@@ -120,9 +120,9 @@ function canvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
 }
 
 /** A kind's texture in a set: the body color, and every face's number in the set's faint ink. */
-function drawAtlas(model: DieModel, set: DiceSet): CanvasTexture {
+function drawAtlas(model: DieModel, set: DiceSet, makeCanvas: () => HTMLCanvasElement): CanvasTexture {
   const { cols, rows, cell } = model.atlas;
-  const canvas = document.createElement("canvas");
+  const canvas = makeCanvas();
   canvas.width = cols * cell;
   canvas.height = rows * cell;
   const g = context2d(canvas);
@@ -174,8 +174,21 @@ function placeOn(mesh: Mesh, at: Vector3, normal: Vector3, up: Vector3): void {
   mesh.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(new Vector3().crossVectors(up, normal).normalize(), up, normal));
 }
 
-export function createStage(events: StageEvents): Stage | null {
-  const canvas = document.createElement("canvas");
+/** What the stage takes from the page: its canvases, its renderer and the font. A test hands in its own to run the stage's lifecycle under Node. */
+export type StageDeps = {
+  canvas(): HTMLCanvasElement;
+  renderer(canvas: HTMLCanvasElement, context: WebGL2RenderingContext, antialias: boolean): WebGLRenderer;
+  fonts(): Promise<void>;
+};
+
+const PAGE: StageDeps = {
+  canvas: () => document.createElement("canvas"),
+  renderer: (canvas, context, antialias) => new WebGLRenderer({ canvas, context, antialias, alpha: true }),
+  fonts,
+};
+
+export function createStage(events: StageEvents, deps: StageDeps = PAGE): Stage | null {
+  const canvas = deps.canvas();
   canvas.setAttribute("aria-hidden", "true");
   canvas.dataset.diceStage = "";
   canvas.style.position = "absolute";
@@ -190,9 +203,11 @@ export function createStage(events: StageEvents): Stage | null {
   const context = canvas.getContext("webgl2", contextAttributes(antialias));
   if (!context) return null;
   let deliberate = false;
+  /** Set first as the stage goes, so a warm-up or previews still waiting for the font never reach the renderer after it. */
+  let disposed = false;
   canvas.addEventListener("webglcontextlost", () => events.lost(deliberate));
   canvas.addEventListener("webglcontextrestored", () => events.restored());
-  const renderer = new WebGLRenderer({ canvas, context, antialias, alpha: true });
+  const renderer = deps.renderer(canvas, context, antialias);
   renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(1);
   renderer.setSize(1, 1);
@@ -213,7 +228,7 @@ export function createStage(events: StageEvents): Stage | null {
     const key = `${set.id}|${kind}`;
     let atlas = atlases.get(key);
     if (!atlas) {
-      atlas = drawAtlas(modelOf(kind).model, set);
+      atlas = drawAtlas(modelOf(kind).model, set, deps.canvas);
       atlases.set(key, atlas);
     }
     return atlas;
@@ -224,7 +239,7 @@ export function createStage(events: StageEvents): Stage | null {
     const key = `${text}|${set.ink}|${underline}`;
     let texture = decals.get(key);
     if (!texture) {
-      const c = document.createElement("canvas");
+      const c = deps.canvas();
       c.width = c.height = 128;
       drawLabel(context2d(c), text, { x: 64, y: 64 }, [0, 1], 128, set.ink, underline, 120);
       texture = canvasTexture(c);
@@ -333,7 +348,8 @@ export function createStage(events: StageEvents): Stage | null {
 
   return {
     async warm(kinds, setId) {
-      await fonts();
+      await deps.fonts();
+      if (disposed) return;
       // Never over a throw on screen: the warm-up relabels the first pooled die of each kind, which the throw is drawn with.
       if (raf || thrown.length > 0) return;
       set = diceSet(setId);
@@ -405,9 +421,9 @@ export function createStage(events: StageEvents): Stage | null {
     stop,
 
     async previews(targets: readonly PreviewTarget[], px: number) {
-      if (raf || thrown.length > 0) return false;
-      await fonts();
-      if (raf || thrown.length > 0) return false;
+      if (disposed || raf || thrown.length > 0) return false;
+      await deps.fonts();
+      if (disposed || raf || thrown.length > 0) return false;
       const { model } = modelOf("d20");
       const twenty = 19;
       const shown = shownFace(model, twenty);
@@ -458,6 +474,7 @@ export function createStage(events: StageEvents): Stage | null {
     },
 
     dispose() {
+      disposed = true;
       deliberate = true;
       stop();
       for (const dice of pool.values()) {

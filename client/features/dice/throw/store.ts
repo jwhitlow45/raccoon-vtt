@@ -48,6 +48,12 @@ export const PRESS_MS = 1000;
 export const WARM_MAX_MS = 1500;
 /** A pane shorter than this cannot hold the header line and the tray, and shows the result at once. */
 export const MIN_PANE_PX = 160;
+/**
+ * A result shown this recently may not have painted yet. Escape in the
+ * panel shows it and closes the sheet in the same event, so the header
+ * line goes before the result ever reaches the screen.
+ */
+export const PAINT_MS = 100;
 
 /** The tray's place on screen, all in screen px (getBoundingClientRect's, which include the panel's zoom). */
 export type TrayGeometry = {
@@ -190,6 +196,9 @@ export class ThrowStore {
   /** The control the panel's last pointer or key went to, and when: a roll from it throws from there. */
   #pressedEl: Element | null = null;
   #pressedAt = Number.NEGATIVE_INFINITY;
+  /** The tag whose held result was let go less than PAINT_MS ago, and may not be on screen yet. */
+  #unpainted: string | null = null;
+  #unpaintedTimer: unknown = null;
 
   /** Binds the store to its Room, once. */
   bind(env: ThrowEnv): void {
@@ -388,6 +397,9 @@ export class ThrowStore {
   dispose(): void {
     this.#end();
     this.#dispose();
+    if (this.#unpaintedTimer !== null) this.#env?.clock.clearTimeout(this.#unpaintedTimer);
+    this.#unpaintedTimer = null;
+    this.#unpainted = null;
     for (const stop of this.#unsubscribe) stop();
     this.#unsubscribe = [];
     this.#pending.clear();
@@ -463,6 +475,7 @@ export class ThrowStore {
     if (this.#clickTimer !== null && env) env.clock.clearTimeout(this.#clickTimer);
     this.#clickTimer = null;
     this.#pressed = false;
+    if (this.#view.held !== null) this.#letGo(this.#view.held);
     if (this.#view.held !== null || this.#view.rolling) this.#set({ ...this.#view, held: null, rolling: false });
   }
 
@@ -480,19 +493,35 @@ export class ThrowStore {
     if (this.#clickTimer !== null && env) env.clock.clearTimeout(this.#clickTimer);
     this.#clickTimer = null;
     this.#pressed = false;
+    if (this.#view.held !== null) this.#letGo(this.#view.held);
     if (this.#view.shown) this.#safely((stage) => stage.stop());
     this.#set(QUIET);
   }
 
+  /** A held result is let go, and stays `unpainted` until it has had time to reach the screen. */
+  #letGo(tag: string): void {
+    const env = this.#env;
+    if (!env) return;
+    this.#unpainted = tag;
+    if (this.#unpaintedTimer !== null) env.clock.clearTimeout(this.#unpaintedTimer);
+    this.#unpaintedTimer = env.clock.setTimeout(() => {
+      this.#unpainted = null;
+      this.#unpaintedTimer = null;
+    }, PAINT_MS);
+  }
+
   /**
    * Ends the throw as its header line goes, with the panel or for the group
-   * save page. A result still held as its dice fly was never seen, so it
-   * goes to the toasts, as a roll whose panel closed before its answer does.
+   * save page. A result still held as its dice fly was never seen, nor was
+   * one let go too recently to have painted, such as by the Escape that
+   * closes the sheet. It goes to the toasts, as a roll whose panel closed
+   * before its answer does.
    */
   #endUnseen(): void {
-    const held = this.#view.held;
     this.#end();
-    if (held !== null) this.#env?.tracker.unseen(held);
+    const tag = this.#unpainted;
+    this.#unpainted = null;
+    if (tag !== null) this.#env?.tracker.unseen(tag);
   }
 
   #clearTimers(): void {

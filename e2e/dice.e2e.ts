@@ -35,8 +35,8 @@ import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, So
  * labeled `ra-`: Pat's own roll throws dice that land on the result, and
  * reduced motion, no WebGL, Low power, the switch, a tap during a throw,
  * the tracker's Roll, a secret roll, the DM's toast of Pat's attack, a
- * small phone and a roll still in the air as its sheet closes each do as
- * the design says. The browser draws WebGL in
+ * small phone and a roll still in the air as its sheet closes, by a tap or
+ * by Escape, each do as the design says. The browser draws WebGL in
  * software (SwiftShader), as CI has no GPU, and the steps that measure the
  * header line do so once the dice have gone.
  *
@@ -1169,5 +1169,31 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await sheet.waitFor({ state: "detached" });
     await player.getByText(`Rolled ${line.rolls[0]!.total}: ra-9.`).waitFor();
     await shots.take(player, "ra-closed-mid-throw-toast");
+  });
+
+  test("ra-10. Escape during a throw shows the result and closes the Dice sheet in one event, so the result lands as a toast", async (t) => {
+    if (!(await needsWebGL(player, t))) return;
+    const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+    let total: number | null = null;
+    // The key must come while the dice fly. A slow runner tries again rather than test a roll that has landed.
+    for (let attempt = 0; attempt < 3 && total === null; attempt++) {
+      await openDicePhone(player);
+      await watchThrow(player);
+      const line = await rollWithEnter(player, playerSocket, `1d20 ra-10 ${attempt}`);
+      const w = await seen(player, "the throw", (w) => w.canvasAt !== null);
+      // Escape in the formula field only leaves the field, so the key goes to the header line's Again.
+      await player.locator("[data-dice-last]").getByRole("button", { name: "Again" }).focus();
+      const flying = await js<number>(player, `return performance.now() - ${w.canvasAt};`);
+      if (flying > LAND_MS - 300) {
+        await settled(player);
+        continue;
+      }
+      await player.keyboard.press("Escape");
+      await sheet.waitFor({ state: "detached" });
+      total = line.rolls[0]!.total;
+      await player.getByText(`Rolled ${total}: ra-10 ${attempt}.`).waitFor();
+    }
+    assert.ok(total !== null, "Escape never came while the dice flew");
+    await shots.take(player, "ra-escape-mid-throw-toast");
   });
 });

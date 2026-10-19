@@ -11,7 +11,7 @@ import { createDicePanel, type DiceState } from "../useDicePanel.ts";
 import { ReceiptTracker, type ReceiptState } from "../useReceipt.ts";
 import type { DieKind } from "./layout.ts";
 import type { LoadState } from "./probe.ts";
-import { DISPOSE_MS, GONE_MS, LAND_MS, LATE_MS, ThrowStore, type PanelHost, type Stage, type StagedThrow, type StageEvents, type StageModule, type ThrowOrigin, type TrayHost } from "./store.ts";
+import { DISPOSE_MS, GONE_MS, LAND_MS, LATE_MS, PAINT_MS, ThrowStore, type PanelHost, type Stage, type StagedThrow, type StageEvents, type StageModule, type ThrowOrigin, type TrayHost } from "./store.ts";
 
 /**
  * The throw's store (docs/design-v1-roll-animation.md 3 to 7), with a fake
@@ -549,7 +549,7 @@ describe("every way a panel control rolls", () => {
       detach();
       unmount();
     };
-    return { store, panel, sender, answerAll, origin, stage: () => stage!, tracker, close };
+    return { store, panel, sender, answerAll, origin, stage: () => stage!, tracker, close, clock };
   }
 
   const ROLL = { formula: "1d20+4", label: "Stealth", creature: { characterId: "thorn" } };
@@ -650,17 +650,42 @@ describe("every way a panel control rolls", () => {
     assert.deepEqual(h.tracker.unannounced(), []);
   });
 
-  test("a result that landed before the panel closed is no toast", () => {
-    const h = setup();
-    const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
-    const unwatch = h.tracker.watch(tag);
-    h.answerAll();
-    h.store.click();
-    assert.equal(h.store.held(tag), false);
-    h.close();
-    unwatch();
-    h.tracker.announced(tag);
-    assert.deepEqual(h.tracker.unannounced(), []);
+  test("a result that landed and painted before the panel closed is no toast", () => {
+    for (const end of ["landing", "click", "key"] as const) {
+      const h = setup();
+      const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+      const unwatch = h.tracker.watch(tag);
+      h.answerAll();
+      if (end === "landing") h.clock.advance(LAND_MS);
+      else if (end === "click") h.store.click();
+      else h.store.keyDown();
+      assert.equal(h.store.held(tag), false);
+      h.clock.advance(PAINT_MS);
+      h.close();
+      unwatch();
+      h.tracker.announced(tag);
+      assert.deepEqual(h.tracker.unannounced(), [], end);
+    }
+  });
+
+  test("Escape lets the result go and closes the sheet in the same event: the result never painted, so it goes to the toasts", () => {
+    for (const end of ["key", "click"] as const) {
+      const h = setup();
+      const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+      const unwatch = h.tracker.watch(tag);
+      h.answerAll();
+      // The panel's capture listener sees the key first, then the room's Escape closes the sheet in the same tick.
+      if (end === "key") h.store.keyDown();
+      else h.store.click();
+      h.close();
+      unwatch();
+      h.tracker.announced(tag);
+      assert.deepEqual(
+        h.tracker.unannounced().map((u) => u.tag),
+        [tag],
+        end,
+      );
+    }
   });
 
   test("the tracker's Roll, which carries no origin, never throws", () => {
