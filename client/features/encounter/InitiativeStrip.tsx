@@ -763,6 +763,16 @@ function FightAlerts() {
     setClipped(!!el && el.scrollHeight - el.clientHeight - el.scrollTop > 4);
   };
   useLayoutEffect(clip, [stacked, alerts]);
+  // A card that grows, or a turn of the phone that shortens the column, cuts the cards with no scroll to say so.
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const cards = cardsRef.current;
+    if (!box || !cards) return;
+    const observer = new ResizeObserver(clip);
+    observer.observe(box);
+    observer.observe(cards);
+    return () => observer.disconnect();
+  }, []);
 
   // The summary row's tap hides the bar, and once the cards show again, opens a roll that waits for this viewer or focuses the alert it named, as the dock's does.
   const [showAfter, setShowAfter] = useState<{ kind: "rolls" } | { kind: "alert"; first: AlertsSummary["first"] } | null>(null);
@@ -983,7 +993,8 @@ function FightAlerts() {
           </button>
         ))}
       </div>
-      {stacked !== null && clipped ? <ScrollForMore /> : null}
+      {/* Wherever the column cuts its cards, such as at the toolbar on a phone held sideways. Its foot keeps the shadow's room unless it stands over a docked bar. */}
+      {clipped ? <ScrollForMore inset={stacked !== null ? 0 : SHADOW_ROOM} /> : null}
     </div>
   );
 }

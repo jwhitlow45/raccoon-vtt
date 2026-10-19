@@ -1214,8 +1214,8 @@ function bandStyle(at: Corner, part: "width" | "height"): CSSProperties {
  * "Scroll for more", laid over the foot of a box that scrolls while
  * anything is hidden below. It has no height of its own, so it never adds
  * to what scrolls, and screen readers skip it: they reach every control by
- * moving through them. The alerts column shows it too while a docked bar
- * cuts it short (features/encounter/InitiativeStrip.tsx), and a popover
+ * moving through them. The alerts column shows it too wherever it cuts
+ * its cards short (features/encounter/InitiativeStrip.tsx), and a popover
  * (components/Popover.tsx). Its fade ends in `surface`, the color of the
  * boxes it covers. As wide as its box, so in a row that wraps it takes a
  * line of its own.
