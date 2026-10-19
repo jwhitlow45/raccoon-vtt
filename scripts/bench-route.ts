@@ -6,7 +6,10 @@
  * on half squares. Then the densest wall build at the caps (design 9.7) and
  * a stair map of 1 ft and 3 ft rises under 5-10-5, where the vertical
  * residues come in. Each search starts cold, its step answers forgotten, as
- * a phone's first drag after an edit pays them.
+ * a phone's first drag after an edit pays them. Last, the reducer's
+ * `routeSeen` on a 1,000-spot walk of a lit monster across a dark vision
+ * scene at the sight caps (bench-vision.ts capRoom), the sight already
+ * worked out, as the op's own stop mark works it out first.
  *
  * Run it alone on the machine being gated, since parallel load skews it:
  *
@@ -23,7 +26,9 @@ import { footprintGround } from "../shared/rules/heights.ts";
 import type { MovingToken } from "../shared/rules/movement.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 import { forgetStepCaches, WalkSearch, WalkWorld, type WalkInput } from "../shared/rules/walk.ts";
+import { seenAtEvery } from "../shared/project.ts";
 import { atCap, chunksOf, mulberry32, randomWalls, type Build } from "./bench-walls.ts";
+import { capRoom } from "./bench-vision.ts";
 
 const SIZE = 200;
 
@@ -132,6 +137,31 @@ export function runRouteBench(runs = 15, only?: (c: Case) => boolean): RouteRow[
   return rows;
 }
 
+/**
+ * `routeSeen`'s cost: a lit monster in the hall of the capped dark scene,
+ * walked back and forth past the party for 1,000 spots, every one of them
+ * in the party's sight, so no early answer cuts it short. Its `settled`
+ * column holds the spots asked.
+ */
+export function runRouteSeenRow(runs = 15): RouteRow {
+  const { state } = capRoom("dark");
+  const monster = { ...state.tokens.m0!, x: 74, y: 95 };
+  const spots = Array.from({ length: 1000 }, (_, k) => {
+    const lap = Math.floor(k / 50);
+    const along = k % 50;
+    return { x: 74 + (lap % 2 === 0 ? along : 49 - along), y: 95 + (lap % 3), elevation: 0 };
+  });
+  const env = { opVersion: undefined };
+  const seen = seenAtEvery(state, monster, spots, env);
+  const times: number[] = [];
+  for (let r = 0; r < runs + 3; r++) {
+    const t = performance.now();
+    seenAtEvery(state, monster, spots, env);
+    if (r >= 3) times.push(performance.now() - t);
+  }
+  return { row: `routeSeen, 1,000 spots of a lit monster on a dark vision scene at the sight caps${seen ? "" : " (an unseen spot cut it short)"}`, settled: spots.length, ms: stats(times) };
+}
+
 export function formatRouteBench(rows: readonly RouteRow[], where = "laptop"): string {
   const lines = [`search (${where}) | settled | ms (median / max) | budget`, "--- | --- | --- | ---"];
   for (const r of rows) {
@@ -191,7 +221,7 @@ async function runChrome(): Promise<string> {
 
 const argv = (globalThis as { process?: { argv?: string[] } }).process?.argv;
 if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
-  console.log(formatRouteBench(runRouteBench()));
+  console.log(formatRouteBench([...runRouteBench(), runRouteSeenRow()]));
   if (argv.includes("--chrome")) {
     console.log("");
     console.log(await runChrome());

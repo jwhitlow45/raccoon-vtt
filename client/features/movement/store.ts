@@ -1,6 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import type { Blocker } from "#shared/ruleHooks.ts";
 import { scopeSlot } from "../../state/scope.ts";
+import type { DragRead } from "../measure/movement.ts";
 import type { Point } from "./drop.ts";
 import type { StopNote } from "./teleport.ts";
 
@@ -27,3 +28,26 @@ export function sameHold(a: Hold | null, b: Hold | null): boolean {
 export type NoteState = { note: StopNote | null; busy: boolean };
 
 export const stopNoteSlot = scopeSlot(() => createStore<NoteState>(() => ({ note: null, busy: false })));
+
+/**
+ * A lone token drag's walk as the board draws it (docs/design-v1-movement.md
+ * 3.1): where the drop would land, the route's corners between, top-left as
+ * the token's position is, and how it reads. The drag writes it when the
+ * spot or the search's answer changes, never on every pointer frame.
+ */
+export type DragRoute = {
+  tokenId: string;
+  /** Where the drop would land. */
+  to: Point;
+  /** The route's corners, none for the straight leg. */
+  corners: Point[];
+  /** The search has not settled the spot yet: the line waits grey and straight. */
+  searching: boolean;
+  /** The finger is up and the drop waits at the ghost for the search. */
+  waiting: boolean;
+  read: DragRead;
+  /** The creature whose space the walk would end in, by the name this viewer sees. */
+  endsIn: string | null;
+};
+
+export const routeSlot = scopeSlot(() => createStore<{ route: DragRoute | null }>(() => ({ route: null })));

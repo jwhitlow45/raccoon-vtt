@@ -2,7 +2,7 @@ import type { Encounter, PathStop, Token, TokenPath, TurnStart } from "../model.
 import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import type { PlacedToken } from "./footprint.ts";
-import { straightCost, type LegCost } from "./route.ts";
+import { straightCost, type LegCost, type SizedSpot } from "./route.ts";
 
 /**
  * A creature's path on its turn (features section 4, design 6): the rules
@@ -236,4 +236,53 @@ function plainStop(stop: PathStop, uncounted: boolean): PathStop {
   if (uncounted) out.uncounted = true;
   if (stop.footprint) out.footprint = { w: stop.footprint.w, h: stop.footprint.h, ...(stop.footprint.squeeze ? { squeeze: true as const } : {}) };
   return out;
+}
+
+/**
+ * The 5-10-5 counters a route's search starts from (5.5, "History"): the
+ * diagonals of this turn's earlier counted legs that players who do not own
+ * the creature saw whole, read from their geometry, the stop and its
+ * corners. So which diagonal of a new route costs 10 ft never depends on a
+ * leg only the owners saw. `stored` says the stops are the DM's, which
+ * hold the marks of who saw what.
+ */
+export function publicCounters(token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings, stored: boolean): DiagonalCounter {
+  const counter = { h: 0, v: 0 };
+  for (let i = 1; i < stops.length; i++) {
+    if (stops[i]!.uncounted === true || !seenWhole(stops, i, stored)) continue;
+    const t = legGeometry(token, stops[i - 1]!, stops[i]!, rules, counter);
+    counter.h += t.diag[0];
+    counter.v += t.diag[1];
+  }
+  return counter;
+}
+
+/**
+ * What a leg takes read from its geometry alone, its stops and corners, as
+ * players who do not own the creature read it (7.3): each straight part by
+ * `straightCost`, the 5-10-5 count running on from `counter` (read only).
+ */
+export function legGeometry(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+  const running = { ...counter };
+  let moved = 0;
+  for (const [a, b] of legParts(from, to)) {
+    const t = straightCost(token, a, b, rules, running);
+    moved += t.moved;
+    running.h += t.diag[0];
+    running.v += t.diag[1];
+  }
+  return { moved, cost: moved, diag: rules.diagonal === "fiveTen" ? [running.h - counter.h, running.v - counter.v] : [0, 0] };
+}
+
+/**
+ * A leg as the straight parts its stops and corners draw (6.2's `via`). The
+ * corners carry no height: they stand at the leg's start, and the last part
+ * takes the stop's, so a walk up a stair counts its rise once.
+ */
+export function legParts(from: PathStop, to: PathStop): [SizedSpot, SizedSpot][] {
+  const via = to.via ?? [];
+  const spots: SizedSpot[] = [from];
+  for (let k = 0; k + 1 < via.length; k += 2) spots.push({ x: via[k]!, y: via[k + 1]!, elevation: from.elevation, ...(to.footprint ? { footprint: to.footprint } : {}) });
+  spots.push(to);
+  return spots.slice(1).map((b, i) => [spots[i]!, b]);
 }

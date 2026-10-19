@@ -1,9 +1,10 @@
 import type { PathStop, TokenPath, TurnStart } from "#shared/model.ts";
+import type { BuildState } from "#shared/ruleHooks.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
-import { footprintRect, type PlacedToken } from "#shared/rules/footprint.ts";
+import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
-import { pathThisTurn, sameSpot } from "#shared/rules/path.ts";
-import { spotRect, straightFeet as movedFeet, type SizedSpot } from "#shared/rules/route.ts";
+import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
+import { routeFeet, routeWalk, spotRect, straightCost, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 
 /**
@@ -56,8 +57,8 @@ export function pathNow(encounter: TurnView | null | undefined, token: Pick<Movi
   return encounter.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId === token.id ? token.path : null;
 }
 
-/** One leg of a trail: the straight line between two spots, and whether it counts against speed. */
-export type TrailLeg = { from: Spot; to: Spot; counted: boolean };
+/** One leg of a trail: from one spot to the next through the corners it walked, top-left as stops are, and whether it counts against speed. */
+export type TrailLeg = { from: Spot; to: Spot; counted: boolean; via: Point[] };
 
 export type TurnTrail = {
   /** Where the turn began, each stop since, and where the creature stands now, in order. */
@@ -68,6 +69,12 @@ export type TurnTrail = {
   legs: TrailLeg[];
   /** The counted legs' feet. */
   movedFt: number;
+  /**
+   * What the counted legs took off the speed (docs/design-v1-movement.md
+   * 3.2): their stored costs for the DM and the creature's owners, whose
+   * copies hold them, and their feet for everyone else.
+   */
+  usedFt: number;
   /** The diagonals the counted legs took, for a drag to count on from under the 5-10-5 rule. */
   diagonals: DiagonalCounter;
   /** The footprints where the turn began, at the size it began at, and where the creature stands now, in cells. */
@@ -96,7 +103,7 @@ export function turnTrail(input: {
   if (!encounter || !token || token.sceneId !== input.sceneId) return null;
   const path = pathNow(encounter, token, input.role);
   const start = encounter.turnStart;
-  let stops: (SizedSpot & Pick<PathStop, "uncounted">)[];
+  let stops: (SizedSpot & Omit<PathStop, "x" | "y" | "elevation" | "footprint">)[];
   if (path) stops = [...path.stops];
   else if (start && start.entryId === encounter.activeEntryId && start.tokenId === token.id && start.sceneId === token.sceneId) stops = [start];
   else return null;
@@ -104,12 +111,38 @@ export function turnTrail(input: {
   if (!sameSpot(last, token)) stops.push({ x: token.x, y: token.y, elevation: token.elevation });
   if (stops.length < 2) return null;
   const spots = stops.map((s): Spot => ({ x: s.x, y: s.y, elevation: s.elevation }));
-  const legs = spots.slice(1).map((to, i): TrailLeg => ({ from: spots[i]!, to, counted: stops[i + 1]!.uncounted !== true }));
+  const legs = spots.slice(1).map((to, i): TrailLeg => ({ from: spots[i]!, to, counted: stops[i + 1]!.uncounted !== true, via: corners(stops[i + 1]!) }));
   // A leg that does not count takes no diagonals either, so the 5-10-5 count runs on across it, a resize's leg included.
   const diagonals: DiagonalCounter = { h: 0, v: 0 };
-  const movedFt = legs.reduce((sum, leg, i) => (leg.counted ? sum + movedFeet(token, stops[i]!, stops[i + 1]!, input.rules, diagonals) : sum), 0);
+  let movedFt = 0;
+  let usedFt = 0;
+  for (const [i, leg] of legs.entries()) {
+    if (!leg.counted) continue;
+    const taken = legRead(token, stops[i]!, stops[i + 1]!, input.rules, diagonals);
+    movedFt += taken.moved;
+    usedFt += taken.cost;
+    diagonals.h += taken.diag[0];
+    diagonals.v += taken.diag[1];
+  }
   const rects = stops.map((stop) => spotRect(token, stop));
-  return { spots, rects, legs, movedFt, diagonals, from: rects[0]!, to: footprintRect(token) };
+  return { spots, rects, legs, movedFt, usedFt, diagonals, from: rects[0]!, to: footprintRect(token) };
+}
+
+/** A stop's corners as points. */
+function corners(stop: Pick<PathStop, "via">): Point[] {
+  const via = stop.via ?? [];
+  const out: Point[] = [];
+  for (let k = 0; k + 1 < via.length; k += 2) out.push({ x: via[k]!, y: via[k + 1]! });
+  return out;
+}
+
+/**
+ * What one leg took, as this viewer reads it: as stored when walked, where
+ * the copy holds it (the DM's and the owners'), else from its stops and
+ * corners, never from a total the viewer was not sent.
+ */
+function legRead(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceRules, counter: DiagonalCounter): LegCost {
+  return to.moved !== undefined || to.cost !== undefined ? legTaken(token, from, to, rules, counter) : legGeometry(token, from, to, rules, counter);
 }
 
 /**
@@ -160,13 +193,26 @@ export function speedsLeft(speeds: Speeds | undefined, elevation: number, usedFt
   return out;
 }
 
+/** Every speed halved, rounded down (docs/design-v1-movement.md 4.2): 25 ft halves to 12 ft. */
+export function halvedSpeeds(speeds: Speeds | undefined): Speeds | undefined {
+  if (!speeds) return undefined;
+  const out: Speeds = { ...speeds };
+  for (const kind of ["walk", "fly", "swim", "climb", "burrow"] as const) {
+    const v = speeds[kind];
+    if (v !== undefined) out[kind] = Math.floor(v / 2);
+  }
+  return out;
+}
+
 /**
- * The marker's text: the feet moved and, for a viewer who knows the
- * creature's speeds (the DM and its owners, design 7.3), what is left.
- * "Dash" counts the extra movement a Dash gives, equal to the speed.
+ * The marker's text: the feet moved, with what it used when the turn's
+ * cost differs ("Moved 25 ft, used 35 ft", docs/design-v1-movement.md 3.2),
+ * and for a viewer who knows the creature's speeds (the DM and its owners,
+ * design 7.3) what is left. "Dash" counts the extra movement a Dash gives,
+ * equal to the speed.
  */
-export function movementText(usedFt: number, left: readonly SpeedLeft[]): string {
-  const moved = `Moved ${formatFeet(usedFt)}`;
+export function movementText(movedFt: number, left: readonly SpeedLeft[], usedFt = movedFt): string {
+  const moved = `Moved ${formatFeet(movedFt)}${usedFt !== movedFt ? `, used ${formatFeet(usedFt)}` : ""}`;
   const [first, ...rest] = left;
   if (!first) return moved;
   const others = rest.filter((s) => s.band === "walk").map((s) => `${capitalize(s.kind)} ${formatFeet(s.leftFt)}`);
@@ -180,20 +226,43 @@ export function leftText(left: SpeedLeft): string {
   return name + (left.band === "walk" ? `${ft} left` : left.band === "dash" ? `${ft} left with Dash` : `${ft} past Dash`);
 }
 
+/** The walk a drag's route search found for it (docs/design-v1-movement.md 3.1), and what the band reads along it. */
+export type DragWalk = {
+  /** The route, or null for the straight leg. */
+  route: { points: readonly RoutePoint[]; pieces: readonly RoutePiece[] } | null;
+  /** The map, for the ground under each spot of the walk. */
+  build: Pick<BuildState, "buildChunks">;
+  /** The name of the Half Speed area the creature would stand in at a spot, or null (4.2). */
+  halved(at: RoutePoint): string | null;
+  /** Crawling: the creature is Prone as players see it. */
+  prone: boolean;
+};
+
+/** What a drag reads: the leg's cost, what in it cost extra, the speed its total falls in, and the Half Speed area it would end in. */
+export type DragRead = { dragFt: number; left?: SpeedLeft; extra?: { ft: number; words: string }; halfSpeed?: string };
+
+const BAND_ORDER: readonly SpeedLeft["band"][] = ["walk", "dash", "over"];
+
 /**
- * How a token drag reads against the creature's speed (features section 4):
- * the feet this drag covers, and the speed its total falls in. During a
- * fight only the active creature is read, and its total is its path so
- * far (turnTrail) plus the leg being dragged, so the band counts every leg
- * of the turn that counts, and the 5-10-5 rule's diagonals run on from the
- * path into the drag. Outside a fight any token is read from where the drag
- * began. `left` is absent when there is nothing to read against: another
- * creature during a fight, or no speed this viewer knows (only the DM and
- * owners get speeds, design 7.3).
+ * How a token drag reads against the creature's speed (features section 4,
+ * docs/design-v1-movement.md 3.1 and 4.2): the cost of this leg, along its
+ * route when it has one, with what cost extra, and the speed its total
+ * falls in. During a fight only the active creature is read, and its total
+ * is what its counted legs used so far (turnTrail) plus this leg's cost, so
+ * the band counts every leg of the turn that counts, and the 5-10-5 rule's
+ * diagonals run on from the path into the drag. Outside a fight any token
+ * is read from where the drag began. `left` is absent when there is nothing
+ * to read against: another creature during a fight, or no speed this
+ * viewer knows (only the DM and owners get speeds, design 7.3).
+ *
+ * The band is judged at every spot of the leg (4.2): within the Speed the
+ * creature has at each, halved inside a Half Speed area that affects it.
+ * The cost only grows along the leg, so the worst spot is its end or the
+ * last spot inside such an area.
  */
 export function dragReading(input: {
   token: MovingToken;
-  /** The snapped drop point. */
+  /** The drop point. */
   to: Point;
   encounter: TurnView | null | undefined;
   /** The token whose turn it is, when this viewer knows. */
@@ -201,16 +270,83 @@ export function dragReading(input: {
   speeds: Speeds | undefined;
   rules: DistanceRules;
   role: "dm" | "player";
-}): { dragFt: number; left?: SpeedLeft } {
-  const { token, encounter, rules } = input;
-  const to = { x: input.to.x, y: input.to.y, elevation: token.elevation };
+  walk?: DragWalk;
+}): DragRead {
+  const { token, encounter, rules, walk } = input;
+  const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: token.elevation };
   const fighting = encounter ? (encounter.started ?? encounter.activeEntryId !== null) : false;
   const active = fighting && input.activeTokenId === token.id;
   const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, token, rules, role: input.role }) : null;
-  const dragFt = movedFeet(token, token, to, rules, trail ? { ...trail.diagonals } : undefined);
-  if (fighting && !active) return { dragFt };
-  const left = speedsLeft(input.speeds, token.elevation, (trail?.movedFt ?? 0) + dragFt)[0];
-  return left ? { dragFt, left } : { dragFt };
+  const counter = trail ? trail.diagonals : { h: 0, v: 0 };
+  const swimSpeed = (input.speeds?.swim ?? 0) > 0;
+  const points: readonly RoutePoint[] = walk?.route?.points ?? [{ x: token.x, y: token.y, elevation: token.elevation }, end];
+  const pieces = walk?.route?.pieces.map(([, , extra, swim]) => ({ extra, swim })) ?? [];
+  const step = snapStep(token);
+  const legCost = (upTo: readonly RoutePoint[]) =>
+    walk?.route ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step }) : straightCost(token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
+  const leg = legCost(points);
+  const out: DragRead = { dragFt: leg.cost };
+  const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed) : [];
+  if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
+  if (fighting && !active) return out;
+  const before = trail?.usedFt ?? 0;
+  const endHalved = walk ? walk.halved(points[points.length - 1]!) : null;
+  if (endHalved) out.halfSpeed = endHalved;
+  const atEnd = speedsLeft(endHalved ? halvedSpeeds(input.speeds) : input.speeds, token.elevation, before + leg.cost)[0];
+  if (!atEnd) return out;
+  let band = atEnd.band;
+  // The last spot inside a Half Speed area before the end, if the leg leaves one: its band may be worse than the end's.
+  const inside = walk && !endHalved ? lastHalvedSpot(points, token, walk) : null;
+  if (inside) {
+    const prefix = [...points.slice(0, inside.piece + 1), inside.at];
+    const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost).find((s) => s.kind === atEnd.kind);
+    if (there && BAND_ORDER.indexOf(there.band) > BAND_ORDER.indexOf(band)) band = there.band;
+  }
+  const total = before + leg.cost;
+  const leftFt = band === "walk" ? atEnd.speed - total : band === "dash" ? atEnd.speed * 2 - total : total - atEnd.speed * 2;
+  out.left = { ...atEnd, band, leftFt };
+  return out;
+}
+
+/** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on. */
+function lastHalvedSpot(points: readonly RoutePoint[], token: MovingToken, walk: DragWalk): { piece: number; at: RoutePoint } | null {
+  const spots = routeWalk(points, token, walk.build);
+  for (let i = spots.length - 2; i > 0; i--) {
+    const s = spots[i]!;
+    const at = { x: s.x, y: s.y, elevation: s.elevation };
+    if (walk.halved(at)) return { piece: s.progress[0], at };
+  }
+  return null;
+}
+
+/**
+ * What cost extra along a route, in the order the label names it: the
+ * ground's difficult terrain, Plant Growth's overgrowth (4 ft per foot),
+ * swimming without a Swim Speed, and crawling. A piece's extra holds the
+ * ground's 1 or 3, and 1 for swimming or crawling, never both.
+ */
+export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean): string[] {
+  const found = new Set<string>();
+  for (const [, , extra, swim] of pieces) {
+    const moving = swim === 1 || prone ? 1 : 0;
+    const ground = extra - moving;
+    if (ground === 1) found.add("difficult terrain");
+    else if (ground >= 3) found.add("overgrowth");
+    if (swim === 1 && !swimSpeed) found.add("swimming");
+    else if (swim === 0 && prone && extra >= 1) found.add("crawling");
+  }
+  return ["difficult terrain", "overgrowth", "swimming", "crawling"].filter((w) => found.has(w));
+}
+
+/** The label's lines (docs/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, and the Half Speed area it would end in. */
+export function dragLabel(read: DragRead): string {
+  const first = read.left ? `${formatFeet(read.dragFt)} · ${leftText(read.left)}` : formatFeet(read.dragFt);
+  return [first, read.extra?.words, read.halfSpeed ? `Half Speed in ${read.halfSpeed}` : null].filter((l): l is string => !!l).join("\n");
+}
+
+/** "a", "a and b", "a, b and c". */
+function joinWords(words: readonly string[]): string {
+  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
 function capitalize(word: string): string {

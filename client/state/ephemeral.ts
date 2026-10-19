@@ -60,6 +60,7 @@ export function applyEph(
       if (local) return eph;
       const preview: DragPreview = { from, tokenId: e.tokenId, x: e.x, y: e.y, ended: false, at: now };
       if (e.k === "dragMove" && e.path) preview.path = e.path;
+      if (e.k === "dragMove" && e.ft !== undefined) preview.ft = e.ft;
       return { ...eph, drags: { ...eph.drags, [key(from, e.tokenId)]: preview } };
     }
     case "dragEnd": {

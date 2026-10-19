@@ -50,6 +50,7 @@ import { useBoardFontEpoch } from "./boardFont.ts";
 import { useBoardText, type TokenText } from "./useBoardText.ts";
 import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
+import type { DropPlan } from "../features/movement/drop.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
@@ -982,8 +983,39 @@ export function MapStage(props: {
     [actions, scene.id, clearSpots],
   );
 
-  const interaction = useMemo<TokenInteraction>(
-    () => ({
+  const interaction = useMemo<TokenInteraction>(() => {
+    /** Puts the dropped tokens where the plan lands them, and sends the moves and the drag's end. */
+    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], group: readonly ViewToken[], plan: DropPlan) => {
+      const moves = plan.moves;
+      const landed = new Map(moves.map((m) => [m.tokenId, m]));
+      for (const [n, t] of [[node, token] as const, ...followers.map((f) => [f.node, f.token] as const)]) {
+        const m = landed.get(t.id);
+        n.position(m ? { x: m.x, y: m.y } : { x: t.x, y: t.y });
+        if (n !== node) n.getLayer()?.batchDraw();
+      }
+      // A player who drops a creature into the fog or out of the party's sight loses it, which reads as a bug unless the map says so.
+      const facts = dropFactsRef.current;
+      const dropped = moves.flatMap((m) => {
+        const t = group.find((g) => g.id === m.tokenId);
+        return t ? [{ token: t, owns: facts.ownsToken(t), x: m.x, y: m.y, squeeze: m.squeeze === true }] : [];
+      });
+      // The fog a drop lands in is known now, on a scene without party vision.
+      const view = facts.store.getState().view;
+      const swallowed = view ? droppedIntoFog({ role: facts.role, view, moves: dropped }) : [];
+      // What the party sees after it is the server's to say, on a vision scene: that note waits for the moves' answers.
+      const watch = watchDrop({ role: facts.role, store: facts.store, moves: dropped, notify: (text) => uiRef.current.notify(text) });
+      // The moves land in the view before the spots go, so an aura on a token never jumps back.
+      const sent = dragStopsRef.current.send(plan, watch?.answer);
+      watch?.sent(sent.length);
+      const note = intoFogText(swallowed.map((t) => displayName(t)));
+      if (note) uiRef.current.notify(note);
+      for (const t of group) {
+        const m = landed.get(t.id);
+        actions.sendEph(m ? { k: "dragEnd", tokenId: t.id, x: m.x, y: m.y, ...(m.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId: t.id });
+      }
+      clearSpots();
+    };
+    return {
       hover(id) {
         if (typeof matchMedia === "function" && matchMedia("(hover: hover)").matches) setHoveredId(id);
       },
@@ -1021,7 +1053,8 @@ export function MapStage(props: {
         if (!drag || drag.cancelled) return;
         // A lone token's preview stays at a wall or a ledge that stops its walk, so its frames do too.
         if (drag.followers.length === 0) dragStopsRef.current.frame(node, token);
-        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y() });
+        // A lone drag's frames carry its route's corners and its cost (docs/design-v1-movement.md 6.5).
+        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...(drag.followers.length === 0 ? dragStopsRef.current.frameFields(token.id) : {}) });
         setSpot(token, node.x(), node.y());
         if (drag.followers.length === 0) return;
         const dx = node.x() - token.x;
@@ -1057,39 +1090,11 @@ export function MapStage(props: {
           return;
         }
         const group = [token, ...followers.map((f) => f.token)];
-        const plan = dragStopsRef.current.plan(node, token, group);
-        const moves = plan.moves;
-        const landed = new Map(moves.map((m) => [m.tokenId, m]));
-        for (const [n, t] of [[node, token] as const, ...followers.map((f) => [f.node, f.token] as const)]) {
-          const m = landed.get(t.id);
-          n.position(m ? { x: m.x, y: m.y } : { x: t.x, y: t.y });
-          if (n !== node) n.getLayer()?.batchDraw();
-        }
-        // A player who drops a creature into the fog or out of the party's sight loses it, which reads as a bug unless the map says so.
-        const facts = dropFactsRef.current;
-        const dropped = moves.flatMap((m) => {
-          const t = group.find((g) => g.id === m.tokenId);
-          return t ? [{ token: t, owns: facts.ownsToken(t), x: m.x, y: m.y, squeeze: m.squeeze === true }] : [];
-        });
-        // The fog a drop lands in is known now, on a scene without party vision.
-        const view = facts.store.getState().view;
-        const swallowed = view ? droppedIntoFog({ role: facts.role, view, moves: dropped }) : [];
-        // What the party sees after it is the server's to say, on a vision scene: that note waits for the moves' answers.
-        const watch = watchDrop({ role: facts.role, store: facts.store, moves: dropped, notify: (text) => uiRef.current.notify(text) });
-        // The moves land in the view before the spots go, so an aura on a token never jumps back.
-        const sent = dragStopsRef.current.send(plan, watch?.answer);
-        watch?.sent(sent.length);
-        const note = intoFogText(swallowed.map((t) => displayName(t)));
-        if (note) uiRef.current.notify(note);
-        for (const t of group) {
-          const m = landed.get(t.id);
-          actions.sendEph(m ? { k: "dragEnd", tokenId: t.id, x: m.x, y: m.y, ...(m.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId: t.id });
-        }
-        clearSpots();
+        // A drop made while its route is searched waits at the ghost and lands once it is found (docs/design-v1-movement.md 3.1).
+        dragStopsRef.current.drop(node, token, group, (plan) => landDrop(node, token, followers, group, plan));
       },
-    }),
-    [actions, stopTokenDrag, setSpot, clearSpots, popovers],
-  );
+    };
+  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers]);
 
   const memberMap = members ?? {};
   const below: ViewToken[] = [];

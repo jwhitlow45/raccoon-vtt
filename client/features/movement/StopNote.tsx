@@ -102,7 +102,7 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
     >
       <PaneHeader
         // The whole sentence, wrapped: it says what stopped the walk.
-        title={<span style={{ display: "block", whiteSpace: "normal" }}>{stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog) })}</span>}
+        title={<span style={{ display: "block", whiteSpace: "normal" }}>{stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped })}</span>}
         onClose={close}
       />
       {/* The note's one action, so the primary (docs/design-v1-visual.md 2.3). */}

@@ -1,7 +1,7 @@
 import type { ClientOp } from "#shared/protocol.ts";
 import { displayName } from "../../lib/scene.ts";
 import { dispatchGesture } from "../../state/actions.ts";
-import { heldText, moveOpsOf, type DropPlan } from "./drop.ts";
+import { CUT_TEXT, heldText, moveOpsOf, type DropPlan } from "./drop.ts";
 import type { StopNote } from "./teleport.ts";
 
 /** What sending a drop needs from the room and the page. */
@@ -39,5 +39,6 @@ export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
   }
   const text = heldText(plan.held.map((h) => ({ name: displayName({ name: h.token.name ?? "A token", number: h.token.number }), blocker: h.blocker })));
   if (text) deps.notify(text);
+  if (plan.cut) deps.notify(CUT_TEXT);
   return sent;
 }

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { canApply } from "#shared/permissions.ts";
 import { MAX_MOVES } from "#shared/protocol.ts";
-import { token } from "#shared/testutil.ts";
-import { dropMode, heldText, holdLabel, landedElevation, moveOpsOf, planGroup, planOne, stopText } from "./drop.ts";
+import { findRoute } from "#shared/rules/walk.ts";
+import { publicWorld } from "#shared/rules/walkWorld.ts";
+import { P1, token } from "#shared/testutil.ts";
+import { dropMode, heldText, holdLabel, landedElevation, moveOpsOf, planGroup, planOne, planWalk, routeTarget, stopText, type Found } from "./drop.ts";
 import { CLOSED, line, raised, thorn, world } from "./testing.ts";
 
 /** A room cut in two by a wall along x = 6, with a closed door at (6, 5) when asked. */
@@ -175,5 +178,66 @@ describe("ops and words", () => {
     assert.equal(heldText([{ name: "Goblin 2", blocker: "wall" }]), "Goblin 2 stayed where it was: a wall is in the way.");
     assert.equal(heldText([{ name: "A", blocker: "ledge" }, { name: "B", blocker: "ledge" }]), "2 tokens stayed where they were: ledges are in the way.");
     assert.equal(heldText([{ name: "A", blocker: "wall" }, { name: "B", blocker: "ledge" }]), "2 tokens stayed where they were: walls or ledges are in the way.");
+  });
+});
+
+describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
+  /** The wall along x = 6 stops at y = 10, so the way from 2, 5 to 9, 5 goes round its end. */
+  const around = () => world({ edges: line("w", 6, 0, 10) });
+  const searched = (state: ReturnType<typeof world>, t: ReturnType<typeof thorn>, to: { x: number; y: number }): Found => {
+    const answer = findRoute(publicWorld(state, t, { role: "player" }).input, to);
+    return answer === null ? { kind: "open" } : answer === "none" ? { kind: "none", capped: false } : { kind: "route", route: answer };
+  };
+
+  test("a route lands at the drop's spot and goes with the move, which the server takes", () => {
+    const state = around();
+    const t = thorn({ x: 2, y: 5 });
+    state.tokens.thorn = t;
+    const found = searched(state, t, { x: 9, y: 5 });
+    assert.equal(found.kind, "route");
+    const plan = planWalk(state, t, { x: 9.2, y: 5.1 }, "walk", found, 5);
+    assert.equal(plan.moves.length, 1);
+    const move = plan.moves[0]!;
+    assert.deepEqual([move.x, move.y], [9, 5]);
+    assert.ok(move.route && move.route.length > 1, "it bends round the wall's end");
+    assert.deepEqual(move.route.at(-1)!.slice(0, 2), [9, 5]);
+    assert.equal(plan.stop, null);
+    assert.ok(canApply(moveOpsOf(plan.moves)[0]!, P1, state, { canUseAsset: () => true }).ok);
+  });
+
+  test("no route holds a player at the wall with the new words, and the DM's drop goes straight", () => {
+    const state = divided();
+    const t = thorn({ x: 2, y: 5 });
+    state.tokens.thorn = t;
+    const none: Found = { kind: "none", capped: false };
+    const plan = planWalk(state, t, { x: 9, y: 5 }, "walk", none, 5);
+    assert.deepEqual(plan.moves, [{ tokenId: "thorn", x: 5, y: 5 }]);
+    assert.equal(stopText(plan.stop!), "Stopped at a wall. There is no way around it that you have seen.");
+    assert.equal(stopText(planWalk(state, t, { x: 9, y: 5 }, "walk", { kind: "none", capped: true }, 5).stop!), "Too far to work out a way around. Stopped at a wall. There is no way around it that you have seen.");
+    assert.equal(stopText({ blocker: "ledge", door: null, searched: true }), "Ledge in the way. No stairs you have seen lead there.");
+    assert.equal(stopText({ blocker: "wall", door: { edge: "6,5,w" }, searched: true }), "A door is in the way. Tap it to open.");
+    assert.deepEqual(planWalk(state, t, { x: 9, y: 5 }, "free", none, 5).moves, [{ tokenId: "thorn", x: 9, y: 5 }]);
+  });
+
+  test("past 64 pieces the walk lands partway and says so, and past 300 squares it goes without its route", () => {
+    const state = world({});
+    const t = thorn({ x: 0, y: 0 });
+    const zigzag = Array.from({ length: 70 }, (_, i): [number, number, number, 0 | 1] => [i % 2 === 0 ? 1 : 0, i + 1, 0, 0]);
+    const cut = planWalk(state, t, { x: 1, y: 70 }, "free", { kind: "route", route: { pieces: zigzag } }, 5);
+    assert.equal(cut.cut, true);
+    assert.equal(cut.moves[0]!.route!.length, 64);
+    assert.deepEqual([cut.moves[0]!.x, cut.moves[0]!.y], [zigzag[63]![0], zigzag[63]![1]]);
+    const far = Array.from({ length: 12 }, (_, i): [number, number, number, 0 | 1] => [i % 2 === 0 ? 29 : 0, 2 * i + 1, 0, 0]);
+    const long = planWalk(state, t, { x: 29, y: 23 }, "free", { kind: "route", route: { pieces: [...far, [29, 23, 0, 0]] } }, 5);
+    assert.equal(long.moves[0]!.route, undefined, "over 300 squares of reach: the drop goes without a route");
+  });
+
+  test("the route's spot is the drop's own, squeezed where the creature squeezes, on the lattice from where it stands", () => {
+    const state = world({ edges: { ...line("w", 10, 10, 20), ...line("w", 11, 10, 20) } });
+    const ogre = token("ogre", { size: "large", x: 4, y: 4 });
+    assert.deepEqual(routeTarget(state, ogre, { x: 7.2, y: 8.1 }), { x: 7, y: 8, squeeze: false });
+    assert.deepEqual(routeTarget(state, ogre, { x: 9.6, y: 14.2 }), { x: 9.5, y: 14.5, squeeze: true });
+    const off = thorn({ x: 1.3, y: 2 });
+    assert.deepEqual(routeTarget(state, off, { x: 5.1, y: 2.2 }), { x: 5.3, y: 2, squeeze: false });
   });
 });

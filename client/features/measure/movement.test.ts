@@ -7,7 +7,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
 import { DM, P1, P2, room, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
-import { dragReading, ellipseExit, leftText, movedFeet, movementText, pathNow, speedsLeft, turnTrail, type MovingToken, type TurnView } from "./movement.ts";
+import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, speedsLeft, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -400,5 +400,70 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
       }
     }
     assert.ok(reshapedInPlace > 100, `only ${reshapedInPlace} changes of footprint in place`);
+  });
+});
+
+describe("a drag along a route (docs/design-v1-movement.md 3.1, 3.2 and 4.2)", () => {
+  const walker = tok({ x: 0, y: 0 });
+  const calm = { encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm" as const };
+  const flat = (pts: [number, number][]) => pts.map(([x, y]) => ({ x, y, elevation: 0 }));
+  const walk = (points: [number, number][], pieces: [number, number, number, 0 | 1][], halved: (x: number) => boolean = () => false, prone = false): DragWalk => ({
+    route: { points: flat(points), pieces },
+    build: { buildChunks: {} },
+    halved: (at) => (halved(at.x) ? "Spirit Guardians" : null),
+    prone,
+  });
+
+  test("the label reads the leg's cost and names what cost extra", () => {
+    const rubble = walk(
+      [
+        [0, 0],
+        [2, 0],
+        [4, 0],
+      ],
+      [
+        [2, 0, 0, 0],
+        [4, 0, 1, 0],
+      ],
+    );
+    const read = dragReading({ ...calm, token: walker, to: { x: 4, y: 0 }, walk: rubble });
+    assert.equal(read.dragFt, 30);
+    assert.deepEqual(read.extra, { ft: 10, words: "+10 ft for difficult terrain" });
+    const wade = walk([[0, 0], [2, 0]], [[2, 0, 2, 1]]);
+    assert.equal(dragReading({ ...calm, token: walker, to: { x: 2, y: 0 }, walk: wade }).extra!.words, "+20 ft for difficult terrain and swimming");
+    assert.equal(dragReading({ ...calm, speeds: { walk: 30, swim: 30 }, token: walker, to: { x: 2, y: 0 }, walk: wade }).extra!.words, "+10 ft for difficult terrain", "a Swim Speed takes the swimming foot off");
+    assert.equal(dragReading({ ...calm, token: walker, to: { x: 2, y: 0 }, walk: walk([[0, 0], [2, 0]], [[2, 0, 1, 0]], undefined, true) }).extra!.words, "+10 ft for crawling");
+    assert.equal(dragReading({ ...calm, token: walker, to: { x: 2, y: 0 }, walk: walk([[0, 0], [2, 0]], [[2, 0, 3, 0]]) }).extra!.words, "+30 ft for overgrowth");
+    assert.equal(dragLabel(read), "30 ft · 0 ft left\n+10 ft for difficult terrain");
+  });
+
+  test("Spirit Guardians: 10 ft outside and 10 ft inside reads yellow from the second step in, and stays yellow after it leaves", () => {
+    const inside = (x: number) => x >= 2 && x <= 4;
+    const pieces: [number, number, number, 0 | 1][] = [[2, 0, 0, 0], [4, 0, 0, 0]];
+    const into = dragReading({ ...calm, token: walker, to: { x: 4, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0]], pieces, inside) });
+    assert.equal(into.halfSpeed, "Spirit Guardians");
+    assert.deepEqual(into.left, { kind: "walk", speed: 15, leftFt: 10, band: "dash" }, "20 ft used against 15: a Dash, 10 ft left with it");
+    const first = dragReading({ ...calm, token: walker, to: { x: 3, y: 0 }, walk: walk([[0, 0], [2, 0], [3, 0]], [[2, 0, 0, 0], [3, 0, 0, 0]], inside) });
+    assert.equal(first.left!.band, "walk", "the first step in is 15 ft against 15");
+    const out = dragReading({ ...calm, token: walker, to: { x: 6, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0], [6, 0]], [...pieces, [6, 0, 0, 0]], inside) });
+    assert.equal(out.halfSpeed, undefined);
+    assert.deepEqual(out.left, { kind: "walk", speed: 30, leftFt: 30, band: "dash" }, "out again with the full Speed, but the walk needed a Dash");
+  });
+
+  test("a halved Speed rounds down, and the marker reads used where it differs from moved", () => {
+    assert.deepEqual(halvedSpeeds({ walk: 25, fly: 30 }), { walk: 12, fly: 15 });
+    const left = speedsLeft(halvedSpeeds({ walk: 25 }), 0, 10);
+    assert.equal(movementText(10, left, 10), "Moved 10 ft\n2 ft left");
+    assert.equal(movementText(25, speedsLeft({ walk: 30 }, 0, 35), 35), "Moved 25 ft, used 35 ft\n25 ft left with Dash");
+  });
+
+  test("the trail reads stored costs where the copy holds them, and corners' geometry everywhere else", () => {
+    const stops: PathStop[] = [stop(2, 2), { ...stop(4, 4), via: [2, 4], moved: 20, cost: 30 }];
+    const owned = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
+    assert.deepEqual([owned.movedFt, owned.usedFt], [20, 30]);
+    assert.deepEqual(owned.legs[0]!.via, [{ x: 2, y: 4 }]);
+    const theirs: PathStop[] = [stop(2, 2), { ...stop(4, 4), via: [2, 4] }];
+    const seen = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops: theirs } }), rules: five, role: "player" })!;
+    assert.deepEqual([seen.movedFt, seen.usedFt], [20, 20], "down two squares, then across two: never the straight 10 ft");
   });
 });

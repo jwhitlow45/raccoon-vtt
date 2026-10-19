@@ -29,7 +29,10 @@ export type DragPreview = {
   /** The latest frame's top-left corner, in cells. */
   x: number;
   y: number;
+  /** The live route's corners, top-left, flattened (docs/design-v1-movement.md 6.5). */
   path?: number[];
+  /** The leg's cost, which only the DM and the token's owners receive. */
+  ft?: number;
   /** A `dragEnd` arrived. The preview holds the drop point until the token's `ev` lands, so the token never flashes back. */
   ended: boolean;
   /** When the latest frame arrived, in the store clock's milliseconds. */

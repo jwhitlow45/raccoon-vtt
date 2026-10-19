@@ -1,9 +1,11 @@
 import type { BuildChunk, Scene, Token } from "#shared/model.ts";
-import { MAX_MOVES, type ClientOp, type DoorRef } from "#shared/protocol.ts";
+import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorRef, type OpOf } from "#shared/protocol.ts";
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { canSqueeze, footprintSize } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, type DropMode } from "#shared/rules/movement.ts";
+import { routeLattice, routePoints, routeReach } from "#shared/rules/route.ts";
+import type { WalkRoute } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 
 /**
@@ -48,8 +50,8 @@ export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, to
   return before === "ground" ? there : Math.max(token.elevation, there);
 }
 
-/** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes. */
-export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true };
+/** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
+export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"] };
 
 /** A walk that a wall, a door or a ledge stopped short of where the player dropped the token. */
 export type Stop = {
@@ -64,6 +66,10 @@ export type Stop = {
   aim: Point;
   /** Where the walk stopped, the start when it stopped at its first step. */
   at: Point;
+  /** A route was looked for and none reaches the spot on ground the party has seen (docs/design-v1-movement.md 3.1). */
+  searched?: true;
+  /** The search gave up past its cap (5.2). */
+  capped?: true;
 };
 
 export type DropPlan = {
@@ -72,6 +78,8 @@ export type DropPlan = {
   stop: Stop | null;
   /** Tokens of a group drag left where they were, since a wall or a ledge stood in their way (section 4.1). */
   held: { token: DropToken; blocker: Blocker }[];
+  /** The lone walk turned too often for one move, so it landed partway (docs/design-v1-movement.md 5.2). */
+  cut?: true;
 };
 
 function moved(token: DropToken, at: Point & { squeeze: boolean }): boolean {
@@ -131,6 +139,55 @@ export function planOne(state: BuildState, token: DropToken, raw: Point, mode: E
   return { moves, stop, held: [] };
 }
 
+/** What a lone drag's route search answered for the drop's spot (routeDrag.ts): the straight leg, a route, or no route. */
+export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces"> } | { kind: "none"; capped: boolean };
+
+/**
+ * The spot a lone drop's route aims at (docs/design-v1-movement.md 3.1):
+ * where the drop would be placed, by the drop's own rule and squeezed where
+ * the creature squeezes, with no leg test, since the route is the leg. A
+ * route steps on the lattice from where the token stands, so a token that
+ * stands off its grid lands on that lattice, the nearest spot to it.
+ */
+export function routeTarget(state: BuildState, token: DropToken, raw: Point): Point & { squeeze: boolean } {
+  const placed = planOne(state, token, raw, "free").moves[0];
+  const at = placed ? { x: placed.x, y: placed.y, squeeze: placed.squeeze === true } : { x: token.x, y: token.y, squeeze: token.squeeze === true };
+  const L = routeLattice(token);
+  const onLattice = (v: number, from: number) => from + Math.round((v - from) / L) * L;
+  return { x: onLattice(at.x, token.x), y: onLattice(at.y, token.y), squeeze: at.squeeze };
+}
+
+/** The note when a walk turned too often for one move and landed partway. */
+export const CUT_TEXT = "Stopped partway: the way there turns too often for one move. Drag again to go on.";
+
+/**
+ * A lone drop with what its route search found (docs/design-v1-movement.md
+ * 3.1 and 5.6). The straight leg is today's drop. A route lands at its
+ * spot and goes with the move, cut after 64 pieces, and goes without a
+ * route past 300 squares of reach, which the server refuses. No route, a
+ * search past its cap, or a scene not yet loaded fall back to today's
+ * straight drop: a player's walk held at the wall with the note's new
+ * words, the DM's drop straight through.
+ */
+export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number): DropPlan {
+  if (found.kind === "route") {
+    const target = routeTarget(state, token, raw);
+    const cut = found.route.pieces.length > MAX_ROUTE_PIECES;
+    const pieces = found.route.pieces.slice(0, MAX_ROUTE_PIECES);
+    const last = pieces[pieces.length - 1];
+    if (last) {
+      const at = cut ? { x: last[0], y: last[1], squeeze: false } : target;
+      const move = landed(state.buildChunks, token, at);
+      const reach = routeReach(routePoints(state.buildChunks, token, pieces, move.elevation ?? token.elevation), feetPerCell);
+      const route = pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+      if (reach <= MAX_ROUTE_REACH) return { moves: [{ ...move, route }], stop: null, held: [], ...(cut ? { cut: true as const } : {}) };
+    }
+  }
+  const plan = planOne(state, token, raw, mode);
+  if (found.kind === "none" && plan.stop) plan.stop = { ...plan.stop, searched: true, ...(found.capped ? { capped: true as const } : {}) };
+  return plan;
+}
+
 /**
  * A group drag (features section 5): each token moves by the same offset
  * and snaps by its own footprint. Walking, each token's own leg is tested,
@@ -160,7 +217,7 @@ export function planGroup(state: BuildState, tokens: readonly DropToken[], dx: n
 export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
   if (moves.length === 0) return [];
   if (moves.length === 1) return [{ t: "token.move", ...moves[0]! }];
-  const plain = moves.map(({ squeeze: _squeeze, ...m }) => m);
+  const plain = moves.map(({ squeeze: _squeeze, route: _route, ...m }) => m);
   const ops: ClientOp[] = [];
   for (let i = 0; i < plain.length; i += MAX_MOVES) ops.push({ t: "token.moveMany", moves: plain.slice(i, i + MAX_MOVES) });
   return ops;
@@ -171,11 +228,17 @@ export function holdLabel(blocker: Blocker): string {
   return blocker === "wall" ? "Wall in the way" : "Ledge in the way";
 }
 
-/** The note after a stopped drop: what stopped it, and how to go on. */
-export function stopText(stop: Pick<Stop, "blocker" | "door">): string {
-  if (stop.blocker === "ledge") return "Ledge in the way. Take the stairs.";
-  if (stop.door) return "A door is in the way. Tap it to open.";
-  return "Stopped at a wall. Drop at the corner first, then go on.";
+/**
+ * The note after a stopped drop: what stopped it, and how to go on. A walk
+ * whose search found no way says so (docs/design-v1-movement.md 3.1),
+ * after "Too far to work out a way around" when the search gave up.
+ */
+export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped">): string {
+  const far = stop.capped ? "Too far to work out a way around. " : "";
+  if (stop.door) return `${far}A door is in the way. Tap it to open.`;
+  if (!stop.searched) return stop.blocker === "ledge" ? "Ledge in the way. Take the stairs." : "Stopped at a wall. Drop at the corner first, then go on.";
+  if (stop.blocker === "ledge") return `${far}Ledge in the way. No stairs you have seen lead there.`;
+  return `${far}Stopped at a wall. There is no way around it that you have seen.`;
 }
 
 /** The note for the tokens of a group drag that stayed where they were. */

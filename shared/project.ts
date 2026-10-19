@@ -227,6 +227,19 @@ function fogReader(state: RoomState): FogReader {
   };
 }
 
+/**
+ * Whether players see any part of a cell's ground on a scene: not fully
+ * under the fog they get (docs/design-v1-heights-readout.md 1), the DM's
+ * layer and the party's explored one joined. It reads the DM's whole state
+ * and a player's copy alike, since that copy holds the joined fog already,
+ * so a route searched on either device keeps to the same ground
+ * (docs/design-v1-movement.md 5.5).
+ */
+export function playersSeeGround(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
+  const fogged = fogReader(state);
+  return (x, y) => !fogged(sceneId, x, y);
+}
+
 /** The revealed bits of a fog tile as players get it, the two layers joined, or null where neither holds the tile. */
 function mergedBits(state: RoomState, key: string): Uint8Array | null {
   const dm = state.fogTiles[key];
