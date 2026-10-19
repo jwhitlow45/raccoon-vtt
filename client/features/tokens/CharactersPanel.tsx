@@ -361,10 +361,10 @@ function NewCharacter(props: { onDone(id: string | null, to: LeaveFor): void; cl
   const [image, setImage] = useState<ImageRef | null>(null);
   const [error, setError] = useState<string | null>(null);
   const draft = { name, owners, size, hpMax, ac, walk, initBonus, pp, image };
-  // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5).
-  useUnsavedSince(draft);
-  const [start] = useState(() => JSON.stringify(draft));
   const { typed, pending } = usePendingNumbers(draft);
+  // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
+  useUnsavedSince(typed);
+  const [start] = useState(() => JSON.stringify(draft));
   const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened);
   usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 

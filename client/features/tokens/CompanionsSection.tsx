@@ -187,8 +187,9 @@ export function CompanionForm(props: {
   const ui = useRoomUi();
   const scope = useRoomScope();
   const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
-  // Only Add sends it, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5).
-  useUnsavedSince(draft);
+  const { typed, pending } = usePendingNumbers(draft, draftWith);
+  // Only Add sends it, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
+  useUnsavedSince(typed);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -198,7 +199,6 @@ export function CompanionForm(props: {
   const focusChange = useRef(false);
   // Typed changes ask first, but not once Add sent them: then leaving throws nothing away.
   const [start] = useState(() => JSON.stringify(draft));
-  const { typed, pending } = usePendingNumbers(draft, draftWith);
   const leave = useLeaveForm(typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened);
   usePanelHeader({
     title: `Add a companion for ${character.name}`,

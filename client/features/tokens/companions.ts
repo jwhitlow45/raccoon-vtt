@@ -297,7 +297,7 @@ export function companionsOf(view: Pick<RoomState, "tokens">, characterId: strin
     .sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
 }
 
-/** The short line under a companion's name in its character's card. */
+/** The short line under a companion's name on its character's page. */
 export function turnLabel(name: string, turn: CompanionTurn): string {
   return turn === "own" ? "Its own turn" : turn === "shared" ? `On ${name}'s turn, listed` : `On ${name}'s turn, not listed`;
 }

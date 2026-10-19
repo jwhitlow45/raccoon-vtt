@@ -88,7 +88,7 @@ describe("what Remove says before a character's Delete", () => {
   });
 });
 
-describe("why a shared character's card has no Delete", () => {
+describe("why a shared character's page has no Delete", () => {
   const members = { p1: member("p1"), p2: { ...member("p2"), name: "Quin" }, p3: { ...member("p3"), name: "Ana" } };
   const cyra = (ownerIds: string[]) => character("cyra", { name: "Cyra", ownerIds });
 

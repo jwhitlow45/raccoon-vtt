@@ -776,6 +776,37 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.equal(await settled(sheet), "gone", "a fresh suggestion kept the sheet open");
   });
 
+  test("lp1-swipe-a. a number typed into New character or Add a companion and still focused springs a header swipe back, with the number kept", async () => {
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    const far = (r: Rect) => closePast(r.height) + 10;
+    const sheet = await openPanel(dm, "Characters");
+    const asks = sheet.getByRole("button", { name: "Discard changes?" });
+    // New character: Max HP typed, never blurred, so only the field holds it.
+    await sheet.getByRole("button", { name: "New character", exact: true }).click();
+    const maxHp = sheet.getByLabel("Max HP", { exact: true });
+    await maxHp.fill("20");
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "rest", "a number being typed let the sheet close");
+    assert.equal(await maxHp.inputValue(), "20", "the number typed was lost");
+    await sheet.getByRole("button", { name: "Back to Characters" }).click();
+    await asks.first().click();
+    // Add a companion: HP typed, never blurred.
+    await sheet.getByRole("button", { name: /Thorn/ }).first().click();
+    const add = sheet.getByRole("button", { name: /^Add a companion/ }).first();
+    await add.scrollIntoViewIfNeeded();
+    await add.click();
+    const hp = sheet.getByLabel("HP", { exact: true });
+    await hp.fill("7");
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "rest", "a companion's HP being typed let the sheet close");
+    assert.equal(await hp.inputValue(), "7", "the HP typed was lost");
+    await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+    await asks.last().click();
+    await add.waitFor();
+    await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
+    assert.equal(await settled(sheet), "gone", "Thorn's page with nothing typed kept the sheet open");
+  });
+
   test("7. a dialog sheet over a panel closes alone, the X-card dismisses, and from 600 px a dialog's card does not swipe", async () => {
     await setUp(dm, { width: 375, height: 667, scale: 1 });
     const sheet = await openPanel(dm, "Monsters");

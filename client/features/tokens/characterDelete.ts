@@ -1,7 +1,7 @@
 import type { Character, Member, RoomState } from "#shared/model.ts";
 
 /**
- * What the Remove section of a character's card says before Delete. The
+ * What the Remove section of a character's page says before Delete. The
  * delete takes every token and companion of the character on every scene
  * and its rows in the fight. Only what this viewer's own view holds is
  * counted. The rest, such as tokens on other scenes and rows the DM hid,

@@ -240,7 +240,12 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
       aria-disabled={props.unavailable && !props.disabled ? true : undefined}
       aria-describedby={describedBy}
       onFocus={focus.onFocus}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        // Told in the keystroke's own update as well as by the effect above, which reached the form a moment later: a press right after typing saw the form without the number.
+        const next = numberCommit(e.target.value, props);
+        props.onPending?.("sends" in next ? next.sends : undefined);
+      }}
       onBlur={() => {
         if (focus.onBlur()) commit();
       }}
