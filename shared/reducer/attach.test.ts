@@ -249,6 +249,14 @@ describe("attaching (8.2)", () => {
     assert.equal(refusal(looped, { t: "token.attach", tokenId: "gob", to: "bree", kind: "drag", x: 7, y: 5, elevation: 0 }), "Goblin 2 would carry itself");
   });
 
+  test("a seat is at its holder's elevation whatever the op says, for the step, what rides along and the description", () => {
+    const op: Op = { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 4, elevation: 500 };
+    const s = run(loose(), op);
+    assert.deepEqual(place(s.tokens.bree), [5, 4, 0]);
+    assert.deepEqual(place(s.tokens.torch), [5.5, 4.5, 0]);
+    assert.deepEqual(planMove(op, loose(), DM, env(1)).find((m) => m.tokenId === "bree")?.to, { sceneId: "s1", x: 5, y: 4, elevation: 0 });
+  });
+
   test("a second attach replaces the link, and the same holder and seat toggle Controlled", () => {
     let s = run(loose(), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 4, elevation: 0 });
     s = run(s, { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 4, elevation: 0 }, DM, 2);
@@ -276,6 +284,14 @@ describe("detaching (8.1)", () => {
     assert.equal(refusal(stable(), { t: "token.detach", tokenId: "gob", x: 7, y: 4 }), "Put down and Let go leave it where it stands");
     assert.equal(refusal(stable(), { t: "token.detach", tokenId: "bree", x: 9, y: 4 }), "Bree can only get off beside Warhorse");
     assert.equal(refusal(stable(), { t: "token.detach", tokenId: "bree", x: 5, y: 4 }), "Bree can only get off beside Warhorse");
+  });
+
+  test("a place's elevation is the ground there or the creature's own, never another height", () => {
+    const raised = stable();
+    heights(raised, { "6,5": 10 });
+    assert.deepEqual(place(run(raised, { t: "token.detach", tokenId: "bree", x: 6, y: 5, elevation: 10 }).tokens.bree), [6, 5, 10]);
+    assert.deepEqual(place(run(raised, { t: "token.detach", tokenId: "bree", x: 6, y: 5, elevation: 0 }).tokens.bree), [6, 5, 0]);
+    assert.equal(refusal(raised, { t: "token.detach", tokenId: "bree", x: 6, y: 5, elevation: 5 }), "Bree gets off onto the ground there or at its own height");
   });
 
   test("Put down and Let go leave it where it stands", () => {

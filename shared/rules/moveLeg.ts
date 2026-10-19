@@ -79,7 +79,9 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
       // A drag leaves the creature where it stands. The rest step onto their seat, a walk.
       const token = before.tokens[op.tokenId];
       if (!token || !onHolder(op.kind) || !attaches(env.opVersion)) return [];
-      return [straight(token, { sceneId: token.sceneId, x: op.x, y: op.y, elevation: op.elevation }, "walk")];
+      // A seat is at its holder's elevation, whatever the op says (4.1).
+      const elevation = before.tokens[op.to]?.elevation ?? op.elevation;
+      return [straight(token, { sceneId: token.sceneId, x: op.x, y: op.y, elevation }, "walk")];
     }
     case "token.detach": {
       const token = before.tokens[op.tokenId];

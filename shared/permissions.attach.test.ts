@@ -177,6 +177,17 @@ describe("moving a group (6)", () => {
     assert.equal(mayMoveToken(own, P2, "gob").ok, false);
   });
 
+  test("a new seat for a token a player may not move keeps its height, and a dragged creature's spot is on its ground or its own height", () => {
+    const held = table((s) => {
+      s.tokens.gob = grappled({ ...s.tokens.gob!, size: "small", x: 6, y: 4, attached: { to: "bree", kind: "carry" } });
+    });
+    assert.equal(answer(held, { t: "token.move", tokenId: "gob", x: 6, y: 4, elevation: 300 }), "forbidden: that is not yours");
+    assert.equal(answer(held, { t: "token.move", tokenId: "gob", x: 6, y: 4, elevation: 0 }), "ok");
+    const dragged = table((s) => (s.tokens.gob = { ...s.tokens.gob!, attached: { to: "bree", kind: "drag" } }));
+    assert.equal(answer(dragged, { t: "token.move", tokenId: "gob", x: 7, y: 4, elevation: 5 }), "forbidden: that is not yours");
+    assert.equal(answer(dragged, { t: "token.move", tokenId: "gob", x: 7, y: 4, elevation: 0 }), "ok");
+  });
+
   test("a player re-seats a token carried by one they may move, and only where it keeps its link", () => {
     const held = table((s) => (s.tokens.torch = { ...s.tokens.torch!, x: 6.5, y: 4.5, attached: { to: "bree", kind: "carry" } }));
     assert.equal(answer(held, { t: "token.move", tokenId: "torch", x: 6, y: 4 }), "ok");

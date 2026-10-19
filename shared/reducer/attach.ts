@@ -4,7 +4,7 @@ import type { InitEntry, PathStop, Token, TokenPath } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { attaches, walksRoutes } from "../migrate.ts";
-import { getOffFits, isCreature, kindRefusal, linkHolds, linkLimitRefusal, onHolder, overlaps, withinReach, type LinkNames } from "../rules/attach.ts";
+import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefusal, onHolder, overlaps, withinReach, type LinkNames } from "../rules/attach.ts";
 import { footprintSize, snapStep } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { routeWalk } from "../rules/route.ts";
@@ -53,8 +53,10 @@ export function tokenAttach(tx: Tx, op: OpOf<"token.attach">): void {
   if (op.steer && op.kind !== "ride") throw invalid(ONLY_A_RIDE_STEERS);
   const why = kindRefusal(op.kind, carried, holder, names);
   if (why) throw invalid(why);
+  // A seat is at its holder's elevation (4.1), whatever the op says, so no attach lifts a token another way.
+  const elevation = onHolder(op.kind) ? holder.elevation : op.elevation;
   if (onHolder(op.kind)) {
-    if (!linkHolds(settings, op.kind, { ...carried, x: op.x, y: op.y, elevation: op.elevation }, holder)) throw invalid(`${names.carried} does not sit on ${names.holder} there`);
+    if (!linkHolds(settings, op.kind, { ...carried, x: op.x, y: op.y, elevation }, holder)) throw invalid(`${names.carried} does not sit on ${names.holder} there`);
   } else {
     if (op.x !== carried.x || op.y !== carried.y || op.elevation !== carried.elevation) throw invalid(DRAG_STAYS);
     if (!withinReach(settings, carried, holder)) throw invalid(`${names.carried} is too far to drag`);
@@ -70,7 +72,7 @@ export function tokenAttach(tx: Tx, op: OpOf<"token.attach">): void {
     return;
   }
   const along = carriedAlong(tx, op);
-  const next: Token = { ...carried, x: op.x, y: op.y, elevation: op.elevation, attached: link };
+  const next: Token = { ...carried, x: op.x, y: op.y, elevation, attached: link };
   delete next.squeeze;
   const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
   const cost = op.kind === "ride" ? mountingCost(tx, carried, holder.id) : null;
@@ -212,6 +214,8 @@ export function tokenDetach(tx: Tx, op: OpOf<"token.detach">): void {
   const scene = tx.scene(carried.sceneId);
   const spot = { x: op.x, y: op.y, elevation: op.elevation ?? carried.elevation };
   if (!getOffFits(tx.state.meta.settings, scene.bounds, carried, holder, spot)) throw invalid(`${nameFor(tx, carried)} can only get off beside ${nameFor(tx, holder)}`);
+  // It lands as a walk lands (4.3): on the ground there, or at its own height, as one that flies keeps it.
+  if (!landsAt(tx.state.buildChunks, carried, spot)) throw invalid(`${nameFor(tx, carried)} gets off onto the ground there or at its own height`);
   const along = carriedAlong(tx, op);
   const next: Token = { ...loose, ...spot };
   delete next.squeeze;

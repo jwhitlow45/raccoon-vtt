@@ -4,6 +4,7 @@ import { isWritable } from "../writable.ts";
 import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.ts";
 import { footprintRect, footprintSize, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
+import { footprintGround } from "./heights.ts";
 
 /**
  * Attached tokens (docs/design-v1-attach.md): a rider on a mount, a
@@ -189,6 +190,17 @@ export function getOffFits(settings: DistanceSettings, bounds: { w: number; h: n
   const r = fullRect(placed);
   if (r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS) return false;
   return !overlaps(placed, holder) && withinReach(settings, placed, holder);
+}
+
+/**
+ * Whether a token set down at `spot` lands as a walk lands (4.3): on the
+ * ground there, or at its own height, as a flier keeps it. A Get off place
+ * and a player's move of a dragged creature they may not move take no
+ * other height, so neither lifts a token any other way.
+ */
+export function landsAt(chunks: Parameters<typeof footprintGround>[0], token: PlacedToken & Pick<Token, "sceneId" | "elevation">, spot: Point & { elevation: number }): boolean {
+  if (spot.elevation === token.elevation) return true;
+  return spot.elevation === footprintGround(chunks, { ...token, x: spot.x, y: spot.y, squeeze: undefined });
 }
 
 /**
