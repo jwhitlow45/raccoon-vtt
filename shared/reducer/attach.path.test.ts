@@ -151,6 +151,31 @@ describe("what getting on and off costs (7.3)", () => {
     );
   });
 
+  test("so does a rider dragged off its mount on its own turn, along the rest of its route, and a Get off needs its place", () => {
+    const free = (s: RoomState) => (s.tokens.bree = { ...s.tokens.bree!, attached: { to: "horse", kind: "ride" } });
+    const straight = bresTurn(free).run({ t: "token.move", tokenId: "bree", x: 8, y: 4 });
+    assert.equal(straight.state.tokens.bree!.attached, undefined);
+    assert.deepEqual(
+      straight.stops("bree").slice(1).map((s) => [s.x, s.y, s.moved, s.cost]),
+      [
+        [6, 4, 10, 15],
+        [8, 4, 10, 10],
+      ],
+    );
+    const routed = bresTurn(free).run({ t: "token.move", tokenId: "bree", x: 7, y: 6, route: [[7, 4, 0, 0], [7, 6, 0, 0]] });
+    assert.deepEqual(
+      routed.stops("bree").slice(1).map((s) => [s.x, s.y, s.moved, s.cost, s.via]),
+      [
+        [6, 4, 10, 15, undefined],
+        [7, 6, 15, 15, [7, 4]],
+      ],
+    );
+    // A teleport off it uses no movement: one leg that does not count, with no dismount in it.
+    const teleported = bresTurn(free).run({ t: "token.move", tokenId: "bree", x: 9, y: 4, teleport: "Misty Step" }).stops("bree");
+    assert.deepEqual([teleported.length, last(teleported).uncounted, last(teleported).cost], [2, true, 25]);
+    assert.equal(bresTurn(free).refused({ t: "token.detach", tokenId: "bree" }), "getting off a mount needs a place beside it");
+  });
+
   test("nothing is paid off the rider's turn", () => {
     const f = bresTurn().run({ t: "encounter.next" }).run({ t: "token.detach", tokenId: "bree", x: 6, y: 4 });
     assert.equal(f.state.tokens.bree!.path?.turn === f.state.encounter!.turnStart?.seq, false);

@@ -3,14 +3,13 @@ import { LIMITS } from "../limits.ts";
 import type { InitEntry, PathStop, Token, TokenPath } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
-import { attaches, walksRoutes } from "../migrate.ts";
-import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefusal, onHolder, overlaps, withinReach, type LinkNames } from "../rules/attach.ts";
-import { footprintSize, snapStep } from "../rules/footprint.ts";
+import { attaches } from "../migrate.ts";
+import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefusal, onHolder, withinReach, type LinkNames } from "../rules/attach.ts";
+import { footprintSize } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
-import { routeWalk } from "../rules/route.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
 import { sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
-import { carriedAlong, judgedIn, placeCarried, sharesTurn, sortedById, speedsOf, withPath, type Judged } from "./tokens.ts";
+import { carriedAlong, dismounted, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, withPath } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /**
@@ -33,6 +32,7 @@ function namesOf(tx: Tx, carried: Token, holder: Token): LinkNames {
 export const ONLY_A_RIDE_STEERS = "only a ride is controlled";
 export const DRAG_STAYS = "a dragged creature stays where it stands";
 export const PUT_DOWN_IN_PLACE = "Put down and Let go leave it where it stands";
+export const GET_OFF_NEEDS_A_PLACE = "getting off a mount needs a place beside it";
 
 /**
  * Attaches a token (8.2): the kind is checked against the two as they
@@ -153,19 +153,6 @@ export function settleMounts(tx: Tx): void {
 }
 
 /**
- * Half the rider's walking Speed, rounded down (7.3): what getting on or
- * off a mount costs on the rider's own turn, whatever the leg's length.
- * Null when it costs nothing: not the rider's turn, or an op from before
- * walked legs or attached tokens recorded what they took.
- */
-function mountCost(tx: Tx, rider: Token): number | null {
-  if (!walksRoutes(tx.env.opVersion) || !attaches(tx.env.opVersion)) return null;
-  const turn = turnUnderWay(tx.state.encounter);
-  if (!turn || turn.tokenId !== rider.id) return null;
-  return Math.floor((speedsOf(tx.state, rider)?.walk ?? 0) / 2);
-}
-
-/**
  * What getting on a ride costs (7.3): half the rider's Speed on its own
  * turn, whatever the leg. "Doesn't count" can take it back as any leg. A
  * rider already on that mount pays nothing: it only changes Controlled or
@@ -206,6 +193,8 @@ export function tokenDetach(tx: Tx, op: OpOf<"token.detach">): void {
   if (!link) throw invalid(`${nameFor(tx, carried)} is not attached to anything`);
   const { attached: _link, ...loose } = carried;
   if (op.x === undefined || op.y === undefined) {
+    // Getting off a ride is a walk to a place beside the mount, which costs what the rules say on the rider's turn (7.3).
+    if (link.kind === "ride") throw invalid(GET_OFF_NEEDS_A_PLACE);
     tx.write(keys.token(carried.id), loose);
     return;
   }
@@ -223,27 +212,6 @@ export function tokenDetach(tx: Tx, op: OpOf<"token.detach">): void {
   const cost = link.kind === "ride" ? mountCost(tx, carried) : null;
   tx.write(keys.token(carried.id), cost === null ? withPath(tx, carried, next, judged) : dismounted(tx, carried, next, holder, judged, cost));
   placeCarried(tx, along, judged);
-}
-
-/**
- * Getting off a ride on the rider's turn (7.3): from the seat to the first
- * spot of the walk clear of the mount costs half its Speed, and the rest of
- * the leg what any leg costs, two stops when the two differ.
- */
-function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number): Token {
-  const walk = routeWalk(
-    [
-      { x: rider.x, y: rider.y, elevation: rider.elevation },
-      { x: next.x, y: next.y, elevation: next.elevation },
-    ],
-    rider,
-    tx.state,
-    snapStep(rider),
-  );
-  const clear = walk.find((p, i) => i > 0 && !overlaps({ ...rider, x: p.x, y: p.y }, mount)) ?? walk[walk.length - 1]!;
-  const off: Token = { ...next, x: clear.x, y: clear.y, elevation: clear.elevation };
-  const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, undefined, undefined, cost);
-  return sameSpot(off, next) ? first : withPath(tx, first, next, judged);
 }
 
 function seenByAll(tx: Tx, tokenId: string): boolean {

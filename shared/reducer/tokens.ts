@@ -8,7 +8,7 @@ import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/foo
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
-import { holderOf } from "../rules/attach.ts";
+import { holderOf, linkHolds, overlaps } from "../rules/attach.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -230,7 +230,7 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
   if (SQUEEZE_FIELDS.some((field) => p[field] !== undefined)) delete next.squeeze;
   updateCompanion(tx, token, next, p);
   const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
-  tx.write(keys.token(token.id), withPath(tx, token, next, judged));
+  tx.write(keys.token(token.id), walkedOwn(tx, token, next, judged));
   placeCarried(tx, along, judged);
   // Coming to act on its character's turn takes its rows out of the fight and its history (docs/design-v1-combat-flow.md 3.6.7).
   if (p.companion && actsOnCharacterTurn(next)) dropRows(tx, tx.token(token.id), true);
@@ -389,8 +389,65 @@ export function judgedIn(tx: Tx, tokens: readonly Token[]): Judged {
 }
 
 function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; next: Token }, judged: Judged): void {
-  tx.write(keys.token(token.id), withPath(tx, token, next, judged, move.teleport !== undefined, move.route));
+  tx.write(keys.token(token.id), walkedOwn(tx, token, next, judged, move.teleport !== undefined, move.route));
   if (move.teleport !== undefined) tx.addEvent({ type: "teleport", tokenId: token.id, past: move.teleport });
+}
+
+/**
+ * A token after a move of its own (withPath), or, when the turn's creature
+ * walks off its own ride, after a Get off (docs/design-v1-attach.md 7.3),
+ * since leaving a mount costs the same whether the rider is dragged off it
+ * or taps Get off. A teleport uses no movement and pays nothing.
+ */
+function walkedOwn(tx: Tx, token: Token, next: Token, judged: Judged, teleport = false, route?: readonly RoutePiece[]): Token {
+  const mount = teleport ? undefined : leftMount(tx, token, next, judged);
+  const cost = mount ? mountCost(tx, token) : null;
+  return mount && cost !== null ? dismounted(tx, token, next, mount, judged, cost, route) : withPath(tx, token, next, judged, teleport, route);
+}
+
+/** The mount a rider's move leaves: its ride, which no longer holds where the op puts the two, on the same scene. */
+function leftMount(tx: Tx, rider: Token, next: Token, judged: Judged): Token | undefined {
+  const link = rider.attached;
+  if (link?.kind !== "ride" || next.sceneId !== rider.sceneId || !attaches(tx.env.opVersion)) return undefined;
+  const mount = holderOf(tx.state.tokens, rider) as Token | undefined;
+  const there = judged.after().tokens[link.to];
+  if (!mount || !there || linkHolds(tx.state.meta.settings, "ride", next, there)) return undefined;
+  return mount;
+}
+
+/**
+ * Half the rider's walking Speed, rounded down (docs/design-v1-attach.md
+ * 7.3): what getting on or off a mount costs on the rider's own turn,
+ * whatever the leg's length. Null when it costs nothing: not the rider's
+ * turn, or an op from before walked legs or attached tokens recorded what
+ * they took.
+ */
+export function mountCost(tx: Tx, rider: Token): number | null {
+  if (!walksRoutes(tx.env.opVersion) || !attaches(tx.env.opVersion)) return null;
+  const turn = turnUnderWay(tx.state.encounter);
+  if (!turn || turn.tokenId !== rider.id) return null;
+  return Math.floor((speedsOf(tx.state, rider)?.walk ?? 0) / 2);
+}
+
+/**
+ * Getting off a ride on the rider's turn (docs/design-v1-attach.md 7.3):
+ * from the seat to the first spot of the walk clear of the mount costs half
+ * its Speed, and the rest of the leg what any leg costs, along the rest of
+ * its route when it has one, two stops when the two differ.
+ */
+export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number, route?: readonly RoutePiece[]): Token {
+  const from = { x: rider.x, y: rider.y, elevation: rider.elevation };
+  const points = route ? routePoints(tx.state.buildChunks, rider, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
+  const walk = routeWalk(points, rider, tx.state, snapStep(rider));
+  const at = walk.findIndex((p, i) => i > 0 && !overlaps({ ...rider, x: p.x, y: p.y }, mount));
+  const clear = walk[at] ?? walk[walk.length - 1]!;
+  const off: Token = { ...next, x: clear.x, y: clear.y, elevation: clear.elevation };
+  const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, undefined, undefined, cost);
+  if (sameSpot(off, next)) return first;
+  // The rest of the route from the clear spot: the piece it lies on, from there, and the pieces after it.
+  const [piece, k, n] = clear.progress;
+  const rest = route && at > 0 ? route.slice(k === n ? piece + 1 : piece) : undefined;
+  return withPath(tx, first, next, judged, false, rest && rest.length > 0 ? rest : undefined);
 }
 
 /**
