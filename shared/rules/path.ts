@@ -28,11 +28,16 @@ export function turnUnderWay(encounter: Pick<Encounter, "activeEntryId" | "turnS
   return start as TurnStart & { seq: number };
 }
 
-/** The token's path when it belongs to the turn under way, which is then its own turn. */
+/**
+ * The token's path when it belongs to the turn under way: tagged with the
+ * turn's seq, which only the turn's own moves can write. That is the turn's
+ * creature's, and a controlled mount's moves on its rider's turn
+ * (docs/design-v1-attach.md 7.2), so older paths read as before.
+ */
 export function pathThisTurn(encounter: Pick<Encounter, "activeEntryId" | "turnStart"> | null | undefined, token: Pick<Token, "id" | "path">): TokenPath | null {
   const turn = turnUnderWay(encounter);
   const path = token.path;
-  return turn && path && turn.tokenId === token.id && path.turn === turn.seq ? path : null;
+  return turn && path && path.turn === turn.seq ? path : null;
 }
 
 /**
@@ -89,6 +94,8 @@ export function withStop(path: TokenPath, stop: PathStop, now?: { w: number; h: 
     const corner = stops[i]!;
     const { uncounted: _uncounted, ...next } = stops[i + 1]!;
     const joined: PathStop = corner.uncounted === true && stops[i + 1]!.uncounted === true ? { ...next, uncounted: true } : next;
+    // A joined leg was carried only when both its legs were (docs/design-v1-attach.md 7.2).
+    if (corner.carried !== true) delete joined.carried;
     if (corner.seen !== true || corner.joinedUnseen === true) joined.joinedUnseen = true;
     if (walk) joinWalked(stops, i, joined, walk);
     stops.splice(i, 2, joined);

@@ -8,6 +8,7 @@ import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/foo
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
+import { holderOf } from "../rules/attach.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -309,10 +310,10 @@ export function carriedAlong(tx: Tx, op: Op): Carried[] {
   return out;
 }
 
-/** Writes the tokens a move took along, each with the leg on its path the path rules give it, and its areas sent along to another scene. */
+/** Writes the tokens a move took along, each with a carried leg on its path when it is the turn's creature, and its areas sent along to another scene. */
 export function placeCarried(tx: Tx, carried: readonly Carried[], judged: Judged): void {
-  for (const { token, next } of carried) {
-    tx.write(keys.token(token.id), withPath(tx, token, next, judged, true));
+  for (const { token, next, plan } of carried) {
+    tx.write(keys.token(token.id), withPath(tx, token, next, judged, true, undefined, plan.route));
     if (next.sceneId !== token.sceneId) areasFollow(tx, token.id, next.sceneId);
   }
 }
@@ -414,7 +415,7 @@ function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; n
  * footprint now unless it holds its own. Ops stored before version 6 did
  * neither (`resizeStop`), and replay as they were.
  */
-export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[]): Token {
+export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[], carried?: readonly RoutePoint[]): Token {
   if (after.sceneId !== before.sceneId) return withoutPath(after);
   const from = footprintSize(before);
   const to = footprintSize(after);
@@ -431,10 +432,14 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
     const active = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
     return active?.tokenId === after.id ? after : withoutPath(after);
   }
-  if (turn.tokenId !== after.id) return withoutPath(after);
+  // A controlled mount sharing its rider's turn moves on its own path then (docs/design-v1-attach.md 7.2), from op version 14.
+  const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
+  if (turn.tokenId !== after.id && !mount) return withoutPath(after);
   // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
   const walked: Walked | undefined = walksRoutes(tx.env.opVersion) ? { token: after, rules: tx.state.meta.settings } : undefined;
-  let path: TokenPath = before.path?.turn === turn.seq ? before.path : { turn: turn.seq, stops: turn.sceneId === before.sceneId ? [startStop(turn)] : [] };
+  // A mount's path starts where it stood before its first move this turn, since the turn's start is its rider's.
+  const first = !mount && turn.sceneId === before.sceneId ? [startStop(turn)] : [];
+  let path: TokenPath = before.path?.turn === turn.seq ? before.path : { turn: turn.seq, stops: first };
   // Every move of the creature this turn is a leg, so the last stop is where it stood. The check keeps a stop from being skipped if not.
   const last = path.stops[path.stops.length - 1];
   if (!last || !sameSpot(last, before)) path = withStop(path, stopAt(judged.before, before, tx.env), undefined, walked);
@@ -444,9 +449,32 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
     const old = stopFootprint(before);
     path = { turn: path.turn, stops: path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: old })) };
   }
-  if (walked) stop = walkedStop(tx, path, stop, before, after, judged, route);
+  if (walked) stop = walkedStop(tx, path, stop, before, after, judged, route, carried);
+  // A leg a holder's move took the creature along never counts, and only the DM learns how it was made (7.2).
+  if (carried) stop = { ...stop, uncounted: true, carried: true };
   const counts = !resized && !(reshaped && inPlace) && !uncounted;
   return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to, walked) };
+}
+
+/**
+ * Whether a token is a controlled mount sharing the turn under way
+ * (docs/design-v1-attach.md 7.1): it joined the turn's list, and the turn's
+ * creature still rides it, by controlled rides all the way up its chain.
+ */
+export function sharesTurn(state: RoomState, mountId: string, turn: TurnStart): boolean {
+  const mounts = turn.mounts;
+  if (!mounts?.includes(mountId)) return false;
+  const seen = new Set<string>();
+  let rider = state.tokens[turn.tokenId];
+  while (rider && !seen.has(rider.id)) {
+    seen.add(rider.id);
+    const link = rider.attached;
+    const holder = link?.kind === "ride" && link.steer ? holderOf(state.tokens, rider) : undefined;
+    if (!holder || !mounts.includes(holder.id)) return false;
+    if (holder.id === mountId) return true;
+    rider = state.tokens[holder.id];
+  }
+  return false;
 }
 
 /**
@@ -458,13 +486,17 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
  * are `via`, and `routeSeen` marks a leg players who do not own the token
  * saw at every spot, before and after the move (7.2).
  */
-function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined): PathStop {
+function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined, carried?: readonly RoutePoint[]): PathStop {
   const rules = tx.state.meta.settings;
   const from = path.stops[path.stops.length - 1]!;
   const counter = pathCounters(after, path.stops, rules);
   let taken: LegCost;
   let walk: RoutePoint[];
-  if (route) {
+  if (carried) {
+    // Carried, its feet are its holder's walk offset by its place, and it took nothing off its own speed: no cost, no corners (M13).
+    walk = [...carried];
+    taken = routeFeet(walk, walk.slice(1).map(() => ({ extra: 0, swim: 0 as const })), rules, counter, { swimSpeed: false, step: snapStep(before) });
+  } else if (route) {
     walk = routePoints(tx.state.buildChunks, before, route, after.elevation);
     const swimSpeed = (speedsOf(tx.state, before)?.swim ?? 0) > 0;
     taken = routeFeet(walk, route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
@@ -475,7 +507,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
     ];
     taken = straightCost(after, from, stop, rules, counter);
   }
-  const out: PathStop = { ...stop, moved: taken.moved, cost: taken.cost };
+  const out: PathStop = carried ? { ...stop, moved: taken.moved } : { ...stop, moved: taken.moved, cost: taken.cost };
   if (taken.diag[0] !== 0 || taken.diag[1] !== 0) out.diag = taken.diag;
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
   // Squeezed where it starts and ends as it was and will be. A walk squeezes nowhere between, as its elevation rule reads the full footprint.
@@ -485,7 +517,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
 }
 
 /** The speeds the token's actor holds: its own, or its character's. */
-function speedsOf(state: RoomState, token: Token): Actor["speeds"] | undefined {
+export function speedsOf(state: RoomState, token: Token): Actor["speeds"] | undefined {
   return "inline" in token.actor ? token.actor.inline.speeds : state.characters[token.actor.ref]?.actor.speeds;
 }
 
@@ -545,7 +577,8 @@ export function tokenCountLeg(tx: Tx, op: OpOf<"token.countLeg">): void {
   // A resize's leg, or a squeeze's in place, never counts (docs/design-v1-token-window.md 8.7). Only paths from version 6 on hold one, so replay is unchanged.
   if (reshapeLeg(path.stops[path.stops.length - 2]!, last, stopFootprint(token))) throw invalid(RESHAPE_NOT_A_MOVE);
   if ((last.uncounted !== true) === op.counts) return;
-  const { uncounted: _uncounted, ...counted } = last;
+  // A carried leg counted is the table's choice, and loses its mark, so no refusal says how the leg was made (7.2).
+  const { uncounted: _uncounted, carried: _carried, ...counted } = last;
   const stops = [...path.stops.slice(0, -1), op.counts ? counted : { ...counted, uncounted: true as const }];
   tx.write(keys.token(token.id), { ...token, path: { turn: path.turn, stops } });
 }
