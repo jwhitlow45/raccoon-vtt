@@ -25,6 +25,7 @@ import {
   whoText,
   ZOOM_STEP,
   MOUSE_SECTION,
+  POINTER_SECTION,
   type Behavior,
   type KeyPress,
   type SheetDevice,
@@ -530,7 +531,7 @@ describe("the sheet's rows beside the keys", () => {
     for (const b of BEHAVIORS) {
       assert.ok(b.roles.length > 0 && b.roles.every((r) => r === "dm" || r === "player"), `${b.id} has a role`);
       assert.equal(new Set(b.roles).size, b.roles.length, `${b.id} names each role once`);
-      assert.ok(["keys", "mouse", "android"].includes(b.device), `${b.id} has a device`);
+      assert.ok(["keys", "mouse", "android", "pointer"].includes(b.device), `${b.id} has a device`);
       assert.ok(b.input.trim() && b.does.trim(), `${b.id} has words`);
       assert.ok(b.surface === undefined || (SURFACES as readonly string[]).includes(b.surface), `${b.id} names a known surface`);
       assert.ok(b.when === undefined || /^[a-z]/.test(b.when), `${b.id}: a condition starts in lowercase, as it follows the role`);
@@ -539,9 +540,11 @@ describe("the sheet's rows beside the keys", () => {
     }
   });
 
-  test("it holds keys and key-plus-pointer combinations only, never a plain click, tap, drag or pinch", () => {
+  test("it holds keys and key-plus-pointer combinations, never a plain click, tap or pinch, and a plain drag only where it does more than move one token", () => {
     for (const b of BEHAVIORS) {
       if (b.surface !== undefined) assert.equal(b.device, "keys", `${b.id}: a surface lists only its keys`);
+      // The drags of attached tokens (docs/design-v1-attach.md 4.6), which move a group or a mount.
+      if (b.device === "pointer") assert.match(b.input, /^Drag .*(carries|carried|mount)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
@@ -557,15 +560,17 @@ describe("the sheet's rows beside the keys", () => {
     }
   });
 
-  test("the mouse's rows show where there is a mouse or trackpad, and the Back button's on Android", () => {
+  test("the mouse's rows show where there is a mouse or trackpad, the drags' everywhere, and the Back button's on Android", () => {
     for (const role of ROLES) {
-      assert.deepEqual(titles(role, DESKTOP).slice(0, 2), ["Keys", MOUSE_SECTION], role);
+      assert.deepEqual(titles(role, DESKTOP).slice(0, 3), ["Keys", MOUSE_SECTION, POINTER_SECTION], role);
       assert.ok(!titles(role, DESKTOP).includes("Android"), role);
       assert.ok(!titles(role, IPHONE).includes(MOUSE_SECTION), role);
+      assert.deepEqual(titles(role, IPHONE).slice(0, 2), ["Keys", POINTER_SECTION], `${role}: a phone drags with a finger`);
       assert.ok(!titles(role, IPHONE).includes("Android"), `${role}: an iPhone has no Back button of its own`);
-      assert.deepEqual(titles(role, ANDROID).slice(0, 2), ["Keys", "Android"], role);
-      assert.deepEqual(titles(role, { mouse: true, android: true }).slice(0, 3), ["Keys", MOUSE_SECTION, "Android"], role);
+      assert.deepEqual(titles(role, ANDROID).slice(0, 3), ["Keys", POINTER_SECTION, "Android"], role);
+      assert.deepEqual(titles(role, { mouse: true, android: true }).slice(0, 4), ["Keys", MOUSE_SECTION, POINTER_SECTION, "Android"], role);
     }
+    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), ["Drag a token that carries others", "Drag the rider of a controlled mount", "Drag any other carried token"]);
     assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
@@ -578,8 +583,8 @@ describe("the sheet's rows beside the keys", () => {
     assert.deepEqual(inputs("player", ANDROID, "Android"), ["Back button"]);
   });
 
-  test("the sections come in order, Keys, the mouse, Android, then each surface, and an empty one is left out", () => {
-    const order = ["Keys", MOUSE_SECTION, "Android", ...SURFACES];
+  test("the sections come in order, Keys, the mouse, the drags, Android, then each surface, and an empty one is left out", () => {
+    const order = ["Keys", MOUSE_SECTION, POINTER_SECTION, "Android", ...SURFACES];
     for (const role of ROLES) {
       for (const device of [DESKTOP, IPHONE, ANDROID]) {
         const got = titles(role, device);
@@ -705,11 +710,12 @@ describe("the sheet's rows beside the keys", () => {
     assert.deepEqual(escape, row(room.find((b) => b.id === "escape")!));
 
     assert.deepEqual(tables.get(MOUSE_SECTION), room.filter((b) => b.device === "mouse").map(row), "the mouse table");
+    assert.deepEqual(tables.get(POINTER_SECTION), room.filter((b) => b.device === "pointer").map(row), "the drags' table");
     assert.deepEqual(tables.get("Android"), room.filter((b) => b.device === "android").map(row), "the Android table");
     for (const surface of SURFACES) {
       assert.deepEqual(tables.get(surface), BEHAVIORS.filter((b) => b.surface === surface).map(row), `the ${surface} table`);
     }
-    assert.deepEqual([...tables.keys()], ["Keys", MOUSE_SECTION, "Android", ...SURFACES], "one table under each heading, in the sheet's order");
+    assert.deepEqual([...tables.keys()], ["Keys", MOUSE_SECTION, POINTER_SECTION, "Android", ...SURFACES], "one table under each heading, in the sheet's order");
   });
 
   test("FEATURES.md repeats the sheet's intros word for word", () => {

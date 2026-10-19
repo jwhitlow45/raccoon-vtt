@@ -136,6 +136,22 @@ The Builder tool is the DM's. Its modes:
 - Each action shows only when you may use it on every selected token, except Request a roll and Start a fight or Add to the fight, which show when any of them can take part. A player who selected their own creatures gets conditions and elevation.
 - A change to the whole group undoes as one step.
 
+### Riding, carrying and dragging
+
+- Attach, in a token's action bar after Light, lists what it can ride, carry or drag within 5 ft, nearest first, each as what it does: "Ride Warhorse", "Perch on Bree" for a Tiny creature, "Carry Torch", "Get on Cart", "Carry Kobold" for a creature the viewer sees Grappled, and "Drag Goblin 2". The DM's list goes on to tokens up to 30 ft away under "Farther away", for setting up a scene. It opens as a pop-up from 900 px up and as a sheet from the bottom on a phone, and takes the arrow keys and Enter. An empty list says "Nothing within 5 ft to ride, carry or drag.", and tells a player that a grappled creature can be dragged once the DM marks it Grappled.
+- Ride asks Controlled ("moves on Bree's turn", the default) or Independent ("keeps its own turn"). The rider's Token panel shows the same choice under its tags.
+- A holder carries what it holds: drag a warhorse and its rider rides along, a cart takes its passengers, a creature the torch in its hand, each with what those carry in turn. What rides takes its holder's change of height. A dragged creature follows beside its holder on its own ground, and comes loose once it is out of reach. A teleport leaves dragged creatures behind, and a move to another scene takes everything.
+- Dragging the rider of a controlled mount, or a rider that covers its whole mount, moves the mount, which needs the right to move the mount: "Warhorse carries Bree. Tap Get off to step down." Any other carried token drags alone: dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose. A selection that holds a holder and what it carries moves each once.
+- Get off, Put down and Let go take Attach's place on a carried token's bar. Get off puts the creature on the first free spot beside its holder, and with none it is disabled, with "No room to get off." under it. Put down and Let go leave it where it stands. Players take back any of the three, or a Ride, with Undo move.
+- A carried token draws right after its holder, a rider that covers its whole mount draws inset so the mount shows around it, and a thin dashed line ties a dragged creature to its holder. The bar's group line reads "On Warhorse", "Dragged by Thorn" or "Carrying Bree, Torch", each name a button that selects that token, with Let go or Put down beside each one a holder carries. The Token panel tags the link the same way: "Riding Warhorse", "On Bree", "Dragged by Thorn", "Carries Bree and Torch".
+- Mounted combat, as the 2024 rules have it. Getting on or off a mount on the rider's own turn costs half the rider's Speed, and a player gets on a mount only on their own turn. A controlled mount takes its rider's Initiative and goes right after the rider: it moves and acts on the rider's turn, its moves count against its own Speed, the moved pill sits on the mount with the rider's own movement under it ("Bree: 15 ft"), and its Reaction comes back with the rider's. Its own row that round only marks time, dimmed in the tracker, and a mount that already had its turn this round is passed over until the next. When the mount's own row is acting as it is mounted, its options offer the DM "Move after Bree". Getting off ends the sharing at once. A rider the DM hides never shares its mount's turn, so the tracker gives nothing away.
+- The tracker tags a rider's row "Riding Warhorse", and a controlled mount's "Controlled by Bree: moves and acts on Bree's turn (Dash, Disengage or Dodge)".
+- Dragging or carrying a creature every player sees costs 1 extra foot per foot, as difficult terrain does, unless it is Tiny or two sizes smaller than its holder.
+- When Prone or Unconscious lands on a rider or on its mount, the DM's device says "Bree may fall off Warhorse: DC 10 Dexterity save.", with "Ask for the save" for a player's rider. Nothing falls off by itself.
+- On a scene where walls stop moves, a player's group stops where its holder, or a creature it drags that every player sees, meets a wall.
+- Hidden stays hidden: a hidden imp on a villain's shoulder never reaches players, and no stop, cost, refusal or undo depends on a token or link they cannot see. A visible torch held by an invisible creature floats along with it, as at the table.
+- A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a group moves at most 20 tokens.
+
 ## Images and art
 
 - The image picker gets an image six ways: Icons, Starter, Device (an upload, or the camera roll on a phone), Link (an image's web address), Search the web, and Library. Pasting a copied image works there too, and in New scene's Map image, a scene's Map image and phases, Show a handout and the stamp picker. On a computer, the DM can paste over the map and choose what it is for.
@@ -461,6 +477,16 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | Space+drag | Move the map | everyone, with any tool, while nothing has focus or the map does |
 | Ctrl+wheel, or a pinch on a trackpad | Zoom in or out at the pointer, faster than the wheel alone | everyone, with any tool |
 | Ctrl+wheel, or a pinch on a trackpad | Zoom the picture or the pages in or out at the pointer, down to a whole page | everyone, in the handout viewer |
+
+### Mouse and touch
+
+On any device. A token that carries others, such as a rider's mount or a holder of a torch, drags as a group.
+
+| Drag | Does | Who |
+| --- | --- | --- |
+| Drag a token that carries others | Move it with what it carries, and what those carry | everyone, with the Select tool |
+| Drag the rider of a controlled mount | Move the mount, the rider riding. So does a drag of a rider that covers its whole mount | everyone, with the Select tool |
+| Drag any other carried token | Move it alone. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose | everyone, with the Select tool |
 
 ### Android
 

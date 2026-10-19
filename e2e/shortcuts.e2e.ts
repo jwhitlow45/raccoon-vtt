@@ -9,8 +9,8 @@ import { ConsoleWatch, openSideTab, reopenRoom, Shots, SocketWatch, startServer,
 /**
  * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys, then on
  * a desktop what a key or another mouse button does with a click, a drag
- * or the wheel, and on an Android phone its Back button, each for the
- * viewer's role. The DM opens it with `?` on a computer, and a player from
+ * or the wheel, on every device the drags of attached tokens, and on an
+ * Android phone its Back button, each for the viewer's role. The DM opens it with `?` on a computer, and a player from
  * Menu, This device, on a phone. Full screen (lib/fullscreen.ts) rides
  * along: the top bar's button, its key and its Menu switch on a computer,
  * and the switch alone on a phone. On the computer, the DM moves Fog's
@@ -143,7 +143,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
     const titles = await headings(sheet);
-    assert.deepEqual(titles.slice(0, 2), ["Keys", "Mouse with keys"], titles.join(", "));
+    assert.deepEqual(titles.slice(0, 3), ["Keys", "Mouse with keys", "Mouse and touch"], titles.join(", "));
     assert.ok(!titles.includes("Android"), titles.join(", "));
     for (const surface of ["Side panel tabs", "Handout viewer", "Token window", "Initiative", "Roll requests", "Token and character fields", "Label, pin and light panes", "Dialogs", "Adding an image"]) {
       assert.ok(titles.includes(surface), `${surface} in ${titles.join(", ")}`);
@@ -179,7 +179,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const sheet = player.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
     const titles = await headings(sheet);
-    assert.deepEqual(titles.slice(0, 2), ["Keys", "Android"], titles.join(", "));
+    // A phone drags with a finger, so the drags of attached tokens show there too (docs/design-v1-attach.md 4.6).
+    assert.deepEqual(titles.slice(0, 3), ["Keys", "Mouse and touch", "Android"], titles.join(", "));
     assert.ok(!titles.includes("Mouse with keys"), titles.join(", "));
     assert.ok(!titles.includes("Label, pin and light panes"), "the panes are the DM's");
     // A player's roll card: Enter sends a typed total, or rolls from the Bonus or Extra dice field (docs/design-v1-roll-request.md 8).

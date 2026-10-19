@@ -494,7 +494,7 @@ export function keyText(id: string, keys: KeyMap = shortcutKeys()): string {
  * (Escape, or the keys inside one surface), a key or a button with the
  * mouse, or Android's Back button.
  */
-export type BehaviorDevice = "keys" | "mouse" | "android";
+export type BehaviorDevice = "keys" | "mouse" | "android" | "pointer";
 
 /** The surfaces whose own keys get a section of the sheet, in the sheet's order. */
 export const SURFACES = [
@@ -606,6 +606,32 @@ export const BEHAVIORS: readonly Behavior[] = [
     roles: EVERYONE,
     when: "in the handout viewer",
     device: "mouse",
+  },
+
+  // Dragging attached tokens, with a mouse or a finger alike (docs/design-v1-attach.md 4.2 and 4.6): canvas/Stage.tsx and features/attach/groups.ts dragLead, dragNamed.
+  {
+    id: "dragHolder",
+    input: "Drag a token that carries others",
+    does: "Move it with what it carries, and what those carry",
+    roles: EVERYONE,
+    when: "with the Select tool",
+    device: "pointer",
+  },
+  {
+    id: "dragRider",
+    input: "Drag the rider of a controlled mount",
+    does: "Move the mount, the rider riding. So does a drag of a rider that covers its whole mount",
+    roles: EVERYONE,
+    when: "with the Select tool",
+    device: "pointer",
+  },
+  {
+    id: "dragCarried",
+    input: "Drag any other carried token",
+    does: "Move it alone. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose",
+    roles: EVERYONE,
+    when: "with the Select tool",
+    device: "pointer",
   },
 
   // The toolbar: state/shortcuts.ts toolShortcut, components/Menu.tsx in Setup and the tool menu (pages/Room.tsx Toolbar).
@@ -810,10 +836,15 @@ export type SheetDevice = { mouse: boolean; android: boolean };
 /** The heading of the mouse rows' section. */
 export const MOUSE_SECTION = "Mouse with keys";
 
+/** The heading of the rows a plain drag gives on every device, a mouse's or a finger's. */
+export const POINTER_SECTION = "Mouse and touch";
+
 /** The sheet's Keys intro, which FEATURES.md repeats. */
 export const KEYS_INTRO = "On any device with a keyboard. They do nothing while you type in a field or a dialog is open. On a Mac, Cmd works where Ctrl is written.";
 
 /** A line under a surface's heading, where its rows do not say where it is. */
+const POINTER_INTRO = "On any device. A token that carries others, such as a rider's mount or a holder of a torch, drags as a group.";
+
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   Toolbar: "Each tool key picks its tool, also one behind Setup or the tool menu.",
   "Tool options": "A tool's options row, its More options and the pop-ups its buttons open.",
@@ -838,8 +869,8 @@ function sheetRow(b: Behavior): SheetRow {
 
 /**
  * The sheet's sections for a role on a device, in order: Keys, the mouse
- * with keys where there is a mouse or trackpad, Android's Back button on
- * Android, then each surface's keys. A section with no row for the role
+ * with keys where there is a mouse or trackpad, the drags every device
+ * has, Android's Back button on Android, then each surface's keys. A section with no row for the role
  * and the device is left out. Each key is the one in effect on this device.
  */
 export function sheetSections(role: "dm" | "player", device: SheetDevice, keys: KeyMap = shortcutKeys()): SheetSection[] {
@@ -852,6 +883,7 @@ export function sheetSections(role: "dm" | "player", device: SheetDevice, keys: 
       rows: [...shortcutsFor(role).map((s) => keyRow(s, keys)), ...room.filter((b) => b.device === "keys").map(sheetRow)],
     },
     { title: MOUSE_SECTION, rows: device.mouse ? room.filter((b) => b.device === "mouse").map(sheetRow) : [] },
+    { title: POINTER_SECTION, intro: POINTER_INTRO, rows: room.filter((b) => b.device === "pointer").map(sheetRow) },
     { title: "Android", rows: device.android ? room.filter((b) => b.device === "android").map(sheetRow) : [] },
     ...SURFACES.map((surface) => ({
       title: surface,

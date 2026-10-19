@@ -1,6 +1,6 @@
 # raccoon-vtt v1: attached tokens
 
-Status: draft 4, after design review rounds 1 to 3, with the project owner's answers (section 15). Code is cited from `main` at `88f03125`.
+Status: built. Draft 4, after design review rounds 1 to 3, with the project owner's answers (section 15), and the build follows it. Section 16 records where the build chose what the note left open. Code is cited from `main` at `88f03125`.
 
 On 2026-10-18 the project owner moved three "Later" items up for design: "Movement and walls", "Attached tokens" and "Triggers and traps". This note is the second: "Attached tokens (rider on a mount, torch on a character)" (docs/features.md section 5). It covers a rider on a mount, a torch or light on a character, a familiar on a shoulder and a grappled creature dragged along: attaching and detaching on a phone and a computer, who may do it, what moves with what, how initiative and turns treat a mount and its rider under the 2024 mounted combat rules, how the movement budget and the ruler see a carried token, and what players see of a hidden attached token.
 
@@ -335,3 +335,18 @@ The coordinator's other calls this note follows: getting off a mount tests traps
 
 7. **Another player's hidden creature on a moved holder.** The DM hides Ana's invisible character, who rides Bree's horse, from Bree. Bree moves the horse. Decided by the coordinator under the project owner's standing instruction, as recommended: Ana's character rides along. Bree's view (the horse) does not depend on it, and Ana's (the horse, her character and the link) depends only on the op and what Ana sees. Contract section 5 is stated per viewer to match.
 8. **The carried-object reveal.** Decided by the coordinator under the project owner's standing instruction, after review round 3: a token players can see that rides a holder they cannot see still follows its holder, on the DM's moves and on a player's move of a holder whose hidden rider holds it, and nothing else of the holder is revealed. It is the second listed reveal of contract section 5. Rejected: keeping the torch still, which breaks the link for no reason players could see, and refusing the move.
+
+## 16. As built
+
+Where the note left a choice open, the build took these:
+
+- **The move description.** `planMove` and `describeMove` (contract 3.1) did not exist when this lane built, so they live in `shared/rules/moveLeg.ts`, with a random test that the reducer puts every token where the plan says, positioned detaches included.
+- **"Every player sees"** reads the rule of the path's `seen` marks (`inSightOfNonOwners`), for the public members, the drag cost, the turn's sharing and a player's limits alike.
+- **Fit.** A carry of a creature by a creature needs a holder at least one size larger, as a ride does. A creature on an object, or an object on anything, only needs to fit inside it. Only a creature drags or is dragged.
+- **Getting on.** A ride while a turn is running, by a player, needs the acting row to be the rider's own, so a rider with no row of its own rides only outside a fight. A rider already seated still pays half its Speed to mount, on a stop where it sits. A rider already on that mount pays nothing to switch Controlled and Independent or take a new seat.
+- **Getting off.** The carried token's owner may always get off, a locked token included. Getting off is recorded as two stops when the first spot clear of the mount differs from where it lands.
+- **Moves.** A move to another scene takes each member by the holder's change in x, y and elevation. A `token.update` that moves a holder (a resize that shifts it too) carries its group. A route's reach cap and an area's samples along a group's move count the named tokens only, each member taking its holder's progress along its own route.
+- **Turns.** A removal that passes the turn on joins the turn's mounts as Next does and sets `markRound`, without giving the mount its Reaction back. An import drops the turn's mounts with its `seq`.
+- **Undo.** A passenger that rode along and that the player cannot see now, or that is gone, is left out of their undo whether or not it is still under the group. A link to a holder deleted since stays off.
+- **The shortcut sheet.** The three drag rows of 4.6 have a section of their own, "Mouse and touch", shown on every device, since the registry had held only keys and key-and-pointer combinations, which a phone never shows.
+- **The client.** The Attach list opens as a pop-up from 900 px up and as the room's sheet below it. The Ride row expands to the Controlled or Independent choice with Ride under it. "Carry X" for a creature lists only one the viewer sees Grappled, the DM included, and "Get on X" only a creature onto an object. Ties in the list sort by name. The walls cut of a player's group drag reuses movement's "Stopped at a wall" note, and its Teleport here moves the holder alone. The extra foot reads "+N ft for dragging" or "carrying".

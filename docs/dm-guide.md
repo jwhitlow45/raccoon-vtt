@@ -35,6 +35,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [The group save](#the-group-save)
   - [Alerts during a fight](#alerts-during-a-fight)
   - [Measuring and movement](#measuring-and-movement)
+  - [Mounts, familiars and dragging](#mounts-familiars-and-dragging)
 - Deeper tools
   - [Outliner](#outliner)
   - [DM panel](#dm-panel)
@@ -799,6 +800,35 @@ Here is how the turn's path works, and how to correct it:
 **The walking ruler.** The Ruler's **Measure** chip chooses **Straight** or **Walking**, and your device remembers the choice. Walking measures how far the creature the ruler starts on would walk to each point, or a Medium creature when you start on empty ground: around walls, through open doors, up stairs and counting difficult terrain, just as a drag would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any, and a leg with no way through draws straight in red. A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know.
 
 Distances between tokens are measured from edge to edge and include height. The room's **Diagonal moves** setting decides how diagonals count. The default, every square 5 ft, is the 2024 rule.
+
+## Mounts, familiars and dragging
+
+Some tokens should go wherever another one goes: a knight on her warhorse, a familiar on a wizard's shoulder, a torch in a fighter's hand, travelers riding in a cart, or a goblin hauled along by the fighter who grappled it. **Attach** links two tokens so that one moves with the other.
+
+**Attaching.** Select the token that gets on, or the one that will carry or drag, and press **Attach** in its action bar. The list shows every token within 5 feet that it can ride, carry or drag, nearest first, each as a sentence that says what will happen:
+
+- **Ride Warhorse** puts a creature on a mount at least one size larger than itself.
+- **Perch on Bree** puts a Tiny creature on another creature, the way a familiar sits on a shoulder.
+- **Carry Torch** puts an object on the selected token, and **Get on Cart** puts the selected creature on an object. **Carry Kobold** lets a creature carry a smaller one that it has grappled.
+- **Drag Goblin 2** pulls a creature along beside the one dragging it.
+
+Your list reaches further than your players' do: tokens up to 30 feet away appear under **Farther away**, so you can seat your NPCs on their mounts while you set up a scene. A player can drag a creature only when they could move it anyway, or once you have marked it Grappled. When nothing is in reach, the list says so.
+
+**Controlled or independent.** Ride asks one more question. A controlled mount, such as a horse trained for battle, moves on its rider's turn as the rider directs it. An independent mount keeps its own turn and goes where it pleases, with its rider along for the ride. Controlled is the default, and you can change it later in the rider's Token panel.
+
+**Moving together.** Drag the holder, and everything it carries comes along: the warhorse takes its rider, the cart its passengers, the fighter her torch. A token on a holder rises and falls with it, so a rider stays in the saddle of a flying mount. A dragged creature walks beside its holder on its own ground, and comes loose if it ends up out of reach. Dragging the rider of a controlled mount moves the mount, since that is how the rider steers. Drag any other carried token on its own to take it off: drop the torch somewhere else and it has been thrown, or pull the grappled goblin away and it is free. A carried token dropped back on its holder just takes a new seat there. On a map where walls stop movement, a player's group stops where the holder, or a creature it drags, would meet a wall.
+
+**Getting off.** A carried token's action bar shows **Get off** for a creature, **Put down** for an object and **Let go** for a dragged creature, in place of Attach. Get off finds a free spot beside the mount. The holder's bar lists what it carries ("Carrying Bree, Torch"), and a tap there selects any of them, which helps when a rider hides its mount or a familiar is too small to tap. Players can take back a mistaken Ride, Get off, Put down or Let go with **Undo move**, like any move.
+
+**Mounted combat.** The app follows the mounted combat rules. On the rider's turn, getting on or off a mount costs half the rider's Speed, and players can mount only on their own turn. When a creature mounts a controlled mount, the mount's Initiative changes to match its rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill sits on the mount with the rider's own movement under it ("Bree: 15 ft"), and the mount gets its Reaction back when its rider's turn starts. Its own row stays in the tracker, dimmed, so effects that count its turns still tick there, but it has no movement of its own that round. If the mount had already taken its turn this round, the tracker passes over its row until the next round. The tracker tags the rider's row "Riding Warhorse" and the mount's row "Controlled by Bree". When the mount's own row is the one acting as a rider mounts it, its row stays put, and its options offer **Move after Bree** for once its turn is over.
+
+If a rider, or the mount under it, is knocked Prone or Unconscious, you get a reminder that the rider may fall off, with the DC 10 Dexterity save and **Ask for the save** for a player's rider. The app never decides this for you, and nothing falls off by itself.
+
+**Dragging costs movement.** Dragging or carrying a creature costs an extra foot for every foot moved, just as difficult terrain does, unless the creature is Tiny or two sizes smaller than the one hauling it.
+
+**Secrets stay secret.** A hidden token you attach stays hidden: the imp on the villain's shoulder, the assassin hiding in the cart. Your players never learn it's there, not from how the group moves, what a move costs, or why a move was refused. One thing does show, as it would at a real table: a torch held by an invisible creature floats along wherever the creature goes. A rider you hide never shares its mount's turn either, so the tracker gives nothing away.
+
+A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a group moves at most 20 tokens.
 
 # Deeper tools
 
