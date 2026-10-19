@@ -232,6 +232,21 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     assert.equal(long.moves[0]!.route, undefined, "over 300 squares of reach: the drop goes without a route");
   });
 
+  test("a walk cut inside a 5 ft corridor lands squeezed, at a piece end where the squeeze is a real one", () => {
+    const state = world({ edges: { ...line("w", 10, 10, 20), ...line("w", 11, 10, 20) } });
+    const ogre = token("ogre", { size: "large", x: 4, y: 0 });
+    // 62 pieces above the corridor, then down it a half square at a time.
+    const above = Array.from({ length: 62 }, (_, i): [number, number, number, 0 | 1] => [i % 2 === 0 ? 5 : 4, 0.5 + i * 0.1, 0, 0]);
+    const down = (ys: number[]) => ys.map((y): [number, number, number, 0 | 1] => [9.5, y, 0, 0]);
+    // The 64th piece ends at y 12.5, where the squeezed footprint lies on the grid.
+    const onGrid = planWalk(state, ogre, { x: 9.5, y: 15.5 }, "free", { kind: "route", route: { pieces: [...above, ...down([12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5])] } }, 5);
+    assert.equal(onGrid.cut, true);
+    assert.deepEqual([onGrid.moves[0]!.x, onGrid.moves[0]!.y, onGrid.moves[0]!.squeeze, onGrid.moves[0]!.route!.length], [9.5, 12.5, true, 64]);
+    // The 64th ends at y 13, half a square off it: the cut steps back to the 63rd.
+    const offGrid = planWalk(state, ogre, { x: 9.5, y: 15.5 }, "free", { kind: "route", route: { pieces: [...above, ...down([12.5, 13, 13.5, 14, 14.5, 15, 15.5])] } }, 5);
+    assert.deepEqual([offGrid.moves[0]!.x, offGrid.moves[0]!.y, offGrid.moves[0]!.squeeze, offGrid.moves[0]!.route!.length], [9.5, 12.5, true, 63]);
+  });
+
   test("the route's spot is the drop's own, squeezed where the creature squeezes, on the lattice from where it stands", () => {
     const state = world({ edges: { ...line("w", 10, 10, 20), ...line("w", 11, 10, 20) } });
     const ogre = token("ogre", { size: "large", x: 4, y: 4 });

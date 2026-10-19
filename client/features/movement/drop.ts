@@ -3,8 +3,8 @@ import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorR
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { canSqueeze, footprintSize } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, type DropMode } from "#shared/rules/movement.ts";
-import { routeLattice, routePoints, routeReach } from "#shared/rules/route.ts";
+import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
+import { routeLattice, routePoints, routeReach, type RoutePiece } from "#shared/rules/route.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 
@@ -157,6 +157,24 @@ export function routeTarget(state: BuildState, token: DropToken, raw: Point): Po
   return { x: onLattice(at.x, token.x), y: onLattice(at.y, token.y), squeeze: at.squeeze };
 }
 
+/**
+ * A route past 64 pieces, cut where the drop can land (5.2): at the last
+ * piece end, no later than the 64th, where the creature stands as a drop
+ * would, squeezed only where the squeeze is a real one (`squeezeFits`) and
+ * not squeezing where nothing pinches it. Null when the route needs no cut,
+ * or no piece end is such a spot.
+ */
+export function cutRoute(state: BuildState, token: DropToken, pieces: readonly RoutePiece[]): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
+  if (pieces.length <= MAX_ROUTE_PIECES) return null;
+  for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
+    const [x, y] = pieces[k - 1]!;
+    const at = { x, y };
+    if (!previewSqueezed(state, token, at)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: false } };
+    if (squeezeFits(state, token, at)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: true } };
+  }
+  return null;
+}
+
 /** The note when a walk turned too often for one move and landed partway. */
 export const CUT_TEXT = "Stopped partway: the way there turns too often for one move. Drag again to go on.";
 
@@ -172,11 +190,11 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
 export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number): DropPlan {
   if (found.kind === "route") {
     const target = routeTarget(state, token, raw);
-    const cut = found.route.pieces.length > MAX_ROUTE_PIECES;
-    const pieces = found.route.pieces.slice(0, MAX_ROUTE_PIECES);
+    const cut = found.route.pieces.length > MAX_ROUTE_PIECES ? cutRoute(state, token, found.route.pieces) : null;
+    const pieces = cut ? cut.pieces : found.route.pieces.length > MAX_ROUTE_PIECES ? [] : found.route.pieces;
     const last = pieces[pieces.length - 1];
     if (last) {
-      const at = cut ? { x: last[0], y: last[1], squeeze: false } : target;
+      const at = cut ? cut.at : target;
       const move = landed(state.buildChunks, token, at);
       const reach = routeReach(routePoints(state.buildChunks, token, pieces, move.elevation ?? token.elevation), feetPerCell);
       const route = pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
