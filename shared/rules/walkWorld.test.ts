@@ -6,7 +6,7 @@ import { projectState } from "../project.ts";
 import { P1, actor, effect, reveal, room, template, token } from "../testutil.ts";
 import { legGeometry, publicCounters } from "./path.ts";
 import { findRoute } from "./walk.ts";
-import { creatureWay, halvedAt, publicWorld, speedAreas, type PublicWorld, type WorldOptions } from "./walkWorld.ts";
+import { creatureWay, groupWalkWorld, halvedAt, publicWorld, speedAreas, type PublicWorld, type WorldOptions } from "./walkWorld.ts";
 
 /** The public world a route is searched in (docs/design-v1-movement.md 4.3 and 5.5). */
 
@@ -166,11 +166,13 @@ describe("the same public world on every device (5.5, review MV-O-1 and MV-O-10)
     { x: 3, y: 20 },
   ];
 
-  function agree(walker: string, opts: WorldOptions = {}) {
+  function agree(walker: string, opts: WorldOptions = {}, setup?: (s: RoomState) => void, grouped = false) {
     const state = busy();
+    setup?.(state);
     const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
-    const onDm = publicWorld(state, state.tokens[walker] as Token, { role: "dm" }, [], opts);
-    const onPlayer = publicWorld(view, view.tokens[walker] as Token, { role: "player" }, [], opts);
+    const build = (s: RoomState, role: "dm" | "player") => (grouped ? groupWalkWorld(s, s.tokens[walker] as Token, { role }) : publicWorld(s, s.tokens[walker] as Token, { role }, [], opts));
+    const onDm = build(state, "dm");
+    const onPlayer = build(view, "player");
     const bounds = state.scenes.s1!.bounds;
     assert.deepEqual(whole(onDm, bounds), whole(onPlayer, bounds), `${walker}: the world`);
     for (const to of targets) {
@@ -188,5 +190,19 @@ describe("the same public world on every device (5.5, review MV-O-1 and MV-O-10)
 
   test("so does a shared ruler on a monster, which keeps to ground players have seen", () => {
     agree("gob", { creatures: false, seenGround: true });
+  });
+
+  test("so does the DM's drag of a monster carrying the hero, which keeps to ground players have seen (docs/design-v1-attach.md 9)", () => {
+    agree("gob", {}, (s) => {
+      s.tokens.gob = { ...s.tokens.gob!, size: "large" };
+      s.tokens.hero = { ...s.tokens.hero!, x: 2, y: 8, attached: { to: "gob", kind: "ride" } };
+    }, true);
+  });
+
+  test("so does a drag whose hidden passenger carries a creature players see: only links every player sees take it out of the way", () => {
+    agree("hero", {}, (s) => {
+      s.tokens.imp = token("imp", { name: "Imp", size: "tiny", x: 3, y: 5, visibility: "dm", attached: { to: "hero", kind: "drag" } });
+      s.tokens.wolf = token("wolf", { name: "Wolf", x: 4, y: 5, attached: { to: "imp", kind: "carry" } });
+    }, true);
   });
 });

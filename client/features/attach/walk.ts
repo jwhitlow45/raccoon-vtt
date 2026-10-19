@@ -1,13 +1,14 @@
 import type { RoomState, Token } from "#shared/model.ts";
-import { carriedGroup, dragExtra, type SeenByAll } from "#shared/rules/attach.ts";
-import { publicToken, type PublicWorld } from "#shared/rules/walkWorld.ts";
+import { dragExtra, type SeenByAll } from "#shared/rules/attach.ts";
+import { publicToken } from "#shared/rules/walkWorld.ts";
 import type { DropToken } from "../movement/drop.ts";
 import { dragWalkers } from "./groups.ts";
 
 /**
  * A holder's walk as a drag searches it (docs/design-v1-attach.md 4.2 and
  * 7.3), as plain functions for node --test, so the drag pipeline
- * (features/movement/stageHooks.ts) needs a line for each.
+ * (features/movement/stageHooks.ts) needs a line for each. The world it
+ * walks in is shared/rules/walkWorld.ts groupWalkWorld.
  */
 
 type Role = "dm" | "player";
@@ -22,21 +23,6 @@ export function seenIn(view: RoomState, role: Role): SeenByAll {
     const token = view.tokens[t.id];
     return token !== undefined && publicToken(view, token, { role });
   };
-}
-
-/**
- * The world a holder walks in: while it drags or carries a creature, every
- * foot costs it one more (dragExtra), which every piece of its route then
- * carries, and movement sums with difficult terrain and the rest. What
- * moves with it never stands in its way, since it is not there once the
- * holder has gone.
- */
-export function groupWorld(view: RoomState, token: Token, role: Role, world: PublicWorld): PublicWorld {
-  const drag = dragExtra(view.tokens, token.id, seenIn(view, role));
-  const members = new Set(carriedGroup(view.tokens, token.id).slice(1));
-  if (drag === 0 && members.size === 0) return world;
-  const keep = world.spaces.map((space) => !members.has(space.id));
-  return { ...world, input: { ...world.input, drag, creatures: world.input.creatures.filter((_, i) => keep[i]) }, spaces: world.spaces.filter((_, i) => keep[i]) };
 }
 
 /**

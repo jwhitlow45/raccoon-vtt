@@ -105,6 +105,19 @@ const PAIRS: Pair[] = [
   pair("fogged pits", fogged, (s) => {
     s.buildChunks[chunkKey("s1", 0, 0)] = chunk(Object.fromEntries(PATCH.map((k) => [k, "pit" as TerrainId])));
   }, partyOnly, ["buildChunks"]),
+  pair(
+    "fogged rubble under a monster the hero rides, whose drag keeps to ground players have seen (docs/design-v1-attach.md 9)",
+    (s) => {
+      fogged(s);
+      s.tokens.gob = { ...s.tokens.gob!, size: "large" };
+      s.tokens.hero = { ...s.tokens.hero!, x: 2, y: 8, attached: { to: "gob", kind: "ride" } };
+    },
+    (s) => {
+      s.buildChunks[chunkKey("s1", 0, 0)] = chunk(Object.fromEntries(PATCH.map((k) => [k, "rubble" as TerrainId])));
+    },
+    [dmGoblinAcross],
+    ["buildChunks"],
+  ),
   pair("a creature the DM hid in the gap", () => {}, (s) => {
     s.tokens.ogre = token("ogre", { name: "Ogre", x: 6, y: 12, visibility: "dm" });
   }),

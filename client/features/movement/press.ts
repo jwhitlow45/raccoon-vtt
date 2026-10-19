@@ -1,14 +1,14 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { WalkWorld, worldUnits, type WorkBudget } from "#shared/rules/walk.ts";
-import { publicWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
+import { groupWalkWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { pathNow } from "../measure/movement.ts";
-import { groupWorld, walkersFor, walkersOfGroup } from "../attach/walk.ts";
+import { walkersFor, walkersOfGroup } from "../attach/walk.ts";
 import { cutForWalkers, dropMode, planGroup, planOne, planPress, rebased, type DropPlan, type DropToken, type Point, type Role } from "./drop.ts";
 
 /** The public world for a walk by this token as this device sees the room (docs/design-v1-movement.md 5.5), with what it drags or carries (docs/design-v1-attach.md 7.3). */
 export function worldFor(view: RoomState, token: Token, role: Role): PublicWorld {
   const stops = pathNow(view.encounter, token, role)?.stops ?? [];
-  return groupWorld(view, token, role, publicWorld(view, token, { role }, stops));
+  return groupWalkWorld(view, token, { role }, stops);
 }
 
 /**

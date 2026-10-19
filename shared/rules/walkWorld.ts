@@ -1,6 +1,7 @@
 import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token } from "../model.ts";
 import { isPartyMember, playersSeeGround, projectChunkForPlayer, withheldWhereItStands } from "../project.ts";
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
+import { dragExtra, publicMembers } from "./attach.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { footprintRect, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
@@ -157,6 +158,31 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
     counter: publicCounters(token, stops, rules, viewer.role === "dm"),
   };
   return { input, spaces, halfSpeed, areaCtx };
+}
+
+/**
+ * The public world for a walk by `token` and what it carries
+ * (docs/design-v1-attach.md 7.3 and 9), read from its public members alone,
+ * those every player sees by links every player sees, so no hidden link
+ * changes a route. It keeps to ground players have seen when any of them
+ * is a party member, the mover included. While it drags or carries a
+ * creature every foot costs one more (dragExtra), which every piece of its
+ * route then carries. What moves with it never stands in its way, since it
+ * is not there once the holder has gone.
+ */
+export function groupWalkWorld(state: RoomState, token: Token, viewer: WalkViewer, stops: readonly PathStop[] = []): PublicWorld {
+  const seen = (t: { id: string }) => {
+    const other = state.tokens[t.id];
+    return other !== undefined && publicToken(state, other, viewer);
+  };
+  const members = publicMembers(state.tokens, token.id, seen).slice(1);
+  const party = members.some((id) => isPartyMember(state, state.tokens[id]!));
+  const world = publicWorld(state, token, viewer, stops, party ? { seenGround: true } : {});
+  const drag = dragExtra(state.tokens, token.id, seen);
+  if (drag === 0 && members.length === 0) return world;
+  const moving = new Set(members);
+  const keep = world.spaces.map((space) => !moving.has(space.id));
+  return { ...world, input: { ...world.input, drag, creatures: world.input.creatures.filter((_, i) => keep[i]) }, spaces: world.spaces.filter((_, i) => keep[i]) };
 }
 
 /** The tokens on the mover's scene players see, by id. */

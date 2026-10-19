@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Token } from "#shared/model.ts";
 import { findRoute } from "#shared/rules/walk.ts";
-import { publicWorld } from "#shared/rules/walkWorld.ts";
+import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { token } from "#shared/testutil.ts";
 import { line, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
-import { groupWorld, towingWord, walkersFor } from "./walk.ts";
+import { towingWord, walkersFor } from "./walk.ts";
 
 const goblin = (over: Partial<Token> = {}) => token("goblin", { name: "Goblin", x: 3, y: 5, attached: { to: "thorn", kind: "drag" }, ...over });
 
@@ -16,7 +16,7 @@ describe("a holder's walk", () => {
     const mover = state.tokens.thorn!;
     const plain = publicWorld(state, mover, { role: "player" });
     assert.equal(plain.spaces.some((s) => s.id === "goblin"), true);
-    const grouped = groupWorld(state, mover, "player", plain);
+    const grouped = groupWalkWorld(state, mover, { role: "player" });
     assert.equal(grouped.input.drag, 1);
     assert.equal(grouped.spaces.some((s) => s.id === "goblin"), false);
     assert.equal(grouped.input.creatures.length, grouped.spaces.length);
@@ -27,12 +27,11 @@ describe("a holder's walk", () => {
 
   test("a Tiny creature, one two sizes smaller and one players cannot see cost nothing, and a lone token's world is as it was", () => {
     const tiny = world({ tokens: [thorn({ x: 2, y: 5 }), goblin({ size: "tiny" })] });
-    assert.equal(groupWorld(tiny, tiny.tokens.thorn!, "player", publicWorld(tiny, tiny.tokens.thorn!, { role: "player" })).input.drag, 0);
+    assert.equal(groupWalkWorld(tiny, tiny.tokens.thorn!, { role: "player" }).input.drag ?? 0, 0);
     const hidden = world({ tokens: [thorn({ x: 2, y: 5 }), goblin({ visibility: "dm" })] });
-    assert.equal(groupWorld(hidden, hidden.tokens.thorn!, "dm", publicWorld(hidden, hidden.tokens.thorn!, { role: "dm" })).input.drag, 0);
+    assert.equal(groupWalkWorld(hidden, hidden.tokens.thorn!, { role: "dm" }).input.drag ?? 0, 0);
     const alone = world({ tokens: [thorn({ x: 2, y: 5 })] });
-    const base = publicWorld(alone, alone.tokens.thorn!, { role: "player" });
-    assert.equal(groupWorld(alone, alone.tokens.thorn!, "player", base), base);
+    assert.deepEqual(groupWalkWorld(alone, alone.tokens.thorn!, { role: "player" }).input.creatures, publicWorld(alone, alone.tokens.thorn!, { role: "player" }).input.creatures);
   });
 
   test("the label names the extra foot by how the holder moves the creature, apart from the ground's", () => {
