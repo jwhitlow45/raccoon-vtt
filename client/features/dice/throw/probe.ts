@@ -38,7 +38,11 @@ export function makeProbe(canvas: () => ProbeCanvas): () => boolean {
 export const canDrawDice = makeProbe(() => document.createElement("canvas") as unknown as ProbeCanvas);
 
 export type LoaderDeps<T> = {
-  /** The switch is on, Low power is off and the page is no preview. */
+  /**
+   * The switch is on and Low power is off. A preview is not asked: View as
+   * a player is a dialog on the DM's own page, which loads the chunk for the
+   * DM's panel, and the store keeps a preview from warming up or throwing.
+   */
   allowed(): boolean;
   /** Told when any of those may have changed. */
   subscribe(listener: () => void): () => void;
