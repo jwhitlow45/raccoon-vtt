@@ -343,6 +343,16 @@ function alongLeg(before: RoomState, after: RoomState, moved: { tokens: Set<stri
 }
 
 /**
+ * The ops that can bring a creature into an area. Since op version 14 a
+ * step onto a seat and a get-off leg are walks of the shared move
+ * description too (docs/design-v1-attach.md 9), so they remind as a move does.
+ */
+function movesIntoAreas(op: Op, opVersion: number | undefined): boolean {
+  if (op.t === "token.move" || op.t === "token.moveMany" || op.t === "token.update" || op.t === "template.update") return true;
+  return (op.t === "token.attach" || op.t === "token.detach") && attaches(opVersion);
+}
+
+/**
  * After an op reduces: the creature whose turn `encounter.next` started, in
  * the areas that hit then, and, during a turn, every creature an op brought
  * into an area that hits on entering, on the way or where it ends.
@@ -350,7 +360,7 @@ function alongLeg(before: RoomState, after: RoomState, moved: { tokens: Set<stri
 export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
   if (startedTurn(tx)) remindAtTurn(tx, "turnStart");
   if (op.t === "encounter.next") return;
-  if (op.t !== "token.move" && op.t !== "token.moveMany" && op.t !== "token.update" && op.t !== "template.update") return;
+  if (!movesIntoAreas(op, tx.env.opVersion)) return;
   const after = tx.state;
   if (!inTurn(after)) return;
   const moved = movedBy(tx, op, before, after);

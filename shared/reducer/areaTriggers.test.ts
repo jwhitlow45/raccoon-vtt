@@ -256,3 +256,30 @@ describe("a move that is a leg of the turn's path and an entry into an area", ()
     assert.deepEqual(again.touched, once.touched);
   });
 });
+
+describe("getting on and off moves a creature into an area as a move does (docs/design-v1-attach.md 9)", () => {
+  /** The goblin's turn, a warhorse just outside the cleric's Spirit Guardians, which reach x 8 on her row. */
+  const mounted = (setup: (s: RoomState) => void) => {
+    const state = fight();
+    state.tokens.horse = token("horse", { name: "Warhorse", size: "large", x: 9, y: 5 });
+    setup(state);
+    return state;
+  };
+  const entering = (state: RoomState, op: Op) => play(state, [op]).reminders.map((r) => r.type === "area" && [r.tokenId, r.trigger]);
+
+  test("getting off into the area reminds as the same step by a move would", () => {
+    const riding = mounted((s) => (s.tokens.g1 = { ...s.tokens.g1!, x: 9, y: 5, attached: { to: "horse", kind: "ride" } }));
+    assert.deepEqual(entering(riding, { t: "token.detach", tokenId: "g1", x: 8, y: 5 }), [["g1", "enter"]]);
+    const standing = mounted((s) => (s.tokens.g1 = { ...s.tokens.g1!, x: 9, y: 5 }));
+    assert.deepEqual(entering(standing, move("g1", 8)), [["g1", "enter"]]);
+  });
+
+  test("so does stepping onto a seat inside it, while a drag, which leaves the creature where it stands, reminds nobody", () => {
+    const beside = mounted((s) => {
+      s.tokens.horse = { ...s.tokens.horse!, x: 7 };
+      s.tokens.g1 = { ...s.tokens.g1!, x: 9, y: 5 };
+    });
+    assert.deepEqual(entering(beside, { t: "token.attach", tokenId: "g1", to: "horse", kind: "ride", x: 8, y: 5, elevation: 0 }), [["g1", "enter"]]);
+    assert.deepEqual(entering(beside, { t: "token.attach", tokenId: "g1", to: "horse", kind: "drag", x: 9, y: 5, elevation: 0 }), []);
+  });
+});
