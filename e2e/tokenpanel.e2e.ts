@@ -1398,6 +1398,23 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await shots.take(page, `sheetlink-${label.replace(/ /g, "")}-thorn-bar`);
       const target = await rectOf(link);
       assert.ok(target.height >= 43.5, `${label}: a 44 px target, ${target.height} px`);
+      // Wrapped under the line above, its reach runs over that line's units, which stay on top: a tap on "HP 31/38" opens no tab.
+      const covered = await line.evaluate((el) => {
+        const sheet = el.querySelector('a[aria-label="Open the sheet"]');
+        const hits: string[] = [];
+        for (const unit of el.querySelectorAll("[data-unit], [role=img]")) {
+          if (!sheet || unit.contains(sheet) || sheet.contains(unit)) continue;
+          const r = unit.getBoundingClientRect();
+          for (const x of [r.left + 2, (r.left + r.right) / 2, r.right - 2]) {
+            for (const y of [r.top + 2, r.bottom - 2]) {
+              const top = el.ownerDocument.elementFromPoint(x, y);
+              if (top && sheet.contains(top)) hits.push(`${unit.textContent ?? ""} at ${Math.round(x)}, ${Math.round(y)}`);
+            }
+          }
+        }
+        return hits;
+      });
+      assert.deepEqual(covered, [], `${label}: the link's reach takes taps meant for the line above`);
       // The link's 44 px reach, a padding its negative margin takes back, leaves the line as tall as the link's text alone would. Only the reach goes, so the line wraps where it did.
       await link.evaluate((el) => {
         const style = (el as unknown as { style: { padding: string; margin: string } }).style;

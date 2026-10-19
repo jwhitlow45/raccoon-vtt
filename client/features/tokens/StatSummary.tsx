@@ -11,7 +11,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
-import { SheetLink } from "./SheetLink.tsx";
+import { OVER_REACH, SheetLink } from "./SheetLink.tsx";
 import { defenseLines, linkedBlockState, moreStatsShown, quickUnit, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
 import { QuickNumberUnit } from "./QuickNumbers.tsx";
 import { pcDefenseLines } from "../pcstats/reading.ts";
@@ -129,11 +129,11 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
         return item.units.flatMap((unit, j) => {
           const gap = j === item.units.length - 1 ? between : undefined;
           const shown = (
-            <span key={`${item.key}:${j}`} data-unit={item.key} style={{ display: "inline-flex", alignItems: "center", minWidth: 0, maxWidth: "100%", ...gap }}>
+            <span key={`${item.key}:${j}`} data-unit={item.key} style={{ display: "inline-flex", alignItems: "center", minWidth: 0, maxWidth: "100%", ...(unit.kind === "sheet" ? null : OVER_REACH), ...gap }}>
               <Unit unit={unit} />
             </span>
           );
-          return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex" }}>{props.afterTag}</span>] : [shown];
+          return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex", ...OVER_REACH }}>{props.afterTag}</span>] : [shown];
         });
       })}
       {props.end}

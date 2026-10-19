@@ -10,6 +10,14 @@ const NAME = "Open the sheet";
 const REACH = `calc((${theme.touch}px - 1lh) / 2)`;
 
 /**
+ * For the units that share a line with the link: positioned, they paint
+ * over its reach and take the taps there, so a tap on "HP 31/38" just above
+ * a wrapped link hits the HP and opens no tab. The link itself stays
+ * unpositioned under them.
+ */
+export const OVER_REACH = { position: "relative" } as const;
+
+/**
  * The owner's D&D Beyond sheet as one compact unit of a stat line: "Sheet"
  * and the new tab's icon, named "Open the sheet" for a screen reader and in
  * the shared tooltip. It opens a new tab with no referrer and no opener.
@@ -19,7 +27,8 @@ const REACH = `calc((${theme.touch}px - 1lh) / 2)`;
  * equal negative margin takes the padding back out of the layout, the same
  * way the measure pill's button does (measure/controls.tsx LINE_BUTTON).
  * Padding goes above and below only, since neighbours stand close at the
- * sides.
+ * sides. Where the link wraps, that reach runs over the line above, whose
+ * units OVER_REACH keeps on top.
  */
 export function SheetLink(props: { url: string }) {
   const tooltip = useTooltip(NAME);

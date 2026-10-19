@@ -4,7 +4,7 @@ import { AcBadge } from "../../components/AcBadge.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import { elevationBadge } from "../../lib/tokenView.ts";
-import { SheetLink } from "./SheetLink.tsx";
+import { OVER_REACH, SheetLink } from "./SheetLink.tsx";
 import { quickUnit, type QuickUnit, type VitalItem } from "./statSummary.ts";
 
 /**
@@ -95,7 +95,7 @@ export function QuickNumberUnit(props: { unit: QuickUnit; style?: CSSProperties 
 function Unit(props: { name: string; wraps?: boolean; style?: CSSProperties; children: ReactNode }) {
   const wrap = props.wraps ? { flexWrap: "wrap", minWidth: 0, maxWidth: "100%" } as const : { whiteSpace: "nowrap" } as const;
   return (
-    <span role="img" aria-label={props.name} title={props.name} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), ...wrap, ...props.style }}>
+    <span role="img" aria-label={props.name} title={props.name} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), ...wrap, ...OVER_REACH, ...props.style }}>
       {props.children}
     </span>
   );
