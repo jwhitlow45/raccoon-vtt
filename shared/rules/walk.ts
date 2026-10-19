@@ -140,6 +140,11 @@ export class WalkWorld {
   /** How far the squeezed footprint stands in from the full one on each side (4.1, 4.5). */
   readonly #ox: number;
   readonly #oy: number;
+  // Scratch for #box, so the hot loop makes no arrays.
+  readonly #seenBox = new Float64Array(5);
+  readonly #endBox = new Float64Array(5);
+  readonly #fromBox = new Float64Array(5);
+  readonly #toBox = new Float64Array(5);
   readonly height: number;
   readonly flags: Uint8Array;
   readonly #ground: Float64Array;
@@ -246,12 +251,17 @@ export class WalkWorld {
     return ok;
   }
 
-  /** Whether the footprint at a stored position lies on ground the search may read: every square under it seen. */
-  seenAt(x: number, y: number): boolean {
+  /** Whether the footprint at a stored position lies on ground the search may read: every square under it seen, under the squeezed footprint where it squeezes. */
+  seenAt(x: number, y: number, n = -2): boolean {
     if (!this.input.seen) return true;
     const flags = this.flags;
-    for (let cy = Math.floor(y + EPS); cy < Math.ceil(y + this.h - EPS); cy++)
-      for (let cx = Math.floor(x + EPS); cx < Math.ceil(x + this.w - EPS); cx++) {
+    const box = this.#box(x, y, n, this.#seenBox);
+    const x0 = box[0]!;
+    const y0 = box[1]!;
+    const x1 = box[2]!;
+    const y1 = box[3]!;
+    for (let cy = Math.floor(y0 + EPS); cy < Math.ceil(y1 - EPS); cy++)
+      for (let cx = Math.floor(x0 + EPS); cx < Math.ceil(x1 - EPS); cx++) {
         if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H || (flags[cy * this.W + cx]! & SEEN) === 0) return false;
       }
     return true;
@@ -264,11 +274,11 @@ export class WalkWorld {
    */
   endOnly(x: number, y: number, elevation: number): boolean {
     if (this.mode === "inside") return false;
-    const k = this.#squeezedAt(x, y, -2) ? 1 : 0;
-    const x0 = x + k * this.#ox;
-    const y0 = y + k * this.#oy;
-    const x1 = x + this.w - k * this.#ox;
-    const y1 = y + this.h - k * this.#oy;
+    const box = this.#box(x, y, -2, this.#endBox);
+    const x0 = box[0]!;
+    const y0 = box[1]!;
+    const x1 = box[2]!;
+    const y1 = box[3]!;
     if (this.mode === "ground") {
       for (let cy = Math.max(0, Math.floor(y0 + EPS)); cy < Math.min(this.H, Math.ceil(y1 - EPS)); cy++)
         for (let cx = Math.max(0, Math.floor(x0 + EPS)); cx < Math.min(this.W, Math.ceil(x1 - EPS)); cx++) if ((this.flags[cy * this.W + cx]! & PIT) !== 0) return true;
@@ -281,13 +291,20 @@ export class WalkWorld {
   }
 
   /**
-   * Whether the rules read the squeezed footprint at a stored position
-   * (4.1): where the squeeze rule finds a narrow space, it stands centered
-   * in the full one, `#ox` and `#oy` in from each side. `n` is the
-   * position's node, -1 off the lattice, or -2 to look it up.
+   * The footprint the rules read at a stored position (4.1), as x0, y0, x1
+   * and y1 in `out`: the squeezed one where the squeeze rule finds a narrow
+   * space, centered in the full one `#ox` and `#oy` in from each side, else
+   * the full one. Seen ground, entry costs, pits and creatures all read it.
+   * `n` is the position's node, -1 off the lattice, or -2 to look it up.
    */
-  #squeezedAt(x: number, y: number, n: number): boolean {
-    return this.squeezes && this.#pinched(x, y, n === -2 ? this.nodeAt({ x, y }) : n);
+  #box(x: number, y: number, n: number, out: Float64Array): Float64Array {
+    const k = this.squeezes && this.#pinched(x, y, n === -2 ? this.nodeAt({ x, y }) : n) ? 1 : 0;
+    out[0] = x + k * this.#ox;
+    out[1] = y + k * this.#oy;
+    out[2] = x + this.w - k * this.#ox;
+    out[3] = y + this.h - k * this.#oy;
+    out[4] = k;
+    return out;
   }
 
   /**
@@ -304,16 +321,16 @@ export class WalkWorld {
    */
   extraOf(ax: number, ay: number, bx: number, by: number, elevation: number, b: number): { extra: number; swim: 0 | 1 } {
     if (this.mode === "inside") return { extra: this.input.drag ?? 0, swim: 0 };
-    const ka = this.#squeezedAt(ax, ay, -2) ? 1 : 0;
-    const kb = this.#squeezedAt(bx, by, b) ? 1 : 0;
-    const ax0 = ax + ka * this.#ox;
-    const ay0 = ay + ka * this.#oy;
-    const ax1 = ax + this.w - ka * this.#ox;
-    const ay1 = ay + this.h - ka * this.#oy;
-    const bx0 = bx + kb * this.#ox;
-    const by0 = by + kb * this.#oy;
-    const bx1 = bx + this.w - kb * this.#ox;
-    const by1 = by + this.h - kb * this.#oy;
+    const from = this.#box(ax, ay, -2, this.#fromBox);
+    const to = this.#box(bx, by, b, this.#toBox);
+    const ax0 = from[0]!;
+    const ay0 = from[1]!;
+    const ax1 = from[2]!;
+    const ay1 = from[3]!;
+    const bx0 = to[0]!;
+    const by0 = to[1]!;
+    const bx1 = to[2]!;
+    const by1 = to[3]!;
     let ground = 0;
     let swim = false;
     if (this.mode === "ground") {
@@ -339,7 +356,7 @@ export class WalkWorld {
         if (x1 - x0 > EPS && y1 - y0 > EPS && newlyCovered(x0, y0, x1, y1, ax0, ay0, ax1, ay1)) ground = 1;
       });
     }
-    if (ground < 1 && kb === 1) ground = 1;
+    if (ground < 1 && to[4] === 1) ground = 1;
     const crawl = this.input.prone;
     return { extra: ground + (swim || crawl ? 1 : 0) + (this.input.drag ?? 0), swim: swim && !crawl ? 1 : 0 };
   }
@@ -593,7 +610,7 @@ export class WalkSearch {
       if (this.#best[b]! >= 0 && !this.#fiveTen) continue;
       const bx = world.xOf(b);
       const by = world.yOf(b);
-      if (!world.seenAt(bx, by) || !world.wallsClear(a, d, b)) continue;
+      if (!world.seenAt(bx, by, b) || !world.wallsClear(a, d, b)) continue;
       const eb = world.elevationAt(b);
       const { extra, swim } = world.extraOf(ax, ay, bx, by, eb, b);
       this.#relax(s, b, d, extra, swim, eb - ea);
@@ -779,7 +796,7 @@ export class WalkSearch {
       const b = this.#node[t]!;
       const bx = world.xOf(b);
       const by = world.yOf(b);
-      if (!world.seenAt(bx, by)) continue;
+      if (!world.seenAt(bx, by, b)) continue;
       const eb = world.elevationAt(b);
       const bi = b % world.nx;
       const bj = Math.floor(b / world.nx);

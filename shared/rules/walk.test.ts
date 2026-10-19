@@ -119,6 +119,11 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assert.equal(walk({ "0,3": "pit" }), 40, "a pit beside the corridor");
     const beside: WalkCreature = { x0: 0, y0: 3, x1: 1, y1: 4, lo: 0, hi: 5, way: "blocked" };
     assert.equal(walk({}, { creatures: [beside] }), 40, "a creature beside the corridor");
+    // Seen ground: the party has seen the hall above and the corridor, nothing beyond its walls, where the full footprint would reach.
+    const seenCorridor = (x: number, y: number) => y < 1 || x === 1;
+    const hall = world({ w: 6, h: 10, edges: { ...line("w", 1, 1, 8), ...line("w", 2, 1, 8) } });
+    const party = input(hall, tok(hall, { size: "large", x: 0.5, y: 0.5, squeeze: true }), { seen: seenCorridor });
+    assert.deepEqual(routeOf(party, { x: 0.5, y: 4.5 }).pieces, [[0.5, 4.5, 1, 0]], "down a corridor the party has seen");
     // In the corridor they still count.
     assert.equal(walk({ "1,3": "pit" }), "none");
     assert.equal(walk({ "1,3": "rubble" }), 40, "rubble inside costs what the squeeze already does: difficult terrain does not stack");
