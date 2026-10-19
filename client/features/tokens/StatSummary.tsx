@@ -12,7 +12,8 @@ import { useRoomView } from "../../state/view.ts";
 import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
 import { SheetLink } from "./SheetLink.tsx";
-import { defenseLines, linkedBlockState, moreStatsShown, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
+import { defenseLines, linkedBlockState, moreStatsShown, quickUnit, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
+import { QuickNumberUnit } from "./QuickNumbers.tsx";
 import { pcDefenseLines } from "../pcstats/reading.ts";
 import { useCharacterRollNumbers } from "../pcstats/useRollNumbers.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
@@ -110,26 +111,31 @@ function Unit(props: { unit: VitalUnit }) {
  * unit that does not fit, and only a unit wider than the whole box, which
  * none is in the boxes the panel and the bar take, shrinks and wraps
  * inside rather than run out of it. Items stand a little further apart
- * than the units inside them. `afterTag` follows the life tag, where the
- * DM's Revive goes, and `end` the last item, where a narrow token window's
- * elevation badge goes.
+ * than the units inside them. Speed and Passive Perception are the token
+ * panel's quick numbers (QuickNumbers.tsx), the footprints with "30 ft"
+ * and "PP 9", so a creature's numbers read alike in both places. HP keeps
+ * its words, since it leads the HP entry under it. `afterTag` follows the
+ * life tag, where the DM's Revive goes, and `end` the last item, where a
+ * narrow token window's elevation badge goes.
  */
 export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
   if (props.items.length === 0 && props.end == null) return null;
   return (
     <div data-vitals="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14, minWidth: 0, fontVariantNumeric: "tabular-nums" }}>
-      {props.items.flatMap((item, i) =>
-        item.units.flatMap((unit, j) => {
-          const last = j === item.units.length - 1;
-          const gap = last && i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : null;
+      {props.items.flatMap((item, i) => {
+        const between = i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined;
+        const quick = quickUnit(item);
+        if (quick) return [<QuickNumberUnit key={item.key} unit={quick} style={between} />];
+        return item.units.flatMap((unit, j) => {
+          const gap = j === item.units.length - 1 ? between : undefined;
           const shown = (
             <span key={`${item.key}:${j}`} data-unit={item.key} style={{ display: "inline-flex", alignItems: "center", minWidth: 0, maxWidth: "100%", ...gap }}>
               <Unit unit={unit} />
             </span>
           );
           return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex" }}>{props.afterTag}</span>] : [shown];
-        }),
-      )}
+        });
+      })}
       {props.end}
     </div>
   );

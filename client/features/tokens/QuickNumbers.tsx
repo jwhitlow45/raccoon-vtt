@@ -1,11 +1,11 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { Actor, Token } from "#shared/model.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import { elevationBadge } from "../../lib/tokenView.ts";
 import { SheetLink } from "./SheetLink.tsx";
-import type { VitalItem } from "./statSummary.ts";
+import { quickUnit, type QuickUnit, type VitalItem } from "./statSummary.ts";
 
 /**
  * The numbers a table asks for most, under a token's name at the top of its
@@ -25,31 +25,12 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
     if (item.key === "ac") {
       const ac = item.units[0];
       if (ac?.kind === "ac") units.push(<AcBadge key="ac" ac={ac.ac} />);
-    } else if (item.key === "speed") {
-      const modes = item.units.flatMap((u) => (u.kind === "text" ? [`${u.label === "Speed" ? "" : `${u.label} `}${u.value}`] : []));
-      units.push(
-        // Five speeds outrun a side panel's column, so this unit alone wraps, between its modes and never inside one, as the bar's do (StatSummary.tsx).
-        <Unit key="speed" name={`Speed ${modes.join(", ")}`} wraps>
-          <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
-          {modes.map((mode, i) => (
-            <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>
-              {i < modes.length - 1 ? `${mode},` : mode}
-            </strong>
-          ))}
-        </Unit>,
-      );
     } else if (item.key === "sheet") {
       const sheet = item.units[0];
       if (sheet?.kind === "sheet") sheetUrl = sheet.url;
-    } else if (item.key === "passivePerception") {
-      const pp = item.units[0];
-      if (pp?.kind === "text")
-        units.push(
-          <Unit key="pp" name={`Passive Perception ${pp.value}`}>
-            <span style={{ color: theme.color.textMuted }}>PP</span>
-            <strong>{pp.value}</strong>
-          </Unit>,
-        );
+    } else {
+      const unit = quickUnit(item);
+      if (unit) units.push(<QuickNumberUnit key={unit.key} unit={unit} />);
     }
   }
   const init = props.actor?.initBonus;
@@ -82,10 +63,39 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
   );
 }
 
-function Unit(props: { name: string; wraps?: boolean; children: ReactNode }) {
+/**
+ * Speed after the footprints or Passive Perception after "PP", as one
+ * quick number. The token window's summary line draws its speed and
+ * Passive Perception with this too (StatSummary.tsx VitalsLine), so a
+ * creature's numbers read alike wherever they are summed up.
+ */
+export function QuickNumberUnit(props: { unit: QuickUnit; style?: CSSProperties }) {
+  const { unit } = props;
+  if (unit.key === "speed") {
+    return (
+      // Five speeds outrun a side panel's column or a narrow window, so this unit alone wraps, between its modes and never inside one.
+      <Unit name={unit.name} wraps style={props.style}>
+        <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
+        {unit.modes.map((mode, i) => (
+          <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>
+            {i < unit.modes.length - 1 ? `${mode},` : mode}
+          </strong>
+        ))}
+      </Unit>
+    );
+  }
+  return (
+    <Unit name={unit.name} style={props.style}>
+      <span style={{ color: theme.color.textMuted }}>PP</span>
+      <strong>{unit.value}</strong>
+    </Unit>
+  );
+}
+
+function Unit(props: { name: string; wraps?: boolean; style?: CSSProperties; children: ReactNode }) {
   const wrap = props.wraps ? { flexWrap: "wrap", minWidth: 0, maxWidth: "100%" } as const : { whiteSpace: "nowrap" } as const;
   return (
-    <span role="img" aria-label={props.name} title={props.name} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), ...wrap }}>
+    <span role="img" aria-label={props.name} title={props.name} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), ...wrap, ...props.style }}>
       {props.children}
     </span>
   );

@@ -143,6 +143,28 @@ export function vitals(input: {
 }
 
 /**
+ * Speed and Passive Perception as the quick numbers draw them, alike in
+ * the token panel's header and the token window's summary
+ * (docs/design-v1-look-pass.md 2.10): the name a screen reader reads in
+ * full, and the short words a screen shows, each speed mode after the
+ * footprints ("30 ft", "Fly 60 ft") or the number after "PP". Null for
+ * the other items, which each place draws its own way.
+ */
+export type QuickUnit = { key: "speed"; name: string; modes: string[] } | { key: "passivePerception"; name: string; value: string };
+
+export function quickUnit(item: VitalItem): QuickUnit | null {
+  if (item.key === "speed") {
+    const modes = item.units.flatMap((u) => (u.kind === "text" ? [`${u.label === "Speed" ? "" : `${u.label} `}${u.value}`] : []));
+    return modes.length > 0 ? { key: "speed", name: `Speed ${modes.join(", ")}`, modes } : null;
+  }
+  if (item.key === "passivePerception") {
+    const pp = item.units[0];
+    return pp?.kind === "text" ? { key: "passivePerception", name: `Passive Perception ${pp.value}`, value: pp.value } : null;
+  }
+  return null;
+}
+
+/**
  * A short bar's split (3.3): AC and HP stay on the vitals line, so it
  * keeps to one line for any ordinary number, and speed and Passive
  * Perception join the saves and defenses in "More stats".

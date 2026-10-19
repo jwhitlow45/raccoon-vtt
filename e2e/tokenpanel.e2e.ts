@@ -590,8 +590,10 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await goblin.waitFor();
     await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
     const vitals = goblin.locator("[data-vitals]");
-    const text = await vitals.innerText();
-    for (const words of ["HP 10/10", "Speed 30 ft", "Passive Perception 9"]) assert.ok(text.replace(/\s+/g, " ").includes(words), `the vitals lack "${words}": ${text}`);
+    const text = (await vitals.innerText()).replace(/\s+/g, " ");
+    // HP in its words, speed and Passive Perception as the panel's quick numbers draw them, each named in full.
+    for (const words of ["HP 10/10", "30 ft", "PP 9"]) assert.ok(text.includes(words), `the vitals lack "${words}": ${text}`);
+    for (const name of ["Speed 30 ft", "Passive Perception 9"]) assert.equal(await vitals.getByRole("img", { name, exact: true }).count(), 1, `the vitals lack "${name}"`);
     const saves = goblin.locator("[data-saves]");
     await saves.waitFor();
     assert.equal((await saves.innerText()).replace(/\s+/g, " ").trim(), "Saves STR −1 DEX +2 CON +0 INT +0 WIS −1 CHA −1");
@@ -1152,7 +1154,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await shots.take(dm, `tokenpanel-${size.label.replace(/ /g, "")}-short-bar`);
       await more.click();
       const opened = (await goblin.innerText()).replace(/\s+/g, " ");
-      for (const words of ["Speed 30 ft", "Passive Perception 9", "Saves STR −1"]) assert.ok(opened.includes(words), `${size.label}: More stats lacks ${words}`);
+      assert.ok(opened.includes("Saves STR −1"), `${size.label}: More stats lacks the saves`);
+      for (const name of ["Speed 30 ft", "Passive Perception 9"]) assert.equal(await goblin.getByRole("img", { name, exact: true }).count(), 1, `${size.label}: More stats lacks ${name}`);
       await noSideScroll(goblin, `${size.label}, the short bar`);
 
       // Stat block keeps the bar open beside the sheet or side panel, which opens at the block.
@@ -1321,7 +1324,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     const thorn = bar(player, "Thorn");
     await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
     const text = (await thorn.innerText()).replace(/\s+/g, " ");
-    for (const words of ["HP 31/38", "+5", "Speed 30 ft", "Passive Perception 14"]) assert.ok(text.includes(words), `Thorn's bar lacks ${words}`);
+    for (const words of ["HP 31/38", "+5"]) assert.ok(text.includes(words), `Thorn's bar lacks ${words}`);
+    for (const name of ["Speed 30 ft", "Passive Perception 14"]) assert.equal(await thorn.getByRole("img", { name, exact: true }).count(), 1, `Thorn's bar lacks ${name}`);
     assert.equal(await thorn.getByRole("link", { name: "Open the sheet" }).getAttribute("href"), SHEET);
     await thorn.getByRole("button", { name: "Details", exact: true }).waitFor();
     assert.equal(await thorn.locator("[data-saves]").count(), 0);
@@ -1341,7 +1345,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await bree.waitFor();
     assert.equal(await bree.getByRole("img").count(), 0, "Bree's AC shows to Pat");
     assert.ok((await bree.locator("[data-vitals]").innerText()).includes("HP 12/24"), "Bree's HP as the party's rule sends it");
-    assert.equal((await bree.innerText()).includes("Passive Perception"), false);
+    assert.equal(await bree.getByRole("img", { name: /^Passive Perception/ }).count(), 0);
     await player.keyboard.press("Escape");
 
     await tapToken(player, run.goblin.at);
@@ -1392,9 +1396,14 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await shots.take(page, `sheetlink-${label.replace(/ /g, "")}-thorn-bar`);
       const target = await rectOf(link);
       assert.ok(target.height >= 43.5, `${label}: a 44 px target, ${target.height} px`);
-      await link.evaluate((el) => ((el as unknown as { parentElement: { style: { display: string } } }).parentElement.style.display = "none"));
+      // The link's 44 px reach, a padding its negative margin takes back, leaves the line as tall as the link's text alone would. Only the reach goes, so the line wraps where it did.
+      await link.evaluate((el) => {
+        const style = (el as unknown as { style: { padding: string; margin: string } }).style;
+        style.padding = "0";
+        style.margin = "0";
+      });
       const without = await rectOf(line);
-      assert.ok(withLink.height <= without.height + 0.5, `${label}: the line is ${withLink.height} px with the link and ${without.height} px without`);
+      assert.ok(withLink.height <= without.height + 0.5, `${label}: the line is ${withLink.height} px with the link's reach and ${without.height} px without`);
       await page.keyboard.press("Escape");
     }
   });

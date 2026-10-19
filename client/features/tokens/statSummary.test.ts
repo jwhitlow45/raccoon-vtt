@@ -1,3 +1,5 @@
+// First, so the components below import under node --test (components/testing/register.ts).
+import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Actor, Token } from "#shared/model.ts";
@@ -6,7 +8,12 @@ import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { loadMonsters } from "#shared/srd/monsters.ts";
 import { statBlockOf } from "#shared/statBlock.ts";
 import { P1, actor, character, companionBlock, customMonster, room, token } from "#shared/testutil.ts";
-import { defenseLines, hpUnits, linkedBlockState, moreStatsShown, saveUnits, shortSplit, speedUnits, unitText, validSheetUrl, vitals, type VitalItem, type VitalUnit } from "./statSummary.ts";
+import { defenseLines, hpUnits, linkedBlockState, moreStatsShown, quickUnit, saveUnits, shortSplit, speedUnits, unitText, validSheetUrl, vitals, type VitalItem, type VitalUnit } from "./statSummary.ts";
+
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { VitalsLine } = await import("./StatSummary.tsx");
+const { QuickNumbers } = await import("./QuickNumbers.tsx");
 
 /*
  * Inter's advance widths in ems at text size (its optical size 14), the
@@ -175,6 +182,71 @@ describe("a short bar's split", () => {
     assert.deepEqual(more, []);
     assert.equal(moreStatsShown(more, { kind: "none" }), false);
     assert.equal(moreStatsShown(more, { kind: "loading" }), true, "saves on their way count");
+  });
+});
+
+/**
+ * Each quick number's markup in a rendered line, by its full name: the
+ * span named "Speed ..." or "Passive Perception ..." and all inside it,
+ * less the spacing a line puts after it, which is the line's and not the
+ * unit's.
+ */
+function quickMarkup(markup: string): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const m of markup.matchAll(/<span role="img" aria-label="((?:Speed|Passive Perception) [^"]+)"/g)) {
+    let depth = 0;
+    let end = m.index;
+    for (const tag of markup.slice(m.index).matchAll(/<\/?span\b/g)) {
+      depth += tag[0] === "<span" ? 1 : -1;
+      end = m.index + tag.index;
+      if (depth === 0) break;
+    }
+    found.set(m[1]!, markup.slice(m.index, end + "</span>".length).replace(/;?margin-inline-end:[^;"]*/, ""));
+  }
+  return found;
+}
+
+describe("the token window's summary and the panel's header", () => {
+  const creatures: [string, Actor, Parameters<typeof vitals>[0]["token"]][] = [
+    ["a monster with one speed", actor({ ac: 15, hp: { cur: 7, max: 7, temp: 0 }, speeds: { walk: 30 }, passivePerception: 9 }), { kind: "monster", hpVisibility: "exact" }],
+    ["a flier that hovers", actor({ ac: 13, hp: { cur: 19, max: 19, temp: 0 }, speeds: { walk: 10, fly: 60, hover: true }, passivePerception: 15 }), { kind: "npc", hpVisibility: "exact" }],
+    ["five speeds", actor({ ac: 18, speeds: { walk: 40, fly: 80, swim: 40, climb: 30, burrow: 20 }, passivePerception: 21 }), { kind: "monster", hpVisibility: "exact" }],
+    ["a character", actor({ ac: 16, hp: { cur: 31, max: 38, temp: 5 }, speeds: { walk: 30 }, passivePerception: 14, sheetUrl: "https://www.dndbeyond.com/characters/1" }), { kind: "pc", hpVisibility: "exact" }],
+  ];
+
+  test("speed and Passive Perception are the same units in both, each named in full", () => {
+    for (const [label, a, t] of creatures) {
+      const bar = vitals({ actor: a, token: t, fullAccess: true, place: "bar" }).map(quickUnit).filter((u) => u !== null);
+      const panel = vitals({ actor: a, token: t, fullAccess: true, place: "panel" }).map(quickUnit).filter((u) => u !== null);
+      assert.deepEqual(bar, panel, label);
+      assert.deepEqual(bar.map((u) => u.key), ["speed", "passivePerception"], label);
+    }
+    const [, flier, t] = creatures[1]!;
+    const units = vitals({ actor: flier, token: t, fullAccess: true, place: "bar" }).map(quickUnit);
+    assert.deepEqual(units, [null, null, { key: "speed", name: "Speed 10 ft, Fly 60 ft (hover)", modes: ["10 ft", "Fly 60 ft (hover)"] }, { key: "passivePerception", name: "Passive Perception 15", value: "15" }], "AC and HP are not quick units");
+  });
+
+  test("the window draws them with the header's markup, the footprints and PP, and keeps HP in its words", () => {
+    for (const [label, a, t] of creatures) {
+      const line = renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: a, token: t, fullAccess: true, place: "bar" }) }));
+      const header = renderToStaticMarkup(createElement(QuickNumbers, { items: vitals({ actor: a, token: t, fullAccess: true, place: "panel" }), actor: a, token: { kind: t.kind, elevation: 0 } }));
+      const ours = quickMarkup(line);
+      assert.equal(ours.size, 2, `${label}: ${[...ours.keys()].join(", ")}`);
+      assert.deepEqual(ours, quickMarkup(header), label);
+      assert.doesNotMatch(line, />Passive Perception</, `${label}: the words stay in the name`);
+      assert.match(line, />HP <\/span><span[^>]*>\d+\/\d+</, `${label}: HP keeps its words`);
+    }
+    const [, goblin, t] = creatures[0]!;
+    const line = renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: goblin, token: t, fullAccess: true, place: "bar" }) }));
+    assert.match(line, /aria-label="Speed 30 ft"[^>]*><svg[^>]*>.*?<\/svg><strong data-unit="speed"[^>]*>30 ft<\/strong>/, "the footprints, then the number");
+    assert.match(line, /aria-label="Passive Perception 9"[^>]*><span[^>]*>PP<\/span><strong>9<\/strong>/);
+  });
+
+  test("More stats on a short bar holds the same units", () => {
+    const [, a, t] = creatures[1]!;
+    const { more } = shortSplit(vitals({ actor: a, token: t, fullAccess: true, place: "bar" }));
+    const opened = renderToStaticMarkup(createElement(VitalsLine, { items: more }));
+    assert.deepEqual([...quickMarkup(opened).keys()], ["Speed 10 ft, Fly 60 ft (hover)", "Passive Perception 15"]);
   });
 });
 
