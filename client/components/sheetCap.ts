@@ -54,6 +54,23 @@ export function sheetMaxHeight(inset: { top: number; bottom: number }, reserveTo
   return `max(${SHEET_MIN_HEIGHT}px, min(${screenHeight(SHEET_SCREEN_SHARE)}, calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${inset.top + inset.bottom + gap}px)))`;
 }
 
+/**
+ * A bottom sheet's widest, in the chrome's own pixels: a medium dialog's
+ * (docs/design-v1-look-pass.md 2.8). A sheet as wide as a tablet held
+ * upright set a field's label 600 px from its input and ran help past 90
+ * characters a line, so a wider screen centers the sheet over the map at
+ * this width. A phone, under 560 px across, never meets it. The sheet on
+ * the right of a phone held sideways has its own width (sideSheetWidth),
+ * and the very short mode keeps the whole screen.
+ */
+export const SHEET_MAX_WIDTH = theme.layout.dialog.md;
+
+/** A sheet's width in the chrome's own pixels, its borders included, for a layout `layoutWidth` across. */
+export function sheetWidth(mode: "bottom" | "side" | "full", layoutWidth: number): number {
+  if (mode === "side") return sideSheetWidth(layoutWidth);
+  return mode === "bottom" ? Math.min(layoutWidth, SHEET_MAX_WIDTH) : layoutWidth;
+}
+
 // ------------------------------------------------------------ sideways sheets (docs/design-v1-layout-hierarchy.md 4.2)
 
 /** A sheet header's one row, and the stacked header of a narrow sheet: 6 px, the 44 px row, a 22 px title line, 6 px. */

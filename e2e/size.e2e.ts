@@ -748,6 +748,37 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     }
   });
 
+  test("lp3-sheet-a. an upright tablet's panels stand in a sheet no wider than a medium dialog, centered over the map, and nothing in them scrolls sideways, at 100% and 130%, while a phone's sheet still spans it (docs/design-v1-look-pass.md 2.8)", async () => {
+    for (const view of [
+      { width: 820, height: 1180, scale: 1 },
+      { width: 820, height: 1180, scale: 1.3 },
+      { width: 390, height: 844, scale: 1 },
+    ]) {
+      const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await page.setViewportSize({ width: view.width, height: view.height });
+      await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      // In the window's pixels: 560 of the sheet's own, or the whole window where that is narrower.
+      const wide = Math.min(view.width, 560 * view.scale);
+      for (const name of ["Initiative", "Characters", "Dice", "Journal"]) {
+        await openPanel(name, true);
+        const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${name}"]`);
+        // The panel loads on first open: its first control in the body says it has laid out, so the sideways check reads a full body.
+        await sheet.locator("[data-pane-body] button").first().waitFor();
+        const box = await sheet.boundingBox();
+        assertInside(box, `${label}, the ${name} sheet`);
+        assert.ok(Math.abs(box!.width - wide) <= 1, `${label}: the ${name} sheet is ${box!.width} px wide, not ${wide}`);
+        assert.ok(Math.abs(box!.x - (view.width - box!.width) / 2) <= 1, `${label}: the ${name} sheet is not centered: ${JSON.stringify(box)}`);
+        const body = await sheet.locator("[data-pane-body]").evaluate((el) => ({ scroll: (el as unknown as { scrollWidth: number }).scrollWidth, client: (el as unknown as { clientWidth: number }).clientWidth }));
+        assert.ok(body.scroll <= body.client, `${label}: the ${name} sheet scrolls sideways, ${body.scroll} px of content in ${body.client}`);
+        await shots.take(page, `size-lp3-${view.width}x${view.height}-${Math.round(view.scale * 100)}-${name.toLowerCase()}`);
+        await closeSheet(true);
+        await sheet.waitFor({ state: "hidden" });
+      }
+    }
+  });
+
   test("3. no page errors along the way", () => {
     assert.deepEqual(consoleWatch.errors.filter((e) => e.startsWith("uncaught")), []);
   });

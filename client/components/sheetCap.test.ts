@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, SHEET_MIN_HEIGHT, sheetCap, sheetMaxHeight, sheetMode, sheetRoom, sideSheetWidth } from "./sheetCap.ts";
+import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, SHEET_MAX_WIDTH, SHEET_MIN_HEIGHT, sheetCap, sheetMaxHeight, sheetMode, sheetRoom, sheetWidth, sideSheetWidth } from "./sheetCap.ts";
 
 /** A 390 x 844 phone at 100%: the 52 px top bar and the 60 px toolbar, no safe areas. */
 const PHONE = { height: 844, safeTop: 0, safeBottom: 0, insetTop: 52, insetBottom: 60 };
@@ -37,6 +37,27 @@ describe("the sheet's height cap", () => {
     assert.match(css, /^max\(120px, min\(calc\(60dvh \/ var\(--rvtt-ui, 1\)\), calc\(100% - env\(safe-area-inset-top, 0px\) - env\(safe-area-inset-bottom, 0px\) - 136px\)\)\)$/);
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 56), / - 168px\)\)\)$/);
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 8), / - 136px\)\)\)$/);
+  });
+});
+
+describe("the sheet's width cap (docs/design-v1-look-pass.md 2.8)", () => {
+  test("a medium dialog's width", () => {
+    assert.equal(SHEET_MAX_WIDTH, 560);
+  });
+
+  test("an upright tablet's sheet stops at 560 px: 820 and 744 across, 820 at 130%, 600, and one past the cap", () => {
+    for (const width of [820, 744, 820 / 1.3, 600, 561]) assert.equal(sheetWidth("bottom", width), 560, `${width} px`);
+  });
+
+  test("a phone's sheet spans its width as before, 560 px and under", () => {
+    for (const width of [560, 430, 390, 360, 320, 320 / 1.3]) assert.equal(sheetWidth("bottom", width), width, `${width} px`);
+  });
+
+  test("no cap on a phone held sideways: the sheet on the right keeps its own width, and the very short mode the whole screen", () => {
+    assert.equal(sheetWidth("side", 844), 340);
+    assert.equal(sheetWidth("side", 932), 340);
+    assert.equal(Math.round(sheetWidth("side", 513)), 308);
+    for (const width of [844, 932, 480 / 1.3]) assert.equal(sheetWidth("full", width), width, `${width} px`);
   });
 });
 

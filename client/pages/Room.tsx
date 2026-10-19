@@ -20,7 +20,7 @@ import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
-import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sideSheetWidth } from "../components/sheetCap.ts";
+import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
@@ -574,7 +574,7 @@ function RoomPage() {
   const filled = sheetModeNow === "bottom" && sheetExpanded;
   const full = (sheetModeNow === "full" || filled) && sheetOpen;
   // Less a 1 px border on each side, which the very short mode does not draw (Sheet.tsx).
-  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : width - safe.left - safe.right) - (sheetModeNow === "full" || filled ? 0 : 2 * theme.line.border);
+  const headerWidth = (sheetModeNow === "side" ? sideWidth - safe.right : sheetWidth(sheetModeNow, width) - safe.left - safe.right) - (sheetModeNow === "full" || filled ? 0 : 2 * theme.line.border);
   const fullMode = sheetModeNow === "full";
   useLayoutEffect(() => {
     const now = dockStore.getState();

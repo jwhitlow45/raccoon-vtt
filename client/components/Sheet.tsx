@@ -5,7 +5,7 @@ import { subpageBack, subpageKey, usePanelScroll, useSubpageFocus, type PanelHea
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
-import { headerStacks, sheetMaxHeight } from "./sheetCap.ts";
+import { headerStacks, SHEET_MAX_WIDTH, sheetMaxHeight } from "./sheetCap.ts";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
 
 /** Where a sheet stands (docs/design-v1-layout-hierarchy.md 4.2): at a phone's foot, on the right of one held sideways, or over the whole screen where that is too short. */
@@ -153,6 +153,13 @@ export function Sheet(props: {
     borderRadius: 0,
     padding: `${theme.safe.top} ${theme.safe.right} ${theme.safe.bottom} ${theme.safe.left}`,
   };
+  /*
+   * At the foot it is no wider than a medium dialog and stands centered
+   * over the map (sheetCap.ts SHEET_MAX_WIDTH), filled or rising too, so a
+   * swipe up never widens it. Its side padding keeps the safe areas where
+   * it spans a phone's whole width.
+   */
+  const bottomWidth: CSSProperties = { maxWidth: SHEET_MAX_WIDTH, margin: "0 auto" };
   const box: CSSProperties =
     mode === "bottom"
       ? {
@@ -163,7 +170,7 @@ export function Sheet(props: {
           bottom: insetBottom,
           width: "auto",
           height: "auto",
-          maxWidth: "none",
+          ...bottomWidth,
           maxHeight: sheetMaxHeight(inset, props.reserveTop),
           borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
           padding: `0 ${theme.safe.right} 0 ${theme.safe.left}`,
@@ -189,7 +196,7 @@ export function Sheet(props: {
         : wholeScreen;
   // Filled, it keeps the upright sheet's top corners, with the room behind showing in them, so they never square off as it reaches the top or round again on the step down.
   const sheetCorners = `${theme.radius.lg}px ${theme.radius.lg}px 0 0`;
-  const fullHeight: CSSProperties = { ...wholeScreen, borderRadius: sheetCorners };
+  const fullHeight: CSSProperties = { ...wholeScreen, ...bottomWidth, borderRadius: sheetCorners };
   // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises.
   const rising: CSSProperties = { ...fullHeight, zIndex: theme.z.overBars, boxShadow: theme.shadow.sheet };
   const shape = swipe.rising ? rising : filled ? fullHeight : box;
