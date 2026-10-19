@@ -207,6 +207,11 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return op.height === 0 ? "clearing heights" : "painting heights";
     case "build.stairs":
       return op.up === null ? "clearing stairs" : "marking stairs";
+    case "build.rough": {
+      const count = op.cells?.length ?? 0;
+      const squares = count === 1 ? "1 square" : `${count} squares`;
+      return op.on ? `marking ${squares} as difficult ground on ${scene(op.sceneId)}` : `clearing difficult ground from ${squares} on ${scene(op.sceneId)}`;
+    }
     case "door.set":
       return doorPhrase(op, before);
     case "encounter.start":

@@ -68,6 +68,12 @@ describe("undo step labels", () => {
     }
   });
 
+  test("difficult ground says how many squares and which scene", () => {
+    const s = state();
+    assert.equal(describeOp({ t: "build.rough", sceneId: "s1", cells: Array.from({ length: 12 }, (_, i) => `${i},0`), on: true }, s), "marking 12 squares as difficult ground on the scene Goblin cave");
+    assert.equal(describeOp({ t: "build.rough", sceneId: "s1", cells: ["1,1"], on: false }, s), "clearing difficult ground from 1 square on the scene Goblin cave");
+  });
+
   test("cut long names, so the toast stays short", () => {
     const label = describeOp({ t: "token.move", tokenId: "long", x: 1, y: 1 }, state());
     assert.ok(label.length < 60, label);

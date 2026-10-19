@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 16;
-export const OP_VERSION = 12;
+export const SNAPSHOT_VERSION = 17;
+export const OP_VERSION = 13;
 
 export type MigrationStep = {
   from: number;
@@ -122,6 +122,11 @@ export const snapshotMigrations: MigrationStep[] = [
     to: 16,
     apply: (state) => (state !== null && typeof state === "object" && !("casts" in state) ? { ...state, casts: {} } : state),
   },
+  // Walking routes (docs/design-v1-movement.md 6.6): a path stop's `via`, `moved`, `cost`, `diag` and `routeSeen`, a
+  // chunk's `rough` marks, an area's `slows` and a kept ruler's `walk` are optional fields whose absence reads as
+  // before, so a v16 room is a v17 room as it is. The number moves so that an older build, whose strict state schema
+  // refuses the fields, refuses a v17 snapshot instead of loading it under old rules.
+  { from: 16, to: 17, apply: (state) => state },
 ];
 
 /**
@@ -390,6 +395,25 @@ export const opMigrations: MigrationStep[] = [
     // since.
     from: 11,
     to: 12,
+    apply: (op) => op,
+  },
+  {
+    // Walking routes (docs/design-v1-movement.md 6.6): `token.move` may
+    // carry a `route`, `build.rough` marks difficult ground, an area may
+    // carry `slows`, a kept ruler `walk`, and a restore `routes`. No older op
+    // holds any of them, so the step is the identity. What the reducer
+    // writes on its own, a path stop's `moved`, `cost`, `diag`, `via` and
+    // `routeSeen` and the sums of a join, it writes only from this version
+    // (walksRoutes), so an older op's token and its restore guard replay
+    // bit for bit as before. So does the area sweep along a leg.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 13, and the shutdown writes version 17 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 12,
+    to: 13,
     apply: (op) => op,
   },
 ];
@@ -667,6 +691,18 @@ export function shapeKeepsOwnNumbers(opVersion: number | undefined): boolean {
  */
 export function marksHadTurn(opVersion: number | undefined): boolean {
   return opVersion === undefined || opVersion >= 8;
+}
+
+/**
+ * Whether a move records what its leg took on the turn's path (`moved`,
+ * `cost`, `diag`), its corners (`via`) and whether players saw it whole
+ * (`routeSeen`), and joins a full path's legs by those sums
+ * (docs/design-v1-movement.md 6.2, 6.6). Ops stored before version 13 wrote
+ * none of them and replay by that rule. Live ops carry no stored version
+ * and take today's rule.
+ */
+export function walksRoutes(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 13);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

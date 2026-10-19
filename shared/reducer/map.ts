@@ -1,4 +1,4 @@
-import { cellIndex, decodeHeights, decodeStairs, encodeHeights, encodeStairs } from "../heightCodec.ts";
+import { cellIndex, decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, encodeStairs } from "../heightCodec.ts";
 import { cellOf, chunkKey, doorChunk, keys, tileKey, wallChunk, wallMidpoint } from "../keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type FogDraft, type FogOp, type FreeWall, type Label, type Light, type Scene, type Stamp, type TerrainId, type Token, type WallFeature } from "../model.ts";
 import { MAX_BUILD_CELLS, MAX_FOG_DRAFT_OPS, type OpOf } from "../protocol.ts";
@@ -285,15 +285,24 @@ export function landOnGround(tx: Tx, standing: readonly Token[]): void {
  * before wave 4 has neither, so a stored erase replays as it did.
  */
 function withoutHeights(chunk: BuildChunk, cells: readonly Cell[]): BuildChunk {
-  if (chunk.heights === undefined && chunk.up === undefined) return chunk;
+  if (chunk.heights === undefined && chunk.up === undefined && chunk.rough === undefined) return chunk;
   const heights = decodeHeights(chunk.heights);
   const marks = decodeStairs(chunk.up);
+  const rough = decodeRough(chunk.rough);
   for (const c of cells) {
     const i = cellIndex(chunk, c.x, c.y);
     heights[i] = 0;
     marks[i] = ".";
+    rough[i] = false;
   }
-  return withHeightFields(chunk, encodeHeights(heights), encodeStairs(marks));
+  // Difficult ground marks go with the rest of a cell (docs/design-v1-movement.md 6.3). No older chunk holds any.
+  return withRough(withHeightFields(chunk, encodeHeights(heights), encodeStairs(marks)), encodeRough(rough));
+}
+
+/** A chunk with its difficult ground marks replaced, the field left out when it holds none. */
+export function withRough(chunk: BuildChunk, rough: string | undefined): BuildChunk {
+  const { rough: _rough, ...rest } = chunk;
+  return rough === undefined ? rest : { ...rest, rough };
 }
 
 /** A chunk with its heights and stair marks replaced, each field left out when it holds nothing. */
@@ -351,7 +360,8 @@ export function writeChunk(tx: Tx, chunk: BuildChunk): void {
     Object.keys(chunk.edges).length === 0 &&
     (chunk.walls?.length ?? 0) === 0 &&
     chunk.heights === undefined &&
-    chunk.up === undefined;
+    chunk.up === undefined &&
+    chunk.rough === undefined;
   if (empty) {
     if (tx.state.buildChunks[chunkKey(chunk.sceneId, chunk.cx, chunk.cy)]) tx.remove(keys.chunk(chunk.sceneId, chunk.cx, chunk.cy));
     return;

@@ -409,6 +409,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "build.lights":
     case "build.height":
     case "build.stairs":
+    case "build.rough":
     case "encounter.start":
     case "encounter.end":
     case "encounter.setValues":

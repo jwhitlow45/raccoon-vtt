@@ -1758,6 +1758,7 @@ function scenesOf(op: Op, before: RoomState, after: RoomState): string[] {
     case "build.lights":
     case "build.height":
     case "build.stairs":
+    case "build.rough":
     case "door.set":
       out.add(op.sceneId);
       break;

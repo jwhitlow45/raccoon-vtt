@@ -432,6 +432,14 @@ export type BuildChunk = {
    * when the chunk has none.
    */
   up?: string;
+  /**
+   * Difficult ground marks (docs/design-v1-movement.md 6.3): one character
+   * per cell, row-major over the chunk's cells, ROUGH_CHARS long, "." none
+   * and "d" difficult ground. A mark paints over whatever is under it,
+   * floor or map art, without changing the cell's terrain. Absent when the
+   * chunk has none.
+   */
+  rough?: string;
 };
 
 /**
@@ -447,6 +455,8 @@ export type StairDirection = Exclude<StairMark, ".">;
 export const HEIGHTS_CHARS = 684;
 /** Characters of a chunk's `up`: one per cell. */
 export const STAIRS_CHARS = CHUNK_CELLS * CHUNK_CELLS;
+/** Characters of a chunk's `rough`: one per cell. */
+export const ROUGH_CHARS = CHUNK_CELLS * CHUNK_CELLS;
 /** The lowest and highest ground a cell can be painted to, in whole feet. */
 export const MIN_HEIGHT_FT = -100;
 export const MAX_HEIGHT_FT = 200;
@@ -762,6 +772,24 @@ export type PathStop = {
    * before it.
    */
   footprint?: { w: number; h: number; squeeze?: true };
+  /**
+   * Display only (docs/design-v1-movement.md 6.2): the corners of the walk
+   * between the stop before and this one, flat x, y in cells, when the leg
+   * bent around walls or terrain. Accounting never reads it.
+   */
+  via?: number[];
+  /** Feet walked on the leg: its length under the room's rule, no extras. Written for every leg since op version 13. */
+  moved?: number;
+  /** Feet the leg took off the creature's speed: difficult terrain, swimming and crawling counted. */
+  cost?: number;
+  /** The 5-10-5 diagonals the leg took, horizontal and vertical, in squares, so the next leg's count runs on. Absent when none. */
+  diag?: [number, number];
+  /**
+   * Players who do not own the token saw every spot of the leg, before and
+   * after the move (7.2). In players' copies, the leg was seen whole: both
+   * its ends seen too, and not joined across an unseen stop.
+   */
+  routeSeen?: true;
 };
 
 export type LifeState = "alive" | "dying" | "stable" | "dead";
@@ -1222,6 +1250,13 @@ export type AreaTemplate = {
    * entering it.
    */
   oncePerTurn?: true;
+  /**
+   * How the area changes movement inside it (docs/design-v1-movement.md
+   * 3.5): difficult terrain, Spirit Guardians' halved Speed, or Plant
+   * Growth's 4 ft per foot. `foes` leaves out the caster and creatures of its
+   * disposition, and without a caster affects everyone. Absent means normal.
+   */
+  slows?: AreaSlows;
   includeOrigin: boolean;
   color: string;
   label?: string;
@@ -1230,6 +1265,8 @@ export type AreaTemplate = {
   ownerId: MemberId;
   visibility: "all" | "dm";
 };
+
+export type AreaSlows = { kind: "difficult" | "halfSpeed" | "quarter"; foes?: true };
 
 /**
  * `ruler` is a ruler kept on the map (features section 4): its stops are the
@@ -1265,6 +1302,8 @@ export type Drawing = {
    * later repaint or fog change leaves it as kept.
    */
   z?: number[];
+  /** Ruler only: it measures the walk between its stops, not straight lines (docs/design-v1-movement.md 3.3). */
+  walk?: true;
 };
 
 export type Encounter = {

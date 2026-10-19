@@ -5,7 +5,7 @@ import { migrateSnapshot } from "#shared/migrate.ts";
 import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
-import { actor, apply, castAsk, castTable, character, companionBlock, customMonster, DM, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { actor, apply, castAsk, castTable, character, companionBlock, customMonster, DM, drawing, imageRef, randomState, rng, room, srdImage, template, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -285,6 +285,30 @@ describe("roomStateSchema", () => {
     assert.equal(withPath([{ ...stop, footprint: { w: 2, h: 2, squeeze: true } }]).ok, true, "squeezed when it was made");
     assert.equal(withPath([{ ...stop, footprint: { w: 2, h: 2, squeeze: false } }]).ok, false);
     assert.equal(parseRoomState(JSON.parse(JSON.stringify(room({ tokens: { t1: token("t1") } })))).ok, true);
+  });
+
+  test("a walked leg's corners and what it took, difficult ground, slowing areas and walking rulers parse, all optional (docs/design-v1-movement.md 6)", () => {
+    const stop = { x: 1, y: 2, elevation: 0, seen: true };
+    const withPath = (stops: object[]) => {
+      const state = room({ tokens: { t1: token("t1", { path: { turn: 4, stops: stops as never } }) } });
+      state.encounter = { rev: 0, round: 1, activeEntryId: "n1", entries: [], turnStart: { entryId: "n1", tokenId: "t1", sceneId: "s1", x: 1, y: 2, elevation: 0, seq: 4 } };
+      return parseRoomState(JSON.parse(JSON.stringify(state)));
+    };
+    assert.equal(withPath([stop, { ...stop, x: 5, via: [3, 2, 3, 4], moved: 25, cost: 35, diag: [1, 0.2], routeSeen: true }]).ok, true);
+    assert.equal(withPath([stop, { ...stop, x: 5, routeSeen: false }]).ok, false);
+    assert.equal(withPath([stop, { ...stop, x: 5, via: Array.from({ length: 128 }, () => 1) }]).ok, false, "a route has at most 63 corners");
+    assert.equal(withPath([stop, { ...stop, x: 5, cost: -5 }]).ok, false);
+    const chunk = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
+    const withChunk = (rough: string) => parseRoomState(JSON.parse(JSON.stringify(room({ buildChunks: { "s1:0,0": { ...chunk, rough } } }))));
+    assert.equal(withChunk("d" + ".".repeat(255)).ok, true);
+    assert.equal(withChunk("x" + ".".repeat(255)).ok, false);
+    assert.equal(withChunk("d").ok, false);
+    const area = (slows: object) => parseRoomState(JSON.parse(JSON.stringify(room({ templates: { a1: template("a1", { slows: slows as never }) } }))));
+    assert.equal(area({ kind: "halfSpeed", foes: true }).ok, true);
+    assert.equal(area({ kind: "quarter" }).ok, true);
+    assert.equal(area({ kind: "slow" }).ok, false);
+    const ruler = parseRoomState(JSON.parse(JSON.stringify(room({ drawings: { d1: drawing("d1", { kind: "ruler", points: [0, 0, 4, 4], walk: true }) } }))));
+    assert.equal(ruler.ok, true);
   });
 
   test("names and short texts follow the protocol's text rules", () => {

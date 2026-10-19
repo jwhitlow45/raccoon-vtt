@@ -1,8 +1,8 @@
-import { cellIndex, decodeHeights, decodeStairs, encodeHeights, encodeStairs } from "../heightCodec.ts";
+import { cellIndex, decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, encodeStairs } from "../heightCodec.ts";
 import { chunkKey } from "../keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type Scene, type StairMark } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
-import { emptyChunk, inBounds, landOnGround, parseCell, standingOn, withHeightFields, writeChunk } from "./map.ts";
+import { emptyChunk, inBounds, landOnGround, parseCell, standingOn, withHeightFields, withRough, writeChunk } from "./map.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /**
@@ -35,7 +35,7 @@ function editChunks(tx: Tx, scene: Scene, cells: readonly Cell[], edit: (chunk: 
     const group = byChunk.get(key)!;
     const chunk = tx.state.buildChunks[key] ?? emptyChunk(scene.id, group.cx, group.cy);
     const next = edit(chunk, group.cells);
-    if (next.heights !== chunk.heights || next.up !== chunk.up) writeChunk(tx, next);
+    if (next.heights !== chunk.heights || next.up !== chunk.up || next.rough !== chunk.rough) writeChunk(tx, next);
   }
 }
 
@@ -68,4 +68,18 @@ export function buildStairs(tx: Tx, op: OpOf<"build.stairs">): void {
     return withHeightFields(chunk, chunk.heights, encodeStairs(marks));
   });
   tx.bumpWalls(scene.id);
+}
+
+/**
+ * Marks cells as difficult ground, or clears the marks (docs/design-v1-movement.md
+ * 6.3). The mark paints over the floor or the map without changing the
+ * cell's terrain, and stops nothing, so no walls version moves.
+ */
+export function buildRough(tx: Tx, op: OpOf<"build.rough">): void {
+  const scene = tx.scene(op.sceneId);
+  editChunks(tx, scene, op.cells.map(parseCell), (chunk, here) => {
+    const marks = decodeRough(chunk.rough);
+    for (const c of here) marks[cellIndex(chunk, c.x, c.y)] = op.on;
+    return withRough(chunk, encodeRough(marks));
+  });
 }

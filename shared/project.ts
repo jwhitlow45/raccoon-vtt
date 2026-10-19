@@ -753,12 +753,14 @@ function playerChunkOf(all: Readonly<Record<string, BuildChunk>>, chunk: BuildCh
     .map((w): FreeWall => (w.f.kind !== "door" ? w : { ...w, f: hiddenDoor(w.f) ? { kind: "wall" } : unlocked(w.f) }))
     .sort(byCoordinates);
   const empty = Object.keys(chunk.cells).length === 0 && Object.keys(edges).length === 0 && walls.length === 0;
-  if (empty && chunk.heights === undefined && chunk.up === undefined) return null;
+  if (empty && chunk.heights === undefined && chunk.up === undefined && chunk.rough === undefined) return null;
   const out: BuildChunk = { sceneId: chunk.sceneId, cx: chunk.cx, cy: chunk.cy, rev: 0, cells: chunk.cells, edges };
   if (walls.length > 0) out.walls = walls;
   // Heights and stair marks are map data, like the floor, and not secret (docs/design-v1-maps-vision.md 4.2).
   if (chunk.heights !== undefined) out.heights = chunk.heights;
   if (chunk.up !== undefined) out.up = chunk.up;
+  // Difficult ground marks are map data too: players see them where they see the map (docs/design-v1-movement.md 3.4).
+  if (chunk.rough !== undefined) out.rough = chunk.rough;
   return out;
 }
 

@@ -657,3 +657,45 @@ describe("a player's ask for saves (docs/design-v1-player-save-spell.md 5.3)", (
     bad(clientOpSchema, { ...outcome, cast: "k1", trap: "tr1" });
   });
 });
+
+describe("walking routes (docs/design-v1-movement.md 6)", () => {
+  test("a move may carry its route, ending where it lands, never with a teleport", () => {
+    const move = { t: "token.move", tokenId: "t1", x: 4, y: 2 };
+    ok(clientOpSchema, { ...move, route: [[2, 0, 0, 0], [4, 2, 1, 0]] });
+    ok(clientOpSchema, { ...move, route: [[4, 2, 7, 1]] });
+    bad(clientOpSchema, { ...move, route: [[2, 0, 0, 0], [4, 3, 0, 0]] });
+    bad(clientOpSchema, { ...move, route: [[4, 2, 8, 0]] });
+    bad(clientOpSchema, { ...move, route: [[4, 2, 1.5, 0]] });
+    bad(clientOpSchema, { ...move, route: [[4, 2, 0, 2]] });
+    bad(clientOpSchema, { ...move, route: [] });
+    bad(clientOpSchema, { ...move, route: [[4, 2, 0, 0]], teleport: "wall" });
+    ok(clientOpSchema, { ...move, route: Array.from({ length: 64 }, (_, i) => (i === 63 ? [4, 2, 0, 0] : [i % 2, 0, 0, 0])) });
+    bad(clientOpSchema, { ...move, route: Array.from({ length: 65 }, (_, i) => (i === 64 ? [4, 2, 0, 0] : [i % 2, 0, 0, 0])) });
+    bad(clientOpSchema, { t: "token.moveMany", moves: [{ tokenId: "t1", x: 1, y: 1, route: [[1, 1, 0, 0]] }] });
+  });
+
+  test("difficult ground is marked or cleared, 2,000 cells an op", () => {
+    ok(clientOpSchema, { t: "build.rough", sceneId: "s1", cells: ["1,2", "3,4"], on: true });
+    ok(clientOpSchema, { t: "build.rough", sceneId: "s1", cells: ["1,2"], on: false });
+    bad(clientOpSchema, { t: "build.rough", sceneId: "s1", cells: [], on: true });
+    bad(clientOpSchema, { t: "build.rough", sceneId: "s1", cells: Array.from({ length: 2_001 }, (_, i) => `${i % 200},${Math.floor(i / 200)}`), on: true });
+  });
+
+  test("an area says how it slows movement, and a patch clears it with null", () => {
+    ok(clientOpSchema, { t: "template.update", templateId: "a1", patch: { slows: { kind: "halfSpeed", foes: true } } });
+    ok(clientOpSchema, { t: "template.update", templateId: "a1", patch: { slows: null } });
+    bad(clientOpSchema, { t: "template.update", templateId: "a1", patch: { slows: { kind: "difficult", foes: false } } });
+    bad(clientOpSchema, { t: "template.update", templateId: "a1", patch: { slows: { kind: "slow" } } });
+  });
+
+  test("drag frames carry the route's cost, rulers and kept rulers may walk, and a redo keeps its routes", () => {
+    ok(clientMessageSchema, { t: "eph", sceneId: "s1", e: { k: "dragMove", tokenId: "t1", x: 1, y: 1, path: [0, 0, 1, 0], ft: 35 } });
+    bad(clientMessageSchema, { t: "eph", sceneId: "s1", e: { k: "dragMove", tokenId: "t1", x: 1, y: 1, ft: -5 } });
+    ok(clientMessageSchema, { t: "eph", sceneId: "s1", e: { k: "ruler", id: "r1", points: [{ x: 0, y: 0 }], walk: true } });
+    bad(clientMessageSchema, { t: "eph", sceneId: "s1", e: { k: "ruler", id: "r1", points: [{ x: 0, y: 0 }], walk: false } });
+    const restore = { t: "sys.restore", entries: [{ key: "token:t1", value: null }], from: "redo", deps: true };
+    ok(serverOnlyOpSchema, { ...restore, routes: { t1: [[[2, 0, 0, 0], [4, 2, 1, 0]], [[5, 2, 0, 0]]] } });
+    bad(serverOnlyOpSchema, { ...restore, routes: { t1: [] } });
+    bad(clientOpSchema, { ...restore, routes: { t1: [[[2, 0, 0, 0]]] } });
+  });
+});

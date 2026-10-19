@@ -38,6 +38,17 @@ export function encodeStairs(marks: readonly StairMark[]): string | undefined {
   return marks.every((m) => m === ".") ? undefined : marks.join("");
 }
 
+/** Each cell's difficult ground mark, true where it has one, all false when the chunk has none (docs/design-v1-movement.md 6.3). */
+export function decodeRough(text: string | undefined): boolean[] {
+  if (text === undefined || text.length !== CELLS) return Array.from({ length: CELLS }, () => false);
+  return Array.from(text, (c) => c === "d");
+}
+
+/** The stored form of the marks, or undefined when no cell has one. */
+export function encodeRough(marks: readonly boolean[]): string | undefined {
+  return marks.some((m) => m) ? marks.map((m) => (m ? "d" : ".")).join("") : undefined;
+}
+
 type Chunks = Readonly<Record<string, BuildChunk>>;
 
 /** One cell's ground in feet: its painted height, 0 where nothing is painted. */

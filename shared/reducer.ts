@@ -44,7 +44,7 @@ import {
   fogReset,
   sysExplore,
 } from "./reducer/map.ts";
-import { buildHeight, buildStairs } from "./reducer/heights.ts";
+import { buildHeight, buildRough, buildStairs } from "./reducer/heights.ts";
 import { sceneDuplicate } from "./reducer/duplicate.ts";
 import { journalCreate, journalDelete, journalReveal, journalUpdate } from "./reducer/journal.ts";
 import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.ts";
@@ -280,6 +280,8 @@ function dispatch(tx: Tx, op: Op): void {
       return buildHeight(tx, op);
     case "build.stairs":
       return buildStairs(tx, op);
+    case "build.rough":
+      return buildRough(tx, op);
     case "door.set":
       return doorSet(tx, op);
     case "encounter.start":

@@ -576,6 +576,7 @@ export function templateUpdate(tx: Tx, op: OpOf<"template.update">): void {
   setOrDelete(next, "footprint", p.footprint);
   setOrDelete(next, "triggers", p.triggers);
   setOrDelete(next, "oncePerTurn", p.oncePerTurn);
+  setOrDelete(next, "slows", p.slows);
   setOrDelete(next, "label", p.label);
   setOrDelete(next, "spell", p.spell);
   if (p.attachedTo !== undefined && p.attachedTo !== null) checkAttachment(tx, template.sceneId, p.attachedTo);
@@ -603,6 +604,8 @@ export function drawingCreate(tx: Tx, op: OpOf<"drawing.create">): void {
       // A stop on a token stands at the token's height, so a ground height there would measure from the wrong place.
       if (input.z.some((feet, i) => feet !== 0 && input.anchors?.[i] != null)) throw invalid("a kept ruler's stop on a token stands on no ground");
     }
+  } else if (input.walk !== undefined) {
+    throw invalid("only a kept ruler walks");
   } else if (input.anchors !== undefined) {
     throw invalid("only a kept ruler stands on tokens");
   } else if (input.z !== undefined) {

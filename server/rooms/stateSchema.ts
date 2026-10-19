@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
@@ -12,10 +12,12 @@ import {
   MAX_OWNERS,
   MAX_PATH_STOPS,
   MAX_RANGE_RINGS,
+  MAX_ROUTE_PIECES,
   MAX_RANGE_RING_FT,
   MAX_RULER_STOPS,
   MAX_TURN_TIMER_SEC,
   actorSchemaForImport,
+  areaSlows,
   areaTriggersSchema,
   moveAnyTokenSchema,
   pcStatsForImport,
@@ -189,6 +191,8 @@ const chunk = z.strictObject({
   // Wave 4: each cell's height and stair mark, in the stored forms of BuildChunk, absent when there are none.
   heights: z.string().regex(new RegExp(`^[A-Za-z0-9+/]{${HEIGHTS_CHARS - 1}}=$`)).optional(),
   up: z.string().regex(new RegExp(`^[.aensw]{${STAIRS_CHARS}}$`)).optional(),
+  // Difficult ground marks (docs/design-v1-movement.md 6.3), absent when there are none.
+  rough: z.string().regex(new RegExp(`^[.d]{${ROUGH_CHARS}}$`)).optional(),
 });
 
 const label = z.strictObject({ id, rev, sceneId: id, x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) });
@@ -223,6 +227,12 @@ const pathStop = z.strictObject({
   seen: z.literal(true).optional(),
   joinedUnseen: z.literal(true).optional(),
   footprint: z.strictObject({ w: z.number().min(0.5).max(20), h: z.number().min(0.5).max(20), squeeze: z.literal(true).optional() }).optional(),
+  // Walking routes (docs/design-v1-movement.md 6.2): the leg's corners, at most a route's 63, and what it took.
+  via: z.array(coord).max(2 * (MAX_ROUTE_PIECES - 1)).optional(),
+  moved: z.number().min(0).max(1_000_000).optional(),
+  cost: z.number().min(0).max(1_000_000).optional(),
+  diag: z.tuple([z.number().min(0).max(1_000_000), z.number().min(0).max(1_000_000)]).optional(),
+  routeSeen: z.literal(true).optional(),
 });
 
 const token = z.strictObject({
@@ -306,6 +316,7 @@ const template = z.strictObject({
     .optional(),
   triggers: areaTriggersSchema.optional(),
   oncePerTurn: z.literal(true).optional(),
+  slows: areaSlows.optional(),
   includeOrigin: z.boolean(),
   color,
   label: shortText.optional(),
@@ -333,6 +344,7 @@ const drawing = z.strictObject({
   visibility,
   anchors: z.array(id.nullable()).max(MAX_RULER_STOPS).optional(),
   z: z.array(z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT)).max(MAX_RULER_STOPS).optional(),
+  walk: z.literal(true).optional(),
 });
 
 const entry = z.strictObject({

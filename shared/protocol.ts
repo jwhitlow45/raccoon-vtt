@@ -59,6 +59,18 @@ export const MAX_RULER_STOPS = 50;
  * turn of many small taps, and its oldest corners merge (rules/path.ts).
  */
 export const MAX_PATH_STOPS = 50;
+/**
+ * A route a move carries (docs/design-v1-movement.md 6.1, section 10): at
+ * most 64 straight pieces and 300 squares of reach in all, each piece's
+ * extra a whole number of feet per foot. A path keeps at most 100 corners
+ * of its legs' routes, past which the oldest legs draw straight.
+ */
+export const MAX_ROUTE_PIECES = 64;
+export const MAX_ROUTE_REACH = 300;
+export const MAX_ROUTE_EXTRA = 7;
+export const MAX_PATH_CORNERS = 100;
+/** Routes an undo step keeps for one token, the moves a merged gesture made in order. */
+export const MAX_KEPT_ROUTES = 32;
 /** Range rings around one token, and the farthest one in feet. */
 export const MAX_RANGE_RINGS = 4;
 export const MAX_RANGE_RING_FT = 1_000;
@@ -831,6 +843,9 @@ const savedEncounterFields = { name, monsters: savedMonsters, party: party.optio
 const savedEncounterInput = z.strictObject({ id, ...savedEncounterFields });
 const savedEncounterPatch = z.strictObject({ name: name.optional(), monsters: savedMonsters.optional(), party: party.nullable().optional() });
 
+/** How an area changes movement inside it (AreaTemplate.slows). */
+export const areaSlows = z.strictObject({ kind: z.enum(["difficult", "halfSpeed", "quarter"]), foes: z.literal(true).optional() });
+
 /** Bounded like a token's custom size, elevation and height, since it is copied from one. */
 const areaFootprint = z.strictObject({
   w: z.number().min(0.5).max(20),
@@ -854,6 +869,7 @@ const templateFields = {
   footprint: areaFootprint.optional(),
   triggers: areaTriggers.optional(),
   oncePerTurn: z.literal(true).optional(),
+  slows: areaSlows.optional(),
   includeOrigin: z.boolean(),
   color,
   label: shortText.optional(),
@@ -880,6 +896,8 @@ const templatePatch = z.strictObject({
   triggers: areaTriggers.nullable().optional(),
   /** Null lets each trigger remind once a turn on its own. */
   oncePerTurn: z.literal(true).nullable().optional(),
+  /** Null makes movement inside normal. */
+  slows: areaSlows.nullable().optional(),
   includeOrigin: z.boolean().optional(),
   color: color.optional(),
   label: shortText.nullable().optional(),
@@ -907,6 +925,8 @@ const drawingInput = z.strictObject({
   anchors: z.array(id.nullable()).max(MAX_RULER_STOPS).optional(),
   /** A kept ruler's ground under each stop, in feet, 0 on a token. The reducer checks it matches the stops and the anchors. */
   z: z.array(groundFeet).max(MAX_RULER_STOPS).optional(),
+  /** A kept ruler that measures the walk (Drawing.walk). */
+  walk: z.literal(true).optional(),
 });
 
 const entryInput = z
@@ -937,6 +957,17 @@ const entryPatch = z.strictObject({
 });
 
 const moveFields = { tokenId: id, x: coord, y: coord, elevation: feet.optional(), rotation: degrees.optional() };
+
+/**
+ * A walk's straight pieces from where the token stands, each piece's end in
+ * order with its public extra feet per foot and whether one of them is the
+ * swimming foot (docs/design-v1-movement.md 6.1). The lattice, the scene and
+ * the reach are permissions' to check, since they need the token.
+ */
+export const routeSchema = z
+  .array(z.tuple([coord, coord, z.number().int().min(0).max(MAX_ROUTE_EXTRA), z.union([z.literal(0), z.literal(1)])]))
+  .min(1)
+  .max(MAX_ROUTE_PIECES);
 
 /** A door named by its grid edge, or a free door by its chunk and id (`door.set`). */
 const doorRef = z.union([z.strictObject({ edge: edgeKey }), z.strictObject({ cx: chunkIndex, cy: chunkIndex, id: freeWallId })]);
@@ -1325,7 +1356,9 @@ export const clientOps = [
    * the move is a "Teleport here" past a wall or a ledge: it skips the wall
    * test, its leg on the turn's path does not count, and the DM's log says so.
    */
-  op("token.move", { ...moveFields, squeeze: z.literal(true).optional(), teleport: z.enum(["wall", "ledge"]).optional() }),
+  op("token.move", { ...moveFields, squeeze: z.literal(true).optional(), teleport: z.enum(["wall", "ledge"]).optional(), route: routeSchema.optional() })
+    .refine((o) => o.route === undefined || o.teleport === undefined, { message: "a teleport walks no route" })
+    .refine((o) => o.route === undefined || (o.route.at(-1)?.[0] === o.x && o.route.at(-1)?.[1] === o.y), { message: "a route ends where the move lands" }),
   op("token.moveMany", { moves: z.array(z.strictObject(moveFields)).min(1).max(MAX_MOVES) }),
   /**
    * Marks the last leg of the active creature's path this turn as not
@@ -1491,6 +1524,8 @@ export const clientOps = [
   op("build.height", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), height: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT) }),
   /** Marks cells as stairs pointing up by the rule or one way, or clears the marks with null (section 4.2). */
   op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable() }),
+  /** Marks cells as difficult ground or clears the marks (docs/design-v1-movement.md 6.3). Terrain is untouched, and no wall moves. */
+  op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean() }),
   /**
    * Opens, closes or locks one door (section 4.1), and for a secret door
    * marks it found or hidden again. A player may only open or close a door
@@ -1676,6 +1711,12 @@ export const serverOnlyOps = [
      * 4.1). Only permissions read it.
      */
     teleport: z.literal(true).optional(),
+    /**
+     * The routes of the step's moves, by token, in the order they were
+     * made, so a player's redo meets the walls along each piece as the
+     * moves did (docs/design-v1-movement.md 7.4). Only permissions read it.
+     */
+    routes: z.record(id, z.array(routeSchema).min(1).max(MAX_KEPT_ROUTES)).optional(),
   }),
   /**
    * What the party saw this batch that the scene's explored layer lacked
@@ -1891,10 +1932,19 @@ const rulerPoint = z
 export const ephEventSchema = z.discriminatedUnion("k", [
   z.strictObject({ k: z.literal("dragStart"), tokenId: id, x: coord, y: coord }),
   // `squeeze` is the dragging client's own preview, for drawing only: the server judges a frame's footprint itself (section 4.1).
-  z.strictObject({ k: z.literal("dragMove"), tokenId: id, x: coord, y: coord, path: z.array(coord).max(200).optional(), squeeze: z.literal(true).optional() }),
+  // `path` is the live route's corners and `ft` its cost (docs/design-v1-movement.md 6.5). The server sends `ft` only to the DM and the token's owners.
+  z.strictObject({
+    k: z.literal("dragMove"),
+    tokenId: id,
+    x: coord,
+    y: coord,
+    path: z.array(coord).max(200).optional(),
+    ft: z.number().min(0).max(100_000).optional(),
+    squeeze: z.literal(true).optional(),
+  }),
   z.strictObject({ k: z.literal("dragEnd"), tokenId: id, x: coord, y: coord, squeeze: z.literal(true).optional() }),
   z.strictObject({ k: z.literal("dragCancel"), tokenId: id }),
-  z.strictObject({ k: z.literal("ruler"), id, points: z.array(rulerPoint).min(1).max(MAX_RULER_STOPS), shared: z.boolean().optional() }),
+  z.strictObject({ k: z.literal("ruler"), id, points: z.array(rulerPoint).min(1).max(MAX_RULER_STOPS), shared: z.boolean().optional(), walk: z.literal(true).optional() }),
   z.strictObject({ k: z.literal("rulerEnd"), id }),
   z.strictObject({
     k: z.literal("aoe"),
