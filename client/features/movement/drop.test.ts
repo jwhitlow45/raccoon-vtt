@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
 import { MAX_MOVES } from "#shared/protocol.ts";
-import { findRoute } from "#shared/rules/walk.ts";
+import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { P1, token } from "#shared/testutil.ts";
-import { dropMode, heldText, holdLabel, landedElevation, moveOpsOf, planGroup, planOne, planWalk, routeTarget, stopText, type Found } from "./drop.ts";
+import { dropMode, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planOne, planWalk, routeTarget, stopText, type Found } from "./drop.ts";
 import { CLOSED, line, raised, thorn, world } from "./testing.ts";
 
 /** A room cut in two by a wall along x = 6, with a closed door at (6, 5) when asked. */
@@ -230,6 +230,27 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     const far = Array.from({ length: 12 }, (_, i): [number, number, number, 0 | 1] => [i % 2 === 0 ? 29 : 0, 2 * i + 1, 0, 0]);
     const long = planWalk(state, t, { x: 29, y: 23 }, "free", { kind: "route", route: { pieces: [...far, [29, 23, 0, 0]] } }, 5);
     assert.equal(long.moves[0]!.route, undefined, "over 300 squares of reach: the drop goes without a route");
+  });
+
+  test("an arrow key steps one square, stops at a wall as before, never goes round it, and counts the square's terrain", () => {
+    const state = divided();
+    const press = (from: { x: number; y: number }, to: { x: number; y: number }, cells: Record<string, "rubble"> = {}) => {
+      const view = { ...state, buildChunks: { ...state.buildChunks } };
+      for (const [key, terrain] of Object.entries(cells)) {
+        const chunk = view.buildChunks["s1:0,0"]!;
+        view.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, [key]: terrain } };
+      }
+      const hero = thorn(from);
+      const found = keyStep(new WalkWorld(publicWorld(view, hero, { role: "player" }).input), to);
+      return { found, plan: planWalk(view, hero, to, "walk", found, 5) };
+    };
+    assert.deepEqual(press({ x: 2, y: 2 }, { x: 3, y: 2 }).found, { kind: "open" });
+    // Into the wall along x = 6: held where it stands, with today's note, never searched.
+    const wall = press({ x: 5, y: 2 }, { x: 6, y: 2 });
+    assert.deepEqual([wall.found, wall.plan.moves, wall.plan.stop?.searched], [{ kind: "open" }, [], undefined]);
+    const rubble = press({ x: 2, y: 2 }, { x: 3, y: 2 }, { "3,2": "rubble" });
+    assert.deepEqual(rubble.found, { kind: "route", route: { pieces: [[3, 2, 1, 0]] } });
+    assert.deepEqual(rubble.plan.moves[0]!.route, [[3, 2, 1, 0]], "the press into rubble goes with its route, so it costs 10 ft");
   });
 
   test("a walk cut inside a 5 ft corridor lands squeezed, at a piece end where the squeeze is a real one", () => {

@@ -5,7 +5,7 @@ import { canSqueeze, footprintSize } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, type RoutePiece } from "#shared/rules/route.ts";
-import type { WalkRoute } from "#shared/rules/walk.ts";
+import { openLeg, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 
 /**
@@ -173,6 +173,22 @@ export function cutRoute(state: BuildState, token: DropToken, pieces: readonly R
     if (squeezeFits(state, token, at)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: true } };
   }
   return null;
+}
+
+/**
+ * What an arrow key's press finds (design 14.17, review MV-O-12): one
+ * square, never searched round a wall. A press the leg test stops, or into
+ * open ground, is the straight drop, stopped at the wall as before. One
+ * into ground that costs extra goes as a one-piece route, so its terrain
+ * counts, as rubble's 10 ft does.
+ */
+export function keyStep(world: WalkWorld, target: Point): Found {
+  const { token, build } = world.input;
+  if (openLeg(world, target)) return { kind: "open" };
+  if (world.tester && legStop(build, token, { x: target.x, y: target.y, elevation: token.elevation }) !== null) return { kind: "open" };
+  const node = world.nodeAt(target);
+  const { extra, swim } = world.extraOf(token.x, token.y, target.x, target.y, node >= 0 ? world.elevationAt(node) : token.elevation, node);
+  return extra > 0 || swim === 1 ? { kind: "route", route: { pieces: [[target.x, target.y, extra, swim]] } } : { kind: "open" };
 }
 
 /** The note when a walk turned too often for one move and landed partway. */

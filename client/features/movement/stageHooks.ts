@@ -1,13 +1,13 @@
 import { useEffect, useMemo } from "react";
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { findRoute } from "#shared/rules/walk.ts";
+import { WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
 import { pathNow } from "../measure/movement.ts";
-import { dropMode, planGroup, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { dropMode, keyStep, planGroup, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
 import { walkPreview } from "./preview.ts";
 import { RouteDrag, type Frames, type RouteAnswer } from "./routeDrag.ts";
 import { sendPlan } from "./send.ts";
@@ -36,7 +36,8 @@ export type DragStops = {
   frameFields(tokenId: string): { path?: number[]; ft?: number };
   /**
    * Where the drop puts the dragged token, and the rest of its group, by
-   * the rules, at once: an arrow key's step, whose route is searched whole.
+   * the rules, at once: an arrow key's step of one square, never searched
+   * round a wall, its own terrain counted (drop.ts keyStep).
    */
   plan(node: DragNode, token: DropToken, group: readonly DropToken[]): DropPlan;
   /**
@@ -224,9 +225,9 @@ export function useDragStops(role: Role): DragStops {
         if (group.length > 1) return planGroup(view, group, at.x - token.x, at.y - token.y, mode);
         const full = view.tokens[token.id];
         if (!full) return planOne(view, token, at, mode);
-        const answer = findRoute(worldFor(view, full, role).input, routeTarget(view, token, at));
-        const searched: Found = answer === null ? { kind: "open" } : answer === "none" ? { kind: "none", capped: false } : { kind: "route", route: answer };
-        return planWalk(view, token, at, mode, searched, view.meta.settings.feetPerCell);
+        // One square, never searched round a wall, its own terrain counted.
+        const step = keyStep(new WalkWorld(worldFor(view, full, role).input), routeTarget(view, token, at));
+        return planWalk(view, token, at, mode, step, view.meta.settings.feetPerCell);
       },
       drop(node, token, group, land) {
         const at = raw?.tokenId === token.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
