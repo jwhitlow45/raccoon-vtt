@@ -9,7 +9,7 @@ import { plainLegCost, routeFeet, routePoints, routeStop, routeWalk, type RouteP
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
-import { dropMode, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, type Found } from "./drop.ts";
+import { cutForWalkers, dropMode, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkersStop, type Found } from "./drop.ts";
 import { dragReading } from "../measure/movement.ts";
 import { frameFields, groupLanding, walkPreview } from "./preview.ts";
 import { CLOSED, line, onTurn, raised, recordedCost, thorn, world } from "./testing.ts";
@@ -555,5 +555,48 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     assert.deepEqual(routeTarget(state, ogre, { x: 9.6, y: 14.2 }), { x: 9.5, y: 14.5, squeeze: true });
     const off = thorn({ x: 1.3, y: 2 });
     assert.deepEqual(routeTarget(state, off, { x: 5.1, y: 2.2 }), { x: 5.3, y: 2, squeeze: false });
+  });
+});
+
+describe("a holder that drags a creature beside it (docs/design-v1-attach.md 4.2)", () => {
+  /** A wall along x = 6 from the top down to y = 5, so Thorn walks past its end at y = 5 and the goblin he drags at y = 4 does not. */
+  const walled = () => world({ edges: line("w", 6, 0, 5) });
+  const holder = () => thorn({ x: 2, y: 5 });
+  const goblin = token("goblin", { x: 2, y: 4, attached: { to: "thorn", kind: "drag" } });
+
+  test("the walk stops at the last spot where the holder and each creature it drags may stand", () => {
+    const state = walled();
+    const points = [
+      { x: 2, y: 5, elevation: 0 },
+      { x: 9, y: 5, elevation: 0 },
+    ];
+    assert.deepEqual(walkersStop(state, holder(), points, [goblin]), { at: { x: 5, y: 5, elevation: 0 }, pieces: 0, blocker: "wall" });
+    assert.equal(walkersStop(state, holder(), points, []), null);
+    assert.equal(walkersStop(state, holder(), [points[0]!, { x: 5, y: 5, elevation: 0 }], [goblin]), null);
+  });
+
+  test("a player's drop is cut there with the note a wall gives, and the DM's goes on", () => {
+    const state = walled();
+    const plan = { moves: [{ tokenId: "thorn", x: 9, y: 5 }], stop: null, held: [] };
+    const cut = cutForWalkers(state, holder(), plan, [goblin], "walk");
+    assert.deepEqual(cut.moves, [{ tokenId: "thorn", x: 5, y: 5 }]);
+    assert.deepEqual(cut.stop?.at, { x: 5, y: 5 });
+    assert.equal(cut.stop?.blocker, "wall");
+    assert.equal(cutForWalkers(state, holder(), plan, [goblin], "free"), plan);
+    // A route keeps its pieces up to the cut, the last one ending there with the extra it had.
+    const routed = { moves: [{ tokenId: "thorn", x: 9, y: 5, route: [[9, 5, 1, 0] as [number, number, number, 0 | 1]] }], stop: null, held: [] };
+    assert.deepEqual(cutForWalkers(state, holder(), routed, [goblin], "walk").moves[0]?.route, [[5, 5, 1, 0]]);
+    // Stopped right where a piece starts, the route ends with the piece before it.
+    const turning = { moves: [{ tokenId: "thorn", x: 9, y: 4, route: [[5, 5, 1, 0], [5, 4, 1, 0], [9, 4, 1, 0]] as [number, number, number, 0 | 1][] }], stop: null, held: [] };
+    const bent = cutForWalkers(state, holder(), turning, [goblin], "walk").moves[0];
+    assert.deepEqual(bent?.route, [[5, 5, 1, 0], [5, 4, 1, 0]]);
+    assert.deepEqual([bent?.x, bent?.y], [5, 4]);
+  });
+
+  test("in a group drag, a holder whose creature could not follow stays where it was", () => {
+    const state = walled();
+    const plan = planGroup(state, [holder(), token("other", { x: 2, y: 8 })], 7, 0, "walk", (t) => (t.id === "thorn" ? [goblin] : []));
+    assert.deepEqual(plan.moves.map((m) => m.tokenId), ["other"]);
+    assert.deepEqual(plan.held.map((h) => h.token.id), ["thorn"]);
   });
 });

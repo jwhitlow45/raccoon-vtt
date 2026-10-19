@@ -1,11 +1,12 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { footprintSize, tokenHeightFt } from "#shared/rules/footprint.ts";
-import type { RoutePiece, RoutePoint } from "#shared/rules/route.ts";
+import { routePoints, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
-import { landedElevation, routeLanding, samePose, type Point, type Pose, type Role } from "./drop.ts";
+import { towingWord } from "../attach/walk.ts";
+import { cutPieces, landedElevation, routeLanding, samePose, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -55,18 +56,28 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
  * straight. So reading it walks at most 300 squares. With no route, a walk
  * held at the wall (`held`) is drawn and read to the wall. A straight walk
  * reads what it walks over as the drop counts it (drop.ts planWalk): by
- * `straight`, its own route to where it lands, once that is checked.
+ * `straight`, its own route to where it lands, once that is checked. A
+ * holder's walk held where a creature it drags would meet a wall
+ * (`walkers`, docs/design-v1-attach.md 4.2) is drawn and read to there.
  */
-export function walkPreview(input: { view: RoomState; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: { view: RoomState; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
   const fpc = view.meta.settings.feetPerCell;
   const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;
-  const to = walk ? walk.at : (input.held ?? input.target);
+  let to: Point & { squeeze?: boolean } = walk ? walk.at : (input.held ?? input.target);
   const own = !walk && input.held && input.straight && samePose(input.straight.to, input.held) ? routeLanding(view, token, input.held, input.straight.pieces, fpc) : null;
   const along = walk ?? (own && !own.cut ? own : null);
-  const pieces = along?.pieces;
-  const points = along
-    ? along.points
+  let pieces = along?.pieces;
+  const walkers = input.walkers ?? null;
+  if (walkers && along && pieces) {
+    const kept = cutPieces(along.points, pieces, walkers);
+    pieces = kept.length > 0 ? kept : undefined;
+  }
+  if (walkers) to = walkers.at;
+  const points = pieces
+    ? walkers
+      ? routePoints(view.buildChunks, token, pieces, landedElevation(view.buildChunks, token, to))
+      : along!.points
     : [
         { x: token.x, y: token.y, elevation: token.elevation },
         { x: to.x, y: to.y, elevation: landedElevation(view.buildChunks, token, to) },
@@ -93,6 +104,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
               return area ? areaTitle(area) : null;
             },
             prone: world.input.prone,
+            ...(world.input.drag === 1 ? { towing: towingWord(view, token.id, role) } : {}),
           },
         }
       : {}),

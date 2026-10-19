@@ -118,6 +118,7 @@ export type FixtureOptions = {
   rolls?: boolean;
   party?: boolean;
   diceui?: boolean;
+  attach?: "near" | "riding";
 };
 
 export function createFixtureState(options: FixtureOptions): RoomState {
@@ -345,6 +346,7 @@ export function createFixtureState(options: FixtureOptions): RoomState {
   if (options.rolls || options.diceui) srdGoblins(state);
   if (options.party) bigParty(state);
   if (options.diceui) diceUiStress(state);
+  if (options.attach) attachedTokens(state, options.attach === "riding");
   return state;
 }
 
@@ -604,6 +606,36 @@ function textStress(state: RoomState): void {
   state.labels = {
     "lb-long": { id: "lb-long", rev: 1, sceneId: FIXTURE_IDS.cave, x: 8, y: 1.5, text: "The Drowned Chapel of Saint Ostrava (flooded, difficult terrain)", size: 0.6 },
   };
+}
+
+/**
+ * Tokens to attach (`attach=1`, docs/design-v1-attach.md): beside Thorn a
+ * warhorse his player owns, a torch, a Grappled kobold and a cart, and by
+ * Goblin 1 a lantern it carries and a prisoner it drags, so a group, its
+ * draw order and its tether show at once. `riding` puts Thorn on the
+ * warhorse already, controlled, with a saddlebag on it and a pack mule
+ * it drags, so his player's copy holds a group to drag.
+ */
+function attachedTokens(state: RoomState, riding: boolean): void {
+  const goblin = Object.values(state.tokens).find((t) => t.name === "Goblin" && t.number === 1)!;
+  const add = (t: Token, id: string) => {
+    t.id = id;
+    state.tokens[id] = t;
+  };
+  add(token({ name: "Warhorse", size: "large", x: 6, y: 5, disposition: "ally", kind: "npc", ownerIds: [FIXTURE_IDS.thorn], hpVisibility: "label", actor: { inline: actor([19, 19], [], { speeds: { walk: 60 } }) } }), "t-attach-horse");
+  add(token({ name: "Torch", size: "tiny", kind: "object", layer: "object", x: 4.5, y: 6, disposition: "neutral", hpVisibility: "hidden", actor: { inline: actor([1, 1]) } }), "t-attach-torch");
+  add(token({ name: "Kobold", size: "small", x: 4, y: 4, hpVisibility: "label", actor: { inline: actor([5, 5], [{ key: "grappled" }]) } }), "t-attach-kobold");
+  add(token({ name: "Cart", size: "large", kind: "object", layer: "object", x: 3, y: 7, disposition: "neutral", hpVisibility: "hidden", actor: { inline: actor([20, 20]) } }), "t-attach-cart");
+  add(token({ name: "Lantern", size: "tiny", kind: "object", layer: "object", x: goblin.x + 0.5, y: goblin.y + 0.5, disposition: "neutral", hpVisibility: "hidden", attached: { to: goblin.id, kind: "carry" }, actor: { inline: actor([1, 1]) } }), "t-attach-lantern");
+  add(token({ name: "Prisoner", x: goblin.x + 1, y: goblin.y, disposition: "neutral", kind: "npc", hpVisibility: "label", attached: { to: goblin.id, kind: "drag" }, actor: { inline: actor([4, 4], [{ key: "grappled" }]) } }), "t-attach-prisoner");
+  if (!riding) return;
+  // Walls stop players' moves here, so a holder's walk stops where a creature it drags would meet a wall (`walls=1` adds walls).
+  const scene = state.scenes[FIXTURE_IDS.cave]!;
+  state.scenes[scene.id] = { ...scene, blockMovement: true };
+  const thorn = Object.values(state.tokens).find((t) => t.name === "Thorn")!;
+  state.tokens[thorn.id] = { ...thorn, x: 6, y: 5, attached: { to: "t-attach-horse", kind: "ride", steer: true } };
+  add(token({ name: "Saddlebag", size: "tiny", kind: "object", layer: "object", x: 7.5, y: 6.5, disposition: "neutral", ownerIds: [FIXTURE_IDS.thorn], hpVisibility: "hidden", attached: { to: "t-attach-horse", kind: "carry" }, actor: { inline: actor([1, 1]) } }), "t-attach-bag");
+  add(token({ name: "Pack mule", x: 6, y: 7, disposition: "ally", kind: "npc", ownerIds: [FIXTURE_IDS.thorn], hpVisibility: "label", attached: { to: "t-attach-horse", kind: "drag" }, actor: { inline: actor([11, 11]) } }), "t-attach-mule");
 }
 
 /**

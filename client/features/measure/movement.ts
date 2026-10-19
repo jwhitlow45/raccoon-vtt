@@ -236,6 +236,8 @@ export type DragWalk = {
   halved(at: RoutePoint): string | null;
   /** Crawling: the creature is Prone as players see it. */
   prone: boolean;
+  /** The holder's extra foot for a creature it drags or carries (docs/design-v1-attach.md 7.3), named by how it moves it. */
+  towing?: "dragging" | "carrying";
 };
 
 /** What a drag reads: the leg's cost, what in it cost extra, the speed its total falls in, and the Half Speed area it would end in. */
@@ -296,7 +298,7 @@ export function dragReading(input: {
   const leg = legCost(points);
   const legFt = input.costFt ?? leg.cost;
   const out: DragRead = { dragFt: legFt };
-  const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed) : [];
+  const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing) : [];
   if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
   if (fighting && !active) return out;
   const before = trail?.usedFt ?? 0;
@@ -348,20 +350,24 @@ function lastHalvedSpot(points: readonly RoutePoint[], token: MovingToken, walk:
 /**
  * What cost extra along a route, in the order the label names it: the
  * ground's difficult terrain, Plant Growth's overgrowth (4 ft per foot),
- * swimming without a Swim Speed, and crawling. A piece's extra holds the
- * ground's 1 or 3, and 1 for swimming or crawling, never both.
+ * swimming without a Swim Speed, crawling, and a creature the walker drags
+ * or carries (`towing`, docs/design-v1-attach.md 7.3). A piece's extra
+ * holds the ground's 1 or 3, 1 for swimming or crawling, never both, and 1
+ * more on every piece while it tows.
  */
-export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean): string[] {
+export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean, towing?: "dragging" | "carrying"): string[] {
   const found = new Set<string>();
+  const tow = towing ? 1 : 0;
   for (const [, , extra, swim] of pieces) {
     const moving = swim === 1 || prone ? 1 : 0;
-    const ground = extra - moving;
+    const ground = extra - moving - tow;
     if (ground === 1) found.add("difficult terrain");
     else if (ground >= 3) found.add("overgrowth");
     if (swim === 1 && !swimSpeed) found.add("swimming");
-    else if (swim === 0 && prone && extra >= 1) found.add("crawling");
+    else if (swim === 0 && prone && extra - tow >= 1) found.add("crawling");
+    if (towing) found.add(towing);
   }
-  return ["difficult terrain", "overgrowth", "swimming", "crawling"].filter((w) => found.has(w));
+  return ["difficult terrain", "overgrowth", "swimming", "crawling", "dragging", "carrying"].filter((w) => found.has(w));
 }
 
 /** The label's lines (docs/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, and the Half Speed area it would end in. */

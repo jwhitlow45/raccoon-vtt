@@ -3,7 +3,8 @@ import { popoverSlot } from "../components/popoverRules.ts";
 import type Konva from "konva";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Layer, Stage } from "react-konva";
-import type { RoomState, Scene, Token } from "#shared/model.ts";
+import { DEFAULT_SETTINGS, type RoomState, type Scene, type Token } from "#shared/model.ts";
+import { holderOf as linkedHolder, linkHolds } from "#shared/rules/attach.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import { activeTool, type ToolContext, type ToolDef, type ToolPointer } from "../features/tools.ts";
 import { LabelPaneHost } from "../features/builder/LabelPaneHost.tsx";
@@ -52,6 +53,8 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
+import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, reseatText } from "../features/attach/groups.ts";
+import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } from "../features/attach/rights.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
 import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
@@ -84,6 +87,29 @@ const APPLE = isAppleDevice();
 const BOARD_LAYERS = layersOf("board");
 const OVERLAY_LAYERS = layersOf("overlay");
 const UNDER_DECOR_LAYERS = layersOf("underDecor");
+
+/** What a drag that starts on a token moves (docs/design-v1-attach.md 4.2). */
+type DragParts = {
+  /** The token whose move goes out and whose walk is searched: the pressed one, or the mount a rider's press moves. */
+  lead: ViewToken;
+  /** The tokens the drop names, the lead first. Empty when it moves nothing. */
+  named: ViewToken[];
+  /** The named token each moving token goes with, for where it lands. */
+  rootOf: Map<string, string>;
+  /** Why the drag moves nothing, said as it starts. */
+  refusal: string | null;
+  /** A player may move the lead only to a new seat on its holder, or within reach of it. */
+  reseatOnly: boolean;
+};
+
+/** The lead's place as a node, while the finger drags another token of its group: the same offset either way. */
+function offsetNode(node: Konva.Node, pressed: ViewToken, lead: ViewToken): { x(): number; y(): number; position(p: Point): void } {
+  return {
+    x: () => node.x() - pressed.x + lead.x,
+    y: () => node.y() - pressed.y + lead.y,
+    position: (p) => node.position({ x: p.x - lead.x + pressed.x, y: p.y - lead.y + pressed.y }),
+  };
+}
 
 function sceneRect(scene: Scene) {
   return { x: 0, y: 0, width: scene.bounds.w, height: scene.bounds.h };
@@ -453,7 +479,9 @@ export function MapStage(props: {
   const tokens = useMemo(() => {
     const list = Object.values(allTokens).filter((t): t is ViewToken => !!t && t.sceneId === scene.id);
     // Objects (doors, chests, markers) under creatures. Creation order otherwise.
-    return list.sort((a, b) => (a.layer === b.layer ? (a.id < b.id ? -1 : 1) : a.layer === "object" ? -1 : 1));
+    list.sort((a, b) => (a.layer === b.layer ? (a.id < b.id ? -1 : 1) : a.layer === "object" ? -1 : 1));
+    // A carried token draws right after its holder, whatever its layer, so a torch shows on the hand holding it (docs/design-v1-attach.md 4.4).
+    return drawOrder(list, allTokens);
   }, [allTokens, scene.id]);
   const tokensById = useMemo(() => new Map(tokens.map((t) => [t.id, t])), [tokens]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -490,9 +518,30 @@ export function MapStage(props: {
   // The lock shows where it is the only thing in the way of a drag.
   const lockShown = useCallback((t: ViewToken) => t.locked && (role === "dm" || ownsToken(t) || movesAny(t)), [role, ownsToken, movesAny]);
   const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch });
+  /*
+   * The attach rules' parts of a drag (docs/design-v1-attach.md 4.2 and 6),
+   * from this copy: a press on a rider of a controlled mount, or on one
+   * that covers its holder, moves the mount, and starts whenever the viewer
+   * could move either, so a rider's player hears why the mount stays. A
+   * player also directs a mount their creature rides controlled, and gives
+   * a token carried by one they may move a new seat.
+   */
+  const rightsView = useMemo(() => ({ tokens: allTokens, characters: characters ?? {}, meta: { settings: settings ?? {} }, encounter }) as unknown as RightsView, [allTokens, characters, settings, encounter]);
+  const attachViewer = useMemo<AttachViewer>(() => ({ role, memberId: youId }), [role, youId]);
+  const plainDrag = useCallback((t: ViewToken) => canDragToken({ token: t, role, memberId: youId, characters, settings }), [role, youId, characters, settings]);
+  /** Whether a drag may move this token as the lead, the drag's own token or the mount a rider's drag moves. */
+  const movesLead = useCallback(
+    (t: ViewToken) => (role === "dm" ? !t.locked : plainDrag(t) || dragsToken(rightsView, attachViewer, t)),
+    [role, plainDrag, rightsView, attachViewer],
+  );
   const canDrag = useCallback(
-    (t: ViewToken) => canDragToken({ token: t, role, memberId: youId, characters, settings }),
-    [role, youId, characters, settings],
+    (t: ViewToken) => {
+      if (plainDrag(t)) return true;
+      const lead = dragLead(allTokens, t);
+      if (lead.id !== t.id) return role === "dm" || movesToken(rightsView, attachViewer, t) || movesLead(lead as ViewToken);
+      return role === "player" && (dragsToken(rightsView, attachViewer, t) || reseats(rightsView, attachViewer, t));
+    },
+    [plainDrag, allTokens, role, rightsView, attachViewer, movesLead],
   );
   /** Why a press on a token cannot drag it (dragNotes.ts), or null when it can. */
   const dragRefusal = useCallback(
@@ -508,6 +557,11 @@ export function MapStage(props: {
   multiRef.current = multi;
   const canDragRef = useRef(canDrag);
   canDragRef.current = canDrag;
+  const movesLeadRef = useRef(movesLead);
+  movesLeadRef.current = movesLead;
+  /** The links of this copy and the rules they are judged by, for the drag callbacks. */
+  const linksRef = useRef({ allTokens, settings, role });
+  linksRef.current = { allTokens, settings, role };
   const dragRefusalRef = useRef(dragRefusal);
   dragRefusalRef.current = dragRefusal;
   /** What a drop reads to tell a player their token went into the fog or out of the party's sight. */
@@ -521,6 +575,31 @@ export function MapStage(props: {
   const dragStops = useDragStops(role);
   const dragStopsRef = useRef(dragStops);
   dragStopsRef.current = dragStops;
+  /**
+   * What a drag or an arrow key that starts on `pressed` moves
+   * (docs/design-v1-attach.md 4.2): the mount a rider's press moves, or
+   * why it moves nothing, then the rest of the selection, less what rides
+   * on another of them, and whether a player may only give it a new seat.
+   */
+  const dragPartsRef = useRef<(pressed: ViewToken, selectedIds: readonly string[]) => DragParts>(null!);
+  dragPartsRef.current = (pressed, selectedIds) => {
+    const links = linksRef.current;
+    const byId = tokensByIdRef.current;
+    const lead = byId.get(dragLead(links.allTokens, pressed).id) ?? pressed;
+    const rootOf = new Map<string, string>([[pressed.id, lead.id]]);
+    if (lead.id !== pressed.id && !movesLeadRef.current(lead)) {
+      const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? carriesText(lead, pressed);
+      return { lead, named: [], rootOf, refusal, reseatOnly: false };
+    }
+    const holderIn = (t: ViewToken) => {
+      const holder = linkedHolder(links.allTokens, t);
+      return holder ? byId.get(holder.id) : undefined;
+    };
+    const followers = groupFollowers(selectedIds, pressed.id, byId, canDragRef.current, holderIn, lead.id === pressed.id ? [] : [lead.id]);
+    const named = dragNamed(links.allTokens, lead, followers, byId, movesLeadRef.current);
+    const reseatOnly = links.role === "player" && lead.id === pressed.id && lead.attached !== undefined && !movesLeadRef.current(lead);
+    return { lead, named, rootOf, refusal: null, reseatOnly };
+  };
 
   // ------------------------------------------------------------ tools
 
@@ -572,9 +651,9 @@ export function MapStage(props: {
     node: Konva.Node;
     tokenId: string;
     cancelled: boolean;
-    /** The rest of the selection, moving with this token (lib/group.ts). */
+    /** Everything else that moves with this token, by the same offset: the rest of the selection (lib/group.ts) and what each carries. */
     followers: { token: ViewToken; node: Konva.Node }[];
-  } | null>(null);
+  } & DragParts | null>(null);
   /**
    * A box being dragged over the map to select the tokens under it, in
    * screen pixels. With Multi-select on and no key that adds (`add`), a
@@ -668,8 +747,14 @@ export function MapStage(props: {
         if (why) uiRef.current.notify(why);
         return;
       }
-      const node = { x: () => lead.x + dx, y: () => lead.y + dy, position: () => {} };
-      dragStopsRef.current.press(node, lead, movable);
+      const parts = dragPartsRef.current(lead, local.selectedIds);
+      if (parts.refusal) {
+        uiRef.current.notify(parts.refusal);
+        return;
+      }
+      const moved = parts.lead;
+      const node = { x: () => moved.x + dx, y: () => moved.y + dy, position: () => {} };
+      dragStopsRef.current.press(node, moved, parts.named);
     };
     slot.zoom = zoomBy;
     slot.nudge = nudge;
@@ -984,13 +1069,46 @@ export function MapStage(props: {
   );
 
   const interaction = useMemo<TokenInteraction>(() => {
-    /** Puts the dropped tokens where the plan lands them, and sends the moves and the drag's end. */
-    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], group: readonly ViewToken[], plan: DropPlan) => {
+    /** Puts every token of a drop back where it stood, and tells the room the drag ended without a move. */
+    const putBack = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[]) => {
+      node.position({ x: token.x, y: token.y });
+      actions.sendEph({ k: "dragCancel", tokenId: token.id });
+      for (const f of followers) {
+        f.node.position({ x: f.token.x, y: f.token.y });
+        f.node.getLayer()?.batchDraw();
+        actions.sendEph({ k: "dragCancel", tokenId: f.token.id });
+      }
+      clearSpots();
+    };
+    /** Puts the dropped tokens where the plan lands them, each carried one by its named holder's offset, and sends the moves and the drag's end. */
+    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], parts: DragParts, plan: DropPlan) => {
+      const group = parts.named;
       const moves = plan.moves;
       const landed = new Map(moves.map((m) => [m.tokenId, m]));
+      // A player who may move a carried token only to a new seat keeps it with its holder (docs/design-v1-attach.md 6).
+      const links = linksRef.current;
+      const reseat = parts.reseatOnly ? linkedHolder(links.allTokens, parts.lead) : undefined;
+      const lands = landed.get(parts.lead.id);
+      if (reseat && parts.lead.attached && lands) {
+        const at = { ...parts.lead, x: lands.x, y: lands.y, elevation: lands.elevation ?? parts.lead.elevation };
+        const holder = reseat as Token;
+        if (!linkHolds(links.settings ?? DEFAULT_SETTINGS, parts.lead.attached.kind, at, holder)) {
+          putBack(node, token, followers);
+          uiRef.current.notify(reseatText(parts.lead, holder));
+          return;
+        }
+      }
+      const tokenOf = (id: string) => (id === token.id ? token : (followers.find((f) => f.token.id === id)?.token ?? tokensByIdRef.current.get(id)));
+      /** Where a moving token lands: its own move, or its named holder's offset, or nowhere when that did not move. */
+      const landing = (t: ViewToken): { x: number; y: number } | null => {
+        const rootId = parts.rootOf.get(t.id) ?? t.id;
+        const m = landed.get(rootId);
+        const root = tokenOf(rootId);
+        if (!m || !root) return null;
+        return rootId === t.id ? { x: m.x, y: m.y } : { x: t.x + m.x - root.x, y: t.y + m.y - root.y };
+      };
       for (const [n, t] of [[node, token] as const, ...followers.map((f) => [f.node, f.token] as const)]) {
-        const m = landed.get(t.id);
-        n.position(m ? { x: m.x, y: m.y } : { x: t.x, y: t.y });
+        n.position(landing(t) ?? { x: t.x, y: t.y });
         if (n !== node) n.getLayer()?.batchDraw();
       }
       // A player who drops a creature into the fog or out of the party's sight loses it, which reads as a bug unless the map says so.
@@ -1009,9 +1127,10 @@ export function MapStage(props: {
       watch?.sent(sent.length);
       const note = intoFogText(swallowed.map((t) => displayName(t)));
       if (note) uiRef.current.notify(note);
-      for (const t of group) {
+      for (const t of [token, ...followers.map((f) => f.token)]) {
         const m = landed.get(t.id);
-        actions.sendEph(m ? { k: "dragEnd", tokenId: t.id, x: m.x, y: m.y, ...(m.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId: t.id });
+        const at = landing(t);
+        actions.sendEph(at ? { k: "dragEnd", tokenId: t.id, x: at.x, y: at.y, ...(m?.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId: t.id });
       }
       clearSpots();
     };
@@ -1030,13 +1149,25 @@ export function MapStage(props: {
         longPressRef.current.cancel();
         // A hover plate would travel with the drag and cover the squares it crosses.
         setHoveredId(null);
-        // Dragging a selected token moves the rest of the selection with it, those this member may move.
+        // Dragging a selected token moves the rest of the selection with it, those this member may move, and everything each of them carries.
         const stage = stageRef.current;
-        const followers = groupFollowers(selectedIdsRef.current, token.id, tokensByIdRef.current, canDragRef.current).flatMap((t) => {
-          const n = stage?.findOne(`#${t.id}`);
-          return n ? [{ token: t, node: n }] : [];
-        });
-        dragRef.current = { node, tokenId: token.id, cancelled: false, followers };
+        const parts = dragPartsRef.current(token, selectedIdsRef.current);
+        const named = new Set(parts.named.map((t) => t.id));
+        const followers: { token: ViewToken; node: Konva.Node }[] = [];
+        for (const t of parts.named) {
+          for (const id of [t.id, ...groupMembers(linksRef.current.allTokens, t.id, named)]) {
+            if (id !== t.id) parts.rootOf.set(id, t.id);
+            const member = id === token.id ? undefined : tokensByIdRef.current.get(id);
+            const n = member ? stage?.findOne(`#${id}`) : undefined;
+            if (member && n) followers.push({ token: member, node: n });
+          }
+        }
+        dragRef.current = { node, tokenId: token.id, cancelled: false, followers, ...parts };
+        if (parts.refusal) {
+          uiRef.current.notify(parts.refusal);
+          stopTokenDrag();
+          return;
+        }
         // Space and the left button drag the map, not the token under it. A press that closes a popover moves nothing.
         if (gestureRef.current.pointers.size >= 2 || mousePanRef.current || popovers.suppressesTool()) {
           stopTokenDrag();
@@ -1044,17 +1175,20 @@ export function MapStage(props: {
         }
         setDraggingId(token.id);
         setCarried(new Set([token.id, ...followers.map((f) => f.token.id)]));
-        dragStopsRef.current.start(token.id);
+        dragStopsRef.current.start(parts.lead.id);
         actions.sendEph({ k: "dragStart", tokenId: token.id, x: token.x, y: token.y });
         for (const f of followers) actions.sendEph({ k: "dragStart", tokenId: f.token.id, x: f.token.x, y: f.token.y });
       },
       dragMove(node, token) {
         const drag = dragRef.current;
         if (!drag || drag.cancelled) return;
-        // A lone token's preview stays at a wall or a ledge that stops its walk, so its frames do too.
-        if (drag.followers.length === 0) dragStopsRef.current.frame(node, token);
-        // A lone drag's frames carry its route's corners and its cost (docs/design-v1-movement.md 6.5).
-        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...(drag.followers.length === 0 ? dragStopsRef.current.frameFields(token.id) : {}) });
+        const lone = drag.named.length === 1;
+        // A lone lead's preview stays at a wall or a ledge that stops its walk, or the walk of a creature it drags, so its frames do too.
+        const leadNode = drag.lead.id === token.id ? node : offsetNode(node, token, drag.lead);
+        if (lone) dragStopsRef.current.frame(leadNode, drag.lead);
+        // A lone lead's frames carry its route's corners and its cost (docs/design-v1-movement.md 6.5).
+        const leadFields = lone ? dragStopsRef.current.frameFields(drag.lead.id) : {};
+        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...(token.id === drag.lead.id ? leadFields : {}) });
         setSpot(token, node.x(), node.y());
         if (drag.followers.length === 0) return;
         const dx = node.x() - token.x;
@@ -1066,7 +1200,7 @@ export function MapStage(props: {
           f.node.position({ x, y });
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
-          actions.sendEph({ k: "dragMove", tokenId: f.token.id, x, y });
+          actions.sendEph({ k: "dragMove", tokenId: f.token.id, x, y, ...(f.token.id === drag.lead.id ? leadFields : {}) });
           setSpot(f.token, x, y);
         }
         for (const layer of layers) layer.batchDraw();
@@ -1079,19 +1213,12 @@ export function MapStage(props: {
         const followers = drag?.followers ?? [];
         if (!drag || drag.cancelled) {
           dragStopsRef.current.end();
-          node.position({ x: token.x, y: token.y });
-          actions.sendEph({ k: "dragCancel", tokenId: token.id });
-          for (const f of followers) {
-            f.node.position({ x: f.token.x, y: f.token.y });
-            f.node.getLayer()?.batchDraw();
-            actions.sendEph({ k: "dragCancel", tokenId: f.token.id });
-          }
-          clearSpots();
+          putBack(node, token, followers);
           return;
         }
-        const group = [token, ...followers.map((f) => f.token)];
+        const leadNode = drag.lead.id === token.id ? node : offsetNode(node, token, drag.lead);
         // A drop made while its route is searched waits at the ghost and lands once it is found (docs/design-v1-movement.md 3.1).
-        dragStopsRef.current.drop(node, token, group, (plan) => landDrop(node, token, followers, group, plan));
+        dragStopsRef.current.drop(leadNode, drag.lead, drag.named, (plan) => landDrop(node, token, followers, drag, plan));
       },
     };
   }, [actions, stopTokenDrag, setSpot, clearSpots, popovers]);
@@ -1113,6 +1240,7 @@ export function MapStage(props: {
       selected={selectedSet.has(t.id)}
       active={t.id === activeTokenId}
       draggable={selecting && canDrag(t)}
+      inset={drawsInset(allTokens, t)}
     />
   );
   // Every chip and badge, then every label, then the plates, over all the tokens and the fog (TokenNode.tsx TokenDecor).

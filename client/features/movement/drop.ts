@@ -344,19 +344,116 @@ export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: 
  * and only the allowed ones go, since the server refuses a group move whole
  * when one leg is stopped (section 4.1). A group move carries no squeeze,
  * so a creature that would have to squeeze to land stays put on a walk.
+ *
+ * `walkersOf` names the creatures a token drags beside it
+ * (docs/design-v1-attach.md 4.2), each tested on the token's leg offset by
+ * its place: a token one of them could not follow stays where it was.
  */
-export function planGroup(state: BuildState, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">): DropPlan {
+export function planGroup(state: BuildState, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
   const moves: Landed[] = [];
   const held: DropPlan["held"] = [];
   for (const token of tokens) {
     const to = snapPosition(token.x + dx, token.y + dy, footprintSize(token));
     if (to.x === token.x && to.y === token.y) continue;
     const elevation = landedElevation(state.buildChunks, token, to);
-    const stopped = mode === "walk" ? legStop(state, token, { x: to.x, y: to.y, elevation }) : null;
+    const from = { x: token.x, y: token.y, elevation: token.elevation };
+    const stopped = mode === "walk" ? (legStop(state, token, { x: to.x, y: to.y, elevation }) ?? walkerStop(state, token, walkersOf(token), from, { x: to.x, y: to.y, elevation })) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
     else moves.push(landed(state.buildChunks, token, { ...to, squeeze: false }));
   }
   return { moves, stop: null, held };
+}
+
+/**
+ * Where a dragged creature walks while its holder walks from `a` to `b`
+ * (docs/design-v1-attach.md 5.1): offset by its place, on its own ground
+ * behind a holder on the ground, else by the holder's change of height,
+ * never below the ground, as the reducer moves it (shared/rules/moveLeg.ts).
+ */
+function walkerAt(state: BuildState, lead: DropToken, walker: DropToken, p: RoutePoint): RoutePoint {
+  const x = p.x + walker.x - lead.x;
+  const y = p.y + walker.y - lead.y;
+  const ground = footprintGround(state.buildChunks, { ...walker, x, y, squeeze: undefined });
+  const grounded = standing(lead.elevation, footprintGround(state.buildChunks, { ...lead, squeeze: undefined })) === "ground";
+  return { x, y, elevation: grounded ? ground : Math.max(walker.elevation + p.elevation - lead.elevation, ground) };
+}
+
+/** The first of the walkers whose leg beside the holder's from `a` to `b` a wall or a ledge stops, with what stopped it. */
+function walkerStop(state: BuildState, lead: DropToken, walkers: readonly DropToken[], a: RoutePoint, b: RoutePoint): { blocker: Blocker } | null {
+  for (const w of walkers) {
+    const from = walkerAt(state, lead, w, a);
+    const stop = legStop(state, { ...w, x: from.x, y: from.y, elevation: from.elevation, squeeze: undefined }, walkerAt(state, lead, w, b));
+    if (stop) return stop;
+  }
+  return null;
+}
+
+/** Where a holder's walk is cut so the creatures it drags can follow: the spot, and how many of its pieces it keeps whole before it. */
+export type WalkersCut = { at: Point; pieces: number };
+
+/**
+ * A route cut at a walkers stop (walkersStop): the pieces kept whole, then
+ * one to the stop with the extra the piece it cuts had. Stopped where a
+ * piece starts, the walk keeps the pieces before it, since a piece of no
+ * length is no piece.
+ */
+export function cutPieces(points: readonly RoutePoint[], pieces: readonly RoutePiece[], cut: WalkersCut): RoutePiece[] {
+  const start = points[cut.pieces];
+  const piece = pieces[cut.pieces];
+  const kept = pieces.slice(0, cut.pieces);
+  if (!start || !piece || (start.x === cut.at.x && start.y === cut.at.y)) return kept;
+  return [...kept, [cut.at.x, cut.at.y, piece[2], piece[3]]];
+}
+
+/**
+ * Where a holder's walk along `points` (its start, then each piece's end)
+ * stops so that every creature it drags beside it can walk too
+ * (docs/design-v1-attach.md 4.2): the first piece some walker's leg is
+ * stopped on is walked back, a lattice step at a time from its end, to
+ * the last spot the holder and every walker reach clear, its start when
+ * none. Null when all of them walk the whole way. `pieces` counts the
+ * pieces kept whole before it.
+ */
+export function walkersStop(state: BuildState, lead: DropToken, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
+  if (walkers.length === 0) return null;
+  const L = routeLattice(lead);
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const stopped = walkerStop(state, lead, walkers, a, b);
+    if (!stopped) continue;
+    const at = { ...lead, x: a.x, y: a.y, elevation: a.elevation, squeeze: undefined };
+    const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
+    for (let k = n - 1; k >= 1; k--) {
+      const c = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n, elevation: 0 };
+      c.elevation = landedElevation(state.buildChunks, at, c);
+      if (legStop(state, at, c) === null && walkerStop(state, lead, walkers, a, c) === null) return { at: c, pieces: i - 1, blocker: stopped.blocker };
+    }
+    return { at: a, pieces: i - 1, blocker: stopped.blocker };
+  }
+  return null;
+}
+
+/**
+ * A holder's drop cut short where a creature it drags cannot follow
+ * (docs/design-v1-attach.md 4.2), only for a player's walk where walls
+ * stop moves: the plan's lone move ends at walkersStop's spot, its route
+ * kept up to there, and the walk is stopped there as a lone walk is at a
+ * wall, with the note that says so.
+ */
+export function cutForWalkers(state: BuildState, lead: DropToken, plan: DropPlan, walkers: readonly DropToken[], mode: Exclude<DropMode, "teleport">): DropPlan {
+  const move = plan.moves.find((m) => m.tokenId === lead.id);
+  if (mode !== "walk" || walkers.length === 0 || !move) return plan;
+  const landing = move.elevation ?? lead.elevation;
+  const points = move.route ? routePoints(state.buildChunks, lead, move.route, landing) : [{ x: lead.x, y: lead.y, elevation: lead.elevation }, { x: move.x, y: move.y, elevation: landing }];
+  const stop = walkersStop(state, lead, points, walkers);
+  if (!stop) return plan;
+  const others = plan.moves.filter((m) => m !== move);
+  const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y } };
+  if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted };
+  const cut = landed(state.buildChunks, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
+  if (move.route) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+  return { ...plan, moves: [...others, cut], stop: halted };
 }
 
 /**

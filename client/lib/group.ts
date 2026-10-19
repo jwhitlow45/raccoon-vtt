@@ -18,20 +18,39 @@ export type Move = { tokenId: string; x: number; y: number };
  * The other tokens that move with the one being dragged: the rest of the
  * selection that is on this scene and that this member may move. The lead
  * moves the group only when it is part of the selection itself.
+ *
+ * With `holderOf`, the links of this viewer's copy (docs/design-v1-attach.md
+ * 4.2): a token whose holder, or any holder above it, moves too is left
+ * out, since it goes with that holder, so a rider and its mount both
+ * selected move once, as the mount's group. `alsoMoving` names what moves
+ * besides the lead and the selection, such as the mount a rider's drag
+ * moves.
  */
 export function groupFollowers<T extends { id: string }>(
   selectedIds: readonly string[],
   leadId: string,
   onScene: ReadonlyMap<string, T>,
   canMove: (token: T) => boolean,
+  holderOf?: (token: T) => T | undefined,
+  alsoMoving: readonly string[] = [],
 ): T[] {
   if (!selectedIds.includes(leadId)) return [];
   const out: T[] = [];
   for (const id of selectedIds) {
     const t = onScene.get(id);
-    if (id !== leadId && t && canMove(t)) out.push(t);
+    if (id !== leadId && !alsoMoving.includes(id) && t && canMove(t)) out.push(t);
   }
-  return out;
+  if (!holderOf) return out;
+  const moving = new Set([leadId, ...alsoMoving, ...out.map((t) => t.id)]);
+  const ridesOnMoving = (t: T): boolean => {
+    const seen = new Set<string>([t.id]);
+    for (let up = holderOf(t); up && !seen.has(up.id); up = holderOf(up)) {
+      if (moving.has(up.id)) return true;
+      seen.add(up.id);
+    }
+    return false;
+  };
+  return out.filter((t) => !ridesOnMoving(t));
 }
 
 /** Where each token lands after the group moved by (dx, dy), snapped by its own footprint. Tokens that end where they began are left out. */

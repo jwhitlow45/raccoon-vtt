@@ -18,6 +18,7 @@ import { ThumbnailLayer } from "./scenes/ThumbnailLayer.tsx";
 import { MoveLayer } from "./movement/MoveLayer.tsx";
 import { FlashLayer } from "./outliner/FlashLayer.tsx";
 import { PinLayer } from "./pins/PinLayer.tsx";
+import { TetherLayer } from "./attach/TetherLayer.tsx";
 import { quietLazy } from "../lib/quietLazy.tsx";
 
 /* The DM's height marks and explored outline, loaded after the room opens (lib/quietLazy.tsx). */
@@ -112,6 +113,7 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "movement", layer: "overlay", order: 9, Component: MoveLayer },
   { id: "outlinerFlash", layer: "overlay", order: 95, Component: FlashLayer },
   { id: "pins", layer: "overlay", order: 15, Component: PinLayer },
+  { id: "tethers", layer: "board", order: 40, Component: TetherLayer },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {

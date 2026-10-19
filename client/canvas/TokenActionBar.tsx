@@ -23,6 +23,8 @@ import { AltImagesRow } from "../features/tokens/AltImages.tsx";
 import { DoorButton } from "../features/doors/DoorButton.tsx";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { LightChip } from "../features/vision/LightChip.tsx";
+import { AttachButton } from "../features/attach/AttachButton.tsx";
+import { DetachButton, GroupLine, useAttachSlot } from "../features/attach/BarParts.tsx";
 import { offersRequest } from "../features/rolls/logic.ts";
 import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
@@ -180,6 +182,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const scope = useRoomScope();
   const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
+  const attachSlot = useAttachSlot(token);
 
   const access = useMemo(
     () =>
@@ -243,6 +246,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     door: true,
     light: (scene !== undefined && visionOn(scene)) || (token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0)),
     companion: isCompanion(token),
+    attach: attachSlot,
   });
   const button = (id: BarButtonId): ReactNode => {
     switch (id) {
@@ -283,6 +287,10 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         );
       case "light":
         return <LightChip key={id} token={token} />;
+      case "attach":
+        return <AttachButton key={id} token={token} onOpen={frame.raise} />;
+      case "detach":
+        return <DetachButton key={id} token={token} />;
       case "multiSelect":
         return (
           <BarButton key={id} pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
@@ -392,6 +400,9 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       ) : null}
 
       {savesAndDefenses}
+
+      {/* What it rides or carries, each a tap away, so a phone reaches a rider that hides its mount (docs/design-v1-attach.md 4.4). */}
+      <GroupLine token={token} />
 
       {/* Stat block and Details both open the panel, so they sit with the summary they expand. */}
       <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
@@ -669,12 +680,16 @@ type FrameControls = {
   header: { grip: "button" | "dots"; badgeInHeader: boolean };
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
   short: boolean;
+  /** Stands the bar over the notices while a popover of its own is open (docs/design-v1-tool-options.md 7.6). */
+  raise(on: boolean): void;
 };
 
 /** The header wherever the window does not dock, or docks at its full width. */
 const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: true };
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, header: WHOLE_HEADER, short: false });
+const NO_RAISE = () => {};
+
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE });
 
 /** Reset's name and tooltip, on every device. */
 const RESET_LABEL = "Reset window position and size";
@@ -814,6 +829,7 @@ function BarFrame(props: {
   );
   const [dragBox, setDragBox] = useState<Box | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  const [raised, setRaised] = useState(false);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
   usePublishBar({ label: props.label, ...props.dock, frame: barRef });
   /*
@@ -1069,7 +1085,7 @@ function BarFrame(props: {
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
   const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer });
   const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place, header, short };
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place, header, short, raise: setRaised };
 
   const { hang } = placed;
   const where = dragBox
@@ -1110,7 +1126,7 @@ function BarFrame(props: {
         boxShadow: theme.shadow.pane,
         color: theme.color.text,
         fontSize: theme.font.body14,
-        zIndex: mode === "compact" ? theme.z.barOverlay : theme.z.pane,
+        zIndex: raised ? theme.z.popover : mode === "compact" ? theme.z.barOverlay : theme.z.pane,
       }}
     >
       <div

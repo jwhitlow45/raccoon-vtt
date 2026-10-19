@@ -224,6 +224,13 @@ describe("other token sources", () => {
     assert.deepEqual(state.tokens.g2!.rangeRings, [30, 120]);
   });
 
+  test("a carried token's duplicate comes without its link, and the op the bar sends is one the server takes (docs/design-v1-attach.md 5.2)", () => {
+    const torch = token("torch", { kind: "object", size: "tiny", attached: { to: "thorn", kind: "carry" } });
+    const copy = duplicateToken(torch, { id: "torch2", at: { x: 4, y: 3 }, chunks: {} });
+    assert.equal("attached" in copy, false);
+    assert.ok(clientOpSchema.safeParse({ t: "token.create", token: copy }).success);
+  });
+
   test("a PC's duplicate shares the character", () => {
     const pc = token("pc", { kind: "pc", actor: { ref: "hero" } });
     assert.deepEqual(duplicateToken(pc, { id: "pc2", at: { x: 0, y: 0 }, chunks: {} }).actor, { ref: "hero" });

@@ -1,15 +1,16 @@
 import { useEffect, useMemo } from "react";
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import type { RoutePiece } from "#shared/rules/route.ts";
-import { LegCheck, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
+import { routePoints, type RoutePiece } from "#shared/rules/route.ts";
+import { LegCheck, WalkWorld, WorkBudget, worldUnits, type WalkRoute } from "#shared/rules/walk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
+import { walkersFor, walkersOfGroup } from "../attach/walk.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { dropMode, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeTarget, samePose, type DropPlan, type DropToken, type Found, type Point, type Pose, type Role, type Stop } from "./drop.ts";
+import { cutForWalkers, cutRoute, dropMode, goesStraight, keyStep, landedElevation, planGroup, planLands, planOne, planWalk, routeTarget, samePose, walkersStop, type DropPlan, type DropToken, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -17,6 +18,9 @@ import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
 import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute } from "./store.ts";
+
+/** Where a drag's preview is held, and what holds it. */
+type Hold = { at: Point; blocker: Stop["blocker"] };
 
 /** The part of a Konva node a drag reads and moves. */
 type DragNode = { x(): number; y(): number; position(p: Point): void };
@@ -34,7 +38,9 @@ export type DragStops = {
    * A frame of a lone token's drag. Its route is searched toward the spot
    * under the finger. While no route reaches it for a player whose walls
    * stop moves, the preview stays on the last clear spot before the wall
-   * or the ledge, so a drop never bounces back.
+   * or the ledge, so a drop never bounces back, and so it does where a
+   * creature the token drags beside it would meet one
+   * (docs/design-v1-attach.md 4.2).
    */
   frame(node: DragNode, token: DropToken): void;
   /** What a frame sends others besides where the token is: the route's corners and the leg's cost (6.5), and where a cut walk lands. */
@@ -86,10 +92,11 @@ function found(answer: Exclude<RouteAnswer, { kind: "searching" }>): Found {
 
 /**
  * A lone drag's walk. `held` is where the preview holds at a wall when no
- * route reaches the finger's spot. `straight` is the straight walk's own
- * route to where the drop would land when it goes straight, checked a few
- * steps at a time on the frame's budget, so the label reads what the drop
- * will count.
+ * route reaches the finger's spot, and `walkers` where it holds because a
+ * creature the token drags would meet one. `straight` is the straight
+ * walk's own route to where the drop would land when it goes straight,
+ * checked a few steps at a time on the frame's budget, so the label reads
+ * what the drop will count.
  */
 type Walk = {
   tokenId: string;
@@ -99,6 +106,7 @@ type Walk = {
   token: Token;
   target: Point | null;
   held: Pose | null;
+  walkers: WalkersCut | null;
   waiting: boolean;
   node: DragNode | null;
   drawn: DropToken | null;
@@ -145,6 +153,35 @@ export function dragStops(deps: DragDeps): DragStops {
    * leg tests.
    */
   let memo: { view: RoomState; token: DropToken; qx: number; qy: number; mode: string; stop: Stop | null; lands: Pose } | null = null;
+  /**
+   * The same for the creatures a holder drags beside it
+   * (docs/design-v1-attach.md 4.2): where along the holder's walk to
+   * `target`, its route or else the straight leg, the first of them would
+   * meet a wall. Asked again only for a new spot, a new route or a
+   * changed room.
+   */
+  let walkMemo: { view: RoomState; token: DropToken; target: Point; route: WalkRoute | null; stop: (WalkersCut & Hold) | null } | null = null;
+  const walkersHold = (view: RoomState, token: DropToken, target: Point, route: WalkRoute | null): (WalkersCut & Hold) | null => {
+    if (walkMemo && walkMemo.view === view && walkMemo.token === token && walkMemo.route === route && walkMemo.target.x === target.x && walkMemo.target.y === target.y) return walkMemo.stop;
+    const walkers = walkersFor(view, token.id, role);
+    let stop: (WalkersCut & Hold) | null = null;
+    if (walkers.length > 0) {
+      // The route as the drop would land it, cut past 64 pieces (drop.ts cutRoute), as the preview draws it.
+      const long = route ? cutRoute(view, token, route.pieces) : null;
+      const end = long ? long.at : target;
+      const landing = landedElevation(view.buildChunks, token, end);
+      const points = route
+        ? routePoints(view.buildChunks, token, long ? long.pieces : route.pieces, landing)
+        : [
+            { x: token.x, y: token.y, elevation: token.elevation },
+            { x: end.x, y: end.y, elevation: landing },
+          ];
+      const cut = walkersStop(view, token, points, walkers);
+      stop = cut ? { at: { x: cut.at.x, y: cut.at.y }, pieces: cut.pieces, blocker: cut.blocker } : null;
+    }
+    walkMemo = { view, token, target: { x: target.x, y: target.y }, route, stop };
+    return stop;
+  };
   const setHold = (next: { tokenId: string; at: Point; blocker: Stop["blocker"] } | null) => {
     if (!sameHold(holds.getState().hold, next)) holds.setState({ hold: next });
   };
@@ -193,6 +230,7 @@ export function dragStops(deps: DragDeps): DragStops {
     }
     raw = null;
     memo = null;
+    walkMemo = null;
     if (walk) goStraight(walk, null);
     walk?.drag.cancel();
     walk = null;
@@ -207,7 +245,7 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!view || !target || walk !== w) return;
     const answer = w.drag.answer;
     const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
-    setRoute({ tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting });
+    setRoute({ tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting });
   };
 
   /** The straight walk to `to` checked for what it walks over, or none wanted (null). */
@@ -248,29 +286,35 @@ export function dragStops(deps: DragDeps): DragStops {
    */
   const follow = (view: RoomState, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
     const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
-    const holdAt = (at: Pose | null) => {
-      if (!w || samePose(w.held, at)) return;
+    const holdAt = (at: Pose | null, walkers: WalkersCut | null = null) => {
+      if (!w || (samePose(w.held, at) && w.walkers?.at.x === walkers?.at.x && w.walkers?.at.y === walkers?.at.y && w.walkers?.pieces === walkers?.pieces)) return;
       w.held = at;
+      w.walkers = walkers;
       publish(w);
     };
+    const mode = dropMode(role, view.scenes[token.sceneId]);
     if (!raw || raw.tokenId !== token.id || !goesStraight(view, token, target, answer, view.meta.settings.feetPerCell)) {
-      holdAt(null);
-      setHold(null);
+      // The walk itself is clear: the preview, its line and its label stop where a creature it drags would meet a wall.
+      const cut = raw?.tokenId === token.id && mode === "walk" && answer.kind !== "searching" ? walkersHold(view, token, target, answer.kind === "route" ? answer.route : null) : null;
+      if (cut) node.position(cut.at);
+      holdAt(null, cut);
+      setHold(cut ? { tokenId: token.id, at: cut.at, blocker: cut.blocker } : null);
       if (w) goStraight(w, null);
       return;
     }
     // The picture ends where planOne lands, not at the spot under the pointer (review MV-O-24).
-    const mode = dropMode(role, view.scenes[token.sceneId]);
     const qx = Math.floor(raw.x * 4);
     const qy = Math.floor(raw.y * 4);
     if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy || memo.mode !== mode) {
       const plan = planOne(view, token, raw, mode);
       memo = { view, token, qx, qy, mode, stop: plan.stop, lands: planLands(plan, token) };
     }
-    const stop = memo.stop;
+    // Held at its own wall, the walk there may still be cut shorter by a creature it drags.
+    const own = memo.stop;
+    const stop: Hold | null = (own && mode === "walk" ? walkersHold(view, token, own.at, null) : null) ?? own;
     if (stop) node.position(stop.at);
     if (w) goStraight(w, memo.lands);
-    holdAt(memo.lands);
+    holdAt(stop && stop !== own ? stop.at : memo.lands);
     setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
   };
 
@@ -281,7 +325,7 @@ export function dragStops(deps: DragDeps): DragStops {
     const basis = basisOf(view, token.sceneId);
     if (!walk || walk.tokenId !== token.id) {
       walk?.drag.cancel();
-      const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, waiting: false, node: null, drawn: null, straight: null };
+      const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, walkers: null, waiting: false, node: null, drawn: null, straight: null };
       w.drag = new RouteDrag(
         () => {
           w.world = worldFor(store.getState().view ?? view, w.token, role);
@@ -370,7 +414,7 @@ export function dragStops(deps: DragDeps): DragStops {
         const w = group.length > 1 ? null : walkFor(view, token);
         if (!w) {
           reset();
-          land(group.length > 1 ? planGroup(view, group, at.x - token.x, at.y - token.y, mode) : planOne(view, token, at, mode));
+          land(group.length > 1 ? planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role)) : planOne(view, token, at, mode));
           return;
         }
         const target = routeTarget(view, token, at);
@@ -394,7 +438,8 @@ export function dragStops(deps: DragDeps): DragStops {
                   return keyStep(own, to, (units) => budget.charge(units));
                 }
               : undefined;
-            land(planWalk(now, token, at, dropMode(role, now.scenes[token.sceneId]), found(answer), now.meta.settings.feetPerCell, account));
+            const nowMode = dropMode(role, now.scenes[token.sceneId]);
+            land(cutForWalkers(now, token, planWalk(now, token, at, nowMode, found(answer), now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode));
           });
         });
         // Still searching: the drop waits at the ghost, which says so.

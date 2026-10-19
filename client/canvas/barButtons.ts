@@ -12,6 +12,8 @@ export type BarButtonId =
   | "conditions"
   | "hidden"
   | "light"
+  | "attach"
+  | "detach"
   | "multiSelect"
   | "roll"
   | "locked"
@@ -34,6 +36,12 @@ export type BarButtonInput = {
   light: boolean;
   /** The token is a companion (docs/design-v1-combat-flow.md 3.6), whose owners dismiss it. */
   companion: boolean;
+  /**
+   * Attach for whoever may attach the token to anything, or in its place on
+   * a carried token, Get off, Put down or Let go for whoever may undo the
+   * link (docs/design-v1-attach.md 4.1 and 4.3). Null for neither.
+   */
+  attach: "attach" | "detach" | null;
 };
 
 /**
@@ -43,7 +51,8 @@ export type BarButtonInput = {
  * them shows. The steady line starts with Conditions, Hidden and
  * Multi-select, which the default width keeps on one line
  * (docs/design-v1-token-window.md 3.2), so nothing that comes and goes
- * moves them: Roll and Light follow, on the same line where room is left.
+ * moves them: Roll, Light and Attach (or Get off in its place) follow, on
+ * the same line where room is left.
  * Roll opens the Dice panel's options, whose Ask switch asks the player of
  * a creature a player plays, so the single bar has no Request a roll
  * (docs/design-v1-roll-options.md 4.5). The less-often row keeps the
@@ -65,6 +74,7 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   // After Multi-select: any earlier, Roll would push Multi-select to a second line at the default width.
   if (dm || owner) play.push("roll");
   if ((dm || owner) && input.light) play.push("light");
+  if (input.attach) play.push(input.attach);
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.

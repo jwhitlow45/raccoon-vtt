@@ -22,6 +22,7 @@ import type { PlacedLines, TokenText } from "./useBoardText.ts";
 import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../features/images/icons.ts";
+import { COVER_INSET } from "../features/attach/groups.ts";
 
 /** How the canvas wants to hear about taps, menus, drags and the mouse over tokens. */
 export type TokenInteraction = {
@@ -61,6 +62,11 @@ type DecorProps = {
  * Those decorations normally come from TokenDecor in a pass above every
  * token and the fog (Stage.tsx). A token this device is dragging draws its
  * own instead (`decor`), so they travel with it.
+ *
+ * A carried token that covers its holder's whole footprint draws `inset`,
+ * at COVER_INSET of its size about its middle, so the mount's edge and
+ * ring show around the rider (docs/design-v1-attach.md 4.4). A tap on the
+ * mount's edge then reaches the mount.
  */
 export const TokenNode = memo(function TokenNode(props: DecorProps & {
   token: ViewToken;
@@ -69,6 +75,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   active: boolean;
   draggable: boolean;
   decor: boolean;
+  inset?: boolean;
 }) {
   const { token, scale, selected, active, draggable } = props;
   const interaction = useContext(TokenInteractionContext);
@@ -96,14 +103,30 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       onDragMove={(e) => interaction?.dragMove(e.target, token)}
       onDragEnd={(e) => interaction?.dragEnd(e.target, token)}
     >
-      <TokenShadow token={token} w={fp.w} h={fp.h} />
-      <TokenBody token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} />
-      {active ? <Outline w={fp.w} h={fp.h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
-      {selected ? <SelectedOutline w={fp.w} h={fp.h} scale={scale} /> : null}
+      {props.inset ? (
+        <Group x={(fp.w * (1 - COVER_INSET)) / 2} y={(fp.h * (1 - COVER_INSET)) / 2} scaleX={COVER_INSET} scaleY={COVER_INSET}>
+          <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} name={name} active={active} selected={selected} />
+        </Group>
+      ) : (
+        <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
+      )}
       {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
     </Group>
   );
 });
+
+/** The token's own picture: its shadow, its body and the rings that mark it active or selected. */
+function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean }) {
+  const { token, actor, w, h, scale, name } = props;
+  return (
+    <>
+      <TokenShadow token={token} w={w} h={h} />
+      <TokenBody token={token} actor={actor} w={w} h={h} scale={scale} name={name} />
+      {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
+      {props.selected ? <SelectedOutline w={w} h={h} scale={scale} /> : null}
+    </>
+  );
+}
 
 /**
  * A token's marks, label or plate, in a pass of their own above every

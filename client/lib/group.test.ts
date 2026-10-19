@@ -18,6 +18,23 @@ describe("moving a group", () => {
     assert.deepEqual(groupFollowers(["b", "mouse"], "a", onScene, canMove), [], "dragging a token outside the selection moves it alone");
   });
 
+  test("a token whose holder, or one above it, moves too is left out, so a rider and its mount move once (docs/design-v1-attach.md 4.2)", () => {
+    const linked = [
+      { id: "horse", holder: undefined },
+      { id: "rider", holder: "horse" },
+      { id: "torch", holder: "rider" },
+      { id: "thorn", holder: undefined },
+    ];
+    const byId = new Map(linked.map((t) => [t.id, t]));
+    const holderOf = (t: { holder: string | undefined }) => (t.holder ? byId.get(t.holder) : undefined);
+    const all = () => true;
+    assert.deepEqual(groupFollowers(["thorn", "horse", "rider", "torch"], "thorn", byId, all, holderOf).map((t) => t.id), ["horse"]);
+    assert.deepEqual(groupFollowers(["rider", "torch", "thorn"], "rider", byId, all, holderOf).map((t) => t.id), ["thorn"], "the torch goes with the rider dragged");
+    // A rider's press that moves its mount names the mount, so a selected rider and torch on it stay out.
+    assert.deepEqual(groupFollowers(["rider", "torch", "thorn", "horse"], "rider", byId, all, holderOf, ["horse"]).map((t) => t.id), ["thorn"]);
+    assert.deepEqual(groupFollowers(["thorn", "rider"], "thorn", byId, all).map((t) => t.id), ["rider"], "without links every selected token follows");
+  });
+
   test("each token snaps by its own footprint, and one that does not move is left out", () => {
     assert.deepEqual(groupDrop(tokens.slice(0, 3), 1.4, -0.2), [
       { tokenId: "a", x: 3, y: 2 },

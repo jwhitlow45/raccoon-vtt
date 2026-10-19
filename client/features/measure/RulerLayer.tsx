@@ -125,7 +125,8 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
           <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} color={colorOf(d.from)} />
         ),
       )}
-      {route && tokens[route.tokenId] && (route.waiting || route.tokenId === localDrag?.tokenId) ? (
+      {/* The route is this drag's, set as it starts: a rider's drag walks its mount, whose route and cost these are (docs/design-v1-attach.md 4.2). */}
+      {route && tokens[route.tokenId] && (route.waiting || localDrag !== null) ? (
         <RouteMeasure route={route} token={tokens[route.tokenId]!} scale={props.scale} color={youId ? colorOf(youId) : theme.color.crest} />
       ) : localDrag && tokens[localDrag.tokenId] ? (
         <DragMeasure
