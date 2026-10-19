@@ -24,12 +24,12 @@ import { handFocusOn } from "../../lib/handFocus.ts";
 import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHeader } from "../panels.ts";
 import type { TokenAccess } from "./access.ts";
-import { DISCARD, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, formKey, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { ChooseBlockDialog } from "./CompanionBlocks.tsx";
 import { characterBlocks, fromTheBlock, srdTitle, whose, type PickerRow } from "./companionBlocks.ts";
 import {
@@ -186,10 +186,14 @@ export function CompanionForm(props: {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
-  const [draft, setDraft] = useState<CompanionDraft>(NEW_COMPANION);
+  const pageStore = useScoped(characterPageSlot);
+  const keptKey = `companion:${character.id}`;
+  const { initial, start } = useKeptDraft<CompanionDraft>(keptKey, () => NEW_COMPANION);
+  const [draft, setDraft] = useState<CompanionDraft>(initial);
   const { typed, pending } = usePendingNumbers(draft, draftWith);
   // Only Add sends it, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
   useUnsavedSince(typed);
+  useKeepDraft(keptKey, typed, start);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -198,7 +202,6 @@ export function CompanionForm(props: {
   const changeRef = useRef<HTMLButtonElement>(null);
   const focusChange = useRef(false);
   // Typed changes ask first, but not once Add sent them: then leaving throws nothing away.
-  const [start] = useState(() => JSON.stringify(draft));
   const leave = useLeaveForm(typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened);
   usePanelHeader({
     title: `Add a companion for ${character.name}`,
@@ -279,7 +282,11 @@ export function CompanionForm(props: {
       if (!mounted.current || !inSight.current) {
         const text = lateCompanionText(sentName, answer, refusal);
         if (text) ui.notify(text, "error");
-        if (!mounted.current) return;
+        // A remount opened this form again with its draft (characterPage.ts): once added, that form goes, so the companion is never added twice.
+        if (!mounted.current) {
+          if (answer === "taken") pageStore.setState((s) => (formKey(s.form) === keptKey ? { form: null } : {}));
+          return;
+        }
         // Still open out of sight: done once added, else showing why for when the user comes back.
         setWaiting(false);
         if (answer === "taken") props.onDone("back");

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { createStore } from "zustand/vanilla";
 import type { Character } from "#shared/model.ts";
-import { scopeSlot } from "../../state/scope.ts";
+import { scopeSlot, useScoped } from "../../state/scope.ts";
 
 /**
  * The character whose page the Characters panel shows
@@ -14,13 +14,64 @@ import { scopeSlot } from "../../state/scope.ts";
  * which is when a player with one character lands on its page. `null` is
  * the list.
  */
-export const characterPageSlot = scopeSlot(() => createStore<CharacterPageState>(() => ({ characterId: undefined, opened: 0 })));
+export const characterPageSlot = scopeSlot(() => createStore<CharacterPageState>(() => ({ characterId: undefined, opened: 0, form: null })));
 
 type CharacterPageState = {
   characterId: string | null | undefined;
   /** How many times a page was opened from outside the panel (openCharacterPage), which a form open in the panel leaves for. */
   opened: number;
+  /** The form or list open in the panel's place, kept here for the same remount as the page. */
+  form: PanelForm | null;
 };
+
+/**
+ * New character, Add a companion and a character's stat blocks, each a
+ * subpage in the panel's place. A form keeps what it holds as it changes
+ * (useKeptDraft), so a tablet turned across 900 px opens it again as it
+ * was. The stat blocks page is a list and holds nothing typed.
+ */
+export type PanelForm = { kind: "new"; kept?: KeptDraft } | { kind: "companion"; characterId: string; kept?: KeptDraft } | { kind: "blocks"; characterId: string };
+
+/** A form's draft with its numbers still being typed folded in, and the draft it opened with, against which Back asks. */
+type KeptDraft = { typed: unknown; start: string };
+
+/** Names a form, so a kept draft is only ever read back by the form it came from: "new", "companion:<id>" or "blocks:<id>". */
+export function formKey(form: PanelForm | null): string | null {
+  if (form === null) return null;
+  return form.kind === "new" ? "new" : `${form.kind}:${form.characterId}`;
+}
+
+/**
+ * A form's starting draft: what the slot kept for this form, else `fresh`,
+ * and the draft it first opened with, so a form opened again by a remount
+ * still asks before it discards what was typed before it. Read once, as
+ * the form mounts.
+ */
+export function useKeptDraft<D>(key: string, fresh: () => D): { initial: D; start: string } {
+  const store = useScoped(characterPageSlot);
+  const [kept] = useState(() => {
+    const form = store.getState().form;
+    const draft = form && formKey(form) === key && form.kind !== "blocks" ? form.kept : undefined;
+    if (draft) return { initial: draft.typed as D, start: draft.start };
+    const initial = fresh();
+    return { initial, start: JSON.stringify(initial) };
+  });
+  return kept;
+}
+
+/**
+ * Writes a form's draft to the slot as it changes. `typed` holds the
+ * numbers still being typed (usePendingNumbers): a remount takes away the
+ * field that held them before it can commit, so they are kept as if
+ * committed, and the form opens again showing them.
+ */
+export function useKeepDraft(key: string, typed: unknown, start: string): void {
+  const store = useScoped(characterPageSlot);
+  const now = JSON.stringify(typed);
+  useEffect(() => {
+    store.setState((s) => (s.form && formKey(s.form) === key && s.form.kind !== "blocks" ? { form: { ...s.form, kept: { typed: JSON.parse(now) as unknown, start } } } : {}));
+  }, [store, key, now, start]);
+}
 
 /**
  * Opens a character's page from outside the panel, as a companion's

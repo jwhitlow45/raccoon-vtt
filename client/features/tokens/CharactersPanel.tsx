@@ -21,7 +21,7 @@ import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { characterPageSlot, DISCARD, pageBackTo, shownPage, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, formKey, pageBackTo, shownPage, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor, type PanelForm } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
 import { CompanionForm } from "./CompanionsSection.tsx";
 import { CREATURE_HEADING } from "./CreatureHeader.tsx";
@@ -53,11 +53,17 @@ export default function CharactersPanel(props: PanelProps) {
   const pageStore = useScoped(characterPageSlot);
   const picked = useStore(pageStore, (s) => s.characterId);
   const opened = useStore(pageStore, (s) => s.opened);
-  const [creating, setCreating] = useState(false);
-  /** The character whose "Add a companion" form shows in the panel's place. */
-  const [addingFor, setAddingFor] = useState<string | null>(null);
-  /** The character whose stat blocks page shows in the panel's place (docs/design-v1-companion-stat-blocks.md 6.4). */
-  const [blocksFor, setBlocksFor] = useState<string | null>(null);
+  /*
+   * The form in the panel's place lives in the slot beside the page, so the
+   * remount a crossing of 900 px makes keeps it: New character, the
+   * character whose "Add a companion" form shows, or the character whose
+   * stat blocks page shows (docs/design-v1-companion-stat-blocks.md 6.4).
+   */
+  const shownForm = useStore(pageStore, (s) => formKey(s.form));
+  const setForm = (form: PanelForm | null) => pageStore.setState({ form });
+  const creating = shownForm === "new";
+  const addingFor = shownForm?.startsWith("companion:") ? shownForm.slice("companion:".length) : null;
+  const blocksFor = shownForm?.startsWith("blocks:") ? shownForm.slice("blocks:".length) : null;
   const dm = you?.role === "dm";
 
   const list = useMemo(
@@ -96,8 +102,8 @@ export default function CharactersPanel(props: PanelProps) {
   useEffect(() => {
     if (openedAt.current === opened) return;
     openedAt.current = opened;
-    setBlocksFor(null);
-  }, [opened]);
+    pageStore.setState((s) => (s.form?.kind === "blocks" ? { form: null } : {}));
+  }, [opened, pageStore]);
   usePanelHeader(
     page && !form
       ? {
@@ -113,12 +119,12 @@ export default function CharactersPanel(props: PanelProps) {
   if (companionOf) {
     // Back where it came from, its character's page, which a page opened from outside may have taken the slot from while the form stayed.
     const done = (to: LeaveFor) => {
-      setAddingFor(null);
+      setForm(null);
       if (to === "back") openPage(companionOf.id);
     };
     return <CompanionForm character={companionOf} shown={props.shown} close={props.close} opened={opened} onDone={done} />;
   }
-  if (blocksOf) return <CharacterBlocksPage character={blocksOf} onBack={() => setBlocksFor(null)} />;
+  if (blocksOf) return <CharacterBlocksPage character={blocksOf} onBack={() => setForm(null)} />;
   if (creating) {
     return (
       <NewCharacter
@@ -126,7 +132,7 @@ export default function CharactersPanel(props: PanelProps) {
         {...(!dm && you ? { owner: you.memberId } : {})}
         opened={opened}
         onDone={(id, to) => {
-          setCreating(false);
+          setForm(null);
           if (id || to === "back") openPage(id);
         }}
       />
@@ -136,7 +142,7 @@ export default function CharactersPanel(props: PanelProps) {
   if (page) {
     return (
       <div ref={root}>
-        <CharacterPage character={page} close={props.close} onAddCompanion={() => setAddingFor(page.id)} onBlocks={() => setBlocksFor(page.id)} onDelete={() => remove(page.id)} />
+        <CharacterPage character={page} close={props.close} onAddCompanion={() => setForm({ kind: "companion", characterId: page.id })} onBlocks={() => setForm({ kind: "blocks", characterId: page.id })} onDelete={() => remove(page.id)} />
       </div>
     );
   }
@@ -144,7 +150,7 @@ export default function CharactersPanel(props: PanelProps) {
   return (
     <div ref={root} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       {dm || own?.allowed ? (
-        <Button variant="primary" size="sm" block onClick={() => setCreating(true)} data-opener="new-character">
+        <Button variant="primary" size="sm" block onClick={() => setForm({ kind: "new" })} data-opener="new-character">
           New character
         </Button>
       ) : null}
@@ -336,6 +342,8 @@ function PartyRow(props: { character: Character }) {
   );
 }
 
+type NewCharacterDraft = { name: string; owners: string[]; size: CreatureSize; hpMax: number; ac: number; walk: number; initBonus: number; pp: number; image: ImageRef | null };
+
 /**
  * The quick entry for a new PC: enough for the table, and the player fills
  * in the rest of the page. The DM picks who plays it. A player making their
@@ -350,21 +358,32 @@ function NewCharacter(props: { onDone(id: string | null, to: LeaveFor): void; cl
   const view = useRoomView((s) => s.view);
   const members = useRoomView((s) => s.view?.members);
   const players = Object.values(members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
-  const [name, setName] = useState("");
-  const [owners, setOwners] = useState<string[]>(props.owner ? [props.owner] : []);
-  const [size, setSize] = useState<CreatureSize>("medium");
-  const [hpMax, setHpMax] = useState(10);
-  const [ac, setAc] = useState(12);
-  const [walk, setWalk] = useState(30);
-  const [initBonus, setInitBonus] = useState(0);
-  const [pp, setPp] = useState(10);
-  const [image, setImage] = useState<ImageRef | null>(null);
+  const { initial, start } = useKeptDraft<NewCharacterDraft>("new", () => ({
+    name: "",
+    owners: props.owner ? [props.owner] : [],
+    size: "medium",
+    hpMax: 10,
+    ac: 12,
+    walk: 30,
+    initBonus: 0,
+    pp: 10,
+    image: null,
+  }));
+  const [name, setName] = useState(initial.name);
+  const [owners, setOwners] = useState<string[]>(initial.owners);
+  const [size, setSize] = useState<CreatureSize>(initial.size);
+  const [hpMax, setHpMax] = useState(initial.hpMax);
+  const [ac, setAc] = useState(initial.ac);
+  const [walk, setWalk] = useState(initial.walk);
+  const [initBonus, setInitBonus] = useState(initial.initBonus);
+  const [pp, setPp] = useState(initial.pp);
+  const [image, setImage] = useState<ImageRef | null>(initial.image);
   const [error, setError] = useState<string | null>(null);
-  const draft = { name, owners, size, hpMax, ac, walk, initBonus, pp, image };
+  const draft: NewCharacterDraft = { name, owners, size, hpMax, ac, walk, initBonus, pp, image };
   const { typed, pending } = usePendingNumbers(draft);
   // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
   useUnsavedSince(typed);
-  const [start] = useState(() => JSON.stringify(draft));
+  useKeepDraft("new", typed, start);
   const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened);
   usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 

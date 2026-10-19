@@ -29,7 +29,8 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, sleep, SocketW
  * character with Back to Characters (docs/design-v1-look-pass.md 3.1):
  * focus goes to its title and Back brings it to the row. Rue, who plays
  * one character, lands on its page, which scrolls nowhere sideways at 320
- * px or at 130%.
+ * px or at 130%. New character, Add a companion and the stat blocks page
+ * stay open with what was typed when the window turns across 900 px.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twelve, one file after
  * another. The other environment variables are the smoke run's
@@ -580,6 +581,66 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await asks.first().dispatchEvent("click");
     await panel.locator('[data-opener="new-character"]').waitFor();
     assert.equal(await dm.getByRole("heading", { name: "New character" }).count(), 0, "the second press left");
+  });
+
+  test("lp10-a. a tablet turned across 900 px keeps New character, Add a companion and the stat blocks page, with what was typed, a number still being typed included", async () => {
+    const TABLET = { width: 820, height: 1180 };
+    /** Turns the DM's window across 900 px and back, so the panel moves from the side panel to a sheet and back, and checks each time. */
+    const turn = async (check: (panel: Locator, where: string) => Promise<void>) => {
+      for (const [size, where] of [[TABLET, "upright at 820"], [DESK, "back at 1280"]] as const) {
+        await dm.setViewportSize({ width: size.width, height: size.height });
+        // The panel stays open across the turn, as a sheet below 900 px and in the side panel above.
+        const shown = size.width < 900 ? dm.locator('dialog[data-rvtt-sheet][aria-label="Characters"]') : dm.getByRole("tabpanel", { name: "Characters" });
+        await shown.waitFor();
+        await check(shown, where);
+      }
+    };
+    const value = async (panel: Locator, name: string) => panel.getByRole("textbox", { name, exact: true }).inputValue();
+
+    let panel = await openCharacters(dm);
+    if (await dm.getByRole("button", { name: "Back to Characters" }).isVisible()) await backToList(panel);
+    await panel.locator('[data-opener="new-character"]').click();
+    await dm.getByRole("heading", { name: "New character" }).waitFor();
+    await panel.getByRole("textbox", { name: "Name", exact: true }).fill("Ilsa");
+    await panel.getByRole("textbox", { name: "Armor Class", exact: true }).fill("15");
+    // Max HP keeps focus, so its number is still being typed when the window turns.
+    await panel.getByRole("textbox", { name: "Max HP", exact: true }).fill("31");
+    let typed = ["Ilsa", "15", "31"];
+    await turn(async (p, where) => {
+      await dm.getByRole("heading", { name: "New character" }).waitFor();
+      assert.deepEqual([await value(p, "Name"), await value(p, "Armor Class"), await value(p, "Max HP")], typed, `New character ${where}`);
+      // A change made on the tablet comes back on the computer too.
+      await p.getByRole("textbox", { name: "Max HP", exact: true }).fill("32");
+      typed = ["Ilsa", "15", "32"];
+    });
+    // What was typed before the turn still asks before it goes.
+    await dm.getByRole("button", { name: "Back to Characters" }).click();
+    await dm.getByRole("button", { name: "Discard changes?" }).first().click();
+    await dm.getByRole("heading", { name: "New character" }).waitFor({ state: "detached" });
+
+    panel = await openCharacters(dm);
+    await openCard(panel, run.cyra);
+    await panel.getByRole("button", { name: "Add a companion" }).click();
+    await dm.getByRole("heading", { name: "Add a companion for Cyra" }).waitFor();
+    await panel.getByRole("textbox", { name: "Name", exact: true }).fill("Pip");
+    await panel.getByRole("textbox", { name: "HP", exact: true }).fill("9");
+    await turn(async (p, where) => {
+      await dm.getByRole("heading", { name: "Add a companion for Cyra" }).waitFor();
+      assert.deepEqual([await value(p, "Name"), await value(p, "HP")], ["Pip", "9"], `Add a companion ${where}`);
+    });
+    await dm.getByRole("button", { name: "Back to Cyra" }).click();
+    await dm.getByRole("button", { name: "Discard changes?" }).first().click();
+    await dm.getByRole("heading", { name: "Add a companion for Cyra" }).waitFor({ state: "detached" });
+
+    panel = await openCharacters(dm);
+    await panel.getByRole("button", { name: /^Stat blocks \(/ }).click();
+    const blocks = dm.getByRole("heading", { name: /^Cyra.s stat blocks$/ });
+    await blocks.waitFor();
+    await turn(async () => {
+      await blocks.waitFor();
+    });
+    await dm.getByRole("button", { name: "Back to Cyra" }).click();
+    await blocks.waitFor({ state: "detached" });
   });
 
   test("8. no page logged an error", () => {
