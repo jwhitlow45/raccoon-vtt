@@ -16,6 +16,7 @@ import { areaTitle } from "./labels.ts";
 import { triggerSummary } from "./placement.ts";
 import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaTool } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
+import { useAreaAsk } from "../dice/cast/AreaAsk.tsx";
 
 /**
  * Every area on the scene and who is in it, kept live as tokens move. This
@@ -116,6 +117,8 @@ export default function AreasPanel(props: PanelProps) {
                 <Button size="sm" onClick={() => openDamage(area, ui, t.id, here)} data-opener={`area-${t.id}`}>
                   Save and damage
                 </Button>
+              ) : t.ownerId === you.memberId ? (
+                <AreaAskButton template={t} />
               ) : null}
               {editable ? (
                 <Button size="sm" variant="danger" icon="delete" iconOnly="always" title={`Delete ${areaTitle(t)}`} onClick={() => deleteTemplate(env, t.id)}>
@@ -127,5 +130,15 @@ export default function AreasPanel(props: PanelProps) {
         );
       })}
     </ul>
+  );
+}
+
+/** A player's Ask for saves on their own area (docs/design-v1-player-save-spell.md 3.1). */
+function AreaAskButton(props: { template: AreaTemplate }) {
+  const ask = useAreaAsk(props.template);
+  return (
+    <Button size="sm" aria-label={ask.name} title={ask.disabled ?? undefined} disabled={ask.disabled !== null} onClick={ask.open}>
+      {ask.words}
+    </Button>
   );
 }

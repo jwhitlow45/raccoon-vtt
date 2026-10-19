@@ -29,6 +29,7 @@ import { POPOVER_MIN } from "../../pages/optionsLayout.ts";
 import { castFrom, choiceOf, draftCaster, fromOffers, idleHint, withoutDeparted, type AreaCreature } from "./caster.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
 import { FromControl, NO_CREATURE } from "./FromControl.tsx";
+import { useAreaAsk } from "../dice/cast/AreaAsk.tsx";
 import { areaTitle, shapeName, SHAPES } from "./labels.ts";
 import {
   aimText,
@@ -562,7 +563,13 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
     select(env.area, null);
     setDraft(env, draftFromTemplate(template, env.actions.newId(), env.view.tokens, fpc));
   };
-  const by = caster ? <span style={{ color: theme.color.textMuted }}> · cast by {displayName(caster)}</span> : null;
+  const ask = useAreaAsk(template);
+  const by = (
+    <>
+      {caster ? <span style={{ color: theme.color.textMuted }}> · cast by {displayName(caster)}</span> : null}
+      {ask.asked ? <span style={{ color: theme.color.textMuted }}> · Saves asked</span> : null}
+    </>
+  );
   return (
     <OptionsStrip
       tool="Area"
@@ -589,6 +596,17 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
             </OptButton>
           ),
         },
+        // A player's own area asks the DM for its saves in the DM's slot, so the row never holds more than the DM's (docs/design-v1-player-save-spell.md 6).
+        env.role === "player" &&
+          template.ownerId === env.youId && {
+            id: "damage",
+            priority: 3,
+            control: (
+              <OptButton ends label={ask.name} disabled={ask.disabled !== null} onClick={ask.open}>
+                {ask.words}
+              </OptButton>
+            ),
+          },
         {
           id: "copy",
           priority: 2,

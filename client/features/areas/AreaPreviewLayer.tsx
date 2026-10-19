@@ -31,6 +31,7 @@ import { useLiveTokens } from "./useLiveTokens.ts";
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
+const EMPTY_CASTS: RoomState["casts"] = {};
 
 export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps) {
   const { scene, scale } = props;
@@ -49,6 +50,7 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   const moving = useAreaTool((s) => s.moving);
   const role = useRoomView((s) => s.you?.role ?? "player");
   const youId = useRoomView((s) => s.you?.memberId ?? "");
+  const casts = useRoomView((s) => s.view?.casts ?? EMPTY_CASTS);
 
   const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings }, scene) : null), [tokens, buildChunks, settings, scene]);
   const coarse = useMemo(
@@ -66,7 +68,7 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
     const placed = templates[selectedId];
     if (placed && placed.sceneId === scene.id) {
       const t = live ? ({ ...placed, ...live } as AreaTemplate) : placed;
-      active = { t, color: t.color, shade: !!live, pointShape: false, editable: canEdit({ role, youId }, placed) };
+      active = { t, color: t.color, shade: !!live, pointShape: false, editable: canEdit({ role, youId, view: { casts } }, placed) };
     }
   }
 

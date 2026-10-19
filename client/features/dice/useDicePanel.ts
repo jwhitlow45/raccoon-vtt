@@ -101,8 +101,10 @@ export type DicePanelApi = {
    * `to` it goes under that visibility with only its own sources. Returns
    * its tag, or null when nothing was sent. With `origin`, a Dice panel
    * control's tap, its dice may be thrown (docs/design-v1-roll-animation.md 3.1).
+   * `parts` hears how many batches the roll went in, before it returns, so
+   * an ask for saves can name the roll whole (docs/design-v1-player-save-spell.md 5.3).
    */
-  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm"; tag?: string; origin?: ThrowOrigin }): string | null;
+  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm"; tag?: string; origin?: ThrowOrigin; parts?(n: number): void }): string | null;
   /** A chip's tap. Adv and Dis are never pressed together. */
   press(choice: "adv" | "dis" | "secret"): void;
   /** Again: rolls exactly what was rolled, under its own visibility, taking no choice. */
@@ -139,7 +141,7 @@ function hasOneD20(formula: string): boolean {
  * Sends a group of rolls as one tag, split by the splitter. Every op goes,
  * or none does. `onRefused` hears once if any part is refused.
  */
-function send(sender: RollSender, rolls: DiceRollInput[], envelope: { to: "all" | "dm"; dc?: number; ac?: number }, onRefused: () => void, given?: string): { ok: true; tag: string } | { ok: false; error: string } {
+function send(sender: RollSender, rolls: DiceRollInput[], envelope: { to: "all" | "dm"; dc?: number; ac?: number }, onRefused: () => void, given?: string): { ok: true; tag: string; parts: number } | { ok: false; error: string } {
   // A group save names its tag before it sends, so its page can keep the tag with the rows it rolls (docs/design-v1-roll-options.md 5.2).
   const tag = given ?? uuidv7();
   const batched = batchRolls(rolls, { tag, ...envelope });
@@ -156,7 +158,7 @@ function send(sender: RollSender, rolls: DiceRollInput[], envelope: { to: "all" 
     });
     if (n === null) return { ok: false, error: NEEDS_CONNECTION };
   }
-  return { ok: true, tag };
+  return { ok: true, tag, parts: batched.ops.length };
 }
 
 /** What every panel surface calls, without React: the hook below, and the flow test that drives it against a fake server. */
@@ -221,6 +223,7 @@ export function createDicePanel(deps: {
       }
       if (panel) store.setState({ last: { tag: sent.tag, rolls: inputs, ...envelope } });
       thrown(sent.tag, opts.origin);
+      opts.parts?.(sent.parts);
       return sent.tag;
     },
     noted(tag, label, origin) {

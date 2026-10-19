@@ -1,5 +1,6 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
+import type { ActorTarget } from "#shared/protocol.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 
 /*
@@ -7,8 +8,8 @@ import { scopeSlot, useScoped } from "../../state/scope.ts";
  * (docs/design-v1-roll-options.md 4.2 and 4.3): each row's newest roll by
  * its tag, an attack's critical that its next Damage tap doubles, the
  * riders toggled on, the DM's Ask switch per creature, the creature a
- * player picked, the tags already acted on, and the request to scroll to
- * the options that a bar's Roll makes.
+ * player picked, the tags already acted on, the request to scroll to the
+ * options that a bar's Roll makes, and a player's open ask for saves.
  */
 export type OptionState = {
   /** `${creature}|${row}` to the row's newest tag. */
@@ -35,10 +36,33 @@ export type OptionState = {
   focus: number;
   /** The last ask the panel scrolled for, so a later opening of the panel does not scroll again. */
   focused: number;
+  /**
+   * The one open block of a player's ask for saves (docs/design-v1-player-save-spell.md 3.1),
+   * kept here so closing the sheet to select targets on the map keeps it. Opening it pins
+   * `picked` to its creature.
+   */
+  cast: CastBlock | null;
+};
+
+/** What a player's ask for saves is for, as its block opened. */
+export type CastBlock = {
+  /** The creature's key (creatureKey), which `picked` is pinned to. */
+  key: string;
+  creature: ActorTarget;
+  /** The spell's or action's name, as the row or the area shows it. */
+  spell: string;
+  /** The row's named roll, absent for an area, whose row is found by its spell's name. */
+  roll?: string;
+  /** The area it asks for. Without one, its targets are the selection less the caster. */
+  area?: string;
+  /** The block's own casting level, where the row has no stepper of its own. */
+  slot?: number;
+  /** The ask this block sent last, whose answer it shows until it waits in the view. */
+  sent?: string;
 };
 
 export const optionSlot = scopeSlot(() =>
-  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0 })),
+  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null })),
 );
 
 export function useOptionStore() {

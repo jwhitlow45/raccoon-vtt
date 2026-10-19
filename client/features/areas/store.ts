@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { AreaShape, AreaTemplate, RoomState, Scene } from "#shared/model.ts";
+import { askedArea } from "#shared/permissions.ts";
 import type { TemplatePatch } from "#shared/protocol.ts";
 import { PREVIEW_SAMPLES, SAMPLES } from "#shared/rules/aoe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -129,8 +130,16 @@ export function memberColor(env: Pick<AreaEnv, "view" | "youId">): string {
   return env.view.members[env.youId]?.color ?? theme.color.crest;
 }
 
-export function canEdit(env: Pick<AreaEnv, "role" | "youId">, t: Pick<AreaTemplate, "ownerId">): boolean {
-  return env.role === "dm" || t.ownerId === env.youId;
+/**
+ * Whether the viewer may move, size, aim or delete the area: the DM, or its
+ * owner while no ask for saves names it, so a player never changes what the
+ * DM is resolving (docs/design-v1-player-save-spell.md 5.4). The server
+ * refuses the same, as the backstop.
+ */
+export function canEdit(env: Pick<AreaEnv, "role" | "youId"> & { view?: Pick<RoomState, "casts"> }, t: Pick<AreaTemplate, "ownerId"> & { id?: string }): boolean {
+  if (env.role === "dm") return true;
+  if (t.ownerId !== env.youId) return false;
+  return t.id === undefined || env.view === undefined || !askedArea(env.view, t.id);
 }
 
 export function currentTemplate(env: Pick<AreaEnv, "view">, draft: AreaDraft | null): DraftTemplate | null {

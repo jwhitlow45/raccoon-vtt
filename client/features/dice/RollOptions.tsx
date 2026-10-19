@@ -62,6 +62,8 @@ import { GroupOptions } from "./groupSave/GroupOptions.tsx";
 import { useStartGroupSave } from "./groupSave/start.ts";
 import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
+import { AskForSavesButton, RowCast, WaitingAsks } from "./cast/CastBlock.tsx";
+import { sameSpell } from "./cast/cast.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
 /** Room above the options when the panel opens on them: the sticky line's height and a little. */
@@ -129,6 +131,7 @@ function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) 
   if (!current) return <Note>Your character's rolls show here once you play one.</Note>;
   return (
     <>
+      <WaitingAsks view={view} pickedKey={current.key} />
       {options.length > 1 ? (
         <ChipRow label="Roll for">
           {options.map((o) => (
@@ -159,9 +162,12 @@ type Ctx = {
   creature: ActorTarget;
   tokenId: string | undefined;
   key: string;
+  name: string;
   played: boolean;
   ask: boolean;
   blocked: string | null;
+  /** The row a player's open ask for saves goes under, or null for the top of the options (docs/design-v1-player-save-spell.md 3.1). */
+  castRow: string | null;
 };
 
 /** Exported for its render test. */
@@ -178,7 +184,10 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
   const store = useOptionStore();
   const blocked = useRollBlocked();
   const openPcStats = useOpenPcStats();
-  const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, played, ask: played && !askOff, blocked };
+  const cast = useOption((s) => (s.cast?.key === key ? s.cast : null));
+  // An area's block opens under the row of its spell, found by name, or at the top where the creature has no such row (3.1).
+  const castRow = cast ? (cast.roll ?? rolls.named.find((r) => sameSpell(r.name, cast.spell))?.key ?? null) : null;
+  const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
   const [skillsOpen, setSkillsOpen] = useState(false);
   const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
   const numbers = rolls.numbers;
@@ -203,6 +212,7 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
         {blocked ? <Note tone="info">{blocked}</Note> : null}
         {played ? <Switch label={`Ask ${props.name} to roll saves and checks`} checked={!askOff} onChange={(on) => store.setState((s) => ({ askOff: { ...s.askOff, [key]: !on } }))} /> : null}
       </div>
+      {cast && castRow === null ? <RowCast dice={dice} creatureKey={key} creature={creature} name={props.name} blocked={blocked} named={null} rowSlot={null} blockHere /> : null}
       {/* While dying, its death save is the one roll it makes, so it leads (W7B-P-19). */}
       {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={rolls.initBonus === null ? null : (numbers?.deathSave ?? 0)} /> : null}
       {numbers ? (
@@ -621,6 +631,8 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   // Only an attack roll scores a Critical Hit (SRD 5.2.1), so a save action's damage, such as Fire Breath's, never doubles (W7B-P-13).
   const canCrit = named.attack !== undefined;
   const hasDamage = named.damage.length > 0;
+  const player = ctx.dice.you.role === "player";
+  const askRef = useRef<HTMLButtonElement>(null);
   return (
     <div style={{ ...ROW, display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
@@ -652,6 +664,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           />
         ) : null}
         {named.save && ctx.dice.you.role === "dm" ? <GroupSaveButton ctx={ctx} named={named} /> : null}
+        {named.save && player ? <AskForSavesButton ref={askRef} spec={{ key: ctx.key, creature: ctx.creature, spell: props.named.name, roll: props.named.key }} /> : null}
         {hasDamage ? (
           <OptionCell
             text="Damage"
@@ -698,6 +711,22 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         ) : null}
         {slots && slot !== null ? <SlotStepper name={named.name} value={slot} min={slots.from} onChange={(n) => store.setState((s) => ({ slots: { ...s.slots, [rowKey]: n } }))} /> : null}
       </div>
+      {player ? (
+        <RowCast
+          dice={ctx.dice}
+          creatureKey={ctx.key}
+          creature={ctx.creature}
+          name={ctx.name}
+          blocked={ctx.blocked}
+          named={named}
+          rowSlot={slots && slot !== null ? slot : null}
+          riders={on}
+          opener={askRef}
+          blockHere={ctx.castRow === props.named.key}
+          // A recharge action is marked Used once its ask goes, as its Damage tap marks it (3.1).
+          onSent={() => named.recharge !== undefined && markUsed(true)}
+        />
+      ) : null}
     </div>
   );
 }

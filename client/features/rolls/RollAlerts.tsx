@@ -1,5 +1,6 @@
 import { quietLazy } from "../../lib/quietLazy.tsx";
 import { useRoomView } from "../../state/view.ts";
+import { useCastAlerts } from "../dice/cast/alerts.ts";
 import { PlayerRolls } from "./PlayerRolls.tsx";
 
 /** The DM's sheet and live cards, loaded after the room opens and never for a player (lib/quietLazy.tsx). */
@@ -13,6 +14,8 @@ const DmDesk = quietLazy(() => import("./DmDesk.tsx").then((m) => m.DmDesk), ["d
  */
 export function RollAlerts() {
   const role = useRoomView((s) => s.you?.role);
+  // A player's asks for saves settle after a reload and toast their end here, wherever the Dice panel is (docs/design-v1-player-save-spell.md 3.2).
+  useCastAlerts();
   if (role === "dm") return <DmDesk />;
   if (role === "player") return <PlayerRolls />;
   return null;
