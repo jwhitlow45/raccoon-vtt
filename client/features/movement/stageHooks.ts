@@ -135,7 +135,14 @@ export function useDragStops(role: Role): DragStops {
     const setRoute = (next: DragRoute | null) => {
       if (routes.getState().route !== next) routes.setState({ route: next });
     };
-    const reset = () => {
+    /**
+     * Clears the drag's search and preview. A new drag or a key press first
+     * lands a drop still waiting for its route (`land`), so it is never thrown
+     * away with no move and no word to the others. The board going away
+     * cancels it.
+     */
+    const reset = (land = false) => {
+      if (land && walk?.waiting) walk.drag.flush();
       raw = null;
       memo = null;
       walk?.drag.cancel();
@@ -222,7 +229,7 @@ export function useDragStops(role: Role): DragStops {
 
     return {
       start(tokenId) {
-        reset();
+        reset(true);
         const s = notes.getState();
         if (s.note?.tokenId === tokenId && !s.busy) notes.setState({ note: null });
       },
@@ -262,7 +269,7 @@ export function useDragStops(role: Role): DragStops {
       },
       plan(node, token, group) {
         const at = raw?.tokenId === token.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
-        reset();
+        reset(true);
         const view = store.getState().view;
         if (!view) return NOTHING;
         const mode = dropMode(role, view.scenes[token.sceneId]);
@@ -312,7 +319,7 @@ export function useDragStops(role: Role): DragStops {
           showActions: (open) => ui.showActions(open),
         });
       },
-      end: reset,
+      end: () => reset(),
     };
   }, [store, actions, ui, scope, role]);
   // A drop still waiting for its route when the board goes away never lands.

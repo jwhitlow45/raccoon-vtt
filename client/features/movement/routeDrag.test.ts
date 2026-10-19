@@ -9,9 +9,11 @@ import { RouteDrag, type Frames, type Settled } from "./routeDrag.ts";
 /**
  * The drag's search as a state machine (docs/design-v1-movement.md 12):
  * random runs of finger moves, frames, drops, cancels, wall changes and
- * frames that fire late, against four invariants:
+ * frames that fire late, against five invariants:
  * - a drop lands at most once,
  * - nothing lands after a cancel,
+ * - a drop that waits is never lost: a flush (a new drag, a key press)
+ *   lands it at once,
  * - the route a drop lands with is the settled route to the drop's spot,
  *   as a fresh search finds it in the world as it is when it lands,
  * - no search state outlives its drag.
@@ -114,12 +116,17 @@ function run(seed: number): void {
       drag.rebuild();
     } else if (r < 0.9) {
       for (const late of frames.late.splice(0)) late();
-    } else if (r < 0.95) {
+    } else if (r < 0.94) {
       // A second drop while the first waits is the board's mistake to make: it is ignored, and the first lands.
       const at = spot();
       dropped ??= at;
       const land = (answer: Settled) => landings.push({ at, answer, input: built });
       drag.drop(at, land);
+    } else if (r < 0.97) {
+      // A new drag starts, or an arrow key is pressed, while a drop may wait.
+      const waiting = dropped !== null && !cancelled && landings.length === 0;
+      drag.flush();
+      if (waiting) assert.equal(landings.length, 1, `seed ${seed}: a flush lost the waiting drop`);
     } else {
       cancelled = true;
       drag.cancel();
@@ -150,7 +157,7 @@ function run(seed: number): void {
 }
 
 describe("the drag's search as a state machine (12)", () => {
-  test("random drags keep the four invariants", () => {
+  test("random drags keep the five invariants", () => {
     for (let seed = 1; seed <= 400; seed++) run(seed);
   });
 

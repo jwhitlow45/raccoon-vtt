@@ -109,6 +109,17 @@ export class RouteDrag {
     this.#end();
   }
 
+  /**
+   * A drop still waiting lands now, its search run to the end at once: a
+   * new drag or a key press would otherwise throw it away. With nothing
+   * waiting it does nothing.
+   */
+  flush(): void {
+    if (this.#over || !this.#landing || !this.#search) return;
+    this.#stopFrames();
+    this.#slice(Infinity);
+  }
+
   #solve(): void {
     const to = this.#target!;
     const world = this.#worldNow();
@@ -122,10 +133,10 @@ export class RouteDrag {
     this.#slice();
   }
 
-  #slice(): void {
+  #slice(deadline = this.#frames.now() + SLICE_MS): void {
     const search = this.#search!;
     const to = this.#target!;
-    const result = search.settle(to, this.#frames.now() + SLICE_MS);
+    const result = search.settle(to, deadline);
     if (result === "paused") {
       if (this.#answer.kind !== "searching") this.#set({ kind: "searching", since: this.#frames.now() });
       this.#schedule();
