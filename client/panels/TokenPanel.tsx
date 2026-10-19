@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { Actor, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
+import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
@@ -21,6 +21,7 @@ import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { CreatureHeader } from "../features/tokens/CreatureHeader.tsx";
+import { kindLine, sizeText, tokenKind } from "../features/tokens/creatureKind.ts";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
@@ -52,7 +53,6 @@ const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
   { value: "gargantuan", label: "Gargantuan" },
   { value: "custom", label: "Custom" },
 ];
-const SIZE_NAMES = Object.fromEntries(SIZE_OPTIONS.map((o) => [o.value, o.label])) as Record<CreatureSize, string>;
 
 const KIND_OPTIONS: { value: TokenKind; label: string }[] = [
   { value: "pc", label: "Player character" },
@@ -148,7 +148,7 @@ function TokenDetails(props: PanelProps) {
     switch (id) {
       case "name":
         return (
-          <NameBlock key={id} token={token} name={name} feetPerCell={feetPerCell}>
+          <NameBlock key={id} token={token} name={name} actor={actor} character={character} feetPerCell={feetPerCell}>
             <QuickNumbers items={quickNumbers} actor={actor} token={token} />
           </NameBlock>
         );
@@ -234,24 +234,28 @@ function TokenDetails(props: PanelProps) {
   );
 }
 
-/** The token's header (CreatureHeader.tsx): its picture as the image field previews it, the name, then the size and the tags on one wrapping line. */
-function NameBlock(props: { token: Token; name: string; feetPerCell: number; children?: ReactNode }) {
+/**
+ * The token's header (CreatureHeader.tsx): its picture as the image field
+ * previews it, the name, the kind line and the tags. A companion names its
+ * character in the tracker's words (docs/design-v1-combat-flow.md 3.6.7),
+ * and wears its portrait, for whoever's copy holds the link.
+ */
+function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | undefined; character: Character | undefined; feetPerCell: number; children?: ReactNode }) {
   const { token } = props;
-  // A companion names its character in the tracker's words (docs/design-v1-combat-flow.md 3.6.7), for whoever's copy holds the link.
-  const companionOf = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of]?.name : undefined));
+  const keeper = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of] : undefined));
   const fp = footprint(token);
-  const sizeText = fp.w === fp.h ? `${fp.w * props.feetPerCell} ft` : `${fp.w * props.feetPerCell} by ${fp.h * props.feetPerCell} ft`;
-  const badges: string[] = [];
-  if (companionOf !== undefined) badges.push(`Companion of ${companionOf}`);
-  if (token.visibility === "dm") badges.push("Hidden from players");
-  if (token.locked) badges.push("Locked");
-  if (token.nameHidden) badges.push("Name hidden");
+  const tags: string[] = [];
+  if (token.visibility === "dm") tags.push("Hidden from players");
+  if (token.locked) tags.push("Locked");
+  if (token.nameHidden) tags.push("Name hidden");
+  const kind = tokenKind({ token, companionOf: keeper?.name, character: props.character, cr: props.actor?.cr });
   return (
     <CreatureHeader
       picture={{ image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: RING[token.disposition] ?? theme.color.neutral, initials: initials(props.name) }}
+      badge={keeper ? { image: keeper.defaultImage, initials: initials(keeper.name) } : null}
       name={props.name}
-      line={`${SIZE_NAMES[token.size] ?? token.size} (${sizeText})${token.kind === "object" ? ", object" : ""}`}
-      tags={badges}
+      line={kindLine(kind, sizeText(token.size, fp, props.feetPerCell))}
+      tags={tags}
     >
       {props.children}
     </CreatureHeader>
