@@ -395,7 +395,8 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await toggleSplit(pat);
     const card = bottomPane(pat, "Characters");
     await card.waitFor();
-    await waitFor("Thorn's card open below", async () => ((await card.getByLabel("Character name").inputValue().catch(() => "")) === "Thorn" ? true : null), 5_000);
+    // Pat plays Thorn alone, so the panel lands on Thorn's page.
+    await card.locator("[data-creature-heading]").filter({ hasText: "Thorn" }).waitFor({ timeout: 5_000 });
     await shots.take(pat, "splitpanel-player-initiative-over-characters");
     await oneOnly(pat);
   });
@@ -855,7 +856,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await openSideTab(pat, "Initiative");
     await toggleSplit(pat);
     await bottomPane(pat, "Characters").waitFor();
-    await waitFor("Thorn's card drawn below", async () => ((await bottomPane(pat, "Characters").getByLabel("Character name").inputValue().catch(() => "")) === "Thorn" ? true : null), 5_000);
+    await bottomPane(pat, "Characters").locator("[data-creature-heading]").filter({ hasText: "Thorn" }).waitFor({ timeout: 5_000 });
     await shots.take(pat, "splitpanel-player-932x430-split");
     await oneOnly(pat);
     await view(pat, patCdp, { width: 1280, height: 800 });

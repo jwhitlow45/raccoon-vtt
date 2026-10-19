@@ -22,8 +22,14 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, sleep, SocketW
  * offers none. A delete the server refuses, since the DM shared the
  * character meanwhile, keeps focus on its row. Focus Pat moved elsewhere
  * stays there. The DM's own delete is busy and then moves focus on too.
- * 80-character names, spaced and unbroken, fit the card at 327, 356 and
+ * 80-character names, spaced and unbroken, fit the page at 327, 356 and
  * 243 px.
+ *
+ * A character's row opens its page, a subpage of the panel named by the
+ * character with Back to Characters (docs/design-v1-look-pass.md 3.1):
+ * focus goes to its title and Back brings it to the row. Rue, who plays
+ * one character, lands on its page, which scrolls nowhere sideways at 320
+ * px or at 130%.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twelve, one file after
  * another. The other environment variables are the smoke run's
@@ -43,6 +49,8 @@ let browser: Browser;
 let dmContext: BrowserContext;
 let patContext: BrowserContext;
 let quinContext: BrowserContext;
+let rueContext: BrowserContext;
+let rue: Page;
 let dm: Page;
 let pat: Page;
 let dmCdp: CDPSession;
@@ -52,6 +60,7 @@ const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
 const dmConsole = new ConsoleWatch("dm");
 const patConsole = new ConsoleWatch("pat");
+const rueConsole = new ConsoleWatch("rue");
 
 /** Two names at the 80-character limit: one with spaces to wrap at, and one word with none. */
 const SPACED = "Sir Aldric Brightwater of the Northern Marches, Warden of the Old Oak and Stones";
@@ -79,6 +88,8 @@ const run = {
   spaced: randomUUID(),
   unbroken: randomUUID(),
   sharedLong: randomUUID(),
+  rueId: "",
+  yew: randomUUID(),
   goblin: randomUUID(),
 };
 
@@ -129,11 +140,24 @@ async function openCharacters(page: Page): Promise<Locator> {
   return sheet;
 }
 
-/** Opens a character's card from its row, unless it is open. */
-async function openCard(panel: Locator, characterId: string): Promise<Locator> {
-  const row = panel.locator(`[data-opener="character:${characterId}"]`);
-  if ((await row.getAttribute("aria-expanded")) !== "true") await row.click();
-  return row;
+/** The open page's own heading, the character's name under the panel's header (CreatureHeader.tsx). */
+const pageHeading = (panel: Locator) => panel.locator("[data-creature-heading]");
+
+/** Opens a character's page from its row, unless it is open: from another character's page, Back to Characters first. */
+async function openCard(panel: Locator, characterId: string): Promise<void> {
+  const name = dmSocket.state!.characters[characterId]!.name;
+  const heading = pageHeading(panel);
+  if ((await heading.count()) > 0 && (await heading.textContent()) === name) return;
+  const back = panel.page().getByRole("button", { name: "Back to Characters" });
+  if (await back.isVisible()) await back.click();
+  await panel.locator(`[data-opener="character:${characterId}"]`).click();
+  await heading.filter({ hasText: name }).waitFor();
+}
+
+/** Back from a page to the panel's list. */
+async function backToList(panel: Locator): Promise<void> {
+  await panel.page().getByRole("button", { name: "Back to Characters" }).click();
+  await panel.page().getByRole("button", { name: "Back to Characters" }).waitFor({ state: "detached" });
 }
 
 /** What has focus: its tag, the `data-opener` id it carries, and its name or text. */
@@ -146,8 +170,24 @@ function focusedOn(page: Page): Promise<string> {
 }
 
 async function focusLands(page: Page, characterId: string, what: string): Promise<void> {
-  const on = `button [character:${characterId}]`;
+  await focusStartsWith(page, `button [character:${characterId}]`, what);
+}
+
+async function focusStartsWith(page: Page, on: string, what: string): Promise<void> {
   await waitFor(what, async () => ((await focusedOn(page)).startsWith(on) ? true : null), 5_000).catch(async () => assert.fail(`${what}: focus is on "${await focusedOn(page)}"`));
+}
+
+/** Nothing in the panel runs out of its box sideways: a scroller that scrolls sideways, or a box its content spills out of. Text fields scroll their own text. */
+async function noSideScroll(panel: Locator, where: string): Promise<void> {
+  const wide = await panel.evaluate((root) => {
+    type El = { scrollWidth: number; clientWidth: number; tagName: string; textContent: string | null; ownerDocument: { defaultView: { getComputedStyle(e: unknown): { overflowX: string } } } };
+    const all = [root as unknown as El, ...(Array.from((root as unknown as { querySelectorAll(s: string): ArrayLike<unknown> }).querySelectorAll("*")) as El[])];
+    return all
+      .filter((el) => el.clientWidth > 1 && el.scrollWidth > el.clientWidth + 1 && el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")
+      .filter((el) => el === (root as unknown) || el.ownerDocument.defaultView.getComputedStyle(el).overflowX !== "hidden")
+      .map((el) => `${el.tagName} ${(el.textContent ?? "").slice(0, 30)}: ${el.scrollWidth} > ${el.clientWidth}`);
+  });
+  assert.deepEqual(wide, [], `${where}: content wider than its box`);
 }
 
 /** The accessible description Chrome gives the button of this exact name, from its accessibility tree. */
@@ -165,7 +205,7 @@ async function boxOf(target: Locator): Promise<Box> {
   return { left: b.x, right: b.x + b.width, top: b.y, bottom: b.y + b.height, width: b.width, height: b.height };
 }
 
-/** A shared character's card at this width: the note saying why there is no Delete stays inside the panel, its long name broken. */
+/** A shared character's page at this width: the note saying why there is no Delete stays inside the panel, its long name broken. */
 async function sharedNoteFits(page: Page, panel: Locator, where: string): Promise<void> {
   await openCard(panel, run.sharedLong);
   const note = panel.getByText(`You and Quin both play ${SHARED_LONG}`);
@@ -178,7 +218,7 @@ async function sharedNoteFits(page: Page, panel: Locator, where: string): Promis
   await shots.take(page, `characters-shared-long-name-${where.replace(/[^a-z0-9]+/gi, "-")}`);
 }
 
-/** A long name's card in a panel this wide: Delete and its line inside the panel, nothing scrolling sideways, the name whole. */
+/** A long name's page in a panel this wide: Delete and its line inside the panel, nothing scrolling sideways, the name whole. */
 async function longNameFits(page: Page, panel: Locator, characterId: string, name: string, where: string): Promise<void> {
   await openCard(panel, characterId);
   const button = panel.getByRole("button", { name: `Delete ${name}`, exact: true });
@@ -221,6 +261,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     dmContext = await browser.newContext({ viewport: DESK });
     patContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     quinContext = await browser.newContext();
+    rueContext = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     dm = await dmContext.newPage();
     pat = await patContext.newPage();
     dmConsole.attach(dm);
@@ -279,6 +320,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     };
     run.patId = await join(patContext, "Pat", "#30a46c");
     run.quinId = await join(quinContext, "Quin", "#e5484d");
+    run.rueId = await join(rueContext, "Rue", "#8e4ec6");
 
     const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
@@ -292,6 +334,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await character(run.spaced, SPACED, [run.patId]);
     await character(run.unbroken, UNBROKEN, [run.patId]);
     await character(run.sharedLong, SHARED_LONG, [run.patId, run.quinId]);
+    await character(run.yew, "Yew", [run.rueId]);
     const token = (id: string, extra: Record<string, unknown>) => ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", ...extra } });
     await token(run.breeToken, { kind: "pc", name: "Bree", x: 5, y: 5, disposition: "ally", actor: { ref: run.bree } });
     await token(run.breeOnTheRoad, { kind: "pc", name: "Bree", sceneId: run.roadId, x: 4, y: 4, disposition: "ally", actor: { ref: run.bree } });
@@ -317,7 +360,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     patConsole.allow = [];
   });
 
-  test("2. Bree's card says what goes before Delete, which a screen reader hears as Delete's description in both states; Cyra's says why it has none, and Quin's Dax offers nothing", async () => {
+  test("2. Bree's page says what goes before Delete, which a screen reader hears as Delete's description in both states; Cyra's says why it has none, and Quin's Dax offers nothing", async () => {
     const sheet = await openCharacters(pat);
     await openCard(sheet, run.bree);
     await sheet.getByText(WARNING, { exact: true }).waitFor();
@@ -336,12 +379,13 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     assert.equal(await sheet.getByRole("button", { name: /^Delete/ }).count(), 0, "a character Pat shares offers no Delete");
     await shots.take(pat, "characters-player-shared-no-delete");
     // Quin's Dax is in the party list, a row with nothing to press.
+    await backToList(sheet);
     await sheet.getByText("Dax", { exact: true }).waitFor();
     assert.equal(await sheet.getByRole("button", { name: /Dax/ }).count(), 0, "another player's character offers nothing");
     assert.equal(patSocket.everSaw(run.breeOnTheRoad), false, "the token on the road never reached Pat");
   });
 
-  test("3. 80-character names, spaced and unbroken, keep Delete and its line inside the card at 356 and 243 px", async () => {
+  test("3. 80-character names, spaced and unbroken, keep Delete and its line inside the page at 356 and 243 px", async () => {
     let sheet = await openCharacters(pat);
     await longNameFits(pat, sheet, run.spaced, SPACED, "356 px spaced");
     await longNameFits(pat, sheet, run.unbroken, UNBROKEN, "356 px unbroken");
@@ -391,8 +435,9 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     );
     assert.equal(state.encounter?.activeEntryId, "e-cyra", "the turn passed on");
     await panel.getByText("Tap a token to see it here.").waitFor();
-    // Pat's list in order: Bree, the unbroken long name, Cyra, ... So the next row is the long name's.
+    // Bree's page went with Bree, back to the list. Pat's list in order: Bree, the unbroken long name, Cyra, ... So the next row is the long name's.
     await focusLands(pat, run.unbroken, "focus on the next row after the late answer");
+    assert.equal(await pat.getByRole("button", { name: "Back to Characters" }).count(), 0, "the page went with Bree");
     await shots.take(pat, "characters-player-after-delete");
 
     // The DM's log, and no player's, says who deleted what.
@@ -406,7 +451,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     patConsole.expectSocketFailures = false;
   });
 
-  test("5. a delete the server refuses, since the DM shared the character meanwhile, keeps focus on its row and says why", async () => {
+  test("5. a delete the server refuses, since the DM shared the character meanwhile, leaves the page open with focus on its heading, and says why", async () => {
     const sheet = await openCharacters(pat);
     await openCard(sheet, run.wren);
     patConsole.expectSocketFailures = true;
@@ -417,14 +462,14 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await ops.send({ t: "character.update", characterId: run.wren, patch: { ownerIds: [run.patId, run.quinId] } });
     await patContext.setOffline(false);
     await pat.getByText("Someone else plays that character too. Ask the DM to delete it.", { exact: true }).waitFor({ timeout: 30_000 });
-    await focusLands(pat, run.wren, "focus on Wren's row after the refusal");
+    await focusStartsWith(pat, "h3 [] Wren", "focus on Wren's heading after the refusal");
     await sheet.getByText("You and Quin both play Wren, so only the DM can delete it.", { exact: true }).waitFor();
     assert.ok(dmSocket.state!.characters[run.wren], "Wren stays");
     await shots.take(pat, "characters-player-delete-refused");
     patConsole.expectSocketFailures = false;
   });
 
-  test("6. focus Pat moves elsewhere while the delete waits stays there", async () => {
+  test("6. focus Pat moves out of the sheet while the delete waits stays there", async () => {
     const sheet = await openCharacters(pat);
     await openCard(sheet, run.zed);
     patConsole.expectSocketFailures = true;
@@ -432,13 +477,14 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await sheet.getByRole("button", { name: "Delete Zed", exact: true }).tap();
     await sheet.getByRole("button", { name: "Tap again to delete", exact: true }).tap();
     await sheet.getByRole("button", { name: "Deleting…", exact: true }).waitFor();
-    // Zed's row is the last, so the hand-off would go to the one before, Wren's. Cyra's is not where it would go.
-    await sheet.locator(`[data-opener="character:${run.cyra}"]`).focus();
+    // Zed's row is the last, so the hand-off would go to the one before, Wren's. The tool bar's Panels is outside the sheet.
+    const panels = pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
+    await panels.focus();
     await patContext.setOffline(false);
     await waitFor("Zed gone for the DM", () => (dmSocket.state && !dmSocket.state.characters[run.zed] ? true : null), 30_000);
-    await sheet.locator(`[data-opener="character:${run.zed}"]`).waitFor({ state: "detached" });
+    await sheet.locator("[data-creature-heading]").filter({ hasText: "Zed" }).waitFor({ state: "detached" });
     await sleep(300);
-    await focusLands(pat, run.cyra, "focus stays on Cyra's row");
+    assert.equal(await panels.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, `focus stays on Panels, not "${await focusedOn(pat)}"`);
     patConsole.expectSocketFailures = false;
   });
 
@@ -469,8 +515,52 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     dmConsole.expectSocketFailures = false;
   });
 
+  test("lp1-page-a. the DM's row opens the character's page under the panel's header, focus on its title, and Back brings focus to the row", async () => {
+    const panel = await openCharacters(dm);
+    const row = panel.locator(`[data-opener="character:${run.cyra}"]`);
+    assert.equal(await row.getAttribute("aria-expanded"), null, "a row that opens a page is no disclosure");
+    await row.focus();
+    await dm.keyboard.press("Enter");
+    await pageHeading(panel).filter({ hasText: "Cyra" }).waitFor();
+    await focusStartsWith(dm, "h2 [] Cyra", "focus on the page's title");
+    // The page names what it is, and holds nothing of a token on a map.
+    await panel.getByText("Character · Medium (5 ft)", { exact: true }).waitFor();
+    for (const name of ["Stat block", "Combat", "Companions", "Notes", "Image", "Stats", "Played by"]) await panel.getByRole("button", { name, exact: true }).waitFor();
+    for (const name of ["Position", "Token settings"]) assert.equal(await panel.getByRole("button", { name, exact: true }).count(), 0, `${name} is a token's`);
+    await shots.take(dm, "characters-lp1-dm-page");
+    await dm.getByRole("button", { name: "Back to Characters" }).click();
+    await focusLands(dm, run.cyra, "Back brings focus to Cyra's row");
+  });
+
+  test("lp1-page-b. Rue, who plays one character, lands on its page, which scrolls nowhere sideways at 320 px or at 130%, and Back shows the list", async () => {
+    rueConsole.attach((rue = await rueContext.newPage()));
+    const cdp = await rueContext.newCDPSession(rue);
+    // On the app's origin first, where setUp keeps the interface size.
+    await rue.goto(`${server.origin}/`);
+    // As for Pat: a new device is answered 403 by GET /me before it joins, which Chrome logs. Rue joined by request, so this is only in case.
+    rueConsole.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/];
+    for (const view of [{ width: 320, height: 568, scale: 1 }, { width: 390, height: 844, scale: 1.3 }]) {
+      const where = `${view.width} px at ${Math.round(view.scale * 100)}%`;
+      await setUp(rue, cdp, view);
+      rueConsole.allow = [];
+      const sheet = await openCharacters(rue);
+      await rue.getByRole("button", { name: "Back to Characters" }).waitFor();
+      await pageHeading(sheet).filter({ hasText: "Yew" }).waitFor();
+      await noSideScroll(sheet, where);
+      await shots.take(rue, `characters-lp1-landed-${view.width}-${Math.round(view.scale * 100)}`);
+    }
+    const sheet = await openCharacters(rue);
+    await backToList(sheet);
+    await sheet.locator(`[data-opener="character:${run.yew}"]`).waitFor();
+    await sheet.getByRole("heading", { name: "The party" }).waitFor();
+    // No row was pressed to open the page Rue landed on, so Back finds Yew's row by the page's header.
+    await focusLands(rue, run.yew, "Back brings focus to Yew's row");
+    await noSideScroll(sheet, "the list at 130%");
+  });
+
   test("8. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(patConsole.errors, [], "Pat's page logged errors");
+    assert.deepEqual(rueConsole.errors, [], "Rue's page logged errors");
   });
 });

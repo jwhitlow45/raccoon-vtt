@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Actor, Character, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
+import { DM, P1, P2, actor, character, room, token } from "#shared/testutil.ts";
 import { statBlockShown } from "../monsters/statBlockLink.ts";
-import { tokenAccess } from "./access.ts";
-import { offersMakeCompanion, panelGroups, panelRelation, panelSections, type PanelPart, type PanelSectionId } from "./panelOrder.ts";
+import { characterAccess, tokenAccess } from "./access.ts";
+import { cardGroups, offersMakeCompanion, panelGroups, panelRelation, panelSections, type CardPartId, type PanelPart, type PanelSectionId } from "./panelOrder.ts";
 
 /**
  * The sections a viewer gets for a token, worked out from their own copy
@@ -193,5 +193,81 @@ describe("the token panel grouped by use (docs/design-v1-token-panel-groups.md 2
     assert.equal(panelRelation({ dm: true, owner: false }), "own");
     assert.equal(panelRelation({ dm: false, owner: true }), "own");
     assert.equal(panelRelation({ dm: false, owner: false }), "other");
+  });
+});
+
+/** A character's page's parts for a viewer, from their own copy of the room, as CharacterPage decides them. */
+function pageFor(state: ReturnType<typeof room>, viewer: typeof DM, characterId: string, has: { companions?: boolean } = {}): CardPartId[] {
+  const view = projectState(state, viewer, { sceneId: "s1" });
+  const c = view.characters[characterId] as Character;
+  const access = characterAccess({ role: viewer.role, memberId: viewer.memberId, character: c });
+  return cardGroups({
+    dm: access.dm,
+    plays: access.owner,
+    statBlock: access.full,
+    companions: has.companions ?? true,
+    notes: access.canEditActor("notes") || !!c.actor.notes?.trim() || access.dm,
+    image: access.canEdit("defaultImage"),
+  });
+}
+
+describe("a character's page's parts (docs/design-v1-look-pass.md 3.1)", () => {
+  const SETUP: CardPartId[] = ["image", "stats"];
+
+  test("the DM: the header, Place a token, the block, Combat, Companions, Notes, setup, Played by and Remove", () => {
+    const state = room();
+    state.characters.c = character("c");
+    assert.deepEqual(pageFor(state, DM, "c"), ["header", "place", "statBlock", "combat", "companions", "notes", ...SETUP, "owners", "remove"]);
+  });
+
+  test("a player who plays it alone: the same, with no Played by", () => {
+    const state = room();
+    state.characters.c = character("c", { ownerIds: ["p1"] });
+    assert.deepEqual(pageFor(state, P1, "c"), ["header", "place", "statBlock", "combat", "companions", "notes", ...SETUP, "remove"]);
+  });
+
+  test("a player who shares it: the same parts, Remove holding the line that says why there is no Delete", () => {
+    const state = room();
+    state.characters.c = character("c", { ownerIds: ["p1", "p2"] });
+    assert.deepEqual(pageFor(state, P1, "c"), pageFor(state, P2, "c"));
+    assert.equal(pageFor(state, P1, "c").at(-1), "remove");
+  });
+
+  test("with a block or with none, the stat block follows the header, for Add a stat block or the block itself", () => {
+    const state = room();
+    state.characters.c = character("c");
+    const none = pageFor(state, DM, "c");
+    state.characters.c = character("c", { stats: {} as Character["stats"] });
+    assert.deepEqual(pageFor(state, DM, "c"), none);
+    assert.equal(none.indexOf("statBlock"), none.indexOf("place") + 1);
+  });
+
+  test("Companions follows Combat with companions or the right to add one, and is not drawn with neither", () => {
+    const state = room();
+    state.characters.c = character("c");
+    const parts = pageFor(state, P1, "c");
+    assert.equal(parts.indexOf("companions"), parts.indexOf("combat") + 1);
+    assert.equal(pageFor(state, P1, "c", { companions: false }).includes("companions"), false);
+  });
+
+  test("Notes is not drawn with nothing to read and no right to write", () => {
+    assert.equal(cardGroups({ dm: false, plays: true, statBlock: true, companions: true, notes: false, image: true }).includes("notes"), false);
+  });
+
+  test("anyone else sees the header alone: only the DM and the character's players open its page", () => {
+    const state = room();
+    state.characters.c = character("c", { ownerIds: ["p1"] });
+    assert.deepEqual(pageFor(state, P2, "c"), ["header"]);
+  });
+
+  test("each part shows exactly once, whoever looks", () => {
+    const state = room();
+    state.characters.c = character("c", { ownerIds: ["p1", "p2"] });
+    for (const viewer of [DM, P1, P2]) {
+      for (const companions of [true, false]) {
+        const parts = pageFor(state, viewer, "c", { companions });
+        assert.equal(new Set(parts).size, parts.length, `${viewer.memberId}: ${parts.join(" ")}`);
+      }
+    }
   });
 });

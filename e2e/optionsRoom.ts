@@ -532,8 +532,10 @@ export const STATES: State[] = [
     async enter(p) {
       await selectTool(p, "v");
       await openSideTab(p, "Characters");
-      await p.getByRole("tabpanel").getByRole("button", { name: /^Thorn/ }).first().click();
-      await p.getByRole("tabpanel").getByRole("button", { name: "Place a token" }).click();
+      // Thorn's page, from his row unless it is open (docs/design-v1-look-pass.md 3.1).
+      const place = p.getByRole("tabpanel").getByRole("button", { name: "Place a token" });
+      if (!(await place.isVisible())) await p.getByRole("tabpanel").getByRole("button", { name: /^Thorn/ }).first().click();
+      await place.click();
       await options(p).getByText("Tap the map to place").first().waitFor();
     },
     async leave(p) {

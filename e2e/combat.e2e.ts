@@ -1185,6 +1185,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await page.getByRole("status", { name: "Connected" }).first().waitFor();
       // From the toolbar's Panels, or from an open sheet's All panels, since Panels closes an open sheet.
       const openPanel = async (title: string, from?: Locator) => {
+        // A sheet on a subpage, such as the character's page a player with one character lands on, has Back where All panels was.
+        if (from && !(await from.getByRole("button", { name: "All panels" }).isVisible())) await from.getByRole("button", { name: /^Back to / }).click();
         if (from) await from.getByRole("button", { name: "All panels" }).click();
         else await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
         await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();

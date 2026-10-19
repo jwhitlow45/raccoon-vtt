@@ -187,6 +187,14 @@ export function panelById(id: string | null): PanelDef | undefined {
  * is typed, or a journal page renamed from another device. Focus follows
  * a change of subpage (useSubpageFocus), and with an `id` a new title is
  * not one. Without it the title is the subpage's identity.
+ *
+ * `backTo` names, by their `data-opener` ids, where focus goes as the
+ * subpage closes when the control pressed to open it is not there: a
+ * subpage the panel opened onto, or one whose opener went, or a subpage
+ * opened from another subpage, such as a form from a character's page,
+ * whose opener lives on that page. The first found wins, so a character's
+ * page names its row and then the rows around it, and focus survives the
+ * page's own delete.
  */
 export type PanelHeader = {
   title: string;
@@ -194,6 +202,7 @@ export type PanelHeader = {
   onBack(): void;
   armed?: string | null;
   id?: string;
+  backTo?: readonly string[];
 };
 
 /**
@@ -255,10 +264,12 @@ export function usePanelHeader(header: PanelHeader | null): void {
   const parent = header?.parent ?? null;
   const armed = header?.armed ?? null;
   const id = header?.id;
+  // By value, so a list made anew on every render publishes nothing new.
+  const backTo = header?.backTo?.join("\n");
   useLayoutEffect(() => {
     if (!publish || title === null || parent === null) return;
-    return publish({ title, parent, armed, onBack: () => onBack.current?.(), ...(id === undefined ? null : { id }) });
-  }, [publish, title, parent, armed, id]);
+    return publish({ title, parent, armed, onBack: () => onBack.current?.(), ...(id === undefined ? null : { id }), ...(backTo === undefined ? null : { backTo: backTo.split("\n") }) });
+  }, [publish, title, parent, armed, id, backTo]);
 }
 
 /**
@@ -335,12 +346,29 @@ function openerOf(body: HTMLElement, el: HTMLElement): Opener {
 function findOpener(body: HTMLElement | null, opener: Opener | null): HTMLElement | null {
   if (!body || !opener) return null;
   if (opener.el.isConnected && body.contains(opener.el)) return opener.el;
-  if (opener.id !== null) {
-    const marked = [...body.querySelectorAll<HTMLElement>("[data-opener]")].find((el) => el.getAttribute("data-opener") === opener.id);
-    if (!marked) return null;
-    return marked.matches(FOCUSABLE) ? marked : marked.querySelector<HTMLElement>(FOCUSABLE);
-  }
+  if (opener.id !== null) return markedControl(body, opener.id);
   return sameNamed(body, opener.tag, opener.name)[opener.index] ?? null;
+}
+
+/**
+ * The control marked with this `data-opener` id, or inside what is marked,
+ * or null when nothing is. A marked element that takes focus from script
+ * alone (`tabindex="-1"`) is one too, such as an empty list's line.
+ */
+function markedControl(body: HTMLElement, id: string): HTMLElement | null {
+  const marked = [...body.querySelectorAll<HTMLElement>("[data-opener]")].find((el) => el.getAttribute("data-opener") === id);
+  if (!marked) return null;
+  return marked.matches(`${FOCUSABLE}, [tabindex="-1"]`) ? marked : marked.querySelector<HTMLElement>(FOCUSABLE);
+}
+
+/** The first control a closing subpage's `backTo` names that the page under it holds (PanelHeader). */
+function firstMarked(body: HTMLElement | null, ids: readonly string[] | null): HTMLElement | null {
+  if (!body || !ids) return null;
+  for (const id of ids) {
+    const found = markedControl(body, id);
+    if (found) return found;
+  }
+  return null;
 }
 
 /**
@@ -356,9 +384,14 @@ function findOpener(body: HTMLElement | null, opener: Opener | null): HTMLElemen
  * - On Back, it goes to the control that opened the subpage, found again
  *   on the page that mounted anew (findOpener): by its `data-opener` id
  *   (Row's `opener`), else by its tag, name and place among its
- *   namesakes. When it is gone, focus goes to the title, or where the
- *   header goes with the subpage (the desktop side panel's), to
- *   `fallback`: something that stays, such as the panel's chosen tab.
+ *   namesakes. When it is gone, or none was pressed, it goes to the first
+ *   control the subpage's `backTo` names. With none of them, focus goes
+ *   to the title, or where the header goes with the subpage (the desktop
+ *   side panel's), to `fallback`: something that stays, such as the
+ *   panel's chosen tab.
+ * - From one subpage to another, it goes to the title, unless the subpage
+ *   that closed names a control on the new one in its `backTo`: a form
+ *   going back to the page it was opened from.
  *
  * Focus moves only when it was in the panel or lost to the page, so a
  * change made elsewhere never takes focus from where the person is.
@@ -377,6 +410,8 @@ export function useSubpageFocus(
   const lastFocus = useRef<Opener | null>(null);
   const opener = useRef<Opener | null>(null);
   const shown = useRef<string | null>(null);
+  /** The shown subpage's `backTo`, kept as it closes. */
+  const backTo = useRef<readonly string[] | null>(null);
   const { title, body, root, fallback } = refs;
 
   /*
@@ -425,15 +460,19 @@ export function useSubpageFocus(
      * row was pressed, when that row is there again.
      */
     const scroller = body.current;
+    const closing = backTo.current;
     let target: HTMLElement | null;
     let back: HTMLElement | null = null;
     if (key !== null) {
       if (was === null) opener.current = pressed;
-      target = title.current;
       if (scroller) scroller.scrollTop = 0;
+      // Brought into view below, as Back's row is.
+      if (was !== null) back = firstMarked(scroller, closing);
+      target = back ?? title.current;
     } else {
-      back = findOpener(scroller, opener.current);
-      if (back && scroller && opener.current) scroller.scrollTop = opener.current.top;
+      const found = findOpener(scroller, opener.current);
+      if (found && scroller && opener.current) scroller.scrollTop = opener.current.top;
+      back = found ?? firstMarked(scroller, closing);
       // A header drawn only for a subpage is gone with it, and its title with it.
       target = back ?? (title.current?.isConnected ? title.current : null) ?? fallback?.current ?? null;
       opener.current = null;
@@ -465,6 +504,12 @@ export function useSubpageFocus(
     const view = scroller.getBoundingClientRect();
     if (row.top < view.top || row.bottom > view.bottom) back.scrollIntoView({ block: "nearest" });
   }, [key, title, body, root, fallback]);
+
+  // After the move above, which reads the closing subpage's list before this keeps the new one's.
+  const named = subpage?.backTo ?? null;
+  useLayoutEffect(() => {
+    backTo.current = named;
+  }, [named]);
 }
 
 /**

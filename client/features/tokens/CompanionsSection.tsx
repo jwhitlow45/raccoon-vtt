@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Character, CompanionTurn, CreatureSize, Token } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
+import { SIX_SIZES } from "#shared/rules/resize.ts";
 import type { ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Spinner } from "../../components/Loading.tsx";
-import { GROUP_BOX, GROUP_FOLD, Group, Help, Section as PanelSection } from "../../components/Panel.tsx";
+import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
@@ -27,7 +28,6 @@ import { useRoomScope } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import type { TokenAccess } from "./access.ts";
-import { SIZE_OPTIONS } from "./CharacterCard.tsx";
 import { ChooseBlockDialog } from "./CompanionBlocks.tsx";
 import { characterBlocks, fromTheBlock, srdTitle, whose, type PickerRow } from "./companionBlocks.ts";
 import {
@@ -51,6 +51,7 @@ import {
   type CompanionDraft,
   type CompanionWhat,
 } from "./companions.ts";
+import { SIZE_WORDS } from "./resize.ts";
 import { FieldRow, NumberField, Select } from "./ui.tsx";
 
 /**
@@ -61,6 +62,9 @@ import { FieldRow, NumberField, Select } from "./ui.tsx";
  * settings. Every change of what a companion is waits for the server
  * (shared/reads.ts), so each control shows busy until it answers.
  */
+
+// A companion's size is one of the six, never Custom, which only the DM sets on a token.
+const SIZE_OPTIONS = SIX_SIZES.map((value) => ({ value, label: SIZE_WORDS[value] }));
 
 const WHAT_OPTIONS: { value: CompanionWhat; label: string }[] = [
   { value: "creature", label: "A creature" },
@@ -83,13 +87,13 @@ function CompanionPortrait(props: { token: Token; size: number }) {
 }
 
 /**
- * The Companions section of a character's open card, after "Place my
- * token" and before the card itself: in play a player opens their card
- * more often for companions than to edit stats. It lists the companions on
- * the scene this device holds, each a button that shows it on the map with
- * its bar, as a party bar tap does.
+ * The Companions group of a character's page, after Combat: in play a
+ * player opens the page more often for companions than to edit stats
+ * (docs/design-v1-combat-flow.md 3.7.5). It lists the companions on the
+ * scene this device holds, each a button that shows it on the map with
+ * its bar, as a party bar tap does. Folded, it names them.
  */
-export function CharacterCompanions(props: { character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void }) {
+export function CharacterCompanions(props: { character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void; group: { open: boolean; onToggle(): void } }) {
   const tokens = useRoomView((s) => s.view?.tokens);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const monsters = useRoomView((s) => s.view?.monsters);
@@ -118,7 +122,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
     });
   };
   return (
-    <PanelSection label="Companions" divider={false}>
+    <Group label="Companions" {...props.group} summary={list.length > 0 ? list.map(displayName).join(", ") : "None yet"}>
       {list.length > 0 ? (
         <RowList label={`${props.character.name}'s companions`}>
           {list.map((t) => (
@@ -147,7 +151,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
           ) : null}
         </div>
       ) : null}
-    </PanelSection>
+    </Group>
   );
 }
 
@@ -319,7 +323,7 @@ export function CompanionForm(props: {
       </TurnField>
       <Help>{chosen.help}</Help>
       <FieldRow label="Size">
-        <Select<CreatureSize> label="Size" value={draft.size} options={SIZE_OPTIONS.filter((o) => o.value !== "custom")} onChange={(size) => set({ size })} />
+        <Select<CreatureSize> label="Size" value={draft.size} options={SIZE_OPTIONS} onChange={(size) => set({ size })} />
       </FieldRow>
       {draft.what === "creature" ? (
         <>

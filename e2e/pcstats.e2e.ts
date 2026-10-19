@@ -355,6 +355,40 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     assert.equal(await bar(cy).getByRole("button", { name: "Stat block" }).count(), 0);
   });
 
+  test("2b. lp1-page-a: at 390 x 844 Ana lands on Bree's page, whose folded Stat block row says Level 5, PB +3 and lines up with Combat's, as in the token panel", async () => {
+    await ana.setViewportSize({ width: 390, height: 844 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+    const labelX = async (scope: Locator, name: string) => (await scope.locator("[data-panel-group] h3 span[id]", { hasText: new RegExp(`^${name}$`) }).boundingBox())!.x;
+    // The token panel's labels first, for the page to match.
+    await tapCell(ana, BOUNDS, { x: 5, y: 5 });
+    await ana.getByRole("button", { name: "Panels" }).click();
+    await ana.getByRole("button", { name: "Token", exact: true }).click();
+    const token = ana.getByRole("region", { name: "Token", exact: true });
+    await token.getByRole("button", { name: "Stat block", exact: true }).waitFor();
+    const tokenX = await labelX(token, "Stat block");
+    await ana.getByRole("button", { name: "All panels" }).click();
+    await ana.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+    const sheet = ana.getByRole("region", { name: "Characters", exact: true });
+    // Ana plays Bree alone, so the panel lands on Bree's page, its stat block right under the header.
+    await ana.getByRole("button", { name: "Back to Characters" }).waitFor();
+    const fold = sheet.getByRole("button", { name: "Stat block", exact: true });
+    const wasOpen = (await fold.getAttribute("aria-expanded")) === "true";
+    if (wasOpen) await fold.click();
+    await sheet.getByText("Level 5, PB +3", { exact: true }).waitFor();
+    const blockX = await labelX(sheet, "Stat block");
+    assert.ok(Math.abs(blockX - (await labelX(sheet, "Combat"))) <= 1, "the page's Stat block lines up with its Combat");
+    assert.ok(Math.abs(blockX - tokenX) <= 1, `the page's Stat block lines up with the token panel's: ${blockX} and ${tokenX}`);
+    await shots.take(ana, "pcstats-lp1-page-390");
+    // The fold is this device's, which the steps after read open on a computer.
+    if (wasOpen) await fold.click();
+    await ana.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+  });
+
   test("3. a level change moves every proficient number", async () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Edit", exact: true }).click();

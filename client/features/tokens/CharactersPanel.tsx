@@ -1,8 +1,7 @@
-import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
-import type { Character, CreatureSize, Member, RoomState } from "#shared/model.ts";
-import { playsAlone } from "#shared/permissions.ts";
-import type { TokenInput } from "#shared/protocol.ts";
-import type { PanelProps } from "../panels.ts";
+import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
+import { useStore } from "zustand";
+import type { Character, CreatureSize, Member } from "#shared/model.ts";
+import { usePanelHeader, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -14,40 +13,45 @@ import { handFocusNow, pressedControl } from "../../lib/handFocus.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { hpDisplay, hpText, initials } from "../../lib/tokenView.ts";
-import { currentStageCamera } from "../scenes/stageCamera.ts";
-import { useRoomScope, type RoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { dispatchGesture } from "../../state/actions.ts";
+import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { useAnyPending } from "../encounter/hooks.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
-import { placeOnGround } from "../movement/ground.ts";
 import { ownsCharacter } from "./access.ts";
-import { CharacterCard, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { deleteWarning, sharedNote } from "./characterDelete.ts";
+import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
+import { characterPageSlot, pageBackTo, shownPage } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
-import { CharacterCompanions, CompanionForm } from "./CompanionsSection.tsx";
+import { CompanionForm } from "./CompanionsSection.tsx";
+import { CREATURE_HEADING } from "./CreatureHeader.tsx";
 import { EffectIcon } from "./EffectIcon.tsx";
 import { newCharacter } from "./factory.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
-import { newCharacterState, onScene, playerToken } from "./playerCharacters.ts";
-import { ConfirmButton, NumberField } from "./ui.tsx";
+import { newCharacterState } from "./playerCharacters.ts";
+import { NumberField } from "./ui.tsx";
 
 /**
  * Player characters (features section 15). The DM creates them, picks who
- * plays each one, edits every card and places their tokens. A player sees
- * and edits their own card, and the rest of the party as the projection
+ * plays each one, edits every character and places their tokens. A player
+ * sees and edits their own, and the rest of the party as the projection
  * shows them: name, conditions and the HP the DM allows. When the room
  * lets players create characters, a player also makes their own (theirs
  * alone, a few at most) and puts their tokens on the players' scene. A
  * player deletes a character they play alone, whoever made it.
+ *
+ * A character's row opens its page (docs/design-v1-look-pass.md 3.1), the
+ * panel's subpage, named by the character with "Back to Characters" in the
+ * sheet's or side panel's header (usePanelHeader). Which page is open lives
+ * in the Room's scope (characterPage.ts), so a companion's link in the
+ * token panel can open its character's page here.
  */
 export default function CharactersPanel(props: PanelProps) {
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.view);
   const characters = useRoomView((s) => s.view?.characters);
-  /** Undefined until the first tap: a player with one character sees that card open. */
-  const [openId, setOpenId] = useState<string | null | undefined>(undefined);
+  const pageStore = useScoped(characterPageSlot);
+  const picked = useStore(pageStore, (s) => s.characterId);
   const [creating, setCreating] = useState(false);
   /** The character whose "Add a companion" form shows in the panel's place. */
   const [addingFor, setAddingFor] = useState<string | null>(null);
@@ -61,14 +65,20 @@ export default function CharactersPanel(props: PanelProps) {
   );
   const mine = list.filter((c) => dm || ownsCharacter(you?.memberId, c));
   const others = dm ? [] : list.filter((c) => !ownsCharacter(you?.memberId, c));
-  const open = openId === undefined ? (!dm && mine.length === 1 ? (mine[0]?.id ?? null) : null) : openId;
+  const openId = shownPage(picked, mine, dm);
+  const page = openId !== null ? mine.find((c) => c.id === openId) : undefined;
+  const openPage = (characterId: string | null) => pageStore.setState({ characterId });
+  // A page a player landed on stays theirs to leave by Back, even once a second character arrives.
+  useEffect(() => {
+    if (picked === undefined && openId !== null) pageStore.setState({ characterId: openId });
+  }, [picked, openId, pageStore]);
 
   const own = !dm && view && you ? newCharacterState(view, you.memberId) : null;
 
   /*
-   * A form opened from the list takes the panel's place, and its opener
-   * goes with the list. Closed, the form hands focus back to the opener
-   * once the list is drawn again, while the panel is in sight.
+   * A form opened from a page takes the panel's place, and its opener goes
+   * with the page. Closed, the form hands focus back to the opener once the
+   * page is drawn again, while the panel is in sight.
    */
   const root = useRef<HTMLDivElement>(null);
   const returnTo = useRef<string | null>(null);
@@ -79,7 +89,26 @@ export default function CharactersPanel(props: PanelProps) {
     if (props.shown) root.current.querySelector<HTMLElement>(opener)?.focus();
   });
 
-  const remove = useDeleteHandOff(root, mine);
+  const remove = useDeleteHandOff(root, mine, (characterId) => {
+    // A page whose character went shows the list from now on, so the id never comes back to a later page.
+    if (pageStore.getState().characterId === characterId) openPage(null);
+  });
+
+  usePanelHeader(
+    page
+      ? {
+          title: page.name,
+          parent: "Characters",
+          id: `character:${page.id}`,
+          backTo: pageBackTo(page.id, mine),
+          onBack: () => {
+            setAddingFor(null);
+            setBlocksFor(null);
+            openPage(null);
+          },
+        }
+      : null,
+  );
 
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   if (companionOf) {
@@ -119,9 +148,17 @@ export default function CharactersPanel(props: PanelProps) {
         onDone={(id) => {
           returnTo.current = '[data-opener="new-character"]';
           setCreating(false);
-          if (id) setOpenId(id);
+          if (id) openPage(id);
         }}
       />
+    );
+  }
+
+  if (page) {
+    return (
+      <div ref={root}>
+        <CharacterPage character={page} close={props.close} onAddCompanion={() => setAddingFor(page.id)} onBlocks={() => setBlocksFor(page.id)} onDelete={() => remove(page.id)} />
+      </div>
     );
   }
 
@@ -134,8 +171,8 @@ export default function CharactersPanel(props: PanelProps) {
       ) : null}
       {own && !own.allowed && own.reason === "full" ? <Help>You have as many characters as a player can make. Ask the DM for another.</Help> : null}
       {mine.length === 0 ? (
-        // Focusable from script alone: where focus goes when the last character is deleted and there is no New character.
-        <div data-characters-empty="" tabIndex={-1}>
+        // Focusable from script alone: where focus goes when the last character is deleted and there is no New character (characterPage.ts pageBackTo).
+        <div data-opener="characters-empty" tabIndex={-1}>
           <Empty>
             {dm
               ? "The party's characters go here. Make one with New character, and pick who plays it."
@@ -146,16 +183,7 @@ export default function CharactersPanel(props: PanelProps) {
         </div>
       ) : null}
       {mine.map((c) => (
-        <CharacterRow
-          key={c.id}
-          character={c}
-          open={open === c.id}
-          onToggle={() => setOpenId(open === c.id ? null : c.id)}
-          close={props.close}
-          onAddCompanion={() => setAddingFor(c.id)}
-          onBlocks={() => setBlocksFor(c.id)}
-          onDelete={() => remove(c.id)}
-        />
+        <CharacterRow key={c.id} character={c} onOpen={() => openPage(c.id)} />
       ))}
       {/* A long rest comes once a day and the list is read every time, so the rest waits below it (docs/design-v1-layout-hierarchy.md M8). */}
       {dm && list.length > 0 ? <PartyLongRest characters={list} /> : null}
@@ -174,60 +202,49 @@ export default function CharactersPanel(props: PanelProps) {
 
 /** A delete under way, for the focus hand-off once it settles (useDeleteHandOff). */
 type Leaving = {
-  /** The character's own row, where focus goes back when the delete is refused. */
-  own: string;
+  characterId: string;
   /** What had focus at the press, or null when nothing did and so nothing can be lost. */
   pressed: ReturnType<typeof pressedControl>;
-  /** Where focus may go, the first found: the character's row, its neighbors, New character, the empty list's line. */
-  to: string[];
-  settled: boolean;
-  /** Where the hand-off put focus, once it has. */
-  movedTo: unknown;
+  /** The server's answer, once it came. */
+  answer: OpAnswer | null;
 };
 
 /**
- * Sends a character's delete and moves focus on once its card, Delete and
- * all, goes with it: to the next character, else the one before, else New
- * character, else the empty list's line. A refusal that takes the card's
- * Delete away (the DM shared the character meanwhile) leaves the row, and
- * focus goes to it.
+ * Sends a character's delete, which waits for the server, and looks after
+ * focus once it settles, however long an offline delete waits.
  *
- * The hand-off follows the op, not a clock: it looks again each time the
- * list is drawn, and once more when the op settles, however long an
- * offline delete waits. A delete this device predicts removes the row at
- * once, and a refusal brings it back, so focus the hand-off put on a
- * neighbor returns to the row then. It moves focus only when it fell to
- * the page, never from where the person put it meanwhile
- * (lib/handFocus.ts handFocusNow).
+ * Taken, the character's page goes with it, and Back's focus goes to the
+ * next character's row, else the one before, else New character: the
+ * page's header names them (characterPage.ts pageBackTo), since its own row
+ * is gone. A delete this device predicts goes at once, and a refusal brings
+ * the character and its page back, with focus on its heading as any page
+ * that opens.
+ *
+ * Refused while the page stays, as when the DM shared the character
+ * meanwhile, the refusal can take Delete away, and focus goes to the page's
+ * heading. It moves only when focus fell to the page, never from where the
+ * person put it meanwhile (lib/handFocus.ts handFocusNow).
  */
-function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly Character[]): (characterId: string) => number | null {
+function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly Character[], onTaken: (characterId: string) => void): (characterId: string) => number | null {
   const actions = useRoomActions();
   const leaving = useRef<Leaving | null>(null);
   const [, settled] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     const l = leaving.current;
-    const scope = root.current;
-    if (!l || !scope) return;
-    if (l.movedTo === null) l.movedTo = handFocusNow(scope, l.pressed, l.to);
-    else if (l.settled && scope.ownerDocument.activeElement === l.movedTo) scope.querySelector<HTMLElement>(l.own)?.focus();
-    if (l.settled) leaving.current = null;
+    if (!l?.answer) return;
+    leaving.current = null;
+    const gone = !mine.some((c) => c.id === l.characterId);
+    // An unknown answer, settled by a reconnect's snapshot, is read from what the view now holds. A refusal of a predicted delete brings the page back.
+    if (l.answer === "taken" || (l.answer === "unknown" && gone)) onTaken(l.characterId);
+    else if (!gone) handFocusNow(root.current, l.pressed, [CREATURE_HEADING, `[data-opener="character:${l.characterId}"]`]);
   });
   return (characterId) => {
-    const at = mine.findIndex((c) => c.id === characterId);
-    const neighbors = [...mine.slice(at + 1), ...mine.slice(0, Math.max(at, 0)).reverse()];
-    const own = `[data-opener="character:${characterId}"]`;
-    const l: Leaving = {
-      own,
-      pressed: pressedControl(),
-      to: [own, ...neighbors.map((c) => `[data-opener="character:${c.id}"]`), '[data-opener="new-character"]', "[data-characters-empty]"],
-      settled: false,
-      movedTo: null,
-    };
+    const l: Leaving = { characterId, pressed: pressedControl(), answer: null };
     const n = actions.dispatch(
       { t: "character.delete", characterId },
       {
-        onAnswer: () => {
-          l.settled = true;
+        onAnswer: (answer) => {
+          l.answer = answer;
           settled();
         },
       },
@@ -296,137 +313,25 @@ export function Portrait(props: { character: Pick<Character, "name" | "defaultIm
   return <ImagePreview image={character.defaultImage} shape="circle" aspect={1} width={size} ring={theme.color.ally} initials={initials(character.name)} />;
 }
 
-function CharacterRow(props: { character: Character; open: boolean; onToggle(): void; close(): void; onAddCompanion(): void; onBlocks(): void; onDelete(): number | null }) {
+/** A character's row: it opens the character's page, so it ends in a chevron right. */
+function CharacterRow(props: { character: Character; onOpen(): void }) {
   const { character } = props;
   const members = useRoomView((s) => s.view?.members);
   const role = useRoomView((s) => s.you?.role);
-  const memberId = useRoomView((s) => s.you?.memberId);
-  const ui = useRoomUi();
-  const scope = useRoomScope();
   const hp = hpDisplay({ actor: character.actor, hpVisibility: undefined, fullAccess: true });
   const players = (character.ownerIds ?? []).map((id) => members?.[id]?.name).filter(Boolean).join(", ");
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
-      {/* A disclosure that opens the character's card under it. */}
-      <Row
-        expanded={props.open}
-        onClick={props.onToggle}
-        opener={`character:${character.id}`}
-        leading={<Portrait character={character} size={32} />}
-        title={character.name}
-        detail={[hpText(hp) ? `HP ${hpText(hp)}` : null, players ? `played by ${players}` : role === "dm" ? "no player yet" : null].filter(Boolean).join(" · ")}
-        trailing={<Icon name={props.open ? "chevronDown" : "chevronRight"} style={{ color: theme.color.textMuted }} />}
-      />
-      {props.open ? (
-        <div style={{ padding: `0 ${theme.space(1)}px ${theme.space(2)}px` }}>
-          {role === "dm" ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), paddingBottom: theme.space(2) }}>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setPending(scope, { kind: "character", characterId: character.id, name: character.name });
-                  ui.setTool(PLACE_TOOL_ID);
-                  props.close();
-                }}
-              >
-                Place a token
-              </Button>
-            </div>
-          ) : (
-            <PlaceMine character={character} close={props.close} />
-          )}
-          {/* Before the card: in play a player opens their card for companions more often than to edit stats (docs/design-v1-combat-flow.md 3.7.5). */}
-          <CharacterCompanions character={character} canAdd onAdd={props.onAddCompanion} onBlocks={props.onBlocks} close={props.close} />
-          <CharacterCard character={character} />
-          {role === "dm" || (memberId !== undefined && playsAlone(memberId, character)) ? (
-            <RemoveCharacter character={character} dm={role === "dm"} onDelete={props.onDelete} />
-          ) : memberId !== undefined && members ? (
-            <Section label="Remove">
-              {/* The name may be one unbroken word as long as the protocol allows, so it breaks anywhere, as the delete line does. */}
-              <Help style={{ overflowWrap: "anywhere" }}>{sharedNote(memberId, character, members)}</Help>
-            </Section>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    <Row
+      onClick={props.onOpen}
+      opener={`character:${character.id}`}
+      leading={<Portrait character={character} size={32} />}
+      title={character.name}
+      detail={[hpText(hp) ? `HP ${hpText(hp)}` : null, players ? `played by ${players}` : role === "dm" ? "no player yet" : null].filter(Boolean).join(" · ")}
+      trailing={<Icon name="chevronRight" style={{ color: theme.color.textMuted }} />}
+    />
   );
 }
 
-/**
- * Delete at the foot of a character's card: the DM's for every character,
- * and a player's for one they play alone. The line above it says what goes
- * with it, and is the button's description in both of its states. The
- * delete waits for the server, since only it holds every token of the
- * character on every scene, so the button is busy until the answer, and a
- * refusal is the store's toast. A player's delete is on no undo stack
- * (shared/permissions.ts playsAlone), so their line says it cannot be
- * undone, in the warning tone.
- */
-function RemoveCharacter(props: { character: Character; dm: boolean; onDelete(): number | null }) {
-  const { character } = props;
-  const tokens = useRoomView((s) => s.view?.tokens);
-  const encounter = useRoomView((s) => s.view?.encounter ?? null);
-  const [sent, setSent] = useState<number | null>(null);
-  const waiting = useAnyPending(sent === null ? [] : [sent]);
-  const id = useId();
-  const warning = deleteWarning({ tokens: tokens ?? {}, encounter }, character, props.dm);
-  // A long name breaks anywhere, as the button's label does.
-  const wraps = { overflowWrap: "anywhere" } as const;
-  return (
-    <Section label="Remove">
-      {props.dm ? (
-        <Help id={id} style={wraps}>
-          {warning}
-        </Help>
-      ) : (
-        <Note id={id} style={wraps}>
-          {warning}
-        </Note>
-      )}
-      <ConfirmButton confirm="Tap again to delete" busy={waiting} describedBy={id} wrap onConfirm={() => setSent(props.onDelete())}>
-        {waiting ? "Deleting…" : `Delete ${character.name}`}
-      </ConfirmButton>
-    </Section>
-  );
-}
-
-/** The token a player puts down for a character of theirs: in the middle of the map they are looking at. */
-function myToken(scope: RoomScope, input: Omit<Parameters<typeof playerToken>[0], "center"> & { view: Pick<RoomState, "buildChunks"> }): TokenInput | null {
-  const live = currentStageCamera(scope);
-  const center = live
-    ? { x: (live.viewport.width / 2 - live.camera.x) / live.camera.scale, y: (live.viewport.height / 2 - live.camera.y) / live.camera.scale }
-    : { x: input.scene.bounds.w / 2, y: input.scene.bounds.h / 2 };
-  const token = playerToken({ ...input, center });
-  return token && placeOnGround(input.view.buildChunks, token);
-}
-
-/** "Place my token" for a player's own character, when the room lets players place them. */
-function PlaceMine(props: { character: Character; close(): void }) {
-  const { character } = props;
-  const view = useRoomView((s) => s.view);
-  const you = useRoomView((s) => s.you);
-  const actions = useRoomActions();
-  const ui = useRoomUi();
-  const scope = useRoomScope();
-  const scene = view?.meta.playerSceneId ? view.scenes[view.meta.playerSceneId] : undefined;
-  if (!view || !you || !scene || view.meta.settings.playersCreateCharacters !== true) return null;
-  if (onScene(view, character.id, scene.id)) return <Help style={{ paddingBottom: theme.space(2), overflowWrap: "anywhere" }}>{character.name} is on the map.</Help>;
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), paddingBottom: theme.space(2) }}>
-      <Button
-        size="sm"
-        onClick={() => {
-          const token = myToken(scope, { view, scene, character, memberId: you.memberId, id: actions.newId() });
-          if (!token || actions.dispatch({ t: "token.create", token }) === null) return;
-          ui.select(token.id);
-          props.close();
-        }}
-      >
-        Place my token
-      </Button>
-    </div>
-  );
-}
 
 /** Another player's character, as far as this player's projection shows it. */
 function PartyRow(props: { character: Character }) {

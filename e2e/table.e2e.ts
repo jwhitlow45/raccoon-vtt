@@ -75,7 +75,12 @@ function portrait(rgb: [number, number, number]): Promise<Buffer> {
 async function openPanel(page: Page, name: string): Promise<void> {
   const all = page.getByRole("button", { name: "All panels" });
   if (await all.isVisible()) await all.tap();
-  else await page.getByRole("button", { name: "Panels", exact: true }).tap();
+  else {
+    // A sheet on a subpage, such as the page a new character opens on, has Back where All panels was, and Panels would only close it.
+    const close = page.locator("dialog[data-rvtt-sheet]").getByRole("button", { name: /^Close / }).filter({ visible: true });
+    if ((await close.count()) > 0) await close.first().tap();
+    await page.getByRole("button", { name: "Panels", exact: true }).tap();
+  }
   await page.getByRole("button", { name, exact: true }).tap();
 }
 

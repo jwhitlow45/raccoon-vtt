@@ -867,20 +867,22 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await dm.keyboard.press("Escape");
   });
 
-  test("3c. a character's card folded while a changed field holds focus keeps what was typed", async () => {
+  test("3c. a character's page left by Back while a changed field holds focus keeps what was typed", async () => {
     await openSideTab(dm, "Characters");
     const list = dm.getByRole("tabpanel", { name: "Characters" });
-    const card = list.getByRole("button", { name: /^Thorn/ }).and(list.locator("[aria-expanded]"));
-    await card.click();
+    const row = list.locator(`[data-opener="character:${run.thorn.characterId}"]`);
+    await row.click();
+    // The level is setup, in the page's Stats group (docs/design-v1-look-pass.md 3.1).
+    const stats = list.getByRole("button", { name: "Stats", exact: true });
+    if ((await stats.getAttribute("aria-expanded")) !== "true") await stats.click();
     const level = list.getByRole("textbox", { name: "Character level", exact: true });
     await level.click();
     await level.fill("5");
-    await card.dispatchEvent("click");
+    await dm.getByRole("button", { name: "Back to Characters" }).dispatchEvent("click");
     await level.waitFor({ state: "detached" });
-    await waitFor("the level typed before the card folded", () => dmSocket.state?.characters[run.thorn.characterId]?.level === 5);
-    assert.equal(await card.getAttribute("aria-expanded"), "false");
+    await waitFor("the level typed before the page closed", () => dmSocket.state?.characters[run.thorn.characterId]?.level === 5);
     const after = await focused(dm);
-    assert.ok(after.expanded === "false" && after.name.includes("Thorn"), `focus stays on the card's row, not ${JSON.stringify(after)}`);
+    assert.ok(after.name.includes("Thorn"), `focus goes back to the character's row, not ${JSON.stringify(after)}`);
     await dm.getByRole("tab", { name: "Initiative" }).click();
   });
 
@@ -1779,8 +1781,10 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
     await player.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
     const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
-    const opener = sheet.locator(`[data-opener="character:${run.thorn.characterId}"]`);
-    if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+    // A player with one character lands on its page, where the picture's buttons are in the Image group.
+    await sheet.locator("[data-creature-heading]").filter({ hasText: "Thorn" }).waitFor();
+    const imageGroup = sheet.getByRole("button", { name: "Image", exact: true });
+    if ((await imageGroup.getAttribute("aria-expanded")) !== "true") await imageGroup.click();
     await sheet.getByRole("button", { name: /^(Add|Change) image$/ }).first().click();
     const picker = player.getByRole("dialog", { name: "Choose an image" });
     await picker.getByRole("tab", { name: "Starter", exact: true }).click();

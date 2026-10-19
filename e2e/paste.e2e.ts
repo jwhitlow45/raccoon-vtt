@@ -426,15 +426,17 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     });
   });
 
-  /** Thorn's card in the phone's Characters sheet, and its image button. */
+  /** Thorn's page in the phone's Characters sheet, and its image button. */
   async function thornsPicker(): Promise<Locator> {
     const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
     if (!(await sheet.isVisible())) {
       await player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
       await player.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
     }
-    const opener = sheet.locator(`[data-opener="character:${run.thorn.characterId}"]`);
-    if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+    // A player with one character lands on its page, where the picture's buttons are in the Image group.
+    await sheet.locator("[data-creature-heading]").filter({ hasText: "Thorn" }).waitFor();
+    const image = sheet.getByRole("button", { name: "Image", exact: true });
+    if ((await image.getAttribute("aria-expanded")) !== "true") await image.click();
     await sheet.getByRole("button", { name: /^(Add|Change) image$/ }).first().click();
     const picker = player.getByRole("dialog", { name: "Choose an image" });
     await picker.waitFor();

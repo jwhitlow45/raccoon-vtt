@@ -1,12 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { hpLess } from "#shared/rules/hp.ts";
 import type { Actor } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
-import { Icon } from "../../components/Icon.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { validSheetUrl } from "./statSummary.ts";
-import { FieldRow, Note, NumberField, Section, Stepper, TextField } from "./ui.tsx";
+import { FieldRow, Note, NumberField, Stepper, TextField } from "./ui.tsx";
 
 /**
  * The light stat card (features section 15): AC, speeds, initiative,
@@ -22,47 +20,6 @@ const SPEED_KEYS = ["walk", "fly", "swim", "climb", "burrow"] as const;
 const SPEED_LABELS: Record<(typeof SPEED_KEYS)[number], string> = { walk: "Walk", fly: "Fly", swim: "Swim", climb: "Climb", burrow: "Burrow" };
 
 export { validSheetUrl } from "./statSummary.ts";
-
-/**
- * The card whole, for a character's card in the Characters panel: Stats,
- * the sheet link and the notes. The token panel places the same parts
- * apart (docs/design-v1-token-panel.md 3.8): the fields folded at its
- * foot, the link in its summary, and the notes with the token's own.
- */
-export function StatsSection(props: {
-  actor: Partial<Actor>;
-  canEdit(field: keyof ActorPatch): boolean;
-  onPatch(patch: ActorPatch): void;
-  dm: boolean;
-  /** Owners see their notes. Others see nothing of the card beyond the public view. */
-  full: boolean;
-  /** The notes' heading. */
-  notesTitle?: string;
-  /** Whether the DM's notes show here. */
-  dmNotes?: boolean;
-  /** A character whose stat block gives its initiative and Passive Perception (StatsFields). */
-  fromBlock?: boolean;
-}) {
-  const { actor, canEdit, onPatch, dm } = props;
-  if (!props.full) return null;
-  return (
-    <>
-      <Section title="Stats">
-        <StatsFields actor={actor} canEdit={canEdit} onPatch={onPatch} dm={dm} noAc={hpLess(actor)} fromBlock={props.fromBlock} />
-      </Section>
-      <SheetLink actor={actor} editable={canEdit("sheetUrl")} onPatch={onPatch} />
-      <Section title={props.notesTitle ?? "Notes"}>
-        <CardNotesField actor={actor} editable={canEdit("notes")} onPatch={onPatch} />
-        {dm && props.dmNotes !== false ? (
-          <>
-            <Note>DM notes, never sent to players</Note>
-            <TextField label="DM notes" multiline value={actor.dmNotes ?? ""} maxLength={4000} placeholder="Only DMs see these" onCommit={(v) => onPatch({ dmNotes: v })} />
-          </>
-        ) : null}
-      </Section>
-    </>
-  );
-}
 
 /** The card's notes, which the DM and the card's owners read: a field where the viewer may write them, else the text. */
 export function CardNotesField(props: { actor: Partial<Actor>; editable: boolean; onPatch(patch: ActorPatch): void; label?: string; rows?: number }) {
@@ -253,37 +210,6 @@ function LegendaryFields(props: { actor: Partial<Actor>; onPatch(patch: ActorPat
         </FieldRow>
       ) : null}
     </>
-  );
-}
-
-/** The owner's D&D Beyond sheet (features 15). Opened in a new tab with no referrer and no opener. */
-function SheetLink(props: { actor: Partial<Actor>; editable: boolean; onPatch(patch: ActorPatch): void }) {
-  const url = props.actor.sheetUrl && validSheetUrl(props.actor.sheetUrl);
-  if (!props.editable && !url) return null;
-  return (
-    <Section title="Character sheet">
-      {url ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          referrerPolicy="no-referrer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: theme.space(1),
-            minHeight: theme.touch,
-            color: theme.color.accent,
-            fontWeight: theme.weight.strong,
-            overflowWrap: "anywhere",
-          }}
-        >
-          Open the sheet
-          <Icon name="external" size="sm" />
-        </a>
-      ) : null}
-      {props.editable ? <SheetUrlField value={props.actor.sheetUrl ?? ""} onPatch={props.onPatch} /> : null}
-    </Section>
   );
 }
 

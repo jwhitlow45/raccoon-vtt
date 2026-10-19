@@ -5,6 +5,9 @@ import { theme } from "../../lib/theme.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import type { KindLine } from "./creatureKind.ts";
 
+/** A character's page's name, found by the focus that lands there. */
+export const CREATURE_HEADING = "[data-creature-heading]";
+
 /** A creature's picture as its header draws it: the image or initials, in its shape, ringed in its disposition's color. */
 export type CreaturePicture = {
   image: ImageRef | null | undefined;
@@ -26,7 +29,18 @@ export type CreaturePicture = {
  * The pictures are decoration: the name and the kind line say who it is,
  * and changing the picture is the Image group's.
  */
-export function CreatureHeader(props: { picture: CreaturePicture; badge?: Omit<CreaturePicture, "shape" | "aspect" | "ring"> | null; name: string; line: KindLine; tags: readonly string[]; children?: ReactNode }) {
+export function CreatureHeader(props: {
+  picture: CreaturePicture;
+  badge?: Omit<CreaturePicture, "shape" | "aspect" | "ring"> | null;
+  name: string;
+  line: KindLine;
+  /** Opens the companion's character's page, for a viewer who may open it. Without it "Companion of Thorn" is text. */
+  onCompanionOf?: (() => void) | null;
+  /** The name takes focus from script, as a character's page's heading does after a delete it refused (CREATURE_HEADING). */
+  focusable?: boolean;
+  tags: readonly string[];
+  children?: ReactNode;
+}) {
   const { picture, badge, line } = props;
   return (
     // The picture beside the name, then one column no wider than the panel, so a tag too long for it is cut rather than widening the column.
@@ -41,11 +55,16 @@ export function CreatureHeader(props: { picture: CreaturePicture; badge?: Omit<C
         ) : null}
       </span>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
-        <h3 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{props.name}</h3>
+        <h3
+          {...(props.focusable ? { tabIndex: -1, "data-creature-heading": "" } : {})}
+          style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}
+        >
+          {props.name}
+        </h3>
         {/* A companion's character's name may be one unbroken word as long as a name may be, so the line breaks anywhere. */}
         <p data-kind-line="" style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
           {/* "Companion of Thorn" is always its own element with exactly those words, which the tracker's row repeats. */}
-          {line.companionOf !== undefined ? <span>{line.kind}</span> : line.kind}
+          {line.companionOf === undefined ? line.kind : props.onCompanionOf ? <CompanionOfLink onClick={props.onCompanionOf}>{line.kind}</CompanionOfLink> : <span>{line.kind}</span>}
           {` · ${line.size}`}
         </p>
         {props.tags.length > 0 ? (
@@ -60,5 +79,37 @@ export function CreatureHeader(props: { picture: CreaturePicture; badge?: Omit<C
         {props.children}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Companion of Thorn" where it opens Thorn's page: a quiet link, in the
+ * line's own size and the text color with a line under it. Its press
+ * reaches the touch size above and below the line without making the line
+ * taller.
+ */
+function CompanionOfLink(props: { onClick(): void; children: ReactNode }) {
+  const reach = (theme.touch - 20) / 2;
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      style={{
+        display: "inline",
+        margin: `${-reach}px 0`,
+        padding: `${reach}px 0`,
+        background: "transparent",
+        border: "none",
+        color: theme.color.text,
+        font: "inherit",
+        textAlign: "left",
+        textDecoration: "underline",
+        textUnderlineOffset: 2,
+        overflowWrap: "anywhere",
+        cursor: "pointer",
+      }}
+    >
+      {props.children}
+    </button>
   );
 }

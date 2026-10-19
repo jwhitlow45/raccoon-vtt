@@ -6,16 +6,40 @@ import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { layoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 
+/**
+ * A character's page's own folds (docs/design-v1-look-pass.md 3.1). A fold
+ * key names no creature, and a DM is the `own` viewer of every monster, so
+ * a page sharing the token panel's Combat would fold Combat on every
+ * monster in the next fight. Only the stat block's fold is shared, the
+ * `own` relation's `statBlock`, so a character's block opens or folds
+ * alike in both places.
+ */
+export const PAGE_FOLD_KEYS = ["page.combat", "page.companions", "page.notes", "page.image", "page.stats", "page.owners"] as const;
+
 /*
  * The token panel's folds (docs/design-v1-token-panel.md 3.5 and
- * docs/design-v1-token-panel-groups.md 5): which of its sections and
- * groups show open, as this device last left them,
+ * docs/design-v1-token-panel-groups.md 5), and a character's page's:
+ * which of their sections and groups show open, as this device last left them,
  * kept for the Room so a crossing of 900 px, which remounts the panel in
  * the other tree, never refolds anything. Plain functions and slots, for
  * node --test.
  */
 
-export const FOLD_KEYS = ["statBlock", "stats", "settings", "companion", "owners", "combat", "notes", "position", "image", "other.statBlock", "other.combat", "other.notes"] as const;
+export const FOLD_KEYS = [
+  "statBlock",
+  "stats",
+  "settings",
+  "companion",
+  "owners",
+  "combat",
+  "notes",
+  "position",
+  "image",
+  "other.statBlock",
+  "other.combat",
+  "other.notes",
+  ...PAGE_FOLD_KEYS,
+] as const;
 export type FoldKey = (typeof FOLD_KEYS)[number];
 
 /** The folds kept apart by relation (docs/design-v1-token-panel-groups.md 5), so a tap on another creature's Notes never folds the viewer's own. */
@@ -56,6 +80,13 @@ export function foldDefaults(layout: Size): Folds {
     "other.statBlock": wide,
     "other.combat": true,
     "other.notes": true,
+    // A character's page opens on what play changes and on its companions, the reasons to open it, and keeps setup folded.
+    "page.combat": true,
+    "page.companions": true,
+    "page.notes": false,
+    "page.image": false,
+    "page.stats": false,
+    "page.owners": false,
   };
 }
 

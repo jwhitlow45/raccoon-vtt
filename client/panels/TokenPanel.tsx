@@ -12,7 +12,7 @@ import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { RowDot } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
-import type { PanelProps } from "../features/panels.ts";
+import { usePanelHere, type PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
@@ -20,6 +20,7 @@ import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
+import { characterPageSlot } from "../features/tokens/characterPage.ts";
 import { CreatureHeader } from "../features/tokens/CreatureHeader.tsx";
 import { kindLine, sizeText, tokenKind } from "../features/tokens/creatureKind.ts";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
@@ -42,6 +43,7 @@ import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { elevationBadge, initials } from "../lib/tokenView.ts";
 import { dispatchGesture } from "../state/actions.ts";
+import { useRoomScope } from "../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 
 const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
@@ -243,6 +245,18 @@ function TokenDetails(props: PanelProps) {
 function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | undefined; character: Character | undefined; feetPerCell: number; children?: ReactNode }) {
   const { token } = props;
   const keeper = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of] : undefined));
+  const you = useRoomView((s) => s.you);
+  const ui = useRoomUi();
+  const scope = useRoomScope();
+  const here = usePanelHere();
+  // "Companion of Thorn" opens Thorn's page where the viewer has one to open: the DM, and Thorn's players (docs/design-v1-look-pass.md 2.11).
+  const openKeeper =
+    keeper && (you?.role === "dm" || ownsCharacter(you?.memberId, keeper))
+      ? () => {
+          scope.get(characterPageSlot).setState({ characterId: keeper.id });
+          ui.openPanel("characters", here ? { from: here } : undefined);
+        }
+      : null;
   const fp = footprint(token);
   const tags: string[] = [];
   if (token.visibility === "dm") tags.push("Hidden from players");
@@ -255,6 +269,7 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
       badge={keeper ? { image: keeper.defaultImage, initials: initials(keeper.name) } : null}
       name={props.name}
       line={kindLine(kind, sizeText(token.size, fp, props.feetPerCell))}
+      onCompanionOf={openKeeper}
       tags={tags}
     >
       {props.children}

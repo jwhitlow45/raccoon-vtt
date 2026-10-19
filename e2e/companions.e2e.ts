@@ -153,6 +153,8 @@ async function setUp(page: Page, cdp: CDPSession, view: View): Promise<void> {
 /** Opens a panel: from the side panel's tabs from 900 layout px up, else from the Panels sheet's list, as size.e2e.ts does. */
 async function openPanel(page: Page, title: string): Promise<void> {
   if (await page.getByRole("tablist", { name: "Panels" }).isVisible()) return openSideTab(page, title);
+  // Already open: a sheet on a subpage, such as a character's page, has Back where All panels was, and the tool bar's Panels would close it.
+  if (await page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`).isVisible()) return;
   const picker = page.getByRole("list", { name: "Panels" });
   const all = page.getByRole("button", { name: "All panels" });
   if (await picker.isVisible()) {
@@ -182,18 +184,22 @@ async function inReach(page: Page, button: Locator, label: string): Promise<void
   assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= size.width + 1 && box.y + box.height <= size.height + 1, `${label}: out of reach ${JSON.stringify(box)}`);
 }
 
-/** Opens Bree's card in the Characters tab and a companion's bar from its row. */
+/** Opens Bree's page in the Characters tab and a companion's bar from its row. */
 async function showCompanion(page: Page, name: string, characterId: string = run.bree.characterId): Promise<void> {
   await openCard(page, characterId);
   await page.getByRole("button", { name: new RegExp(`^${name}\\. Show it on the map`) }).click();
   await bar(page, name).waitFor();
 }
 
-/** A character's card in the Characters panel, open. One card is open at a time, so this opens it when another is. */
+/** A character's page in the Characters panel, open. One page shows at a time, so from another's this goes Back to Characters first. */
 async function openCard(page: Page, characterId: string): Promise<void> {
   await openPanel(page, "Characters");
   const blocks = page.locator(`[data-opener="blocks:${characterId}"]`);
-  if (!(await blocks.isVisible())) await page.locator(`[data-opener="character:${characterId}"]`).click();
+  if (!(await blocks.isVisible())) {
+    const back = page.getByRole("button", { name: "Back to Characters" });
+    if (await back.isVisible()) await back.click();
+    await page.locator(`[data-opener="character:${characterId}"]`).click();
+  }
   await blocks.waitFor();
 }
 

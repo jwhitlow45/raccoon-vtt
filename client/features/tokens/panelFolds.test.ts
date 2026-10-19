@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { RoomScope } from "../../state/scope.ts";
-import { createPanelFolds, FOLDS_KEY, foldDefaults, overrideAfterSelect, relationKey, resolveFolds, statBlockOpen, statBlockOpenedSlot, writeFold, type Folds } from "./panelFolds.ts";
+import { createPanelFolds, FOLD_KEYS, FOLDS_KEY, foldDefaults, overrideAfterSelect, PAGE_FOLD_KEYS, relationKey, resolveFolds, statBlockOpen, statBlockOpenedSlot, writeFold, type Folds } from "./panelFolds.ts";
 import { openStatBlock } from "./statBlockOpen.ts";
 
 /** A device's localStorage, or one that throws as a private window's or blocked site data's does. */
@@ -26,7 +26,26 @@ function storage(initial: string | null = null, throws = false) {
 
 const NARROW = { width: 899, height: 844 };
 const WIDE = { width: 900, height: 800 };
-const FOLDED: Folds = { statBlock: false, stats: false, settings: false, companion: false, owners: false, combat: true, notes: false, position: false, image: false, "other.statBlock": false, "other.combat": true, "other.notes": true };
+const FOLDED: Folds = {
+  statBlock: false,
+  stats: false,
+  settings: false,
+  companion: false,
+  owners: false,
+  combat: true,
+  notes: false,
+  position: false,
+  image: false,
+  "other.statBlock": false,
+  "other.combat": true,
+  "other.notes": true,
+  "page.combat": true,
+  "page.companions": true,
+  "page.notes": false,
+  "page.image": false,
+  "page.stats": false,
+  "page.owners": false,
+};
 
 describe("the folds' defaults", () => {
   test("the stat block opens at 900 px wide and 600 tall, and folds below either", () => {
@@ -36,10 +55,12 @@ describe("the folds' defaults", () => {
     assert.equal(foldDefaults({ width: 932, height: 430 }).statBlock, false, "a large phone held sideways in the wide layout");
   });
 
-  test("Combat starts open and every other section folded, everywhere, and another creature's Notes open", () => {
+  test("Combat starts open and every other section folded, everywhere, another creature's Notes open, and a character's page's Combat and Companions", () => {
     for (const layout of [NARROW, WIDE]) {
-      const { statBlock, combat, "other.statBlock": otherBlock, "other.combat": otherCombat, "other.notes": otherNotes, ...rest } = foldDefaults(layout);
+      const { statBlock, combat, "other.statBlock": otherBlock, "other.combat": otherCombat, "other.notes": otherNotes, "page.combat": pageCombat, "page.companions": pageCompanions, ...rest } = foldDefaults(layout);
       assert.equal(combat, true);
+      assert.equal(pageCombat, true, "a character's page opens on Combat");
+      assert.equal(pageCompanions, true, "and on its companions");
       assert.equal(otherCombat, true);
       assert.equal(otherNotes, true, "it shows only with the DM's note for everyone, the reason to open it");
       assert.equal(otherBlock, statBlock, "a block folds by the same layout rule for any creature");
@@ -52,7 +73,7 @@ describe("reading the folds", () => {
   test("a valid value, at 899 and 900", () => {
     const value = JSON.stringify({ statBlock: false, stats: true, settings: true, companion: false, owners: true });
     for (const layout of [NARROW, WIDE]) {
-      assert.deepEqual(resolveFolds(storage(value), layout), { statBlock: false, stats: true, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false, "other.statBlock": layout === WIDE, "other.combat": true, "other.notes": true });
+      assert.deepEqual(resolveFolds(storage(value), layout), { ...FOLDED, stats: true, settings: true, owners: true, "other.statBlock": layout === WIDE });
     }
   });
 
@@ -85,7 +106,7 @@ describe("the Room's folds", () => {
     let heard = 0;
     folds.subscribe(() => heard++);
     folds.tap("settings", true, true);
-    assert.deepEqual(folds.get(WIDE), { statBlock: true, stats: false, settings: true, companion: false, owners: true, combat: true, notes: false, position: false, image: false, "other.statBlock": true, "other.combat": true, "other.notes": true });
+    assert.deepEqual(folds.get(WIDE), { ...FOLDED, statBlock: true, settings: true, owners: true, "other.statBlock": true });
     assert.deepEqual(JSON.parse(s.items.get(FOLDS_KEY)!), { owners: true, settings: true });
     assert.equal(heard, 1);
     folds.tap("statBlock", false, true);
@@ -186,5 +207,41 @@ describe("the folds by relation (docs/design-v1-token-panel-groups.md 5)", () =>
     assert.equal(statBlockOpen(folds, { tokenId: null }, "g1", "own"), true);
     assert.equal(statBlockOpen(folds, { tokenId: null }, "g1", "other"), false);
     assert.equal(statBlockOpen(folds, { tokenId: "g1" }, "g1", "other"), true);
+  });
+});
+
+describe("a character's page's folds (docs/design-v1-look-pass.md 3.1)", () => {
+  test("its groups have keys of their own, Combat and Companions open, the rest folded, on every layout", () => {
+    for (const layout of [NARROW, WIDE]) {
+      const d = foldDefaults(layout);
+      assert.deepEqual(
+        Object.fromEntries(PAGE_FOLD_KEYS.map((k) => [k, d[k]])),
+        { "page.combat": true, "page.companions": true, "page.notes": false, "page.image": false, "page.stats": false, "page.owners": false },
+      );
+    }
+    for (const key of PAGE_FOLD_KEYS) assert.ok((FOLD_KEYS as readonly string[]).includes(key), `${key} is stored as the token panel's are`);
+  });
+
+  test("folding the page's Combat leaves the token panel's Combat, a monster's included, as it was", () => {
+    const s = storage();
+    const folds = createPanelFolds(s);
+    folds.get(NARROW);
+    folds.tap("page.combat", false, true);
+    const now = folds.get(NARROW);
+    assert.equal(now["page.combat"], false);
+    assert.equal(now.combat, true, "the DM's own creatures' Combat, every monster's");
+    assert.equal(now["other.combat"], true);
+    assert.deepEqual(JSON.parse(s.items.get(FOLDS_KEY)!), { "page.combat": false }, "only the page's key is stored");
+    assert.equal(resolveFolds(s, NARROW).combat, true, "and so after a reload");
+  });
+
+  test("the stat block is the one fold both read: the own relation's statBlock", () => {
+    const folds = createPanelFolds(storage());
+    folds.get(NARROW);
+    // The page folds and opens its block through "statBlock", as the token panel does for its own creatures.
+    folds.tap("statBlock", true, true);
+    assert.equal(statBlockOpen(folds.get(NARROW), { tokenId: null }, "t1", "own"), true, "the token panel opens the character's block too");
+    assert.equal(folds.get(NARROW)["other.statBlock"], false, "another creature's block keeps its own fold");
+    assert.ok(!PAGE_FOLD_KEYS.some((k) => k.endsWith("statBlock")), "the page has no stat block fold of its own");
   });
 });
