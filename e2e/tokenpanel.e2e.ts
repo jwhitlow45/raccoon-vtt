@@ -608,8 +608,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     // The two rows: play first, then setup and Delete apart, starting a line of their own.
     // By name, since Hidden, Locked and Duplicate show their icon alone to a mouse (docs/design-v1-icons.md 4).
     const names = async (row: string) => goblin.locator(`[data-bar-row="${row}"] button`).evaluateAll((els) => els.map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim()));
-    // Roll opens the Dice panel's options for the goblin (docs/design-v1-roll-options.md 4.5).
-    assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Multi-select", "Roll"]);
+    // Roll opens the Dice panel's options for the goblin (docs/design-v1-roll-options.md 4.5), and Attach its list of what it can ride, carry or drag (docs/design-v1-attach.md 4.1).
+    assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Multi-select", "Roll", "Attach"]);
     assert.deepEqual(await names("less"), ["Locked", "Duplicate", "Delete"]);
     const multiSelect = await rectOf(goblin.getByRole("button", { name: "Multi-select", exact: true }));
     assert.ok(Math.abs(multiSelect.top - (await rectOf(goblin.getByRole("button", { name: "Conditions", exact: true }))).top) < 1, "Multi-select left Conditions' line");
