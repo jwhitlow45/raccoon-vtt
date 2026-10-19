@@ -11,7 +11,7 @@ import { Note } from "../../tokens/ui.tsx";
 import { ReplaceConfirm } from "../groupSave/ReplaceConfirm.tsx";
 import { useStartGroupSave, type StartInput } from "../groupSave/start.ts";
 import { useDiceView } from "../useDiceView.ts";
-import { castCardText, castStart, castWho } from "./castStart.ts";
+import { castCardText, castStart, readingWords } from "./castStart.ts";
 
 /**
  * A player's ask for saves on the DM's desk (docs/design-v1-player-save-spell.md
@@ -129,7 +129,7 @@ function CastOpen(props: { ask: CastAsk; onDone(): void }) {
   const { ask, onDone } = props;
   const start = useStartGroupSave();
   const here = useRoomView((s) => s.sceneId === ask.sceneId && s.view?.tokens[ask.caster] !== undefined);
-  const who = useRoomView((s) => (s.view ? castWho(s.view, ask) : "the caster"));
+  const reading = useRoomView((s) => (s.view ? readingWords(s.view, ask) : "Reading the caster's stat block…"));
   const creatures = useMemo(() => (here ? [{ tokenId: ask.caster }] : []), [here, ask.caster]);
   const { dice, loading } = useDiceView(creatures);
   const [pending, setPending] = useState<StartInput | null>(null);
@@ -139,7 +139,7 @@ function CastOpen(props: { ask: CastAsk; onDone(): void }) {
     if (start(input)) onDone();
     else setPending(input);
   }, [input]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!pending) return <Loading text={`Reading ${who}'s stat block…`} />;
+  if (!pending) return <Loading text={reading} />;
   return (
     <ReplaceConfirm
       onDiscard={() => {

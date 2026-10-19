@@ -7,7 +7,7 @@ import type { DiceView } from "../creature.ts";
 import { castSeen, closeSettled, closeTheAsk, CLOSED_UNREAD, damageSent, newPage, RESOLVED_ELSEWHERE, restoredPage, settleTag, type Page } from "../groupSave/chain.ts";
 import { amountsOf } from "../groupSave/plan.ts";
 import { holdsRolls, sentAny } from "../groupSave/start.ts";
-import { castCardText, castFill, castStart, castWho, deskAsks, foldedWithAsks } from "./castStart.ts";
+import { castCardText, castFill, castStart, castWho, deskAsks, foldedWithAsks, readingWords } from "./castStart.ts";
 
 /** The group save a player's ask opens (docs/design-v1-player-save-spell.md 3.3 and 8). */
 
@@ -242,6 +242,8 @@ describe("the DM's card", () => {
     delete v.tokens.thorn;
     assert.equal(castCardText(v, castAsk("d4", { area: undefined, targets: ["g1"] }), { viewing: "s1", caught: null }).gone, "Its caster is gone");
     assert.equal(castWho(v, castAsk("d4")), "p1", "with no token in view, the player who asked");
+    assert.equal(readingWords(v, castAsk("d4")), "Reading the caster's stat block…", "Open on its way to the scene names no player's stat block");
+    assert.equal(readingWords(view(), castAsk("d4")), "Reading Thorn's stat block…");
     delete v.scenes.s1;
     assert.equal(castCardText(v, castAsk("d5"), { viewing: "s2", caught: null }).gone, "Its scene is gone");
   });

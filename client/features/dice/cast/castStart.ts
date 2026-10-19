@@ -29,6 +29,16 @@ export function castWho(view: Pick<RoomState, "tokens" | "members">, ask: Pick<C
   return view.members[ask.by]?.name ?? "A player";
 }
 
+/**
+ * Open's words while the caster's block loads (3.3). Going to the ask's
+ * scene, the caster's token is not in view yet, and the asker castWho
+ * falls back to has no stat block to read.
+ */
+export function readingWords(view: Pick<RoomState, "tokens">, ask: Pick<CastAsk, "caster">): string {
+  const token = view.tokens[ask.caster];
+  return token ? `Reading ${tokenName(token)}'s stat block…` : "Reading the caster's stat block…";
+}
+
 /** The caster's row the ask was sent from: its key, else a save of the spell's name. */
 function askedRoll(dice: DiceView, ask: CastAsk): NamedRoll | undefined {
   const named = creatureRolls(dice, { tokenId: ask.caster })?.named ?? [];
