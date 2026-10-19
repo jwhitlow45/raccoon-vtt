@@ -189,10 +189,12 @@ type Reduced = { ok: true; inverse: RestoreEntry[] | null } | { ok: false; code:
 /** A tagged op past admission (docs/design-v1-dice.md 1.2): whatever becomes of it from here writes its receipt. */
 type Admitted = { memberId: string; player: boolean; tag: string; part: number };
 
-/** Ops a room at its storage quota still accepts (design 10.5): deletions only. A room whose replay failed accepts none. */
+/** Ops a room at its storage quota still accepts (design 10.5): deletions, and the one move a deletion needs first. A room whose replay failed accepts none. */
 const DELETIONS = new Set<Op["t"]>([
   "token.delete",
   "scene.delete",
+  // The players' scene is deleted only once they are moved (permissions.ts MOVE_PLAYERS_FIRST), so a full room must still move them. It writes one field of the room's meta, and adds nothing.
+  "room.setPlayerScene",
   "character.delete",
   "monster.delete",
   "template.delete",

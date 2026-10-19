@@ -18,6 +18,7 @@ import {
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Actor, Member, RoomState } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
@@ -349,6 +350,40 @@ describe("a room whose replay failed", () => {
       assert.notEqual(ev, "stuck");
       assert.equal(ev !== "stuck" && ev.rejects, undefined);
       assert.equal(actor.committed.state.tokens[tokenId], undefined);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  // The players' scene is deleted only once they are moved, so a full room refused the move and could never delete it (LP9F-1).
+  test("while a room at its storage quota still moves its players, so the scene they left can be deleted", async () => {
+    const dm = member("DM", "dm");
+    const { state } = roomWithGoblin(dm);
+    const first = state.meta.playerSceneId!;
+    const road = uuidv7();
+    const made = applyOp(state, { t: "scene.create", scene: { id: road, name: "Road", bounds: { w: 10, h: 10 } } }, { memberId: dm.id, role: "dm" }, { seq: 2, at: new Date().toISOString() });
+    assert.ok(made.ok);
+    const db = new FakeDb({ state: made.state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db, { readOnly: true }));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(conn, 1, { t: "scene.delete", sceneId: first });
+      const refused = await answerTo(sent, 1);
+      assert.ok(refused !== "stuck");
+      assert.deepEqual(refused.rejects, [{ n: 1, code: "invalid", message: MOVE_PLAYERS_FIRST }]);
+      await actor.op(conn, 2, { t: "room.setPlayerScene", sceneId: road });
+      const moved = await answerTo(sent, 2);
+      assert.ok(moved !== "stuck");
+      assert.equal(moved.rejects, undefined, "the move was refused");
+      await actor.op(conn, 3, { t: "scene.delete", sceneId: first });
+      const deleted = await answerTo(sent, 3);
+      assert.ok(deleted !== "stuck");
+      assert.equal(deleted.rejects, undefined, "the delete was refused");
+      assert.equal(actor.committed.state.meta.playerSceneId, road);
+      assert.equal(actor.committed.state.scenes[first], undefined);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
