@@ -689,8 +689,45 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     }
   });
 
+  test("lp9-a. the players' scene's Delete row waits until they are moved, says why, and keeps its focus", async () => {
+    // Deleting it sent them to the first scene in the list, which can be one the DM is preparing (LP9-PLAY-2).
+    const players = sceneOf(dmSocket.state, dmSocket.state!.meta.playerSceneId!)!;
+    const menu = await openMenu(players.name);
+    try {
+      const row = menu.getByRole("button", { name: /^Delete/ });
+      await menu.getByText("Move the players to another scene first.").waitFor();
+      // Playwright's isDisabled() counts aria-disabled too, so the native property is read.
+      assert.equal(await row.evaluate((el) => (el as unknown as { disabled: boolean }).disabled), false, "natively disabled, so a focused row would lose its focus");
+      assert.equal(await row.getAttribute("aria-disabled"), "true");
+      await row.focus();
+      await dm.keyboard.press("Enter");
+      // Forced, as Playwright waits for an aria-disabled button to be enabled before a click.
+      await row.click({ force: true });
+      await row.click({ force: true });
+      assert.equal(await menu.getByRole("button", { name: /^Tap again to delete/ }).count(), 0, "the row armed");
+      assert.equal(await row.evaluate((el) => el === el.ownerDocument.activeElement), true, "the row lost its focus");
+      assert.ok(sceneOf(dmSocket.state, players.id), "the players' scene was deleted");
+      await shots.take(dm, "lp9-a-players-scene-delete");
+    } finally {
+      await dm.keyboard.press("Escape");
+      await menu.waitFor({ state: "detached" });
+    }
+  });
+
   test("sd-c. the last scene's Delete row is disabled", async () => {
-    // Players' scene and every other scene go through the same menu, so the last one is left at the end.
+    // The players' scene cannot be deleted while they are on it, so they move to the DM's scene, which is left at the end.
+    const kept = sceneOf(dmSocket.state, dmSocket.you!.sceneId!)!;
+    if (dmSocket.state?.meta.playerSceneId !== kept.id) {
+      await openSideTab(dm, "Scenes");
+      await dm.getByRole("button", { name: `Move players to ${kept.name}`, exact: true }).click();
+      // A scene with fog or lighting off asks first.
+      await waitFor("the players on the DM's scene", async () => {
+        if (dmSocket.state?.meta.playerSceneId === kept.id) return true;
+        const anyway = dm.getByRole("button", { name: "Move anyway", exact: true });
+        if (await anyway.isVisible()) await anyway.click();
+        return null;
+      });
+    }
     for (let guard = 0; Object.keys(dmSocket.state?.scenes ?? {}).length > 1 && guard < 30; guard++) {
       const count = Object.keys(dmSocket.state?.scenes ?? {}).length;
       const target = Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && s.id !== dmSocket.you?.sceneId)!;

@@ -25,7 +25,7 @@ import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { VisionSettings } from "../vision/VisionSettings.tsx";
-import { sceneAfterDelete } from "./afterDelete.ts";
+import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
@@ -49,6 +49,9 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): v
   const scope = useRoomScope();
   const startFraming = useStartFraming();
   const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
+  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
+  const deleteWhy = deleteBlocked(others, scene.id, playerSceneId);
+  const deleteHelp = useId();
 
   const saveView = () => {
     // A phone's sheet hides most of the map, so the DM frames the view with the sheet closed (FrameView.tsx).
@@ -131,15 +134,17 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): v
             confirm="Tap again to delete"
             title="Delete this scene and everything on it"
             disabled={others.length === 0}
+            unavailable={deleteWhy !== null}
+            describedBy={deleteHelp}
             onConfirm={() => {
               const next = sceneAfterDelete(others, scene.id);
-              if (!next) return;
+              if (!next || deleteWhy !== null) return;
               actions.dispatch({ t: "scene.delete", sceneId: scene.id });
               actions.switchScene(next.id);
             }}
           />
         </div>
-        <Help>{others.length === 0 ? "The last scene cannot be deleted." : "Removes its tokens, drawings, build and fog too."}</Help>
+        <Help id={deleteHelp}>{deleteWhy ?? "Removes its tokens, drawings, build and fog too."}</Help>
       </Section>
     </>
   );

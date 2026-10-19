@@ -41,14 +41,21 @@ export function SceneSheet(props: {
  * A menu choice in a scene sheet: a card row, as a Row that is a button
  * looks (components/Row.tsx), whose hint wraps rather than cuts off, since
  * it says what the choice will do ("Open this scene first").
+ *
+ * `unavailable` draws it disabled with `aria-disabled` and a tap that does
+ * nothing, for a choice that can turn off while it has focus: native
+ * `disabled` would drop that focus to the page.
  */
-export function SheetRow(props: { label: ReactNode; hint?: ReactNode; disabled?: boolean; danger?: "rest" | "armed"; onClick(): void }) {
-  const { disabled } = props;
+export function SheetRow(props: { label: ReactNode; hint?: ReactNode; disabled?: boolean; unavailable?: boolean; danger?: "rest" | "armed"; onClick(): void }) {
+  const disabled = props.disabled === true || props.unavailable === true;
   return (
     <button
       type="button"
-      disabled={disabled}
-      onClick={props.onClick}
+      disabled={props.disabled}
+      aria-disabled={props.unavailable && !props.disabled ? true : undefined}
+      onClick={() => {
+        if (!disabled) props.onClick();
+      }}
       // Armed keeps the row's size, so the second tap lands where the first did.
       style={{
         display: "grid",

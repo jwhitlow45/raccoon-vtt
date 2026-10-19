@@ -9,10 +9,10 @@ import { LIMITS } from "#shared/limits.ts";
 import { UnsavedInput, useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useAssets, useRoomActions, useRoomStore } from "../../state/view.ts";
+import { useAssets, useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { DUPLICATE_DEFAULTS, duplicateOp, fogHint, type DuplicateInclude } from "./duplicate.ts";
 import { cleanFolderName } from "./folders.ts";
-import { sceneAfterDelete } from "./afterDelete.ts";
+import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { makeThumbnail, thumbsSlot } from "./thumbs.ts";
 import { CheckRow, SceneSheet, SheetRow } from "./SceneSheet.tsx";
 
@@ -278,6 +278,11 @@ function UpdateThumbnail(props: { scene: Scene; viewing: boolean }) {
  * Delete with the app's two taps: the first arms the row where it stands, the
  * second deletes. The row keeps its size armed, so the second tap lands on it.
  * A tap anywhere else, or the 4 seconds ConfirmButton allows, disarms it.
+ *
+ * The players' scene waits until they are moved. The players can arrive
+ * while the menu is open, sent from another DM device, so the row then
+ * turns unavailable rather than disabled, keeping the focus it has, and
+ * disarms, so a second tap that was coming deletes nothing.
  */
 function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly Scene[]; onDone(): void }) {
   const { scene } = props;
@@ -285,6 +290,12 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
   const [armed, setArmed] = useState(false);
   const row = useRef<HTMLDivElement>(null);
   const next = sceneAfterDelete(props.scenes, scene.id);
+  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
+  const blocked = deleteBlocked(props.scenes, scene.id, playerSceneId);
+  const playersHere = next !== undefined && blocked !== null;
+  useEffect(() => {
+    if (playersHere) setArmed(false);
+  }, [playersHere]);
   useEffect(() => {
     if (!armed) return;
     const t = setTimeout(() => setArmed(false), 4000);
@@ -298,7 +309,7 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
     };
   }, [armed]);
   const press = () => {
-    if (!next) return;
+    if (!next || blocked !== null) return;
     if (!armed) {
       setArmed(true);
       return;
@@ -311,9 +322,10 @@ function DeleteScene(props: { scene: Scene; viewing: boolean; scenes: readonly S
     <div ref={row} style={{ display: "grid" }}>
       <SheetRow
         label={armed ? "Tap again to delete" : "Delete"}
-        hint={next ? "Removes its tokens, drawings, build and fog too." : "The last scene cannot be deleted."}
+        hint={blocked ?? "Removes its tokens, drawings, build and fog too."}
         danger={armed ? "armed" : "rest"}
         disabled={!next}
+        unavailable={playersHere}
         onClick={press}
       />
     </div>
