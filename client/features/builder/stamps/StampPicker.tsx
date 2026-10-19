@@ -13,6 +13,7 @@ import { libraryFootprint, matchStamps, shippedChoice, starterChoice, type Chose
 import { imageAssetId } from "#shared/imageRef.ts";
 import { imageErrorMessage } from "../../images/errors.ts";
 import { PasteButton, PasteStatus, usePasteTarget, type PasteHandle } from "../../images/PasteImage.tsx";
+import { useHandoff } from "../../images/roomPaste.ts";
 import { PickError, uploadTokenImage } from "../../images/upload.ts";
 import { StarterBrowser } from "../../starter/StarterBrowser.tsx";
 
@@ -80,6 +81,8 @@ export function StampPicker(props: {
     [],
   );
   const paste = usePasteTarget(whole, { accepts: "image", takes: "open", disabled: upload.busy, onFile: (f) => void takePasted(f) });
+  // The room's "Use the pasted image" opens the picker on its picture (docs/design-v1-paste.md 4).
+  useHandoff("stamp", !upload.busy, (file) => void takePasted(file));
 
   const chosenKey = props.chosen && "key" in props.chosen.art ? props.chosen.art.key : null;
   const chosenAsset = props.chosen && "assetId" in props.chosen.art ? props.chosen.art.assetId : null;

@@ -59,9 +59,11 @@ export function ImagePicker(props: {
   onClose(): void;
   /** What the image is for, a visible line above the tabs, so a phone with no hover reads it on the first tap. */
   hint?: string;
+  /** A picture pasted over the map for the selected token (docs/design-v1-paste.md 4), uploaded at once as a pasted one is. */
+  initialFile?: File;
 }) {
   const roomId = useRoomView((s) => s.roomId);
-  const [tab, setTab] = useState<Tab>("icons");
+  const [tab, setTab] = useState<Tab>(props.initialFile ? "device" : "icons");
   const [busy, setBusy] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +140,20 @@ export function ImagePicker(props: {
       finish(await run(STARTER_BUSY, (signal, onWaiting) => api.pickStarter(roomId, { work: found.work.key, kind: "token" }, { signal, onWaiting }))),
     [finish, run, roomId],
   );
+
+  // Once, a turn after mounting, so React's development double mount, whose cleanup cancels an upload, starts it only once.
+  const initial = useRef({ file: props.initialFile, started: false, upload });
+  initial.current.upload = upload;
+  useEffect(() => {
+    const first = initial.current;
+    if (!first.file || first.started) return;
+    const file = first.file;
+    const timer = setTimeout(() => {
+      first.started = true;
+      void first.upload(file);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   // A paste anywhere while the picker is open, through the room's router: an image uploads, a link imports (docs/design-v1-paste.md 1.2).
   const body = useRef<HTMLDivElement>(null);

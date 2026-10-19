@@ -17,6 +17,7 @@ import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { FileButton, RadioGroup } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
+import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
 import { apartFromStarter, docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, withPick, withTypedTitle, type HandoutDraft } from "./draft.ts";
@@ -265,6 +266,17 @@ function ShowHandout(props: {
   const looseApart = apartFromStarter(loose ?? [], (a) => a);
   // A paste takes Upload a file's path, a PDF to its page job and an image shrunk and uploaded, while the form is open with nothing picked (docs/design-v1-paste.md 1.2).
   const paste = usePasteTarget(form, { accepts: "image-or-pdf", takes: open && !pick ? "open" : "none", disabled: status !== null, onFile: (f) => upload(f) });
+  /*
+   * The room's "Use the pasted image" opens the form and uploads its
+   * picture, which replaces a pick as choosing another file does, keeping
+   * a typed title and the audience (docs/design-v1-paste.md 4). It is
+   * taken only once the form is open, where upload is in reach.
+   */
+  const handed = useHandoff("handout", open && status === null, (file) => upload(file));
+  useEffect(() => {
+    if (handed && !open) set({ open: true });
+  }, [handed, open, set]);
+  useEntryBusy("handout", status !== null);
   const imageTile = (a: AssetRow) => (
     <button
       key={a.id}

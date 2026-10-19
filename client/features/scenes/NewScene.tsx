@@ -15,6 +15,7 @@ import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
 import { apartFromStarter } from "../images/library.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
+import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
 import { loadedStarterWork } from "../starter/catalog.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
@@ -190,6 +191,13 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     stopSearch();
     if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
   };
+
+  // The room's "Use the pasted image" hands its picture here: Map image opens with it picked, and the grid search starts (docs/design-v1-paste.md 4).
+  useHandoff("scene", !status.busy && !full, (handed) => {
+    pick("map");
+    pickFile(handed, true);
+  });
+  useEntryBusy("scene", status.busy);
 
   const upload = async () => {
     if (!file || status.busy) return;

@@ -63,6 +63,7 @@ import { TOAST_MS } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
+import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended, Toast, ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
@@ -1013,6 +1014,7 @@ function RoomPage() {
       <FoldStatus folded={folded || columnSummary} />
       <HandoutPopup />
       <ShortcutSheetHost role={role} />
+      <RoomPasteHost />
     </div>
   );
 }
