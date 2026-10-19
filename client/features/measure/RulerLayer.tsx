@@ -15,7 +15,8 @@ import { markOwner } from "../pings/who.ts";
 import { dragLabel, dragReading, remoteWalk, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
 import { Pill, pillGeometry } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
-import { measureWalk, walkText } from "./walkRuler.ts";
+import { useWalkMeasure } from "./useWalkMeasure.ts";
+import { walkText, type WalkInput } from "./walkRuler.ts";
 
 /**
  * Rulers and the distance a dragged token travels (design sections 7.6 and
@@ -136,7 +137,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   );
 });
 
-type WalkSource = Omit<Parameters<typeof measureWalk>[0], "stops">;
+type WalkSource = Omit<WalkInput, "stops">;
 
 function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null; walk: WalkSource | undefined }) {
   const { drawing } = props;
@@ -157,11 +158,14 @@ function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rul
  * route the creature would walk, between its footprint's centers, with a
  * dot at each stop, each leg's cost, and "Walking 40 ft" at the end with
  * what terrain added. A leg with no route runs straight in red, "No way
- * through".
+ * through". While a leg's search runs, it waits grey and straight, and past
+ * the shared loading delay the label says "Finding the way…", as a drag's
+ * does.
  */
 function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean }) {
   const { stops, walk, scale, color } = props;
-  const m = useMemo(() => measureWalk({ ...walk, stops }), [walk.view, walk.sceneId, walk.viewer.role, walk.everything, stops]);
+  const m = useWalkMeasure({ ...walk, stops });
+  const slow = useDelayed(m?.searching === true);
   if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
   const last = mid(m.legs[m.legs.length - 1]!.to);
@@ -170,10 +174,10 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
       {m.legs.map((leg, i) => {
         const pts = [leg.from, ...leg.corners, leg.to].map(mid);
         const flat = pts.flatMap((p) => [p.x, p.y]);
-        const stroke = leg.none ? theme.color.danger : color;
+        const stroke = leg.searching ? theme.color.textMuted : leg.none ? theme.color.danger : color;
         const a = pts[0]!;
         const b = pts[pts.length - 1]!;
-        const labelled = leg.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX);
+        const labelled = !leg.searching && (leg.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX));
         return (
           <Group key={i}>
             <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
@@ -186,7 +190,11 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
         const c = mid(p);
         return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
       })}
-      <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(m)} size="screen" color={color} offsetPx={18} />
+      {m.searching ? (
+        slow ? <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={theme.color.textMuted} offsetPx={18} /> : null
+      ) : (
+        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(m)} size="screen" color={color} offsetPx={18} />
+      )}
     </>
   );
 }

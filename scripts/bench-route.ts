@@ -221,7 +221,9 @@ async function runChrome(): Promise<string> {
 
 const argv = (globalThis as { process?: { argv?: string[] } }).process?.argv;
 if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
-  console.log(formatRouteBench([...runRouteBench(), runRouteSeenRow()]));
+  // The walking ruler's rows read client code, so only the Node run loads them, never the Chrome bundle.
+  const { runRulerRows } = await import("./bench-ruler.ts");
+  console.log(formatRouteBench([...runRouteBench(), runRouteSeenRow(), ...runRulerRows()]));
   if (argv.includes("--chrome")) {
     console.log("");
     console.log(await runChrome());

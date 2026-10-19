@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey } from "#shared/keys.ts";
-import type { RoomState } from "#shared/model.ts";
+import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { P1, reveal, template, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
@@ -16,6 +16,7 @@ function room(): RoomState {
 }
 
 const free = (x: number, y: number): RulerStop => ({ x: x + 0.5, y: y + 0.5 });
+const WALL: EdgeFeature = { kind: "wall" };
 
 describe("the walking ruler", () => {
   test("a Medium creature from empty ground walks round the wall's end, and the total says so", () => {
@@ -108,6 +109,35 @@ describe("the walking ruler", () => {
     state.meta = { ...state.meta, settings: { ...state.meta.settings, diagonal: "fiveTen" } };
     const m = measureWalk({ view: state, sceneId: "s1", stops: [free(0, 0), free(1, 1), free(2, 2)], viewer: { role: "player" }, everything: false })!;
     assert.deepEqual(m.legs.map((l) => l.ft), [5, 10]);
+  });
+
+  test("a ruler is walked again only when the room it reads changes, and a long search goes a slice at a time", () => {
+    // A closed room far off on a 200 by 200 map: a stop inside it has no way through, and the search floods everything it can reach.
+    const edges: Record<string, EdgeFeature> = {};
+    for (let k = 190; k < 194; k++) Object.assign(edges, { [`${k},190,n`]: WALL, [`${k},194,n`]: WALL, [`190,${k},w`]: WALL, [`194,${k},w`]: WALL });
+    const state = world({ edges });
+    state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 200, h: 200 } };
+    const stops = [free(10, 10), free(191, 191)];
+    const input = { view: state, sceneId: "s1", stops, viewer: { role: "player" as const }, everything: false };
+    const first = measureWalk({ ...input, deadline: 0 })!;
+    assert.equal(first.searching, true, "the first slice runs out");
+    assert.equal(first.legs[0]!.searching, true);
+    let m = first;
+    let slices = 1;
+    while (m.searching && slices < 10_000) {
+      m = measureWalk({ ...input, deadline: performance.now() + 4 })!;
+      slices++;
+    }
+    assert.ok(slices > 1);
+    assert.deepEqual([m.searching, m.legs[0]!.none], [false, true], "it goes on where it stopped, to No way through");
+    // An op that leaves the walk's inputs alone, a chat line, finds the walk kept.
+    const chat = { ...state, log: [...state.log] };
+    assert.equal(measureWalk({ ...input, view: chat }), m);
+    // A token moved is an input: walked again, to the same answer.
+    const moved = { ...chat, tokens: { ...chat.tokens } };
+    const again = measureWalk({ ...input, view: moved })!;
+    assert.notEqual(again, m);
+    assert.deepEqual(again.legs, m.legs);
   });
 
   test("Measure is remembered on the device, Straight when storage fails", () => {

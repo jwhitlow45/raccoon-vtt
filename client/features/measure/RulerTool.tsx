@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { EphEvent } from "#shared/protocol.ts";
+import { useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { theme } from "../../lib/theme.ts";
 import { groundSource, seenGround } from "../builder/heights/ground.ts";
@@ -25,7 +26,8 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
+import { useWalkMeasure } from "./useWalkMeasure.ts";
+import { saveWalk, savedWalk, walkText } from "./walkRuler.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -201,8 +203,11 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   const stops = ruler ? allStops(ruler) : [];
   let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
   if (stops.length === 1) info = "Tap or drag to the next point.";
-  const walked = walk && view && tool.activeCtx && stops.length > 1 ? measureWalk({ view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share }) : null;
-  if (walked) {
+  const walked = useWalkMeasure(walk && view && tool.activeCtx && stops.length > 1 ? { view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share } : null);
+  const finding = useDelayed(walked?.searching === true);
+  if (walked?.searching) {
+    if (finding) info = "Finding the way…";
+  } else if (walked) {
     const [first, extra] = walkText(walked).split("\n");
     info = (
       <>

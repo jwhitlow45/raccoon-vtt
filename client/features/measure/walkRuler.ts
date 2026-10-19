@@ -25,8 +25,8 @@ import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
  * everything the DM knows.
  */
 
-/** One leg as drawn: from where the walker stood to where it would stand, through its route's corners, top-left as tokens are, and what it costs. No route: drawn straight, "No way through". */
-export type WalkLeg = { from: Point; to: Point; corners: Point[]; ft: number; none: boolean };
+/** One leg as drawn: from where the walker stood to where it would stand, through its route's corners, top-left as tokens are, and what it costs. No route: drawn straight, "No way through". Still searching: drawn straight, its cost unknown. */
+export type WalkLeg = { from: Point; to: Point; corners: Point[]; ft: number; none: boolean; searching?: true };
 
 export type WalkMeasure = {
   legs: WalkLeg[];
@@ -35,6 +35,8 @@ export type WalkMeasure = {
   extra: string | null;
   /** The walker's footprint in cells, for drawing the legs between footprint centers. */
   size: { w: number; h: number };
+  /** A leg's search ran out of its time slice: the walk is not known yet, and is asked for again next frame. */
+  searching: boolean;
 };
 
 /** The creature a walking ruler walks: the token its first stop is on, or a Medium creature standing on the ground there. */
@@ -50,34 +52,65 @@ function walkerAt(view: RoomState, sceneId: string, first: RulerStop): Token | n
 
 const NO_ACTOR: Actor = { hp: { cur: 1, max: 1, temp: 0 }, life: "alive", ac: 10, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 
+/** The parts of the room a ruler's walk reads (publicWorld, walkerAt). While each is the same object, the walks and searches kept for it still hold. */
+type Basis = Pick<RoomState, "buildChunks" | "templates" | "tokens" | "fogTiles" | "exploredTiles" | "meta" | "members" | "characters"> & { scene: unknown };
+
+function basisOf(view: RoomState, sceneId: string): Basis {
+  const { buildChunks, templates, tokens, fogTiles, exploredTiles, meta, members, characters } = view;
+  return { buildChunks, templates, tokens, fogTiles, exploredTiles, meta, members, characters, scene: view.scenes[sceneId] };
+}
+
+function sameBasis(a: Basis, b: Basis): boolean {
+  return (Object.keys(a) as (keyof Basis)[]).every((k) => a[k] === b[k]);
+}
+
 /*
- * Searches kept for the legs of the ruler being drawn: one per leg start,
- * world and 5-10-5 residue, so a stop dragged around reuses the search of
- * its leg, as a drag's search serves every spot the finger visits. They go
- * when the room changes.
+ * Kept for the room as the walks read it, and dropped when a part of it
+ * changes (as a drag's world is, stageHooks.ts), never for an op that
+ * leaves those parts alone, such as a chat line or a die roll:
+ * - searches for the legs of the rulers drawn, one per leg start, world and
+ *   5-10-5 residue, so a stop dragged around reuses the search of its leg,
+ *   as a drag's search serves every spot the finger visits.
+ * - Each ruler's finished walk, by its stops and viewer, so a kept ruler
+ *   is not walked again for every op.
  */
-let kept: { view: RoomState; searches: Map<string, WalkSearch> } | null = null;
+const MAX_SEARCHES = 32;
+let kept: { basis: Basis; searches: Map<string, WalkSearch>; walks: WeakMap<readonly RulerStop[], Map<string, WalkMeasure>> } | null = null;
+
+function keptFor(view: RoomState, sceneId: string): NonNullable<typeof kept> {
+  const basis = basisOf(view, sceneId);
+  if (!kept || !sameBasis(kept.basis, basis)) kept = { basis, searches: new Map(), walks: new WeakMap() };
+  return kept;
+}
 
 function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter): WalkSearch {
-  if (kept?.view !== view) kept = { view, searches: new Map() };
+  const kept = keptFor(view, walker.sceneId);
   const key = `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
   let search = kept.searches.get(key);
   if (!search) {
     const world = publicWorld(view, walker, viewer, [], { creatures: false, everything, seenGround: !everything });
     search = new WalkSearch(new WalkWorld({ ...world.input, prone: false, counter }));
-    if (kept.searches.size >= 16) kept.searches.delete(kept.searches.keys().next().value!);
+    if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
     kept.searches.set(key, search);
   }
   return search;
 }
 
+export type WalkInput = { view: RoomState; sceneId: string; stops: readonly RulerStop[]; viewer: WalkViewer; everything: boolean };
+
 /**
  * The walk a walking ruler measures. `everything` is the DM's own ruler
  * before it is shared, and only then may the search read what players
- * cannot see.
+ * cannot see. With a `deadline` (a `performance.now()` time) a search
+ * that runs past it pauses, as a drag's does a frame at a time, and the
+ * walk comes back `searching`: asked again, it goes on where it stopped.
  */
-export function measureWalk(input: { view: RoomState; sceneId: string; stops: readonly RulerStop[]; viewer: WalkViewer; everything: boolean }): WalkMeasure | null {
+export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasure | null {
   const { view, stops } = input;
+  const memo = keptFor(view, input.sceneId).walks;
+  const memoKey = `${input.sceneId},${input.viewer.role},${input.everything}`;
+  const known = memo.get(stops)?.get(memoKey);
+  if (known) return known;
   const first = stops[0];
   let walker = first ? walkerAt(view, input.sceneId, first) : null;
   if (!walker || stops.length < 2) return null;
@@ -88,6 +121,7 @@ export function measureWalk(input: { view: RoomState; sceneId: string; stops: re
   const pieces: [number, number, number, 0 | 1][] = [];
   let totalFt = 0;
   let extraFt = 0;
+  let searching = false;
   for (const drawn of stops.slice(1)) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
@@ -100,10 +134,18 @@ export function measureWalk(input: { view: RoomState; sceneId: string; stops: re
     let taken: LegCost;
     let corners: Point[] = [];
     let none = false;
-    if (openLeg(search.world, target)) {
+    // Past a leg still searching, the walker's later legs start from where it would land, unsearched until it is known.
+    const answer = searching || openLeg(search.world, target) ? null : search.settle(target, input.deadline);
+    if (answer === "paused") searching = true;
+    if (searching) {
+      legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });
+      walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
+      continue;
+    }
+    if (answer === null) {
       taken = straightCost(walker, walker, end, rules, counter);
     } else {
-      const route = search.settle(target) === "settled" ? search.routeTo(target) : null;
+      const route = answer === "settled" ? search.routeTo(target) : null;
       if (route) {
         const points = routePoints(view.buildChunks, walker, route.pieces, landing);
         taken = routeFeet(points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
@@ -122,7 +164,13 @@ export function measureWalk(input: { view: RoomState; sceneId: string; stops: re
     walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
   }
   const words = extraWords(pieces, false, false);
-  return { legs, totalFt, extra: extraFt > 0 && words.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(words)}` : null, size };
+  const walk: WalkMeasure = { legs, totalFt, extra: extraFt > 0 && words.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(words)}` : null, size, searching };
+  if (!searching) {
+    const byViewer = memo.get(stops) ?? new Map<string, WalkMeasure>();
+    byViewer.set(memoKey, walk);
+    memo.set(stops, byViewer);
+  }
+  return walk;
 }
 
 /** "Walking 40 ft", with what terrain added under it. */
