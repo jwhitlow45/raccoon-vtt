@@ -4,7 +4,7 @@ import type { ActorPatch } from "#shared/protocol.ts";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { validSheetUrl } from "./statSummary.ts";
-import { FieldRow, Note, NumberField, Stepper, TextField } from "./ui.tsx";
+import { FieldRow, Note, NumberField, Section, Stepper, TextField } from "./ui.tsx";
 
 /**
  * The light stat card (features section 15): AC, speeds, initiative,
@@ -17,7 +17,22 @@ import { FieldRow, Note, NumberField, Stepper, TextField } from "./ui.tsx";
 
 type Speeds = Actor["speeds"];
 const SPEED_KEYS = ["walk", "fly", "swim", "climb", "burrow"] as const;
-const SPEED_LABELS: Record<(typeof SPEED_KEYS)[number], string> = { walk: "Walk", fly: "Fly", swim: "Swim", climb: "Climb", burrow: "Burrow" };
+type SpeedKey = (typeof SPEED_KEYS)[number];
+type OtherSpeed = Exclude<SpeedKey, "walk">;
+const OTHER_SPEEDS: readonly OtherSpeed[] = ["fly", "swim", "climb", "burrow"];
+const SPEED_LABELS: Record<SpeedKey, string> = { walk: "Walk", fly: "Fly", swim: "Swim", climb: "Climb", burrow: "Burrow" };
+
+/**
+ * Which speeds stand in "Other speeds" (docs/design-v1-look-pass.md 3.1):
+ * every one not set, so a walker's Stats shows Walk alone rather than four
+ * rows of "none". `held` is what the fold held as it opened, kept while it
+ * stays open, so a speed typed there stays under the field's own label
+ * rather than jumping out of the fold, and taking focus with it, once it
+ * is set. Null while it is folded.
+ */
+export function foldedSpeeds(speeds: Speeds, held: readonly OtherSpeed[] | null): readonly OtherSpeed[] {
+  return held ?? OTHER_SPEEDS.filter((key) => speeds[key] === undefined);
+}
 
 export { validSheetUrl } from "./statSummary.ts";
 
@@ -58,13 +73,31 @@ export function StatsFields(props: {
   const fromBlock = props.fromBlock === true;
   const speeds: Speeds = actor.speeds ?? { walk: 30 };
 
-  const setSpeed = (key: (typeof SPEED_KEYS)[number], value: number | null) => {
+  const setSpeed = (key: SpeedKey, value: number | null) => {
     const next: Speeds = { ...speeds };
     if (key === "walk") next.walk = value ?? 0;
     else if (value === null || value === 0) delete next[key];
     else next[key] = value;
     onPatch({ speeds: next });
   };
+  const editSpeeds = canEdit("speeds");
+  // Only a viewer who may set a speed has anything to fold: the rest read only the speeds that are set.
+  const [held, setHeld] = useState<readonly OtherSpeed[] | null>(null);
+  const folded = editSpeeds ? foldedSpeeds(speeds, held) : [];
+  const speedRow = (key: SpeedKey) => (
+    <Stat key={key} label={`${SPEED_LABELS[key]} Speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={editSpeeds}>
+      <NumberField
+        label={`${SPEED_LABELS[key]} Speed`}
+        value={speeds[key]}
+        min={0}
+        max={1000}
+        nullable={key !== "walk"}
+        placeholder="none"
+        onCommit={(n) => setSpeed(key, n)}
+      />
+      <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>ft</span>
+    </Stat>
+  );
 
   return (
     <>
@@ -73,31 +106,30 @@ export function StatsFields(props: {
           <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
         </Stat>
       )}
-      {SPEED_KEYS.map((key) => (
-        <Stat key={key} label={`${SPEED_LABELS[key]} Speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={canEdit("speeds")}>
-          <NumberField
-            label={`${SPEED_LABELS[key]} Speed`}
-            value={speeds[key]}
-            min={0}
-            max={1000}
-            nullable={key !== "walk"}
-            placeholder="none"
-            onCommit={(n) => setSpeed(key, n)}
-          />
-          <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>ft</span>
-        </Stat>
-      ))}
-      {canEdit("speeds") ? (
-        <Switch
-          checked={speeds.hover === true}
-          onChange={(on) => {
-            const next: Speeds = { ...speeds };
-            if (on) next.hover = true;
-            else delete next.hover;
-            onPatch({ speeds: next });
+      {speedRow("walk")}
+      {OTHER_SPEEDS.filter((key) => !folded.includes(key)).map(speedRow)}
+      {editSpeeds ? (
+        <Section
+          title="Other speeds"
+          fold={{
+            open: held !== null,
+            onToggle: () => setHeld(held === null ? foldedSpeeds(speeds, null) : null),
+            // Folded, a speed it holds is never set, so Hovers is the one thing it may hide.
+            summary: held === null && speeds.hover ? <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>Hovers</span> : undefined,
           }}
-          label="Hovers"
-        />
+        >
+          {folded.map(speedRow)}
+          <Switch
+            checked={speeds.hover === true}
+            onChange={(on) => {
+              const next: Speeds = { ...speeds };
+              if (on) next.hover = true;
+              else delete next.hover;
+              onPatch({ speeds: next });
+            }}
+            label="Hovers"
+          />
+        </Section>
       ) : speeds.hover ? (
         <Note>Hovers.</Note>
       ) : null}
