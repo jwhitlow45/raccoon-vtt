@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import type { PathStop, RoomState, Token, Viewer } from "./model.ts";
+import { canApply, mayMoveToken } from "./permissions.ts";
 import { projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
+import { moveGroups } from "./rules/attach.ts";
 import { pathThisTurn } from "./rules/path.ts";
 import { findRoute } from "./rules/walk.ts";
 import { publicWorld } from "./rules/walkWorld.ts";
@@ -115,6 +117,79 @@ export function checkPair(pair: Pair, seq = 3): void {
       assert.deepEqual(seen(ra.state, p), seen(rb.state, p), `${where}: ${p.memberId} sees the rooms differ after it`);
     }
   }
+}
+
+/**
+ * One step of a sequence the rooms of a pair go through together: an op by
+ * a viewer, fixed, or made from that viewer's device copy (as the bar or a
+ * drop makes it). A step may also stand for the server's own op, such as
+ * an undo it builds, by `build` from the room as it stands.
+ */
+export type Step = { who: Viewer; op: Op | ((view: RoomState, state: RoomState) => Op | null); note?: string };
+
+/** A pair of rooms differing only in what players cannot see, and the steps both go through (attached tokens, docs/design-v1-attach.md 8.0). */
+export type OpPair = Omit<Pair, "drags"> & { steps: readonly Step[] };
+
+/** How a step is checked and applied: by default as the server does, permissions then the reducer. */
+export type Applier = (state: RoomState, op: Op, who: Viewer, seq: number) => { ok: true; state: RoomState } | { ok: false; code: string; message: string };
+
+const deps = { canUseAsset: () => true };
+
+export const serverApply: Applier = (state, op, who, seq) => {
+  const decision = canApply(op, who, state, deps);
+  if (!decision.ok) return decision;
+  const r = applyOp(state, op, who, env(seq));
+  return r.ok ? { ok: true, state: r.state } : r;
+};
+
+/**
+ * Runs a pair's steps in both rooms and compares everything a player can
+ * observe (contract section 5): for each step, the op the device makes,
+ * the answer and its words, whether each token the acting player's device
+ * moves may send drag frames (server/rooms/ephemeral.ts), and each
+ * player's copy after it, its log and so its `ev` stream included, for
+ * every player whose copy was the same before the sequence began. The
+ * steps go on from where each room's last step left it.
+ */
+export function checkOps(pair: OpPair, applier: Applier = serverApply, firstSeq = 3): { a: RoomState; b: RoomState } {
+  const sceneId = pair.a.meta.playerSceneId ?? "s1";
+  const seen = (state: RoomState, p: Viewer) => shown(projectState(state, p, { sceneId }), pair.unshown);
+  const same = players(pair.a).filter((p) => isDeepEqual(seen(pair.a, p), seen(pair.b, p)));
+  assert.ok(same.length > 0, `${pair.name}: the rooms differ for every player, so the pair tests nothing`);
+  let a = pair.a;
+  let b = pair.b;
+  for (const [i, step] of pair.steps.entries()) {
+    const where = `${pair.name}, step ${i + 1}${step.note ? ` (${step.note})` : ""} by ${step.who.memberId}`;
+    if (step.who.role === "player") assert.ok(same.some((p) => p.memberId === step.who.memberId), `${where}: the acting player's copies differ, so the step tests nothing`);
+    const make = (state: RoomState) => (typeof step.op === "function" ? step.op(deviceView(state, step.who, sceneId), state) : step.op);
+    const oa = make(a);
+    const ob = make(b);
+    assert.deepEqual(step.who.role === "player" ? oa : oa === null, step.who.role === "player" ? ob : ob === null, `${where}: the op differs`);
+    if (oa === null || ob === null) continue;
+    if (step.who.role === "player") {
+      const frames = (state: RoomState, op: Op) => framesOf(state, op, step.who, sceneId);
+      assert.deepEqual(frames(a, oa), frames(b, ob), `${where}: the drag frames differ`);
+    }
+    const ra = applier(a, oa, step.who, firstSeq + i);
+    const rb = applier(b, ob, step.who, firstSeq + i);
+    assert.deepEqual(ra.ok ? "ok" : `${ra.code}: ${ra.message}`, rb.ok ? "ok" : `${rb.code}: ${rb.message}`, `${where}: the answer differs`);
+    if (ra.ok && rb.ok) {
+      a = ra.state;
+      b = rb.state;
+    }
+    for (const p of same) assert.deepEqual(seen(a, p), seen(b, p), `${where}: ${p.memberId} sees the rooms differ after it`);
+  }
+  return { a, b };
+}
+
+/** The drag frames a player's device sends for a move: each token of the group its copy holds, and whether the server passes it on. */
+function framesOf(state: RoomState, op: Op, who: Viewer, sceneId: string): [string, boolean][] {
+  if (op.t !== "token.move" && op.t !== "token.moveMany") return [];
+  const view = deviceView(state, who, sceneId);
+  const named = op.t === "token.move" ? [op.tokenId] : op.moves.map((m) => m.tokenId);
+  const out: [string, boolean][] = [];
+  for (const ids of moveGroups(view.tokens, named).values()) for (const id of ids) out.push([id, mayMoveToken(state, who, id).ok]);
+  return out;
 }
 
 function shown(copy: object, unshown: readonly string[] | undefined): object {

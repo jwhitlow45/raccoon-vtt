@@ -3,7 +3,10 @@ import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
 import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
+import { LIMITS } from "../limits.ts";
+import { linkHolds } from "../rules/attach.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
+import { turnUnderWay } from "../rules/path.ts";
 import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
@@ -123,6 +126,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   // would stop the room's load and leave it read-only.
   if (op.deps) checkReferences(tx, op.entries, before, removed);
   companionsAfterRestore(tx, op.entries);
+  if (op.rides) ridesBack(tx, op.rides);
   if (op.undid !== undefined) writeHpUndoLine(tx, op.undid);
   for (const sceneId of [...wallsMoved].sort()) {
     if (!scenesWritten.has(sceneId) && tx.state.scenes[sceneId]) tx.bumpWalls(sceneId);
@@ -162,6 +166,29 @@ function companionsAfterRestore(tx: Tx, entries: RestoreEntry[]): void {
     }
   }
   syncOwners(tx, [...characters].sort());
+}
+
+/**
+ * A player's undo of a Get off, or redo of a mounting, puts the mount back
+ * on the turn's list (docs/design-v1-attach.md 8.3): only for the turn the
+ * step was made on, the same seq, and only while the restored ride is the
+ * one it names, a controlled ride of the turn's creature that holds. It
+ * never adds a mount the turn did not have and never touches `markRound`.
+ */
+function ridesBack(tx: Tx, rides: NonNullable<OpOf<"sys.restore">["rides"]>): void {
+  for (const ride of rides) {
+    const encounter = tx.state.encounter;
+    const turn = turnUnderWay(encounter);
+    if (!encounter || !turn || turn.seq !== ride.seq || turn.tokenId !== ride.rider) continue;
+    const rider = tx.state.tokens[ride.rider];
+    const mount = tx.state.tokens[ride.mount];
+    const link = rider?.attached;
+    if (!rider || !mount || link?.to !== mount.id || link.kind !== "ride" || link.steer !== true) continue;
+    if (!linkHolds(tx.state.meta.settings, "ride", rider, mount)) continue;
+    const mounts = turn.mounts ?? [];
+    if (mounts.includes(mount.id) || mounts.length >= LIMITS.turnMounts) continue;
+    tx.write(keys.encounter, { ...encounter, turnStart: { ...encounter.turnStart!, mounts: [...mounts, mount.id] } });
+  }
 }
 
 /** The refusal when a restore would take away a scene, character or token that other work still uses. */
@@ -242,7 +269,9 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
     const named = (id: string | undefined) => id !== undefined && tokens.has(id);
     const entryUses = s.encounter?.entries.some((e) => named(e.tokenId)) ?? false;
     const templateUses = Object.values(s.templates).some((t) => named(t.attachedTo) || named(t.casterId));
-    if (entryUses || templateUses) throw invalid(DEPENDED_ON);
+    // A token another one is attached to holds it (docs/design-v1-attach.md 8.3).
+    const tokenUses = Object.values(s.tokens).some((t) => named(t.attached?.to));
+    if (entryUses || templateUses || tokenUses) throw invalid(DEPENDED_ON);
   }
 }
 
@@ -257,9 +286,10 @@ function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
   const sceneId = sceneIdOf(parsed, value as Record<string, unknown>);
   if (sceneId !== undefined) refs.push(keys.scene(sceneId));
   if (parsed.kind === "token") {
-    const { actor: ref, companion } = value as Partial<Token>;
+    const { actor: ref, companion, attached } = value as Partial<Token>;
     if (ref && "ref" in ref) refs.push(keys.character(ref.ref));
     if (companion) refs.push(keys.character(companion.of));
+    if (attached) refs.push(keys.token(attached.to));
   }
   if (parsed.kind === "pin") {
     const { pageId } = value as Partial<Pin>;

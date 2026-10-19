@@ -575,8 +575,10 @@ function projectTokenCtx(ctx: Ctx, token: Token): ProjectedToken | null {
   if (ownsToken(ctx.state, ctx.viewer, token)) {
     const actor = "inline" in token.actor ? { inline: projectActorOwner(token.actor.inline) } : token.actor;
     // Owners get their token's light to change it. Party membership is the DM's mark (docs/design-v1-maps-vision.md 4.3.5).
-    const { partyVision: _partyVision, ...own } = token;
+    const { partyVision: _partyVision, attached: _attached, ...own } = token;
     const out: ProjectedToken = { ...own, rev: 0, actor, aboveFog };
+    const link = linkShown(ctx, token);
+    if (link) out.attached = link;
     if (playersToken(ctx.state, token)) out.party = true;
     const path = projectPathCtx(ctx, token, true);
     if (path) out.path = path;
@@ -622,9 +624,24 @@ function projectTokenCtx(ctx: Ctx, token: Token): ProjectedToken | null {
     // plain token, so no link between a DM creature and a character leaks (docs/design-v1-combat-flow.md 3.6.5).
     if (token.companion) out.companion = token.companion;
   }
+  const link = linkShown(ctx, token);
+  if (link) out.attached = link;
   const path = projectPathCtx(ctx, token, false);
   if (path) out.path = path;
   return out;
+}
+
+/**
+ * A token's link as a player gets it (docs/design-v1-attach.md 8.5): only
+ * while its holder is in their projection, with its kind and `steer`, as an
+ * area attached to a token they cannot see is withheld whole. So a torch a
+ * hidden creature holds reaches them as a loose torch, which follows its
+ * holder all the same.
+ */
+function linkShown(ctx: Ctx, token: Token): Token["attached"] | null {
+  const link = token.attached;
+  if (!link || !tokenVisibleById(ctx, link.to)) return null;
+  return { to: link.to, kind: link.kind, ...(link.steer ? { steer: true as const } : {}) };
 }
 
 /**
@@ -1281,6 +1298,9 @@ function projectTurnStart(ctx: Ctx, start: TurnStart | undefined, activeEntryId:
   if (!start.seen && !ownsToken(ctx.state, ctx.viewer, token)) return null;
   const out: TurnStart = { entryId: start.entryId, tokenId: start.tokenId, sceneId: start.sceneId, x: start.x, y: start.y, elevation: start.elevation };
   if (start.seq !== undefined) out.seq = start.seq;
+  // The mounts sharing the turn that the player's copy holds (docs/design-v1-attach.md 8.5).
+  const mounts = start.mounts?.filter((id) => tokenVisibleById(ctx, id));
+  if (mounts && mounts.length > 0) out.mounts = mounts;
   return out;
 }
 
@@ -1774,6 +1794,13 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
   for (const id of tokenIds) {
     const token = state.tokens[id];
     if (token && "ref" in token.actor) add(keys.character(token.actor.ref));
+  }
+  // A carried token's link reaches a player while they see its holder (linkShown), so the holder's change re-projects it.
+  for (const token of Object.values(state.tokens)) if (token.attached && tokenIds.has(token.attached.to)) add(keys.token(token.id));
+  // So does a mount sharing the turn, in the turn's start.
+  if (state.encounter?.turnStart?.mounts?.some((id) => tokenIds.has(id))) {
+    add(keys.encounter);
+    encounterTouched = true;
   }
   for (const template of Object.values(state.templates)) {
     if ((template.attachedTo !== undefined && tokenIds.has(template.attachedTo)) || (template.casterId !== undefined && tokenIds.has(template.casterId))) {

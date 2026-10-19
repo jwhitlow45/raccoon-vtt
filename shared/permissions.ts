@@ -771,12 +771,15 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "sys.restore": {
       // A player's stack holds only their own drawings and token moves and resizes (design 7.7), so that is all a restore may touch.
+      const restoring = restoredTokens(op);
       for (const entry of op.entries) {
         if (entry.key.startsWith("token:")) {
           // An undo retraces a move that was allowed when made. A redo makes it again, so walls stop it as they would a new
           // move, except a teleport's, which passed them the first time too (docs/design-v1-maps-vision.md 4.1).
           const tokenId = entry.key.slice("token:".length);
-          const d = restorePoseCheck(c, tokenId, entry.value, op.from === "redo" && !op.teleport, op.routes?.[tokenId]);
+          const redo = op.from === "redo" && !op.teleport;
+          const holder = carriedThroughout(c, tokenId, entry.value, restoring);
+          const d = holder ? restoreCarriedCheck(c, tokenId, entry.value, redo, holder, op.routes?.[holder], restoring) : restorePoseCheck(c, tokenId, entry.value, redo, op.routes?.[tokenId]);
           if (!d.ok) return d;
           continue;
         }
@@ -1307,7 +1310,7 @@ export function movesAnyToken(settings: Partial<Pick<RoomSettings, "playersMoveA
  * turn's path goes back with the position, and a squeeze with the place it
  * was squeezed in (docs/design-v1-maps-vision.md 4.1).
  */
-const POSE_FIELDS = ["x", "y", "elevation", "rotation", "path", "squeeze", "rev"] as const;
+const POSE_FIELDS = ["x", "y", "elevation", "rotation", "path", "squeeze", "attached", "rev"] as const;
 
 function withoutPose(token: Token, also: readonly string[] = []): string {
   const rest: Record<string, unknown> = { ...token };
@@ -1334,10 +1337,95 @@ function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
   if (!token) return GONE;
   const restored = value && typeof value === "object" ? (value as Token) : null;
   const inPlace = restored !== null && restored.sceneId === current.sceneId && restored.x === current.x && restored.y === current.y;
-  const may = inPlace && ownsToken(c.state, c.actor, token) ? OK : moveCheck(c, tokenId);
+  const may = (inPlace && ownsToken(c.state, c.actor, token)) || viaHolder(c, current, restored) ? OK : moveCheck(c, tokenId);
   if (!may.ok) return may;
   if (!restored) return FORBIDDEN;
   return withoutPose(restored) === withoutPose(current) ? OK : refuse("forbidden", "an undo of yours only moves tokens back");
+}
+
+/** The tokens a restore writes, with the values it puts back. */
+function restoredTokens(op: OpOf<"sys.restore">): Map<string, unknown> {
+  const out = new Map<string, unknown>();
+  for (const entry of op.entries) if (entry.key.startsWith("token:")) out.set(entry.key.slice("token:".length), entry.value);
+  return out;
+}
+
+/**
+ * The token of the restore a token rides under, before and after it
+ * (docs/design-v1-attach.md 8.3): walking up its links now, and up the
+ * links the restore puts back, each reaches a token of the same restore
+ * the player may move. Its top one names the group, or undefined when the
+ * token is not carried so throughout. Such a token rides back as it rode
+ * out, and needs no right to move it of its own.
+ */
+function carriedThroughout(c: Check, tokenId: string, value: unknown, restoring: ReadonlyMap<string, unknown>): string | undefined {
+  const linkOf = (id: string, put: boolean): string | undefined => {
+    const v = put && restoring.has(id) ? restoring.get(id) : c.state.tokens[id];
+    const to = v && typeof v === "object" ? (v as Token).attached?.to : undefined;
+    return to !== undefined && c.state.tokens[to]?.sceneId === c.state.tokens[id]?.sceneId ? to : undefined;
+  };
+  const under = (put: boolean): string | undefined => {
+    const visited = new Set<string>([tokenId]);
+    let found: string | undefined;
+    for (let up = put && value && typeof value === "object" ? (value as Token).attached?.to : linkOf(tokenId, false); up !== undefined && !visited.has(up); up = linkOf(up, put)) {
+      visited.add(up);
+      if (restoring.has(up) && namedMoveCheck(c, up).ok) found = up;
+    }
+    return found;
+  };
+  const now = under(false);
+  const then = under(true);
+  return now !== undefined && then !== undefined ? now : undefined;
+}
+
+/**
+ * A passenger's part of a player's undo or redo of a group move
+ * (docs/design-v1-attach.md 8.3). One outside the public members (hidden,
+ * seen by only some players, or riding a holder players cannot see) takes
+ * no check at all, so no refusal ever reads it. A public one must be in the
+ * player's copy and change only its pose, and on a redo a dragged one
+ * walks its holder's kept routes offset by its place, as the move did.
+ */
+function restoreCarriedCheck(c: Check, tokenId: string, value: unknown, redo: boolean, holderId: string, routes: readonly (readonly RoutePiece[])[] | undefined, restoring: ReadonlyMap<string, unknown>): Decision {
+  const current = c.state.tokens[tokenId];
+  const restored = value && typeof value === "object" ? (value as Token) : null;
+  if (!current || !restored) return OK;
+  const seenAll = (id: string) => {
+    const t = c.state.tokens[id];
+    return t !== undefined && seenByAll(c, t);
+  };
+  const chain = (): boolean => {
+    const visited = new Set<string>([tokenId]);
+    for (let at = tokenId, up = current.attached?.to; up !== undefined && !visited.has(up); at = up, up = c.state.tokens[up]?.attached?.to) {
+      visited.add(up);
+      if (!seenAll(at) || !seenAll(up)) return false;
+      if (restoring.has(up)) return true;
+    }
+    return false;
+  };
+  if (!chain()) return OK;
+  if (!c.visibleToken(tokenId)) return GONE;
+  if (withoutPose(restored) !== withoutPose(current)) return refuse("forbidden", "an undo of yours only moves tokens back");
+  if (!redo || current.attached?.kind !== "drag") return OK;
+  const holder = c.state.tokens[holderId];
+  if (!holder || !routes || routes.length === 0) return legCheck(c, tokenId, restored, false);
+  const ox = current.x - holder.x;
+  const oy = current.y - holder.y;
+  const offset = routes.map((route) => route.map(([x, y, extra, swim]): RoutePiece => [x + ox, y + oy, extra, swim]));
+  return routeCheck(c, tokenId, offset, restored);
+}
+
+/**
+ * Whether a player takes back a link by its holder's right (docs/design-v1-attach.md
+ * 6 and 8.3): the token is attached, now or in what the restore puts back,
+ * to a holder in their copy that they may move, as a detach of it needs. So
+ * undoing a Drag of a goblin the DM marked Grappled is theirs, as the drag was.
+ */
+function viaHolder(c: Check, current: Token, restored: Token | null): boolean {
+  for (const to of [current.attached?.to, restored?.attached?.to]) {
+    if (to !== undefined && c.visibleToken(to) && namedMoveCheck(c, to).ok) return true;
+  }
+  return false;
 }
 
 /** The fields a resize sets beside a move's, which a player's undo or redo of a resize may also put back. */

@@ -238,7 +238,7 @@ describe("a player's move undo", () => {
 
   test("puts the token back and keeps what others changed since", () => {
     const { state, step } = moved();
-    assert.deepEqual(step.poses, { wolf: { sceneId: "s1", x: 5, y: 5, elevation: 0, rotation: 0, size: "medium", path: "null" } });
+    assert.deepEqual(step.poses, { wolf: { sceneId: "s1", x: 5, y: 5, elevation: 0, rotation: 0, size: "medium", path: "null", attached: "" } });
     const hurt = applyOp(state, { t: "actor.hp", target: { tokenId: "wolf" }, change: { kind: "damage", amount: 5 } }, { memberId: "dm1", role: "dm" }, env(2));
     assert.ok(hurt.ok);
     const built = poseRestore(hurt.state, { ...step, poses: step.poses! }, visible);
@@ -306,7 +306,7 @@ describe("a player's move undo", () => {
 
   test("a group's moves merge into one step that keeps where the last op left each token", () => {
     const stacks = new UndoStacks();
-    const at = (x: number) => ({ sceneId: "s1", x, y: 0, elevation: 0, rotation: 0, size: "medium" as const, path: "null" });
+    const at = (x: number) => ({ sceneId: "s1", x, y: 0, elevation: 0, rotation: 0, size: "medium" as const, path: "null", attached: "" });
     stacks.push("p1", [{ key: "token:a", value: null, expectHash: "a".repeat(32) }], "moving 3 tokens", "g", { a: at(1) });
     stacks.push("p1", [{ key: "token:b", value: null, expectHash: "b".repeat(32) }], "moving 3 tokens", "g", { b: at(2) });
     stacks.push("p1", [{ key: "drawing:d", value: null, expectHash: "c".repeat(32) }], "drawing", "g");
@@ -512,7 +512,7 @@ describe("a player's resize undo (docs/design-v1-token-window.md 8.7)", () => {
   test("takes back the size and the place alone, damage dealt since kept, and redo grows it again", () => {
     const stacks = new UndoStacks();
     let state = play(bear(), { t: "token.update", tokenId: "bear", patch: { size: "huge", x: 3, y: 3 } }, stacks, 1);
-    assert.deepEqual(stacks.peek("p1", "undo")!.poses!.bear, { sceneId: "s1", x: 3, y: 3, elevation: 0, rotation: 0, size: "huge", path: "null" });
+    assert.deepEqual(stacks.peek("p1", "undo")!.poses!.bear, { sceneId: "s1", x: 3, y: 3, elevation: 0, rotation: 0, size: "huge", path: "null", attached: "" });
     state = apply(state, { t: "actor.hp", target: { tokenId: "bear" }, change: { kind: "damage", amount: 6 } }, DM_VIEWER, 2);
     state = settled(restore(state, stacks, "undo", 3));
     const bearNow = state.tokens.bear!;

@@ -1733,6 +1733,14 @@ export const serverOnlyOps = [
      * moves did (docs/design-v1-movement.md 7.4). Only permissions read it.
      */
     routes: z.record(id, z.array(routeSchema).min(1).max(MAX_KEPT_ROUTES)).optional(),
+    /**
+     * The controlled rides a player's step ended or made on a turn, each
+     * with that turn's seq (docs/design-v1-attach.md 8.3). The restore puts
+     * the mount back on the turn's list only when the same turn is under way
+     * and the restored ride is the one it names, so an undone Get off or a
+     * redone mounting shares the turn again and nothing else ever does.
+     */
+    rides: z.array(z.strictObject({ seq: z.number().int().min(0), mount: id, rider: id })).min(1).max(LIMITS.turnMounts).optional(),
   }),
   /**
    * What the party saw this batch that the scene's explored layer lacked
@@ -1780,8 +1788,9 @@ export type OpOf<T extends OpType> = Extract<Op, { t: T }>;
  * bar offers to take it back after one, so an owner's own height or facing
  * change after a drag never reads as someone else moving the token.
  */
-export function isPoseOp(op: Op): op is OpOf<"token.move" | "token.moveMany" | "token.update" | "token.countLeg"> {
-  if (op.t === "token.move" || op.t === "token.moveMany" || op.t === "token.countLeg") return true;
+export function isPoseOp(op: Op): op is OpOf<"token.move" | "token.moveMany" | "token.update" | "token.countLeg" | "token.attach" | "token.detach"> {
+  // A mistaken Ride should not cost a Get off at half Speed, so attaching and detaching undo as moves (docs/design-v1-attach.md 8.3).
+  if (op.t === "token.move" || op.t === "token.moveMany" || op.t === "token.countLeg" || op.t === "token.attach" || op.t === "token.detach") return true;
   if (op.t !== "token.update") return false;
   const fields = Object.keys(op.patch);
   return fields.length > 0 && fields.every((field) => field === "elevation" || field === "rotation");

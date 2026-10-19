@@ -1,8 +1,13 @@
+import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { checkPair, type Drag, type Pair } from "./differential.ts";
+import { checkOps, checkPair, type Drag, type OpPair, type Pair, type Step } from "./differential.ts";
 import { chunkKey } from "./keys.ts";
-import type { BuildChunk, EdgeFeature, RoomState, TerrainId } from "./model.ts";
-import { DM, P1, actor, deepClone, effect, entry, reveal, room, template, token } from "./testutil.ts";
+import type { AttachKind, BuildChunk, EdgeFeature, RoomState, TerrainId, Token } from "./model.ts";
+import type { Op } from "./protocol.ts";
+import { getOffSpot, overlaps, seatSpot } from "./rules/attach.ts";
+import { projectState } from "./project.ts";
+import { applyOp } from "./reducer.ts";
+import { DM, P1, P2, actor, deepClone, effect, entry, env, reveal, room, template, token } from "./testutil.ts";
 
 /**
  * Movement's generators for the shared differential test
@@ -12,7 +17,7 @@ import { DM, P1, actor, deepClone, effect, entry, reveal, room, template, token 
  * leaves a gap below y = 12. The hero is P1's, the goblin the DM's.
  *
  * Attach's generators (hidden holders, dragged and carried creatures,
- * passengers) join when attached tokens are built.
+ * passengers) follow movement's, below.
  */
 
 const WALL: EdgeFeature = { kind: "wall" };
@@ -216,4 +221,299 @@ describe("public determinism: movement's generators (contract section 5)", () =>
   for (const p of PAIRS) {
     test(p.name, () => checkPair(p));
   }
+});
+
+/*
+ * Attached tokens' generators (docs/design-v1-attach.md 8.0): pairs of rooms
+ * that differ only in hidden state, and never only in a link that carries a
+ * visible token, which the carried-object reveal shows by design. Each pair
+ * goes through the same steps in both rooms, made on the acting device's
+ * own copy, and every player whose copy was the same before must see the
+ * same answers, frames and copies throughout.
+ *
+ * The table: P1 plays Thorn (a PC at 4,6) and a warhorse (Large, at 4,4),
+ * P2 plays Cora at 12,6, and the DM runs a goblin at 8,6. The scene stops
+ * moves at a wall along x = 14 that leaves a gap below y = 10.
+ */
+
+function attachBase(): RoomState {
+  const state = room();
+  state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off" };
+  const edges: Record<string, EdgeFeature> = {};
+  for (let y = 0; y < 10; y++) edges[`14,${y},w`] = WALL;
+  state.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges };
+  state.tokens.thorn = token("thorn", { name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 4, y: 6 });
+  state.tokens.horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", disposition: "ally", ownerIds: ["p1"], x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+  state.tokens.cora = token("cora", { name: "Cora", kind: "pc", disposition: "ally", ownerIds: ["p2"], x: 12, y: 6 });
+  state.tokens.gob = token("gob", { name: "Goblin", x: 8, y: 6 });
+  return state;
+}
+
+function attachPair(name: string, setup: (s: RoomState) => void, hidden: (s: RoomState) => void, steps: readonly Step[], unshown?: OpPair["unshown"]): OpPair {
+  const a = attachBase();
+  setup(a);
+  const b = deepClone(a);
+  hidden(b);
+  return { name, a, b, steps, ...(unshown ? { unshown } : {}) };
+}
+
+/** Thorn's turn of a fight with rows for Thorn, the goblin and the horse, as two DM steps. */
+const fightSteps: Step[] = [
+  { who: DM, op: { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "eg", tokenId: "gob", value: 12 }, { id: "eh", tokenId: "horse", value: 8 }] }, note: "start" },
+  { who: DM, op: { t: "encounter.next" }, note: "Thorn's turn" },
+];
+
+/** An attach as the bar makes it from the device's copy: the seat nearest the carried token, or where a dragged one stands. */
+function attachFrom(carried: string, holder: string, kind: AttachKind, steer = false): (view: RoomState) => Op | null {
+  return (view) => {
+    const c = view.tokens[carried];
+    const h = view.tokens[holder];
+    if (!c || !h) return null;
+    const seat = kind === "drag" ? { x: c.x, y: c.y } : seatSpot(c, h);
+    if (!seat) return null;
+    return { t: "token.attach", tokenId: carried, to: holder, kind, ...(steer ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? c.elevation : h.elevation };
+  };
+}
+
+/** Get off as the bar finds its place: the first spot beside the holder on no creature the copy holds. */
+function getOffFrom(carried: string): (view: RoomState) => Op | null {
+  return (view) => {
+    const c = view.tokens[carried];
+    const h = c?.attached ? view.tokens[c.attached.to] : undefined;
+    const scene = c ? view.scenes[c.sceneId] : undefined;
+    if (!c || !h || !scene) return null;
+    const others = Object.values(view.tokens).filter((t) => t.id !== c.id && t.id !== h.id && t.sceneId === c.sceneId && t.kind !== "object");
+    const spot = getOffSpot(view.meta.settings, scene.bounds, c, h, (p) => !others.some((t) => overlaps({ ...c, x: p.x, y: p.y }, t)));
+    return spot ? { t: "token.detach", tokenId: carried, x: spot.x, y: spot.y } : null;
+  };
+}
+
+const moveHorse = (x: number, y: number, who = P1): Step => ({ who, op: { t: "token.move", tokenId: "horse", x, y }, note: `horse to ${x},${y}` });
+const moveThorn = (x: number, y: number, who = P1): Step => ({ who, op: { t: "token.move", tokenId: "thorn", x, y }, note: `Thorn to ${x},${y}` });
+const nudgeBoth: Step = { who: P1, op: { t: "token.moveMany", moves: [{ tokenId: "horse", x: 5, y: 4 }, { tokenId: "thorn", x: 5, y: 6 }] }, note: "two destinations" };
+const rideHorse: Step = { who: P1, op: attachFrom("thorn", "horse", "ride", true), note: "Thorn rides, controlled" };
+const rideFree: Step = { who: P1, op: attachFrom("thorn", "horse", "ride"), note: "Thorn rides, independent" };
+const getOff: Step = { who: P1, op: getOffFrom("thorn"), note: "Thorn gets off" };
+const doesntCount: Step = { who: P1, op: { t: "token.countLeg", tokenId: "thorn", counts: false }, note: "Doesn't count" };
+const counts: Step = { who: P1, op: { t: "token.countLeg", tokenId: "thorn", counts: true }, note: "counts again" };
+const next: Step = { who: DM, op: { t: "encounter.next" }, note: "Next" };
+const endTurn: Step = { who: P1, op: (view) => ({ t: "encounter.next", from: { entry: view.encounter?.activeEntryId ?? null, round: view.encounter?.round ?? 0 } }), note: "End turn" };
+
+/** A hidden creature of the DM's on a token, by a link of this kind. */
+function hiddenOn(s: RoomState, id: string, to: string, kind: AttachKind, extra: Partial<Token> = {}): void {
+  const holder = s.tokens[to]!;
+  const size = extra.size ?? (kind === "perch" ? "tiny" : "medium");
+  const at = kind === "drag" ? { x: holder.x - 1, y: holder.y } : { x: holder.x, y: holder.y };
+  s.tokens[id] = token(id, { name: "Shade", size, ...at, elevation: holder.elevation, visibility: "dm", attached: { to, kind }, ...extra });
+}
+
+/** A torch of P1's beside Thorn, which every player sees. */
+function torch(s: RoomState): void {
+  s.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", ownerIds: ["p1"], x: 5, y: 6.5 });
+}
+
+const grappled = (s: RoomState, hidden: boolean) => {
+  s.tokens.gob = { ...s.tokens.gob!, x: 5, y: 7, actor: { inline: actor({ effects: [effect("g", { key: "grappled", ...(hidden ? { hiddenFromPlayers: true } : {}) })] }) } };
+};
+
+const ATTACH_PAIRS: OpPair[] = [
+  attachPair("a hidden rider on a visible mount", () => {}, (s) => hiddenOn(s, "shade", "horse", "ride"), [
+    ...fightSteps,
+    rideHorse,
+    moveHorse(8, 4),
+    doesntCount,
+    counts,
+    { who: DM, op: { t: "token.move", tokenId: "horse", x: 9, y: 4 }, note: "the DM's drag" },
+    getOff,
+    moveThorn(9, 6),
+    rideFree,
+    moveHorse(10, 2),
+    nudgeBoth,
+    { who: P1, op: { t: "token.detach", tokenId: "thorn" }, note: "a refused Put down" },
+    endTurn,
+    { who: P1, op: attachFrom("thorn", "horse", "ride", true), note: "a ride off Thorn's turn" },
+  ]),
+  attachPair(
+    "a hidden passenger under a visible holder",
+    (s) => {
+      torch(s);
+      s.tokens.gob = { ...s.tokens.gob!, x: 4, y: 7 };
+    },
+    (s) => hiddenOn(s, "imp", "thorn", "perch"),
+    [
+      ...fightSteps,
+      { who: P1, op: attachFrom("gob", "thorn", "drag"), note: "a drag refused without Grappled" },
+      { who: P1, op: attachFrom("torch", "thorn", "carry"), note: "Carry the torch" },
+      rideHorse,
+      moveHorse(8, 2),
+      nudgeBoth,
+      { who: P1, op: (v) => (v.tokens.thorn?.attached ? getOffFrom("thorn")(v) : { t: "token.move", tokenId: "thorn", x: 7, y: 6 }), note: "Thorn steps down" },
+      moveThorn(16, 12),
+      { who: P1, op: { t: "token.detach", tokenId: "torch" }, note: "Put down the torch" },
+    ],
+  ),
+  attachPair(
+    "a passenger hidden from every player but its own player",
+    () => {},
+    (s) => {
+      s.tokens.owl = token("owl", { name: "Owl", kind: "npc", size: "tiny", ownerIds: ["p2"], x: 4.5, y: 4.5, visibility: "dm", attached: { to: "horse", kind: "perch" } });
+    },
+    [...fightSteps, rideHorse, moveHorse(8, 4), nudgeBoth, getOff, endTurn],
+  ),
+  attachPair(
+    "a hidden token between a visible holder and a hidden-from-others chain end",
+    () => {},
+    (s) => {
+      hiddenOn(s, "shade", "horse", "ride");
+      s.tokens.owl = token("owl", { name: "Owl", kind: "npc", size: "tiny", ownerIds: ["p2"], x: 4.5, y: 4.5, visibility: "dm", attached: { to: "shade", kind: "perch" } });
+    },
+    [...fightSteps, rideHorse, moveHorse(8, 4), moveHorse(8, 8), getOff, endTurn],
+  ),
+  attachPair(
+    "a hidden dragged creature",
+    (s) => grappled(s, false),
+    (s) => hiddenOn(s, "rat", "thorn", "drag", { size: "small", y: 5 }),
+    [
+      ...fightSteps,
+      { who: P1, op: attachFrom("gob", "thorn", "drag"), note: "Drag the goblin" },
+      moveThorn(10, 6),
+      // Past the wall's gap Thorn and the goblin walk free, while the rat, a row up, meets the wall unseen.
+      { who: P1, op: { t: "token.move", tokenId: "thorn", x: 16, y: 10, route: [[12, 10, 0, 0], [16, 10, 0, 0]] }, note: "round the wall" },
+      moveThorn(17, 10),
+      { who: P1, op: { t: "token.detach", tokenId: "gob" }, note: "Let go of the goblin" },
+    ],
+  ),
+  attachPair(
+    "a hidden Grappled effect",
+    (s) => (s.tokens.gob = { ...s.tokens.gob!, x: 5, y: 7 }),
+    (s) => grappled(s, true),
+    [
+      ...fightSteps,
+      { who: P1, op: attachFrom("gob", "thorn", "drag"), note: "Drag the goblin" },
+      { who: P1, op: attachFrom("gob", "thorn", "carry"), note: "Carry the goblin" },
+    ],
+  ),
+  attachPair(
+    "hidden passengers that would pass a limit",
+    () => {},
+    (s) => {
+      for (let i = 0; i < 8; i++) hiddenOn(s, `imp${i}`, "horse", "perch", { name: "Imp", x: 4 + (i % 4) * 0.5, y: 4 + Math.floor(i / 4) * 0.5 });
+    },
+    [...fightSteps, rideHorse, moveHorse(8, 4), getOff],
+  ),
+  attachPair(
+    "a hidden row beside a mount's row",
+    () => {},
+    (s) => {
+      s.tokens.lurker = token("lurker", { name: "Lurker", x: 30, y: 20, visibility: "dm" });
+    },
+    [
+      { who: DM, op: { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "eg", tokenId: "gob", value: 12 }, { id: "eh", tokenId: "horse", value: 8 }] } },
+      { who: DM, op: (_v, state) => (state.tokens.lurker ? { t: "encounter.add", entries: [{ id: "el", tokenId: "lurker", value: 9, hidden: true }] } : { t: "encounter.update", entryId: "eh", patch: { inLair: false } }), note: "a hidden row joins in one room" },
+      next,
+      rideHorse,
+      moveHorse(8, 4),
+      doesntCount,
+      counts,
+      // The horse's row now goes right after Thorn's, and marks time.
+      endTurn,
+      next,
+    ],
+  ),
+  attachPair(
+    "a creature the fog withholds inside a group",
+    (s) => {
+      s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: true };
+      reveal(s, "s1", { x: 4, y: 0, w: 36, h: 30 });
+    },
+    (s) => {
+      s.tokens.wolf = token("wolf", { name: "Wolf", x: 3, y: 4, attached: { to: "horse", kind: "drag" } });
+    },
+    // The wolf walks in the fog's column, so it stays withheld.
+    [...fightSteps, rideHorse, moveHorse(4, 8), moveHorse(4, 12), getOff, endTurn],
+  ),
+  attachPair(
+    "a rider whose visibility flips during the round",
+    (s) => {
+      s.meta.settings = { ...s.meta.settings, revealHiddenOnTurn: false };
+      s.tokens.shade = token("shade", { name: "Shade", x: 30, y: 20, visibility: "dm" });
+    },
+    (s) => {
+      // A controlled ride no player sees: its turn starting hidden shares nothing.
+      s.tokens.shade = { ...s.tokens.shade!, x: 4, y: 4, attached: { to: "horse", kind: "ride", steer: true } };
+    },
+    [
+      { who: DM, op: { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "es", tokenId: "shade", value: 15, hidden: true }, { id: "eg", tokenId: "gob", value: 12 }, { id: "eh", tokenId: "horse", value: 8 }] } },
+      next,
+      rideHorse,
+      moveHorse(8, 4),
+      { who: DM, op: { t: "token.update", tokenId: "thorn", patch: { visibility: "dm" } }, note: "the DM hides Thorn" },
+      moveHorse(8, 8),
+      endTurn,
+      // Into the hidden shade's turn, on which the DM moves the horse.
+      next,
+      { who: DM, op: { t: "token.move", tokenId: "horse", x: 12, y: 8 }, note: "the DM moves the horse on the hidden turn" },
+      next,
+      next,
+      // Round 2, Thorn's turn starts while he is hidden: the horse shares nothing.
+      { who: DM, op: { t: "token.update", tokenId: "thorn", patch: { visibility: "all" } }, note: "the DM shows Thorn" },
+      moveHorse(12, 12),
+      endTurn,
+      next,
+      next,
+      next,
+      // Round 3: seen by all again, the turn starts shared.
+      moveHorse(12, 16),
+    ],
+  ),
+];
+
+describe("public determinism: attached tokens' generators (docs/design-v1-attach.md 8.0)", () => {
+  for (const p of ATTACH_PAIRS) test(p.name, () => void checkOps(p));
+});
+
+describe("the carried-object reveal (docs/design-v1-attach.md 8.0)", () => {
+  /** A torch every player sees, on a hidden stalker in one room and loose where it stands in the other. */
+  function rooms(): { a: RoomState; b: RoomState } {
+    const a = attachBase();
+    a.tokens.stalker = token("stalker", { name: "Stalker", x: 8, y: 2, visibility: "dm" });
+    a.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 8.5, y: 2.5 });
+    const b = deepClone(a);
+    b.tokens.torch = { ...b.tokens.torch!, attached: { to: "stalker", kind: "carry" } };
+    return { a, b };
+  }
+
+  test("the torch follows its hidden holder exactly in the room with the link, and no link reaches players", () => {
+    const { a, b } = rooms();
+    const op: Op = { t: "token.move", tokenId: "stalker", x: 12, y: 3 };
+    const after = (state: RoomState) => {
+      const r = applyOp(state, op, DM, env(5));
+      assert.ok(r.ok);
+      return r.state;
+    };
+    assert.deepEqual([after(a).tokens.torch!.x, after(a).tokens.torch!.y], [8.5, 2.5]);
+    assert.deepEqual([after(b).tokens.torch!.x, after(b).tokens.torch!.y], [12.5, 3.5]);
+    for (const p of [P1, P2]) {
+      const copy = projectState(after(b), p, { sceneId: "s1" }).tokens.torch as Token | undefined;
+      assert.equal(copy?.attached, undefined, `${p.memberId} gets no link`);
+      assert.deepEqual([copy?.x, copy?.y], [12.5, 3.5]);
+    }
+  });
+
+  test("every refusal, limit and answer is the same in both rooms", () => {
+    const { a, b } = rooms();
+    const torchTo = (to: string, kind: AttachKind): Step => ({ who: P1, op: attachFrom("torch", to, kind), note: `torch on ${to}` });
+    const steps: Step[] = [
+      { who: P1, op: { t: "token.move", tokenId: "torch", x: 9, y: 2 }, note: "not theirs to move" },
+      { who: P1, op: { t: "token.detach", tokenId: "torch" }, note: "not attached in their copy" },
+      { who: DM, op: { t: "room.update", settings: { playersMoveAny: "all" } } },
+      torchTo("thorn", "carry"),
+      { who: P1, op: { t: "token.move", tokenId: "torch", x: 5, y: 6.5 }, note: "beside Thorn" },
+      torchTo("thorn", "carry"),
+      { who: P1, op: { t: "token.move", tokenId: "thorn", x: 6, y: 6 }, note: "Thorn carries it off" },
+      { who: P1, op: { t: "token.detach", tokenId: "torch" }, note: "Put down" },
+    ];
+    // The torch's link differs by design, so its copy is left out of the comparison until it moves off the stalker.
+    checkOps({ name: "the reveal's answers", a, b, steps });
+  });
 });

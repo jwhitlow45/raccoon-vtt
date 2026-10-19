@@ -22,6 +22,7 @@ import {
   type MoveAnyToken,
   type RollRequest,
   type RollTest,
+  type AttachKind,
   type RoomState,
   type SavedEncounter,
   type SavedEncounterMonster,
@@ -40,6 +41,7 @@ import { applyOp, type Env } from "./reducer.ts";
 import { normalizeCompanionState } from "./reducer/companions.ts";
 import { hpUndoRestore } from "./reducer/hpUndo.ts";
 import type { Op } from "./protocol.ts";
+import { ATTACH_KINDS, seatSpot } from "./rules/attach.ts";
 import { encodeTile, fullTileBits, rasterizeFogOps, TILE_BYTES } from "./rules/fog.ts";
 
 /**
@@ -1288,6 +1290,8 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
   if (chance(r, 0.08)) return companionOp(r, state, who, { anyToken, anyCharacter, seqId });
   // Asks for saves (docs/design-v1-player-save-spell.md 5.3), about one in sixteen.
   if (chance(r, 0.06)) return castOp(r, state, who, { anyToken, seqId });
+  // Attached tokens (docs/design-v1-attach.md), about one in fourteen.
+  if (chance(r, 0.07)) return attachOp(r, state, anyToken);
 
   if (who.role === "player") {
     // Wave 4's moves, doors and lights, now and then.
@@ -1582,6 +1586,34 @@ function visionOp(r: () => number, state: RoomState, sceneId: string, who: Viewe
  * Reaction, Dismiss, and a character's new owners, which reach its
  * companions.
  */
+/**
+ * Links of every kind, mostly at the seat the bar would pick or where a
+ * dragged creature stands, so they hold often enough to be carried, a move
+ * beside a holder that sets up a drag, and Get off, Put down and Let go.
+ */
+function attachOp(r: () => number, state: RoomState, anyToken: () => string): Op {
+  const carried = state.tokens[anyToken()];
+  // Mostly a holder on the carried token's scene, and a kind its size allows, so links are made often.
+  const near = Object.values(state.tokens).filter((t) => carried && t.id !== carried.id && t.sceneId === carried.sceneId);
+  const holder = near.length > 0 && chance(r, 0.9) ? pick(r, near) : state.tokens[anyToken()];
+  if (!carried || !holder) return { t: "token.detach", tokenId: anyToken() };
+  const fitting: AttachKind = carried.kind === "object" ? "carry" : carried.size === "tiny" ? "perch" : holder.kind === "object" ? "carry" : "ride";
+  const kind = chance(r, 0.7) ? fitting : pick(r, ATTACH_KINDS);
+  switch (int(r, 0, 6)) {
+    case 0:
+      return { t: "token.move", tokenId: carried.id, x: Math.max(0, holder.x - 1), y: holder.y };
+    case 1:
+      return { t: "token.detach", tokenId: carried.id, x: holder.x + int(r, -1, 2), y: Math.max(0, holder.y - 1) };
+    case 2:
+      return { t: "token.detach", tokenId: carried.id };
+    default: {
+      const seat = kind === "drag" ? carried : (seatSpot(carried, holder) ?? holder);
+      const steer = kind === "ride" ? chance(r, 0.6) : chance(r, 0.05);
+      return { t: "token.attach", tokenId: carried.id, to: holder.id, kind, ...(steer ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? carried.elevation : holder.elevation };
+    }
+  }
+}
+
 function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { anyToken(): string; anyCharacter(): string; seqId: string }): Op {
   const companions = Object.values(state.tokens).filter((t) => t.companion !== undefined);
   const anyCompanion = () => (companions.length > 0 && chance(r, 0.8) ? pick(r, companions).id : helpers.anyToken());

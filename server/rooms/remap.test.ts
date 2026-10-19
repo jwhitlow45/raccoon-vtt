@@ -573,3 +573,23 @@ describe("remapState, a player's asks for saves (docs/design-v1-player-save-spel
     assert.notEqual(thorn.id, "thorn");
   });
 });
+
+describe("attached tokens in an import (docs/design-v1-attach.md 5.2)", () => {
+  test("a link follows its holder's new id, goes when the holder did not come through, and the turn's mounts stay behind", () => {
+    let state = room();
+    state.tokens.horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4 });
+    state.tokens.bree = token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, attached: { to: "horse", kind: "ride", steer: true } });
+    state.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 9, y: 9, attached: { to: "nowhere", kind: "carry" } });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "bree", value: 20 }] });
+    state = apply(state, { t: "encounter.next" }, undefined, 2);
+    assert.deepEqual(state.encounter!.turnStart!.mounts, ["horse"]);
+    const out = remapState(state, { assets: new Map() });
+    const tokens = Object.values(out.tokens);
+    const horse = tokens.find((t) => t.name === "Warhorse")!;
+    assert.deepEqual(tokens.find((t) => t.name === "Bree")!.attached, { to: horse.id, kind: "ride", steer: true });
+    assert.equal(tokens.find((t) => t.name === "Torch")!.attached, undefined);
+    assert.equal(out.encounter!.turnStart!.mounts, undefined);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+});

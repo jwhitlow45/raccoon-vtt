@@ -306,6 +306,11 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (characters.has(t.companion.of)) next.companion = { ...t.companion, of: characters.of(t.companion.of) };
       else delete next.companion;
     }
+    // A link follows its holder's new id, and goes when the holder did not come through (docs/design-v1-attach.md 5.2).
+    if (t.attached) {
+      if (tokens.has(t.attached.to)) next.attached = { ...t.attached, to: tokens.of(t.attached.to) };
+      else delete next.attached;
+    }
     if (t.image) {
       const mapped = image(t.image);
       if (mapped) next.image = mapped;
@@ -355,7 +360,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (turnStart && entries.has(turnStart.entryId) && tokens.has(turnStart.tokenId) && scenes.has(turnStart.sceneId)) {
       // The seq that names the turn counts ops of the old room. The new room counts from the start again, so a
       // later turn could get the same number and take up an old path. The turn records no path until the next.
-      const { seq: _seq, ...spot } = turnStart;
+      // Without its seq the turn shares nothing with a mount either (docs/design-v1-attach.md 7.1).
+      const { seq: _seq, mounts: _mounts, ...spot } = turnStart;
       next.turnStart = { ...spot, entryId: entries.of(turnStart.entryId), tokenId: tokens.of(turnStart.tokenId), sceneId: scenes.of(turnStart.sceneId) };
     }
     return next;

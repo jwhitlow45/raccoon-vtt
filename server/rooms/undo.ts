@@ -6,7 +6,9 @@ import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type 
 export type KeptRoute = NonNullable<OpOf<"token.move">["route"]>;
 import { guardMatches } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
-import { stableStringify } from "#shared/project.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { inSightOfNonOwners, stableStringify } from "#shared/project.ts";
+import { holderOf } from "#shared/rules/attach.ts";
 import { addTally, describeTally, type Tally } from "./undoLabels.ts";
 
 /**
@@ -37,7 +39,10 @@ type Place = Pick<Token, "x" | "y" | "elevation" | "rotation" | "squeeze">;
  * (docs/design-v1-token-window.md 8.7), and an undo of a move or a resize
  * would put back a footprint someone changed since.
  */
-export type Pose = Place & Pick<Token, "sceneId" | "size" | "w" | "h"> & { path: string };
+export type Pose = Place & Pick<Token, "sceneId" | "size" | "w" | "h"> & { path: string; attached: string };
+
+/** Which tokens the step's player sees now: a pose holds a link only as their copy shows it (docs/design-v1-attach.md 8.3). */
+export type Shows = (tokenId: string) => boolean;
 
 /**
  * One undo step: the restore that takes it back, what it did in words
@@ -80,7 +85,16 @@ export type UndoEntry = {
    */
   routes?: Record<string, KeptRoute[]>;
   routed?: true;
+  /**
+   * The controlled rides a player's step ended or made, each with its
+   * turn's seq (docs/design-v1-attach.md 8.3). Its undo and its redo carry
+   * them, so a ride put back on the same turn shares the turn again.
+   */
+  rides?: Ride[];
 };
+
+/** A controlled ride on one turn's list of mounts. */
+export type Ride = { seq: number; mount: string; rider: string };
 
 /** One walk an op made, for the step's routes: the token, its route, and whether it bent or cost extra (UndoEntry.routes). */
 export type Walk = { tokenId: string; route: KeptRoute; routed: boolean };
@@ -138,7 +152,7 @@ export class UndoStacks {
    * It keeps where its last op left each token, and names its last op as its
    * origin.
    */
-  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk): void {
+  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[]): void {
     const s = this.#stacks(memberId);
     s.redo = [];
     if (inverse.length > MAX_RESTORE_ENTRIES) {
@@ -162,6 +176,7 @@ export class UndoStacks {
         // A walk merged into a teleport's step is tested again on redo.
         if (!teleport) delete top.teleport;
         withWalk(top, walk);
+        withRides(top, rides);
         return;
       }
     }
@@ -173,6 +188,7 @@ export class UndoStacks {
       entry.routes = { [walk.tokenId]: [walk.route] };
       if (walk.routed) entry.routed = true;
     }
+    withRides(entry, rides);
     s.undo.push(withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin));
     if (s.undo.length > UNDO_DEPTH) s.undo.splice(0, s.undo.length - UNDO_DEPTH);
   }
@@ -207,7 +223,7 @@ export class UndoStacks {
    * still the one its op made. It carries no group, so nothing sent later
    * merges into a step that was undone and redone.
    */
-  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed">): void {
+  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides">): void {
     const s = this.#stacks(memberId);
     if (inverse.length > MAX_RESTORE_ENTRIES) {
       s.undo = [];
@@ -219,6 +235,7 @@ export class UndoStacks {
     // Undone and redone, the step keeps the routes its walks took.
     if (walked?.routes) entry.routes = walked.routes;
     if (walked?.routed) entry.routed = true;
+    if (walked?.rides) entry.rides = walked.rides;
     target.push(withExtras(entry, poses, origin));
     if (target.length > UNDO_DEPTH) target.splice(0, target.length - UNDO_DEPTH);
   }
@@ -259,6 +276,36 @@ function withWalk(entry: UndoEntry, walk: Walk | undefined): void {
   if (walk.routed) entry.routed = true;
 }
 
+/** A merged step's rides: each new one joins the list once, up to the most a turn shares. */
+function withRides(entry: UndoEntry, rides: readonly Ride[] | undefined): void {
+  if (!rides || rides.length === 0) return;
+  const list = [...(entry.rides ?? [])];
+  for (const ride of rides) {
+    if (list.length >= LIMITS.turnMounts) break;
+    if (!list.some((r) => r.seq === ride.seq && r.mount === ride.mount && r.rider === ride.rider)) list.push(ride);
+  }
+  entry.rides = list;
+}
+
+/**
+ * The controlled rides an op ended or made on the turn under way, from the
+ * turn's list of mounts before and after it (docs/design-v1-attach.md 8.3).
+ */
+export function ridesChanged(before: RoomState, after: RoomState): Ride[] {
+  const was = before.encounter?.turnStart;
+  const now = after.encounter?.turnStart;
+  const out: Ride[] = [];
+  for (const start of [was, now]) {
+    if (!start || start.seq === undefined) continue;
+    const other = start === was ? now : was;
+    for (const mount of start.mounts ?? []) {
+      const kept = other?.seq === start.seq && (other.mounts ?? []).includes(mount);
+      if (!kept && !out.some((r) => r.seq === start.seq && r.mount === mount)) out.push({ seq: start.seq, mount, rider: start.tokenId });
+    }
+  }
+  return out;
+}
+
 function withExtras(entry: UndoEntry, poses: Record<string, Pose> | undefined, origin: Origin | undefined): UndoEntry {
   const out = poses ? { ...entry, poses } : entry;
   return origin ? { ...out, origin } : out;
@@ -270,8 +317,9 @@ function placeOf(token: Place): Place {
   return place;
 }
 
-function poseOf(token: Token): Pose {
-  return { sceneId: token.sceneId, ...placeOf(token), ...sizeOf(token), path: stableStringify(token.path ?? null) };
+function poseOf(token: Token, shows: Shows): Pose {
+  const link = token.attached && shows(token.attached.to) ? stableStringify(token.attached) : "";
+  return { sceneId: token.sceneId, ...placeOf(token), ...sizeOf(token), path: stableStringify(token.path ?? null), attached: link };
 }
 
 /** A token's footprint size: Custom's width and height only where it has them. */
@@ -290,19 +338,41 @@ function samePose(a: Pose, b: Pose): boolean {
     a.size === b.size &&
     a.w === b.w &&
     a.h === b.h &&
-    a.path === b.path
+    a.path === b.path &&
+    a.attached === b.attached
   );
 }
 
-/** Where each token an op or a restore touched stands in `state`, the state it left. */
-export function posesAfter(state: RoomState, inverse: RestoreEntry[]): Record<string, Pose> {
+/** Where each token an op or a restore touched stands in `state`, the state it left, its link as the player's copy shows it. */
+export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Shows = () => true): Record<string, Pose> {
   const poses: Record<string, Pose> = {};
   for (const entry of inverse) {
     const parsed = parseKey(entry.key);
     const token = parsed?.kind === "token" ? state.tokens[parsed.id] : undefined;
-    if (token) poses[token.id] = poseOf(token);
+    if (token) poses[token.id] = poseOf(token, shows);
   }
   return poses;
+}
+
+/**
+ * Whether a token is carried now under a token of the restore by a chain
+ * not every player sees (docs/design-v1-attach.md 8.3): a hidden passenger,
+ * one only some players see, or a visible one riding a hidden holder. Such
+ * a passenger never answers an undo: it rides back silently or stays.
+ */
+function silentPassenger(state: RoomState, tokenId: string, restoring: ReadonlySet<string>): boolean {
+  let token = state.tokens[tokenId];
+  const visited = new Set<string>([tokenId]);
+  let open = true;
+  while (token) {
+    const holder = holderOf(state.tokens, token);
+    if (!holder || visited.has(holder.id)) return false;
+    visited.add(holder.id);
+    if (!inSightOfNonOwners(state, token, {}) || !inSightOfNonOwners(state, state.tokens[holder.id]!, {})) open = false;
+    if (restoring.has(holder.id)) return !open;
+    token = state.tokens[holder.id];
+  }
+  return false;
 }
 
 export type PoseRestore = { ok: true; entries: RestoreEntry[] } | { ok: false; code: RefusalCode; message: string };
@@ -325,20 +395,59 @@ export type PoseRestore = { ok: true; entries: RestoreEntry[] } | { ok: false; c
  */
 export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<string, Pose> }, visible: (tokenId: string) => boolean): PoseRestore {
   const tokens: { key: string; before: Token; current: Token; left: Pose | undefined }[] = [];
+  const quiet: RestoreEntry[] = [];
+  const restoring = new Set<string>();
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
+    if (parsed?.kind === "token") restoring.add(parsed.id);
+  }
+  for (const entry of step.entries) {
+    const parsed = parseKey(entry.key);
+    // An attach's rows and the turn's list stay as they are: the undo takes back the link and the seat only (docs/design-v1-attach.md 8.3).
+    if (parsed?.kind === "encounter") continue;
     if (parsed?.kind !== "token") return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     const current = state.tokens[parsed.id];
-    if (!current || !visible(parsed.id)) return { ok: false, code: "gone", message: "that is not here" };
     const before = entry.value as Token | null | undefined;
+    if (current && silentPassenger(state, parsed.id, restoring)) {
+      const back = quietlyBack(current, before, step.poses[parsed.id], visible);
+      if (back) quiet.push({ key: entry.key, value: back, expectHash: guardHash(entry.key, current) });
+      continue;
+    }
+    // A passenger gone since, or one the player cannot see now and no longer under the group, is left out: it rode
+    // along, and no answer reads it.
+    if ((!current || !visible(parsed.id)) && before?.attached && restoring.has(before.attached.to)) continue;
+    if (!current || !visible(parsed.id)) return { ok: false, code: "gone", message: "that is not here" };
     if (!before) return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     tokens.push({ key: entry.key, before, current, left: step.poses[parsed.id] });
   }
-  if (tokens.some((t) => !t.left || !samePose(poseOf(t.current), t.left))) return { ok: false, code: "invalid", message: MOVED_SINCE };
+  if (tokens.some((t) => !t.left || !samePose(poseOf(t.current, visible), t.left))) return { ok: false, code: "invalid", message: MOVED_SINCE };
   return {
     ok: true,
-    entries: tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before), expectHash: guardHash(t.key, t.current) })),
+    entries: [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined), expectHash: guardHash(t.key, t.current) })), ...quiet],
   };
+}
+
+/**
+ * A silent passenger's way back (docs/design-v1-attach.md 8.3): by the
+ * displacement the step gave it, its own holder's actual move, from
+ * wherever it sits now, so a visible torch on an invisible holder floats
+ * back as it floated out. Its path goes back with it only where it still
+ * stands as the step left it. Null when it has nothing to take back.
+ */
+function quietlyBack(current: Token, before: Token | null | undefined, left: Pose | undefined, shows: Shows): Token | null {
+  if (!before || !left || before.sceneId !== left.sceneId || current.sceneId !== left.sceneId) return null;
+  const dx = left.x - before.x;
+  const dy = left.y - before.y;
+  const dz = left.elevation - before.elevation;
+  const still = samePose(poseOf(current, shows), left);
+  if (dx === 0 && dy === 0 && dz === 0 && !still) return null;
+  const out: Token = { ...current, x: current.x - dx, y: current.y - dy, elevation: current.elevation - dz };
+  delete out.squeeze;
+  if (still) {
+    if (before.path) out.path = before.path;
+    else delete out.path;
+  }
+  return out;
 }
 
 /**
@@ -347,10 +456,14 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
  * goes with it. So does a squeeze: undoing a move into a corridor takes it
  * off, and undoing one out of it puts it back.
  */
-function putBack(current: Token, before: Token): Token {
-  const { path: _path, squeeze: _squeeze, w: _w, h: _h, ...rest } = current;
+function putBack(current: Token, before: Token, exists: (tokenId: string) => boolean): Token {
+  const { path: _path, squeeze: _squeeze, w: _w, h: _h, attached: _attached, ...rest } = current;
   const out: Token = { ...rest, ...placeOf(before), ...sizeOf(before) };
   if (before.path) out.path = before.path;
+  // The link goes back with the seat (docs/design-v1-attach.md 8.3). One to a holder the player cannot see now comes back
+  // too, and the link pass keeps it only where it holds, so the player's answer is the one with no hidden holder at all.
+  // One to a holder deleted since stays off, since a player's restore never refuses on a link.
+  if (before.attached && exists(before.attached.to)) out.attached = before.attached;
   return out;
 }
 

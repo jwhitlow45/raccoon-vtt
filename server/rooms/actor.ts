@@ -44,7 +44,7 @@ import {
 } from "./persistence.ts";
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
 import { growthBound, SizeGuard, touchedScenes } from "./sizeGuard.ts";
-import { NOT_NEWEST, poseRestore, posesAfter, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { NOT_NEWEST, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 
 /**
@@ -945,7 +945,9 @@ export class RoomActor {
       // `deps` turns on the reference checks (design 7.7). It is stored with the op, so replay checks it the same way.
       // A redo of walks around walls keeps their routes, which only permissions read (docs/design-v1-movement.md 7.4).
       const routes = op.t === "redo" && step.routed && step.routes ? { routes: step.routes } : {};
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes });
+      // A controlled ride the step ended or made shares its turn again when put back on that turn (docs/design-v1-attach.md 8.3).
+      const rides = step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {};
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides });
       if (!checked.ok) {
         this.#refuse(key, wm, n, "invalid", checked.message);
         return;
@@ -1038,20 +1040,27 @@ export class RoomActor {
       const inverse = reduced.inverse;
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
-      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse) : undefined, step.origin, step.teleport === true, step);
+      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer)) : undefined, step.origin, step.teleport === true, step);
     } else if (UndoStacks.records(viewer.role, op) && reduced.inverse) {
       const inverse = reduced.inverse;
       // A player's move or resize takes back only the move or the resize (undo.ts poseRestore). The DM's undo restores whole
       // values, as for every other op.
-      const poses = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.#staged.state, inverse) : undefined;
+      const poses = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.#staged.state, inverse, this.#shows(viewer)) : undefined;
       // A teleport's step remembers it, so its redo passes the wall again (docs/design-v1-maps-vision.md 4.1).
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       // A player's walk keeps its route for the redo (docs/design-v1-movement.md 7.4), a plain move as its one straight piece.
       const walk: Walk | undefined =
         poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
-      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk);
+      const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
+      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides);
     }
     this.#scheduleCommit();
+  }
+
+  /** Which tokens a viewer sees in the staged room, as their undo's poses read links (undo.ts poseOf). */
+  #shows(viewer: Viewer): (tokenId: string) => boolean {
+    const state = this.#staged.state;
+    return (id) => viewer.role === "dm" || projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) !== null;
   }
 
   #blockSaveBudget(memberId: string): TokenBucket {
