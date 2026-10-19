@@ -118,7 +118,8 @@ export function RollOptions(_props: PanelProps) {
  * keeps its pick for the page. Other creatures are never offered, since
  * the server refuses them.
  */
-function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) {
+/** Exported for its render test. */
+export function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) {
   const me = useRoomView((s) => s.you?.memberId ?? "");
   const sceneId = useRoomView((s) => s.sceneId);
   const picked = useOption((s) => s.picked);
@@ -193,14 +194,15 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
   const blocked = useRollBlocked();
   const openPcStats = useOpenPcStats();
   const cast = useOption((s) => (s.cast?.key === key ? s.cast : null));
-  // An area's block opens under the row of its spell, found by name, or at the top where the creature has no such row (3.1).
-  const castRow = cast ? (cast.roll ?? rolls.named.find((r) => sameSpell(r.name, cast.spell))?.key ?? null) : null;
-  const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
   const [skillsOpen, setSkillsOpen] = useState(false);
   const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
   const numbers = rolls.numbers;
   const named = rolls.named.filter((r) => r.section !== "spells");
   const spells = rolls.named.filter((r) => r.section === "spells");
+  // A block opens under its row where that row draws: its roll's, else the spell's found by name. Else it opens at the top (3.1), as for an area whose spell has no row or a row gone since, so an open block always draws for its creature (WaitingAsks leaves its send to it).
+  const drawn = new Set([...named.filter((r) => ACTION_SECTIONS.some(([section]) => section === r.section)), ...spells].map((r) => r.key));
+  const castRow = cast ? ((cast.roll !== undefined && drawn.has(cast.roll) ? cast.roll : undefined) ?? rolls.named.find((r) => drawn.has(r.key) && sameSpell(r.name, cast.spell))?.key ?? null) : null;
+  const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
 
   // The effects that bear on a group's rolls, named once in its label rather than under each of its buttons.
   const presetOf = (test: D20Test) => presetFor(dice, creature, test, { rolls });

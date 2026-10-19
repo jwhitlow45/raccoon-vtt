@@ -173,8 +173,12 @@ function WaitingLine(props: { ask: Pick<CastAsk, "id" | "spell">; caster?: strin
   );
 }
 
-/** A send this page made that is not in the view: still waiting for its answer, refused, or unknown (3.1, 3.2). */
-function SendStatus(props: { send: CastSend; again?: () => string | null; onClosed?(): void }) {
+/**
+ * A send this page made that is not in the view: still waiting for its
+ * answer, refused, or unknown (3.1, 3.2). `lead` names it where no row or
+ * block around it does: "Thorn's Fireball: not asked."
+ */
+function SendStatus(props: { send: CastSend; again?: () => string | null; onClosed?(): void; lead?: string }) {
   const env = useCastEnv();
   const state = env.tracker.state(props.send.id);
   const phase = phaseOf(state, false);
@@ -189,6 +193,7 @@ function SendStatus(props: { send: CastSend; again?: () => string | null; onClos
   };
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
+      {props.lead ? <div style={{ ...LINE, fontWeight: theme.weight.strong }}>{props.lead}</div> : null}
       {rolled ? <div style={LINE}>{rolled}</div> : null}
       <Note tone={phase === "refused" ? "error" : "info"}>{sendSays(state)}</Note>
       <div style={BUTTONS}>
@@ -383,7 +388,8 @@ function OwnLevel(props: { spell: string; min: number; value: number; onChange(n
 export function WaitingAsks(props: { view: RoomState; pickedKey: string | null }) {
   const env = useCastEnv();
   const sends = useSends();
-  const held = useOption((s) => s.cast?.sent ?? null);
+  // An open block shows its own send in place, but only while it draws: for the picked creature, never with none to pick.
+  const held = useOption((s) => (s.cast !== null && s.cast.key === props.pickedKey ? (s.cast.sent ?? null) : null));
   const lines = waitingLines(props.view, sends, (id) => env.tracker.state(id), held);
   if (lines.length === 0) return null;
   const casterName = (id: string) => {
@@ -398,7 +404,10 @@ export function WaitingAsks(props: { view: RoomState; pickedKey: string | null }
         const caster = other ? casterName(line.caster) : undefined;
         const send = sends[line.id];
         if (line.phase === "asked") return <WaitingLine key={line.id} ask={{ id: line.id, spell: line.spell }} {...(caster ? { caster } : {})} />;
-        if (line.phase !== "sending" && send) return <SendStatus key={line.id} send={send} />;
+        if (line.phase !== "sending" && send) {
+          const what = caster ? `${caster}'s ${line.spell}` : line.spell;
+          return <SendStatus key={line.id} send={send} lead={line.phase === "refused" ? `${what}: not asked.` : `${what}: the ask may have gone.`} />;
+        }
         return (
           <div key={line.id} style={LINE}>
             {caster ? `${caster}'s ${line.spell}: asking` : `${line.spell}: asking`} the DM for saves…

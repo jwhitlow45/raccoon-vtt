@@ -1052,13 +1052,6 @@ const rollRequestInput = z.strictObject({
   ends: z.strictObject({ effect: id, occurrence: id }).optional(),
 });
 /**
- * A player's ask for saves (docs/design-v1-player-save-spell.md 5.2 and
- * 5.3): its caster and the players' scene, the spell's name as the row or
- * the area shows it, and exactly one of an area and the targets. `damage`
- * names the caster's damage roll, sent just before on the same socket, by
- * its tag and its batches. The server writes `by`, `at` and `rolled`.
- */
-/**
  * A stat block roll's key (shared/dice/named.ts blockActions): its section
  * (up to 16 characters), a colon, the slug of a name of up to 120, a
  * repeat's "-NN" and a part's ":later", so well past an id's 64. A
@@ -1066,6 +1059,13 @@ const rollRequestInput = z.strictObject({
  */
 const rollKey = line(160).min(1);
 
+/**
+ * A player's ask for saves (docs/design-v1-player-save-spell.md 5.2 and
+ * 5.3): its caster and the players' scene, the spell's name as the row or
+ * the area shows it, and exactly one of an area and the targets. `damage`
+ * names the caster's damage roll, sent just before on the same socket, by
+ * its tag and its batches. The server writes `by`, `at` and `rolled`.
+ */
 const castInput = z
   .strictObject({
     id,

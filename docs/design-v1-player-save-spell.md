@@ -1,6 +1,6 @@
 # raccoon-vtt v1: a player's save spell
 
-Status: built. It reached consensus in design review round 3, whose decisions it takes (section 10), and the build follows it with the differences under "As built" below. Code is cited from `main` at `06706b7c`, with known forms. It builds on docs/design-v1-roll-options.md ("doc 3": the group save, 5.1 to 5.10), docs/design-v1-roll-request.md ("doc 4": requests and `resultOf`), docs/design-v1-dice.md ("doc 1": tags, receipts and budgets), docs/design-v1-area-from-character.md (the From control) and docs/design-v1-dice-ui.md (4.4, a named row's line of controls). It redesigns none of them.
+Status: built. It reached consensus in design review round 4, whose decisions it takes (section 10), and the build follows it with the differences under "As built" below. Code is cited from `main` at `06706b7c`, with known forms. It builds on docs/design-v1-roll-options.md ("doc 3": the group save, 5.1 to 5.10), docs/design-v1-roll-request.md ("doc 4": requests and `resultOf`), docs/design-v1-dice.md ("doc 1": tags, receipts and budgets), docs/design-v1-area-from-character.md (the From control) and docs/design-v1-dice-ui.md (4.4, a named row's line of controls). It redesigns none of them.
 
 **As built.** Where the build differs from the text below:
 
