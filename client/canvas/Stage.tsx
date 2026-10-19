@@ -53,7 +53,7 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
-import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, reseatText } from "../features/attach/groups.ts";
+import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, pressLead, reseatText } from "../features/attach/groups.ts";
 import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } from "../features/attach/rights.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
@@ -577,17 +577,19 @@ export function MapStage(props: {
   dragStopsRef.current = dragStops;
   /**
    * What a drag or an arrow key that starts on `pressed` moves
-   * (docs/design-v1-attach.md 4.2): the mount a rider's press moves, or
-   * why it moves nothing, then the rest of the selection, less what rides
-   * on another of them, and whether a player may only give it a new seat.
+   * (docs/design-v1-attach.md 4.2): the mount a rider's press moves, or a
+   * selected holder above it, or why it moves nothing, then the rest of the
+   * selection, less what rides on another of them, and whether a player may
+   * only give it a new seat.
    */
   const dragPartsRef = useRef<(pressed: ViewToken, selectedIds: readonly string[]) => DragParts>(null!);
   dragPartsRef.current = (pressed, selectedIds) => {
     const links = linksRef.current;
     const byId = tokensByIdRef.current;
-    const lead = byId.get(dragLead(links.allTokens, pressed).id) ?? pressed;
+    const mount = dragLead(links.allTokens, pressed).id;
+    const lead = pressLead(links.allTokens, pressed, byId, new Set(selectedIds), canDragRef.current, movesLeadRef.current);
     const rootOf = new Map<string, string>([[pressed.id, lead.id]]);
-    if (lead.id !== pressed.id && !movesLeadRef.current(lead)) {
+    if (lead.id !== pressed.id && lead.id === mount && !movesLeadRef.current(lead)) {
       const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? carriesText(lead, pressed);
       return { lead, named: [], rootOf, refusal, reseatOnly: false };
     }
@@ -597,7 +599,8 @@ export function MapStage(props: {
     };
     const followers = groupFollowers(selectedIds, pressed.id, byId, canDragRef.current, holderIn, lead.id === pressed.id ? [] : [lead.id]);
     const named = dragNamed(links.allTokens, lead, followers, byId, movesLeadRef.current);
-    const reseatOnly = links.role === "player" && lead.id === pressed.id && lead.attached !== undefined && !movesLeadRef.current(lead);
+    // The pressed token, or a selected holder that leads it, which a player may move only within its own holder.
+    const reseatOnly = links.role === "player" && (lead.id === pressed.id || lead.id !== mount) && lead.attached !== undefined && !movesLeadRef.current(lead);
     return { lead, named, rootOf, refusal: null, reseatOnly };
   };
 

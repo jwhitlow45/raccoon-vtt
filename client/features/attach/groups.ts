@@ -85,6 +85,40 @@ export function dragLead(tokens: Tokens, token: Token): Token {
   }
 }
 
+/**
+ * The token a press on `pressed` drags, the selection read (4.2):
+ * dragLead's, unless a holder above it is selected too and moves with the
+ * drag, judged as dragNamed judges the rest of the selection. Then the
+ * topmost such holder, or the mount it drags, leads, and the pressed token
+ * goes with it by its own pointer offset, so a free rider of a selected
+ * horse is never walked off it.
+ */
+export function pressLead<T extends Token>(
+  tokens: Tokens,
+  pressed: T,
+  byId: ReadonlyMap<string, T>,
+  selected: ReadonlySet<string>,
+  canDrag: (token: T) => boolean,
+  movesLead: (token: T) => boolean,
+): T {
+  let lead = byId.get(dragLead(tokens, pressed).id) ?? pressed;
+  if (!selected.has(pressed.id)) return lead;
+  const seen = new Set<string>([pressed.id, lead.id]);
+  for (let at: Token = lead; ; ) {
+    const up = holderOf(tokens, at) as Token | undefined;
+    if (!up || seen.has(up.id)) return lead;
+    seen.add(up.id);
+    at = up;
+    const held = byId.get(up.id);
+    if (!held || !selected.has(held.id) || !canDrag(held)) continue;
+    const moved = byId.get(dragLead(tokens, held).id) ?? held;
+    if (moved !== held && !movesLead(moved)) continue;
+    lead = moved;
+    seen.add(lead.id);
+    at = lead;
+  }
+}
+
 /** The words when a drag would move a mount the viewer may not move (4.2). */
 export function carriesText(mount: Token, rider: Token): string {
   return `${displayName(mount)} carries ${displayName(rider)}. Tap Get off to step down.`;

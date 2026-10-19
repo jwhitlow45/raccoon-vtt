@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Token } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
-import { carriesText, coversHolder, dragLead, dragNamed, drawOrder, drawsInset, dragWalkers, groupLine, groupMembers, reseatText, tethers } from "./groups.ts";
+import { groupFollowers } from "../../lib/group.ts";
+import { carriesText, coversHolder, dragLead, dragNamed, drawOrder, drawsInset, dragWalkers, groupLine, groupMembers, pressLead, reseatText, tethers } from "./groups.ts";
 
 const byId = (...list: Token[]) => Object.fromEntries(list.map((t) => [t.id, t]));
 const everyone = () => true;
@@ -77,6 +78,28 @@ describe("what a drag moves", () => {
     assert.deepEqual(dragNamed(tokens, thorn, [steered, torch, free], map, () => true).map((t) => t.id), ["thorn", "horse"]);
     // A mount the viewer may not move keeps its rider where it is.
     assert.deepEqual(dragNamed(tokens, thorn, [steered], map, () => false).map((t) => t.id), ["thorn"]);
+  });
+
+  test("a press on a token whose holder is selected too drags the holder, so a free rider goes with its horse and is never walked off it", () => {
+    const tokens = byId(horse, steered, free);
+    const map = new Map(Object.values(tokens).map((t) => [t.id, t]));
+    const parts = (selected: string[], canDrag: (t: Token) => boolean = () => true, movesLead = canDrag) => {
+      const lead = pressLead(tokens, free, map, new Set(selected), canDrag, movesLead);
+      const followers = groupFollowers(selected, free.id, map, canDrag, (t) => map.get(t.attached?.to ?? ""), lead.id === free.id ? [] : [lead.id]);
+      return { lead: lead.id, named: dragNamed(tokens, lead, followers, map, movesLead).map((t) => t.id) };
+    };
+    assert.deepEqual(parts(["vex", "horse"]), { lead: "horse", named: ["horse"] });
+    // Unselected, or a horse the viewer may not drag, and the press drags the rider alone, off its horse.
+    assert.deepEqual(parts(["vex"]), { lead: "vex", named: ["vex"] });
+    assert.deepEqual(parts(["vex", "horse"], (t) => t.id !== "horse"), { lead: "vex", named: ["vex"] });
+    // A horse a player may only give a new seat still leads, and the drag is that re-seat (canvas/Stage.tsx).
+    assert.deepEqual(parts(["vex", "horse"], () => true, (t) => t.id !== "horse"), { lead: "horse", named: ["horse"] });
+    // Up the chain: a pup on a mastiff on a selected cart moves the cart.
+    const cart = token("cart", { kind: "object", size: "large", x: 0, y: 0 });
+    const mastiff = token("m", { x: 0, y: 0, attached: { to: "cart", kind: "carry" } });
+    const pup = token("p", { size: "small", x: 0, y: 0, attached: { to: "m", kind: "ride" } });
+    const chain = byId(cart, mastiff, pup);
+    assert.equal(pressLead(chain, pup, new Map(Object.values(chain).map((t) => [t.id, t])), new Set(["p", "cart"]), () => true, () => true).id, "cart");
   });
 
   test("a group moves at most a group's limit of tokens beside its lead", () => {
