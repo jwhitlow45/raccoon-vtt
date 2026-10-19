@@ -140,6 +140,25 @@ describe("the walking ruler", () => {
     assert.deepEqual(again.legs, m.legs);
   });
 
+  test("a ruler of 34 stops whose first leg searches long still finishes: no later leg's search pushes the first one out", () => {
+    const edges: Record<string, EdgeFeature> = {};
+    for (let k = 190; k < 194; k++) Object.assign(edges, { [`${k},190,n`]: WALL, [`${k},194,n`]: WALL, [`190,${k},w`]: WALL, [`194,${k},w`]: WALL });
+    const state = world({ edges });
+    state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 200, h: 200 } };
+    // Into the closed room, then 32 short legs elsewhere, each from a spot of its own.
+    const stops = [free(10, 10), free(191, 191), ...Array.from({ length: 32 }, (_, k) => free(20 + k, 50))];
+    const input = { view: state, sceneId: "s1", stops, viewer: { role: "player" as const }, everything: false };
+    let m = measureWalk({ ...input, deadline: performance.now() + 4 })!;
+    let slices = 1;
+    while (m.searching && slices < 2_000) {
+      m = measureWalk({ ...input, deadline: performance.now() + 4 })!;
+      slices++;
+    }
+    assert.equal(m.searching, false, `still searching after ${slices} slices`);
+    assert.equal(m.legs.length, 33);
+    assert.equal(m.legs[0]!.none, true, "No way through");
+  });
+
   test("Measure is remembered on the device, Straight when storage fails", () => {
     const items = new Map<string, string>();
     const storage = () => ({ getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => void items.set(k, v) }) as unknown as Storage;

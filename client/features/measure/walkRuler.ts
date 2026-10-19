@@ -2,7 +2,7 @@ import type { Actor, RoomState, Token } from "#shared/model.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { routeFeet, routePoints, straightCost, type LegCost } from "#shared/rules/route.ts";
+import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { openLeg, WalkSearch, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { landedElevation, routeTarget } from "../movement/drop.ts";
@@ -75,25 +75,67 @@ function sameBasis(a: Basis, b: Basis): boolean {
  *   is not walked again for every op.
  */
 const MAX_SEARCHES = 32;
-let kept: { basis: Basis; searches: Map<string, WalkSearch>; walks: WeakMap<readonly RulerStop[], Map<string, WalkMeasure>> } | null = null;
+const MAX_LEGS = 4096;
+
+/**
+ * A leg's finished answer: the straight leg, the route's pieces, or none.
+ * Kept by its start, 5-10-5 residue and spot, so a ruler of many legs needs
+ * a leg's search only while that leg is searched (review ASTRA-07).
+ */
+type LegAnswer = { kind: "open" } | { kind: "route"; pieces: RoutePiece[] } | { kind: "none" };
+
+let kept: { basis: Basis; searches: Map<string, WalkSearch>; pending: Set<string>; legs: Map<string, LegAnswer>; walks: WeakMap<readonly RulerStop[], Map<string, WalkMeasure>> } | null = null;
 
 function keptFor(view: RoomState, sceneId: string): NonNullable<typeof kept> {
   const basis = basisOf(view, sceneId);
-  if (!kept || !sameBasis(kept.basis, basis)) kept = { basis, searches: new Map(), walks: new WeakMap() };
+  if (!kept || !sameBasis(kept.basis, basis)) kept = { basis, searches: new Map(), pending: new Set(), legs: new Map(), walks: new WeakMap() };
   return kept;
 }
 
-function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter): WalkSearch {
+function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter): string {
+  return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
+}
+
+/** A leg start's search, made when first asked for. Over the cap the oldest goes, one still searching last of all, so no ruler pushes out its own unfinished leg. */
+function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter, key: string): WalkSearch {
   const kept = keptFor(view, walker.sceneId);
-  const key = `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
   let search = kept.searches.get(key);
   if (!search) {
     const world = publicWorld(view, walker, viewer, [], { creatures: false, everything, seenGround: !everything });
     search = new WalkSearch(new WalkWorld({ ...world.input, prone: false, counter }));
-    if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
+    if (kept.searches.size >= MAX_SEARCHES) {
+      const done = [...kept.searches.keys()].find((k) => !kept.pending.has(k));
+      kept.searches.delete(done ?? kept.searches.keys().next().value!);
+    }
     kept.searches.set(key, search);
   }
   return search;
+}
+
+/** A leg's answer, searched within the slice: null while it is still searching. */
+function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline?: number }, counter: DiagonalCounter, target: Point): LegAnswer | null {
+  const kept = keptFor(view, walker.sceneId);
+  const key = searchKey(walker, input.everything, counter);
+  const legKey = `${key}|${target.x},${target.y}`;
+  const known = kept.legs.get(legKey);
+  if (known) return known;
+  const search = searchFor(view, walker, input.viewer, input.everything, counter, key);
+  let answer: LegAnswer;
+  if (openLeg(search.world, target)) answer = { kind: "open" };
+  else {
+    const settled = search.settle(target, input.deadline);
+    // The trace shares the slice: a ruler's frame never runs past it.
+    const traced = settled === "settled" ? search.traceTo(target, input.deadline) : null;
+    if (settled === "paused" || traced === "paused") {
+      kept.pending.add(key);
+      return null;
+    }
+    answer = traced ? { kind: "route", pieces: traced.pieces } : { kind: "none" };
+  }
+  kept.pending.delete(key);
+  if (kept.legs.size >= MAX_LEGS) kept.legs.delete(kept.legs.keys().next().value!);
+  kept.legs.set(legKey, answer);
+  return answer;
 }
 
 export type WalkInput = { view: RoomState; sceneId: string; stops: readonly RulerStop[]; viewer: WalkViewer; everything: boolean };
@@ -130,34 +172,26 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     const target = routeTarget(view, walker, { x: stop.x - size.w / 2, y: stop.y - size.h / 2 });
     const landing = landedElevation(view.buildChunks, walker, target);
     const end = { x: target.x, y: target.y, elevation: landing };
-    const search = searchFor(view, walker, input.viewer, input.everything, counter);
     let taken: LegCost;
     let corners: Point[] = [];
     let none = false;
-    // Past a leg still searching, the walker's later legs start from where it would land, unsearched until it is known.
-    const answer = searching || openLeg(search.world, target) ? null : search.settle(target, input.deadline);
-    // The trace shares the slice: a ruler's frame never runs past it.
-    const traced = answer === "settled" ? search.traceTo(target, input.deadline) : null;
-    if (answer === "paused" || traced === "paused") searching = true;
-    if (searching) {
+    // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
+    const answer = searching ? null : legAnswer(view, walker, input, counter, target);
+    if (!answer) {
+      searching = true;
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });
       walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
       continue;
     }
-    if (answer === null) {
-      taken = straightCost(walker, walker, end, rules, counter);
+    if (answer.kind === "route") {
+      const points = routePoints(view.buildChunks, walker, answer.pieces, landing);
+      taken = routeFeet(points, answer.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
+      corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
+      pieces.push(...answer.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
+      extraFt += taken.cost - taken.moved;
     } else {
-      const route = traced === "paused" ? null : traced;
-      if (route) {
-        const points = routePoints(view.buildChunks, walker, route.pieces, landing);
-        taken = routeFeet(points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
-        corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
-        pieces.push(...route.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
-        extraFt += taken.cost - taken.moved;
-      } else {
-        none = true;
-        taken = straightCost(walker, walker, end, rules, counter);
-      }
+      none = answer.kind === "none";
+      taken = straightCost(walker, walker, end, rules, counter);
     }
     counter.h += taken.diag[0];
     counter.v += taken.diag[1];
