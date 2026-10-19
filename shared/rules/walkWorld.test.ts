@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { PathStop, RoomState } from "../model.ts";
+import { chunkKey } from "../keys.ts";
+import type { EdgeFeature, PathStop, RoomState, Token } from "../model.ts";
 import { projectState } from "../project.ts";
 import { P1, actor, effect, reveal, room, template, token } from "../testutil.ts";
 import { legGeometry, publicCounters } from "./path.ts";
-import { creatureWay, halvedAt, publicWorld, speedAreas } from "./walkWorld.ts";
+import { findRoute } from "./walk.ts";
+import { creatureWay, halvedAt, publicWorld, speedAreas, type PublicWorld, type WorldOptions } from "./walkWorld.ts";
 
 /** The public world a route is searched in (docs/design-v1-movement.md 4.3 and 5.5). */
 
@@ -116,5 +118,75 @@ describe("the counters a route starts from (5.5, History)", () => {
     const owners = stops.map(({ seen: _seen, ...s }) => s);
     assert.deepEqual(publicCounters(gob, owners, rules, false), { h: 3, v: 0 }, "an owner's copy marks the legs seen whole with routeSeen alone, the last one's two diagonals by its corner");
     assert.deepEqual(legGeometry(gob, stop(2, 2), stop(5, 2, { via: [3, 3] }), rules, { h: 0, v: 0 }), { moved: 20, cost: 20, diag: [2, 0] }, "5 ft, then 10 ft and 5 ft past the corner");
+  });
+});
+
+describe("the same public world on every device (5.5, review MV-O-1 and MV-O-10)", () => {
+  /**
+   * A room cut by a wall along x = 6 down to y = 12, an unfound secret door
+   * in it left open beside Plant Growth, fog over a patch of the gap, a
+   * creature the DM hid in it, a DM-only web, and a Prone the DM hid on the
+   * goblin. The hero is P1's.
+   */
+  function busy(): RoomState {
+    const edges: Record<string, EdgeFeature> = { "6,5,w": { kind: "door", state: "open", secret: true, discovered: false } };
+    for (let y = 0; y < 12; y++) if (y !== 5) edges[`6,${y},w`] = { kind: "wall" };
+    const state = room({
+      tokens: {
+        hero: token("hero", { kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 2, y: 5 }),
+        gob: token("gob", { x: 2, y: 8, actor: { inline: actor({ effects: [effect("e1", { key: "prone", hiddenFromPlayers: true })] }) } }),
+        lurker: token("lurker", { x: 7, y: 13, visibility: "dm" }),
+      },
+      templates: {
+        pg: template("pg", { shape: "sphere", size: 15, origin: { x: 5, y: 5, z: 0 }, ownerId: "dm1", slows: { kind: "quarter" } }),
+        web: template("web", { shape: "cube", size: 10, origin: { x: 8, y: 14, z: 0 }, ownerId: "dm1", visibility: "dm", slows: { kind: "difficult" } }),
+      },
+    });
+    state.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges };
+    state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off", fogEnabled: true };
+    reveal(state, "s1", { x: 0, y: 0, w: 40, h: 12 });
+    reveal(state, "s1", { x: 0, y: 12, w: 5, h: 18 });
+    reveal(state, "s1", { x: 8, y: 12, w: 32, h: 18 });
+    return state;
+  }
+
+  /** What a world holds, functions read at every square, so two can be compared whole. */
+  function whole(w: PublicWorld, bounds: { w: number; h: number }) {
+    const { build: _build, seen, token, ...rest } = w.input;
+    const ground = seen ? Array.from({ length: bounds.h }, (_, y) => Array.from({ length: bounds.w }, (_, x) => (seen(x, y) ? 1 : 0)).join("")) : null;
+    // The walker as it stands: a player's copy of its own token leaves out what the DM keeps private.
+    const at = { size: token.size, x: token.x, y: token.y, elevation: token.elevation };
+    return { ...rest, token: at, seen: ground, spaces: w.spaces, halfSpeed: w.halfSpeed.map((t) => t.id) };
+  }
+
+  const targets = [
+    { x: 9, y: 5 },
+    { x: 9, y: 8 },
+    { x: 10, y: 14 },
+    { x: 3, y: 20 },
+  ];
+
+  function agree(walker: string, opts: WorldOptions = {}) {
+    const state = busy();
+    const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const onDm = publicWorld(state, state.tokens[walker] as Token, { role: "dm" }, [], opts);
+    const onPlayer = publicWorld(view, view.tokens[walker] as Token, { role: "player" }, [], opts);
+    const bounds = state.scenes.s1!.bounds;
+    assert.deepEqual(whole(onDm, bounds), whole(onPlayer, bounds), `${walker}: the world`);
+    for (const to of targets) {
+      const route = (w: PublicWorld) => {
+        const r = findRoute(w.input, to);
+        return r === null || r === "none" ? r : r.pieces;
+      };
+      assert.deepEqual(route(onDm), route(onPlayer), `${walker} to ${to.x}, ${to.y}`);
+    }
+  }
+
+  test("a party member's drag reads the same world and finds the same routes on the DM's device as on a player's", () => {
+    agree("hero");
+  });
+
+  test("so does a shared ruler on a monster, which keeps to ground players have seen", () => {
+    agree("gob", { creatures: false, seenGround: true });
   });
 });

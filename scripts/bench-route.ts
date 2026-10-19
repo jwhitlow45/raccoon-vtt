@@ -103,6 +103,7 @@ export function cases(): Case[] {
     { row: "Medium, cost up to 30 squares, the same walls", state: capped, token: medium, limit: squares(30) },
     { row: "Medium within a Dash on 1 ft rises, 5-10-5", state: stateOf(stairs(1), "bench-route-stairs-1", false), token: { size: "medium", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(12) },
     { row: "Medium within 30 squares on 3 ft rises, 5-10-5", state: stateOf(stairs(3), "bench-route-stairs-3", false), token: { size: "medium", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(30) },
+    { row: "Large within a Dash on 3 ft rises, 5-10-5", state: stateOf(stairs(3), "bench-route-stairs-3ld", false), token: { size: "large", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(12) },
     { row: "Large within 30 squares on 3 ft rises, 5-10-5", state: stateOf(stairs(3), "bench-route-stairs-3l", false), token: { size: "large", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(30) },
   ];
 }
@@ -135,6 +136,31 @@ export function runRouteBench(runs = 15, only?: (c: Case) => boolean): RouteRow[
     rows.push({ row: c.row, ...(c.budget !== undefined ? { budget: c.budget } : {}), settled, ms: stats(times) });
   }
   return rows;
+}
+
+/**
+ * The trace of a cheapest walk with the fewest corners (5.3, `routeTo`),
+ * once the spot is settled: a Large creature round a wall 40 squares long
+ * on open ground, 80 squares to walk, where many cheapest walks tie. Its
+ * `settled` column holds the states the search settled first.
+ */
+export function runTraceRow(runs = 15): RouteRow {
+  const edges = new Map<string, EdgeFeature>();
+  for (let y = 0; y < 40; y++) edges.set(`40,${y},w`, { kind: "wall" });
+  const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, "bench-route-trace");
+  const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId: "bench-route-trace" };
+  const to = { x: 80, y: 2 };
+  let settled = 0;
+  const times: number[] = [];
+  for (let r = 0; r < runs + 3; r++) {
+    const search = new WalkSearch(new WalkWorld({ build: state, token, rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } }));
+    search.settle(to);
+    settled = search.settled;
+    const t = performance.now();
+    search.routeTo(to);
+    if (r >= 3) times.push(performance.now() - t);
+  }
+  return { row: "Large round a 40-square wall, 80 squares: the trace with the fewest corners", settled, ms: stats(times) };
 }
 
 /**
@@ -221,9 +247,9 @@ async function runChrome(): Promise<string> {
 
 const argv = (globalThis as { process?: { argv?: string[] } }).process?.argv;
 if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
-  // The walking ruler's rows read client code, so only the Node run loads them, never the Chrome bundle.
-  const { runRulerRows } = await import("./bench-ruler.ts");
-  console.log(formatRouteBench([...runRouteBench(), runRouteSeenRow(), ...runRulerRows()]));
+  // The walking ruler's and the public world's rows read client code and the test rooms, so only the Node run loads them, never the Chrome bundle.
+  const { runPublicWorldRow, runRulerRows } = await import("./bench-ruler.ts");
+  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
   if (argv.includes("--chrome")) {
     console.log("");
     console.log(await runChrome());

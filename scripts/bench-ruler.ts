@@ -1,8 +1,33 @@
 import { measureWalk } from "../client/features/measure/walkRuler.ts";
 import type { BuildChunk, EdgeFeature, RoomState } from "../shared/model.ts";
 import { forgetStepCaches } from "../shared/rules/walk.ts";
-import { room, scene, token } from "../shared/testutil.ts";
+import { publicWorld } from "../shared/rules/walkWorld.ts";
+import { reveal, room, scene, template, token } from "../shared/testutil.ts";
 import type { RouteRow } from "./bench-route.ts";
+
+/**
+ * Building the public world a drag starts from (5.5, review MV-O-13): a
+ * 200 x 200 scene under fog, half of it revealed, 300 creatures and four
+ * areas that cost, on the DM's device for a party member, the room's chunk
+ * collection new each run so the chunks as players hold them are built
+ * again too.
+ */
+export function runPublicWorldRow(runs = 15): RouteRow {
+  const state = closedRoom();
+  state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+  reveal(state, "s1", { x: 0, y: 0, w: 200, h: 100 });
+  for (let k = 0; k < 300; k++) state.tokens[`t${k}`] = token(`t${k}`, { x: (k * 37) % 197, y: (k * 53) % 197, disposition: k % 3 === 0 ? "ally" : "hostile" });
+  state.tokens.hero = token("hero", { kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 50, y: 50 });
+  for (let k = 0; k < 4; k++) state.templates[`a${k}`] = template(`a${k}`, { shape: "sphere", size: 20, origin: { x: 40 + 30 * k, y: 60, z: 0 }, ownerId: "dm1", slows: { kind: "difficult" } });
+  const times: number[] = [];
+  for (let r = 0; r < runs + 3; r++) {
+    const view = { ...state, buildChunks: { ...state.buildChunks } };
+    const t = performance.now();
+    publicWorld(view, view.tokens.hero!, { role: "dm" });
+    if (r >= 3) times.push(performance.now() - t);
+  }
+  return { row: "The public world on 200 x 200 under fog, 300 creatures and 4 areas, on the DM's device (settled holds the creatures)", settled: 300, ms: stats(times) };
+}
 
 /**
  * The walking ruler's worst case (docs/design-v1-movement.md 3.3, review

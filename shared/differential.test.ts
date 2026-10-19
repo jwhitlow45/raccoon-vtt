@@ -161,6 +161,30 @@ const PAIRS: Pair[] = [
     [dmGoblinAcross],
   ),
   pair(
+    "a player drags a monster they may move but do not own, its Prone hidden and its Swim Speed private",
+    (s) => {
+      s.meta = { ...s.meta, settings: { ...s.meta.settings, playersMoveAny: "all" } };
+      s.buildChunks[chunkKey("s1", 0, 0)] = chunk(Object.fromEntries(["3,8", "4,8", "5,8", "3,9", "4,9", "5,9"].map((k) => [k, "water" as TerrainId])));
+    },
+    (s) => {
+      s.tokens.gob = { ...s.tokens.gob!, actor: { inline: actor({ speeds: { walk: 30, swim: 30 }, effects: [effect("e1", { key: "prone", hiddenFromPlayers: true })] }) } };
+    },
+    [{ who: P1, tokenId: "gob", to: { x: 9, y: 8 } }, dmGoblinAcross],
+  ),
+  pair(
+    "a creature the party's sight withholds in the gap, the fog lifted everywhere",
+    (s) => {
+      s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: true, vision: { on: true, light: "bright" } };
+      reveal(s, "s1", { x: 0, y: 0, w: 40, h: 30 });
+    },
+    (s) => {
+      // Behind the wall from the hero, though the fog is lifted there, and in the goblin's way round it: neutral, so it would block a hostile goblin.
+      s.tokens.ogre = token("ogre", { name: "Ogre", disposition: "neutral", x: 7, y: 12 });
+    },
+    // The hero stays put, so what the party sees stays the same.
+    [dmGoblinAcross],
+  ),
+  pair(
     "earlier legs of the turn unseen by others that took other diagonals",
     (s) => {
       s.meta = { ...s.meta, settings: { ...s.meta.settings, diagonal: "fiveTen" } };
