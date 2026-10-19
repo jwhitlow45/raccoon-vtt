@@ -612,6 +612,30 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await pickTool(dm, "Select");
   });
 
+  test("pa-11. on a narrow window with a panel's sheet open, Stamp in the offer closes the sheet and the stamp picker takes the picture", async () => {
+    await dm.setViewportSize({ width: 820, height: 900 });
+    // Narrowed, the side panel's open panel may come over as a sheet. Otherwise Scenes opens as one from the list of panels.
+    await dm.waitForTimeout(500);
+    const sheets = dm.locator("dialog[data-rvtt-sheet][open]");
+    if ((await sheets.count()) === 0) {
+      await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+      await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Scenes", exact: true }).click();
+    }
+    await sheets.first().waitFor();
+    await blur(dm);
+    const tokens = dmUploads.token ?? 0;
+    assert.equal(await paste(dm, { files: [await swatch([120, 60, 20])] }), true);
+    const offer = dm.getByRole("dialog", { name: "Use the pasted image" });
+    await offer.getByRole("button", { name: "Stamp", exact: true }).click();
+    await offer.waitFor({ state: "detached" });
+    await waitFor("the sheet closed", async () => (await sheets.count()) === 0 || null);
+    await waitFor("the pasted stamp's upload", () => (dmUploads.token ?? 0) === tokens + 1 || null, 30_000);
+    await dm.getByRole("button", { name: "Placing Room image. Choose another stamp" }).first().waitFor({ timeout: 30_000 });
+    await shots.take(dm, "paste-narrow-stamp-chosen");
+    await pickTool(dm, "Select");
+    await dm.setViewportSize({ width: 1280, height: 800 });
+  });
+
   test("pa-12. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

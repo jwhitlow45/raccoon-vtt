@@ -11,6 +11,7 @@ import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { builderSlot } from "../builder/store.ts";
 import { stampSlot } from "../builder/stamps/store.ts";
+import { layoutWidth } from "../device/layout.ts";
 import { usePreview } from "../dm/previewContext.ts";
 import { DEFAULT_CROP } from "./crop.ts";
 import { CropEditor } from "./CropEditor.tsx";
@@ -42,6 +43,7 @@ export function RoomPasteHost() {
       if (registry.room === take) registry.room = null;
     };
   }, [scope, preview, role]);
+  useStaleHandoffs();
   return (
     <>
       {offer ? (
@@ -57,6 +59,39 @@ export function RoomPasteHost() {
       {picture ? <TokenPicture tokenId={picture.tokenId} file={picture.file} onDone={() => setPicture(null)} /> : null}
     </>
   );
+}
+
+/** How long a handed-off picture waits for its entry to open and take it. */
+const HANDOFF_WAIT_MS = 10_000;
+
+/**
+ * A picture handed to an entry is used now or not at all, never by itself
+ * later: it goes, with a note, when Stamp mode closes before the stamp
+ * picker took it, or when no entry took it within HANDOFF_WAIT_MS, as when
+ * the tool's row stays hidden.
+ */
+function useStaleHandoffs(): void {
+  const scope = useRoomScope();
+  const ui = useRoomUi();
+  const handoffs = useScoped(roomPasteSlot);
+  const handoff = useStore(handoffs, (s) => s.handoff);
+  const tool = useRoomView((s) => s.local.tool);
+  const mode = useStore(scope.get(builderSlot).store, (s) => s.mode);
+  const stampMode = tool === "build" && mode === "stamp";
+  useEffect(() => {
+    if (!handoff) return;
+    const drop = (why: string) => {
+      if (handoffs.getState().handoff !== handoff) return;
+      handoffs.setState({ handoff: null });
+      ui.notify(`The pasted image was not used, since ${why}. Paste it again.`);
+    };
+    if (handoff.to === "stamp" && !stampMode) {
+      drop("Stamp mode closed first");
+      return;
+    }
+    const timer = setTimeout(() => drop("its place did not open"), HANDOFF_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [handoff, stampMode, handoffs, ui]);
 }
 
 /**
@@ -101,16 +136,22 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
       if (selected) props.onToken(selected.id);
       return;
     }
-    handoffs.setState({ handoff: { to: id, file } });
     props.onClose();
     if (id === "scene") ui.openPanel("scenes");
     else if (id === "handout") ui.openPanel("dm");
     else {
-      // As choosing Stamp mode does in the builder's row, with the stamp picker open on it.
+      /*
+       * As choosing Stamp mode does in the builder's row, with the stamp
+       * picker open on it. On a narrow window a panel's sheet keeps the
+       * tool's row, and so the picker, from being drawn, so it closes.
+       * Stamp mode comes before the handoff, which waits only while it is on.
+       */
+      if (layoutWidth() < theme.layout.wideMinWidth) ui.closeSheets();
       ui.setTool("build");
       scope.get(builderSlot).store.setState({ mode: "stamp", poly: [], rect: null, run: [], note: null });
       scope.get(stampSlot).store.setState({ pickerOpen: true });
     }
+    handoffs.setState({ handoff: { to: id, file } });
   };
 
   const several = severalImages(images);
