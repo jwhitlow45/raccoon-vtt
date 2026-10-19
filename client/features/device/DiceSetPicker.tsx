@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { Help } from "../../components/Panel.tsx";
 import { idle } from "../../lib/idle.ts";
 import { theme } from "../../lib/theme.ts";
@@ -24,6 +24,29 @@ import { setDiceSetId, useDiceSetId, useLowPower, useRollAnimation } from "./set
 /** The d20 in each tile, and the tile's narrowest: four to a row at 390 px, three at 320. */
 const DIE_PX = 48;
 const TILE_MIN_PX = 72;
+
+/**
+ * A tile's look, chosen or not, with the switch on or off. The chosen
+ * tile's heavier border takes its extra width out of its padding, so every
+ * tile is one size and a pick never makes its row taller than the other.
+ */
+export function tileStyle(picked: boolean, on: boolean): CSSProperties {
+  const line = picked ? theme.line.strong : theme.line.border;
+  const extra = line - theme.line.border;
+  return {
+    position: "relative",
+    display: "grid",
+    justifyItems: "center",
+    gap: theme.space(1),
+    minHeight: theme.touch,
+    padding: `${theme.space(2) - extra}px ${theme.space(1) - extra}px`,
+    borderRadius: theme.radius.md,
+    border: `${line}px solid ${picked && on ? theme.color.accent : theme.color.border}`,
+    background: picked && on ? theme.color.accentTint : "transparent",
+    color: on ? theme.color.text : theme.color.textDisabled,
+    cursor: on ? "pointer" : "default",
+  };
+}
 
 export function DiceSetPicker() {
   const on = useRollAnimation();
@@ -69,24 +92,7 @@ export function DiceSetPicker() {
         {DICE_SETS.map((set) => {
           const picked = set.id === chosen;
           return (
-            <label
-              key={set.id}
-              className="rvtt-choice"
-              data-dice-set={set.id}
-              style={{
-                position: "relative",
-                display: "grid",
-                justifyItems: "center",
-                gap: theme.space(1),
-                minHeight: theme.touch,
-                padding: `${theme.space(2)}px ${theme.space(1)}px`,
-                borderRadius: theme.radius.md,
-                border: `${picked ? theme.line.strong : theme.line.border}px solid ${picked && on ? theme.color.accent : theme.color.border}`,
-                background: picked && on ? theme.color.accentTint : "transparent",
-                color: on ? theme.color.text : theme.color.textDisabled,
-                cursor: on ? "pointer" : "default",
-              }}
-            >
+            <label key={set.id} className="rvtt-choice" data-dice-set={set.id} style={tileStyle(picked, on)}>
               <input
                 type="radio"
                 name={name}
