@@ -5,7 +5,7 @@ import type { RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { P1, reveal, template, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
-import { tokenStop, type RulerStop } from "./ruler.ts";
+import { keptDrawing, keptStops, tokenStop, type RulerStop } from "./ruler.ts";
 import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
 
 /** The ruler's walking mode (docs/design-v1-movement.md 3.3). */
@@ -92,6 +92,15 @@ describe("the walking ruler", () => {
     const state = world({ blockMovement: false, heights: Object.fromEntries(Array.from({ length: 30 }, (_, y) => [`5,${y}`, 10])) });
     const m = measureWalk({ view: state, sceneId: "s1", stops: [free(4, 5), free(6, 5)], viewer: { role: "player" }, everything: false })!;
     assert.equal(m.totalFt, 20, "10 ft up and 10 ft down, where the straight ruler reads 10 ft");
+  });
+
+  test("a kept walking ruler follows every token it is anchored to", () => {
+    const state = world({ blockMovement: false, tokens: [token("a", { x: 1, y: 1 }), token("b", { x: 4, y: 1 })] });
+    const kept = keptDrawing({ id: "k", sceneId: "s1", stops: [tokenStop(state.tokens.a!), tokenStop(state.tokens.b!)], ownerId: "dm1", color: "#fff", shared: true, walk: true })!;
+    const read = (view: RoomState) => measureWalk({ view, sceneId: "s1", stops: keptStops(kept), viewer: { role: "dm" }, everything: false })!;
+    assert.deepEqual([read(state).totalFt, read(state).legs[0]!.to], [15, { x: 4, y: 1 }]);
+    const moved = { ...state, tokens: { ...state.tokens, b: { ...state.tokens.b!, x: 8 } } };
+    assert.deepEqual([read(moved).totalFt, read(moved).legs[0]!.to], [35, { x: 8, y: 1 }], "the second anchor moved on, and the ruler with it");
   });
 
   test("the 5-10-5 count runs on across the stops", () => {

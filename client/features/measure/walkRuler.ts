@@ -7,7 +7,7 @@ import { openLeg, WalkSearch, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { landedElevation, routeTarget } from "../movement/drop.ts";
 import { extraWords, joinWords } from "./movement.ts";
-import { formatFeet, type Point, type RulerStop } from "./ruler.ts";
+import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
 
 /**
  * The ruler's walking mode (docs/design-v1-movement.md 3.3), kept free of
@@ -88,7 +88,10 @@ export function measureWalk(input: { view: RoomState; sceneId: string; stops: re
   const pieces: [number, number, number, 0 | 1][] = [];
   let totalFt = 0;
   let extraFt = 0;
-  for (const stop of stops.slice(1)) {
+  for (const drawn of stops.slice(1)) {
+    // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
+    const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
+    const stop = on ? tokenStop(on) : drawn;
     const from = { x: walker.x, y: walker.y };
     const target = routeTarget(view, walker, { x: stop.x - size.w / 2, y: stop.y - size.h / 2 });
     const landing = landedElevation(view.buildChunks, walker, target);
