@@ -111,6 +111,61 @@ async function savesLine(page: Page): Promise<string> {
   return ((await line.textContent()) ?? "").replace(/\s+/g, " ");
 }
 
+/** The known forms step row that has the keyboard's focus, by its key, or the tag of whatever else has it. */
+function focusedForm(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const a = (globalThis as unknown as { document: { activeElement: { tagName: string; parentElement: { dataset: Record<string, string | undefined> } | null } | null } }).document.activeElement;
+    return a?.parentElement?.dataset.form ?? a?.tagName ?? null;
+  });
+}
+
+/**
+ * A second device of Ana's whose room socket goes through a route. While
+ * `route.spoil` is on, a known forms toggle goes out with an id no SRD
+ * monster has, so the server refuses it. While `route.hold` is on, the
+ * frame carrying the refusal waits until `release`.
+ */
+async function routedAna() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await context.addCookies(await anaContext.cookies(server.origin));
+  const page = await context.newPage();
+  const watch = new ConsoleWatch("ana-2");
+  watch.attach(page);
+  const route = { spoil: false, hold: false };
+  const held: (string | Buffer)[] = [];
+  let toPage: ((m: string | Buffer) => void) | null = null;
+  await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+    const upstream = ws.connectToServer();
+    ws.onMessage((m) => {
+      const frame = route.spoil && typeof m === "string" ? (JSON.parse(m) as { t?: string; op?: { t?: string; patch?: { knownForms?: string[] } } }) : null;
+      if (frame?.t === "op" && frame.op?.t === "character.update" && frame.op.patch?.knownForms) {
+        frame.op.patch.knownForms = [...frame.op.patch.knownForms, "Not An Id"];
+        upstream.send(JSON.stringify(frame));
+      } else upstream.send(m);
+    });
+    upstream.onMessage((m) => (route.hold && String(m).includes('"rejects"') ? held.push(m) : ws.send(m)));
+    toPage = (m) => ws.send(m);
+  });
+  const release = () => {
+    route.hold = false;
+    for (const m of held.splice(0)) toPage?.(m);
+  };
+  return { context, page, watch, route, held: () => held.length, release };
+}
+
+/** Bree's known forms step on a page, through Take a shape's Change. */
+async function openKnownFormsStep(page: Page): Promise<Locator> {
+  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  await page.locator(".konvajs-content").first().waitFor();
+  const panel = await showBree(page);
+  await panel.getByRole("button", { name: "Take a shape" }).click();
+  await page.getByRole("dialog", { name: "Take a shape" }).getByRole("button", { name: "Change", exact: true }).click();
+  const step = page.getByRole("dialog", { name: "Bree’s known forms" });
+  await step.waitFor();
+  return step;
+}
+
 describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -438,12 +493,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
     const row = (name: RegExp) => step.getByRole("button", { name }).first();
     const rowKeys = () => step.locator("li[data-form] > button").evaluateAll((els) => els.map((el) => el.parentElement?.dataset.form ?? ""));
-    // The focused row's key, or the tag of whatever else has the focus.
-    const focused = () =>
-      ana.evaluate(() => {
-        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; parentElement: { dataset: Record<string, string | undefined> } | null } | null } }).document.activeElement;
-        return a?.parentElement?.dataset.form ?? a?.tagName ?? null;
-      });
+    const focused = () => focusedForm(ana);
     const pressedIs = (name: RegExp, value: string) => waitFor(`${name} pressed ${value}`, async () => ((await row(name).getAttribute("aria-pressed")) === value ? true : null));
 
     // knownforms-b: the Wolf leaves the known forms for the rest of the list and comes back, keeping the focus both ways.
@@ -475,45 +525,18 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   });
 
   test("4d. knownforms-b: a toggle refused after Back shows its refusal on Take a shape's first page, and Change clears it", async () => {
-    // A second device of Ana's whose room socket goes through a route: its toggle goes out with an id no SRD monster has, and the refusal waits.
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    await context.addCookies(await anaContext.cookies(server.origin));
-    const page = await context.newPage();
-    const watch = new ConsoleWatch("ana-2");
-    watch.attach(page);
-    let spoil = false;
-    let hold = false;
-    const held: (string | Buffer)[] = [];
-    let toPage: ((m: string | Buffer) => void) | null = null;
-    await page.routeWebSocket(/\/ws\?room=/, (ws) => {
-      const upstream = ws.connectToServer();
-      ws.onMessage((m) => {
-        const frame = spoil && typeof m === "string" ? (JSON.parse(m) as { t?: string; op?: { t?: string; patch?: { knownForms?: string[] } } }) : null;
-        if (frame?.t === "op" && frame.op?.t === "character.update" && frame.op.patch?.knownForms) {
-          frame.op.patch.knownForms = [...frame.op.patch.knownForms, "Not An Id"];
-          upstream.send(JSON.stringify(frame));
-        } else upstream.send(m);
-      });
-      upstream.onMessage((m) => (hold && String(m).includes('"rejects"') ? held.push(m) : ws.send(m)));
-      toPage = (m) => ws.send(m);
-    });
+    const ana2 = await routedAna();
+    const { page } = ana2;
     try {
-      await page.goto(`${server.origin}/r/${run.roomId}`);
-      await page.getByRole("status", { name: "Connected" }).first().waitFor();
-      await page.locator(".konvajs-content").first().waitFor();
-      const panel = await showBree(page);
-      await panel.getByRole("button", { name: "Take a shape" }).click();
+      const step = await openKnownFormsStep(page);
       const picker = page.getByRole("dialog", { name: "Take a shape" });
-      await picker.getByRole("button", { name: "Change", exact: true }).click();
-      const step = page.getByRole("dialog", { name: "Bree’s known forms" });
-      spoil = true;
-      hold = true;
+      ana2.route.spoil = true;
+      ana2.route.hold = true;
       await step.getByRole("button", { name: /^Wolf / }).first().click();
-      await waitFor("the refusal held back", () => (held.length > 0 ? true : null));
+      await waitFor("the refusal held back", () => (ana2.held() > 0 ? true : null));
       await step.getByRole("button", { name: "Back to the creatures" }).click();
       await picker.getByRole("button", { name: "Change", exact: true }).waitFor();
-      hold = false;
-      for (const m of held.splice(0)) toPage!(m);
+      ana2.release();
       // The server's words, as a toast would say them.
       await picker.getByRole("alert").getByText(/^Not saved\. /).waitFor();
       await picker.getByRole("button", { name: "Wild Shape as Wolf", exact: true }).waitFor();
@@ -522,9 +545,33 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
       // This device remembers no level, so the step starts at Bree's level 9.
       await step.getByText("2 of 8 known forms at Druid level 9.").waitFor();
       assert.equal(await step.getByRole("alert").count(), 0, "Change clears the refusal");
-      assert.deepEqual(watch.errors, []);
+      assert.deepEqual(ana2.watch.errors, []);
     } finally {
-      await context.close();
+      await ana2.context.close();
+    }
+  });
+
+  test("4e. knownforms-c: a refusal that comes while the step stays open moves the toggled row back, and the keyboard's focus with it", async () => {
+    const ana2 = await routedAna();
+    const { page } = ana2;
+    try {
+      const step = await openKnownFormsStep(page);
+      const wolf = step.getByRole("button", { name: /^Wolf / }).first();
+      const pressedIs = (value: string) => waitFor(`the Wolf pressed ${value}`, async () => ((await wolf.getAttribute("aria-pressed")) === value ? true : null));
+      ana2.route.spoil = true;
+      ana2.route.hold = true;
+      await wolf.focus();
+      await page.keyboard.press("Enter");
+      await pressedIs("false");
+      assert.equal(await focusedForm(page), "wolf", "the focus stays on the Wolf the prediction took out");
+      await waitFor("the refusal held back", () => (ana2.held() > 0 ? true : null));
+      ana2.release();
+      await step.getByRole("alert").getByText(/^Not saved\. /).waitFor();
+      await pressedIs("true");
+      assert.equal(await focusedForm(page), "wolf", "the focus follows the Wolf back as the refusal rolls the toggle back");
+      assert.deepEqual(ana2.watch.errors, []);
+    } finally {
+      await ana2.context.close();
     }
   });
 

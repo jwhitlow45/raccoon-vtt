@@ -63,10 +63,10 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       mounted.current = false;
     };
   }, []);
-  // The known forms step's list, its count line, and the row a key press toggled, to give the focus back to (refocusAfterToggle).
+  // The known forms step's list, its count line, and the row a toggle took the focus from, for when that row leaves the list (refocusAfterToggle).
   const formsList = useRef<HTMLUListElement>(null);
-  const countLine = useRef<HTMLParagraphElement>(null);
-  const toggled = useRef<{ key: string; index: number } | null>(null);
+  const countLine = useRef<HTMLDivElement>(null);
+  const toggled = useRef<Toggled | null>(null);
   const deferred = useDeferredValue(query);
   const matches = useMemo(() => monsterMatcher(deferred), [deferred]);
   const limit = useMemo(() => (druidLevel === null ? null : shapeLimit(druidLevel)), [druidLevel]);
@@ -189,7 +189,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       const rows = formsList.current ? formRows(formsList.current) : [];
       const index = rows.findIndex((b) => b.parentElement?.dataset.form === srdId);
       toggled.current = index >= 0 && rows[index] === document.activeElement ? { key: srdId, index } : null;
-      // Quiet, so a refusal shows under the count in the server's words rather than in a toast behind the dialog.
+      // Quiet, so a refusal shows in the server's words on the open page rather than in a toast behind the dialog.
       const sent = actions.dispatch(
         { t: "character.update", characterId, patch: { knownForms } },
         {
@@ -220,15 +220,21 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
           {filters}
           {monsters ? (
             <>
-              {/* One keyed list, so a row that moves between the known forms and the rest stays one element (refocusAfterToggle). */}
+              {/*
+                One flat keyed array. React scopes keys to each array, so with three arrays a row that moved between the known
+                forms and the rest, on a toggle or a refusal's rollback, was mounted anew and its keyboard focus fell to the page.
+                In one array React moves the row and gives a moved row its focus back itself.
+              */}
               <ul ref={formsList} style={ROWS}>
-                {knownRows.map(rowItem)}
-                {known.missing.map((id) => (
-                  <li key={id} data-form={id}>
-                    <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app’s SRD list" />
-                  </li>
-                ))}
-                {otherRows.map(rowItem)}
+                {[
+                  ...knownRows.map(rowItem),
+                  ...known.missing.map((id) => (
+                    <li key={id} data-form={id}>
+                      <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app’s SRD list" />
+                    </li>
+                  )),
+                  ...otherRows.map(rowItem),
+                ]}
               </ul>
               {otherRows.length === 0 ? <Help>No other creature matches.</Help> : null}
             </>
@@ -290,17 +296,22 @@ function formRows(list: HTMLElement): HTMLButtonElement[] {
   return [...list.querySelectorAll<HTMLButtonElement>("li[data-form] > button")];
 }
 
+/** The row a toggle took the focus from: its key, and where it stood among the rows. */
+type Toggled = { key: string; index: number };
+
 /**
- * Gives the keyboard's focus back after a toggle took it from a row (5.2).
- * A row that moves between the known forms and the rest can still lose it,
- * since the browser blurs an element React moves, so the toggled row takes
- * it back. A known form the filters drop leaves the list, such as the Owl
- * at Druid level 4, and the row now in its place takes it, else the count.
+ * Gives the keyboard's focus a place after a toggle lost it to the page
+ * (5.2). A known form the filters drop leaves the list, such as the Owl at
+ * Druid level 4, and the row now in its place takes it, else the count. A
+ * row that only moved keeps its focus, since React gives a moved element
+ * its focus back, so finding the toggled row by key is a safety net.
  */
-function refocusAfterToggle(list: HTMLElement, was: { key: string; index: number }, count: HTMLElement | null): void {
+function refocusAfterToggle(list: HTMLElement, was: Toggled, count: HTMLElement | null): void {
+  const active = document.activeElement;
+  if (active !== null && active !== document.body) return;
   const rows = formRows(list);
   const target = rows.find((b) => b.parentElement?.dataset.form === was.key) ?? rows.slice(was.index).find((b) => !b.disabled) ?? count;
-  if (target && document.activeElement !== target) target.focus();
+  target?.focus();
 }
 
 /** Each page's body: one column no wider than the dialog, so a long name cuts or wraps rather than scroll it sideways. */
