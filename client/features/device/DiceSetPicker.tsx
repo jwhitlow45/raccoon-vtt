@@ -5,7 +5,7 @@ import { theme } from "../../lib/theme.ts";
 import { D20Icon } from "../dice/throw/D20Icon.tsx";
 import { DICE_SETS } from "../dice/throw/sets.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
-import { useThrows } from "../dice/throw/useThrows.ts";
+import { useThrows, useThrowView } from "../dice/throw/useThrows.ts";
 import { setDiceSetId, useDiceSetId, useLowPower, useRollAnimation } from "./settings.ts";
 
 /**
@@ -16,7 +16,9 @@ import { setDiceSetId, useDiceSetId, useLowPower, useRollAnimation } from "./set
  * Where the dice can be drawn, the dice chunk renders each set's d20 once,
  * in a quiet moment, and copies it into the tile. Until then, and with the
  * switch off, Low power, no WebGL or a failed load, each tile shows the
- * flat d20 in the set's colors. Nothing animates.
+ * flat d20 in the set's colors. Nothing animates. While a throw is on
+ * screen the renderer is busy, and the previews wait for it to end. On a
+ * lost context the tiles keep their flat icons.
  */
 
 /** The d20 in each tile, and the tile's narrowest: four to a row at 390 px, three at 320. */
@@ -28,6 +30,7 @@ export function DiceSetPicker() {
   const lowPower = useLowPower();
   const chosen = useDiceSetId();
   const store = useThrows();
+  const throwing = useThrowView().shown !== null;
   const loaded = useSyncExternalStore(diceLoader.subscribe, diceLoader.state, diceLoader.state);
   const name = useId();
   const canvases = useRef(new Map<string, HTMLCanvasElement>());
@@ -35,11 +38,13 @@ export function DiceSetPicker() {
   const ratio = Math.min(globalThis.devicePixelRatio || 1, 2);
 
   useEffect(() => {
-    if (!on || lowPower || loaded !== "ready" || drawn) return;
+    if (!on || lowPower || loaded !== "ready" || drawn || throwing || !store.previewsAllowed) return;
     const module = diceLoader.loaded();
     if (!module?.drawPreviews) return;
     let live = true;
     const cancel = idle(() => {
+      // A context lost meanwhile: drawPreviews would make a renderer of its own for blank pictures.
+      if (!store.previewsAllowed) return;
       const targets = DICE_SETS.flatMap((set) => {
         const canvas = canvases.current.get(set.id);
         return canvas ? [{ set: set.id, canvas }] : [];
@@ -53,7 +58,7 @@ export function DiceSetPicker() {
       live = false;
       cancel();
     };
-  }, [on, lowPower, loaded, drawn, store]);
+  }, [on, lowPower, loaded, drawn, throwing, store]);
 
   const previews = drawn && on && !lowPower;
   return (

@@ -21,7 +21,10 @@ import type { LoadState } from "./probe.ts";
  * shows for one frame and then goes.
  *
  * The result shows by its own timer, never by the animation: 1 s after the
- * answer whatever frames the device drops, and at once on any interruption.
+ * answer whatever frames the device drops or the setup takes, and at once
+ * on any interruption. A stage that throws is let go for the session and
+ * the result shows at once: this store runs inside the tracker's listener,
+ * so an error escaping it would skip the listeners after it.
  */
 
 /** What a Dice panel control hands its roll: where the tap was, and when. */
@@ -58,8 +61,12 @@ export type TrayGeometry = {
   from: { x: number; y: number } | null;
 };
 
-/** One throw as the stage draws it. `parent` is the element its canvas hangs in. */
-export type StagedThrow = { tag: string; plan: TrayPlan; geometry: TrayGeometry; reduced: boolean; set: string; parent: unknown };
+/**
+ * One throw as the stage draws it. `parent` is the element its canvas hangs
+ * in. `elapsed` is how long ago the answer came, in ms, as the play begins:
+ * the stage counts its 1 s from the answer, on its own clock.
+ */
+export type StagedThrow = { tag: string; plan: TrayPlan; geometry: TrayGeometry; reduced: boolean; set: string; parent: unknown; elapsed: number };
 
 /**
  * The stage, made by the lazy chunk. `play` draws from now: frames until
@@ -122,7 +129,7 @@ export type ThrowInputs = {
 export type ThrowEnv = {
   clock: Clock;
   idle(cb: () => void, maxMs: number): () => void;
-  tracker: Pick<ReceiptTracker, "state" | "subscribe">;
+  tracker: Pick<ReceiptTracker, "state" | "subscribe" | "unseen">;
   loader: { loaded(): StageModule | null; state(): LoadState; subscribe(listener: () => void): () => void };
   /** The page is hidden. */
   hidden(): boolean;
@@ -220,9 +227,14 @@ export class ThrowStore {
     return tag !== null && this.#view.held === tag;
   }
 
-  /** The stage, once made: for the dice set picker's previews. */
+  /** The stage, once made, for the dice set picker's previews. None while its context is lost: it would copy blank pictures. */
   get stage(): Stage | null {
-    return this.#stage;
+    return this.#contextLost ? null : this.#stage;
+  }
+
+  /** Whether the picker may draw its previews at all: never on a lost context, after two losses, or where no stage could be made. */
+  get previewsAllowed(): boolean {
+    return !this.#contextLost && this.#losses < 2 && !this.#noStage;
   }
 
   #set(view: ThrowView): void {
@@ -237,17 +249,28 @@ export class ThrowStore {
     const before = this.#inputs;
     this.#inputs = { ...before, ...patch };
     const now = this.#inputs;
-    // Turning the dice off, Low power on, reduced motion on or a preview ends a throw at once.
-    if ((!now.on && before.on) || (now.lowPower && !before.lowPower) || (now.reducedMotion && !before.reducedMotion) || (now.preview && !before.preview)) this.#end();
-    // A new set's textures are drawn ahead of its first throw. The stage stays warm meanwhile: the old set's shaders already run.
-    const env = this.#env;
-    if (now.set !== before.set && this.#warm === "warm" && this.#stage && env) {
-      const stage = this.#stage;
-      env.idle(() => {
-        if (this.#stage === stage) stage.warm(this.#panel?.kinds() ?? ["d20", "d6"], now.set).then(undefined, () => undefined);
-      }, WARM_MAX_MS);
+    // Reduced motion on ends a throw at once.
+    if (now.reducedMotion && !before.reducedMotion) this.#end();
+    // Turning the dice off, Low power on or a preview also lets the renderer go, and any warm-up on its way.
+    if ((!now.on && before.on) || (now.lowPower && !before.lowPower) || (now.preview && !before.preview)) {
+      this.#end();
+      this.#dispose();
     }
+    // A new set's textures are drawn ahead of its first throw. The stage stays warm meanwhile: the old set's shaders already run.
+    if (now.set !== before.set && this.#warm === "warm" && this.#stage) this.#warmSet(this.#stage, now.set);
     this.#maybeWarm();
+  }
+
+  /** Draws a new set's textures in a quiet moment, never over a throw on screen, whose pooled dice the warm-up would relabel. */
+  #warmSet(stage: Stage, set: string): void {
+    this.#env?.idle(() => {
+      if (this.#stage !== stage || this.#inputs.set !== set || !this.#allowed()) return;
+      if (this.#view.shown) {
+        this.#warmSet(stage, set);
+        return;
+      }
+      this.#safely((s) => void s.warm(this.#panel?.kinds() ?? ["d20", "d6"], set).then(undefined, () => undefined));
+    }, WARM_MAX_MS);
   }
 
   get inputs(): ThrowInputs {
@@ -273,7 +296,7 @@ export class ThrowStore {
       if (this.#mount !== mount) return;
       this.#panel = null;
       this.#mount++;
-      this.#end();
+      this.#endUnseen();
       this.#stopWarming();
       if (this.#stage && env) this.#disposeTimer = env.clock.setTimeout(() => this.#dispose(), DISPOSE_MS);
     };
@@ -285,7 +308,7 @@ export class ThrowStore {
     return () => {
       if (this.#tray !== tray) return;
       this.#tray = null;
-      this.#end();
+      this.#endUnseen();
     };
   }
 
@@ -293,7 +316,7 @@ export class ThrowStore {
   register(tag: string, origin: ThrowOrigin): void {
     if (origin.surface !== "dice") return;
     this.#end();
-    // A few taps in flight at most; an old one that never settled is forgotten.
+    // A few taps are in flight at most. An old one that never settled is forgotten.
     if (this.#pending.size > 20) this.#pending.delete(this.#pending.keys().next().value!);
     this.#pending.set(tag, { origin, mount: this.#panel ? this.#mount : -1, checked: false, seq: ++this.#seq });
     // An answer that came inside the send, as the dev room's local server gives, is this tap's commit.
@@ -319,7 +342,7 @@ export class ThrowStore {
     this.#press(target);
     if (this.#view.held !== null) this.#pressed = true;
     if (!this.#view.shown) return;
-    this.#stage?.stop();
+    this.#safely((stage) => stage.stop());
     this.#set({ ...this.#view, shown: null });
   }
 
@@ -404,22 +427,32 @@ export class ThrowStore {
     if (rolls.length === 0 || !oneCreature(rolls)) return;
     const dice = tapDice(rolls);
     if (!dice) return;
-    const geometry = tray.measure(pending.origin);
+    let geometry: TrayGeometry | null;
+    try {
+      geometry = tray.measure(pending.origin);
+    } catch {
+      geometry = null;
+    }
     if (!geometry) return;
     const reduced = this.#inputs.reducedMotion;
     const plan = planTray(dice, geometry.width, seededRandom(tag));
     this.#clearTimers();
-    this.#stage.stop();
     this.#pressed = false;
     const shown: ShownThrow = { id: ++this.#throwId, tag, plan, geometry, reduced, set: this.#inputs.set, startedAt: now };
-    this.#stage.play({ tag, plan, geometry, reduced, set: this.#inputs.set, parent: tray.parent });
+    const played = this.#safely((stage) => {
+      stage.stop();
+      stage.play({ tag, plan, geometry, reduced, set: this.#inputs.set, parent: tray.parent, elapsed: env.clock.now() - now });
+    });
+    if (!played) return;
+    // The deadlines count from the answer, so a slow setup never delays the result.
+    const spent = env.clock.now() - now;
     // Under reduced motion the dice are drawn once, at rest, and the result shows at once.
     if (reduced) this.#set({ held: null, rolling: false, shown });
     else {
       this.#set({ held: tag, rolling: now - pending.origin.tapAt >= ROLLING_MS, shown });
-      this.#timers.push(env.clock.setTimeout(() => this.#release(), LAND_MS));
+      this.#timers.push(env.clock.setTimeout(() => this.#release(), Math.max(0, LAND_MS - spent)));
     }
-    this.#timers.push(env.clock.setTimeout(() => this.#gone(shown.id), GONE_MS));
+    this.#timers.push(env.clock.setTimeout(() => this.#gone(shown.id), Math.max(0, GONE_MS - spent)));
   }
 
   // ------------------------------------------------------------ ending
@@ -436,7 +469,7 @@ export class ThrowStore {
   /** The dice have faded. */
   #gone(id: number): void {
     if (this.#view.shown?.id !== id) return;
-    this.#stage?.stop();
+    this.#safely((stage) => stage.stop());
     this.#set({ ...this.#view, shown: null });
   }
 
@@ -447,8 +480,19 @@ export class ThrowStore {
     if (this.#clickTimer !== null && env) env.clock.clearTimeout(this.#clickTimer);
     this.#clickTimer = null;
     this.#pressed = false;
-    if (this.#view.shown) this.#stage?.stop();
+    if (this.#view.shown) this.#safely((stage) => stage.stop());
     this.#set(QUIET);
+  }
+
+  /**
+   * Ends the throw as its header line goes, with the panel or for the group
+   * save page. A result still held as its dice fly was never seen, so it
+   * goes to the toasts, as a roll whose panel closed before its answer does.
+   */
+  #endUnseen(): void {
+    const held = this.#view.held;
+    this.#end();
+    if (held !== null) this.#env?.tracker.unseen(held);
   }
 
   #clearTimers(): void {
@@ -469,23 +513,34 @@ export class ThrowStore {
     this.#cancelIdle = env.idle(() => {
       this.#cancelIdle = null;
       if (run !== this.#warmRun) return;
+      // The settings or the page may have changed while the callback waited.
+      if (!this.#panel || !this.#allowed() || this.#contextLost || env.hidden()) {
+        this.#warm = "cold";
+        return;
+      }
       if (!this.#stage) {
         const events: StageEvents = { lost: (deliberate) => this.#lost(events, deliberate), restored: () => this.#restored(events) };
         this.#stageEvents = events;
-        this.#stage = module.createStage(events);
+        try {
+          this.#stage = module.createStage(events);
+        } catch {
+          this.#stage = null;
+        }
         if (!this.#stage) {
           this.#noStage = true;
           this.#warm = "cold";
           return;
         }
       }
-      this.#stage.warm(this.#panel?.kinds() ?? ["d20", "d6"], this.#inputs.set).then(
-        () => {
-          if (run === this.#warmRun) this.#warm = "warm";
-        },
-        () => {
-          if (run === this.#warmRun) this.#warm = "cold";
-        },
+      this.#safely((stage) =>
+        stage.warm(this.#panel?.kinds() ?? ["d20", "d6"], this.#inputs.set).then(
+          () => {
+            if (run === this.#warmRun) this.#warm = "warm";
+          },
+          () => {
+            if (run === this.#warmRun) this.#warm = "cold";
+          },
+        ),
       );
     }, WARM_MAX_MS);
   }
@@ -525,6 +580,31 @@ export class ThrowStore {
     this.#stage = null;
     this.#stageEvents = null;
     this.#contextLost = false;
-    stage.dispose();
+    try {
+      stage.dispose();
+    } catch {
+      // Going anyway: nothing of it is used again.
+    }
+  }
+
+  /**
+   * Runs a call on the stage. One that throws, such as a texture drawn
+   * where iOS Safari has no canvas memory left, lets the stage go for the
+   * session, and any throw ends with its result shown. False then.
+   */
+  #safely(call: (stage: Stage) => unknown): boolean {
+    const stage = this.#stage;
+    if (!stage) return false;
+    try {
+      call(stage);
+      return true;
+    } catch {
+      this.#noStage = true;
+      this.#clearTimers();
+      this.#pressed = false;
+      this.#set(QUIET);
+      this.#dispose();
+      return false;
+    }
   }
 }

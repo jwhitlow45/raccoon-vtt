@@ -69,6 +69,12 @@ type Entry = {
   looking: Promise<void> | null;
   /** Whether the settled outcome was told to whoever announces results. */
   announced: boolean;
+  /**
+   * Its surface closed while the roll animation still held the result back
+   * (docs/design-v1-roll-animation.md 3.5), so no surface showed it and it
+   * goes to the toasts, whatever the closing surfaces say.
+   */
+  unseen: boolean;
 };
 
 export type ReceiptEnv = {
@@ -101,7 +107,7 @@ export class ReceiptTracker {
   #entry(tag: string): Entry {
     let entry = this.#entries.get(tag);
     if (!entry) {
-      entry = { parts: new Map(), watchers: 0, looked: false, looking: null, announced: false };
+      entry = { parts: new Map(), watchers: 0, looked: false, looking: null, announced: false, unseen: false };
       this.#entries.set(tag, entry);
     }
     return entry;
@@ -215,8 +221,12 @@ export class ReceiptTracker {
   watch(tag: string): () => void {
     const entry = this.#entry(tag);
     entry.watchers++;
+    // A surface that shows it again has shown it.
+    entry.unseen = false;
     return () => {
       entry.watchers--;
+      // The last surface of an unseen result closed, so the toasts look again.
+      if (entry.unseen && entry.watchers === 0) this.#changed();
     };
   }
 
@@ -231,6 +241,7 @@ export class ReceiptTracker {
       const state = this.state(tag);
       if (!state || state.state === "sending" || state.state === "checking") continue;
       entry.announced = true;
+      entry.unseen = false;
       out.push({ tag, state });
     }
     return out;
@@ -239,7 +250,20 @@ export class ReceiptTracker {
   /** A tag shown where it was sent is told there, and never to the toasts. */
   announced(tag: string): void {
     const entry = this.#entries.get(tag);
-    if (entry) entry.announced = true;
+    if (entry && !entry.unseen) entry.announced = true;
+  }
+
+  /**
+   * A committed result the roll animation still held back as its panel
+   * closed: no surface showed it, so it goes to the toasts once no surface
+   * shows it, in whatever order the closing surfaces clean up.
+   */
+  unseen(tag: string): void {
+    const entry = this.#entries.get(tag);
+    if (!entry) return;
+    entry.unseen = true;
+    entry.announced = false;
+    this.#changed();
   }
 }
 

@@ -34,8 +34,9 @@ import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, So
  * Then the roll animation (docs/design-v1-roll-animation.md 10), its steps
  * labeled `ra-`: Pat's own roll throws dice that land on the result, and
  * reduced motion, no WebGL, Low power, the switch, a tap during a throw,
- * the tracker's Roll, a secret roll, the DM's toast of Pat's attack and a
- * small phone each do as the design says. The browser draws WebGL in
+ * the tracker's Roll, a secret roll, the DM's toast of Pat's attack, a
+ * small phone and a roll still in the air as its sheet closes each do as
+ * the design says. The browser draws WebGL in
  * software (SwiftShader), as CI has no GPU, and the steps that measure the
  * header line do so once the dice have gone.
  *
@@ -53,6 +54,9 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const PHONE = { width: 375, height: 667 };
+
+/** The dice land this long after the answer (client/features/dice/throw/store.ts). */
+const LAND_MS = 1000;
 
 /** WebGL drawn in software, so the dice throw on a CI runner, which has no GPU. */
 const WEBGL_ARGS = ["--enable-unsafe-swiftshader", "--use-angle=swiftshader-webgl"];
@@ -1149,5 +1153,21 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
+  });
+
+  test("ra-9. a roll still in the air as Pat closes the Dice sheet lands as a toast", async (t) => {
+    if (!(await needsWebGL(player, t))) return;
+    await openDicePhone(player);
+    await diceReady(player, playerSocket);
+    await watchThrow(player);
+    const line = await rollWithEnter(player, playerSocket, "1d20 ra-9");
+    await seen(player, "the throw", (w) => w.canvasAt !== null);
+    const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+    await sheet.getByRole("button", { name: "Close Dice" }).tap();
+    const w = await seen(player, "the close", (w) => w.downAt !== null);
+    assert.ok(w.downAt! - w.canvasAt! < LAND_MS, "the sheet closed while the dice flew");
+    await sheet.waitFor({ state: "detached" });
+    await player.getByText(`Rolled ${line.rolls[0]!.total}: ra-9.`).waitFor();
+    await shots.take(player, "ra-closed-mid-throw-toast");
   });
 });

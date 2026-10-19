@@ -101,6 +101,17 @@ function drawLabel(g: CanvasRenderingContext2D, text: string, at: { x: number; y
   g.restore();
 }
 
+/**
+ * A canvas's 2D context for a texture. iOS Safari hands out none once the
+ * page's canvases pass its memory cap, the map's included, and the store
+ * then lets the stage go and shows the result at once.
+ */
+function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const g = canvas.getContext("2d");
+  if (!g) throw new Error("No 2D context for the dice's textures");
+  return g;
+}
+
 function canvasTexture(canvas: HTMLCanvasElement): CanvasTexture {
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
@@ -114,7 +125,7 @@ function drawAtlas(model: DieModel, set: DiceSet): CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = cols * cell;
   canvas.height = rows * cell;
-  const g = canvas.getContext("2d")!;
+  const g = context2d(canvas);
   g.fillStyle = set.body;
   g.fillRect(0, 0, canvas.width, canvas.height);
   if (model.kind !== "coin") {
@@ -215,7 +226,7 @@ export function createStage(events: StageEvents): Stage | null {
     if (!texture) {
       const c = document.createElement("canvas");
       c.width = c.height = 128;
-      drawLabel(c.getContext("2d")!, text, { x: 64, y: 64 }, [0, 1], 128, set.ink, underline, 120);
+      drawLabel(context2d(c), text, { x: 64, y: 64 }, [0, 1], 128, set.ink, underline, 120);
       texture = canvasTexture(c);
       decals.set(key, texture);
     }
@@ -323,6 +334,8 @@ export function createStage(events: StageEvents): Stage | null {
   return {
     async warm(kinds, setId) {
       await fonts();
+      // Never over a throw on screen: the warm-up relabels the first pooled die of each kind, which the throw is drawn with.
+      if (raf || thrown.length > 0) return;
       set = diceSet(setId);
       // One die of each kind in the scene, so its shader compiles and its texture uploads now, not on the first throw.
       const dice = kinds.map((kind) => acquire(kind, set, 0));
@@ -333,10 +346,12 @@ export function createStage(events: StageEvents): Stage | null {
       }
       renderer.compile(scene, camera);
       for (const atlas of atlasList) renderer.initTexture(atlas);
-      if (!raf) hideAll();
+      hideAll();
     },
 
     play(t: StagedThrow) {
+      // The 1 s counts from the answer, which came `elapsed` ms ago, and the setup below counts too.
+      const begun = performance.now() - t.elapsed;
       stop();
       set = diceSet(t.set);
       const parent = t.parent as HTMLElement | null;
@@ -374,14 +389,16 @@ export function createStage(events: StageEvents): Stage | null {
       landedRead = false;
       delete canvas.dataset.landed;
       canvas.style.display = "block";
-      startedAt = performance.now();
+      startedAt = begun;
+      // The fade keeps the same time as the dice and the tray's scrim, however long the setup took.
+      const delay = -(performance.now() - begun);
       if (t.reduced) {
         // Reduced motion: the dice drawn once, already at rest, fading in.
         draw(LAST_FRAME_MS);
-        fade = canvas.animate([{ opacity: 0 }, { opacity: 1, offset: FADE_IN_MS / GONE_MS }, { opacity: 1, offset: FADE_FROM_MS / GONE_MS }, { opacity: 0 }], { duration: GONE_MS, fill: "forwards" });
+        fade = canvas.animate([{ opacity: 0 }, { opacity: 1, offset: FADE_IN_MS / GONE_MS }, { opacity: 1, offset: FADE_FROM_MS / GONE_MS }, { opacity: 0 }], { duration: GONE_MS, delay, fill: "both" });
         return;
       }
-      fade = canvas.animate([{ opacity: 1 }, { opacity: 1, offset: FADE_FROM_MS / GONE_MS }, { opacity: 0 }], { duration: GONE_MS, fill: "forwards" });
+      fade = canvas.animate([{ opacity: 1 }, { opacity: 1, offset: FADE_FROM_MS / GONE_MS }, { opacity: 0 }], { duration: GONE_MS, delay, fill: "both" });
       raf = requestAnimationFrame(tick);
     },
 
@@ -423,6 +440,16 @@ export function createStage(events: StageEvents): Stage | null {
           g.clearRect(0, 0, t.canvas.width, t.canvas.height);
           g.drawImage(canvas, 0, 0, t.canvas.width, t.canvas.height);
         }
+      }
+      // The pooled d20 goes back to the throws' set. The other sets' textures are copied out now, and each would keep about 2.7 MB on the GPU.
+      acquire("d20", set, 0).decal.material.opacity = 0;
+      const inUse = new Set<Texture | null>([...pool.values()].flat().map((d) => d.body.map));
+      for (const t of targets) {
+        const key = `${t.set}|d20`;
+        const atlas = atlases.get(key);
+        if (!atlas || inUse.has(atlas)) continue;
+        atlas.dispose();
+        atlases.delete(key);
       }
       hideAll();
       renderer.setPixelRatio(1);

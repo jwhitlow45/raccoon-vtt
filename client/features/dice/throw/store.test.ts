@@ -35,6 +35,11 @@ class FakeTracker {
     this.states.set(tag, state);
     for (const l of [...this.#listeners]) l();
   }
+  /** The results the store handed to the toasts, unseen. */
+  unseenTags: string[] = [];
+  unseen = (tag: string): void => {
+    this.unseenTags.push(tag);
+  };
 }
 
 class FakeLoader {
@@ -89,6 +94,12 @@ class FakeStage implements Stage {
   playing: { tag: string; at: number; reduced: boolean } | null = null;
   disposed = false;
   warmups: Warmup[] = [];
+  /** The set each warm-up was asked for. */
+  warmSets: string[] = [];
+  /** A play that throws, as a texture drawn with no 2D context does. */
+  failPlay = false;
+  /** How long a play's setup blocks the page: the clock moves on, and no timer fires meanwhile. */
+  setupMs = 0;
   readonly clock: FakeClock;
   readonly events: StageEvents;
   /** Checked as each throw starts, so the test sees the store's state at that moment. */
@@ -100,18 +111,22 @@ class FakeStage implements Stage {
     this.events = events;
   }
 
-  warm(): Promise<void> {
+  warm(_kinds: readonly DieKind[], set: string): Promise<void> {
+    assert.equal(this.playing, null, "never warmed over a throw on screen");
     const w = new Warmup();
     this.warmups.push(w);
+    this.warmSets.push(set);
     return w.promise;
   }
 
   play(t: StagedThrow): void {
     assert.equal(this.disposed, false, "a disposed stage never plays");
     assert.ok(!this.looping(), "never two throws at once");
+    if (this.failPlay) throw new TypeError("Cannot read properties of null (reading 'fillRect')");
     this.plays.push(t);
-    this.playing = { tag: t.tag, at: this.clock.now(), reduced: t.reduced };
+    this.playing = { tag: t.tag, at: this.clock.now() - t.elapsed, reduced: t.reduced };
     this.onPlay?.(t);
+    this.clock.t += this.setupMs;
   }
 
   stop(): void {
@@ -146,10 +161,12 @@ function harness() {
   const page = { hidden: false };
   const stages: FakeStage[] = [];
   let makeStage = true;
+  let setupMs = 0;
   const module: StageModule = {
     createStage(events) {
       if (!makeStage) return null;
       const stage = new FakeStage(clock, events);
+      stage.setupMs = setupMs;
       stages.push(stage);
       return stage;
     },
@@ -183,6 +200,10 @@ function harness() {
     module,
     noStage() {
       makeStage = false;
+    },
+    /** Every stage made from now on takes this long to set up each throw. */
+    setup(ms: number) {
+      setupMs = ms;
     },
     short(on: boolean) {
       shortPane = on;
@@ -226,6 +247,72 @@ describe("the throw's store", () => {
     assert.ok(h.store.view().shown, "the dice stay to fade");
     h.clock.advance(GONE_MS - LAND_MS);
     assert.equal(h.store.view().shown, null);
+  });
+
+  test("a slow setup never delays the result: the deadlines count from the answer", () => {
+    const h = harness();
+    h.setup(200);
+    h.ready();
+    const tag = h.tap();
+    h.commit(tag);
+    assert.equal(h.stage()?.plays[0]?.elapsed, 0, "the stage is told how long ago the answer came");
+    assert.equal(h.clock.now(), 200, "the setup took 200 ms");
+    h.clock.advance(LAND_MS - 200 - 1);
+    assert.equal(h.store.held(tag), true);
+    h.clock.advance(1);
+    assert.equal(h.store.held(tag), false, "landed 1 s after the answer, setup included");
+    h.clock.advance(GONE_MS - LAND_MS);
+    assert.equal(h.store.view().shown, null, "gone 2.1 s after the answer");
+  });
+
+  test("a dice set changed mid-flight waits for the throw to end before it warms up", () => {
+    const h = harness();
+    h.ready();
+    const stage = h.stage()!;
+    const tag = h.tap();
+    h.commit(tag);
+    h.store.setInputs({ set: "ruby" });
+    h.idle.runAll();
+    assert.deepEqual(stage.warmSets, ["ivory"], "nothing relabels the dice in the air");
+    h.clock.advance(GONE_MS);
+    h.idle.runAll();
+    assert.deepEqual(stage.warmSets, ["ivory", "ruby"], "the new set warms up once the dice are gone");
+  });
+
+  test("turning the dice off or Low power on lets the renderer go and stops a warm-up on its way", () => {
+    const h = harness();
+    h.ready();
+    const stage = h.stage()!;
+    h.store.setInputs({ on: false });
+    assert.equal(stage.disposed, true);
+    assert.equal(h.store.lostContexts, 0, "a deliberate disposal");
+    h.store.setInputs({ on: true });
+    h.store.setInputs({ lowPower: true });
+    h.idle.runAll();
+    assert.equal(h.stages.length, 1, "the warm-up queued before Low power made no renderer");
+    h.store.setInputs({ lowPower: false });
+    h.idle.runAll();
+    assert.equal(h.stages.length, 2, "and one comes once the dice are allowed again");
+  });
+
+  test("the picker gets no stage while its context is lost, and no previews after two losses or with no stage", () => {
+    const h = harness();
+    h.ready();
+    const stage = h.stage()!;
+    assert.equal(h.store.stage, stage);
+    assert.equal(h.store.previewsAllowed, true);
+    stage.events.lost(false);
+    assert.equal(h.store.stage, null);
+    assert.equal(h.store.previewsAllowed, false);
+    stage.events.restored();
+    assert.equal(h.store.stage, stage);
+    stage.events.lost(false);
+    stage.events.restored();
+    assert.equal(h.store.previewsAllowed, false, "two losses end the dice for the session");
+    const none = harness();
+    none.noStage();
+    none.ready();
+    assert.equal(none.store.previewsAllowed, false);
   });
 
   test("an answer 200 ms or more after its tap keeps Rolling… until the dice land", () => {
@@ -441,8 +528,8 @@ describe("every way a panel control rolls", () => {
     const store = new ThrowStore();
     store.bind({ clock, idle: idle.idle, tracker, loader, hidden: () => false });
     loader.finish({ createStage: (events) => (stage = new FakeStage(clock, events)) });
-    store.mount({ kinds: () => ["d20"] });
-    store.attach({ parent: null, measure: () => GEOMETRY });
+    const unmount = store.mount({ kinds: () => ["d20"] });
+    const detach = store.attach({ parent: null, measure: () => GEOMETRY });
     idle.runAll();
     stage!.warmups[0]!.finish(true);
     const choices = createStore<DiceState>(() => ({ adv: false, dis: false, secret: null, version: 0, last: null }));
@@ -457,7 +544,12 @@ describe("every way a panel control rolls", () => {
       }
     };
     const origin = () => store.origin();
-    return { store, panel, sender, answerAll, origin, stage: () => stage! };
+    /** The Dice panel closes: its header line's tray, then the panel, as React cleans them up. */
+    const close = () => {
+      detach();
+      unmount();
+    };
+    return { store, panel, sender, answerAll, origin, stage: () => stage!, tracker, close };
   }
 
   const ROLL = { formula: "1d20+4", label: "Stealth", creature: { characterId: "thorn" } };
@@ -493,6 +585,82 @@ describe("every way a panel control rolls", () => {
       h.answerAll();
       assert.equal(h.store.held(op.tag), true, op.t);
     }
+  });
+
+  test("a stage that throws as it plays shows the result at once, goes for the session, and the tracker's other listeners still run", () => {
+    const h = setup();
+    h.stage().failPlay = true;
+    let told = 0;
+    h.tracker.subscribe(() => told++);
+    const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+    told = 0;
+    h.answerAll();
+    assert.equal(h.store.held(tag), false, "the result shows");
+    assert.ok(told > 0, "a listener after the store's still heard the answer");
+    assert.equal(h.stage().disposed, true, "the stage is let go");
+    assert.equal(h.store.lostContexts, 0);
+    assert.equal(h.store.stage, null);
+    const next = h.panel.roll([ROLL], { origin: h.origin() })!;
+    h.answerAll();
+    assert.equal(h.store.held(next), false, "no throws for the session");
+  });
+
+  test("a result still in the air as the panel closes goes to the toasts, in either cleanup order", () => {
+    for (const order of ["panel first", "header line first"] as const) {
+      const h = setup();
+      const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+      // The header line shows the tag while it is mounted, and calls it told as it goes (useReceipt).
+      const unwatch = h.tracker.watch(tag);
+      h.answerAll();
+      assert.equal(h.store.held(tag), true);
+      const lastResultGoes = () => {
+        unwatch();
+        h.tracker.announced(tag);
+      };
+      const before = h.tracker.version();
+      if (order === "panel first") {
+        h.close();
+        lastResultGoes();
+      } else {
+        lastResultGoes();
+        h.close();
+      }
+      assert.ok(h.tracker.version() > before, `${order}: the toasts are told to look again`);
+      assert.deepEqual(
+        h.tracker.unannounced().map((u) => u.tag),
+        [tag],
+        `${order}: the own roll's toast`,
+      );
+    }
+  });
+
+  test("a result in the air as the panel closed, shown again before its toast, is no toast", () => {
+    const h = setup();
+    const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+    const unwatch = h.tracker.watch(tag);
+    h.answerAll();
+    h.close();
+    unwatch();
+    h.tracker.announced(tag);
+    // The panel opens again at once, and its header line shows the result.
+    const again = h.tracker.watch(tag);
+    assert.deepEqual(h.tracker.unannounced(), []);
+    again();
+    h.tracker.announced(tag);
+    assert.deepEqual(h.tracker.unannounced(), []);
+  });
+
+  test("a result that landed before the panel closed is no toast", () => {
+    const h = setup();
+    const tag = h.panel.roll([ROLL], { origin: h.origin() })!;
+    const unwatch = h.tracker.watch(tag);
+    h.answerAll();
+    h.store.click();
+    assert.equal(h.store.held(tag), false);
+    h.close();
+    unwatch();
+    h.tracker.announced(tag);
+    assert.deepEqual(h.tracker.unannounced(), []);
   });
 
   test("the tracker's Roll, which carries no origin, never throws", () => {
@@ -536,6 +704,10 @@ function run(seed: number): void {
   const inputs = { on: true, lowPower: false, reducedMotion: false, preview: false };
   let realLosses = 0;
   let contextLost = false;
+  /** A stage threw as it played: no throws for the session. */
+  let broken = false;
+  // Some sequences take a while to set up each throw, which the deadlines count.
+  h.setup(pick(r, [0, 0, 30, 200]));
   let short = false;
   /** The group save page shows in place of the header line and its tray. */
   let groupSave = false;
@@ -590,6 +762,7 @@ function run(seed: number): void {
     if (stage) watchStage(stage);
     const k = r();
     let committed: Tap | null = null;
+    let committedAt = 0;
     let eligible = false;
     if (k < 0.18) {
       // A tap: in the panel (with an origin), or elsewhere, such as the tracker's Roll. With the panel closed, a panel tap is a stale one.
@@ -628,10 +801,18 @@ function run(seed: number): void {
           !short &&
           !groupSave &&
           !later &&
+          !broken &&
           rolls.length === 1;
+        // An eligible commit on a stage that throws as it plays shows at once, and ends the dice for the session.
+        if (eligible && h.stage()?.failPlay) {
+          eligible = false;
+          broken = true;
+          chill();
+        }
         tap.settled = true;
         committed = tap;
         did(`commit ${tap.tag}${eligible ? " (eligible)" : ""}`);
+        committedAt = clock.now();
         h.commit(tap.tag, rolls);
       } else if (how < 0.8) {
         tap.settled = true;
@@ -771,6 +952,11 @@ function run(seed: number): void {
       did(`${key} ${inputs[key]}`);
       store.setInputs({ [key]: inputs[key] });
       if (stops) shownNow();
+      // Turning the dice off, Low power on or a preview lets the renderer go: the next one starts cold, on a fresh context.
+      if (stops && key !== "reducedMotion") {
+        chill();
+        contextLost = false;
+      }
     } else if (k < 0.88) {
       short = !short;
       h.short(short);
@@ -789,6 +975,12 @@ function run(seed: number): void {
         groupSave = true;
         shownNow();
       }
+    } else if (k < 0.905) {
+      const s = h.stage();
+      if (s && !s.disposed && !s.failPlay) {
+        did("the stage breaks");
+        s.failPlay = true;
+      }
     } else {
       const ms = chance(r, 0.05) ? DISPOSE_MS : pick(r, [16, 100, 250, 400, 700, 999, 1_000, 1_500, 2_500]);
       did(`wait ${ms}`);
@@ -799,7 +991,8 @@ function run(seed: number): void {
     const view = store.view();
     const now = clock.now();
     if (committed && eligible) assert.equal(play?.tag, committed.tag, at(`an eligible commit throws (${committed.tag})`));
-    if (committed && !eligible) assert.notEqual(play?.tag === committed.tag && play.at === now, true, at(`an ineligible commit never throws (${committed.tag})`));
+    if (committed && !eligible) assert.notEqual(play?.tag === committed.tag && play.at === committedAt, true, at(`an ineligible commit never throws (${committed.tag})`));
+    if (broken) assert.equal(view.held, null, at("a stage that threw never holds a result"));
     if (view.held !== null) {
       assert.ok(play && play.tag === view.held && !play.reduced, at("only a throw holds its result"));
       assert.ok(now < play.at + LAND_MS, at("a result shows by t0 + 1,000 ms"));
