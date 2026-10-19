@@ -110,11 +110,25 @@ describe("Recent rolls", () => {
 
 describe("the field", () => {
   test("its reading names the formula, the label and the range, or the refusal", () => {
-    assert.deepEqual(readingOf("2d6+3 fire"), { ok: true, text: "2d6+3, fire: 5 to 15" });
-    assert.deepEqual(readingOf("1d20+5 Stealth adv"), { ok: true, text: "1d20+5 with Advantage, Stealth: 6 to 25" });
+    assert.deepEqual(readingOf("2d6+3 fire"), { ok: true, text: "2d6+3, fire: 5 to 15", range: ": 5 to 15" });
+    assert.deepEqual(readingOf("1d20+5 Stealth adv"), { ok: true, text: "1d20+5 with Advantage, Stealth: 6 to 25", range: ": 6 to 25" });
     assert.deepEqual(readingOf("2d6 adv"), { ok: false, error: "Adv or Dis needs one d20." });
     assert.equal(readingOf("   "), null);
     assert.equal(readingOf("fire")?.ok, false);
+  });
+
+  // The one line under the field cut a long reading at its end, so "…: 32 to 344" never showed (LP9-DICE-2).
+  test("its range is the reading's end, apart, so a long formula and label cut before it", () => {
+    const long = readingOf("10d4+1d8+2d6+3d10+4d12+5d20+1d100+6 fire, cold and the dragon's breath");
+    assert.ok(long?.ok);
+    assert.equal(long.range, ": 32 to 344");
+    assert.ok(long.text.endsWith(long.range));
+    assert.equal(long.text.slice(0, -long.range.length), "10d4+1d8+2d6+3d10+4d12+5d20+1d100+6, fire, cold and the dragon's breath");
+    // A colon in the label stays in the part that cuts.
+    const colon = readingOf("1d6 note: hot");
+    assert.ok(colon?.ok);
+    assert.equal(colon.range, ": 1 to 6");
+    assert.equal(colon.text, "1d6, note: hot: 1 to 6");
   });
 
   test("Again sends the formula as asked, the mode beside it", () => {

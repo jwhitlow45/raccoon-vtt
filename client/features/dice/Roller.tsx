@@ -37,7 +37,8 @@ export const LAST_LINE_PX = 40;
  * a refusal or the blocked note coming and going while someone types never
  * moves the quick dice. The blocked note shares the line and wins: a blocked
  * panel cannot roll, so its reading and refusals add nothing. Long text cuts
- * with an ellipsis and the full words stay in the field's description.
+ * with an ellipsis, a reading's before its range, and the full words stay in
+ * the field's description.
  */
 const NOTE_LINE = 1.3;
 // The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
@@ -364,8 +365,10 @@ export function Roller() {
             {error}
           </span>
         ) : reading?.ok ? (
-          <span id={readingId} style={{ color: theme.color.textMuted }}>
-            {reading.text}
+          // A long formula or label cuts before the range, which is what the reading is for.
+          <span id={readingId} style={{ display: "flex", minWidth: 0, color: theme.color.textMuted }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{reading.text.slice(0, -reading.range.length)}</span>
+            <span style={{ flex: "none" }}>{reading.range}</span>
           </span>
         ) : null}
       </div>

@@ -157,9 +157,11 @@ export function answerVerdict(roll: Pick<DiceResult, "formula" | "faces">, resul
 
 /**
  * The reading under the field (8.2): "2d6+3, fire: 5 to 15", with the typed
- * mode, or the refusal's words. Null for an empty field.
+ * mode, or the refusal's words. Null for an empty field. `range` is the
+ * text's end, ": 5 to 15", which the one line under the field keeps whole
+ * when a long formula or label has to be cut.
  */
-export function readingOf(text: string): { ok: true; text: string } | { ok: false; error: string } | null {
+export function readingOf(text: string): { ok: true; text: string; range: string } | { ok: false; error: string } | null {
   if (text.trim() === "") return null;
   const parsed = parseRollText(text);
   if (!parsed.ok) return { ok: false, error: parsed.error };
@@ -174,7 +176,8 @@ export function readingOf(text: string): { ok: true; text: string } | { ok: fals
   }
   const { min, max } = formulaRange(formula);
   const label = parsed.label !== undefined ? `, ${parsed.label}` : "";
-  return { ok: true, text: `${formatFormula(formula, mode)}${label}: ${min.toLocaleString("en-US")} to ${max.toLocaleString("en-US")}` };
+  const range = `: ${min.toLocaleString("en-US")} to ${max.toLocaleString("en-US")}`;
+  return { ok: true, text: `${formatFormula(formula, mode)}${label}${range}`, range };
 }
 
 /**
