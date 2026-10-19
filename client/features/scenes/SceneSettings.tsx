@@ -19,6 +19,7 @@ import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater } from "../grid/useFindGrid.ts";
+import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
@@ -371,8 +372,17 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
   const assets = useAssets();
   const landLater = useLandLater();
   const phaseCount = scene.phases?.length ?? 0;
+  /*
+   * A key paste lands here only with focus in the row, and on the players'
+   * scene only once the DM has confirmed (docs/design-v1-paste.md 1.2):
+   * the row is on screen whenever the Scenes panel is, and a paste uploads
+   * at once, so a Ctrl+V meant for the room must never replace the map.
+   * Confirming moves focus into the row, so the rule costs nothing.
+   */
+  const rowRef = useRef<HTMLDivElement>(null);
+  const paste = usePasteTarget(rowRef, { accepts: "image", takes: playersHere && !armed ? "none" : "focus", disabled: upload.busy, onFile: (f) => void choose(f, true) });
 
-  const choose = async (file: File) => {
+  const choose = async (file: File, pasted = false) => {
     const abort = new AbortController();
     abortRef.current = abort;
     setUpload({ busy: true, waiting: false, error: null });
@@ -383,7 +393,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
     let search = searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? importSearch(file, device) : null;
     abort.signal.addEventListener("abort", () => search?.cancel());
     try {
-      const asset = await uploadMap(roomId, file, { signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
       let wait: ImportWait = { answer: null, later: null };
       if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined) {
         search ??= importSearch(file, device);
@@ -463,6 +473,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
 
   const status = (
     <>
+      <PasteStatus paste={paste} />
       {upload.waiting ? <Help>Waiting for the server…</Help> : null}
       {upload.error ? (
         <div role="alert">
@@ -495,6 +506,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
       <>
         <Row>
           {filePicker(playersHere ? "Choose the image" : label)}
+          <PasteButton paste={paste} />
           {playersHere && !upload.busy ? (
             <Button size="sm" onClick={() => setArmed(false)}>
               Cancel
@@ -511,7 +523,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
   // Its buttons, the warning, the fog choice and the status stack under the name, as the section they came from did.
   return (
     <SettingRow name="Map image" help={map ? `A ${map.widthPx} × ${map.heightPx} px image.` : "No map image yet."} wide>
-      <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
+      <div ref={rowRef} style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
         {picker(map ? "Replace map image" : "Add a map image")}
         {status}
       </div>

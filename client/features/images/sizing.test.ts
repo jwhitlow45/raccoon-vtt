@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 import { api } from "../../lib/api.ts";
 import { imageErrorMessage, isQuotaError } from "./errors.ts";
-import { TOKEN_UPLOAD_MAX_PX, fitWithin, outputType, smaller } from "./sizing.ts";
+import { PASTED_MAP_REENCODE_BYTES, TOKEN_UPLOAD_MAX_PX, fitWithin, keepsReencoded, outputType, reencodesPastedMap, smaller } from "./sizing.ts";
 import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
 import { checkImageFile, checkImageUrl, PickError } from "./upload.ts";
 
@@ -41,6 +41,24 @@ describe("downscale size math", () => {
     assert.equal(smaller({ size: 10 }, { size: 50 }).size, 10);
     assert.equal(smaller({ size: 10 }, null).size, 10);
     assert.equal(smaller({ size: 10 }, { size: 0 }).size, 10);
+  });
+});
+
+describe("a pasted map's re-encode", () => {
+  test("only a pasted map over 8 MB, and only on a computer", () => {
+    assert.equal(PASTED_MAP_REENCODE_BYTES, 8 * 1024 * 1024);
+    assert.equal(reencodesPastedMap(PASTED_MAP_REENCODE_BYTES + 1, "computer"), true);
+    assert.equal(reencodesPastedMap(PASTED_MAP_REENCODE_BYTES, "computer"), false, "8 MB itself goes up as it is");
+    assert.equal(reencodesPastedMap(20 * 1024 * 1024, "phone"), false, "a phone uploads the original");
+    assert.equal(reencodesPastedMap(20 * 1024 * 1024, "iPad"), false);
+  });
+
+  test("the copy is kept only when it is WebP and smaller", () => {
+    const original = { size: 15_000_000, type: "image/png" };
+    assert.equal(keepsReencoded(original, { size: 3_000_000, type: "image/webp" }).size, 3_000_000);
+    assert.equal(keepsReencoded(original, { size: 9_000_000, type: "image/png" }), original, "Safari's PNG in place of WebP");
+    assert.equal(keepsReencoded(original, { size: 16_000_000, type: "image/webp" }), original);
+    assert.equal(keepsReencoded(original, null), original);
   });
 });
 

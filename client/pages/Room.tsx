@@ -62,6 +62,7 @@ import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/
 import { TOAST_MS } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
 import type { Ended, Toast, ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
@@ -338,10 +339,11 @@ function RoomPage() {
   const panels = panelsFor(role, wide);
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
-  // The keyboard (state/shortcuts.ts). A "view as a player" preview answers no key.
+  // The keyboard (state/shortcuts.ts) and pasted images (features/images/pasteRouter.ts). A "view as a player" preview answers no key and takes no paste.
   const previewing = usePreview();
   const preview = previewing !== null;
   useShortcuts({ role, tools, scope, preview });
+  usePasteRouter({ scope, preview });
 
   /*
    * The side panel from 900 px up, which can be hidden

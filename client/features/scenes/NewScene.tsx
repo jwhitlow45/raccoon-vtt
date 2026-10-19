@@ -14,6 +14,7 @@ import { showOutcome } from "../grid/outcome.ts";
 import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
 import { apartFromStarter } from "../images/library.ts";
+import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { loadedStarterWork } from "../starter/catalog.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
@@ -62,6 +63,8 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const [h, setH] = useState(20);
   const [background, setBackground] = useState(MAT_BACKGROUND);
   const [file, setFile] = useState<File | null>(null);
+  /** The file came from a paste, which may be re-encoded before it uploads (upload.ts). */
+  const [pasted, setPasted] = useState(false);
   const [starter, setStarter] = useState(false);
   const starterButton = useRef<HTMLButtonElement>(null);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
@@ -87,6 +90,9 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   useUnsavedSince({ name, w, h, background, file: file?.name ?? null });
 
   const full = props.sceneCount >= MAX_SCENES;
+  // A paste lands here while the Map image form is open, as a chosen file does: picked, and searched for its grid (docs/design-v1-paste.md 1.2).
+  const formRef = useRef<HTMLDivElement>(null);
+  const paste = usePasteTarget(formRef, { accepts: "image", takes: kind === "map" ? "open" : "none", disabled: status.busy, onFile: (f) => pickFile(f, true) });
 
   const pick = (k: Kind) => {
     // Another kind of scene ends an upload in flight, or it would still
@@ -177,8 +183,9 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map");
   };
 
-  const pickFile = (next: File | null) => {
+  const pickFile = (next: File | null, fromPaste = false) => {
     setFile(next);
+    setPasted(fromPaste);
     setStatus({ busy: false, waiting: false, error: null });
     stopSearch();
     if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
@@ -191,6 +198,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     setStatus({ busy: true, waiting: false, error: null });
     try {
       const asset = await uploadMap(roomId, file, {
+        pasted,
         signal: abort.signal,
         onWaiting: (waiting) => setStatus((s) => ({ ...s, waiting })),
       });
@@ -244,6 +252,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
       />
       {kind ? (
         <div
+          ref={formRef}
           style={{
             display: "grid",
             gap: theme.space(2),
@@ -282,6 +291,10 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
                   onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
                 />
               </label>
+              <div style={{ display: "flex" }}>
+                <PasteButton paste={paste} />
+              </div>
+              <PasteStatus paste={paste} />
               <Help>
                 A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.
               </Help>

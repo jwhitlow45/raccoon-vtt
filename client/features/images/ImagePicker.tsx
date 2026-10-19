@@ -19,6 +19,7 @@ import { rememberAsset } from "./library.ts";
 import { honorsImageOrientation } from "./orientation.ts";
 import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
 import { StarterBrowser } from "../starter/StarterBrowser.tsx";
+import { PasteButton, PasteStatus, usePasteTarget, type PasteHandle } from "./PasteImage.tsx";
 import { PickError, checkImageUrl, searchConfig, uploadTokenImage } from "./upload.ts";
 
 /**
@@ -138,26 +139,9 @@ export function ImagePicker(props: {
     [finish, run, roomId],
   );
 
-  // A paste anywhere while the picker is open: an image uploads, a link imports.
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      const file = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"))?.getAsFile();
-      if (file) {
-        e.preventDefault();
-        void upload(file);
-        return;
-      }
-      const text = e.clipboardData?.getData("text/plain")?.trim();
-      if (text && /^https:\/\//i.test(text)) {
-        e.preventDefault();
-        void importUrl(text);
-      }
-    };
-    document.addEventListener("paste", onPaste);
-    return () => document.removeEventListener("paste", onPaste);
-  }, [upload, importUrl]);
+  // A paste anywhere while the picker is open, through the room's router: an image uploads, a link imports (docs/design-v1-paste.md 1.2).
+  const body = useRef<HTMLDivElement>(null);
+  const paste = usePasteTarget(body, { accepts: "image-or-link", takes: "open", disabled: busy !== null, onFile: upload, onLink: importUrl });
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "icons", label: "Icons" },
@@ -177,67 +161,74 @@ export function ImagePicker(props: {
       status={busy ? <span role="status">{waiting ? "Waiting for the server…" : busy}</span> : undefined}
       footer={busy ? <Button onClick={() => abortRef.current?.abort()}>Cancel</Button> : undefined}
     >
-      {props.hint ? <p style={{ margin: `0 0 ${theme.space(3)}px`, fontSize: theme.font.body14, color: theme.color.textMuted }}>{props.hint}</p> : null}
-      <div role="tablist" aria-label="Where the image comes from" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), marginBottom: theme.space(3) }}>
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => {
-              setTab(t.id);
-              setError(null);
-            }}
-            style={{
-              flex: "1 0 auto",
-              minHeight: theme.touch,
-              padding: `0 ${theme.space(3)}px`,
-              borderRadius: theme.radius.md,
-              fontFamily: theme.font.body,
-              fontSize: theme.font.body14,
-              fontWeight: theme.weight.strong,
-              cursor: "pointer",
-              ...choiceLook(tab === t.id),
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {error ? (
-        <div style={{ marginBottom: theme.space(3) }}>
-          <ErrorText>{error}</ErrorText>
+      <div ref={body}>
+        {props.hint ? <p style={{ margin: `0 0 ${theme.space(3)}px`, fontSize: theme.font.body14, color: theme.color.textMuted }}>{props.hint}</p> : null}
+        <div role="tablist" aria-label="Where the image comes from" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), marginBottom: theme.space(3) }}>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => {
+                setTab(t.id);
+                setError(null);
+              }}
+              style={{
+                flex: "1 0 auto",
+                minHeight: theme.touch,
+                padding: `0 ${theme.space(3)}px`,
+                borderRadius: theme.radius.md,
+                fontFamily: theme.font.body,
+                fontSize: theme.font.body14,
+                fontWeight: theme.weight.strong,
+                cursor: "pointer",
+                ...choiceLook(tab === t.id),
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
-      ) : null}
-      <div role="tabpanel">
-        {tab === "icons" ? (
-          <IconsTab disabled={busy !== null} initial={props.current && "icon" in props.current ? props.current : undefined} onUse={props.onPickIcon} />
+        {error ? (
+          <div style={{ marginBottom: theme.space(3) }}>
+            <ErrorText>{error}</ErrorText>
+          </div>
         ) : null}
-        {tab === "starter" ? (
-          <StarterBrowser
-            uses={STARTER_USES}
-            hint="Openly licensed art packs. Use copies the picture into this room's library with its credit."
-            busy={busy === STARTER_BUSY}
-            busyLabel="Adding…"
-            disabled={busy !== null}
-            onUse={(found) => void pickStarter(found)}
-          />
+        {paste.note && tab !== "device" ? (
+          <div style={{ marginBottom: theme.space(3) }}>
+            <PasteStatus paste={paste} only="note" />
+          </div>
         ) : null}
-        {tab === "device" ? <DeviceTab disabled={busy !== null} onFile={upload} onUrl={importUrl} onError={setError} /> : null}
-        {tab === "link" ? <LinkTab disabled={busy !== null} onUrl={importUrl} /> : null}
-        {tab === "search" ? (
-          <SearchTab
-            disabled={busy !== null}
-            search={(q, source) =>
-              run(source === "openverse" ? "Searching Openverse…" : "Searching…", (signal, onWaiting) =>
-                api.imageSearch(roomId, q, { signal, onWaiting, ...(source ? { source } : {}) }),
-              )
-            }
-            onPick={(r) => importUrl(r.original, r.thumbnail)}
-          />
-        ) : null}
-        {tab === "library" ? <LibraryGrid roomId={roomId} disabled={busy !== null} onPick={(id) => onPick({ id })} /> : null}
+        <div role="tabpanel">
+          {tab === "icons" ? (
+            <IconsTab disabled={busy !== null} initial={props.current && "icon" in props.current ? props.current : undefined} onUse={props.onPickIcon} />
+          ) : null}
+          {tab === "starter" ? (
+            <StarterBrowser
+              uses={STARTER_USES}
+              hint="Openly licensed art packs. Use copies the picture into this room's library with its credit."
+              busy={busy === STARTER_BUSY}
+              busyLabel="Adding…"
+              disabled={busy !== null}
+              onUse={(found) => void pickStarter(found)}
+            />
+          ) : null}
+          {tab === "device" ? <DeviceTab disabled={busy !== null} onFile={upload} paste={paste} /> : null}
+          {tab === "link" ? <LinkTab disabled={busy !== null} onUrl={importUrl} /> : null}
+          {tab === "search" ? (
+            <SearchTab
+              disabled={busy !== null}
+              search={(q, source) =>
+                run(source === "openverse" ? "Searching Openverse…" : "Searching…", (signal, onWaiting) =>
+                  api.imageSearch(roomId, q, { signal, onWaiting, ...(source ? { source } : {}) }),
+                )
+              }
+              onPick={(r) => importUrl(r.original, r.thumbnail)}
+            />
+          ) : null}
+          {tab === "library" ? <LibraryGrid roomId={roomId} disabled={busy !== null} onPick={(id) => onPick({ id })} /> : null}
+        </div>
       </div>
     </Dialog>
   );
@@ -252,32 +243,13 @@ export function ImagePicker(props: {
  */
 const rowField = { flex: 1, width: 0 } as const;
 
-function DeviceTab(props: { disabled: boolean; onFile(file: Blob): void; onUrl(url: string): void; onError(message: string): void }) {
+/**
+ * The device's own file, or the clipboard. "Paste from the clipboard" shows
+ * on every browser: where `clipboard.read()` is missing or refused, it opens
+ * the paste box, which a phone's press and hold pastes into.
+ */
+function DeviceTab(props: { disabled: boolean; onFile(file: Blob): void; paste: PasteHandle }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const canReadClipboard = typeof navigator !== "undefined" && !!navigator.clipboard && "read" in navigator.clipboard;
-
-  /** The Paste button, for phones, where there is no keyboard shortcut to paste with. */
-  const pasteFromClipboard = async () => {
-    try {
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        const type = item.types.find((t) => t.startsWith("image/") && !t.startsWith("image/svg"));
-        if (type) {
-          props.onFile(await item.getType(type));
-          return;
-        }
-      }
-      const text = (await navigator.clipboard.readText()).trim();
-      if (/^https:\/\//i.test(text)) {
-        props.onUrl(text);
-        return;
-      }
-      props.onError("The clipboard has no image or image link in it.");
-    } catch {
-      props.onError("The browser did not allow reading the clipboard. Try pasting with the keyboard instead.");
-    }
-  };
-
   return (
     <div style={{ display: "grid", gap: theme.space(3) }}>
       <input
@@ -294,11 +266,8 @@ function DeviceTab(props: { disabled: boolean; onFile(file: Blob): void; onUrl(u
       <Button variant="primary" disabled={props.disabled} onClick={() => inputRef.current?.click()}>
         Choose a photo or file
       </Button>
-      {canReadClipboard ? (
-        <Button disabled={props.disabled} onClick={() => void pasteFromClipboard()}>
-          Paste from the clipboard
-        </Button>
-      ) : null}
+      <PasteButton paste={props.paste} label="Paste from the clipboard" size="md" />
+      <PasteStatus paste={props.paste} />
       <Help>You can also paste an image or an image link anywhere in this window. Large photos are made smaller before they upload.</Help>
     </div>
   );

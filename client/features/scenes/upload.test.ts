@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
-import { uploadErrorText, uploadMap } from "./upload.ts";
+import { MapTooLarge, uploadErrorText, uploadMap } from "./upload.ts";
 import { ApiError } from "../../lib/api.ts";
 
 const realFetch = globalThis.fetch;
@@ -43,6 +43,19 @@ describe("map upload", () => {
     const asset = await uploadMap("ROOM1234", new File([new Uint8Array(10)], "map"));
     assert.equal(type, "image/jpeg");
     assert.equal(asset.cellPx, undefined);
+  });
+
+  test("a map over 32 MB is refused before a byte goes up", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    const big = new File([new Uint8Array(32 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" });
+    const err = await uploadMap("ROOM1234", big).catch((e: unknown) => e);
+    assert.ok(err instanceof MapTooLarge);
+    assert.equal(uploadErrorText(err), "That image is too large. Maps can be up to 32 MB.");
+    assert.equal(calls, 0);
   });
 
   test("refusals read as plain sentences", () => {

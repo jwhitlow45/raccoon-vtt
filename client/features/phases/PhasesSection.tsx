@@ -10,6 +10,7 @@ import { accessibleName } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
+import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { nameFromFile } from "../scenes/create.ts";
 import { uploadErrorText, uploadMap } from "../scenes/upload.ts";
 import { UvttAddPhase } from "../uvtt/UvttImport.tsx";
@@ -38,6 +39,9 @@ export function PhasesSection(props: { scene: Scene }) {
     setEditing(null);
     setUpload((u) => (u.busy ? u : { busy: false, waiting: false, error: null }));
   }, [scene.id]);
+  // Only with focus in its row, since it uploads at once and the row is on screen whenever the scene's settings are (docs/design-v1-paste.md 1.2).
+  const addRef = useRef<HTMLDivElement>(null);
+  const paste = usePasteTarget(addRef, { accepts: "image", takes: "focus", disabled: upload.busy, onFile: (f) => void add(f, true) });
 
   if (!scene.map) return null;
   const phases = phasesOf(scene);
@@ -46,13 +50,13 @@ export function PhasesSection(props: { scene: Scene }) {
     if (list) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { phases: list } });
   };
 
-  const add = async (file: File) => {
+  const add = async (file: File, pasted = false) => {
     const sceneId = scene.id;
     const abort = new AbortController();
     abortRef.current = abort;
     setUpload({ busy: true, waiting: false, error: null });
     try {
-      const asset = await uploadMap(roomId, file, { signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
       // The scene as it is now: the DM may have changed its grid or phases during the upload.
       const latest = store.getState().view?.scenes[sceneId];
       if (!latest) {
@@ -125,8 +129,12 @@ export function PhasesSection(props: { scene: Scene }) {
           : `A map can have at most ${LIMITS.phasesPerScene} phases.`}
       </Help>
       {canAddPhase(phases) ? (
-        <div style={{ display: "grid", gap: theme.space(2), justifyItems: "start" }}>
-          <AddPicker busy={upload.busy} onFile={(f) => void add(f)} />
+        <div ref={addRef} style={{ display: "grid", gap: theme.space(2), justifyItems: "start" }}>
+          <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+            <AddPicker busy={upload.busy} onFile={(f) => void add(f)} />
+            <PasteButton paste={paste} />
+          </div>
+          <PasteStatus paste={paste} />
           <UvttAddPhase scene={scene} />
         </div>
       ) : null}

@@ -370,8 +370,11 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
       return doc.getElementById(id)?.textContent ?? "";
     });
     assert.match(described, /^The players are on this scene\./);
+    // Paste an image sits beside the picker (docs/design-v1-paste.md 2.2), then Cancel.
     await dm.keyboard.press("Tab");
-    assert.equal((await focused(dm)).name, "Cancel", "Tab goes from the picker to its Cancel");
+    assert.equal((await focused(dm)).name, "Paste an image", "Tab goes from the picker to its Paste an image");
+    await dm.keyboard.press("Tab");
+    assert.equal((await focused(dm)).name, "Cancel", "Tab goes on to its Cancel");
     await dm.keyboard.press("Enter");
     await waitFor("Add a map image focused again", async () => (await focused(dm)).name === "Add a map image");
 

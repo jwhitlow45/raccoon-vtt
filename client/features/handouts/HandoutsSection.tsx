@@ -16,6 +16,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { FileButton, RadioGroup } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
+import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { apartFromStarter, docShowing } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, withPick, withTypedTitle, type HandoutDraft } from "./draft.ts";
@@ -262,6 +263,8 @@ function ShowHandout(props: {
   const loose = library?.filter((a) => !inDocs.has(a.id) && !uploading.has(a.id)) ?? null;
   // The DM's own images first, then the starter picks apart (docs/design-v1-starter-art.md 5), as the Library panel lists them.
   const looseApart = apartFromStarter(loose ?? [], (a) => a);
+  // A paste takes Upload a file's path, a PDF to its page job and an image shrunk and uploaded, while the form is open with nothing picked (docs/design-v1-paste.md 1.2).
+  const paste = usePasteTarget(form, { accepts: "image-or-pdf", takes: open && !pick ? "open" : "none", disabled: status !== null, onFile: (f) => upload(f) });
   const imageTile = (a: AssetRow) => (
     <button
       key={a.id}
@@ -403,10 +406,12 @@ function ShowHandout(props: {
                 From the library
               </Button>
               <FileButton label="Upload a file" accept="image/*,application/pdf,.pdf" size="sm" disabled={status !== null} onFile={upload} />
+              <PasteButton paste={paste} />
               <Button ref={starterButton} size="sm" onClick={() => setStarter(true)} disabled={status !== null}>
                 From starter packs
               </Button>
             </div>
+            <PasteStatus paste={paste} />
             {starter ? (
               <StarterDialog
                 title="Starter handouts"

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Dialog } from "../../../components/Dialog.tsx";
 import { Empty } from "../../../components/Empty.tsx";
-import { Input } from "../../../components/Field.tsx";
+import { ErrorText, Input } from "../../../components/Field.tsx";
 import { Loading } from "../../../components/Loading.tsx";
 import { choiceLook } from "../../../components/looks.ts";
 import { Help, SectionLabel } from "../../../components/Panel.tsx";
@@ -11,6 +11,9 @@ import { useAssets, useRoomView } from "../../../state/view.ts";
 import { STAMP_TILE_FLOOR } from "./draw.ts";
 import { libraryFootprint, matchStamps, shippedChoice, starterChoice, type ChosenArt } from "./rules.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
+import { imageErrorMessage } from "../../images/errors.ts";
+import { PasteButton, PasteStatus, usePasteTarget, type PasteHandle } from "../../images/PasteImage.tsx";
+import { PickError, uploadTokenImage } from "../../images/upload.ts";
 import { StarterBrowser } from "../../starter/StarterBrowser.tsx";
 
 /** The search field's share of the header: room for a word or two, with the title kept whole down to a 390 px phone. */
@@ -29,6 +32,10 @@ const SEARCH_BASIS = 240;
  * close it, and focus goes back to the button that chooses a stamp, also
  * when a tap on the map opened it. The search sits in the header, so it
  * stays in reach while the tiles scroll under it.
+ *
+ * A pasted image joins the room's images as a token image does, and
+ * becomes what the next tap places, at its own shape (docs/design-v1-paste.md
+ * 1.2).
  */
 export function StampPicker(props: {
   chosen: ChosenArt | null;
@@ -42,6 +49,37 @@ export function StampPicker(props: {
   const [tab, setTab] = useState<"stamps" | "starter">("stamps");
   const shipped = useMemo(() => matchStamps(query), [query]);
   const { onPick } = props;
+  const roomId = useRoomView((s) => s.roomId);
+  const [upload, setUpload] = useState<PastedUpload>({ busy: false, waiting: false, error: null });
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+  const takePasted = async (file: File) => {
+    // The room's images are where it lands, so their tab shows its progress.
+    setTab("stamps");
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setUpload({ busy: true, waiting: false, error: null });
+    try {
+      const asset = await uploadTokenImage(roomId, file, { signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      setUpload({ busy: false, waiting: false, error: null });
+      onPick({ art: { assetId: asset.id }, ...libraryFootprint(asset.width, asset.height), name: "Room image" });
+    } catch (err) {
+      if (!abort.signal.aborted) setUpload({ busy: false, waiting: false, error: err instanceof PickError ? err.message : imageErrorMessage(err) });
+    } finally {
+      if (abortRef.current === abort) abortRef.current = null;
+    }
+  };
+  const body = useRef<HTMLDivElement>(null);
+  // The whole dialog, so an image pasted with focus in the header's search box lands here too.
+  const whole = useMemo<RefObject<HTMLElement | null>>(
+    () => ({
+      get current() {
+        return body.current?.closest("dialog") ?? body.current;
+      },
+    }),
+    [],
+  );
+  const paste = usePasteTarget(whole, { accepts: "image", takes: "open", disabled: upload.busy, onFile: (f) => void takePasted(f) });
 
   const chosenKey = props.chosen && "key" in props.chosen.art ? props.chosen.art.key : null;
   const chosenAsset = props.chosen && "assetId" in props.chosen.art ? props.chosen.art.assetId : null;
@@ -61,54 +99,56 @@ export function StampPicker(props: {
         ) : undefined
       }
     >
-      <div role="tablist" aria-label="Which stamps" style={{ display: "flex", gap: theme.space(1), marginBottom: theme.space(3) }}>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              flex: "1 0 auto",
-              minHeight: theme.touch,
-              padding: `0 ${theme.space(3)}px`,
-              borderRadius: theme.radius.md,
-              fontFamily: theme.font.body,
-              fontSize: theme.font.body14,
-              fontWeight: theme.weight.strong,
-              cursor: "pointer",
-              ...choiceLook(tab === t.id),
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel">
-        {tab === "stamps" ? (
-          <>
-            {shipped.length === 0 ? <Empty>No stamp is called that.</Empty> : null}
-            <ul style={gridStyle}>
-              {shipped.map((s) => (
-                <li key={s.key}>
-                  <Tile name={s.name} src={`/stamps/${s.key}.webp`} chosen={chosenKey === s.key} onPick={() => onPick(shippedChoice(s))} />
-                </li>
-              ))}
-            </ul>
-            <RoomImages chosen={chosenAsset} onPick={onPick} onMeasured={props.onMeasured} />
-          </>
-        ) : (
-          <StarterBrowser
-            uses={STARTER_STAMP_USES}
-            hint="Openly licensed props from the starter packs. Use sets what the next tap places."
-            floor={STAMP_TILE_FLOOR}
-            onUse={(found) => {
-              const choice = starterChoice(found.work);
-              if (choice) onPick(choice);
-            }}
-          />
-        )}
+      <div ref={body}>
+        <div role="tablist" aria-label="Which stamps" style={{ display: "flex", gap: theme.space(1), marginBottom: theme.space(3) }}>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                flex: "1 0 auto",
+                minHeight: theme.touch,
+                padding: `0 ${theme.space(3)}px`,
+                borderRadius: theme.radius.md,
+                fontFamily: theme.font.body,
+                fontSize: theme.font.body14,
+                fontWeight: theme.weight.strong,
+                cursor: "pointer",
+                ...choiceLook(tab === t.id),
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div role="tabpanel">
+          {tab === "stamps" ? (
+            <>
+              {shipped.length === 0 ? <Empty>No stamp is called that.</Empty> : null}
+              <ul style={gridStyle}>
+                {shipped.map((s) => (
+                  <li key={s.key}>
+                    <Tile name={s.name} src={`/stamps/${s.key}.webp`} chosen={chosenKey === s.key} onPick={() => onPick(shippedChoice(s))} />
+                  </li>
+                ))}
+              </ul>
+              <RoomImages chosen={chosenAsset} onPick={onPick} onMeasured={props.onMeasured} paste={paste} upload={upload} />
+            </>
+          ) : (
+            <StarterBrowser
+              uses={STARTER_STAMP_USES}
+              hint="Openly licensed props from the starter packs. Use sets what the next tap places."
+              floor={STAMP_TILE_FLOOR}
+              onUse={(found) => {
+                const choice = starterChoice(found.work);
+                if (choice) onPick(choice);
+              }}
+            />
+          )}
+        </div>
       </div>
     </Dialog>
   );
@@ -120,6 +160,9 @@ const TABS = [
 ] as const;
 
 const STARTER_STAMP_USES = ["stamp"] as const;
+
+/** A pasted image on its way to becoming a stamp. */
+type PastedUpload = { busy: boolean; waiting: boolean; error: string | null };
 
 const gridStyle = {
   listStyle: "none",
@@ -172,7 +215,7 @@ function Tile(props: { name: string; src: string; chosen: boolean; onPick(): voi
  * on its long side, keeping its shape, so its size is read from the list,
  * or from the image itself when the list does not have it.
  */
-function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): void; onMeasured(chosen: ChosenArt): void }) {
+function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): void; onMeasured(chosen: ChosenArt): void; paste: PasteHandle; upload: PastedUpload }) {
   const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
   const tokens = useRoomView((s) => s.view?.tokens);
@@ -224,6 +267,12 @@ function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): v
   return (
     <section aria-label="This room's images" style={{ display: "grid", gap: theme.space(2), marginTop: theme.space(4) }}>
       <SectionLabel>This room's images</SectionLabel>
+      <div style={{ display: "flex" }}>
+        <PasteButton paste={props.paste} />
+      </div>
+      <PasteStatus paste={props.paste} />
+      <Loading text={props.upload.waiting ? "Waiting for the server…" : "Uploading…"} active={props.upload.busy} />
+      <ErrorText>{props.upload.error}</ErrorText>
       <Loading text="Loading this room's images…" active={listed === null && !failed} />
       {failed ? <Help>The room's library did not load. Images already on the map are below.</Help> : null}
       {ids.length === 0 && (listed !== null || failed) ? <Empty>No token images yet. Add one in the Library panel or on a token.</Empty> : null}
