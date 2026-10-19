@@ -30,6 +30,8 @@ The panel is a header, then groups by use, then setup. The order inside a group 
 | Stats, Token settings, Companion, Owners | as today | Owners keeps its names | folded | folded | not drawn, as today |
 | Remove | Delete this token | | shown | | |
 
+Changed by docs/design-v1-look-pass.md (3.1, 3.3): the Stat block row has a folded summary after all, naming what it holds: a companion's or a monster's linked block by its name and CR ("Wolf, CR 1/4"), and a character's block by its level and Proficiency Bonus or its shape ("Level 5, PB +3", "Wild Shape: Brown Bear"). In Stats, Walk and every speed that is set keep their rows, and for a viewer who may change them the rest fold under "Other speeds" with Hovers. A character's page in the Characters panel uses the same groups and shares the `statBlock` fold.
+
 Why these groups:
 
 - **Combat** holds what changes in a fight, the owner's list. Rest sits there because it changes HP and spends dice, and the owner named it.
@@ -56,6 +58,8 @@ Why these groups:
   - The sheet link, "Sheet" and its `external` icon, 44 px tall, where the actor has one.
 - **Who sees what**: exactly what `vitals()` gives each viewer today (`statSummary.ts`): AC, speed and PP only where the viewer's copy holds them, so a player looking at a monster sees its elevation and nothing it hides. Init follows the same rule (`initBonus` on the viewer's copy).
 - **Room**: on a 390 px phone the line holds all five at 100% and wraps once at 130%.
+
+Changed by docs/design-v1-look-pass.md (2.11, 3.3): the header is `CreatureHeader.tsx`, shared with a character's page. Under the name, a kind line says what the creature is, then its size ("Level 5 character · Medium (5 ft)", "Monster, CR 1/4 · Small (5 ft)", "Companion of Thorn · Medium (5 ft)"), and the tags have a row of their own under it. "Companion of Thorn" is a link to Thorn's page for the DM and Thorn's players, and a companion's picture carries its character's portrait as a 20 px disk at its lower right.
 
 ## 4. The group's look
 

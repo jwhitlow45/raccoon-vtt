@@ -1,6 +1,6 @@
 # raccoon-vtt v1: the look pass
 
-Status: reviewed in round 1. The coordinator decided its open questions (section 7): this note's recommendations, with two decisions of its own, that only the stat block's fold is shared with the token panel and that Hovers stays a 16 px Switch. Code is cited from the stacked tip `sztyppyr` (04564e15), with the roll animation. Two designs in flight are prerequisites, built on their own lanes before this pass's build: docs/design-v1-paste.md and docs/design-v1-known-forms.md (section 5).
+Status: built, in the eight lanes of section 4 with their review fixes, and the docs commit (4.2) on top. The guide screenshots of section 6 are still to retake. Reviewed in round 1. The coordinator decided its open questions (section 7): this note's recommendations, with two decisions of its own, that only the stat block's fold is shared with the token panel and that Hovers stays a 16 px Switch. Code is cited from the stacked tip `sztyppyr` (04564e15), with the roll animation. Two designs in flight are prerequisites, built on their own lanes before this pass's build: docs/design-v1-paste.md and docs/design-v1-known-forms.md (section 5).
 
 The project owner asked on 2026-10-14: "in general we should also do a design review pass of the entire app once done with all waves and try to make the app look consistent and unified/sleek while not sacrificing functionality". On 2026-10-18 they named three things for this pass, "these aren't necessarily hard rules either i just want things that make sense given a design review":
 
@@ -299,7 +299,7 @@ Two designs are being built on other lanes, and their notes land with them, so n
 | 7 | size (run, not edited: its image picker case covers the grid), reach |
 | 8 | options, reach |
 
-**Guide screenshots to retake** once lanes 1 and 2 merge: `pc-stats.webp` (Thorn's card becomes his page), `companion.webp` (Add a companion as a subpage), `action-bar.webp` and `boss.webp` (the window's summary units). The words change in the docs commit (4.2).
+**Guide screenshots to retake** once lanes 1, 2 and 7 merge: `pc-stats.webp` (Thorn's card becomes his page), `companion.webp` (Add a companion as a subpage), `action-bar.webp` and `boss.webp` (the window's summary units), and `monsters.webp` (CR moves into the place card's first line, lane 7). The words change in the docs commit (4.2).
 
 ## 7. Decided by the coordinator
 

@@ -63,7 +63,7 @@ The screen has three main parts: the **map** in the middle, the **toolbar** unde
 
 Above the tabs sits the party bar, which shows your players' characters with their HP. Press **Party** to fold it down to a single line: the characters' names and HP in a strip that scrolls sideways when they don't all fit, followed by **Ask** for [asking the party for a roll](#asking-for-rolls).
 
-**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom, and you swipe the sheet down to close it. To save room, your setup tools (Add token, Pin, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
+**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom, and you swipe the sheet down to close it. On a tablet held upright, the sheet keeps to the width of a dialog and sits in the middle of the screen. To save room, your setup tools (Add token, Pin, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
 
 ![The DM's panel list on a phone, grouped under In play and Prepare.](dm-guide/screen-phone.webp)
 
@@ -375,7 +375,7 @@ This part covers what you use once the dice come out: monsters and encounters, t
 
 The **Monsters** panel (DM only) holds the 330 monsters of the SRD 5.2.1, along with any your room has added. Use it to look up a stat block or to put monsters on the map.
 
-![A monster's page in the Monsters panel: the Goblin Warrior's place card with How many, Hidden from players and Place 4 on the map, then its token image and credit.](dm-guide/monsters.webp)
+![A monster's page in the Monsters panel: the Goblin Warrior's place card, with CR 1/4 on its first line, then How many, Hidden from players and Place 4 on the map, then its token image and credit.](dm-guide/monsters.webp)
 
 **Finding a monster.** Type in **Search** (`goblin`, `undead`, `huge`), and your words are matched against each monster's name, type and size. You can add a challenge rating to the search as well: `cr 5` for one rating, `cr 1-5` or `cr 1/2-3` for a range, or `cr 10-` for 10 and up. **Filters** narrows the list further by challenge rating, creature type, **Legendary**, **Has a lair**, size, immunities, resistances, vulnerabilities, movement, senses and alignment.
 
@@ -422,11 +422,11 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar opens under the token. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
-![A goblin's action bar: AC, HP, Speed and Passive Perception, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
+![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
 The action bar holds, from top to bottom:
 
-- The token's AC, HP, Speed and Passive Perception, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
+- The token's AC, HP, Speed (after the footprints) and **PP** (Passive Perception), as the Token panel shows them, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
 - **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel.
 - **Elevation**, with **−5** and **+5** (or Page Down and Page Up).
 - **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel) and **Light**.
@@ -437,7 +437,7 @@ With a mouse, Hidden, Locked and Duplicate show only their icons, to keep the ba
 
 A few keys work on the selected tokens: `H` hides or shows them, `L` locks them, and Delete removes them (Ctrl+Z brings them back). The arrow keys move the selection one square at a time.
 
-**The Token panel** starts with the token's picture and name. Under the name sit its quick numbers, the ones you reach for most in a fight: AC, Speed, **PP** (Passive Perception), **Init** (its Initiative bonus), its elevation, and a link to its sheet. A monster or NPC's stat block comes next.
+**The Token panel** starts with the token's picture and name, and a line that says what it is and how big: "Monster, CR 1/4 · Small (5 ft)", say, or "Companion of Bree" for a companion, whose picture also wears a small portrait of its character. Press "Companion of Bree" to open Bree's page in **Characters**. Under that line sit its quick numbers, the ones you reach for most in a fight: AC, Speed, **PP** (Passive Perception), **Init** (its Initiative bonus), its elevation, and a link to its sheet. A monster or NPC's stat block comes next. Folded, its row names the block, such as "Wolf, CR 1/4".
 
 The rest of the panel is sorted into groups by what you use them for, and each group folds as one, so you can keep open only what matters right now:
 
@@ -799,13 +799,13 @@ The **Characters** panel lists the party. A character belongs to the room rather
 
 - **New character** takes a name, size, max HP, AC, Speed, Initiative bonus, Passive Perception, and who plays it (**Played by**). While "Players can create their own characters" is on, each player can also make up to 3 of their own.
 - To put a character on the scene you are viewing, open it, press **Place a token**, and tap the map.
-- A character's card shows its numbers, its companions and its stat block.
+- Tap a character to open its page. It reads like the Token panel: the picture, name, level and size, the quick numbers and **Place a token**, then the stat block, then **Combat** and **Companions**, open, and **Notes**, **Image**, **Stats** and **Played by**, folded until you need them. Your device remembers which ones you open. **Back to Characters** at the top returns to the list. A player who plays a single character goes straight to its page.
 
-![Thorn's card in the Characters panel: Short Rest and Long Rest, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
+![Thorn's page in the Characters panel: his picture, level and quick numbers, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
 
-**Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it.
+**Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it. Folded, the **Stat block** row says what it holds, such as "Level 5, PB +3", or "Wild Shape: Brown Bear" while the character is in a shape.
 
-To fill one in, press **Add a stat block** on the character's card or in its token's panel, then choose where it comes from under **Fill from**:
+To fill one in, press **Add a stat block** on the character's page or in its token's panel, then choose where it comes from under **Fill from**:
 
 - **Paste text**: a stat block copied as text, read on your device. Set the level first.
 - **D&D Beyond**: a public character's share link or number (press **Get it**), or its JSON pasted in (**Paste its JSON instead**). It reads numbers, proficiencies, weapons and spells, but never their descriptions.
@@ -814,7 +814,7 @@ To fill one in, press **Add a stat block** on the character's card or in its tok
 
 **Take a shape** turns a character into an SRD creature. A druid's player can set **Druid level** in the picker, beside **Beasts only**, to see just the forms that level allows: nothing above CR 1/4 at levels 2 and 3, CR 1/2 from 4, CR 1 from 8, and no creature with a Fly Speed before 8. The list then runs from the highest CR down. **Any** removes the Druid level filter, which is what Polymorph wants. **Wild Shape** keeps the druid's Intelligence, Wisdom, Charisma and proficiencies, while **Polymorph or another shape** takes all of the creature's numbers. Either way, the token takes the creature's AC and Speeds, the HP stay the character's own, and the app offers the Temporary HP the 2024 rules give. **End the shape** turns the character back.
 
-**Known forms.** A druid knows a handful of Beast forms for Wild Shape: four at level 2, six at level 4 and eight at level 8. In **Take a shape**, the druid's player presses **Choose known forms** (or **Change**, once there are some) and taps each form the druid knows, with the search, **Beasts only** and **Druid level** to narrow the list. From then on those forms sit at the top of **Take a shape**, and as buttons at the top of the **Stat block** section in the token's panel and on the character's card, where one tap takes the form as Wild Shape. While in Wild Shape, a tap on another known form changes to it. With a **Druid level** picked, the app counts the forms against what that level knows and marks any form above its CR limit or with a Fly Speed too soon, but it never stops one: the rules let you allow other Beasts, so the call is yours. It does not track the one form a druid may swap after a Long Rest either. Only you and the character's players see the list. Each device remembers the **Druid level** its player last picked for the character, **Any** included, and the next **Take a shape** starts there. Until a level is picked on a device, a druid with known forms starts at the character's level, so a player who uses Polymorph picks **Any** once, which removes the Druid level filter, and the device keeps it. Wild Shape's Temporary HP follow the picked level, which matters for a druid who has taken levels in another class, and the character's level otherwise.
+**Known forms.** A druid knows a handful of Beast forms for Wild Shape: four at level 2, six at level 4 and eight at level 8. In **Take a shape**, the druid's player presses **Choose known forms** (or **Change**, once there are some) and taps each form the druid knows, with the search, **Beasts only** and **Druid level** to narrow the list. From then on those forms sit at the top of **Take a shape**, and as buttons at the top of the **Stat block** section in the token's panel and on the character's page, where one tap takes the form as Wild Shape. While in Wild Shape, a tap on another known form changes to it. With a **Druid level** picked, the app counts the forms against what that level knows and marks any form above its CR limit or with a Fly Speed too soon, but it never stops one: the rules let you allow other Beasts, so the call is yours. It does not track the one form a druid may swap after a Long Rest either. Only you and the character's players see the list. Each device remembers the **Druid level** its player last picked for the character, **Any** included, and the next **Take a shape** starts there. Until a level is picked on a device, a druid with known forms starts at the character's level, so a player who uses Polymorph picks **Any** once, which removes the Druid level filter, and the device keeps it. Wild Shape's Temporary HP follow the picked level, which matters for a druid who has taken levels in another class, and the character's level otherwise.
 
 **Rests.** The Token panel's **Rest** section has **Short Rest**, where you add the HP the player rolled on their Hit Point Dice, and **Long Rest**, which restores all HP, ends Temporary HP, removes one Exhaustion level and resets Legendary Resistance. **Long Rest for the party**, in Characters, rests everyone at once. Spell slots and class features are tracked on the players' own sheets, not here.
 
@@ -822,17 +822,17 @@ To fill one in, press **Add a stat block** on the character's card or in its tok
 
 A companion is a token that belongs to a character: a familiar, a summoned spirit, an animal companion, or an effect with no HP such as Spiritual Weapon. Whoever plays the character controls the companion too, moving it and changing its HP and conditions.
 
-**Adding one.** On a character's card in **Characters**, press **Add a companion** and fill in:
+**Adding one.** On a character's page in **Characters**, press **Add a companion** and fill in:
 
 - A **Name**, and what **It is**: **A creature** or **An effect**.
 - An optional stat block, from **Choose a stat block**: an SRD creature such as an owl or a wolf, one of the character's own saved blocks, or one you paste. A stat block fills in the numbers it knows ("From the block: Speed 5 ft, Fly 60 ft. Darkvision 120 ft."), and the picture too if you haven't chosen one: an SRD creature's default icon, or a saved block's own picture when it has one.
 - Its **Turn** (see below), **Size**, **HP** and **AC**.
 
-**Add and place** puts the companion next to the character's token. Players add their own companions the same way. To turn a token that is already on the map into a companion, use **Make a companion** in its **Token settings**.
+**Add and place** puts the companion next to the character's token. Players add their own companions the same way. The form is a page of its own. **Back** at the top, named for the character (**Back to Ivo**, say), or **Cancel** at the foot returns to the character's page, and asks "Discard changes?" first if you typed anything. To turn a token that is already on the map into a companion, use **Make a companion** in its **Token settings**.
 
-![Add a companion for Ivo: Hoot, a creature with the SRD Owl's stat block, taking its own turn.](dm-guide/companion.webp)
+![Add a companion for Ivo, a page of its own with Back to Ivo at the top: Hoot, a creature with the SRD Owl's stat block, taking its own turn.](dm-guide/companion.webp)
 
-**Stat blocks (N)**, on the character's card, keeps the character's own companion stat blocks, pasted or typed, up to 100 of them. That way a creature summoned again starts from the same block. An SRD creature doesn't need keeping, since you can simply pick it again.
+**Stat blocks (N)**, on the character's page, opens a page of its own that keeps the character's own companion stat blocks, pasted or typed, up to 100 of them. That way a creature summoned again starts from the same block. An SRD creature doesn't need keeping, since you can simply pick it again.
 
 **Its turn** decides where the companion acts in a fight:
 
@@ -1013,10 +1013,10 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 
 **The familiar**
 
-1. Ivo's player opens **Characters**, then Ivo's card, and presses **Add a companion**. They name it "Hoot", pick **A creature**, and under **Choose a stat block** pick the SRD Owl. Under the 2024 rules a familiar rolls its own Initiative, so they set **Turn** to **Its own turn**. **Add and place** puts the owl next to Ivo.
+1. Ivo's player opens **Characters**, which opens straight onto Ivo's page, since Ivo is the only character they play, and presses **Add a companion**. They name it "Hoot", pick **A creature**, and under **Choose a stat block** pick the SRD Owl. Under the 2024 rules a familiar rolls its own Initiative, so they set **Turn** to **Its own turn**. **Add and place** puts the owl next to Ivo.
 2. Since Ivo is in a running fight, Hoot joins it at once, in a row of its own that reads "Companion of Ivo", and its player rolls its Initiative. Outside a fight, it joins with **Add Hoot** under **Join the fight**, or with **Everyone here** when you start one.
 3. Under party vision, the owl lends the party its sight, so it can scout a dark room ahead of everyone else.
-4. The next time Ivo summons a familiar, his player simply picks the SRD Owl again. A pasted or typed stat block would be kept under **Stat blocks** on Ivo's card instead.
+4. The next time Ivo summons a familiar, his player simply picks the SRD Owl again. A pasted or typed stat block would be kept under **Stat blocks** on Ivo's page instead.
 
 A companion that acts on its character's turn, such as a summoned spirit or a steed, is listed under its character's row with its own Reaction. An effect such as Spiritual Weapon takes **On Bree's turn, not listed**.
 
