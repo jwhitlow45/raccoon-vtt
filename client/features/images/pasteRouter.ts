@@ -36,8 +36,18 @@ export type PasteTake = "open" | "focus" | "none";
 export type PasteSpec = {
   accepts: PasteAccepts;
   takes: PasteTake;
-  /** Busy by the same rule as its file control: uploading, or finding a grid. */
+  /**
+   * Busy by the same rule as its file control (uploading, or finding a
+   * grid), or closed. Checked again when a late answer or a box paste
+   * arrives, so a disabled entry hands nothing on by any path.
+   */
   disabled: boolean;
+  /**
+   * The entry is closed or unconfirmed: a form folded away, or the players'
+   * Map image row before the DM confirms. It is disabled too, and turning
+   * closed drops a read still waiting, the box and the note (design 3.3).
+   */
+  closed?: boolean;
   onFile(file: File): void;
   /** An https link, for Choose an image alone. */
   onLink?(url: string): void;
@@ -137,15 +147,18 @@ const NO_IMAGE_SHORT = "The clipboard has no image in it.";
  * late, an entry that turns busy meanwhile, and the entry closing, so its
  * rules hold whatever comes in whatever order (pasteRouter.test.ts):
  *
- * - At most one read is in flight, and a key paste while it is cannot
- *   start a second upload: the entry counts as disabled.
- * - Nothing is handed on after the entry closes, nor to an entry that is
- *   busy when the answer comes.
+ * - At most one read whose answer counts is in flight, and a key paste
+ *   while it is cannot start a second upload: the entry counts as disabled.
+ * - Nothing is handed on after the entry unmounts or closes, nor to an
+ *   entry that is busy or closed when the answer comes. A read the entry
+ *   closed on never counts, even once it opens again.
  * - Each read hands on at most one file.
  */
 export class PasteControl {
   #view: PasteView = { reading: false, note: null, box: false };
   #live = true;
+  /** Bumped when the entry closes, so an answer to a read started before then is dropped. */
+  #round = 0;
   readonly #deps: PasteControlDeps;
 
   constructor(deps: PasteControlDeps) {
@@ -156,9 +169,15 @@ export class PasteControl {
     return this.#view;
   }
 
-  /** Busy, or reading the clipboard: a paste chosen for this entry stops here and does nothing. */
+  /** Busy, closed, or reading the clipboard: a paste chosen for this entry stops here and does nothing. */
   get disabled(): boolean {
-    return this.#view.reading || this.#deps.spec().disabled;
+    return this.#view.reading || this.#off();
+  }
+
+  /** The entry itself takes nothing now: busy or closed. */
+  #off(): boolean {
+    const spec = this.#deps.spec();
+    return spec.disabled || spec.closed === true;
   }
 
   /** The entry is on screen again, as after React's development double mount. */
@@ -191,18 +210,21 @@ export class PasteControl {
       return;
     }
     this.#set({ reading: true, note: null });
+    const round = this.#round;
+    const counts = () => this.#live && round === this.#round;
     answer
       .then((items) => clipboardImage(items, accepts))
       .then(
         (pasted) => {
-          if (!this.#live) return;
+          if (!counts()) return;
           this.#set({ reading: false });
           this.#take(pasted, "button");
         },
         () => {
-          if (!this.#live) return;
+          if (!counts()) return;
           this.#set({ reading: false });
-          this.#refused();
+          // A refusal for an entry that turned busy or closed meanwhile opens no box there.
+          if (!this.#off()) this.#refused();
         },
       );
   }
@@ -224,18 +246,24 @@ export class PasteControl {
     if (this.#view.box || this.#view.note) this.#set({ box: false, note: null });
   }
 
+  /** The entry closed or disarmed while still mounted: a read still waiting no longer counts, and the box and the note go. */
+  close(): void {
+    this.#round++;
+    if (this.#view.reading || this.#view.box || this.#view.note) this.#set({ reading: false, box: false, note: null });
+  }
+
   #take(pasted: Pasted, from: "button" | "key" | "box"): void {
+    // The entry turned busy or closed while the clipboard was read: a second upload would compete with its first, and a closed entry takes nothing.
+    if (this.#off()) return;
     const spec = this.#deps.spec();
     if (pasted.kind === "file") {
-      // The entry turned busy while the clipboard was read: a second upload would compete with its first.
-      if (spec.disabled) return;
       const several = severalImages(pasted.images);
       this.#set({ note: several ? { text: several, tone: "info" } : null, ...(from === "box" ? { box: false } : null) });
       spec.onFile(pastedFile(pasted.blob, pasted.name, this.#deps.now()));
       return;
     }
     if (pasted.kind === "link") {
-      if (spec.disabled || !spec.onLink) return;
+      if (!spec.onLink) return;
       this.#set({ note: null, ...(from === "box" ? { box: false } : null) });
       spec.onLink(pasted.url);
       return;

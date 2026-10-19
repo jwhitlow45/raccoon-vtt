@@ -252,39 +252,73 @@ describe("one entry's paste", () => {
     assert.equal(busy.control.view.reading, false);
   });
 
+  test("an answer or a box paste after the entry closed hands nothing on, and opens no box", async () => {
+    const h = harness();
+    h.control.press();
+    h.spec.closed = true;
+    h.control.close();
+    h.pending.shift()!.reject(new DOMException("Read permission denied.", "NotAllowedError"));
+    await flush();
+    assert.equal(h.control.view.box, false, "a refusal that came after the entry closed opened its box");
+    h.control.fromBox(eventData("image"));
+    h.control.fromKey(eventData("image"));
+    assert.equal(h.files.length, 0);
+    assert.equal(h.control.disabled, true);
+  });
+
+  test("closing drops a read still waiting, even when the entry opens again before the answer", async () => {
+    const h = harness();
+    h.control.press();
+    h.control.fromBox(eventData("text"));
+    h.spec.closed = true;
+    h.control.close();
+    assert.deepEqual(h.control.view, { reading: false, note: null, box: false });
+    h.spec.closed = false;
+    h.pending.shift()!.resolve(clipItems("image"));
+    await flush();
+    assert.equal(h.files.length, 0, "the answer to a read the entry closed on was handed on");
+    h.control.press();
+    h.pending.shift()!.resolve(clipItems("image"));
+    await flush();
+    assert.equal(h.files.length, 1, "a fresh press after reopening reads again");
+  });
+
   /*
    * Many random runs of presses, answers, refusals, key and box pastes, the
-   * entry turning busy and idle, and the entry closing. The rules that must
-   * hold in every one: at most one read in flight, nothing handed on after
-   * the entry closed or to a busy entry, at most one file for each read or
-   * paste, and never reading once every answer is in.
+   * entry turning busy and idle, closing and opening again, and unmounting.
+   * The rules that must hold in every one: at most one read in flight whose
+   * answer counts, nothing handed on after the entry unmounted or to a busy
+   * or closed entry, no answer to a read the entry closed on, at most one
+   * file for each read or paste, and never reading once every answer is in.
    */
   test("whatever the order of events, its rules hold", async () => {
-    for (let run = 0; run < 300; run++) {
+    for (let run = 0; run < 400; run++) {
       const next = random(run + 1);
-      const files: { busy: boolean; live: boolean }[] = [];
-      const pending: { resolve(items: ClipItem[]): void; reject(err: unknown): void }[] = [];
-      let inFlight = 0;
+      const files: { busy: boolean; closed: boolean; live: boolean }[] = [];
+      const pending: { round: number; resolve(items: ClipItem[]): void; reject(err: unknown): void }[] = [];
       let live = true;
-      const spec: PasteSpec = { accepts: "image", takes: "open", disabled: false, onFile: () => void files.push({ busy: spec.disabled, live }) };
-      const settle = (fn: () => void) => () => {
-        inFlight--;
-        fn();
+      /** How many times the entry closed, so a read knows whether it was started before the latest close. */
+      let round = 0;
+      const spec: PasteSpec = {
+        accepts: "image",
+        takes: "open",
+        disabled: false,
+        closed: false,
+        onFile: () => void files.push({ busy: spec.disabled, closed: spec.closed === true, live }),
       };
       const control = new PasteControl({
         spec: () => spec,
         read: () => {
-          inFlight++;
-          assert.ok(inFlight <= 1, `run ${run}: ${inFlight} reads in flight at once`);
-          return new Promise<readonly ClipItem[]>((resolve, reject) =>
-            pending.push({ resolve: (items) => settle(() => resolve(items))(), reject: (err) => settle(() => reject(err))() }),
-          );
+          const counting = pending.filter((p) => p.round === round).length + 1;
+          assert.ok(counting <= 1, `run ${run}: ${counting} reads in flight whose answers count`);
+          return new Promise<readonly ClipItem[]>((resolve, reject) => pending.push({ round, resolve, reject }));
         },
         now: () => new Date(),
         ios: next() < 0.5,
         boxHint: "Press and hold in the box, then tap Paste.",
-        onChange: () => assert.equal(live, true, `run ${run}: the view changed after the entry closed`),
+        onChange: () => assert.equal(live, true, `run ${run}: the view changed after the entry unmounted`),
       });
+      const open = () => live && !spec.disabled && !spec.closed;
       /** What one event handed on: never more than one file, and none where it could not. */
       const once = async (what: string, could: boolean, fn: () => void) => {
         const before = files.length;
@@ -294,36 +328,49 @@ describe("one entry's paste", () => {
         assert.ok(handed <= 1, `run ${run}: ${what} handed on ${handed} files`);
         if (!could) assert.equal(handed, 0, `run ${run}: ${what} handed on a file it could not`);
       };
-      for (let step = 0; step < 40; step++) {
+      for (let step = 0; step < 50; step++) {
         const roll = next();
-        if (roll < 0.25) {
+        if (roll < 0.22) {
           await once("a press", false, () => control.press());
-        } else if (roll < 0.45 && pending.length > 0) {
-          const answer = pending.shift()!;
+        } else if (roll < 0.4 && pending.length > 0) {
+          const answer = pending.splice(Math.floor(next() * pending.length), 1)[0]!;
           const kind = next();
-          await once("an answer", kind < 0.6 && live && !spec.disabled, () => {
+          await once("an answer", kind < 0.6 && open() && answer.round === round, () => {
             if (kind < 0.6) answer.resolve(clipItems("image"));
             else if (kind < 0.8) answer.resolve(clipItems("text"));
             else answer.reject(new DOMException("denied", "NotAllowedError"));
           });
-        } else if (roll < 0.6) {
+        } else if (roll < 0.52) {
           const image = next() < 0.7;
           await once("a key paste", image && live && !control.disabled, () => control.fromKey(eventData(image ? "image" : "text")));
-        } else if (roll < 0.7) {
+        } else if (roll < 0.62) {
           await once("a box paste", live && !control.disabled, () => control.fromBox(eventData("image")));
-        } else if (roll < 0.85) {
+        } else if (roll < 0.74) {
           spec.disabled = !spec.disabled;
-        } else if (roll < 0.9) {
+        } else if (roll < 0.86) {
+          // The entry closes or opens again, as a form folds away or the players' row is confirmed.
+          spec.closed = !spec.closed;
+          if (spec.closed) {
+            round++;
+            control.close();
+            if (live) assert.equal(control.view.box, false, `run ${run}: the box outlived its entry`);
+          }
+        } else if (roll < 0.92) {
           control.closeBox();
-        } else if (roll < 0.95 && live) {
+        } else if (roll < 0.96 && live) {
           live = false;
           control.detach();
         }
+        if (spec.closed && live) assert.equal(control.view.box, false, `run ${run}: a closed entry shows its box`);
       }
-      while (pending.length > 0) await once("a late answer", live && !spec.disabled, () => pending.shift()!.resolve(clipItems("image")));
+      while (pending.length > 0) {
+        const answer = pending.shift()!;
+        await once("a late answer", open() && answer.round === round, () => answer.resolve(clipItems("image")));
+      }
       for (const f of files) {
-        assert.equal(f.live, true, `run ${run}: a file was handed on after the entry closed`);
+        assert.equal(f.live, true, `run ${run}: a file was handed on after the entry unmounted`);
         assert.equal(f.busy, false, `run ${run}: a file was handed to a busy entry`);
+        assert.equal(f.closed, false, `run ${run}: a file was handed to a closed entry`);
       }
       if (live) assert.equal(control.view.reading, false, `run ${run}: still reading once every answer was in`);
     }

@@ -20,7 +20,7 @@ export type PasteHandle = PasteView & {
   /** The Paste button's press: reads the clipboard, or opens the box where the browser will not. */
   press(): void;
   closeBox(): void;
-  /** The entry is busy or reading: its Paste button is disabled by the same rule as its file control. */
+  /** The entry is busy, closed or reading: its Paste button is disabled by the same rule as its file control. */
   disabled: boolean;
   control: PasteControl;
 };
@@ -70,8 +70,24 @@ export function usePasteTarget(ref: RefObject<HTMLElement | null>, spec: PasteSp
   useEffect(() => {
     if (opens && registry && entry.current) entry.current.seq = ++registry.seq;
   }, [opens, registry]);
+  /*
+   * The box and the note close with their entry (design 3.3), and a read
+   * still waiting stops counting: when the entry says it closed, and when
+   * its element leaves the page while the component stays, as a form that
+   * folds away does.
+   */
+  const closed = spec.closed === true;
+  useEffect(() => {
+    if (closed) control.close();
+  }, [closed, control]);
+  const drawn = useRef(false);
+  useEffect(() => {
+    const now = ref.current !== null;
+    if (drawn.current && !now) control.close();
+    drawn.current = now;
+  });
   const view = control.view;
-  return { ...view, press: () => control.press(), closeBox: () => control.closeBox(), disabled: spec.disabled || view.reading, control };
+  return { ...view, press: () => control.press(), closeBox: () => control.closeBox(), disabled: spec.disabled || closed || view.reading, control };
 }
 
 /**
@@ -90,14 +106,14 @@ export function PasteButton(props: { paste: PasteHandle; label?: string; size?: 
 
 /**
  * What a paste left under its entry: its note, and the paste box while it
- * is open. `only="note"` leaves the box out, for a picker tab other than
- * the one its Paste button is on.
+ * is open. `only` shows one of the two, for a dialog that shows its notes
+ * above its tabs, in view whichever tab is open, and the box by its button.
  */
-export function PasteStatus(props: { paste: PasteHandle; only?: "note" }) {
+export function PasteStatus(props: { paste: PasteHandle; only?: "note" | "box" }) {
   const { paste } = props;
   return (
     <>
-      {paste.note ? (
+      {paste.note && props.only !== "box" ? (
         <p
           role={paste.note.tone === "error" ? "alert" : "status"}
           style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: paste.note.tone === "error" ? theme.color.dangerText : theme.color.textMuted }}
@@ -138,7 +154,8 @@ function PasteBox(props: { paste: PasteHandle }) {
     el.addEventListener("paste", onPaste);
     el.addEventListener("beforeinput", refuse);
     el.addEventListener("drop", refuse);
-    // On a computer the box is where Ctrl+V goes next. A phone's press and hold needs no focus first.
+    // In view, since its words may sit above a dialog's tabs. On a computer it is where Ctrl+V goes next. A phone's press and hold needs no focus first.
+    el.scrollIntoView({ block: "nearest" });
     if (!isCoarsePointer()) el.focus({ preventScroll: true });
     return () => {
       el.removeEventListener("paste", onPaste);

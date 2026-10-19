@@ -83,6 +83,9 @@ type PageGlobals = {
   ClipboardItem: new (items: Record<string, Blob>) => unknown;
   navigator: { clipboard?: { read(): Promise<unknown>; write(items: unknown[]): Promise<void> } };
   __clipboardReads?: number;
+  /** How the DM's page answers a read: as the browser does, refused, or held until `__releaseRead`. */
+  __readMode?: "real" | "deny" | "hold";
+  __releaseRead?: () => void;
 };
 
 /**
@@ -122,6 +125,16 @@ async function seedClipboard(page: Page, clip: Clip): Promise<void> {
   }, clip.base64);
 }
 
+/** How the DM's page answers its next reads (the init script below). */
+function readMode(page: Page, mode: "real" | "deny" | "hold"): Promise<void> {
+  return page.evaluate((m) => void ((globalThis as unknown as PageGlobals).__readMode = m), mode);
+}
+
+/** Lets a held read answer, from the clipboard as it is now. */
+function releaseRead(page: Page): Promise<void> {
+  return page.evaluate(() => (globalThis as unknown as PageGlobals).__releaseRead?.());
+}
+
 /** How many times the page has called `navigator.clipboard.read` (the init script below counts them). */
 function readsOf(page: Page): Promise<number> {
   return page.evaluate(() => (globalThis as unknown as PageGlobals).__clipboardReads ?? -1);
@@ -149,7 +162,11 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     await dmContext.grantPermissions(["clipboard-read", "clipboard-write"], { origin: server.origin });
-    // pa-8: every call to navigator.clipboard.read is counted, from the page's first script on.
+    /*
+     * pa-8: every call to navigator.clipboard.read is counted, from the
+     * page's first script on. pa-9 also has a read refused, or held until
+     * the step lets it answer, as a slow permission prompt would.
+     */
     await dmContext.addInitScript(() => {
       const g = globalThis as unknown as PageGlobals;
       const clipboard = g.navigator.clipboard;
@@ -158,6 +175,8 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
       g.__clipboardReads = 0;
       clipboard.read = () => {
         g.__clipboardReads = (g.__clipboardReads ?? 0) + 1;
+        if (g.__readMode === "deny") return Promise.reject(new DOMException("Read permission denied.", "NotAllowedError"));
+        if (g.__readMode === "hold") return new Promise((resolve, reject) => (g.__releaseRead = () => void real().then(resolve, reject)));
         return real();
       };
     });
@@ -512,7 +531,88 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await page.close();
   });
 
-  test("pa-9. no page errors along the way", () => {
+  test("pa-9. a closed or unconfirmed entry takes nothing by any path: not its box, not a read that answers after it closed", async () => {
+    // The players' Map image row: confirmed, refused, its box open, then Cancel. The box goes with the confirm.
+    await openSideTab(dm, "Scenes");
+    const scenes = dm.getByRole("tabpanel", { name: "Scenes" });
+    await scenes.getByRole("button", { name: new RegExp(`^${dmSocket.state!.scenes[run.firstSceneId]!.name}`) }).first().click();
+    await waitFor("the DM on the players' scene", () => dmSocket.you?.sceneId === run.firstSceneId || null, 30_000);
+    const map = dmSocket.state!.scenes[run.firstSceneId]!.map;
+    const maps = dmUploads.map ?? 0;
+    const arm = scenes.getByRole("button", { name: /^(Add a|Replace) map image$/ });
+    await arm.click();
+    await readMode(dm, "deny");
+    await scenes.getByRole("button", { name: "Paste an image" }).first().click();
+    const box = scenes.getByRole("textbox", { name: /right-click here and choose Paste/ });
+    await box.waitFor();
+    await shots.take(dm, "paste-players-row-box");
+    // The row's Cancel comes before the box's own.
+    await scenes.getByRole("button", { name: "Cancel", exact: true }).first().click();
+    await arm.waitFor();
+    // The box goes in the render after the one that disarmed the row.
+    await box.waitFor({ state: "detached", timeout: 2_000 });
+    assert.equal(await scenes.getByText("The browser did not let the app read the clipboard.", { exact: false }).count(), 0, "the refusal outlived the confirm");
+
+    // The same row with a read still waiting when Cancel is pressed: its answer is dropped.
+    await seedClipboard(dm, await swatch([250, 0, 0]));
+    await readMode(dm, "hold");
+    await arm.click();
+    await scenes.getByRole("button", { name: "Paste an image" }).first().click();
+    await scenes.getByRole("button", { name: "Cancel", exact: true }).first().click();
+    await arm.waitFor();
+    await releaseRead(dm);
+    await dm.waitForTimeout(800);
+    assert.equal(dmUploads.map ?? 0, maps, "a read answered after Cancel uploaded a map");
+    assert.deepEqual(dmSocket.state!.scenes[run.firstSceneId]!.map, map, "a read answered after Cancel replaced the players' map");
+
+    // Show a handout cancelled while its read waits: nothing is uploaded or picked, and nothing throws.
+    const handouts = dmUploads.handout ?? 0;
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: "DM" });
+    await panel.getByRole("button", { name: "Show a handout" }).click();
+    const form = dm.getByRole("group", { name: "Show a handout" });
+    await form.getByRole("button", { name: "Paste an image" }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
+    await form.waitFor({ state: "detached" });
+    await releaseRead(dm);
+    await dm.waitForTimeout(800);
+    assert.equal(dmUploads.handout ?? 0, handouts, "a read answered after the form closed uploaded a handout");
+    await panel.getByRole("button", { name: "Show a handout" }).click();
+    await form.getByRole("button", { name: "Paste an image" }).waitFor();
+    assert.equal(await form.getByRole("button", { name: "Change", exact: true }).count(), 0, "a read answered after the form closed picked an image");
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    // New scene's Map image, left for Battle mat while its read waits: the answer picks nothing.
+    await openSideTab(dm, "Scenes");
+    await scenes.getByRole("radio", { name: "Map image" }).click();
+    await scenes.getByRole("button", { name: "Paste an image" }).first().click();
+    await scenes.getByRole("radio", { name: "Battle mat" }).click();
+    await releaseRead(dm);
+    await dm.waitForTimeout(800);
+    await scenes.getByRole("radio", { name: "Map image" }).click();
+    await scenes.getByText("Choose a map image", { exact: true }).waitFor();
+    assert.equal(await scenes.getByText(PASTED).count(), 0, "a read answered after leaving Map image picked a map");
+    await scenes.getByRole("button", { name: "Cancel", exact: true }).first().click();
+    await readMode(dm, "real");
+    assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
+  });
+
+  test("pa-10. the stamp picker says why a paste gave nothing on its Starter tab too", async () => {
+    await pickTool(dm, "Map builder");
+    await pickOption(dm, "Map builder", "Builder mode", "Stamp");
+    await dm.getByRole("button", { name: /^(Choose a stamp|Placing .*Choose another stamp)/ }).first().click();
+    const stamps = dm.getByRole("dialog", { name: "Stamps" });
+    await stamps.getByRole("tab", { name: "Starter", exact: true }).click();
+    assert.equal(await paste(dm, { text: "a goblin with a spear" }), true);
+    await stamps.getByText("The clipboard has no image in it. Copy an image first, such as with Copy image on a web page.").waitFor();
+    assert.equal(await stamps.getByRole("tab", { name: "Starter", exact: true }).getAttribute("aria-selected"), "true");
+    await shots.take(dm, "paste-stamp-starter-no-image");
+    await dm.keyboard.press("Escape");
+    await stamps.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
+
+  test("pa-12. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);
   });

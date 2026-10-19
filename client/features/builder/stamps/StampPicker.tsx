@@ -55,8 +55,6 @@ export function StampPicker(props: {
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
   const takePasted = async (file: File) => {
-    // The room's images are where it lands, so their tab shows its progress.
-    setTab("stamps");
     const abort = new AbortController();
     abortRef.current = abort;
     setUpload({ busy: true, waiting: false, error: null });
@@ -103,6 +101,14 @@ export function StampPicker(props: {
       }
     >
       <div ref={body}>
+        {/* A paste lands on either tab, so what it says and how its upload goes show above them. */}
+        {paste.note || upload.busy || upload.error ? (
+          <div style={{ display: "grid", gap: theme.space(2), marginBottom: theme.space(3) }}>
+            <PasteStatus paste={paste} only="note" />
+            <Loading text={upload.waiting ? "Waiting for the server…" : "Uploading…"} active={upload.busy} />
+            <ErrorText>{upload.error}</ErrorText>
+          </div>
+        ) : null}
         <div role="tablist" aria-label="Which stamps" style={{ display: "flex", gap: theme.space(1), marginBottom: theme.space(3) }}>
           {TABS.map((t) => (
             <button
@@ -138,7 +144,7 @@ export function StampPicker(props: {
                   </li>
                 ))}
               </ul>
-              <RoomImages chosen={chosenAsset} onPick={onPick} onMeasured={props.onMeasured} paste={paste} upload={upload} />
+              <RoomImages chosen={chosenAsset} onPick={onPick} onMeasured={props.onMeasured} paste={paste} />
             </>
           ) : (
             <StarterBrowser
@@ -218,7 +224,7 @@ function Tile(props: { name: string; src: string; chosen: boolean; onPick(): voi
  * on its long side, keeping its shape, so its size is read from the list,
  * or from the image itself when the list does not have it.
  */
-function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): void; onMeasured(chosen: ChosenArt): void; paste: PasteHandle; upload: PastedUpload }) {
+function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): void; onMeasured(chosen: ChosenArt): void; paste: PasteHandle }) {
   const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
   const tokens = useRoomView((s) => s.view?.tokens);
@@ -273,9 +279,7 @@ function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): v
       <div style={{ display: "flex" }}>
         <PasteButton paste={props.paste} />
       </div>
-      <PasteStatus paste={props.paste} />
-      <Loading text={props.upload.waiting ? "Waiting for the server…" : "Uploading…"} active={props.upload.busy} />
-      <ErrorText>{props.upload.error}</ErrorText>
+      <PasteStatus paste={props.paste} only="box" />
       <Loading text="Loading this room's images…" active={listed === null && !failed} />
       {failed ? <Help>The room's library did not load. Images already on the map are below.</Help> : null}
       {ids.length === 0 && (listed !== null || failed) ? <Empty>No token images yet. Add one in the Library panel or on a token.</Empty> : null}

@@ -93,7 +93,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
   const full = props.sceneCount >= MAX_SCENES;
   // A paste lands here while the Map image form is open, as a chosen file does: picked, and searched for its grid (docs/design-v1-paste.md 1.2).
   const formRef = useRef<HTMLDivElement>(null);
-  const paste = usePasteTarget(formRef, { accepts: "image", takes: kind === "map" ? "open" : "none", disabled: status.busy, onFile: (f) => pickFile(f, true) });
+  const paste = usePasteTarget(formRef, { accepts: "image", takes: kind === "map" ? "open" : "none", disabled: status.busy || kind !== "map", closed: kind !== "map", onFile: (f) => pickFile(f, true) });
 
   const pick = (k: Kind) => {
     // Another kind of scene ends an upload in flight, or it would still

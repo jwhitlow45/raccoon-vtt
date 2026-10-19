@@ -265,7 +265,8 @@ function ShowHandout(props: {
   // The DM's own images first, then the starter picks apart (docs/design-v1-starter-art.md 5), as the Library panel lists them.
   const looseApart = apartFromStarter(loose ?? [], (a) => a);
   // A paste takes Upload a file's path, a PDF to its page job and an image shrunk and uploaded, while the form is open with nothing picked (docs/design-v1-paste.md 1.2).
-  const paste = usePasteTarget(form, { accepts: "image-or-pdf", takes: open && !pick ? "open" : "none", disabled: status !== null, onFile: (f) => upload(f) });
+  // Closed, the form takes nothing, and its render never reaches upload.
+  const paste = usePasteTarget(form, { accepts: "image-or-pdf", takes: open && !pick ? "open" : "none", disabled: status !== null || !open, closed: !open, onFile: (f) => upload(f) });
   /*
    * The room's "Use the pasted image" opens the form and uploads its
    * picture, which replaces a pick as choosing another file does, keeping

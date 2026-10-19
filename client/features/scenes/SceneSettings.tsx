@@ -380,7 +380,17 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
    * Confirming moves focus into the row, so the rule costs nothing.
    */
   const rowRef = useRef<HTMLDivElement>(null);
-  const paste = usePasteTarget(rowRef, { accepts: "image", takes: playersHere && !armed ? "none" : "focus", disabled: upload.busy, onFile: (f) => void choose(f, true) });
+  /** On the players' scene before the DM confirms, the row takes no paste by any path: not a key, not the box, not a late answer. */
+  const unconfirmed = playersHere && !armed;
+  const paste = usePasteTarget(rowRef, {
+    accepts: "image",
+    takes: unconfirmed ? "none" : "focus",
+    disabled: upload.busy || unconfirmed,
+    closed: unconfirmed,
+    onFile: (f) => {
+      if (!unconfirmed) void choose(f, true);
+    },
+  });
 
   const choose = async (file: File, pasted = false) => {
     const abort = new AbortController();
