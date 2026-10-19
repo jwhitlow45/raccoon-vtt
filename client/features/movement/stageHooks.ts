@@ -1,17 +1,14 @@
 import { useEffect, useMemo } from "react";
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { footprintSize, tokenHeightFt } from "#shared/rules/footprint.ts";
-import { routePoints, type RoutePoint } from "#shared/rules/route.ts";
 import { findRoute } from "#shared/rules/walk.ts";
-import { halvedAt, publicWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
-import { displayName } from "../../lib/scene.ts";
+import { publicWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
-import { areaTitle } from "../areas/labels.ts";
-import { dragReading, pathNow, type Speeds } from "../measure/movement.ts";
-import { dropMode, landedElevation, planGroup, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { pathNow } from "../measure/movement.ts";
+import { dropMode, planGroup, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { walkPreview } from "./preview.ts";
 import { RouteDrag, type Frames, type RouteAnswer } from "./routeDrag.ts";
 import { sendPlan } from "./send.ts";
 import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute } from "./store.ts";
@@ -82,30 +79,15 @@ function worldFor(view: RoomState, token: Token, role: Role): PublicWorld {
   return publicWorld(view, token, { role }, stops);
 }
 
-function speedsOf(view: RoomState, token: Token): Speeds | undefined {
-  // Speeds are the actor's, which only the DM and the creature's owners receive.
-  return "inline" in token.actor ? token.actor.inline.speeds : view.characters[token.actor.ref]?.actor.speeds;
-}
 
 /** The search's answer as the planner takes it. A search still running has none yet. */
 function found(answer: Exclude<RouteAnswer, { kind: "searching" }>): Found {
   return answer.kind === "route" ? { kind: "route", route: answer.route } : answer;
 }
 
-/** The creature whose space the mover would end in at `at`, by the name this viewer sees (3.1): the rules say it can't willingly end its move there. */
-function endsIn(view: RoomState, world: PublicWorld, token: Token, at: RoutePoint): string | null {
-  const { w, h } = footprintSize(token);
-  const lo = at.elevation;
-  const hi = lo + tokenHeightFt(token, world.input.rules.feetPerCell);
-  for (const s of world.spaces) {
-    const overlaps = at.x < s.x1 - 1e-9 && at.x + w > s.x0 + 1e-9 && at.y < s.y1 - 1e-9 && at.y + h > s.y0 + 1e-9 && lo < s.hi && hi > s.lo;
-    const other = view.tokens[s.id];
-    if (overlaps && other) return displayName(other);
-  }
-  return null;
-}
 
-type Walk = { tokenId: string; drag: RouteDrag; world: PublicWorld | null; basis: Basis; token: Token; target: Point | null; waiting: boolean };
+/** A lone drag's walk. `held` is where the preview holds at a wall when no route reaches the finger's spot. */
+type Walk = { tokenId: string; drag: RouteDrag; world: PublicWorld | null; basis: Basis; token: Token; target: Point | null; held: Point | null; waiting: boolean };
 
 export function useDragStops(role: Role): DragStops {
   const store = useRoomStore();
@@ -156,50 +138,8 @@ export function useDragStops(role: Role): DragStops {
       const view = store.getState().view;
       const target = w.target;
       if (!view || !target || walk !== w) return;
-      const token = w.token;
       const answer = w.drag.answer;
-      const route = answer.kind === "route" ? answer.route : null;
-      const landing = landedElevation(view.buildChunks, token, target);
-      const points = route
-        ? routePoints(view.buildChunks, token, route.pieces, landing)
-        : [
-            { x: token.x, y: token.y, elevation: token.elevation },
-            { x: target.x, y: target.y, elevation: landing },
-          ];
-      const world = w.world;
-      const encounter = view.encounter;
-      const activeTokenId = encounter?.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId ?? null;
-      const read = dragReading({
-        token,
-        to: target,
-        encounter,
-        activeTokenId,
-        speeds: speedsOf(view, token),
-        rules: { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal },
-        role,
-        ...(world
-          ? {
-              walk: {
-                route: route ? { points, pieces: route.pieces } : null,
-                build: view,
-                halved: (at: RoutePoint) => {
-                  const area = halvedAt(world, token, at);
-                  return area ? areaTitle(area) : null;
-                },
-                prone: world.input.prone,
-              },
-            }
-          : {}),
-      });
-      setRoute({
-        tokenId: token.id,
-        to: target,
-        corners: route ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
-        searching: answer.kind === "searching",
-        waiting: w.waiting,
-        read,
-        endsIn: world ? endsIn(view, world, token, points[points.length - 1]!) : null,
-      });
+      setRoute({ tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, world: w.world, role }), searching: answer.kind === "searching", waiting: w.waiting });
     };
 
     /** The drag's search for this token, begun on its first frame and told when the room changes under it. */
@@ -209,7 +149,7 @@ export function useDragStops(role: Role): DragStops {
       const basis = basisOf(view, token.sceneId);
       if (!walk || walk.tokenId !== token.id) {
         walk?.drag.cancel();
-        const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, waiting: false };
+        const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, waiting: false };
         w.drag = new RouteDrag(
           () => {
             w.world = worldFor(store.getState().view ?? view, w.token, role);
@@ -249,7 +189,13 @@ export function useDragStops(role: Role): DragStops {
           answer = w.drag.aim(target);
           if (moved) publish(w);
         }
+        const holdAt = (at: Point | null) => {
+          if (!w || (w.held?.x === at?.x && w.held?.y === at?.y)) return;
+          w.held = at;
+          publish(w);
+        };
         if (dropMode(role, view.scenes[token.sceneId]) !== "walk" || answer.kind !== "none") {
+          holdAt(null);
           setHold(null);
           return;
         }
@@ -260,6 +206,8 @@ export function useDragStops(role: Role): DragStops {
         }
         const stop = memo.stop;
         if (stop) node.position(stop.at);
+        // The line and the label stop at the wall with the preview.
+        holdAt(stop ? stop.at : null);
         setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
       },
       frameFields(tokenId) {
