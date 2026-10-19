@@ -12,6 +12,11 @@ import {
   applyAgain,
   applySettled,
   askAnswered,
+  castEndOf,
+  castSeen,
+  closeSettled,
+  closeTheAsk,
+  restoredPage,
   damageSent,
   damageSettled,
   discard,
@@ -36,9 +41,14 @@ import {
   type Page,
   type Settled,
   type ServerRoll,
+  type Step,
 } from "./chain.ts";
-import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
+import { ANSWERED_MEANWHILE, ASK_CLOSED } from "#shared/permissions.ts";
+import { castAsk } from "#shared/testutil.ts";
+import type { CastAsk, CastEnd } from "#shared/model.ts";
+import { deskAsks } from "../cast/castStart.ts";
 import { applyWaits, buildPlan } from "./plan.ts";
+import { holdsRolls } from "./start.ts";
 import { groupRows, type Mark, type RowBase } from "./rows.ts";
 
 /** An hour after the time every id of this test carries, so Apply again is still offered. */
@@ -550,5 +560,304 @@ test("the server rolls carry the DC in the open only while players see it, and a
       const resent = again.send.find((c): c is Extract<Command, { kind: "dice" }> => c.kind === "dice");
       assert.equal(resent?.dc, secret || dcShown ? 14 : undefined, "Roll again follows the same rule");
     }
+  }
+});
+
+/**
+ * A player's ask for saves through the DM's page (docs/design-v1-player-save-spell.md
+ * 3.3 and 8), over random orders: Open from the card (replacing a page that
+ * holds rolls, or not), the roll and its requests, marks, Apply and its
+ * answer taken, refused or lost, Apply again, Close the ask and its answer,
+ * Close the ask again, Discard, the card's Dismiss, another DM's dismissal
+ * or resolve, the player's Withdraw, an undo bringing the ask back, the log
+ * pruned while the DM is away, a reconnect that loses every answer, and a
+ * reload. The page reads the view after every step it is open for, as its
+ * effect does. Invariants, after every step:
+ *
+ * A. An ask closes only through Apply, Close the ask, Dismiss or Withdraw
+ *    (here or on another device): the page's own steps send a close or an
+ *    outcome only from Apply, Apply again and Close the ask, and Discard
+ *    sends only its requests' closes.
+ * B. After Close the ask lands, neither the ask nor the page's requests remain.
+ * C. A page never applies an ask that was resolved or whose end it cannot
+ *    read: an outcome carries only the ask the page holds, never a blocked
+ *    one, and once the page has read that its ask was resolved elsewhere, or
+ *    cannot read its end, Apply and Close the ask send nothing.
+ * D. An ask withdrawn or dismissed under the page leaves it, and no plan
+ *    after carries it.
+ * E. The card shows exactly while the ask is open and no live page holds it,
+ *    and opening it with the caster's roll seeded never reads as rolls held.
+ */
+test("a player's ask through the DM's page keeps its invariants over 1,500 random sequences", () => {
+  const reached: Record<string, number> = {};
+  const count = (k: string) => (reached[k] = (reached[k] ?? 0) + 1);
+  const ids = ["m1", "m2", "p1"];
+  const rows = groupRows(DICE, ids, SAVE, false);
+  let n = 0;
+  const newId = () => `0192f0a8-6c1e-7a4b-9c3d-${String(++n).padStart(12, "0")}`;
+  for (let seed = 1; seed <= 1_500; seed++) {
+    const r = rng(seed);
+    // The room: the one ask, open or not, its closing lines, and the requests the page opened.
+    let ask: CastAsk | null = castAsk("k1", { caster: "p1", area: undefined, targets: ["m1", "m2"], ...(chance(r, 0.6) ? { damage: { tag: "r1", parts: 1 }, rolled: [{ formula: "9d6", total: 31, type: "fire" as const }] } : {}) });
+    const theAsk = ask;
+    let log: LogEntry[] = [];
+    let line = 0;
+    const end = (e: CastEnd) => {
+      log = [...log, { id: `${++line}:0`, at: "", kind: "event", data: { type: "cast", castId: theAsk.id, tokenId: theAsk.caster, spell: theAsk.spell, end: e } }];
+      ask = null;
+    };
+    let closedBy: "done" | "dismissed" | "withdrawn" | null = null;
+    const openRequests = new Set<string>();
+    let page: Page | null = null;
+    let away = false;
+    // What the page sent and has no answer for yet: outcomes by plan (their receipts survive a reload), and the close (whose answer does not).
+    const outcomes = new Map<string, OpOf<"actor.outcome">>();
+    let close: { castId: string } | null = null;
+    let closeLanded = false;
+    const damage = () => (page?.outcome.damage ? [{ amount: 9, type: "fire" as const }] : []);
+
+    for (let step = 0; step < 30; step++) {
+      const at = `ask seed ${seed} step ${step}`;
+      const before: Page | null = page;
+      const kind = pick(r, ["open", "open", "plain", "roll", "roll", "answer", "mark", "mark", "apply", "apply", "apply", "outcomeAnswer", "outcomeAnswer", "closeAnswer", "closeAnswer", "again", "discard", "dismissCard", "dismissElsewhere", "resolveElsewhere", "withdraw", "undo", "leave", "prune", "back", "reconnect", "reload"] as const);
+      // The rarer events, so a page lives long enough to reach Apply and its answer.
+      if (["discard", "plain", "reconnect", "reload"].includes(kind) && !chance(r, 0.35)) continue;
+      let send: Command[] = [];
+      let error: string | undefined;
+      switch (kind) {
+        case "open": {
+          if (!ask || away || deskAsks({ [ask.id]: ask }, page && page.phase !== "applied" ? (page.cast?.ask.id ?? null) : null).length === 0) break;
+          if (page && holdsRolls(page)) {
+            if (!chance(r, 0.5)) break;
+            const out = replace(page);
+            if (!out.ok) break;
+            send = out.send;
+            count("open:replace");
+          }
+          const seeded = ask.rolled && ask.damage ? { tag: ask.damage.tag, state: "committed" as const, amounts: [ask.rolled[0]!.total], imported: true as const } : null;
+          page = newPage({ id: newId(), sceneId: "s1", source: { kind: "selection", tokenIds: ids }, test: SAVE, dc: 12, secret: true, spell: true, switches: { dcShown: false, resultShown: true }, outcome: { damage: chance(r, 0.5) ? "9 fire" : "" }, cast: { ask, who: "Hero 1" }, ...(seeded ? { damage: seeded } : {}) });
+          // E: a seeded roll is the caster's, not the page's.
+          assert.equal(holdsRolls(page), false, `${at}: E, a new page from an ask reads as holding rolls`);
+          count(seeded ? "open:seeded" : "open");
+          break;
+        }
+        case "plain": {
+          // The DM's own group save, which the card's Open then asks to replace once it holds rolls.
+          if (away || (page && page.phase !== "applied")) break;
+          page = newPage({ id: newId(), sceneId: "s1", source: { kind: "selection", tokenIds: ids }, test: SAVE, dc: 12, secret: true, spell: false, switches: { dcShown: false, resultShown: true } });
+          count("plain");
+          break;
+        }
+        case "roll": {
+          if (!page || page.phase !== "setup") break;
+          const out = roll(page, { rows, server: serverRolls(rows), tag: newId(), requestIds: newId, openRequests: openRequests.size, taken: [], at: "2026-10-17T20:00:00.000Z" });
+          page = out.page;
+          send = out.send;
+          count("roll");
+          break;
+        }
+        case "answer": {
+          const sending = page?.requests.filter((q) => q.state === "sending") ?? [];
+          if (!page || sending.length === 0) break;
+          const q = pick(r, sending);
+          page = askAnswered(page, q.rollId, { ok: true });
+          openRequests.add(q.rollId);
+          break;
+        }
+        case "mark": {
+          if (!page || page.phase !== "rolled") break;
+          for (const row of rows) page = mark(page, row.holder, chance(r, 0.5) ? "pass" : "fail");
+          break;
+        }
+        case "apply": {
+          if (!page || away) break;
+          // Most often the DM marks what is left, then applies.
+          if (page.phase === "rolled" && chance(r, 0.7)) for (const row of rows) page = mark(page, row.holder, chance(r, 0.5) ? "pass" : "fail");
+          const plan = buildPlan(page, { ...DICE }, damage(), { plan: newId(), newId });
+          const out: Step = plan ? apply(page, plan) : closeTheAsk(page);
+          if (out.error) error = out.error;
+          page = out.page;
+          send = out.send;
+          if (send.length > 0) count(plan ? "apply" : "closeTheAsk");
+          break;
+        }
+        case "again": {
+          if (!page || away) break;
+          const closing = page.cast?.closing !== undefined;
+          const out: Step = closing ? closeTheAsk(page) : applyAgain(page, NOW);
+          page = out.page;
+          send = out.send;
+          if (send.length > 0) count(closing ? "closeAgain" : "applyAgain");
+          break;
+        }
+        case "outcomeAnswer": {
+          const [planId, op] = [...outcomes.entries()][0] ?? [];
+          if (!planId || !op) break;
+          outcomes.delete(planId);
+          const taken = op.cast === undefined || (ask !== null && ask.id === op.cast);
+          if (taken && op.cast !== undefined) {
+            end("done");
+            closedBy = "done";
+          }
+          const lost = chance(r, 0.25);
+          if (page && !away) page = settleTag(page, planId, lost ? { state: "unknown" } : taken ? { state: "committed", lines: [] } : { state: "refused", says: "The ask was closed meanwhile.", message: ASK_CLOSED }, key);
+          count(lost ? "outcome:unknown" : taken ? "outcome:taken" : "outcome:refused");
+          break;
+        }
+        case "closeAnswer": {
+          if (!close) break;
+          const taken = ask !== null && ask.id === close.castId;
+          if (taken) {
+            end("done");
+            closedBy = "done";
+            closeLanded = true;
+          }
+          close = null;
+          const lost = chance(r, 0.25);
+          if (page) page = closeSettled(page, lost ? { state: "unknown" } : taken ? { state: "taken" } : { state: "refused", says: "The ask was closed meanwhile.", message: ASK_CLOSED });
+          count(lost ? "close:unknown" : taken ? "close:taken" : "close:refused");
+          break;
+        }
+        case "discard": {
+          if (!page || page.phase === "applying") break;
+          send = discard(page);
+          page = null;
+          count("discard");
+          break;
+        }
+        case "dismissCard": {
+          // Only a card shows Dismiss, and the page that holds the ask hides its card.
+          if (!ask || (page && page.phase !== "applied" && page.cast?.ask.id === ask.id) || !chance(r, 0.15)) break;
+          end("dismissed");
+          closedBy = "dismissed";
+          count("dismissCard");
+          break;
+        }
+        case "dismissElsewhere":
+        case "resolveElsewhere":
+        case "withdraw": {
+          // Less often than the page's own steps, so an ask lives long enough to reach Apply.
+          if (!ask || !chance(r, 0.12)) break;
+          const e = kind === "dismissElsewhere" ? "dismissed" : kind === "resolveElsewhere" ? "done" : "withdrawn";
+          end(e);
+          closedBy = e;
+          count(kind);
+          break;
+        }
+        case "undo": {
+          // The DM's undo of an outcome that closed it brings the ask back, its closing line kept.
+          if (ask || closedBy !== "done") break;
+          ask = theAsk;
+          closedBy = null;
+          closeLanded = false;
+          count("undo");
+          break;
+        }
+        case "leave":
+          away = true;
+          break;
+        case "prune": {
+          if (!away) break;
+          log = [];
+          count("prune");
+          break;
+        }
+        case "back":
+          away = false;
+          break;
+        case "reconnect": {
+          // Every answer on its way is lost, after the server took or refused it.
+          for (const [planId, op] of outcomes) {
+            if (op.cast !== undefined && ask?.id === op.cast) {
+              end("done");
+              closedBy = "done";
+            }
+            if (page && !away) page = settleTag(page, planId, { state: "unknown" }, key);
+          }
+          outcomes.clear();
+          if (close) {
+            if (ask?.id === close.castId && chance(r, 0.5)) {
+              end("done");
+              closedBy = "done";
+              closeLanded = true;
+            }
+            close = null;
+            if (page) page = closeSettled(page, { state: "unknown" });
+          }
+          count("reconnect");
+          break;
+        }
+        case "reload": {
+          if (!page) break;
+          if (close && ask?.id === close.castId && chance(r, 0.5)) {
+            end("done");
+            closedBy = "done";
+            closeLanded = true;
+          }
+          close = null;
+          page = restoredPage(JSON.parse(JSON.stringify(page)) as Page);
+          count("reload");
+          break;
+        }
+      }
+
+      // A: who sends what.
+      const closes = send.filter((c) => c.kind === "op" && c.op.t === "cast.close");
+      const sentOutcomes = send.filter((c): c is Extract<Command, { kind: "outcome" }> => c.kind === "outcome");
+      if (kind !== "apply" && kind !== "again") {
+        assert.deepEqual(closes, [], `${at}: A, ${kind} closed the ask`);
+        assert.deepEqual(sentOutcomes, [], `${at}: A, ${kind} applied`);
+      }
+      if (kind === "discard" || kind === "open") assert.ok(send.every((c) => c.kind === "op" && c.op.t === "roll.close"), `${at}: A, ${kind} sent more than closes of its requests`);
+      for (const c of closes) assert.ok(c.kind === "op" && c.op.t === "cast.close" && c.op.end === "done", `${at}: A, the page closes an ask only as done`);
+      // C: an outcome carries only the ask the page held, and never a blocked one.
+      for (const c of sentOutcomes) {
+        assert.equal(c.op.cast, before?.cast?.ask.id, `${at}: C, the outcome named another ask than the page's`);
+        assert.equal(before?.cast?.blocked, undefined, `${at}: C, an outcome went for a blocked ask`);
+      }
+      if (before?.cast?.blocked) assert.equal(closes.length + sentOutcomes.length, 0, `${at}: C, a blocked page sent`);
+      if (kind === "apply" && before?.cast?.blocked && send.length === 0) count("blockedApply");
+      void error;
+
+      // The room takes what was sent.
+      for (const c of send) {
+        if (c.kind === "op" && c.op.t === "roll.close") for (const id of c.op.rollIds) openRequests.delete(id);
+        if (c.kind === "op" && c.op.t === "cast.close") close = { castId: c.op.castId };
+        if (c.kind === "outcome") outcomes.set(c.op.plan, c.op);
+      }
+
+      // The page reads the view, as its effect does while it is open.
+      if (page && !away) {
+        const was = page;
+        page = castSeen(page, ask ? { present: true } : { present: false, end: castEndOf(log, theAsk.id) });
+        // D.
+        if (was.cast && !ask && (closedBy === "withdrawn" || closedBy === "dismissed") && log.length > 0 && was.phase !== "applied" && !(was.phase === "applying" && (was.cast.closing === undefined || was.apply === "sending"))) {
+          assert.equal(page.cast, undefined, `${at}: D, a ${closedBy} ask stayed on the page`);
+          count(`seen:${closedBy}`);
+        }
+        // C: an ask resolved elsewhere, or an end lost from the log, stops the page.
+        if (was.cast && !ask && (was.phase === "setup" || was.phase === "rolled") && (closedBy === "done" || log.length === 0) && !closeLanded) {
+          assert.ok(page.cast?.blocked, `${at}: C, an ask closed elsewhere left Apply free`);
+          count(log.length === 0 ? "seen:unread" : "seen:resolved");
+        }
+        if (page.cast?.blocked) assert.equal(ask, null, `${at}: C, an open ask read as closed`);
+      }
+      // D: no plan after carries an ask the page let go.
+      if (page && !page.cast && page.plan && page.apply === "sending") assert.equal(page.plan.cast, undefined, `${at}: D, a plan carried an ask the page let go`);
+
+      // B: after Close the ask lands, no ask and no request of the page's remains.
+      if (closeLanded && page?.phase === "applied" && page.plan === null && page.cast) {
+        assert.equal(ask, null, `${at}: B, the ask stayed after Close the ask`);
+        assert.equal(openRequests.size, 0, `${at}: B, a request stayed open after Close the ask`);
+        count("closed");
+      }
+      // E: the card.
+      const held: string | null = page && page.phase !== "applied" ? (page.cast?.ask.id ?? null) : null;
+      const cards: CastAsk[] = ask ? deskAsks({ [ask.id]: ask }, held) : [];
+      assert.equal(cards.length, ask && held !== ask.id ? 1 : 0, `${at}: E, the card`);
+    }
+  }
+  for (const k of ["open", "open:seeded", "open:replace", "roll", "apply", "closeTheAsk", "closeAgain", "applyAgain", "outcome:taken", "outcome:refused", "outcome:unknown", "close:taken", "close:refused", "close:unknown", "discard", "dismissCard", "dismissElsewhere", "resolveElsewhere", "withdraw", "undo", "prune", "reconnect", "reload", "seen:withdrawn", "seen:dismissed", "seen:resolved", "seen:unread", "closed", "blockedApply"]) {
+    assert.ok((reached[k] ?? 0) > 0, `never reached ${k}`);
   }
 });

@@ -34,7 +34,12 @@ import { d20Text, knownOrTyped, parseBonus } from "../../rolls/card.ts";
 import {
   apply,
   applyAgain,
+  castEndOf,
+  castSeen,
+  closeSettled,
+  closeTheAsk,
   mayApplyAgain,
+  restoredPage,
   askAnswered,
   damageSent,
   discard,
@@ -64,10 +69,12 @@ import {
   type Step,
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
-import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
+import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, NOTHING_TO_APPLY, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { countWords, creatureCount, d20Of, groupRows, rowBonus, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
+import { castFill } from "../cast/castStart.ts";
+import { sentAny } from "./start.ts";
 
 /**
  * The group save (docs/design-v1-roll-options.md 5): rows rolled by the
@@ -187,6 +194,15 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     if (next !== pageRef.current) update(next);
   }, [view?.rolls, view?.tokens, viewing, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A player's ask the page holds, as the view holds it (docs/design-v1-player-save-spell.md 3.3): its end, read from its closing line, frees or stops Apply.
+  useEffect(() => {
+    const cast = pageRef.current.cast;
+    if (!view || !cast) return;
+    const id = cast.ask.id;
+    const next = castSeen(pageRef.current, view.casts[id] ? { present: true } : { present: false, end: castEndOf(view.log, id) });
+    if (next !== pageRef.current) update(next);
+  }, [view?.casts, view?.log, page.phase, page.apply, page.cast?.ask.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const title = pageTitle(shown);
   usePanelHeader({ title, parent: props.parent, onBack: props.onBack });
   const rollNowRef = useRef<() => void>(() => undefined);
@@ -242,6 +258,19 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           sender.receipts.forget(tag, 0);
           update(dmRollSettled(pageRef.current, tag, "refused", "Not sent."));
         }
+      } else if (c.op.t === "cast.close") {
+        // The close has no receipt: its answer settles the page, and a reload leaves it to the view (restoredPage).
+        const n = actions.dispatch(c.op, {
+          quiet: true,
+          onAnswer: (answer, refusal) =>
+            update(
+              closeSettled(
+                pageRef.current,
+                answer === "taken" ? { state: "taken" } : answer === "refused" ? { state: "refused", says: refusal?.text || refusal?.message || "The close was refused.", ...(refusal?.message ? { message: refusal.message } : {}) } : { state: "unknown" },
+              ),
+            ),
+        });
+        if (n === null) update(closeSettled(pageRef.current, { state: "refused", says: "Not sent." }));
       } else actions.dispatch(c.op);
     }
   };
@@ -302,13 +331,20 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     }
     const plan = buildPlan(shown, dice, amounts, { plan: uuidv7(), newId: actions.newId });
     if (!plan) {
-      setError("Nothing would change.");
+      if (page.cast) closeAsk();
+      else setError("Nothing would change.");
       return;
     }
     const base = page.phase === "setup" ? { ...page, rows, phase: "rolled" as const } : page;
     // An action filled from a recharge is spent (6.4), once its outcome goes.
     const recharge = page.fill?.recharge;
     spendOnStart(() => run(apply(base, plan)), recharge ? () => writeUsed(roomId, withUsed(readUsed(roomId), recharge.holder, recharge.key, true)) : null);
+  };
+
+  // Close the ask (3.3): where Apply would change nothing, the ask closes as done, with the page's open requests first.
+  const closeAsk = () => {
+    const base = page.phase === "setup" ? { ...pageRef.current, rows } : pageRef.current;
+    run(closeTheAsk(base));
   };
 
   const close = () => {
@@ -318,8 +354,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     props.onBack();
   };
 
-  const rolledAny = page.rolls.length > 0 || page.requests.length > 0 || page.damage !== null;
-  const doneWords = page.apply === "taken" ? `Applied to ${page.plan?.targets.length ?? 0}. Undo takes it all back.` : null;
+  const rolledAny = sentAny(page);
+  const doneWords = page.apply === "taken" ? (page.plan ? `Applied to ${page.plan.targets.length}. Undo takes it all back.` : page.cast ? `Closed ${page.cast.who}'s ask for saves.` : null) : null;
 
   // ---- the parts
 
@@ -370,7 +406,16 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       view={view}
       me={me}
       onSlot={
-        page.source.kind === "area" && page.outcome.slot !== undefined
+        page.cast && page.outcome.slot !== undefined
+          ? (slot) => {
+              const cast = pageRef.current.cast;
+              if (!cast) return;
+              // A slot change refills the formula from the fill and drops the caster's roll, as a new formula would (3.3).
+              const filled = castFill(dice, cast.ask, slot, { imported: false }).input;
+              const current = pageRef.current;
+              update({ ...current, fill: filled.fill, outcome: { ...current.outcome, damage: filled.outcome.damage ?? "", slot: filled.outcome.slot ?? slot }, damage: current.damage?.imported ? null : current.damage });
+            }
+          : page.source.kind === "area" && page.outcome.slot !== undefined
           ? (slot) => {
               const template = view.templates[(page.source as { templateId: string }).templateId];
               const filled = template ? areaFill(dice, template, slot) : null;
@@ -444,6 +489,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   );
 
   const waits = page.phase === "applied" ? null : applyWaits(shown, dice, amounts);
+  const words = applyWords(outcomeList, conditions);
   const applyButton =
     page.phase === "applied" ? (
       <div style={{ display: "grid", gap: theme.space(1) }}>
@@ -460,10 +506,15 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
             Apply again
           </Button>
         ) : null}
+        {page.cast?.closing ? (
+          <Button variant="primary" onClick={closeAsk} disabled={blocked !== null}>
+            Close the ask
+          </Button>
+        ) : null}
       </div>
     ) : (
-      <Button variant="primary" busy={page.apply === "sending"} disabled={blocked !== null || offScene || waits !== null || bound !== null || tooMany} onClick={doApply}>
-        {waits ?? bound ?? applyWords(outcomeList, conditions)}
+      <Button variant="primary" busy={page.apply === "sending"} disabled={blocked !== null || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
+        {waits ?? bound ?? (page.cast && words === NOTHING_TO_APPLY ? "Close the ask" : words)}
       </Button>
     );
 
@@ -471,6 +522,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     <div style={{ display: "grid", gap: theme.space(3) }}>
       <Watchers page={page} settle={(tag, receipt) => update(settleTag(pageRef.current, tag, settledOf(receipt), key))} />
       {page.fill ? <Note tone="info">{page.fill.from}</Note> : null}
+      {page.cast?.says && page.damage === null ? <Note>{page.cast.says}</Note> : null}
+      {page.castNote ? <Note tone="info">{page.castNote}</Note> : null}
+      {page.cast?.blocked ? <Note tone="error">{page.cast.blocked}</Note> : null}
       {failed ? <SrdLoadFailed what="The stat blocks" inline /> : null}
       {offScene ? <Note tone="error">{`This group save is on ${sceneName}. Go back to it to apply.`}</Note> : null}
       {page.apply === "refused" && page.applySays ? <Note tone="error">{page.applySays}</Note> : null}
@@ -948,7 +1002,7 @@ export function useRestoreGroupSave(): void {
   useEffect(() => {
     if (!dm || store.getState().page || store.getState().restored) return;
     const draft = readDraft(roomId);
-    store.setState({ restored: true, ...(draft ? { page: draft } : {}) });
+    store.setState({ restored: true, ...(draft ? { page: restoredPage(draft) } : {}) });
   }, [dm, roomId, store]);
 }
 

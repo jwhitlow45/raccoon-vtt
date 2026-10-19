@@ -3,13 +3,23 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { askSwitches } from "../../rolls/logic.ts";
-import { newPage, replace, type Fill, type OutcomeForm, type Page, type Source } from "./chain.ts";
+import { newPage, replace, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
 
+/**
+ * Whether the page sent anything: rolls, requests or its damage line. The
+ * caster's roll an ask brought is not the page's own until the DM rolls or
+ * the page sends anything, so opening an ask never asks to discard nothing
+ * (docs/design-v1-player-save-spell.md 3.3).
+ */
+export function sentAny(page: Pick<Page, "rolls" | "requests" | "damage">): boolean {
+  return page.rolls.length > 0 || page.requests.length > 0 || (page.damage !== null && !page.damage.imported);
+}
+
 /** Whether a page holds anything a start would throw away: rolls or requests sent and not yet applied. */
 export function holdsRolls(page: Page | null): boolean {
-  return page !== null && page.phase !== "applied" && (page.rolls.length > 0 || page.requests.length > 0 || page.damage !== null);
+  return page !== null && page.phase !== "applied" && sentAny(page);
 }
 
 export type StartInput = {
@@ -22,6 +32,9 @@ export type StartInput = {
   panel: "dice" | "areas";
   /** A quick tap (4.4): roll at once with the choices the tap took. */
   rollNow?: { sources: AdvantageSource[]; secret: boolean };
+  /** A player's ask the page answers, and the caster's roll it brought (dice/cast/castStart.ts). */
+  cast?: PageCast;
+  damage?: Page["damage"];
 };
 
 /**
@@ -57,6 +70,8 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
         fill: input.fill ?? null,
         ...(input.outcome ? { outcome: input.outcome } : {}),
         ...(input.rollNow ? { rollNow: { sources: input.rollNow.sources } } : {}),
+        ...(input.cast ? { cast: input.cast } : {}),
+        ...(input.damage ? { damage: input.damage } : {}),
       });
       store.setState({ page, shownIn: input.panel, restored: false });
       ui.openPanel(input.panel);

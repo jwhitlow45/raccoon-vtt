@@ -49,11 +49,13 @@ export function partsTextOf(parts: readonly Part[], slotExtra = 0): string {
   return parts.map((p) => `${atSlot(p, slotExtra)}${p.type ? ` ${damageTypeName(p.type)}` : ""}`).join(" + ");
 }
 
-function fromLine(name: string, test: GroupTest, dc: number | null, dcFrom: string | null, damage: string, onPass: "half" | "none", conditions: readonly string[]): string {
+/** The fill line: "From Fireball: Dexterity save, DC 15, 8d6 Fire, half on a pass." `rolled` follows the damage: "rolled 31 (Thorn's roll)". */
+export function fromLine(name: string, test: GroupTest, dc: number | null, dcFrom: string | null, damage: string, onPass: "half" | "none", conditions: readonly string[], rolled?: string): string {
   const what = test.kind === "none" ? "No save" : test.kind === "save" ? `${ABILITY_NAMES[test.ability]} save` : `${ABILITY_NAMES[test.ability]} check`;
   const parts = [what];
   if (dc !== null) parts.push(`DC ${dc}${dcFrom ? ` (${dcFrom})` : ""}`);
   if (damage) parts.push(damage);
+  if (damage && rolled) parts.push(rolled);
   if (damage && test.kind !== "none") parts.push(onPass === "half" ? "half on a pass" : "none on a pass");
   if (conditions.length > 0) parts.push(`${conditions.map(effectName).join(" and ")} on a fail`);
   return `From ${name}: ${parts.join(", ")}.`;
@@ -69,12 +71,18 @@ function characterOf(dice: DiceView, tokenId: string | undefined): Character | u
  * A save action's fill (5.6): its ability, DC, parts that are not optional,
  * half or none, conditions and how they end, and "Against a spell" for a
  * spell. The save that ends a condition takes the page's DC, as a repeated
- * save does, unless the DM types its own.
+ * save does, unless the DM types its own. With a `slot`, a leveled spell
+ * keeps it, held at its own level or above, and a character's spell scales
+ * its damage there as its row does (pcSlots).
  */
-export function actionFill(dice: DiceView, named: NamedRoll, actor: { key: string; tokenId?: string }): FillInput | null {
+export function actionFill(dice: DiceView, named: NamedRoll, actor: { key: string; tokenId?: string }, slot?: number): FillInput | null {
   const save = named.save;
   if (!save) return null;
-  const parts: Part[] = named.damage.filter((p) => !p.optional).map((p) => ({ formula: p.formula, ...(p.type ? { type: p.type } : {}) }));
+  const level = named.section === "spells" && named.level !== undefined && named.level >= 1 ? named.level : undefined;
+  const pick = slot !== undefined && level !== undefined ? Math.max(level, Math.min(9, Math.floor(slot))) : undefined;
+  const character = characterOf(dice, actor.tokenId);
+  const scaled = pick !== undefined && level !== undefined && pick > level && character ? (pcSlots(character, named.key)?.at(pick) ?? named) : named;
+  const parts: Part[] = scaled.damage.filter((p) => !p.optional).map((p) => ({ formula: p.formula, ...(p.type ? { type: p.type } : {}) }));
   const damage = partsTextOf(parts);
   const conditions = named.conditions ?? [];
   const test: GroupTest = { kind: "save", ability: save.ability };
@@ -98,6 +106,7 @@ export function actionFill(dice: DiceView, named: NamedRoll, actor: { key: strin
       conditions,
       lasts: named.lasts ? { mode: named.lasts.at === "start" ? "turnStart" : "turnEnd", rounds: 10, anchor: named.lasts.of === "self" && actingRow ? actingRow.id : "own" } : { mode: "none", rounds: 10, anchor: "own" },
       saveEnds: named.saveEnds ? { ability: save.ability, dc: null } : null,
+      ...(pick !== undefined ? { slot: pick } : {}),
     },
   };
 }

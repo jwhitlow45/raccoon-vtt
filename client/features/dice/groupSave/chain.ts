@@ -1,10 +1,10 @@
 import { d20Formula } from "#shared/dice/formula.ts";
 import { LIMITS } from "#shared/limits.ts";
-import type { DiceRoll, LogEntry, RollRequest, RollTest } from "#shared/model.ts";
+import type { CastAsk, CastEnd, DiceRoll, LogEntry, RollRequest, RollTest } from "#shared/model.ts";
 import type { ActorTarget, ClientOp, OpOf } from "#shared/protocol.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
-import { ANSWERED_MEANWHILE } from "#shared/permissions.ts";
+import { ANSWERED_MEANWHILE, ASK_CLOSED } from "#shared/permissions.ts";
 import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "../../../state/store.ts";
 import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
@@ -97,14 +97,29 @@ export type Page = {
   requests: { rollId: string; holders: string[]; state: "sending" | "open" | "refused" | "closed"; says?: string }[];
   /** The DM's one tap on an asked row (5.2). */
   dmRolls: { tag: string; holder: string; state: Settle; says?: string }[];
-  damage: { tag: string; state: Settle; amounts?: (number | undefined)[]; says?: string } | null;
+  /** The damage line. `imported` is the caster's own roll an ask brought (castFill), which the page never sent. */
+  damage: { tag: string; state: Settle; amounts?: (number | undefined)[]; says?: string; imported?: true } | null;
   plan: OpOf<"actor.outcome"> | null;
   apply: "idle" | "sending" | "unknown" | "refused" | "taken";
   applySays?: string;
   rolledAt?: string;
   /** A quick tap from the Dice panel (4.4): the page rolls as soon as its rows are read, with the choices the tap took. */
   rollNow?: { sources: AdvantageSource[] };
+  /** The player's ask for saves the page answers (docs/design-v1-player-save-spell.md 3.3), until it reads the ask's end. */
+  cast?: PageCast;
+  /** Why the page let go of its ask: "Thorn withdrew the ask." Apply then works as a plain group save. */
+  castNote?: string;
 };
+
+/**
+ * The ask a page holds: the ask as the DM's view had it at Open, and its
+ * caster's name then, for the page's words. `blocked` is why Apply waits
+ * for good: the ask was resolved elsewhere, or closed with an end the page
+ * cannot read. `closing` is the phase a Close the ask left, while the
+ * close is on its way or unknown. `says` is why the caster's roll was not
+ * taken (castFill).
+ */
+export type PageCast = { ask: CastAsk; who: string; blocked?: string; closing?: "setup" | "rolled"; says?: string };
 
 export type Command =
   | { kind: "dice"; tag: string; rolls: PanelRoll[]; to: "all" | "dm"; dc?: number }
@@ -115,9 +130,24 @@ export type Step = { page: Page; send: Command[]; error?: string };
 
 const EMPTY_OUTCOME: OutcomeForm = { damage: "", onPass: "half", conditions: [], lasts: { mode: "none", rounds: 10, anchor: "own" }, saveEnds: null };
 
-export function newPage(input: { id: string; sceneId: string; source: Source; test: GroupTest; dc: number | null; secret: boolean; spell: boolean; switches: Page["switches"]; fill?: Fill | null; outcome?: Partial<OutcomeForm>; rollNow?: { sources: AdvantageSource[] } }): Page {
+export function newPage(input: {
+  id: string;
+  sceneId: string;
+  source: Source;
+  test: GroupTest;
+  dc: number | null;
+  secret: boolean;
+  spell: boolean;
+  switches: Page["switches"];
+  fill?: Fill | null;
+  outcome?: Partial<OutcomeForm>;
+  rollNow?: { sources: AdvantageSource[] };
+  cast?: PageCast;
+  damage?: Page["damage"];
+}): Page {
   return {
     ...(input.rollNow ? { rollNow: input.rollNow } : {}),
+    ...(input.cast ? { cast: input.cast } : {}),
     id: input.id,
     sceneId: input.sceneId,
     phase: "setup",
@@ -134,7 +164,7 @@ export function newPage(input: { id: string; sceneId: string; source: Source; te
     rolls: [],
     requests: [],
     dmRolls: [],
-    damage: null,
+    damage: input.damage ?? null,
     plan: null,
     apply: "idle",
   };
@@ -389,7 +419,10 @@ export function settleTag(page: Page, tag: string, settled: Settled, key: (t: { 
     const says = settled.state === "refused" ? (settled.message === ANSWERED_MEANWHILE ? "Answered before your roll." : settled.says) : undefined;
     return dmRollSettled(page, tag, settled.state, says);
   }
-  if (page.plan?.plan === tag) return applySettled(page, settled.state === "committed" ? { state: "committed" } : settled);
+  if (page.plan?.plan === tag) {
+    if (settled.state === "refused" && settled.message === ASK_CLOSED && page.cast) return applySettled(page, { state: "refused", says: closedMeanwhile(page.cast) });
+    return applySettled(page, settled.state === "committed" ? { state: "committed" } : settled);
+  }
   return page;
 }
 
@@ -454,11 +487,16 @@ export function damageSettled(page: Page, tag: string, settled: { state: "commit
 export function apply(page: Page, plan: OpOf<"actor.outcome">): Step {
   if (page.phase !== "rolled" && !(page.phase === "setup" && page.test.kind === "none")) return { page, send: [] };
   if (page.apply === "sending" || page.apply === "unknown" || page.apply === "taken") return { page, send: [] };
+  // An ask resolved elsewhere, or closed with an end the page cannot read, is never applied (docs/design-v1-player-save-spell.md 3.3).
+  if (page.cast?.blocked) return { page, send: [], error: page.cast.blocked };
+  // The plan closes the ask the page holds now, and only that one, so a page that let its ask go closes none.
+  const { cast: _built, ...rest } = plan;
+  const op: OpOf<"actor.outcome"> = page.cast ? { ...rest, cast: page.cast.ask.id } : rest;
   const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
   const send: Command[] = [];
   if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open } });
-  send.push({ kind: "outcome", op: plan });
-  return { page: { ...page, phase: "applying", plan, apply: "sending", requests: page.requests.map((r) => (open.includes(r.rollId) ? { ...r, state: "closed" } : r)) }, send };
+  send.push({ kind: "outcome", op });
+  return { page: { ...page, phase: "applying", plan: op, apply: "sending", requests: page.requests.map((r) => (open.includes(r.rollId) ? { ...r, state: "closed" } : r)) }, send };
 }
 
 export function applySettled(page: Page, settled: { state: "committed" } | { state: "refused"; says: string } | { state: "unknown" }): Page {
@@ -486,6 +524,103 @@ export function mayApplyAgain(page: Page, now: number): boolean {
 export function applyAgain(page: Page, now: number = Date.now()): Step {
   if (!mayApplyAgain(page, now)) return { page, send: [] };
   return { page: { ...page, apply: "sending" }, send: [{ kind: "outcome", op: page.plan! }] };
+}
+
+// ------------------------------------------------------------ a player's ask (docs/design-v1-player-save-spell.md 3.3)
+
+/** Apply's refusal when the ask closed before the outcome landed: "Thorn's ask was closed meanwhile." */
+export function closedMeanwhile(cast: Pick<PageCast, "who">): string {
+  return `${cast.who}'s ask was closed meanwhile.`;
+}
+
+export const RESOLVED_ELSEWHERE = "Resolved on another device.";
+export const CLOSED_UNREAD = "This ask was closed. Check the log.";
+
+/**
+ * Close the ask: where Apply would change nothing (Hold Person, and every
+ * creature passed), the page's open requests close, then the ask closes as
+ * done, and the page settles as Applied does. From an unknown close it
+ * sends the same close again, which the server refuses as closed if the
+ * first one landed, so the ask never closes twice.
+ */
+export function closeTheAsk(page: Page): Step {
+  const cast = page.cast;
+  if (!cast) return { page, send: [] };
+  if (cast.blocked) return { page, send: [], error: cast.blocked };
+  const again = page.phase === "applying" && page.apply === "unknown" && cast.closing !== undefined;
+  if (!again && (page.phase === "applying" || page.phase === "applied" || page.apply === "sending" || page.apply === "unknown")) return { page, send: [] };
+  if (!again && page.phase === "setup" && page.test.kind !== "none") return { page, send: [] };
+  const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
+  const send: Command[] = [];
+  if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open } });
+  send.push({ kind: "op", op: { t: "cast.close", castId: cast.ask.id, end: "done" } });
+  const from = again ? cast.closing! : (page.phase as "setup" | "rolled");
+  return {
+    page: { ...page, phase: "applying", apply: "sending", plan: null, cast: { ...cast, closing: from }, requests: page.requests.map((r) => (open.includes(r.rollId) ? { ...r, state: "closed" } : r)) },
+    send,
+  };
+}
+
+/** The close's answer: taken settles the page as Applied, refused goes back with the words, unknown waits for the view or Close the ask again. */
+export function closeSettled(page: Page, settled: { state: "taken" } | { state: "refused"; says: string; message?: string } | { state: "unknown" }): Page {
+  const cast = page.cast;
+  if (!cast?.closing || page.phase !== "applying" || (page.apply !== "sending" && page.apply !== "unknown")) return page;
+  if (settled.state === "taken") return { ...page, phase: "applied", apply: "taken" };
+  if (settled.state === "refused") {
+    const { closing, ...kept } = cast;
+    return { ...page, phase: closing, apply: "refused", applySays: settled.message === ASK_CLOSED ? closedMeanwhile(cast) : settled.says, cast: kept };
+  }
+  return { ...page, apply: "unknown" };
+}
+
+/**
+ * A reload loses a close's answer, which has no receipt to read, so a
+ * close on its way reads as unknown: the view then settles it, or the DM
+ * closes it again.
+ */
+export function restoredPage(page: Page): Page {
+  return page.cast?.closing && page.phase === "applying" && page.apply === "sending" ? { ...page, apply: "unknown" } : page;
+}
+
+/**
+ * The page's ask as the view holds it (3.3). While it waits nothing
+ * changes, and an ask the DM's undo brought back frees Apply again. Once
+ * it is gone the page reads its end from the closing line: a withdrawal or
+ * a dismissal lets the ask go and Apply works as a plain group save, a
+ * resolve elsewhere or an end the page cannot read (its line pruned while
+ * the device was away) disables Apply with the reason, and Discard is the
+ * way out. A close or an Apply of this page's own still on its way is
+ * left to its answer, and an unknown close of its own that the view shows
+ * done settles the page as Applied.
+ */
+export function castSeen(page: Page, seen: { present: true } | { present: false; end: CastEnd | null }): Page {
+  const cast = page.cast;
+  if (!cast || page.phase === "applied") return page;
+  if (seen.present) {
+    if (!cast.blocked) return page;
+    const { blocked: _blocked, ...free } = cast;
+    return { ...page, cast: free };
+  }
+  const closing = cast.closing;
+  // An Apply or a close of the page's own on its way settles by its answer. Only an unknown close is the view's to settle.
+  if (page.phase === "applying" && (closing === undefined || page.apply === "sending")) return page;
+  if (seen.end === "withdrawn" || seen.end === "dismissed") {
+    const { cast: _cast, ...rest } = page;
+    const back: Partial<Page> = closing !== undefined ? { phase: closing, apply: "idle" } : {};
+    return { ...rest, ...back, castNote: seen.end === "withdrawn" ? `${cast.who} withdrew the ask.` : "Another DM set it aside." };
+  }
+  if (closing !== undefined) return { ...page, phase: "applied", apply: "taken" };
+  const blocked = seen.end === "done" ? RESOLVED_ELSEWHERE : CLOSED_UNREAD;
+  return cast.blocked === blocked ? page : { ...page, cast: { ...cast, blocked } };
+}
+
+/** The end of an ask as the view's log reads it: its closing line's, or null when that line is gone. */
+export function castEndOf(log: readonly LogEntry[], castId: string): CastEnd | null {
+  for (let i = log.length - 1; i >= 0; i--) {
+    const data = log[i]!.data;
+    if (data?.type === "cast" && data.castId === castId && data.end !== undefined) return data.end;
+  }
+  return null;
 }
 
 /** Discard (5.1): closes the requests the page opened, if open, and nothing else. */

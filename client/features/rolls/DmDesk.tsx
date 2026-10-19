@@ -14,7 +14,10 @@ import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { CastCard } from "../dice/cast/CastCard.tsx";
+import { castWho, deskAsks, foldedWithAsks } from "../dice/cast/castStart.ts";
 import { creatureRolls } from "../dice/creature.ts";
+import { useGroupSave } from "../dice/groupSave/store.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
@@ -48,6 +51,7 @@ import { RequestSheet } from "./RequestSheet.tsx";
 import { cardStyle, ResultBadge } from "./parts.tsx";
 
 const NO_ROLLS = {};
+const NO_CASTS = {};
 
 /**
  * The DM's side of request a roll (docs/design-v1-dm-tools.md 3.3): the
@@ -62,12 +66,23 @@ const NO_ROLLS = {};
  * rest, since six folded cards covered most of the map. Under a sheet in
  * portrait the whole stack folds into one summary, which the dock on the
  * sheet's edge stands for.
+ *
+ * A player's ask for saves is a card above the live cards
+ * (docs/design-v1-player-save-spell.md 3.3), counted with them in the
+ * newest two and the summary, and it leads the dock's summary, since it
+ * waits for the DM. The ask the open group save holds has no card until
+ * that page is discarded.
  */
 export function DmDesk() {
   const scope = useRoomScope();
   const asking = useStore(useScoped(askSlot), (s) => s.asking);
   const rolls = useRoomView((s) => s.view?.rolls ?? NO_ROLLS);
   const cards = useMemo(() => newestFirst(rolls), [rolls]);
+  const casts = useRoomView((s) => s.view?.casts ?? NO_CASTS);
+  const heldAsk = useGroupSave((s) => (s.page && s.page.phase !== "applied" ? (s.page.cast?.ask.id ?? null) : null));
+  const asked = useMemo(() => deskAsks(casts, heldAsk), [casts, heldAsk]);
+  const askWho = useRoomView((s) => (s.view && asked.length === 1 ? castWho(s.view, asked[0]!) : ""));
+  const items = asked.length + cards.length;
   const tokens = useRoomView((s) => s.view?.tokens);
   const characters = useRoomView((s) => s.view?.characters);
   const held = useMemo(() => (tokens && characters ? heldBySaveEnds({ tokens, characters, rolls }) : new Set<string>()), [tokens, characters, rolls]);
@@ -81,8 +96,8 @@ export function DmDesk() {
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
   // Whether a phone shows the cards past the newest two (chipStack).
   const [expanded, setExpanded] = useState(false);
-  const stack = chipStack({ count: cards.length, phone: size.width < theme.layout.wideMinWidth, underSheet: layout.folded, expanded });
-  const keepShown = chipsStayShown(cards.length);
+  const stack = chipStack({ count: items, phone: size.width < theme.layout.wideMinWidth, underSheet: layout.folded, expanded });
+  const keepShown = chipsStayShown(items);
   useEffect(() => {
     if (!keepShown) setExpanded(false);
   }, [keepShown]);
@@ -103,8 +118,8 @@ export function DmDesk() {
   useEffect(() => {
     if (!focusAfter || layout.folded) return;
     // The column scrolls as a whole, and kept its place while the sheet folded it.
-    const first = cards[0];
-    revealAndFocus(first ? toggles.current.get(first.id) : null);
+    const first = asked[0]?.id ?? cards[0]?.id;
+    revealAndFocus(first ? toggles.current.get(first) : null);
     setFocusAfter(false);
   }, [focusAfter, layout.folded]);
 
@@ -143,9 +158,12 @@ export function DmDesk() {
   // A player's ask to change a roll waits for the DM, so then the rolls lead the dock's summary (docs/design-v1-roll-request.md 6).
   const asks = cards.reduce((n, c) => n + c.targets.filter((t) => t.change !== undefined).length, 0);
   const counted = answeredCount(cards);
+  // An ask for saves waits for the DM too, so it leads: "Thorn asks for saves".
+  const forSaves = asked.length === 0 ? null : asked.length === 1 ? `${askWho} asks for saves` : `${asked.length} asks for saves`;
+  const rollsName = cards.length > 0 ? (asks > 0 ? `${counted.name}, ${asks} ${asks === 1 ? "asks" : "ask"} to change a roll` : counted.name) : null;
   useAlertsSummary(
-    cards.length > 0
-      ? { ...counted, ...(asks > 0 ? { name: `${counted.name}, ${asks} ${asks === 1 ? "asks" : "ask"} to change a roll` } : {}), waiting: asks > 0, requests: cards.length, open }
+    items > 0
+      ? { text: forSaves ?? counted.text, name: [forSaves, rollsName].filter((x): x is string => x !== null).join(", "), waiting: asks > 0 || forSaves !== null, requests: items, open }
       : null,
   );
 
@@ -153,7 +171,12 @@ export function DmDesk() {
   const phone = size.width < theme.layout.wideMinWidth;
   // One its save-ends card holds stays folded: Allow and Keep show once, on that card.
   const opensAt = (request: RollRequest, i: number) => !held.has(request.id) && (layout.startsOpen(i) || (!phone && request.targets.some((t) => t.change !== undefined)));
-  const summary = stack.button === "sheet" ? foldedChips(cards, "sheet") : stack.button ? foldedChips(cards.slice(PHONE_CHIPS), stack.button) : null;
+  // The asks stand first, so the newest two are counted over both, and what folds is the rest of each.
+  const shownAsks = asked.slice(0, stack.shown);
+  const shownCards = cards.slice(0, Math.max(0, stack.shown - asked.length));
+  const foldedCards = stack.button === "sheet" ? cards : cards.slice(Math.max(0, PHONE_CHIPS - asked.length));
+  const foldedAsks = stack.button === "sheet" ? asked : asked.slice(PHONE_CHIPS);
+  const summary = stack.button ? foldedWithAsks(foldedCards.length > 0 ? foldedChips(foldedCards, stack.button) : null, foldedAsks.length, stack.button) : null;
   const summaryButton = summary ? (
     <Button
       size="sm"
@@ -170,9 +193,9 @@ export function DmDesk() {
 
   return (
     <>
-      {cards.length > 0 && stack.button === "sheet" ? (
+      {items > 0 && stack.button === "sheet" ? (
         summaryButton
-      ) : cards.length > 0 ? (
+      ) : items > 0 ? (
         <div
           style={{
             display: "grid",
@@ -186,7 +209,17 @@ export function DmDesk() {
               Close all answered ({done.length})
             </Button>
           ) : null}
-          {cards.slice(0, stack.shown).map((request, i) => (
+          {shownAsks.map((ask) => (
+            <CastCard
+              key={ask.id}
+              ask={ask}
+              toggleRef={toggleRef(ask.id)}
+              // An ask waits for the DM, so it opens on a computer, and a phone's card starts folded to its first line.
+              open={toggled[ask.id] ?? !phone}
+              onToggle={() => setToggled((t) => ({ ...t, [ask.id]: !(t[ask.id] ?? !phone) }))}
+            />
+          ))}
+          {shownCards.map((request, i) => (
             <DmCard
               key={request.id}
               toggleRef={toggleRef(request.id)}

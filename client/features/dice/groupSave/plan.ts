@@ -181,8 +181,11 @@ export function applyWords(outcomes: readonly RowOutcome[], conditions: readonly
   }
   const resisted = outcomes.filter((o) => o.resisted).length;
   if (resisted > 0) parts.push(`${resisted} use Legendary Resistance`);
-  return parts.length > 0 ? `Apply: ${parts.join(", ")}` : "Nothing to apply";
+  return parts.length > 0 ? `Apply: ${parts.join(", ")}` : NOTHING_TO_APPLY;
 }
+
+/** Apply's words when nothing would change, which a page holding a player's ask reads as Close the ask. */
+export const NOTHING_TO_APPLY = "Nothing to apply";
 
 /**
  * The plan (5.5): each creature once, only those still present, never a
@@ -203,7 +206,8 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   }
   const targets = planTargets(rows, ids.newId);
   if (targets.length === 0) return null;
-  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), targets };
+  // The outcome closes the player's ask it answers in the same op (docs/design-v1-player-save-spell.md 3.3).
+  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), targets };
 }
 
 // ------------------------------------------------------------ a row in words (5.8)

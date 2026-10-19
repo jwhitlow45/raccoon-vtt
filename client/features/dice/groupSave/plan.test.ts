@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { actor, character, member, room, token } from "#shared/testutil.ts";
+import { actor, castAsk, character, member, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
-import { mark, markGone, newPage, setAmount, setDc, stateOf, typeTotal, type Page } from "./chain.ts";
+import { apply, mark, markGone, newPage, setAmount, setDc, stateOf, typeTotal, type Page } from "./chain.ts";
 import { worstCase } from "./outcome.ts";
 import { applyWaits, buildPlan, damageTo, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
 import { groupRows } from "./rows.ts";
@@ -152,5 +152,25 @@ describe("the Dice panel's row for the open group save", () => {
     assert.equal(openSaveState(owed, 2), "2 waiting");
     assert.equal(openSaveState({ ...owed, phase: "setup" }, 0), "set up");
     assert.equal(openSaveState({ ...owed, phase: "applied" }, 0), "applied");
+  });
+});
+
+describe("a player's ask for saves (docs/design-v1-player-save-spell.md 3.3)", () => {
+  test("the plan carries the ask it answers, so the outcome closes it in the same op", () => {
+    const page: Page = { ...sunburst(13), cast: { ask: castAsk("k1", { area: undefined, targets: ["g1"] }), who: "Thorn" } };
+    const plan = buildPlan(page, DICE, [], { plan: "plan-1", newId: () => "e1" })!;
+    assert.equal(plan.cast, "k1");
+    assert.equal(buildPlan({ ...page, cast: undefined } as Page, DICE, [], { plan: "plan-2", newId: () => "e2" })!.cast, undefined, "a plain group save closes none");
+  });
+
+  test("Apply sends the ask the page holds then, never one it let go", () => {
+    const page: Page = { ...sunburst(13), cast: { ask: castAsk("k1", { area: undefined, targets: ["g1"] }), who: "Thorn" } };
+    const plan = buildPlan(page, DICE, [], { plan: "plan-1", newId: () => "e1" })!;
+    const { cast: _held, ...free } = page;
+    const sent = apply(free, plan).send.find((c) => c.kind === "outcome");
+    assert.ok(sent && sent.kind === "outcome");
+    assert.equal(sent.op.cast, undefined, "withdrawn meanwhile: a plain outcome");
+    const blocked = apply({ ...page, cast: { ...page.cast!, blocked: "Resolved on another device." } }, plan);
+    assert.deepEqual([blocked.send, blocked.error], [[], "Resolved on another device."]);
   });
 });
