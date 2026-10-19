@@ -73,25 +73,12 @@ export function castFill(dice: DiceView, ask: CastAsk, slot?: number, opts: { im
   const fromArea = (): FillInput | null =>
     preset ? areaFill(dice, { spell: preset.name, casterId: ask.caster, ...(template?.label !== undefined ? { label: template.label } : {}) }, pick) : null;
   const fromRow = (): FillInput | null => (named ? actionFill(dice, named, { key: creatureKey(dice.view, { tokenId: ask.caster }), tokenId: ask.caster }, pick) : null);
-  const base = ask.area ? (fromArea() ?? fromRow()) : (fromRow() ?? fromArea());
+  const found = ask.area ? (fromArea() ?? fromRow()) : (fromRow() ?? fromArea());
 
   const level = named ? spellLevel(named, ask.spell) : preset?.level;
   const leveled = level !== undefined && level >= 1 ? Math.max(level, Math.min(9, Math.floor(pick ?? level))) : undefined;
-
-  if (!base) {
-    const at = leveled !== undefined ? ` at level ${leveled}` : "";
-    return {
-      input: {
-        test: { kind: "save", ability: "dex" },
-        dc: null,
-        spell: leveled !== undefined,
-        fill: { name: ask.spell, from: `From ${who}'s ${ask.spell}${at}: not on ${who}'s stat block, so set the save and the damage.`, caster: ask.caster },
-        outcome: leveled !== undefined ? { slot: leveled } : {},
-      },
-      damage: null,
-      says: null,
-    };
-  }
+  // With neither a row nor a preset, a Dexterity save with no DC, and the caster's roll still read below, since the server wrote it (SSB-A-05).
+  const base: FillInput = found ?? { test: { kind: "save", ability: "dex" }, dc: null, spell: leveled !== undefined, fill: { name: ask.spell, from: "", caster: ask.caster }, outcome: {} };
 
   const outcome = { ...base.outcome, ...(base.outcome.slot === undefined && leveled !== undefined ? { slot: leveled } : {}) };
   let fill = base.fill;
@@ -115,8 +102,15 @@ export function castFill(dice: DiceView, ask: CastAsk, slot?: number, opts: { im
   }
 
   const at = outcome.slot !== undefined ? ` at level ${outcome.slot}` : "";
-  const dcFrom = base.dc !== null && base.spell ? `${who}'s spell save DC` : null;
-  const from = fromLine(`${who}'s ${fill.name}${at}`, base.test, base.dc, dcFrom, outcome.damage ?? "", outcome.onPass ?? "half", outcome.conditions ?? [], rolledWords);
+  let from: string;
+  if (found) {
+    const dcFrom = base.dc !== null && base.spell ? `${who}'s spell save DC` : null;
+    from = fromLine(`${who}'s ${fill.name}${at}`, base.test, base.dc, dcFrom, outcome.damage ?? "", outcome.onPass ?? "half", outcome.conditions ?? [], rolledWords);
+  } else {
+    from = rolledWords
+      ? `From ${who}'s ${ask.spell}${at}: not on ${who}'s stat block, so set the save. ${outcome.damage}, ${rolledWords}.`
+      : `From ${who}'s ${ask.spell}${at}: not on ${who}'s stat block, so set the save and the damage.`;
+  }
   return { input: { ...base, fill: { ...fill, from }, outcome }, damage, says };
 }
 

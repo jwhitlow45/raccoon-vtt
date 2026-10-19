@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
+import { blockActions } from "#shared/dice/named.ts";
 import type { RoomState } from "#shared/model.ts";
-import { ASKS_WAITING } from "#shared/permissions.ts";
-import type { ClientOp } from "#shared/protocol.ts";
-import { P1, castAsk, castTable, diceLine, damageRoll, token } from "#shared/testutil.ts";
+import { ASKS_WAITING, canApply } from "#shared/permissions.ts";
+import { projectState } from "#shared/project.ts";
+import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
+import { monsterView, statBlockOf } from "#shared/statBlock.ts";
+import { P1, castAsk, castTable, customMonster, diceLine, damageRoll, token } from "#shared/testutil.ts";
 import type { OnAnswer } from "../../../state/types.ts";
 import { ReceiptTracker } from "../useReceipt.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import {
   SELECT_TARGETS,
+  TOO_MANY_TARGETS,
   areaAskSpec,
   askAgain,
   askFor,
@@ -22,7 +26,9 @@ import {
   fillRolls,
   forgetSend,
   openedBlock,
+  pendingSend,
   readCastDraft,
+  restoreSends,
   rolledText,
   rollWords,
   selectionTargets,
@@ -35,6 +41,7 @@ import {
   withdrawAsk,
   writeCastDraft,
   type CastEnv,
+  type CastSend,
   type CastSends,
 } from "./cast.ts";
 
@@ -70,17 +77,41 @@ describe("the block", () => {
       { tokenId: "thorn", characterId: "thorn-c" },
     ];
     const area = view.templates.a1!;
-    assert.deepEqual(areaAskSpec({ creatures, view, template: area, picked: "c:bree-c" }), { key: "c:thorn-c", creature: { characterId: "thorn-c" }, spell: "Fireball", area: "a1" });
+    assert.deepEqual(areaAskSpec({ creatures, view, me: "p1", template: area, picked: "c:bree-c" }), { key: "c:thorn-c", creature: { characterId: "thorn-c" }, spell: "Fireball", area: "a1" });
     const uncast = { ...area, casterId: undefined };
-    assert.equal(areaAskSpec({ creatures, view, template: uncast, picked: "c:thorn-c" })?.key, "c:thorn-c", "the panel's pick");
-    assert.equal(areaAskSpec({ creatures, view, template: uncast, picked: null })?.key, "c:bree-c", "their first");
-    assert.equal(areaAskSpec({ creatures: [], view, template: area, picked: null }), null, "none of theirs here");
-    assert.equal(areaAskSpec({ creatures: [{ tokenId: "g1" }], view, template: { ...area, spell: undefined, label: "Stinking cloud" }, picked: null })?.spell, "Stinking cloud");
+    assert.equal(areaAskSpec({ creatures, view, me: "p1", template: uncast, picked: "c:thorn-c" })?.key, "c:thorn-c", "the panel's pick");
+    assert.equal(areaAskSpec({ creatures, view, me: "p1", template: uncast, picked: null })?.key, "c:bree-c", "their first");
+    assert.equal(areaAskSpec({ creatures: [], view, me: "p1", template: area, picked: null }), null, "none of theirs here");
+    assert.equal(areaAskSpec({ creatures: [{ tokenId: "g1" }], view, me: "p1", template: { ...area, spell: undefined, label: "Stinking cloud" }, picked: null })?.spell, "Stinking cloud");
   });
 
-  test("opening it pins the panel's pick to its creature", () => {
+  test("a lent token whose character the player does not play asks and rolls by its token, which the server takes (SSB-A-04)", () => {
+    const view = castTable();
+    view.tokens.lent = token("lent", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree-c" }, x: 7, y: 4 });
+    const area = { ...view.templates.a1!, casterId: "lent" };
+    const spec = areaAskSpec({ creatures: [{ tokenId: "lent", characterId: "bree-c" }], view, me: "p1", template: area, picked: null })!;
+    assert.deepEqual(spec.creature, { tokenId: "lent" });
+    assert.equal(spec.key, "c:bree-c", "keyed as playerCreatures keys it");
+    const roll = (creature: { tokenId: string } | { characterId: string }): ClientOp => ({ t: "dice.roll", tag: "r1", to: "all", rolls: [{ formula: "8d6", label: "Fireball damage, Fire", creature }] });
+    assert.deepEqual(canApply(roll(spec.creature as { tokenId: string }), P1, view, { canUseAsset: () => true }), { ok: true });
+    assert.equal(canApply(roll({ characterId: "bree-c" }), P1, view, { canUseAsset: () => true }).ok, false, "by the character it would be refused");
+  });
+
+  test("opening it pins the panel's pick to its creature, and takes back a send of its own that has not settled well", () => {
     const spec = { key: "c:thorn-c", creature: { characterId: "thorn-c" }, spell: "Hold Person", roll: "spells:hold-person" };
     assert.deepEqual(openedBlock(spec), { cast: spec, picked: "c:thorn-c" });
+    assert.deepEqual(openedBlock({ ...spec, sent: "old" }), { cast: spec, picked: "c:thorn-c" }, "a fresh block drops a stale send");
+    assert.deepEqual(openedBlock(spec, "ask-1"), { cast: { ...spec, sent: "ask-1" }, picked: "c:thorn-c" });
+    const send = (id: string, over: Record<string, unknown>) => ({ id, key: "c:thorn-c", spell: "Fireball", ask: { caster: "thorn", sceneId: "s1", spell: "Fireball", area: "a1" }, area: "a1", ...over });
+    const sends = { r: send("r", {}), x: send("x", { area: "a2" }), t: send("t", { area: undefined, roll: "spells:hold-person", spell: "Hold Person" }) };
+    const refused = { state: "refused" as const, code: "quota" as const, message: ASKS_WAITING, text: ASKS_WAITING, parts: [] };
+    const state = (id: string) => (id === "r" || id === "t" ? (refused as never) : null);
+    const area = { key: "c:thorn-c", spell: "Fireball", area: "a1" };
+    assert.equal(pendingSend({ spec: area, sends, casts: {}, state })?.id, "r", "the same area's refused send");
+    assert.equal(pendingSend({ spec: { ...area, area: "a2" }, sends, casts: {}, state })?.id, "x", "one still on its way");
+    assert.equal(pendingSend({ spec: area, sends, casts: { r: {} }, state }), undefined, "one asked is the waiting line's");
+    assert.equal(pendingSend({ spec, sends, casts: {}, state })?.id, "t", "the same row's");
+    assert.equal(pendingSend({ spec: { ...spec, key: "c:bree-c" }, sends, casts: {}, state }), undefined, "another creature's");
   });
 
   test("a leveled spell gets a level from its own to 9: the row's stepper where it has one, else the block's, as for Hold Person", () => {
@@ -123,15 +154,44 @@ describe("the block", () => {
     assert.equal(sendBlocked({ ...base, waiting: 3 }), ASKS_WAITING);
   });
 
-  test("the cap counts the asks whose caster exists and the player owns now, as the server counts them", () => {
-    const view = castTable({ casts: { k1: castAsk("k1"), k2: castAsk("k2", { caster: "gone" }), k3: castAsk("k3", { by: "p2" }) } });
-    assert.equal(waitingCount(view, P1), 1);
+  test("a selection past 50 targets is refused before anything rolls, and none is cut unseen (SSB-A-01)", () => {
+    const caster = castTable().tokens.thorn!;
+    const base = { blocked: null, casterName: "Thorn", caster, waiting: 0 };
+    assert.equal(sendBlocked({ ...base, targets: 50 }), null);
+    assert.equal(sendBlocked({ ...base, targets: 51 }), TOO_MANY_TARGETS);
+    assert.equal(TOO_MANY_TARGETS, "An ask names at most 50 targets. Select fewer.");
+    const ids = Array.from({ length: 51 }, (_, i) => `t${i}`);
+    assert.equal(askInput({ caster: "thorn", sceneId: "s1", spell: "Hold Person", targets: ids }).targets?.length, 51, "askInput sends what it is given");
+  });
+
+  test("the cap counts the player's own asks in their projected view, as the server counts them, after a scene change too (SSB-A-03)", () => {
+    const state = castTable({ casts: { k1: castAsk("k1"), k2: castAsk("k2", { caster: "gone" }), k3: castAsk("k3", { by: "p2" }), k4: castAsk("k4", { area: undefined, targets: ["g1"] }) } });
+    state.characters["thorn-c"]!.ownerIds = ["p1", "p2"];
+    const view = projectState(state, P1, { sceneId: "s1" }) as RoomState;
+    assert.equal(waitingCount(view, P1), 2, "k1 and k4: k2's caster is gone, and k3 is p2's");
+    // The DM moves the players to s2: Thorn's token leaves their view, the server still counts the asks, and so does the block.
+    state.meta.playerSceneId = "s2";
+    const away = projectState(state, P1, { sceneId: "s2" }) as RoomState;
+    assert.equal(away.tokens.thorn, undefined);
+    assert.equal(waitingCount(away, P1), 2);
   });
 
   test("its ask names the area, or the targets and the row's roll, with the spell's name cut to fit", () => {
     assert.deepEqual(askInput({ caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 4, area: "a1", targets: ["g1"], roll: "spells:fireball" }), { caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 4, area: "a1" });
     assert.deepEqual(askInput({ caster: "thorn", sceneId: "s1", spell: "Hold Person", targets: ["g1", "bree"], roll: "spells:hold-person" }), { caster: "thorn", sceneId: "s1", spell: "Hold Person", targets: ["g1", "bree"], roll: "spells:hold-person" });
     assert.ok(askInput({ caster: "thorn", sceneId: "s1", spell: "A very long name ".repeat(6), targets: ["g1"] }).spell.length <= 60);
+  });
+
+  test("a row of a long-named custom action keeps its whole key, and the op passes the protocol (SSB-O-1)", () => {
+    const name = "Breath of the Ancient Storm That Scours the Northern Wastes!";
+    assert.equal(name.length, 60);
+    const monster = customMonster("storm", { actions: [{ name, text: "Dexterity Saving Throw: DC 13, each creature in a 30-foot cone. Failure: 21 (6d6) Lightning damage. Success: Half damage." }] });
+    const named = blockActions(monsterView(statBlockOf(monster))).find((r) => r.save)!;
+    assert.ok(named.key.length > 64, `${named.key} is past an id's 64`);
+    const input = askInput({ caster: "thorn", sceneId: "s1", spell: named.name, targets: ["g1"], roll: named.key });
+    assert.equal(input.roll, named.key, "never dropped, since the DM's name fallback reads the cut name");
+    const op = { t: "cast.ask", cast: { ...input, id: "0192f0a8-6c1e-7a4b-9c3d-000000000001" } };
+    assert.equal(clientOpSchema.safeParse(op).success, true);
   });
 
   test("a roll's words read by type, and a toast for each DM's end", () => {
@@ -229,7 +289,7 @@ describe("the send", () => {
     p.sent[1]!.onAnswer("taken");
     assert.deepEqual(p.toasts, ["Asked the DM for saves against Fireball."]);
     assert.deepEqual(p.saved.at(-1), []);
-    assert.deepEqual(waitingLines(p.holder.view, p.env.store.getState().sends, (id) => p.env.tracker.state(id)), [{ id: "ask-1", spell: "Fireball", caster: "thorn", asked: true }]);
+    assert.deepEqual(waitingLines(p.holder.view, p.env.store.getState().sends, (id) => p.env.tracker.state(id)), [{ id: "ask-1", spell: "Fireball", caster: "thorn", phase: "asked" }]);
   });
 
   test("refused after its roll committed, Ask again names the same roll and never rolls it again", () => {
@@ -242,6 +302,32 @@ describe("the send", () => {
     assert.equal(p.rolled.length, 1, "rolled once");
     assert.deepEqual((p.sent.at(-1)!.op as { cast: { damage?: unknown } }).cast.damage, { tag: "roll-1", parts: 1 });
     assert.equal(p.env.store.getState().sends["ask-1"], undefined, "the refused send gives way to the new one");
+  });
+
+  test("a refused or unknown send for an area with no row leads the options with its Ask again, across a reload, until it is closed or held by its block (SSB-A-06)", async () => {
+    const p = page();
+    askFor(p.env, input());
+    p.sent[1]!.onAnswer("refused", { code: "quota", message: ASKS_WAITING, text: ASKS_WAITING });
+    const lines = () => waitingLines(p.holder.view, p.env.store.getState().sends, (id) => p.env.tracker.state(id));
+    assert.deepEqual(lines(), [{ id: "ask-1", spell: "Fireball", caster: "thorn", phase: "refused" }]);
+    assert.deepEqual(waitingLines(p.holder.view, p.env.store.getState().sends, (id) => p.env.tracker.state(id), "ask-1"), [], "its open block shows it in place");
+    // A reload: a new page restores the draft and settles each send by its receipt, refused and unknown alike.
+    for (const receipt of ["refused", "unknown"] as const) {
+      const q = page();
+      (q.env.tracker as ReceiptTracker).env = { lookup: () => Promise.resolve(receipt === "refused" ? { parts: [{ part: 0, state: "refused", code: "quota", message: ASKS_WAITING }] } : { parts: [] }), log: () => [] };
+      restoreSends(q.env, p.saved.at(-1) as CastSend[]);
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      const after = waitingLines(q.holder.view, q.env.store.getState().sends, (id) => q.env.tracker.state(id));
+      assert.equal(after.length, 1, `${receipt}: one line`);
+      assert.ok(after[0]!.phase === "refused" || after[0]!.phase === "unknown", `${receipt}: reads ${after[0]!.phase}`);
+      // Reopening the area's block takes it back, so the block offers Ask again rather than a second roll.
+      assert.equal(pendingSend({ spec: { key: "c:thorn-c", spell: "Fireball", area: "a1" }, sends: q.env.store.getState().sends, casts: {}, state: (id) => q.env.tracker.state(id) })?.id, "ask-1");
+      q.env.newId = () => "ask-9";
+      assert.equal(askAgain(q.env, "ask-1"), "ask-9");
+      assert.deepEqual(q.rolled, [], "Ask again rolls nothing");
+      assert.deepEqual((q.sent.at(-1)!.op as { cast: { damage?: unknown } }).cast.damage, { tag: "roll-1", parts: 1 }, "it names the first roll");
+    }
   });
 
   test("an unknown never sends again on its own, and only Ask again sends", () => {

@@ -129,6 +129,17 @@ describe("the group save an ask opens", () => {
     assert.equal(bare.input.fill.from, "From Thorn's Mystery Bolt: not on Thorn's stat block, so set the save and the damage.");
   });
 
+  test("a row gone or renamed before Open, with no preset, still takes the caster's stored roll (SSB-A-05)", () => {
+    const ask = castAsk("k13", { area: undefined, targets: ["g1"], roll: "gone", spell: "Mystery Bolt", slot: undefined, damage: { tag: "r6", parts: 1 }, rolled: [{ formula: "8d6", total: 28, type: "fire" }] });
+    const filled = castFill(dice(), ask);
+    assert.deepEqual([filled.input.test, filled.input.dc], [{ kind: "save", ability: "dex" }, null], "the DM sets the save");
+    assert.equal(filled.input.outcome.damage, "8d6 Fire");
+    assert.deepEqual(filled.damage, { tag: "r6", state: "committed", amounts: [28], imported: true });
+    assert.equal(filled.says, null);
+    assert.equal(filled.input.fill.from, "From Thorn's Mystery Bolt: not on Thorn's stat block, so set the save. 8d6 Fire, rolled 28 (Thorn's roll).");
+    assert.deepEqual(castStart(dice(), ask).damage, filled.damage, "Open seeds it");
+  });
+
   test("the seeded roll is left out of holdsRolls and rolledAny until the DM rolls or the page sends anything", () => {
     const page = pageOf(castAsk("k11", { slot: 3, ...ROLLED_31 }));
     assert.equal(page.damage?.imported, true);

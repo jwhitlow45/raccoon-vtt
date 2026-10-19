@@ -34,6 +34,7 @@ import {
   fillRolls,
   forgetSend,
   openedBlock,
+  pendingSend,
   phaseOf,
   rolledText,
   sameSpell,
@@ -97,14 +98,22 @@ function useSends(): Record<string, CastSend> {
 /** The row's own Ask for saves (3.1), where the DM's Group save stands. */
 export function AskForSavesButton(props: { spec: CastBlock; ref?: RefObject<HTMLButtonElement | null> }) {
   const store = useOptionStore();
+  const sendStore = useScoped(castSendsSlot);
+  const tracker = useCastTracker();
+  const room = useRoomStore();
+  const open = () => {
+    // A send of this row's that has not settled well comes back with its block, so it offers Ask again, never a second roll.
+    const pending = pendingSend({ spec: props.spec, sends: sendStore.getState().sends, casts: room.getState().view?.casts ?? {}, state: (id) => tracker.state(id) });
+    store.setState(openedBlock(props.spec, pending?.id));
+  };
   return (
-    <Button ref={props.ref} size="sm" aria-label={`Ask the DM for saves against ${props.spec.spell}`} onClick={() => store.setState(openedBlock(props.spec))}>
+    <Button ref={props.ref} size="sm" aria-label={`Ask the DM for saves against ${props.spec.spell}`} onClick={open}>
       Ask for saves
     </Button>
   );
 }
 
-/** A row's or a creature's ask: its open block, the asks waiting in the view, and its sends still settling (3.1, 3.2). */
+/** A row's or a creature's ask: its open block and the asks waiting in the view (3.1, 3.2). Its other sends lead the options (WaitingAsks), with or without a row. */
 export function RowCast(props: {
   dice: DiceView;
   creatureKey: string;
@@ -123,13 +132,11 @@ export function RowCast(props: {
   blockHere: boolean;
 }) {
   const spec = useOption((s) => s.cast);
-  const sends = useSends();
   const view = props.dice.view;
   const named = props.named;
   const mine = (s: { roll?: string; spell: string }) => named !== null && (s.roll === named.key || sameSpell(s.spell, named.name));
   const open = spec !== null && props.blockHere;
   const asks = named === null ? [] : Object.values(view.casts).filter((ask) => creatureKey(view, { tokenId: ask.caster }) === props.creatureKey && mine(ask));
-  const settling = named === null ? [] : Object.values(sends).filter((s) => s.key === props.creatureKey && mine(s) && view.casts[s.id] === undefined && s.id !== spec?.sent);
   const wasOpen = useRef(open);
   useEffect(() => {
     // Back to the row's Ask for saves when its block closes (6, Accessibility).
@@ -140,9 +147,6 @@ export function RowCast(props: {
     <>
       {asks.map((ask) => (
         <WaitingLine key={ask.id} ask={ask} />
-      ))}
-      {settling.map((send) => (
-        <SendStatus key={send.id} send={send} />
       ))}
       {open && spec ? <CastBlockView {...props} spec={spec} /> : null}
     </>
@@ -368,15 +372,19 @@ function OwnLevel(props: { spell: string; min: number; value: number; onChange(n
 }
 
 /**
- * Every waiting ask of the player's, leading the Dice panel's options (3.2),
- * named for its caster when that is not the picked creature, so one shows
- * with the panel scrolled off its row, and one whose caster has no chip can
- * still be withdrawn.
+ * Every ask of the player's leading the Dice panel's options (3.2), named
+ * for its caster when that is not the picked creature: the waiting ones
+ * with Withdraw, the sends on their way, and those refused or unknown with
+ * Ask again. They show with the panel scrolled off any row, for a caster
+ * with no chip (a lent token off the players' scene) and for an area whose
+ * spell has no row, after a reload or a replaced block too. The send an
+ * open block shows in place is left to it.
  */
 export function WaitingAsks(props: { view: RoomState; pickedKey: string | null }) {
   const env = useCastEnv();
   const sends = useSends();
-  const lines = waitingLines(props.view, sends, (id) => env.tracker.state(id));
+  const held = useOption((s) => s.cast?.sent ?? null);
+  const lines = waitingLines(props.view, sends, (id) => env.tracker.state(id), held);
   if (lines.length === 0) return null;
   const casterName = (id: string) => {
     const token = props.view.tokens[id];
@@ -388,9 +396,10 @@ export function WaitingAsks(props: { view: RoomState; pickedKey: string | null }
       {lines.map((line) => {
         const other = creatureKey(props.view, { tokenId: line.caster }) !== props.pickedKey;
         const caster = other ? casterName(line.caster) : undefined;
-        return line.asked ? (
-          <WaitingLine key={line.id} ask={{ id: line.id, spell: line.spell }} {...(caster ? { caster } : {})} />
-        ) : (
+        const send = sends[line.id];
+        if (line.phase === "asked") return <WaitingLine key={line.id} ask={{ id: line.id, spell: line.spell }} {...(caster ? { caster } : {})} />;
+        if (line.phase !== "sending" && send) return <SendStatus key={line.id} send={send} />;
+        return (
           <div key={line.id} style={LINE}>
             {caster ? `${caster}'s ${line.spell}: asking` : `${line.spell}: asking`} the DM for saves…
           </div>

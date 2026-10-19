@@ -128,7 +128,15 @@ function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) 
   const last = props.selected[props.selected.length - 1];
   const selectedKey = last !== undefined ? creatureKey(view, { tokenId: last }) : null;
   const current = options.find((o) => o.key === picked) ?? options.find((o) => o.key === selectedKey) ?? options[0];
-  if (!current) return <Note>Your character's rolls show here once you play one.</Note>;
+  // An ask stays in reach with no creature to pick, as for a lent token off the players' scene (docs/design-v1-player-save-spell.md 3.2).
+  if (!current) {
+    return (
+      <>
+        <WaitingAsks view={view} pickedKey={null} />
+        <Note>Your character's rolls show here once you play one.</Note>
+      </>
+    );
+  }
   return (
     <>
       <WaitingAsks view={view} pickedKey={current.key} />

@@ -618,7 +618,8 @@ function forPlayer(op: Op, c: Check): Decision {
       const template = c.state.templates[op.templateId];
       if (!template || !c.visible(keys.template(op.templateId))) return GONE;
       if (template.ownerId !== c.actor.memberId) return NOT_YOURS;
-      if (askedArea(c.state, template.id)) return refuse("forbidden", AREA_ASKED);
+      const asked = askedAreaRefusal(c, template.id);
+      if (asked) return asked;
       if (op.patch.visibility !== undefined && op.patch.visibility !== "all") return refuse("forbidden", "players cannot hide areas");
       if (op.patch.attachedTo && !c.visibleToken(op.patch.attachedTo)) return GONE;
       if (op.patch.casterId && !c.visibleToken(op.patch.casterId)) return GONE;
@@ -628,7 +629,7 @@ function forPlayer(op: Op, c: Check): Decision {
       const template = c.state.templates[op.templateId];
       if (!template || !c.visible(keys.template(op.templateId))) return GONE;
       if (template.ownerId !== c.actor.memberId) return NOT_YOURS;
-      return askedArea(c.state, template.id) ? refuse("forbidden", AREA_ASKED) : OK;
+      return askedAreaRefusal(c, template.id) ?? OK;
     }
 
     case "drawing.create": {
@@ -1002,6 +1003,20 @@ export const ROLL_ASKED_ALREADY = "That roll already went with another ask.";
 export const ASKS_WAITING = `You have ${LIMITS.castsPerMember} asks waiting. Withdraw one first.`;
 /** The refusal of a change to an area its player asked saves for, until the ask closes (5.4). */
 export const AREA_ASKED = "Saves asked. Withdraw to change it.";
+/** The same refusal where its owner can no longer withdraw the ask: its caster is gone, or passed to another player. */
+export const AREA_ASKED_DM = "Saves were asked for this area. The DM can dismiss the ask.";
+
+/**
+ * An asked area stays fixed for its owner (5.4), and the refusal says who
+ * can free it: the owner by Withdraw while they own the caster, else only
+ * the DM's Dismiss, since an ask whose caster is gone or passed on is no
+ * longer theirs to withdraw.
+ */
+function askedAreaRefusal(c: Check, templateId: string): Decision | null {
+  const asks = Object.values(c.state.casts).filter((ask) => ask.area === templateId);
+  if (asks.length === 0) return null;
+  return refuse("forbidden", asks.some((ask) => c.ownsTokenId(ask.caster)) ? AREA_ASKED : AREA_ASKED_DM);
+}
 
 /** Whether an open ask for saves names this area, which locks it for its player (docs/design-v1-player-save-spell.md 5.4). */
 export function askedArea(state: Pick<RoomState, "casts">, templateId: string): boolean {

@@ -1,10 +1,12 @@
 import type { AreaTemplate } from "#shared/model.ts";
 import { askedArea } from "#shared/permissions.ts";
+import { useScoped } from "../../../state/scope.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { areaCreatures } from "../../areas/caster.ts";
 import { NO_CREATURE } from "../../areas/FromControl.tsx";
 import { useOptionStore } from "../optionState.ts";
-import { areaAskSpec, areaSpellName, openedBlock } from "./cast.ts";
+import { useCastTracker } from "./alerts.ts";
+import { areaAskSpec, areaSpellName, castSendsSlot, openedBlock, pendingSend } from "./cast.ts";
 
 /**
  * A player's Ask for saves on an area of their own (docs/design-v1-player-save-spell.md
@@ -18,6 +20,8 @@ export function useAreaAsk(template: Pick<AreaTemplate, "id" | "casterId" | "spe
   const room = useRoomStore();
   const options = useOptionStore();
   const ui = useRoomUi();
+  const sendStore = useScoped(castSendsSlot);
+  const tracker = useCastTracker();
   const asked = useRoomView((s) => (s.view ? askedArea(s.view, template.id) : false));
   const none = useRoomView((s) => {
     const { view, you } = s;
@@ -26,10 +30,12 @@ export function useAreaAsk(template: Pick<AreaTemplate, "id" | "casterId" | "spe
   const open = () => {
     const { view, you } = room.getState();
     if (!view || !you) return;
-    const spec = areaAskSpec({ creatures: areaCreatures({ view, sceneId: template.sceneId, you }), view, template, picked: options.getState().picked });
+    const spec = areaAskSpec({ creatures: areaCreatures({ view, sceneId: template.sceneId, you }), view, me: you.memberId, template, picked: options.getState().picked });
     if (!spec) return;
+    // A send of this area's that has not settled well comes back with its block, so the block offers Ask again, never a second roll.
+    const pending = pendingSend({ spec, sends: sendStore.getState().sends, casts: view.casts, state: (id) => tracker.state(id) });
     // A bar's Roll asks the panel to scroll to the options the same way (dice/optionState.ts focus). A new block brings itself into view instead (CastBlock.tsx).
-    options.setState((s) => (asked ? { picked: spec.key, focus: s.focus + 1 } : openedBlock(spec)));
+    options.setState((s) => (asked ? { picked: spec.key, focus: s.focus + 1 } : openedBlock(spec, pending?.id)));
     ui.openPanel("dice");
   };
   const spell = areaSpellName(template);

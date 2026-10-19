@@ -1058,13 +1058,21 @@ const rollRequestInput = z.strictObject({
  * names the caster's damage roll, sent just before on the same socket, by
  * its tag and its batches. The server writes `by`, `at` and `rolled`.
  */
+/**
+ * A stat block roll's key (shared/dice/named.ts blockActions): its section
+ * (up to 16 characters), a colon, the slug of a name of up to 120, a
+ * repeat's "-NN" and a part's ":later", so well past an id's 64. A
+ * character's roll is keyed by its id, which fits too.
+ */
+const rollKey = line(160).min(1);
+
 const castInput = z
   .strictObject({
     id,
     caster: id,
     sceneId: id,
     spell: line(LIMITS.diceLabelChars).min(1),
-    roll: id.optional(),
+    roll: rollKey.optional(),
     slot: z.number().int().min(1).max(9).optional(),
     area: id.optional(),
     targets: z.array(id).min(1).max(LIMITS.rollTargets).optional(),

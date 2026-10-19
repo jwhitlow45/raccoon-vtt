@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS, checkLimits } from "./limits.ts";
 import type { RoomState, Viewer } from "./model.ts";
-import { AREA_ASKED, ASKS_WAITING, ASK_CLOSED, DM_RUNS_GROUP_SAVE, ONLY_ITS_PLAYER_WITHDRAWS, ROLL_ASKED_ALREADY, canApply, waitingAsks } from "./permissions.ts";
+import { AREA_ASKED, AREA_ASKED_DM, ASKS_WAITING, ASK_CLOSED, DM_RUNS_GROUP_SAVE, ONLY_ITS_PLAYER_WITHDRAWS, ROLL_ASKED_ALREADY, canApply, waitingAsks } from "./permissions.ts";
 import type { CastInput, Op } from "./protocol.ts";
 import { DM, P1, P2, castAsk, castTable, token } from "./testutil.ts";
 
@@ -133,6 +133,19 @@ describe("an asked area", () => {
     assert.equal(decide(state, { t: "template.update", templateId: "a1", patch: { size: 30 } }), `forbidden: ${AREA_ASKED}`);
     assert.equal(decide(state, { t: "template.delete", templateId: "a1" }), `forbidden: ${AREA_ASKED}`);
     assert.equal(decide(castTable(), { t: "template.delete", templateId: "a1" }), "ok", "with no ask open");
+  });
+
+  test("stays fixed when its owner can no longer withdraw the ask, and says the DM can dismiss it (SSB-O-3)", () => {
+    const gone = open();
+    delete gone.tokens.thorn;
+    assert.equal(decide(gone, { t: "cast.close", castId: "k1", end: "withdrawn" }), `gone: ${ASK_CLOSED}`, "its caster is gone, so no withdraw");
+    assert.equal(decide(gone, { t: "template.update", templateId: "a1", patch: { size: 30 } }), `forbidden: ${AREA_ASKED_DM}`);
+    assert.equal(decide(gone, { t: "template.delete", templateId: "a1" }), `forbidden: ${AREA_ASKED_DM}`);
+    const passed = open();
+    passed.characters["thorn-c"]!.ownerIds = ["p2"];
+    assert.equal(decide(passed, { t: "cast.close", castId: "k1", end: "withdrawn" }), `gone: ${ASK_CLOSED}`, "Thorn passed to another player");
+    assert.equal(decide(passed, { t: "template.delete", templateId: "a1" }), `forbidden: ${AREA_ASKED_DM}`);
+    assert.equal(decide(passed, { t: "cast.close", castId: "k1", end: "dismissed" }, DM), "ok", "the DM's Dismiss frees it");
   });
 
   test("is not locked for the DM, and a hidden area still answers as missing", () => {

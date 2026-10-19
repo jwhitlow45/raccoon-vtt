@@ -2,7 +2,7 @@ import type { StoreApi } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { LIMITS } from "#shared/limits.ts";
 import type { AreaTemplate, CastAsk, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
-import { ASKS_WAITING, waitingAsks } from "#shared/permissions.ts";
+import { ASKS_WAITING } from "#shared/permissions.ts";
 import type { ActorTarget, CastInput, ClientOp } from "#shared/protocol.ts";
 import { labelDamageType } from "#shared/reducer/casts.ts";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
@@ -56,17 +56,42 @@ export function areaSpellName(t: Pick<AreaTemplate, "spell" | "label" | "shape" 
  * has picked when it stands here, else on their first creature here. Null
  * with none of theirs on this scene, the From control's case.
  */
-export function areaAskSpec(input: { creatures: readonly Pick<AreaCreature, "tokenId" | "characterId">[]; view: Pick<RoomState, "tokens">; template: Pick<AreaTemplate, "id" | "casterId" | "spell" | "label" | "shape" | "size">; picked: string | null }): CastBlock | null {
+export function areaAskSpec(input: {
+  creatures: readonly Pick<AreaCreature, "tokenId" | "characterId">[];
+  view: Pick<RoomState, "tokens" | "characters">;
+  me: string;
+  template: Pick<AreaTemplate, "id" | "casterId" | "spell" | "label" | "shape" | "size">;
+  picked: string | null;
+}): CastBlock | null {
   const keyOf = (c: Pick<AreaCreature, "tokenId" | "characterId">) => (c.characterId !== undefined ? `c:${c.characterId}` : creatureKey(input.view, { tokenId: c.tokenId }));
   const pick = input.creatures.find((c) => c.tokenId === input.template.casterId) ?? input.creatures.find((c) => keyOf(c) === input.picked) ?? input.creatures[0];
   if (!pick) return null;
-  const creature: ActorTarget = pick.characterId !== undefined ? { characterId: pick.characterId } : { tokenId: pick.tokenId };
+  // As playerCreatures names it: by its character only where the player plays that character, else by the token the DM lent, which the server lets them roll for.
+  const owns = pick.characterId !== undefined && (input.view.characters[pick.characterId]?.ownerIds ?? []).includes(input.me);
+  const creature: ActorTarget = owns ? { characterId: pick.characterId! } : { tokenId: pick.tokenId };
   return { key: keyOf(pick), creature, spell: areaSpellName(input.template), area: input.template.id };
 }
 
-/** Opening a block (3.1): one at a time, and the panel's pick pinned to its creature, so selecting targets never moves it. */
-export function openedBlock(spec: CastBlock): Pick<OptionState, "cast" | "picked"> {
-  return { cast: spec, picked: spec.key };
+/**
+ * Opening a block (3.1): one at a time, and the panel's pick pinned to its
+ * creature, so selecting targets never moves it. `sent` is a send of the
+ * same block that has not settled well, which the block shows again, so it
+ * offers Ask again rather than a second roll.
+ */
+export function openedBlock(spec: CastBlock, sent?: string): Pick<OptionState, "cast" | "picked"> {
+  const { sent: _old, ...rest } = spec;
+  return { cast: sent !== undefined ? { ...rest, sent } : rest, picked: spec.key };
+}
+
+/** The send a reopened block takes back: one for the same creature and the same area, or the same row, still sending, refused or unknown. */
+export function pendingSend(input: { spec: Pick<CastBlock, "key" | "spell" | "roll" | "area">; sends: Readonly<Record<string, CastSend>>; casts: Readonly<Record<string, unknown>>; state: (id: string) => ReceiptState | null }): CastSend | undefined {
+  const { spec } = input;
+  const same = (s: CastSend) => s.key === spec.key && (spec.area !== undefined ? s.area === spec.area : s.area === undefined && (spec.roll !== undefined && s.roll !== undefined ? s.roll === spec.roll : sameSpell(s.spell, spec.spell)));
+  return Object.values(input.sends).find((s) => {
+    if (!same(s)) return false;
+    const phase = phaseOf(input.state(s.id), input.casts[s.id] !== undefined);
+    return phase === "sending" || phase === "refused" || phase === "unknown";
+  });
 }
 
 /** Whether a row's name is the spell's, as the group save finds a caster's own spell by name (groupSave/fills.ts ownSpell). */
@@ -144,6 +169,9 @@ export function targetsLine(names: readonly string[]): string {
   return names.length === 0 ? "Select the creatures it targets on the map." : `Targets (${names.length}): ${names.join(", ")}`;
 }
 
+/** The refusal of a selection past what one ask names, before anything rolls, so no target is dropped unseen. */
+export const TOO_MANY_TARGETS = `An ask names at most ${LIMITS.rollTargets} targets. Select fewer.`;
+
 /** The refusal of a send with no target, on the disabled button. */
 export const SELECT_TARGETS = "Select the creatures it targets";
 
@@ -156,13 +184,19 @@ export function sendBlocked(input: { blocked: string | null; casterName: string;
   if (input.blocked) return input.blocked;
   if (!input.caster) return `${input.casterName} is not on this scene.`;
   if (input.targets === 0) return SELECT_TARGETS;
+  if (input.targets !== null && input.targets > LIMITS.rollTargets) return TOO_MANY_TARGETS;
   if (input.waiting >= LIMITS.castsPerMember) return ASKS_WAITING;
   return null;
 }
 
-/** The asks that count against the viewer's cap, from their own view, as the server counts them. */
-export function waitingCount(view: Pick<RoomState, "casts" | "tokens" | "characters">, you: Viewer): number {
-  return waitingAsks(view, you).length;
+/**
+ * The asks that count against the viewer's cap, as the server counts them:
+ * their own whose caster exists and they own now. Their view holds exactly
+ * the asks whose caster they own, the projection's rule, whether or not the
+ * caster's token is on the scene they see, so this counts their own there.
+ */
+export function waitingCount(view: Pick<RoomState, "casts">, you: Pick<Viewer, "memberId">): number {
+  return Object.values(view.casts).filter((ask) => ask.by === you.memberId).length;
 }
 
 /** The ask an open block sends, less its id and its damage roll, which the send adds. */
@@ -171,7 +205,8 @@ export function askInput(input: { caster: string; sceneId: string; spell: string
   if (input.slot !== undefined) out.slot = input.slot;
   if (input.area !== undefined) out.area = input.area;
   else {
-    out.targets = input.targets.slice(0, LIMITS.rollTargets);
+    // The block refuses a selection past the limit before anything goes (sendBlocked), so nothing is cut here unseen.
+    out.targets = [...input.targets];
     if (input.roll !== undefined) out.roll = input.roll;
   }
   return out;
@@ -352,21 +387,25 @@ export function withdrawAsk(env: CastEnv, askId: string): number | null {
   return n;
 }
 
-/** A waiting line (3.2): an ask in the view, or a send that waits for its answer. */
-export type WaitingLine = { id: string; spell: string; caster: string; asked: boolean };
+/** A line leading the options (3.2): an ask in the view, a send that waits for its answer, or one refused or unknown, which keeps Ask again. */
+export type WaitingLine = { id: string; spell: string; caster: string; phase: "asked" | "sending" | "refused" | "unknown" };
 
 /**
- * Every waiting ask of the player's, the asks in their view (the
- * projection holds only those whose caster they own) and the sends still
- * waiting for an answer, oldest first.
+ * Every ask of the player's that leads the Dice panel's options, with or
+ * without a creature to pick and whatever rows it has: the asks in their
+ * view (the projection holds only those whose caster they own), the sends
+ * still waiting for an answer, and the sends refused or unknown that the
+ * person has not closed, oldest first. `held` is the send an open block
+ * shows in place, left out here.
  */
-export function waitingLines(view: Pick<RoomState, "casts">, sends: Readonly<Record<string, CastSend>>, state: (id: string) => ReceiptState | null): WaitingLine[] {
+export function waitingLines(view: Pick<RoomState, "casts">, sends: Readonly<Record<string, CastSend>>, state: (id: string) => ReceiptState | null, held: string | null = null): WaitingLine[] {
   const out: WaitingLine[] = Object.values(view.casts)
     .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))
-    .map((ask: CastAsk) => ({ id: ask.id, spell: ask.spell, caster: ask.caster, asked: true }));
+    .map((ask: CastAsk) => ({ id: ask.id, spell: ask.spell, caster: ask.caster, phase: "asked" }));
   for (const send of Object.values(sends)) {
-    if (view.casts[send.id] !== undefined) continue;
-    if (phaseOf(state(send.id), false) === "sending") out.push({ id: send.id, spell: send.spell, caster: send.ask.caster, asked: false });
+    if (view.casts[send.id] !== undefined || send.id === held) continue;
+    const phase = phaseOf(state(send.id), false);
+    if (phase === "sending" || phase === "refused" || phase === "unknown") out.push({ id: send.id, spell: send.spell, caster: send.ask.caster, phase });
   }
   return out;
 }
