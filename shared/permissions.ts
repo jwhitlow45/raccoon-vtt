@@ -1272,6 +1272,11 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
     if (!may.ok) return may;
     if (!withinReach(settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far to ${op.kind === "drag" ? "drag" : "carry"}`);
     if (!moveCheck(c, carried.id).ok && !grappledShown(c, carried)) return refuse("forbidden", `${shownName(carried)} is not marked Grappled`);
+    // A creature carried by a creature steps onto its seat, which meets the walls as every attach but a drag does (4.1).
+    if (op.kind !== "drag") {
+      const walls = legCheck(c, carried.id, op, false);
+      if (!walls.ok) return walls;
+    }
   } else {
     for (const id of [carried.id, holder.id]) {
       const may = moveCheck(c, id);

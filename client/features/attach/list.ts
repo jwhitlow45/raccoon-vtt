@@ -5,7 +5,7 @@ import { sizeCategory } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
-import { attachAllowed, grappledSeen, grapples, type AttachViewer } from "./rights.ts";
+import { attachAllowed, grappledSeen, type AttachViewer } from "./rights.ts";
 
 /**
  * The Attach list (docs/design-v1-attach.md 4.1), as plain functions for
@@ -122,14 +122,15 @@ function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice,
   // The DM's limits count the whole graph, a player's what every player sees and the two named (8.0).
   const inGraph = viewer.role === "dm" ? () => true : (t: { id: string }) => t.id === carried.id || t.id === holder.id || seenByAll(view, t.id);
   if (linkLimitRefusal(view.tokens, carried.id, holder.id, inGraph, names) !== null) return null;
-  if (viewer.role === "player" && onHolder(kind) && !grapples(kind, carried, holder) && stepStopped(view, carried, at)) return null;
+  if (viewer.role === "player" && onHolder(kind) && stepStopped(view, carried, at)) return null;
   return { key: `${choice}:${carried.id}:${holder.id}`, otherId: other.id, choice, kind, carriedId: carried.id, holderId: holder.id, text: sentence(choice, otherName), at, farther };
 }
 
 /**
  * Whether a wall stops the step onto a seat, on a scene whose walls stop a
- * player's moves (shared/permissions.ts legCheck). A grappled creature is
- * lifted, not walked, and a token rising where it stands crosses no edge.
+ * player's moves (shared/permissions.ts legCheck): every attach but a drag
+ * steps onto its seat, a grappled creature carried by a creature included
+ * (docs/design-v1-attach.md 4.1). A token rising where it stands crosses no edge.
  */
 function stepStopped(view: RoomState, carried: Token, at: AttachRow["at"]): boolean {
   if (view.scenes[carried.sceneId]?.blockMovement !== true || (at.x === carried.x && at.y === carried.y)) return false;

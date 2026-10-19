@@ -95,6 +95,14 @@ describe("the Attach list", () => {
     assert.equal(attachRows(state, dm, "thorn").some((r) => r.kind === "ride"), true);
   });
 
+  test("so is a grappled creature's seat on its carrier, while its drag stays, since a drag leaves it where it stands", () => {
+    const state = world({ edges: line("w", 5, 0, 30), tokens: Object.values(table().tokens) });
+    const texts = attachRows(asPlayer(state), p1, "thorn").map((r) => r.text);
+    assert.equal(texts.includes("Carry Kobold"), false);
+    assert.equal(texts.includes("Drag Kobold"), true);
+    assert.equal(attachRows(state, dm, "thorn").some((r) => r.text === "Carry Kobold"), true);
+  });
+
   test("a link already made, a seat that does not fit and the limits are left out", () => {
     const state = table();
     state.tokens.thorn = { ...state.tokens.thorn!, attached: { to: "horse", kind: "ride" } };

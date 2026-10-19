@@ -62,6 +62,20 @@ describe("ride, perch and carry (6)", () => {
     assert.equal(answer(walled, ride()), `forbidden: ${WALL_IN_THE_WAY}`);
   });
 
+  test("so does a creature carried by a creature: it is lifted onto its seat, never through a wall, while a drag leaves it where it stands", () => {
+    const edges: Record<string, EdgeFeature> = {};
+    for (let y = 0; y < 10; y++) edges[`7,${y},w`] = { kind: "wall" };
+    const walled = table((s) => {
+      s.scenes.s1 = { ...s.scenes.s1!, blockMovement: true };
+      s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges };
+      s.tokens.gob = grappled({ ...s.tokens.gob!, size: "small" });
+    });
+    const carry: Op = { t: "token.attach", tokenId: "gob", to: "bree", kind: "carry", x: 6, y: 4, elevation: 0 };
+    assert.equal(answer(walled, carry), `forbidden: ${WALL_IN_THE_WAY}`);
+    assert.equal(answer(walled, carry, DM), "ok");
+    assert.equal(answer(walled, drag), "ok");
+  });
+
   test("a ride in a fight waits for the rider's own turn", () => {
     const fight = (active: string) =>
       table((s) => {
