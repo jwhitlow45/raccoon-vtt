@@ -17,6 +17,7 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../stat
 import { CastCard } from "../dice/cast/CastCard.tsx";
 import { castWho, deskAsks, foldedWithAsks } from "../dice/cast/castStart.ts";
 import { creatureRolls } from "../dice/creature.ts";
+import { useRestoreGroupSave } from "../dice/groupSave/start.ts";
 import { useGroupSave } from "../dice/groupSave/store.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
@@ -79,6 +80,7 @@ export function DmDesk() {
   const rolls = useRoomView((s) => s.view?.rolls ?? NO_ROLLS);
   const cards = useMemo(() => newestFirst(rolls), [rolls]);
   const casts = useRoomView((s) => s.view?.casts ?? NO_CASTS);
+  useRestoreGroupSave();
   const heldAsk = useGroupSave((s) => (s.page && s.page.phase !== "applied" ? (s.page.cast?.ask.id ?? null) : null));
   const asked = useMemo(() => deskAsks(casts, heldAsk), [casts, heldAsk]);
   const askWho = useRoomView((s) => (s.view && asked.length === 1 ? castWho(s.view, asked[0]!) : ""));

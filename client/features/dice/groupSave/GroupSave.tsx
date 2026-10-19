@@ -39,7 +39,6 @@ import {
   closeSettled,
   closeTheAsk,
   mayApplyAgain,
-  restoredPage,
   askAnswered,
   damageSent,
   discard,
@@ -59,7 +58,6 @@ import {
   stateOf,
   syncRequests,
   typeTotal,
-  readDraft,
   waitingTags,
   writeDraft,
   type Command,
@@ -992,18 +990,6 @@ export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
       </Button>
     </div>
   );
-}
-
-/** A reload brings the tab's group save back from its draft (5.10), once, for the DM. */
-export function useRestoreGroupSave(): void {
-  const store = useGroupSaveStore();
-  const roomId = useRoomView((s) => s.roomId);
-  const dm = useRoomView((s) => s.you?.role === "dm");
-  useEffect(() => {
-    if (!dm || store.getState().page || store.getState().restored) return;
-    const draft = readDraft(roomId);
-    store.setState({ restored: true, ...(draft ? { page: restoredPage(draft) } : {}) });
-  }, [dm, roomId, store]);
 }
 
 /**

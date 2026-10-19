@@ -1,11 +1,35 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { uuidv7 } from "#shared/ids.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { askSwitches } from "../../rolls/logic.ts";
-import { newPage, replace, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
+import { newPage, readDraft, replace, restoredPage, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
+
+/**
+ * Reads the tab's draft back once after a reload (5.10). The DM's alerts
+ * column does it as the room opens, not only the Dice panel, so the ask a
+ * kept page holds shows no card to open a second page from
+ * (docs/design-v1-player-save-spell.md 3.3), and a start reads it first, so
+ * a kept page with rolls is never replaced unasked.
+ */
+function restoreDraft(store: ReturnType<typeof useGroupSaveStore>, roomId: string): void {
+  const now = store.getState();
+  if (now.page || now.restored) return;
+  const draft = readDraft(roomId);
+  store.setState({ restored: true, ...(draft ? { page: restoredPage(draft) } : {}) });
+}
+
+/** A reload brings the tab's group save back from its draft, once, for the DM. */
+export function useRestoreGroupSave(): void {
+  const store = useGroupSaveStore();
+  const roomId = useRoomView((s) => s.roomId);
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  useEffect(() => {
+    if (dm) restoreDraft(store, roomId);
+  }, [dm, roomId, store]);
+}
 
 /**
  * Whether the page sent anything: rolls, requests or its damage line. The
@@ -52,6 +76,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
   const actions = useRoomActions();
   return useMemo(
     () => (input: StartInput, opts: { replace?: boolean } = {}) => {
+      restoreDraft(store, roomId);
       const old = store.getState().page;
       if (!opts.replace && holdsRolls(old)) return false;
       const out = replace(old);

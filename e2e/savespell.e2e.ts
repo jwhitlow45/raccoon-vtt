@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { AreaTemplate, LogEntry, LogEvent } from "../shared/model.ts";
-import { ConsoleWatch, dragCells, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, LoadWatch, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player's save spell end to end (docs/design-v1-player-save-spell.md 8),
@@ -19,7 +19,8 @@ import { ConsoleWatch, dragCells, OpSocket, pagePoint, pickTool, Shots, SocketWa
  * hidden goblin, rolls, Pat answers for Bree, and Apply resolves the ask.
  * Then Hold Person at level 3 goes from its row with both goblins selected,
  * and the DM sets it aside. An asked area offers Pat no move, size or
- * Delete until Pat withdraws.
+ * Delete until Pat withdraws. A reload of the DM's phone keeps the group
+ * save that holds an ask, so its card stays away until Discard.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-three, one file
  * after another as the others. The other environment variables are the
@@ -429,7 +430,44 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     await waitFor("the area's size back", async () => ((await hasSlot(pat, "size")) ? true : null));
   });
 
-  test("ss-7. nothing went wrong in the browsers", () => {
+  test("ss-7. the DM's phone reloads with an ask's group save open: the card stays away until Discard", async () => {
+    await pickTool(pat, "Select");
+    await tapCell(pat, BOUNDS, run.thorn);
+    await pat.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
+    await pat.getByRole("dialog", { name: "3 selected tokens" }).waitFor();
+    const dice = await openDice(pat);
+    await dice.getByRole("button", { name: "Ask the DM for saves against Hold Person" }).tap();
+    await dice.getByRole("group", { name: "Ask for saves: Hold Person" }).getByRole("button", { name: "Ask the DM", exact: true }).tap();
+    await waitFor("Hold Person's ask", () => Object.values(dmSocket.state?.casts ?? {})[0] ?? null);
+    await closeSheet(pat, "Dice");
+    const done = pat.getByRole("button", { name: "Done", exact: true });
+    if (await done.isVisible()) await done.tap();
+
+    const card = await dmCard("Thorn asks for saves: Hold Person");
+    await card.getByRole("button", { name: "Open the group save for Thorn's Hold Person" }).tap();
+    await dm.getByText("From Thorn's Hold Person", { exact: false }).first().waitFor();
+    // A phone that drops a background tab reloads it. The page comes back from its draft, so the ask has no card to start a second page from.
+    const loads = new LoadWatch();
+    loads.attach(dm);
+    await dm.reload();
+    await dm.locator(".konvajs-content").first().waitFor();
+    await loads.preloaded();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    assert.equal(await dm.getByRole("group", { name: "Thorn asks for saves: Hold Person" }).count(), 0, "the held ask showed its card after a reload");
+    const dmDice = await openDice(dm);
+    await dmDice.getByText("Hold Person's save", { exact: false }).first().waitFor();
+    await shots.take(dm, "savespell-reloaded-page");
+    await dmDice.getByRole("button", { name: "Open", exact: true }).first().tap();
+    await dmDice.getByRole("button", { name: "Discard", exact: true }).tap();
+    // Over a sheet the card folds into the alerts summary, so the sheet closes first.
+    await closeSheet(dm, "Dice");
+    const back = await dmCard("Thorn asks for saves: Hold Person");
+    await back.getByRole("button", { name: "Dismiss Thorn's Hold Person" }).tap();
+    await waitFor("the ask set aside", () => (Object.keys(dmSocket.state?.casts ?? {}).length === 0 ? true : null));
+  });
+
+  test("ss-8. nothing went wrong in the browsers", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} logged errors`);
   });
 });
