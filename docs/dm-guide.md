@@ -737,7 +737,7 @@ With **No save** ("No save: everyone takes it"), **Apply** shows at once, for da
 
 Press **Open** to start the group save from it. The page fills itself in from the caster's stat block as you see it, never from anything the player sent, and their roll is already in the damage: "From Thorn's Fireball at level 4: Dexterity save, DC 15 (Thorn's spell save DC), 9d6 Fire, rolled 31 (Thorn's roll), half on a pass." From there it is an ordinary group save, and everything on it is yours to change. **Roll again** or a typed amount replaces their roll, and changing the **Slot level** refills the damage for the new level. If the ask is on a scene you aren't looking at, the button reads **Go to Crypt and open**.
 
-**Apply** resolves the ask, and the caster's player sees "The DM resolved Fireball." When there is nothing to apply, say a Hold Person that every creature shrugged off, the button reads **Close the ask** instead. **Discard** leaves the ask waiting with its card back. To turn an ask down without a group save, press **Dismiss** on its card.
+**Apply** resolves the ask, and the caster's player sees "The DM resolved Fireball." When there is nothing to apply, the button reads **Close the ask** instead. Hold Person doesn't fill in Paralyzed for you yet, so add it under **On a fail** before you apply, or the button reads **Close the ask** even for the creatures that failed. **Discard** leaves the ask waiting with its card back. To turn an ask down without a group save, press **Dismiss** on its card.
 
 If the player withdraws the ask while you have it open, the page says so and carries on as a plain group save. If another of your devices already resolved it, **Apply** stays off with the reason, so a spell never lands twice. **Discard** is the way out.
 

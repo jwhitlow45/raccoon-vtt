@@ -1,6 +1,14 @@
 # raccoon-vtt v1: a player's save spell
 
-Status: draft 4, after design review rounds 1 to 3, whose decisions it takes (section 10). Code is cited from `main` at `06706b7c`, with known forms. It builds on docs/design-v1-roll-options.md ("doc 3": the group save, 5.1 to 5.10), docs/design-v1-roll-request.md ("doc 4": requests and `resultOf`), docs/design-v1-dice.md ("doc 1": tags, receipts and budgets), docs/design-v1-area-from-character.md (the From control) and docs/design-v1-dice-ui.md (4.4, a named row's line of controls). It redesigns none of them.
+Status: built. It reached consensus in design review round 3, whose decisions it takes (section 10), and the build follows it with the differences under "As built" below. Code is cited from `main` at `06706b7c`, with known forms. It builds on docs/design-v1-roll-options.md ("doc 3": the group save, 5.1 to 5.10), docs/design-v1-roll-request.md ("doc 4": requests and `resultOf`), docs/design-v1-dice.md ("doc 1": tags, receipts and budgets), docs/design-v1-area-from-character.md (the From control) and docs/design-v1-dice-ui.md (4.4, a named row's line of controls). It redesigns none of them.
+
+**As built.** Where the build differs from the text below:
+
+- The DM's card names the caster by its token in view, else the player who asked (3.3). "Else its character" cannot happen: without the token, the DM's view does not know which character it stood for.
+- Damage reads in the SRD's capitals in the field and the fill line, "9d6 Fire", as section 6 says, not "9d6 fire" (3.3).
+- `castFill` imports nothing when the field would not read back part for part (3.3's count rule), and also when the roll has two or more parts and any of them is untyped (SS-O-27), since an untyped part joins the part after it. A lone untyped part takes the fill's type, as a typed "28" does.
+- An ask with 50 targets is about 2 KiB, not under 1 KiB (5.6). The room's 20 waiting asks still bound what they hold.
+- A row's `roll` is a stat block key, which runs past an id's 64 characters, so it is bounded at 160 (5.3). A selection past 50 targets is refused before anything rolls, "An ask names at most 50 targets. Select fewer.", and nothing is cut unseen (3.1). Where the owner can no longer withdraw an ask (its caster gone, or passed to another player), the asked area's refusal reads "Saves were asked for this area. The DM can dismiss the ask." (5.4).
 
 The project owner asked on 2026-10-18: "just to confirm spell save rolls are currently in the pipeline right?" A save spell's row already shows its DC ("Sacred Flame DC 14 DEX, 1d8 Radiant"), and the DM's group save fills from a placed area and its caster. The player's half is missing: a player who casts Fireball, Hold Person or Sacred Flame has no way to ask for the saves.
 
