@@ -395,6 +395,73 @@ export function straightClear(state: BuildState, token: MovingToken, to: LegEnd)
   return partClear(leg, segs, atStart, px, py, qx, qy, true);
 }
 
+/**
+ * `straightClear` as a route search asks it (docs/design-v1-movement.md 5.1):
+ * the walls, the core and the ledges worked out once, and nothing allocated
+ * per step, since a search asks up to a million steps. The ledges count as
+ * for a leg from where the token stands, which a walk keeps all the way: a
+ * walker on the ground is stopped by every ledge, a flier keeps its height.
+ */
+export type StepTester = {
+  walls: WallSet;
+  /** Whether the core's straight sweep between two stored positions touches nothing it may not. */
+  clear(ax: number, ay: number, bx: number, by: number): boolean;
+  /** Whether the core fits at a stored position and blockers pinch the full footprint there, as a drag preview's squeeze is judged. */
+  pinched(x: number, y: number): boolean;
+};
+
+export function stepTester(state: BuildState, token: MovingToken): StepTester | null {
+  const scene = state.scenes[token.sceneId];
+  if (!scene) return null;
+  const walls = sceneWalls(scene, state.buildChunks);
+  const floor = ledgeFloor(walls, scene, token, token.elevation);
+  const { w, h } = footprintSize(token);
+  const core = coreSize(token);
+  const hx = core.w / 2;
+  const hy = core.h / 2;
+  const mask = MOVEMENT | (floor === Infinity ? 0 : LEDGE);
+  const xy = walls.stored.xy;
+  const index = walls.storedIndex;
+  const EPS = 1e-7;
+  let px = 0;
+  let py = 0;
+  let qx = 0;
+  let qy = 0;
+  let hit = false;
+  const visit = (k: number) => {
+    if (hit || !blocksMove(walls, k, floor)) return;
+    const ax = xy[4 * k]!;
+    const ay = xy[4 * k + 1]!;
+    const bx = xy[4 * k + 2]!;
+    const by = xy[4 * k + 3]!;
+    if (!sweptTouches(px, py, qx, qy, hx, hy, ax, ay, bx, by)) return;
+    // partClear's first part: a segment the core touches where it starts may be left toward the start's side.
+    if (sweptTouches(px, py, px, py, hx, hy, ax, ay, bx, by)) {
+      const side = orient(ax, ay, bx, by, px, py);
+      const toward = orient(0, 0, bx - ax, by - ay, qx - px, qy - py);
+      if (toward !== 0 && (side === 0 || toward === side)) return;
+    }
+    hit = true;
+  };
+  const squeezer: MovingToken = { ...token, squeeze: undefined };
+  return {
+    walls,
+    clear(ax, ay, bx, by) {
+      px = ax + w / 2;
+      py = ay + h / 2;
+      qx = bx + w / 2;
+      qy = by + h / 2;
+      if (px === qx && py === qy) return true;
+      hit = false;
+      index.query(Math.min(px, qx) - hx - EPS, Math.min(py, qy) - hy - EPS, Math.max(px, qx) + hx + EPS, Math.max(py, qy) + hy + EPS, mask, visit);
+      return !hit;
+    },
+    pinched(x, y) {
+      return squeezedThere(state, { ...squeezer, x: token.x, y: token.y }, { x, y }, false);
+    },
+  };
+}
+
 /** Section 4.1's test as the core asks it (shared/ruleHooks.ts). */
 export function legBlocker(state: BuildState, token: Token, to: LegEnd): Blocker | null {
   return legStop(state, token, to)?.blocker ?? null;

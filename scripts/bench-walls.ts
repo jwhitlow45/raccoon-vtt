@@ -29,7 +29,7 @@ import { planOne } from "../client/features/movement/drop.ts";
 const SIZE = 200;
 const CHUNK = 16;
 
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {
     a = (a + 0x6d2b79f5) | 0;
@@ -39,7 +39,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-type Build = { cells: Map<string, TerrainId>; edges: Map<string, EdgeFeature>; walls: FreeWall[]; heights?: Map<string, number>; marks?: Map<string, StairMark> };
+export type Build = { cells: Map<string, TerrainId>; edges: Map<string, EdgeFeature>; walls: FreeWall[]; heights?: Map<string, number>; marks?: Map<string, StairMark> };
 
 /**
  * A 200 x 200 dungeon of 20 x 20 rooms joined by doors and windows, a pillar
@@ -83,7 +83,7 @@ function drawnEverywhere(): Build {
  * edges, where each also cuts a long vertical run, and the rest of the drawn
  * edges are walls drawn over north edges' automatic ones.
  */
-function checkerboard(): Build {
+export function checkerboard(): Build {
   const cells = new Map<string, TerrainId>();
   const stride = Math.floor((SIZE * SIZE) / 2 / LIMITS.pillarsPerScene);
   let k = 0;
@@ -119,7 +119,7 @@ function wall(ax: number, ay: number, bx: number, by: number): FreeWall {
 }
 
 /** Random walls of 2 to 8 cells, at any angle, inside a square of `side` cells at (x0, y0). */
-function randomWalls(rand: () => number, count: number, x0: number, y0: number, side: number): FreeWall[] {
+export function randomWalls(rand: () => number, count: number, x0: number, y0: number, side: number): FreeWall[] {
   const out: FreeWall[] = [];
   while (out.length < count) {
     const ax = x0 + rand() * side;
@@ -150,7 +150,7 @@ function parallelWalls(count: number, x0: number, y0: number, pitch: number): Fr
 }
 
 /** The build as stored: 16 x 16 chunks, each free wall in the chunk of its midpoint. */
-function chunksOf(build: Build, sceneId: string): Record<string, BuildChunk> {
+export function chunksOf(build: Build, sceneId: string): Record<string, BuildChunk> {
   const out: Record<string, BuildChunk> = {};
   const at = (cx: number, cy: number) => (out[`${sceneId}:${cx},${cy}`] ??= { sceneId, cx, cy, rev: 1, cells: {}, edges: {} });
   for (const [key, terrain] of build.cells) {
@@ -182,7 +182,7 @@ function chunksOf(build: Build, sceneId: string): Record<string, BuildChunk> {
 }
 
 /** The longest prefix of `walls` whose scene stays within the caps, found by bisection (the counts only grow with more walls). */
-function atCap(base: Build, walls: FreeWall[]): number {
+export function atCap(base: Build, walls: FreeWall[]): number {
   const fits = (n: number) => countChunksSplit(Object.values(chunksOf({ ...base, walls: walls.slice(0, n) }, "probe")), "all").over === null;
   let lo = 0;
   let hi = walls.length;
