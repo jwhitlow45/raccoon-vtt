@@ -85,6 +85,84 @@ export const MAX_SETTLED = 200_000;
  */
 export const MAX_TRACED = 10_000;
 
+/**
+ * What route work may still do (docs/design-v1-movement.md 5.2), one object
+ * shared by every search, check and build that runs in a frame, so they
+ * stop together when it is spent. Work charges it in units: a state settled
+ * or traced, a lattice step checked, or a few hundred nodes of a world
+ * built, about a microsecond each on a development laptop. It is spent when
+ * its units reach `limit`, when the time its runs have taken (`begin` to
+ * `end`) reaches `ms`, or when `clock` passes `deadline`, the clock read
+ * every 16 units. Once spent it stays spent.
+ */
+export class WorkBudget {
+  units = 0;
+  readonly limit: number;
+  readonly ms: number;
+  readonly deadline: number;
+  readonly clock: () => number;
+  #since = 0;
+  #spent = false;
+  #took = 0;
+  #runAt: number | null = null;
+
+  constructor(opts: { limit?: number; ms?: number; deadline?: number; clock?: () => number } = {}) {
+    this.limit = opts.limit ?? Infinity;
+    this.ms = opts.ms ?? Infinity;
+    this.deadline = opts.deadline ?? Infinity;
+    this.clock = opts.clock ?? (() => performance.now());
+  }
+
+  /** No limit: work runs to the end, as a test, a drop's flush or `findRoute` needs. */
+  static all(): WorkBudget {
+    return new WorkBudget();
+  }
+
+  /** A budget already spent: reading what is known, doing no work. */
+  static none(): WorkBudget {
+    return new WorkBudget({ limit: 0 });
+  }
+
+  /** A budget for `deadline` as one caller's slice: the clock, read every 16 units, says when it is over. */
+  static until(deadline: number, clock?: () => number): WorkBudget {
+    return new WorkBudget(clock ? { deadline, clock } : { deadline });
+  }
+
+  /** A run of work begins: its time counts against `ms` until `end`. */
+  begin(): void {
+    if (this.#runAt === null && this.ms !== Infinity) this.#runAt = this.clock();
+  }
+
+  end(): void {
+    if (this.#runAt === null) return;
+    this.#took += this.clock() - this.#runAt;
+    this.#runAt = null;
+  }
+
+  charge(units = 1): void {
+    this.units += units;
+    this.#since += units;
+  }
+
+  get spent(): boolean {
+    if (this.#spent) return true;
+    if (this.units >= this.limit) return (this.#spent = true);
+    if ((this.ms === Infinity && this.deadline === Infinity) || this.#since < 16) return false;
+    this.#since = 0;
+    const now = this.clock();
+    const took = this.#took + (this.#runAt === null ? 0 : now - this.#runAt);
+    return (this.#spent = took >= this.ms || now > this.deadline);
+  }
+}
+
+/** A budget, or for one caller's own slice a `performance.now()` deadline. */
+export type Slice = WorkBudget | number;
+
+/** The units a world's build charges, by its lattice and its cells. */
+export function worldUnits(world: WalkWorld): number {
+  return Math.ceil((world.nx * world.ny + world.W * world.H) / 400);
+}
+
 /** The eight steps in lattice units, straight ones first. Their order fixes the route among equal ones, on every device. */
 const DX = [1, 0, -1, 0, 1, -1, -1, 1] as const;
 const DY = [0, 1, 0, -1, 1, 1, -1, -1] as const;
@@ -608,21 +686,27 @@ export class WalkSearch {
 
   /**
    * Runs until `to` is settled, nothing more can be reached, the cap is hit,
-   * or `deadline` (a `performance.now()` time) passes, checked every few
-   * hundred states.
+   * or the slice is spent: a budget shared with the frame's other work, or a
+   * `performance.now()` deadline of the caller's own. Each state settled is
+   * a unit.
    */
-  settle(to: Point, deadline = Infinity): SettleResult {
+  settle(to: Point, slice: Slice = Infinity): SettleResult {
     const target = this.world.nodeAt(to);
     if (target < 0) return "unreachable";
-    let polled = 0;
+    const budget = this.#budget(slice);
     while (this.#best[target]! < 0) {
       if (this.#capped) return "capped";
-      if (deadline !== Infinity && ++polled % 256 === 0 && this.#clock() > deadline) return "paused";
+      if (budget.spent) return "paused";
       const s = this.#heap.popValid((slot, cost, corners, len) => this.#done[slot] === 0 && this.#cost[slot] === cost && this.#corners[slot] === corners && this.#len[slot] === len);
       if (s < 0) return "unreachable";
       this.#settle(s);
+      budget.charge();
     }
     return "settled";
+  }
+
+  #budget(slice: Slice): WorkBudget {
+    return typeof slice === "number" ? (slice === Infinity ? WorkBudget.all() : WorkBudget.until(slice, this.#clock)) : slice;
   }
 
   /**
@@ -630,11 +714,11 @@ export class WalkSearch {
    * its own units (half feet, or feet under true distance), or all of them:
    * every route within a Dash, or a flood of the whole scene.
    */
-  flood(limit = Infinity, deadline = Infinity): "done" | "capped" | "paused" {
-    let polled = 0;
+  flood(limit = Infinity, slice: Slice = Infinity): "done" | "capped" | "paused" {
+    const budget = this.#budget(slice);
     for (;;) {
       if (this.#capped) return "capped";
-      if (deadline !== Infinity && ++polled % 256 === 0 && this.#clock() > deadline) return "paused";
+      if (budget.spent) return "paused";
       const s = this.#heap.popValid((slot, cost, corners, len) => this.#done[slot] === 0 && this.#cost[slot] === cost && this.#corners[slot] === corners && this.#len[slot] === len);
       if (s < 0) return "done";
       if (this.#cost[s]! > limit) {
@@ -642,6 +726,7 @@ export class WalkSearch {
         return "done";
       }
       this.#settle(s);
+      budget.charge();
     }
   }
 
@@ -802,12 +887,12 @@ export class WalkSearch {
    * traced its walk is kept, so the finger's every return to it and a
    * ruler's every frame reuse it.
    */
-  traceTo(to: Point, deadline = Infinity): WalkRoute | null | "paused" {
+  traceTo(to: Point, slice: Slice = Infinity): WalkRoute | null | "paused" {
     const n = this.world.nodeAt(to);
     if (n < 0 || this.#best[n]! < 0) return null;
     const known = this.#routes.get(n);
     if (known) return known;
-    const late = this.#lateness(deadline);
+    const late = this.#lateness(this.#budget(slice));
     // Another spot's trace under way is finished first, never thrown away.
     if (this.#job && this.#job.target !== n) {
       if (!this.#runTrace(this.#job, late)) return "paused";
@@ -822,15 +907,12 @@ export class WalkSearch {
     return route;
   }
 
-  /** A slice's clock: each call counts `units` of work, and every 16 or more units it says whether `deadline` has passed. */
-  #lateness(deadline: number): (units?: number) => boolean {
-    let since = 0;
+  /** A slice's check: each call charges `units` of work and says whether the budget is spent. */
+  #lateness(budget: WorkBudget): (units?: number) => boolean {
     return (units = 1) => {
       this.work += units;
-      since += units;
-      if (deadline === Infinity || since < 16) return false;
-      since = 0;
-      return this.#clock() > deadline;
+      budget.charge(units);
+      return budget.spent;
     };
   }
 
@@ -1063,7 +1145,7 @@ export class PieceBuilder {
   readonly #world: WalkWorld;
   readonly #steps: WalkSteps;
   readonly #fiveTen: boolean;
-  readonly #euclid: boolean;
+  readonly #taut: boolean;
   readonly #points: RoutePoint[];
   readonly #pieces: RoutePiece[] = [];
   // The grid rules' place.
@@ -1076,18 +1158,19 @@ export class PieceBuilder {
   #best = 0;
   #misses = 0;
 
-  constructor(world: WalkWorld, steps: WalkSteps) {
+  /** `taut` pulls the pieces taut under true distance, as a search's route is. A straight leg has nothing to pull, so its check leaves it off. */
+  constructor(world: WalkWorld, steps: WalkSteps, taut = world.input.rules.diagonal === "euclid") {
     this.#world = world;
     this.#steps = steps;
     this.#fiveTen = world.input.rules.diagonal === "fiveTen";
-    this.#euclid = world.input.rules.diagonal === "euclid";
+    this.#taut = taut;
     const first = steps.nodes[0]!;
     this.#points = [{ x: world.xOf(first), y: world.yOf(first), elevation: world.input.token.elevation }];
   }
 
   /** Builds until done, the route, or until `late` says the slice is over, null, to go on when asked again. */
   run(late: (units?: number) => boolean): WalkRoute | null {
-    if (this.#euclid ? !this.#taut(late) : !this.#grid(late)) return null;
+    if (this.#taut ? !this.#pullTaut(late) : !this.#grid(late)) return null;
     const last = this.#points[this.#points.length - 1]!;
     return { pieces: this.#pieces, points: this.#points, endsBlocked: this.#world.endOnly(last.x, last.y, last.elevation) };
   }
@@ -1120,7 +1203,7 @@ export class PieceBuilder {
     return true;
   }
 
-  #taut(late: (units?: number) => boolean): boolean {
+  #pullTaut(late: (units?: number) => boolean): boolean {
     const walk = this.#steps;
     const n = walk.nodes.length;
     while (this.#i < n - 1) {
@@ -1184,47 +1267,171 @@ function straightHolds(world: WalkWorld, a: RoutePoint, b: RoutePoint, extra: nu
 }
 
 /**
- * The straight leg to `to` as a route (review ASTRA-13): its lattice steps
- * as `routeWalk` takes them, exactly along one of the eight directions or
- * snapped to the lattice for any other, each step's extra, swimming foot
- * and rise read as the search reads them, and its pieces built as a
- * search's route's are (`PieceBuilder`). An arrow key's press counts what
- * it walks over this way. Null where a step leaves the lattice or the
- * scene, or a spot short of `to` stops a walk.
+ * The straight leg to `to`, stepped as the reducer steps a walk (6.1,
+ * `routeWalk`): exactly along one of the eight directions, or snapped to
+ * the lattice for any other line. A check runs a few steps at a time, so a
+ * frame's budget can stop it between any two (review ASTRA-08), and says
+ * two things:
+ * - `open`: the straight leg is the route and needs no search (5.2, "Open
+ *   ground first"). The leg test allows it, and no spot along it costs
+ *   extra or stops a walk short. The ground rises or falls evenly all the
+ *   way, as one piece of the search would, since the straight leg counts
+ *   only the change of height between its ends while a walk counts each
+ *   piece's (4.6). Under 5-10-5 a diagonal that climbs is a piece of its
+ *   own, so that holds for one step only. And the straight leg costs what
+ *   the route along it does, since a walk's feet round up to the
+ *   creature's step: 3 ft up a stair in a Tiny creature's half square reads
+ *   3 ft straight and 5 ft walked (review ASTRA-13). Unseen ground reads as
+ *   plain, as a straight drop into the fog does today.
+ * - `route`: the leg as a route, each step's extra, swimming foot and rise
+ *   read as the search reads them, and its pieces built as a route's are
+ *   (`PieceBuilder`), split where the cost or the rise per step changes.
+ *   It has nothing to pull taut, so true distance splits it as the grid
+ *   rules do. An arrow key's press counts what it walks over this way.
+ *   What it counts never asks whether a search could go on from a spot: a
+ *   hostile creature's space or a pit short of the end keeps the leg from
+ *   being open, and its steps still count (review ASTRA-15). Null only
+ *   where a step leaves the lattice or the scene.
+ *
+ * Asked only whether the leg is open, it stops at the first step that
+ * says no.
  */
-export function stepRoute(world: WalkWorld, to: Point): WalkRoute | null {
-  const { token } = world.input;
-  const L = world.L;
-  const dx = to.x - token.x;
-  const dy = to.y - token.y;
-  const n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - EPS);
-  const start = world.nodeAt(token);
-  if (n <= 0 || start < 0) return null;
-  // One of the eight directions in whole lattice steps, or -2 for any other line, which never counts as a climbing diagonal.
-  const d = DX.findIndex((x, k) => Math.abs(x * L * n - dx) < EPS && Math.abs(DY[k]! * L * n - dy) < EPS);
-  const steps: WalkSteps = { nodes: [start], dir: [-1], extra: [0], swim: [0], dz: [0] };
-  let px = token.x;
-  let py = token.y;
-  let pe = world.elevationAt(start);
-  for (let k = 1; k <= n; k++) {
-    const x = k === n ? to.x : d >= 0 ? token.x + DX[d]! * L * k : token.x + Math.round((dx * k) / n / L) * L;
-    const y = k === n ? to.y : d >= 0 ? token.y + DY[d]! * L * k : token.y + Math.round((dy * k) / n / L) * L;
-    if (k < n && x === px && y === py) continue;
-    const node = world.nodeAt({ x, y });
-    if (node < 0) return null;
-    const e = world.elevationAt(node);
-    if (k < n && world.endOnly(x, y, e)) return null;
-    const { extra, swim } = world.extraOf(px, py, x, y, e, node);
-    steps.nodes.push(node);
-    steps.dir.push(d >= 0 ? d : -2);
-    steps.extra.push(extra);
-    steps.swim.push(swim);
-    steps.dz.push(Math.round((e - pe) * 2));
-    px = x;
-    py = y;
-    pe = e;
+export class LegCheck {
+  readonly #world: WalkWorld;
+  readonly #to: Point;
+  readonly #wantRoute: boolean;
+  #phase: "test" | "steps" | "pieces" | "cost" | "done" = "test";
+  #n = 0;
+  #d = -2;
+  #exact = false;
+  #even: "slope" | "level" = "level";
+  #k = 1;
+  #rise: number | null = null;
+  #px: number;
+  #py: number;
+  #pe: number;
+  #steps: WalkSteps | null;
+  #pieces: PieceBuilder | null = null;
+  #open = true;
+  #route: WalkRoute | null = null;
+  /** The leg test stops the straight leg: a drop is held at the wall. */
+  stopped = false;
+
+  /** `route` asks for the leg as a route as well, not only whether it is open. */
+  constructor(world: WalkWorld, to: Point, route = false) {
+    this.#world = world;
+    this.#to = { x: to.x, y: to.y };
+    this.#wantRoute = route;
+    const { token } = world.input;
+    this.#px = token.x;
+    this.#py = token.y;
+    this.#pe = token.elevation;
+    const start = world.nodeAt(token);
+    this.#steps = start >= 0 ? { nodes: [start], dir: [-1], extra: [0], swim: [0], dz: [0] } : null;
+    if (start >= 0) this.#pe = world.elevationAt(start);
   }
-  return new PieceBuilder(world, steps).run(() => false);
+
+  get done(): boolean {
+    return this.#phase === "done";
+  }
+
+  /** Whether the straight leg is the route. Read once `run` is done. */
+  get open(): boolean {
+    return this.#open;
+  }
+
+  /** The leg as a route, when asked for, null off the lattice. Read once `run` is done. */
+  get route(): WalkRoute | null {
+    return this.#route;
+  }
+
+  /** Checks until done (true), or until `late` says the slice is spent (false), to go on when asked again. */
+  run(late: (units?: number) => boolean): boolean {
+    const world = this.#world;
+    const { token, build } = world.input;
+    const to = this.#to;
+    if (this.#phase === "test") {
+      if (late()) return false;
+      const dx = to.x - token.x;
+      const dy = to.y - token.y;
+      const L = world.L;
+      this.#n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - EPS));
+      this.#exact = Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
+      this.#d = DX.findIndex((x, k) => Math.abs(x * L * this.#n - dx) < EPS && Math.abs(DY[k]! * L * this.#n - dy) < EPS);
+      // Off the eight directions the samples are not lattice steps, so only level ground keeps one rise per step.
+      this.#even = this.#exact ? (this.#n === 1 || world.input.rules.diagonal !== "fiveTen" || Math.abs(dx) < EPS || Math.abs(dy) < EPS ? "slope" : "level") : "level";
+      if (to.x === token.x && to.y === token.y) {
+        this.#phase = "done";
+        return true;
+      }
+      if (world.tester && legStop(build, token, { x: to.x, y: to.y, elevation: token.elevation }) !== null) {
+        this.stopped = true;
+        this.#open = false;
+      }
+      this.#phase = "steps";
+    }
+    if (this.#phase === "steps") {
+      const dx = to.x - token.x;
+      const dy = to.y - token.y;
+      const L = world.L;
+      const n = this.#n;
+      for (; this.#k <= n; this.#k++) {
+        if (!this.#open && !this.#wantRoute) break;
+        if (late()) return false;
+        const k = this.#k;
+        const x = k === n ? to.x : token.x + (this.#exact ? (dx * k) / n : Math.round((dx * k) / n / L) * L);
+        const y = k === n ? to.y : token.y + (this.#exact ? (dy * k) / n : Math.round((dy * k) / n / L) * L);
+        if (x === this.#px && y === this.#py) continue;
+        const node = world.nodeAt({ x, y });
+        const e = node >= 0 ? world.elevationAt(node) : this.#pe;
+        const dz = e - this.#pe;
+        if (this.#even === "level" ? Math.abs(dz) > EPS : this.#rise !== null && Math.abs(dz - this.#rise) > EPS) this.#open = false;
+        this.#rise = dz;
+        if (k < n && world.endOnly(x, y, e)) this.#open = false;
+        const { extra, swim } = world.extraOf(this.#px, this.#py, x, y, e, node);
+        if (extra !== 0) this.#open = false;
+        if (node < 0) this.#steps = null;
+        else if (this.#steps) {
+          this.#steps.nodes.push(node);
+          this.#steps.dir.push(this.#d >= 0 ? this.#d : -2);
+          this.#steps.extra.push(extra);
+          this.#steps.swim.push(swim);
+          this.#steps.dz.push(Math.round(dz * 2));
+        }
+        this.#px = x;
+        this.#py = y;
+        this.#pe = e;
+      }
+      // The route is needed to answer for the cost when the leg is still open, or when asked for.
+      const needed = this.#steps !== null && this.#steps.nodes.length > 1 && (this.#wantRoute || this.#open);
+      this.#pieces = needed ? new PieceBuilder(world, this.#steps!, false) : null;
+      this.#phase = needed ? "pieces" : "done";
+    }
+    if (this.#phase === "pieces") {
+      const route = this.#pieces!.run(late);
+      if (!route) return false;
+      this.#route = route;
+      this.#phase = this.#open ? "cost" : "done";
+    }
+    if (this.#phase === "cost") {
+      const route = this.#route!;
+      late(route.pieces.length);
+      const { rules, counter } = world.input;
+      const straight = straightCost(token, token, route.points[route.points.length - 1]!, rules, counter);
+      const walked = routeFeet(route.points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(token) });
+      this.#open = straight.cost === walked.cost && straight.diag[0] === walked.diag[0] && straight.diag[1] === walked.diag[1];
+      this.#phase = "done";
+    }
+    if (!this.#wantRoute) this.#route = null;
+    return true;
+  }
+}
+
+/** The straight leg to `to` as a route, checked whole (`LegCheck`). An arrow key's press is one square, so it is a few steps. */
+export function stepRoute(world: WalkWorld, to: Point): WalkRoute | null {
+  const check = new LegCheck(world, to, true);
+  check.run(() => false);
+  return check.route;
 }
 
 function less(c1: number, k1: number, l1: number, c2: number, k2: number, l2: number): boolean {
@@ -1339,61 +1546,11 @@ class Heap {
 // ---------------------------------------------------------------------------
 // Open ground
 
-/**
- * Whether the plain straight leg to `to` is the route (5.2, "Open ground
- * first"): the leg test allows it and no spot along it, stepped as the
- * reducer's spots are, costs extra or stops a walk short. Most drags are,
- * and need no search. Unseen ground reads as plain, as a straight drop into
- * the fog does today.
- *
- * The straight leg counts only the change of height between its ends,
- * while a walk counts each piece's (4.6). So the ground must also rise or
- * fall evenly all the way, as one piece of the search would: a walk over a
- * rise and down again, or up a step partway, is searched. Under 5-10-5 a
- * diagonal that climbs is a piece of its own, so it holds for one step only.
- * And a walk's feet round up to the creature's step, so last the straight
- * leg must cost what the route along it does (`stepRoute`): 3 ft up a stair
- * in a Tiny creature's half square reads 3 ft straight and 5 ft walked,
- * and is searched (review ASTRA-13).
- */
+/** Whether the plain straight leg to `to` is the route (5.2, "Open ground first"), checked whole (`LegCheck`). Most drags are, and need no search. */
 export function openLeg(world: WalkWorld, to: Point): boolean {
-  const { token, build } = world.input;
-  if (to.x === token.x && to.y === token.y) return true;
-  if (world.tester) {
-    if (legStop(build, token, { x: to.x, y: to.y, elevation: token.elevation }) !== null) return false;
-  }
-  const L = world.L;
-  const dx = to.x - token.x;
-  const dy = to.y - token.y;
-  const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - EPS));
-  const exact = Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
-  // Off the eight directions the samples are not lattice steps, so only level ground keeps one rise per step.
-  const even = exact ? (n === 1 || world.input.rules.diagonal !== "fiveTen" || Math.abs(dx) < EPS || Math.abs(dy) < EPS ? "slope" : "level") : "level";
-  let rise: number | null = null;
-  let px = token.x;
-  let py = token.y;
-  let pe = token.elevation;
-  for (let k = 1; k <= n; k++) {
-    const x = k === n ? to.x : token.x + (exact ? (dx * k) / n : Math.round((dx * k) / n / L) * L);
-    const y = k === n ? to.y : token.y + (exact ? (dy * k) / n : Math.round((dy * k) / n / L) * L);
-    if (x === px && y === py) continue;
-    const node = world.nodeAt({ x, y });
-    const e = node >= 0 ? world.elevationAt(node) : pe;
-    const dz = e - pe;
-    if (even === "level" ? Math.abs(dz) > EPS : rise !== null && Math.abs(dz - rise) > EPS) return false;
-    rise = dz;
-    if (k < n && world.endOnly(x, y, e)) return false;
-    if (world.extraOf(px, py, x, y, e, node).extra !== 0) return false;
-    px = x;
-    py = y;
-    pe = e;
-  }
-  const route = stepRoute(world, to);
-  if (!route) return true;
-  const { rules, counter } = world.input;
-  const straight = straightCost(token, token, route.points[route.points.length - 1]!, rules, counter);
-  const walked = routeFeet(route.points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(token) });
-  return straight.cost === walked.cost && straight.diag[0] === walked.diag[0] && straight.diag[1] === walked.diag[1];
+  const check = new LegCheck(world, to);
+  check.run(() => false);
+  return check.open;
 }
 
 /**

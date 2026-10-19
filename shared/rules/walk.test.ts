@@ -179,6 +179,17 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     );
   });
 
+  test("unseen ground reads as plain: a straight leg into it is open ground under every rule, off the eight directions too (review MV-O-21)", () => {
+    const w = world({ w: 100, h: 100 });
+    for (const size of ["tiny", "medium", "large"] as const) {
+      for (const diagonal of ["five", "fiveTen", "euclid"] as const) {
+        const i = input(w, tok(w, { size, x: 2, y: 2 }), { rules: { feetPerCell: 5, diagonal }, seen: (x) => x < 20 });
+        const walk = new WalkWorld(i);
+        for (const to of [{ x: 30, y: 2 }, { x: 30, y: 30 }, { x: 30, y: 12 }, { x: 60, y: 40 }]) assert.equal(openLeg(walk, to), true, `${size} under ${diagonal} to ${to.x}, ${to.y}`);
+      }
+    }
+  });
+
   test("through an open door, and not a closed one or a secret door nobody found", () => {
     const wall = (door: EdgeFeature) => world({ edges: { ...line("w", 5, 0, 30), "5,4,w": door } });
     const open = wall(OPEN_DOOR);
