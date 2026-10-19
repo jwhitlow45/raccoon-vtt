@@ -11,17 +11,16 @@ import { Group } from "../components/Panel.tsx";
 import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { RowDot } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
-import { Tag } from "../components/Tag.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
-import { ImagePreview } from "../features/images/IconDisk.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
+import { CreatureHeader } from "../features/tokens/CreatureHeader.tsx";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
@@ -235,7 +234,7 @@ function TokenDetails(props: PanelProps) {
   );
 }
 
-/** The name at the very top, whole and wrapping, then the size and the tags on one wrapping line. */
+/** The token's header (CreatureHeader.tsx): its picture as the image field previews it, the name, then the size and the tags on one wrapping line. */
 function NameBlock(props: { token: Token; name: string; feetPerCell: number; children?: ReactNode }) {
   const { token } = props;
   // A companion names its character in the tracker's words (docs/design-v1-combat-flow.md 3.6.7), for whoever's copy holds the link.
@@ -248,36 +247,14 @@ function NameBlock(props: { token: Token; name: string; feetPerCell: number; chi
   if (token.locked) badges.push("Locked");
   if (token.nameHidden) badges.push("Name hidden");
   return (
-    // The picture beside the name, then one column no wider than the panel, so a badge too long for it is cut rather than widening the column.
-    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: theme.space(3), alignItems: "start", paddingTop: theme.space(2), paddingBottom: theme.space(4) }}>
-      <Thumbnail token={token} name={props.name} />
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
-      <h3 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{props.name}</h3>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-        <span style={{ color: theme.color.textMuted, fontSize: theme.font.small, marginRight: theme.space(1) }}>
-          {SIZE_NAMES[token.size] ?? token.size} ({sizeText}){token.kind === "object" ? ", object" : ""}
-        </span>
-        {badges.map((b) => (
-          // "Companion of" names a character, of any length: no badge runs wider than the row.
-          <Tag key={b} cut="100%">
-            {b}
-          </Tag>
-        ))}
-      </div>
+    <CreatureHeader
+      picture={{ image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: RING[token.disposition] ?? theme.color.neutral, initials: initials(props.name) }}
+      name={props.name}
+      line={`${SIZE_NAMES[token.size] ?? token.size} (${sizeText})${token.kind === "object" ? ", object" : ""}`}
+      tags={badges}
+    >
       {props.children}
-      </div>
-    </div>
-  );
-}
-
-/** The token's picture at 48 px, as the image field previews it, ringed in its disposition's color. Changing it is the Image group's. */
-function Thumbnail(props: { token: Token; name: string }) {
-  const { token } = props;
-  const fp = footprint(token);
-  return (
-    <span aria-hidden style={{ display: "flex" }}>
-      <ImagePreview image={token.image} shape={token.kind === "object" ? "square" : "circle"} aspect={fp.w / fp.h} width={48} ring={RING[token.disposition] ?? theme.color.neutral} initials={initials(props.name)} />
-    </span>
+    </CreatureHeader>
   );
 }
 
