@@ -19,6 +19,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [The map builder](#the-map-builder)
   - [Walls and doors](#walls-and-doors)
   - [Heights and stairs](#heights-and-stairs)
+  - [Difficult ground](#difficult-ground)
   - [Light and party vision](#light-and-party-vision)
   - [Fog](#fog)
   - [Map phases, imports and exports](#map-phases-imports-and-exports)
@@ -155,7 +156,7 @@ Below the scene list (**All scenes**) and **New scene**, the panel shows the set
 - **Map phases**: other images of the same map. See [Map phases, imports and exports](#map-phases-imports-and-exports).
 - **Vision**: **Party vision** and **Light**. See [Light and party vision](#light-and-party-vision).
 - **Grid**: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid** and **Or count the squares**.
-- **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player dragging a token is stopped at walls, closed doors and ledges. Your own moves are never stopped.
+- **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped.
 - **Map builder**: **Open the builder**, **Clear the build** and **Automatic walls**.
 - At the end, **Export as image** and **Delete scene**.
 
@@ -245,6 +246,7 @@ Open the builder from the toolbar, or with **Open the builder** in the scene's s
 - **Erase**: drag across squares to clear them completely, along with any floor, walls, doors, windows, heights, stairs, labels, stamps and lights on them. **Erase area** clears a whole rectangle at once.
 - **Walls and doors**: see [Walls and doors](#walls-and-doors).
 - **Heights and stairs**: see [Heights and stairs](#heights-and-stairs).
+- **Difficult ground**: see [Difficult ground](#difficult-ground).
 - **Label**: type the text, then tap the map to place it. **Label size** is S, M or L. To change a label later, tap it in this mode to edit or delete it, or drag it to move it. Tapping a label with the Select tool opens it too.
 - **Lights**: see [Light and party vision](#light-and-party-vision).
 - **Stamp**: press **Choose a stamp** to pick one of the 46 pictures that come with the app (trees, bushes, rocks, campfires, furniture, barrels and more) or any token image in the room's library, then tap the map to place it. The picker's **Starter** tab holds 131 more props from the starter packs, such as ruins, boats, benches, tables, crates and treasure (see [Starter art](#starter-art)). Drag a placed stamp to move it, and use its handles to turn and resize it. While a stamp is picked, the row offers **Tint**, **Flip**, **Bring to front**, **Duplicate**, **DM only** (to hide it from players), **Delete** and **Done**. With **Snap** on, a stamp turns in 15° steps and moves in half squares, and with it off, it follows your finger freely.
@@ -284,7 +286,7 @@ Here is what blocks what:
 - Pillars block movement and sight, but not areas.
 - A secret door that hasn't been found is a wall to players, even when it stands open.
 
-When it comes to movement, walls stop only the players' tokens, never yours, and only while the scene's **Walls and ledges block players' moves** setting is on. When a player's drag is stopped, they can choose **Teleport here** for Misty Step and the like. You get a notice and a log line when they do.
+When it comes to movement, a dragged token walks around walls on its own: drop it on the far side of a wall, and it takes the way through the nearest open door, as the creature would. Walls stop only the players' tokens, never yours, and only while the scene's **Walls and ledges block players' moves** setting is on. A player's drag stops at the wall only when there is no way around that the party has seen ("Stopped at a wall. There is no way around it that you have seen."), and the player can then choose **Teleport here** for Misty Step and the like. You get a notice and a log line when they do. A secret door the party hasn't found is a wall to every walk, yours included, so to walk a monster through a secret passage, drop it at the door first and then go on.
 
 ## Heights and stairs
 
@@ -299,12 +301,27 @@ While this mode is open, each raised or lowered area shows its height in a pill,
 
 Heights change play in several ways:
 
-- With **Walls and ledges block players' moves** on, a walking token can cross a ledge only by a stair. A flying token above the ledge passes over it.
+- With **Walls and ledges block players' moves** on, a walking token can cross a ledge only by a stair. A token dropped on top of a rise walks up by the stairs on its own, as long as the party has seen them. A flying token above the ledge passes over it.
 - A creature can see over a ledge that is no higher than its eyes. A creature in a pit can't see out.
 - A token you place, drop or duplicate on raised ground stands on top of it.
 - Rulers, distances and areas all count the height.
 
 You can paint heights over a map image too, so the cliff drawn in the art can become a real cliff.
+
+## Difficult ground
+
+Some ground is slow going: rubble, thick undergrowth, a slope of loose scree, the furniture of a crowded tavern. In the rules every foot of movement through difficult terrain costs 1 extra foot, so a square of it costs 10 ft to enter instead of 5 ft. The app counts this for you whenever a token is dragged.
+
+The **Difficult** and **Rubble** terrains from the Brush are difficult terrain. For anything else, pick **Difficult ground** in the builder and **Mark** squares with the brush (1, 2 or 3 squares) or a dragged **Area**. A mark goes over whatever is there, floor or map art, without changing it, and draws as a thin ochre hatch that lets the map show through. **Clear** takes marks off, and Erase takes them along with everything else. Players see the marks with the rest of the map.
+
+A few other things cost extra too, and the app counts them the same way:
+
+- **Water** costs double for a creature without a Swim Speed.
+- **Another creature's space** is difficult terrain, unless the creature is an ally or Tiny. A walk never passes through a creature it couldn't pass in the rules (one that isn't Incapacitated and is less than two sizes apart), but it can end there, and the label warns that it would.
+- **A Prone creature** crawls, so every foot costs 1 extra.
+- **Areas** marked to slow movement, such as Web or Plant Growth (see [Areas that slow movement](#areas-that-slow-movement)).
+
+Difficult terrain isn't cumulative: a square is difficult or it isn't. Plant Growth's 4 ft per foot replaces it rather than adding to it.
 
 ## Light and party vision
 
@@ -680,7 +697,7 @@ Under **⋯** (More area options) you will also find:
 - **Elevation**, for an area placed at a free point.
 - **Includes caster**, for a Cone, Cube, Line or Emanation. A Sphere or Cylinder always catches a caster inside it.
 - **Moves with token**, for an Emanation.
-- **Set caster**, **Reminders**, **Color** and **DM only**.
+- **Set caster**, **Reminders**, **Movement inside**, **Color** and **DM only**.
 
 **Why the caster matters.** An area with a caster fills in the group save for you: the save's DC comes from the caster's spell save DC, and the damage from the caster's own spell. Your areas start with no caster. The easiest way to give one a caster is to cast a Cone, Line, Cube or Emanation from the caster's token. For a Sphere, press **Set caster** under **⋯**, then tap the caster's token. The hint then reads "Cast by Ivo.", and the row shows **From Ivo**, which you can tap to drop the caster or restore it.
 
@@ -715,6 +732,12 @@ Every area is a shape in three dimensions, and every creature has a height that 
 An area can remind you when a creature enters it, starts its turn in it, or ends its turn in it. Turn these on with **Enters**, **Starts turn** and **Ends turn** under **⋯**, **Reminders**, and add **Once a turn** for spells that affect a creature only once per turn. Spirit Guardians, Moonbeam, Web, Spike Growth and other spell presets turn on the right reminders for you.
 
 Reminders fire only while a fight's turns are running. Each one adds a line to the log ("Goblin Warrior 1 entered Spirit Guardians.", "Spirit Guardians moved onto Goblin Warrior 1.") and shows a notice on your screen. The area's owner and the creature's owner get the notice too, and players read the line only for what they could see. A reminder doesn't roll anything on its own: use **Save and damage** or the Dice panel for that.
+
+### Areas that slow movement
+
+**Movement inside**, under **⋯**, makes walking through an area cost more. **Difficult terrain** costs 1 extra foot for every foot, as Web, Grease, Spike Growth and Entangle do. **4 ft per foot** is Plant Growth's overgrowth. **Half Speed** halves the Speed of a creature standing in it, as Spirit Guardians does. When the area has a caster, **Only the caster's enemies** leaves out the caster and every creature on its side, as Spirit Guardians and Conjure Minor Elementals allow. Spell presets set all of this for you.
+
+Players' routes count an area only as the players see it: a DM-only area never bends a player's walk. If the players can't see who cast an area, it slows everyone for them, so keep the caster in view or turn off **Only the caster's enemies** when that matters.
 
 ## The group save
 
@@ -759,13 +782,21 @@ Some moments in a fight need an answer from you, and the app shows them as cards
 
 **Moving a token** measures as you drag: the path is green within the creature's Speed, yellow within a Dash, and red beyond that. A flier above the ground is measured against its Fly Speed. During a fight, only the creature whose turn it is gets the colors, and the app tracks its path through the turn.
 
+The token walks the cheapest way to where you drop it. When a wall, a closed door or a ledge is in the way, or when going around a patch of rubble costs less than wading through it, the line bends along the way the creature would walk, with a dot at each corner. The label at its end reads what the walk costs, and under that what cost extra: "+10 ft for difficult terrain". If the walk would end in another creature's space, the label says so in amber, since a creature can't willingly end its move there. On a big map a long walk can take a moment to work out, and the label then reads "Finding the way…". A drop made meanwhile waits a moment and then lands.
+
+A drop says where, not how. If a player wants their character to wade through the rubble rather than go around it, they drop it in the rubble first and then go on from there. Dragging several tokens at once moves them in straight lines.
+
 ![Thorn dragged down the corridor: a yellow path and "35 ft · 15 ft left with Dash".](dm-guide/movement.webp)
 
 Here is how the turn's path works, and how to correct it:
 
-- Each drop adds a leg to the turn's path, which is drawn on the map with a ring where the turn began. "Moved 20 ft" totals the whole path, which helps the table judge Opportunity Attacks. The app doesn't detect those for you.
+- Each drop adds a leg to the turn's path, which is drawn on the map with a ring where the turn began and bends where the walk went around something. "Moved 20 ft" totals the whole path, which helps the table judge Opportunity Attacks. The app doesn't detect those for you.
+- When difficult terrain made the turn cost more than its distance, you and the creature's players read both: "Moved 15 ft, used 20 ft", and what is left of its Speed counts what it used. Other players see only "Moved".
+- Inside Spirit Guardians, or any area set to Half Speed that affects it, a creature's Speed is halved, rounded down, so a 25 ft Speed is 12 ft. The label says "Half Speed in Spirit Guardians" while the drag would end inside, and the colors count the halved Speed at each step. Leaving the area gives the full Speed back, less what was used.
 - **Doesn't count**, in the action bar, leaves the last leg out of the total, for a shove or a teleport.
 - Players get **Undo move** for their own newest move. Your own moves are undone with Undo in the top bar.
+
+**The walking ruler.** The Ruler's **Measure** chip chooses **Straight** or **Walking**, and your device remembers the choice. Walking measures how far the creature the ruler starts on would walk to each point, or a Medium creature when you start on empty ground: around walls, through open doors, up stairs and counting difficult terrain, just as a drag would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any, and a leg with no way through draws straight in red. A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know.
 
 Distances between tokens are measured from edge to edge and include height. The room's **Diagonal moves** setting decides how diagonals count. The default, every square 5 ft, is the 2024 rule.
 
@@ -980,7 +1011,7 @@ A watchtower stands on a rise above a field, and harpies circle overhead.
 
 **Running it**
 
-- With **Walls and ledges block players' moves** on, a character walking to the tower stops at the ledge ("Ledge in the way. Take the stairs.") and goes up by the stairs. A flier passes over.
+- With **Walls and ledges block players' moves** on, a character dropped on the tower walks there by the stairs, once the party has seen them. Until then the walk stops at the ledge ("Ledge in the way. No stairs you have seen lead there."). A flier passes over.
 - Tap the ground with **Select** to read a height. The Ruler and token distances count height as if it were one more diagonal. Under the default rule (every square 5 ft), the larger of the two distances is what counts. So the Ruler from the archer, 30 ft up, to a goblin on the ground 10 squares (50 ft) away reads 50 ft.
 - Ivo casts Fireball on the ground under a harpy flying at 40 ft. The shaded squares include the harpy's square, but "In area" leaves it out, since the Sphere reaches only 20 ft up. To catch the harpy, center the Sphere on its token, or raise **Elevation** under **⋯** before placing it.
 - When a harpy is knocked out of the air, lower its elevation to the ground, and apply any falling damage through its HP entry. The **Flying** status is only a reminder for you, and it is separate from the token's elevation.

@@ -238,7 +238,7 @@ A holder's move reads the holder and every token of its group in the viewer's vi
 
 ### 8.5 Projection (`shared/project.ts`)
 
-- **`attached` reaches a player only while its holder is in their projection**, with its kind and `steer`. Otherwise it is left out, as an area's `attachedTo` is sent as null (design 7.3). The fan-out re-projects every token attached to a touched token, since its copy depends on the holder's.
+- **`attached` reaches a player only while its holder is in their projection**, with its kind and `steer`. Otherwise it is left out, as an area attached to a token a player cannot see is withheld whole (design 7.3). The fan-out re-projects every token attached to a touched token, since its copy depends on the holder's.
 - **A carried token the DM hides** sends players nothing: its moves change only fields their projection lacks, its drag frames go only to DMs and its owners as any hidden token's do (design 7.6), and the holder holds no field naming it. A carried token withheld by fog or sight follows the token rules as any token does.
 - **A visible token carried by a hidden holder** follows its holder, on every op, the contract's carried-object reveal: a torch carried by an invisible stalker floats along, and its drag frames go to everyone who sees it. Players get nothing else of the holder: no link (`attached` stays out of their copy), no path, no name. Its own path shows a carried leg as an uncounted one (7.2).
 - **Path stops**: `carried` is the DM's, and the uncounted mark follows design 7.3's rule. Mount and dismount costs reach only the DM and the rider's owners (7.3).
