@@ -92,9 +92,10 @@ function rowOf(tx: Tx, tokenId: string): InitEntry | undefined {
 
 /**
  * A controlled ride taken during a fight (7.1). "The Initiative of a
- * controlled mount changes to match yours when you mount it": the mount's
- * row takes its rider's value and goes right after its rider's, unless it
- * is the acting row, which no row moves around. One that had its turn this
+ * controlled mount changes to match yours when you mount it": for a ride
+ * every player sees, the mount's row takes its rider's value and goes right
+ * after its rider's, unless it is the acting row, which no row moves
+ * around. A ride some player cannot see leaves the rows as they stand. One that had its turn this
  * round already is passed over for the rest of it (`skipRound`). Taken on
  * the chain of controlled rides the acting creature directs, each pair
  * seen by every player (sharedMounts), the mount and any mount above it
@@ -107,7 +108,9 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   let entries = encounter.entries;
   const riderRow = rowOf(tx, riderId);
   const mountRow = rowOf(tx, mountId);
-  if (riderRow && mountRow && riderRow.id !== mountRow.id && mountRow.id !== encounter.activeEntryId) {
+  // The rows move only for a ride every player sees, both tokens and so the link, since the tracker shows the move to all (section 10).
+  const shown = seenByAll(tx, riderId) && seenByAll(tx, mountId);
+  if (shown && riderRow && mountRow && riderRow.id !== mountRow.id && mountRow.id !== encounter.activeEntryId) {
     const sorted = sortEntries(entries);
     const acting = sorted.findIndex((e) => e.id === encounter.activeEntryId);
     const hadTurn = acting >= 0 && sorted.findIndex((e) => e.id === mountRow.id) < acting;

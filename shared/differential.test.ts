@@ -446,6 +446,29 @@ const ATTACH_PAIRS: OpPair[] = [
     [...fightSteps, rideHorse, moveHorse(4, 8), moveHorse(4, 12), getOff, endTurn],
   ),
   attachPair(
+    "a hidden rider's mounting in a fight, whose own row stands elsewhere in each room",
+    (s) => {
+      s.meta.settings = { ...s.meta.settings, revealHiddenOnTurn: false };
+      s.tokens.shade = token("shade", { name: "Shade", x: 3, y: 4, visibility: "dm" });
+    },
+    // The second room's shade, which no player sees, rolled low.
+    (s) => (s.tokens.shade = { ...s.tokens.shade!, name: "Slow shade" }),
+    [
+      {
+        who: DM,
+        op: (view) => {
+          const value = view.tokens.shade?.name === "Slow shade" ? 5 : 15;
+          return { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "es", tokenId: "shade", value, hidden: true }, { id: "eg", tokenId: "gob", value: 12 }, { id: "eh", tokenId: "horse", value: 8 }] };
+        },
+        note: "start",
+      },
+      next,
+      // The DM puts the hidden shade on the horse, controlled: the horse's row stays where the table sees it.
+      { who: DM, op: { t: "token.attach", tokenId: "shade", to: "horse", kind: "ride", steer: true, x: 4, y: 4, elevation: 0 }, note: "the DM's hidden ride" },
+      moveHorse(8, 4),
+    ],
+  ),
+  attachPair(
     "a rider whose visibility flips during the round",
     (s) => {
       s.meta.settings = { ...s.meta.settings, revealHiddenOnTurn: false };
