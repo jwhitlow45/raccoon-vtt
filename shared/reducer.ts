@@ -12,7 +12,7 @@ import {
   effectUpdate,
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
-import { linkPass, tokenAttach, tokenDetach } from "./reducer/attach.ts";
+import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
 import { attaches } from "./migrate.ts";
 import {
   encounterAdd,
@@ -127,7 +127,10 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     if (op.t === "encounter.next" && !pressChangesNothing(state, actor, op, env)) remindTurnEnd(tx);
     dispatch(tx, op);
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design-v1-attach.md 5.2).
-    if (attaches(env.opVersion)) linkPass(tx);
+    if (attaches(env.opVersion)) {
+      linkPass(tx);
+      settleMounts(tx);
+    }
     endSaves(tx);
     remindAfter(tx, state, op);
     tx.finish();

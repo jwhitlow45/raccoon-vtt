@@ -435,6 +435,8 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   // A controlled mount sharing its rider's turn moves on its own path then (docs/design-v1-attach.md 7.2), from op version 14.
   const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
   if (turn.tokenId !== after.id && !mount) return withoutPath(after);
+  // A row that marks time had its movement on its rider's turn, so its moves there are outside its turn (7.1).
+  if (!mount && attaches(tx.env.opVersion) && marksTime(encounter, turn.entryId)) return withoutPath(after);
   // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
   const walked: Walked | undefined = walksRoutes(tx.env.opVersion) ? { token: after, rules: tx.state.meta.settings } : undefined;
   // A mount's path starts where it stood before its first move this turn, since the turn's start is its rider's.
@@ -454,6 +456,12 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   if (carried) stop = { ...stop, uncounted: true, carried: true };
   const counts = !resized && !(reshaped && inPlace) && !uncounted;
   return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to, walked) };
+}
+
+/** Whether the row marks time this round: its mount shared a rider's turn in it (docs/design-v1-attach.md 7.1). */
+function marksTime(encounter: RoomState["encounter"], entryId: string): boolean {
+  const row = encounter?.entries.find((e) => e.id === entryId);
+  return row?.markRound !== undefined && row.markRound === encounter!.round;
 }
 
 /**

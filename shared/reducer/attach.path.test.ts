@@ -42,7 +42,7 @@ function bresTurn(setup?: (s: RoomState) => void) {
     stops(id: string): PathStop[] {
       return f.state.tokens[id]!.path?.stops ?? [];
     },
-    /** The mounts sharing the turn, as Next writes them (attach step 4). */
+    /** The mounts sharing the turn, set by hand: Next writes them for a visible controlled ride anyway. */
     share(...ids: string[]) {
       const e = f.state.encounter!;
       f.state = { ...f.state, encounter: { ...e, turnStart: { ...e.turnStart!, mounts: ids } } };
@@ -58,7 +58,8 @@ function last(stops: PathStop[]): PathStop {
 
 describe("a carried leg (7.2)", () => {
   test("the rider's leg on the horse's move is uncounted and carried, with no cost and no corners", () => {
-    const f = bresTurn().run({ t: "token.move", tokenId: "horse", x: 8, y: 4 });
+    // An independent mount: Bree's turn moves it on no path of its own.
+    const f = bresTurn((s) => (s.tokens.bree = { ...s.tokens.bree!, attached: { to: "horse", kind: "ride" } })).run({ t: "token.move", tokenId: "horse", x: 8, y: 4 });
     const leg = last(f.stops("bree"));
     assert.equal(leg.uncounted, true);
     assert.equal(leg.carried, true);

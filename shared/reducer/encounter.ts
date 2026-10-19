@@ -10,7 +10,9 @@ import {
   tickEffects,
   unbindFromEntry,
 } from "../rules/durations.ts";
-import { marksHadTurn } from "../migrate.ts";
+import { attaches, marksHadTurn } from "../migrate.ts";
+import { LIMITS } from "../limits.ts";
+import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
 import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
@@ -25,7 +27,7 @@ function encounterOf(tx: Tx): Encounter {
   return encounter;
 }
 
-function writeEncounter(tx: Tx, encounter: Encounter): void {
+export function writeEncounter(tx: Tx, encounter: Encounter): void {
   tx.write(keys.encounter, { ...encounter, entries: renumber(sortEntries(encounter.entries)) });
 }
 
@@ -49,6 +51,36 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
     next.turnStart = start;
   }
   return next;
+}
+
+/**
+ * The turn that starts with the controlled mounts its creature rides
+ * (docs/design-v1-attach.md 7.1): up the creature's chain of controlled
+ * rides, each mount whose rider and itself every player sees now, so the
+ * link is seen too. Each joins `TurnStart.mounts`, and its row, if it has
+ * one, marks time this round (`markRound`). On Next the row's Reaction
+ * comes back with its rider's (`reactions`).
+ */
+function withMounts(tx: Tx, encounter: Encounter, reactions: boolean): Encounter {
+  const start = encounter.turnStart;
+  if (!start) return encounter;
+  const mounts: string[] = [];
+  const seen = new Set<string>();
+  let rider = tx.state.tokens[start.tokenId];
+  while (rider && !seen.has(rider.id) && mounts.length < LIMITS.turnMounts) {
+    seen.add(rider.id);
+    const link = rider.attached;
+    const mount = link?.kind === "ride" && link.steer ? holderOf(tx.state.tokens, rider) : undefined;
+    if (!mount || !inSightOfNonOwners(tx.state, rider, tx.env) || !inSightOfNonOwners(tx.state, tx.state.tokens[mount.id]!, tx.env)) break;
+    mounts.push(mount.id);
+    rider = tx.state.tokens[mount.id];
+  }
+  if (mounts.length === 0) return encounter;
+  const entries = encounter.entries.map((e) => {
+    if (e.tokenId === undefined || !mounts.includes(e.tokenId)) return e;
+    return { ...e, markRound: encounter.round, ...(reactions ? { reactionUsed: false } : {}) };
+  });
+  return { ...encounter, entries, turnStart: { ...start, mounts } };
 }
 
 function buildEntry(tx: Tx, input: EntryInput, existing: InitEntry[]): InitEntry {
@@ -168,8 +200,9 @@ export function removeEntries(tx: Tx, entryIds: string[]): void {
     }
   }
   const kept = { ...encounter, entries: sorted.filter((e) => !removing.has(e.id)) };
-  // A turn passed on by the removal starts where its creature stands now.
-  writeEncounter(tx, activeEntryId === encounter.activeEntryId ? kept : withTurn(tx, kept, activeEntryId));
+  // A turn passed on by the removal starts where its creature stands now, with the mounts it rides (docs/design-v1-attach.md 7.1).
+  const passed = activeEntryId === encounter.activeEntryId ? kept : withTurn(tx, kept, activeEntryId);
+  writeEncounter(tx, passed !== kept && attaches(tx.env.opVersion) ? withMounts(tx, passed, false) : passed);
   for (const entry of sorted) {
     if (!removing.has(entry.id)) continue;
     unbindDurations(tx, entry);
@@ -279,11 +312,15 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   if (pressChangesNothing(tx.state, tx.actor, op, tx.env)) return;
   const encounter = encounterOf(tx);
   const settings = tx.state.meta.settings;
-  const step = nextTurn(tx.state, encounter, settings);
+  const mounted = attaches(tx.env.opVersion);
+  const step = nextTurn(tx.state, encounter, settings, mounted);
   if (!step) throw invalid("the encounter has no combatants");
   const snapshot: EncounterSnapshot = { encounter, effects: {}, revealed: [], at: tx.env.at };
+  const round = encounter.round + (step.wrapped ? 1 : 0);
 
-  const entries = encounter.entries.map((e) => (e.id === step.landing ? { ...e, reactionUsed: false } : e));
+  // A row that marks time this round keeps its spent Reaction: it came back on its rider's turn (docs/design-v1-attach.md 7.1).
+  const keepsReaction = (e: InitEntry) => mounted && e.markRound === round;
+  let entries = encounter.entries.map((e) => (e.id === step.landing && !keepsReaction(e) ? { ...e, reactionUsed: false } : e));
   const landing = entries.find((e) => e.id === step.landing)!;
 
   // The reveal comes before the durations tick: expiry lines are stamped
@@ -325,8 +362,11 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   }
 
   // After the reveal, so a creature this turn reveals has its starting spot marked as its turn line is.
-  const round = encounter.round + (step.wrapped ? 1 : 0);
-  writeEncounter(tx, withTurn(tx, { ...encounter, round, entries }, step.landing));
+  let turned = withTurn(tx, { ...encounter, round, entries }, step.landing);
+  // The mounts the starting creature rides join its turn, their Reactions back with its own (7.1).
+  if (mounted) turned = withMounts(tx, turned, true);
+  entries = turned.entries;
+  writeEncounter(tx, turned);
   tx.write(keys.encounterHistory, [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
   tx.addEvent({ type: "turn", entryId: step.landing, round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
 }

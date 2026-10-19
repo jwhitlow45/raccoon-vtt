@@ -1,5 +1,6 @@
 import { keys } from "../keys.ts";
-import type { PathStop, Token } from "../model.ts";
+import { LIMITS } from "../limits.ts";
+import type { InitEntry, PathStop, Token } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { attaches, walksRoutes } from "../migrate.ts";
@@ -7,7 +8,9 @@ import { getOffFits, isCreature, kindRefusal, linkHolds, linkLimitRefusal, onHol
 import { snapStep } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay } from "../rules/path.ts";
 import { routeWalk } from "../rules/route.ts";
-import { carriedAlong, judgedIn, placeCarried, sortedById, speedsOf, withPath, type Judged } from "./tokens.ts";
+import { renumber, sortEntries } from "../rules/initiative.ts";
+import { writeEncounter } from "./encounter.ts";
+import { carriedAlong, judgedIn, placeCarried, sharesTurn, sortedById, speedsOf, withPath, type Judged } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /**
@@ -73,6 +76,70 @@ export function tokenAttach(tx: Tx, op: OpOf<"token.attach">): void {
   const seated = withPath(tx, carried, next, judged);
   tx.write(keys.token(carried.id), op.kind === "ride" ? withMountCost(tx, carried, seated) : seated);
   placeCarried(tx, along, judged);
+  if (op.steer && attaches(tx.env.opVersion)) controlledRide(tx, carried.id, holder.id);
+}
+
+/** A token's initiative row: its own, or for a character's token the character's row without a token. */
+function rowOf(tx: Tx, tokenId: string): InitEntry | undefined {
+  const entries = tx.state.encounter?.entries ?? [];
+  const own = entries.find((e) => e.tokenId === tokenId);
+  if (own) return own;
+  const token = tx.state.tokens[tokenId];
+  const ref = token && "ref" in token.actor ? token.actor.ref : undefined;
+  return ref === undefined ? undefined : entries.find((e) => e.tokenId === undefined && e.characterId === ref);
+}
+
+/**
+ * A controlled ride taken during a fight (7.1). "The Initiative of a
+ * controlled mount changes to match yours when you mount it": the mount's
+ * row takes its rider's value and goes right after its rider's, unless it
+ * is the acting row, which no row moves around. One that had its turn this
+ * round already is passed over for the rest of it (`skipRound`). Taken on
+ * the rider's own turn while every player sees the pair, the mount joins
+ * the turn's `mounts` and its row marks time this round (`markRound`).
+ */
+function controlledRide(tx: Tx, riderId: string, mountId: string): void {
+  const encounter = tx.state.encounter;
+  if (!encounter) return;
+  let entries = encounter.entries;
+  const riderRow = rowOf(tx, riderId);
+  const mountRow = rowOf(tx, mountId);
+  if (riderRow && mountRow && riderRow.id !== mountRow.id && mountRow.id !== encounter.activeEntryId) {
+    const sorted = sortEntries(entries);
+    const acting = sorted.findIndex((e) => e.id === encounter.activeEntryId);
+    const hadTurn = acting >= 0 && sorted.findIndex((e) => e.id === mountRow.id) < acting;
+    const moved: InitEntry = { ...mountRow, value: riderRow.value, ...(hadTurn ? { skipRound: encounter.round } : {}) };
+    const rest = sorted.filter((e) => e.id !== mountRow.id);
+    rest.splice(rest.findIndex((e) => e.id === riderRow.id) + 1, 0, moved);
+    entries = renumber(rest);
+  }
+  let turnStart = encounter.turnStart;
+  const turn = turnUnderWay(encounter);
+  const rider = tx.state.tokens[riderId];
+  const mount = tx.state.tokens[mountId];
+  if (turn && turn.tokenId === riderId && rider && mount && seenByAll(tx, riderId) && seenByAll(tx, mountId)) {
+    const mounts = turn.mounts ?? [];
+    if (!mounts.includes(mountId) && mounts.length < LIMITS.turnMounts) turnStart = { ...turn, mounts: [...mounts, mountId] };
+    entries = entries.map((e) => (e.tokenId === mountId ? { ...e, markRound: encounter.round } : e));
+  }
+  if (entries !== encounter.entries || turnStart !== encounter.turnStart) writeEncounter(tx, { ...encounter, entries, ...(turnStart ? { turnStart } : {}) });
+}
+
+/**
+ * The turn's `mounts` after an op (7.1): a mount leaves the list in the op
+ * that ends its ride, whatever ends it (getting off, Let go, the link pass,
+ * a deletion, an undo), since sharing is bound to one turn and one ride.
+ * It changes no row: a row that marks time this round goes on marking it.
+ */
+export function settleMounts(tx: Tx): void {
+  const encounter = tx.state.encounter;
+  const start = encounter?.turnStart;
+  if (!encounter || !start?.mounts) return;
+  const turn = turnUnderWay(encounter);
+  const kept = turn ? start.mounts.filter((id) => sharesTurn(tx.state, id, turn)) : [];
+  if (kept.length === start.mounts.length) return;
+  const { mounts: _left, ...rest } = start;
+  writeEncounter(tx, { ...encounter, turnStart: kept.length > 0 ? { ...rest, mounts: kept } : rest });
 }
 
 /**

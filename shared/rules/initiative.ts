@@ -152,7 +152,7 @@ export type TurnStep = { landing: EntryId; skipped: EntryId[]; wrapped: boolean 
  * skips defeated rows when the room says so, and never loops: when every row
  * is defeated it lands on the next one regardless.
  */
-export function nextTurn(state: RoomState, encounter: Encounter, settings: RoomSettings): TurnStep | null {
+export function nextTurn(state: RoomState, encounter: Encounter, settings: RoomSettings, passOver = true): TurnStep | null {
   const entries = sortEntries(encounter.entries);
   if (entries.length === 0) return null;
   const activeIndex = encounter.activeEntryId === null ? -1 : entries.findIndex((e) => e.id === encounter.activeEntryId);
@@ -166,6 +166,9 @@ export function nextTurn(state: RoomState, encounter: Encounter, settings: RoomS
       wrapped = true;
     }
     const entry = entries[index]!;
+    // A controlled mount mounted after its row acted is passed over for the rest of that round, its durations untouched,
+    // so they never tick twice in one round (docs/design-v1-attach.md 7.1). Ops from before op version 14 pass none.
+    if (passOver && entry.skipRound !== undefined && entry.skipRound === encounter.round + (wrapped ? 1 : 0)) continue;
     if (settings.skipDefeated && isDefeated(state, entry)) {
       skipped.push(entry.id);
       continue;
