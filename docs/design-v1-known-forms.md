@@ -85,7 +85,7 @@ Known forms ships before movement, attach and traps. Each of those notes takes "
 
 - **The group** sits above the search, which filters only the list under it. Its label row holds "Known forms", the count (5.4) and "Change" (a `SmallButton`), wrapping as one row. The forms are `MonsterList` rows sorted by `byCrThenName`, and the list below is headed "All creatures".
 - **One tap takes the form** as Wild Shape, with the Temporary HP by the step's default (5.5's Druid level, only where more than it holds, through `shapePatch`), sends the one `character.update` Take the shape sends, and closes the picker. A row's accessible name is "Wild Shape as Wolf". The full list keeps its step, for Polymorph and the checkbox.
-- **Marks**: with a Druid level chosen, a form outside its limit gets a muted `Tag` before its CR (`ListedRow.tag`), "Over CR 1/2" or "Fly Speed", short enough for the tag's 88 px, and the reason joins the row's name: "Wild Shape as Owl, has a Fly Speed".
+- **Marks**: with a Druid level chosen, a form outside its limit gets a muted `Tag` before its CR (`ListedRow.tag`), "Over CR 1/2" or "Fly Speed", drawn whole (only a character's name in a tag is cut at 88 px), and the reason joins the row's name: "Wild Shape as Owl, has a Fly Speed".
 - **Empty state**: one `Help` line, "Bree knows no forms yet. A Druid knows 4 Beast forms at level 2, 6 at level 4 and 8 at level 8.", and "Choose known forms" in place of Change.
 - **Loading**: the rows need the SRD list's names, AC and speeds, so the group waits under the picker's existing "Loading the creatures…", and the SRD failure line covers both.
 
@@ -110,7 +110,7 @@ Known forms ships before movement, attach and traps. Each of those notes takes "
   3. Any, at 8: "8 known forms, the most there are." Short: "8 of 8".
   4. Any: "4 known forms." Short: "4".
 - **Style**: sentence case for labels and buttons. SRD capitals for rules terms: Druid, Beast, Wild Shape, Long Rest, Fly Speed, CR, Temporary HP. "known forms" stays lowercase in prose, as the SRD writes it.
-- **390 x 844**: the picker fills the screen and scrolls as one. Rows are 56 px with their detail line, so 8 forms take about 480 px and the search follows them. Panel buttons are 44 px and wrap. At 320 px or 130% text, a row's name cuts with an ellipsis and its tag cuts as `MonsterList`'s do.
+- **390 x 844**: the picker fills the screen and scrolls as one. Rows are 56 px with their detail line, so 8 forms take about 480 px and the search follows them. Panel buttons are 44 px and wrap. At 320 px or 130% text, a row's name cuts with an ellipsis and its mark stays whole.
 - **Keys**: none added or changed, so the shortcut sheet needs no row.
 
 ### 5.5 The Druid level and the Temporary HP
