@@ -1639,4 +1639,72 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await ops.send({ t: "handout.close", handoutId: id });
   });
 
+  test("lp4-library-retry. the Library's list fails: its handouts and the images on the map still open, and Try again shows the loading line, keeps focus in the panel, then lists the room (docs/design-v1-look-pass.md 2.9)", async () => {
+    // A document and a token's image of this step's own, so it needs no earlier step's.
+    const doc = await documentOf("Retry letter", [await paper(1584, 2048, 2)]);
+    const upload = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=token`, { headers: { Origin: server.origin, "content-type": "image/png" }, data: await paper(256, 256, 3) });
+    assert.ok(upload.ok());
+    const imageId = ((await upload.json()) as { id: string }).id;
+    const actor = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    await ops.send({
+      t: "token.create",
+      token: { id: randomUUID(), sceneId: dmSocket.state!.meta.playerSceneId, size: "medium", visibility: "all", kind: "monster", name: "Gargoyle", x: 3, y: 2, image: { assetId: imageId, crop: { cx: 0, cy: 0, zoom: 1 } }, actor: { inline: actor } },
+    });
+
+    // Only the list's GET fails: uploads go to the same path with PUT.
+    const list = `**/api/rooms/${run.roomId}/assets`;
+    await dm.route(list, (route) => (route.request().method() === "GET" ? route.abort("internetdisconnected") : route.continue()));
+    consoles.dm.allow = [/Failed to load resource: net::ERR_INTERNET_DISCONNECTED/];
+    try {
+      // A fresh page: a list loaded by an earlier step would stay shown over a failed refresh, as it should.
+      await dm.reload();
+      await openSideTab(dm, "Library");
+      const library = dm.getByRole("tabpanel", { name: "Library" });
+      const failed = library.getByRole("alert").filter({ hasText: "The library did not load. Handouts and images already on the map are below." });
+      await failed.waitFor();
+      await shots.take(dm, "lp4-library-failed");
+
+      // What the room's state names still shows and opens: the document, and the image on the map's token.
+      await library.getByRole("list", { name: "Handouts in this room" }).getByRole("button", { name: `${doc.title}, handout, 1 page`, exact: true }).click();
+      const letter = viewer(dm, doc.title);
+      await letter.waitFor();
+      await letter.getByRole("button", { name: `Close ${doc.title}` }).click();
+      await letter.waitFor({ state: "detached" });
+      const tile = library.getByRole("list", { name: "Token images in this room" }).locator(`li:has(img[src*="${imageId}"])`);
+      await tile.getByRole("button").click();
+      const image = viewer(dm, "Token image");
+      await image.waitFor();
+      await image.getByRole("button", { name: /^Close/ }).click();
+      await image.waitFor({ state: "detached" });
+
+      // Try again: held a while, so the loading line shows in the failure's place.
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await dm.unroute(list);
+      await dm.route(list, async (route) => {
+        if (route.request().method() === "GET") await held;
+        await route.continue();
+      });
+      await failed.getByRole("button", { name: "Try again" }).focus();
+      await dm.keyboard.press("Enter");
+      await library.getByText("Loading the library…").waitFor();
+      assert.equal(await failed.count(), 0, "the failure stays while it tries again");
+      const focused = () =>
+        dm.evaluate(() => {
+          const el = (globalThis as unknown as { document: { activeElement: { tagName: string; closest(s: string): unknown } | null } }).document.activeElement;
+          return { tag: el?.tagName ?? "", inPane: el?.closest("[data-pane]") != null };
+        });
+      assert.deepEqual(await focused(), { tag: "BUTTON", inPane: true }, "focus fell out of the panel as Try again left");
+      await shots.take(dm, "lp4-library-retrying");
+      release();
+      await library.getByText("Loading the library…").waitFor({ state: "detached" });
+      // The list's own rows now: the token image's tile says it is in use, which only the list knows.
+      await waitFor("the listed tile's status", async () => /In use/.test((await tile.locator("span[aria-hidden]").textContent()) ?? ""));
+      assert.equal(await library.getByRole("alert").filter({ hasText: "did not load" }).count(), 0, "the failure came back");
+    } finally {
+      await dm.unroute(list);
+      consoles.dm.allow = [];
+    }
+  });
+
 });

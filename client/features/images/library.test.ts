@@ -10,6 +10,7 @@ import {
   docBytes,
   docShowing,
   docsNewestFirst,
+  libraryState,
   looseHandouts,
   notInUse,
   refreshLibrary,
@@ -91,6 +92,47 @@ describe("the DM's library cleanup", () => {
     assert.equal(result.deleted, 0);
     assert.ok(result.error instanceof ApiError && result.error.code === "network");
     assert.deepEqual(result.remaining, ["a"]);
+  });
+});
+
+describe("a library list that failed to load (docs/design-v1-look-pass.md 2.9)", () => {
+  test("Try again asks once more, reads as loading meanwhile, and its answer replaces the failure", async () => {
+    api.listAssets = async () => {
+      throw new ApiError(0, "offline", "network", null);
+    };
+    await refreshLibrary("room");
+    assert.deepEqual({ ...libraryState("room"), retry: null }, { rows: null, loading: false, failed: true, retry: null });
+
+    let answer: (rows: { assets: AssetRow[] }) => void = () => undefined;
+    let asked = 0;
+    api.listAssets = () => {
+      asked++;
+      return new Promise((resolve) => (answer = resolve));
+    };
+    libraryState("room").retry();
+    // A second press while the first is out shares its request.
+    libraryState("room").retry();
+    assert.equal(asked, 1);
+    assert.deepEqual({ ...libraryState("room"), retry: null }, { rows: null, loading: true, failed: false, retry: null });
+
+    answer({ assets: [row("a")] });
+    await refreshLibrary("room");
+    const after = libraryState("room");
+    assert.deepEqual(after.rows?.map((r) => r.id), ["a"]);
+    assert.equal(after.failed, false);
+    assert.equal(after.loading, false);
+  });
+
+  test("a refresh that fails once the list has loaded keeps the list and reports no failure", async () => {
+    api.listAssets = async () => ({ assets: [row("a")] });
+    await refreshLibrary("room");
+    api.listAssets = async () => {
+      throw new ApiError(502, "down", undefined, null);
+    };
+    await refreshLibrary("room");
+    const state = libraryState("room");
+    assert.deepEqual(state.rows?.map((r) => r.id), ["a"]);
+    assert.equal(state.failed, false);
   });
 });
 

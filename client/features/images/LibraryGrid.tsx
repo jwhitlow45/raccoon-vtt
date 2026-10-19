@@ -5,6 +5,7 @@ import { imageAssetId } from "#shared/imageRef.ts";
 import type { Handout, HandoutDoc } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
+import { LoadFailed } from "../../components/LoadFailed.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section, SectionLabel } from "../../components/Panel.tsx";
 import { TAG_TONES } from "../../components/tones.ts";
@@ -166,7 +167,12 @@ function LibraryStatus(props: { library: LibraryState; failed?: string }) {
   return (
     <>
       {library.rows === null && !library.failed ? <Loading text="Loading the library…" /> : null}
-      {library.failed ? <Help>{props.failed ?? "The library did not load. Images already on the map are below."}</Help> : null}
+      {library.failed ? (
+        // Focus goes to the panel's first control, as when the last tile goes.
+        <LoadFailed retry={library.retry} focusTo={(from) => panelControl(from, from)}>
+          {props.failed ?? "The library did not load. Images already on the map are below."}
+        </LoadFailed>
+      ) : null}
     </>
   );
 }
@@ -527,11 +533,14 @@ function focusHeading(section: HTMLElement | null): void {
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The panel's first control: in its pane of the desktop side panel (either of two, docs/design-v1-split-panel.md 9.1), or the phone sheet's region, which holds its header too. */
-function focusPanel(root: HTMLElement | null): void {
+/** The panel's first control: in its pane of the desktop side panel (either of two, docs/design-v1-split-panel.md 9.1), or the phone sheet's region, which holds its header too. `except` is a control on its way out. */
+function panelControl(root: HTMLElement | null, except?: HTMLElement): HTMLElement | undefined {
   const panel = root?.closest<HTMLElement>("[data-pane]") ?? root?.closest<HTMLElement>('[role="tabpanel"], section[aria-label]') ?? root?.parentElement ?? null;
-  const first = panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el.getClientRects().length > 0) : undefined;
-  first?.focus();
+  return panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].find((el) => el !== except && el.getClientRects().length > 0) : undefined;
+}
+
+function focusPanel(root: HTMLElement | null): void {
+  panelControl(root)?.focus();
 }
 
 /** A tile's marks: its tag in the bottom left, and its status in the bottom right, which wraps above the tag where a narrow tile has no room for both. The tile's name says both, so they are hidden from screen readers. */

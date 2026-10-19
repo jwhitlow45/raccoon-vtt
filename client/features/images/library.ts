@@ -82,7 +82,8 @@ export function forgetAssets(roomId: string, ids: readonly string[]): void {
   emit();
 }
 
-export type LibraryState = { rows: readonly AssetRow[] | null; loading: boolean; failed: boolean };
+/** `retry` lists the room's images again, for a list that failed to load. */
+export type LibraryState = { rows: readonly AssetRow[] | null; loading: boolean; failed: boolean; retry(): void };
 
 function useEntry(roomId: string): Entry {
   // The same snapshot on a server render, which only tests do.
@@ -90,13 +91,28 @@ function useEntry(roomId: string): Entry {
   return entryFor(roomId);
 }
 
+/**
+ * The room's list as it stands. A list that failed and is being asked for
+ * again reads as loading, not failed, so Try again shows that it is trying
+ * and an empty list says nothing until the answer comes.
+ */
+export function libraryState(roomId: string): LibraryState {
+  const entry = entryFor(roomId);
+  return {
+    rows: entry.rows ? [...entry.rows.values()] : null,
+    loading: entry.loading !== null,
+    failed: entry.failed && !entry.rows && entry.loading === null,
+    retry: () => void refreshLibrary(roomId),
+  };
+}
+
 /** The whole list, refreshed when the caller mounts. */
 export function useLibrary(roomId: string): LibraryState {
-  const entry = useEntry(roomId);
+  useEntry(roomId);
   useEffect(() => {
     void refreshLibrary(roomId);
   }, [roomId]);
-  return { rows: entry.rows ? [...entry.rows.values()] : null, loading: entry.loading !== null, failed: entry.failed && !entry.rows };
+  return libraryState(roomId);
 }
 
 /**
