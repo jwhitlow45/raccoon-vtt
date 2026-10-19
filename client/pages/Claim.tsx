@@ -11,6 +11,7 @@ import { once } from "../lib/once.ts";
 import { roomPath } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
 import { claimRefusal } from "./claimRefusal.ts";
+import { HomeHeader } from "./Home.tsx";
 
 type Phase =
   | { kind: "checking" }
@@ -84,9 +85,7 @@ export function Claim(props: { roomId: string; fragment: FragmentSecret; onDone(
 
   return (
     <Page>
-      <h1 style={{ margin: 0, fontSize: theme.font.display, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
-        {fragment.kind === "dm" ? "DM link" : "DM device invite"}
-      </h1>
+      <HomeHeader title={fragment.kind === "dm" ? "DM link" : "DM device invite"} />
       {phase.kind === "checking" || phase.kind === "claiming" ? (
         <p style={{ color: theme.color.textMuted }}>Signing this device in as a DM…</p>
       ) : null}

@@ -60,9 +60,9 @@ export function Home() {
 }
 
 /**
- * The logo and a name over a page outside a room: Home, the error pages
- * and Admin. An error page that carries it still reads as this app, where
- * a bare card looked like a server's error page.
+ * The logo and a name over a page outside a room: Home, Join, a DM link's
+ * claim, the error pages and Admin. An error page that carries it still
+ * reads as this app, where a bare card looked like a server's error page.
  */
 export function HomeHeader(props: { title?: string; tagline?: string; actions?: ReactNode }) {
   return (

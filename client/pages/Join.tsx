@@ -12,6 +12,7 @@ import type { LinkPassword } from "../lib/playerLink.ts";
 import { formatRoomId } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
+import { HomeHeader } from "./Home.tsx";
 import {
   CHALLENGE_NOTICE,
   CHALLENGE_UNAVAILABLE,
@@ -66,12 +67,7 @@ export function Join(props: { roomId: string; roomName: string; link: LinkPasswo
 
   return (
     <Page>
-      <header>
-        <p style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.small }}>
-          Room {formatRoomId(roomId)}
-        </p>
-        <h1 style={{ margin: 0, fontSize: theme.font.display }}>{props.roomName}</h1>
-      </header>
+      <HomeHeader title={props.roomName} tagline={`Room ${formatRoomId(roomId)}`} />
       {wasDm ? dmEntry : null}
       {step ? (
         <PickPlayer
