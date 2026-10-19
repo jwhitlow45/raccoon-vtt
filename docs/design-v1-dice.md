@@ -87,7 +87,7 @@ resolveAdvantage(sources): AdvantageMode | undefined           // shared/dice/fo
 
 ### 3.4 Advantage on the dice
 
-A resolved mode applies to the formula's one d20, exactly one term that is `1d20`, positive, with no keep. It becomes `2d20kh1`, or `2d20kl1`, and the result keeps `mode`. A resolved mode on a roll without one d20 is refused ("Advantage and disadvantage need one d20 in the roll."). Sources on such a roll, such as the panel's on damage, are never added.
+A resolved mode applies to the formula's one d20, exactly one term that is `1d20`, positive, with no keep. It becomes `2d20kh1`, or `2d20kl1`, and the result keeps `mode`. A resolved mode on a roll without one d20 is refused ("Adv or Dis needs one d20."). Sources on such a roll, such as the panel's on damage, are never added.
 
 ### 3.5 Functions
 
