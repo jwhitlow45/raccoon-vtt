@@ -39,3 +39,19 @@ describe("monster list rows as subpage openers", () => {
     assert.deepEqual(openers(markup), []);
   });
 });
+
+/*
+ * A known form's mark in Take a shape (docs/design-v1-known-forms.md 5.1)
+ * reads whole. Cut at a character name's 88 px, "Over CR 1/4" showed as
+ * "Over CR …" on a phone (LP9-PLAY-1). A companion block's character name
+ * still cuts.
+ */
+describe("tags in monster rows", () => {
+  test("a known form's mark is never cut, and a character's name on a companion block is", () => {
+    const mark = renderToStaticMarkup(createElement(MonsterList, { items: [{ key: "goblin-warrior", source: "srd", view: goblin, tag: "Over CR 1/4", label: "Wild Shape as Goblin Warrior, over CR 1/4" }], onPick: () => {} }));
+    assert.match(mark, /Over CR 1\/4/);
+    assert.doesNotMatch(mark, /max-width:88px/, "the mark is cut at a name's width");
+    const block = renderToStaticMarkup(createElement(MonsterList, { items: [{ key: "block:b1", source: "block", view: goblin, tag: "Bartholomew the Unready's" }], onPick: () => {} }));
+    assert.match(block, /max-width:88px/, "a character's name is no longer cut");
+  });
+});

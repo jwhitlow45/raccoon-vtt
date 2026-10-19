@@ -78,8 +78,8 @@ export function MonsterRow(props: { item: ListedRow; onPick(key: string): void; 
           {m.source === "room" ? (
             <RoomBadge />
           ) : m.tag ? (
-            // A character's name, of any length: cut so the row keeps room for the block's own name.
-            <Tag tone="muted" cut={SOURCE_TAG_PX}>
+            // A character's name, of any length: cut so the row keeps room for the block's own name. A known form's mark is a few fixed words that say why, such as "Over CR 1/4", so it reads whole.
+            <Tag tone="muted" cut={m.source === "block" ? SOURCE_TAG_PX : undefined}>
               {m.tag}
             </Tag>
           ) : null}
