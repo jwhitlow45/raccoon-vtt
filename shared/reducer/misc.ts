@@ -1,10 +1,10 @@
 import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
 import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
 import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
-import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, Scene, Token } from "../model.ts";
+import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, RoomState, Scene, Token } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
-import { linkHolds } from "../rules/attach.ts";
+import { holderOf, linkHolds } from "../rules/attach.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { turnUnderWay } from "../rules/path.ts";
 import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
@@ -172,23 +172,35 @@ function companionsAfterRestore(tx: Tx, entries: RestoreEntry[]): void {
  * A player's undo of a Get off, or redo of a mounting, puts the mount back
  * on the turn's list (docs/design-v1-attach.md 8.3): only for the turn the
  * step was made on, the same seq, and only while the restored ride is the
- * one it names, a controlled ride of the turn's creature that holds. It
- * never adds a mount the turn did not have and never touches `markRound`.
+ * one it names, a mount the turn's creature rides by controlled rides that
+ * hold, up the whole chain as the turn's start lists them. It never adds a
+ * mount the turn did not have and never touches `markRound`.
  */
 function ridesBack(tx: Tx, rides: NonNullable<OpOf<"sys.restore">["rides"]>): void {
   for (const ride of rides) {
     const encounter = tx.state.encounter;
     const turn = turnUnderWay(encounter);
     if (!encounter || !turn || turn.seq !== ride.seq || turn.tokenId !== ride.rider) continue;
-    const rider = tx.state.tokens[ride.rider];
     const mount = tx.state.tokens[ride.mount];
-    const link = rider?.attached;
-    if (!rider || !mount || link?.to !== mount.id || link.kind !== "ride" || link.steer !== true) continue;
-    if (!linkHolds(tx.state.meta.settings, "ride", rider, mount)) continue;
+    if (!mount || !ridesUpTo(tx.state, ride.rider, mount.id)) continue;
     const mounts = turn.mounts ?? [];
     if (mounts.includes(mount.id) || mounts.length >= LIMITS.turnMounts) continue;
     tx.write(keys.encounter, { ...encounter, turnStart: { ...encounter.turnStart!, mounts: [...mounts, mount.id] } });
   }
+}
+
+/** Whether `mountId` is up `riderId`'s chain of controlled rides, each of which holds (7.1). */
+function ridesUpTo(state: RoomState, riderId: string, mountId: string): boolean {
+  const seen = new Set<string>();
+  for (let rider = state.tokens[riderId]; rider && !seen.has(rider.id); ) {
+    seen.add(rider.id);
+    const link = rider.attached;
+    const holder = link?.kind === "ride" && link.steer === true ? (holderOf(state.tokens, rider) as Token | undefined) : undefined;
+    if (!holder || !linkHolds(state.meta.settings, "ride", rider, holder)) return false;
+    if (holder.id === mountId) return true;
+    rider = holder;
+  }
+  return false;
 }
 
 /** The refusal when a restore would take away a scene, character or token that other work still uses. */

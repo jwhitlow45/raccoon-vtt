@@ -9,7 +9,7 @@ import { footprintSize, snapStep } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { routeWalk } from "../rules/route.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
-import { writeEncounter } from "./encounter.ts";
+import { sharedMounts, writeEncounter } from "./encounter.ts";
 import { carriedAlong, judgedIn, placeCarried, sharesTurn, sortedById, speedsOf, withPath, type Judged } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
@@ -96,8 +96,10 @@ function rowOf(tx: Tx, tokenId: string): InitEntry | undefined {
  * row takes its rider's value and goes right after its rider's, unless it
  * is the acting row, which no row moves around. One that had its turn this
  * round already is passed over for the rest of it (`skipRound`). Taken on
- * the rider's own turn while every player sees the pair, the mount joins
- * the turn's `mounts` and its row marks time this round (`markRound`).
+ * the chain of controlled rides the acting creature directs, each pair
+ * seen by every player (sharedMounts), the mount and any mount above it
+ * join the turn's `mounts` and their rows mark time this round
+ * (`markRound`), as they would at the turn's start.
  */
 function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   const encounter = tx.state.encounter;
@@ -116,12 +118,18 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   }
   let turnStart = encounter.turnStart;
   const turn = turnUnderWay(encounter);
-  const rider = tx.state.tokens[riderId];
-  const mount = tx.state.tokens[mountId];
-  if (turn && turn.tokenId === riderId && rider && mount && seenByAll(tx, riderId) && seenByAll(tx, mountId)) {
-    const mounts = turn.mounts ?? [];
-    if (!mounts.includes(mountId) && mounts.length < LIMITS.turnMounts) turnStart = { ...turn, mounts: [...mounts, mountId] };
-    entries = entries.map((e) => (e.tokenId === mountId ? { ...e, markRound: encounter.round } : e));
+  // The new ride joins the turn when it is on the chain the turn's creature directs, with every mount above it there.
+  const chain = turn ? sharedMounts(tx, turn.tokenId) : [];
+  if (turn && chain.includes(mountId)) {
+    const mounts = [...(turn.mounts ?? [])];
+    const marked = new Set([mountId]);
+    for (const id of chain) {
+      if (mounts.includes(id) || mounts.length >= LIMITS.turnMounts) continue;
+      mounts.push(id);
+      marked.add(id);
+    }
+    if (mounts.length !== (turn.mounts ?? []).length) turnStart = { ...turn, mounts };
+    entries = entries.map((e) => (e.tokenId !== undefined && marked.has(e.tokenId) ? { ...e, markRound: encounter.round } : e));
   }
   if (entries !== encounter.entries || turnStart !== encounter.turnStart) writeEncounter(tx, { ...encounter, entries, ...(turnStart ? { turnStart } : {}) });
 }

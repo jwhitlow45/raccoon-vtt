@@ -104,6 +104,40 @@ describe("a player's attach and detach undo as moves (8.3)", () => {
     assert.equal(t.t("horse").path!.stops.length, 2);
   });
 
+  test("undoing a Get off off a chain of controlled mounts puts every mount of the chain back on the turn's list", () => {
+    // Pip (Small) rides a mastiff by a controlled ride, and the mastiff rides the warhorse the same way.
+    const t = table((s) => {
+      s.tokens.pip = token("pip", { name: "Pip", kind: "pc", size: "small", disposition: "ally", ownerIds: ["p1"], x: 4, y: 4, attached: { to: "dog", kind: "ride", steer: true } });
+      s.tokens.dog = token("dog", { name: "Mastiff", kind: "npc", disposition: "ally", ownerIds: ["p1"], x: 4, y: 4, attached: { to: "horse", kind: "ride", steer: true } });
+    });
+    assert.equal(t.play(DM, { t: "encounter.start", entries: [{ id: "ep", tokenId: "pip", value: 20 }, { id: "eg", tokenId: "gob", value: 12 }] }), "ok");
+    assert.equal(t.play(DM, { t: "encounter.next" }), "ok");
+    assert.deepEqual(t.mounts(), ["dog", "horse"]);
+    assert.equal(t.play(P1, { t: "token.detach", tokenId: "pip", x: 3, y: 4 }), "ok");
+    assert.equal(t.mounts(), undefined);
+    assert.equal(t.undo(), "ok");
+    assert.deepEqual(t.mounts(), ["dog", "horse"]);
+    assert.equal(t.redo(), "ok");
+    assert.equal(t.mounts(), undefined);
+  });
+
+  test("getting on a mount that rides a controlled mount shares the whole chain, as the turn's start would, and its undo and redo take it back and forth", () => {
+    const t = table((s) => {
+      s.tokens.pip = token("pip", { name: "Pip", kind: "pc", size: "small", disposition: "ally", ownerIds: ["p1"], x: 3, y: 4 });
+      s.tokens.dog = token("dog", { name: "Mastiff", kind: "npc", disposition: "ally", ownerIds: ["p1"], x: 4, y: 4, attached: { to: "horse", kind: "ride", steer: true } });
+    });
+    assert.equal(t.play(DM, { t: "encounter.start", entries: [{ id: "ep", tokenId: "pip", value: 20 }, { id: "eg", tokenId: "gob", value: 12 }, { id: "eh", tokenId: "horse", value: 8 }] }), "ok");
+    assert.equal(t.play(DM, { t: "encounter.next" }), "ok");
+    assert.equal(t.mounts(), undefined);
+    assert.equal(t.play(P1, { t: "token.attach", tokenId: "pip", to: "dog", kind: "ride", steer: true, x: 4, y: 4, elevation: 0 }), "ok");
+    assert.deepEqual(t.mounts(), ["dog", "horse"]);
+    assert.equal(row(t, "horse").markRound, 1);
+    assert.equal(t.undo(), "ok");
+    assert.equal(t.mounts(), undefined);
+    assert.equal(t.redo(), "ok");
+    assert.deepEqual(t.mounts(), ["dog", "horse"]);
+  });
+
   test("on another turn the ride comes back without sharing that turn, even the rider's own next one", () => {
     const t = thornsTurn(table());
     assert.equal(t.play(P1, ride), "ok");

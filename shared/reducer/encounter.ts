@@ -54,6 +54,26 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
 }
 
 /**
+ * The mounts a creature's turn shares (docs/design-v1-attach.md 7.1): up
+ * its chain of controlled rides, each mount whose rider and itself every
+ * player sees now, so the link is seen too, at most a turn's limit.
+ */
+export function sharedMounts(tx: Tx, creatureId: string): string[] {
+  const mounts: string[] = [];
+  const seen = new Set<string>();
+  let rider = tx.state.tokens[creatureId];
+  while (rider && !seen.has(rider.id) && mounts.length < LIMITS.turnMounts) {
+    seen.add(rider.id);
+    const link = rider.attached;
+    const mount = link?.kind === "ride" && link.steer ? holderOf(tx.state.tokens, rider) : undefined;
+    if (!mount || !inSightOfNonOwners(tx.state, rider, tx.env) || !inSightOfNonOwners(tx.state, tx.state.tokens[mount.id]!, tx.env)) break;
+    mounts.push(mount.id);
+    rider = tx.state.tokens[mount.id];
+  }
+  return mounts;
+}
+
+/**
  * The turn that starts with the controlled mounts its creature rides
  * (docs/design-v1-attach.md 7.1): up the creature's chain of controlled
  * rides, each mount whose rider and itself every player sees now, so the
@@ -64,17 +84,7 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
 function withMounts(tx: Tx, encounter: Encounter, reactions: boolean): Encounter {
   const start = encounter.turnStart;
   if (!start) return encounter;
-  const mounts: string[] = [];
-  const seen = new Set<string>();
-  let rider = tx.state.tokens[start.tokenId];
-  while (rider && !seen.has(rider.id) && mounts.length < LIMITS.turnMounts) {
-    seen.add(rider.id);
-    const link = rider.attached;
-    const mount = link?.kind === "ride" && link.steer ? holderOf(tx.state.tokens, rider) : undefined;
-    if (!mount || !inSightOfNonOwners(tx.state, rider, tx.env) || !inSightOfNonOwners(tx.state, tx.state.tokens[mount.id]!, tx.env)) break;
-    mounts.push(mount.id);
-    rider = tx.state.tokens[mount.id];
-  }
+  const mounts = sharedMounts(tx, start.tokenId);
   if (mounts.length === 0) return encounter;
   const entries = encounter.entries.map((e) => {
     if (e.tokenId === undefined || !mounts.includes(e.tokenId)) return e;
