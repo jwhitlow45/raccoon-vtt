@@ -5,7 +5,7 @@ import { canSqueeze, footprintSize, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footprintGround, standing } from "./heights.ts";
 import { legStop, stepTester, type MovingToken, type StepTester } from "./movement.ts";
-import { routeLattice, type RoutePiece, type RoutePoint } from "./route.ts";
+import { routeLattice, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
  * Finding the way a creature walks (docs/design-v1-movement.md section 5):
@@ -627,7 +627,7 @@ export class WalkSearch {
     if (this.#euclid) {
       const L = this.world.L;
       const fpc = this.world.input.rules.feetPerCell;
-      step = Math.hypot(L, diagonal ? L : 0, Math.abs(dzFt) / fpc) * fpc;
+      step = trueLength(L, diagonal ? L : 0, Math.abs(dzFt) / fpc) * fpc;
     } else if (!this.#fiveTen) step = Math.max(this.#Lu, Z);
     else {
       const S2 = 2 * this.#S;

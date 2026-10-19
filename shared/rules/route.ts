@@ -80,6 +80,17 @@ export function routeReach(points: readonly RoutePoint[], feetPerCell: number): 
 }
 
 /**
+ * A straight length in squares under true distance. `Math.hypot` is left to
+ * each engine's own approximation, so a tie could break one way in one
+ * browser and the other in the next. A square root of a sum of squares is
+ * correctly rounded at every step, so every device gets the same bits
+ * (review MV-O-11).
+ */
+export function trueLength(dx: number, dy: number, dz: number): number {
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
  * What a walked leg takes (6.2, contract 4.4): the sum over its pieces of
  * `legFeet(dx, dy, dz)` for `moved`, and of `(1 + extra - swim * s)` times
  * it for `cost`, where `s` is 1 for a creature with a Swim Speed. The 5-10-5
@@ -107,7 +118,7 @@ export function routeFeet(
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1]!;
       const b = points[i]!;
-      const ft = Math.hypot(b.x - a.x, b.y - a.y, (b.elevation - a.elevation) / fpc) * fpc;
+      const ft = trueLength(b.x - a.x, b.y - a.y, (b.elevation - a.elevation) / fpc) * fpc;
       moved += ft;
       cost += ft * multiplier(pieces[i - 1], opts.swimSpeed);
     }

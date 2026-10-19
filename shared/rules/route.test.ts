@@ -4,7 +4,7 @@ import type { DiagonalRule } from "../model.ts";
 import { legFeet } from "./distance.ts";
 import { sizeCategory, sizeSteps } from "./footprint.ts";
 import { legStop } from "./movement.ts";
-import { onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, straightFeet, type RoutePoint } from "./route.ts";
+import { onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, straightFeet, trueLength, type RoutePoint } from "./route.ts";
 import { free, line, tok, world } from "./testWorld.ts";
 
 const RULES: DiagonalRule[] = ["five", "fiveTen", "euclid"];
@@ -112,6 +112,15 @@ describe("routeFeet (docs/design-v1-movement.md 6.2)", () => {
       // The float count drifts where the exact one does not, a fifth of a square at a time.
       if (diagonal === "fiveTen") for (const [i, d] of [before.h - counter.h, before.v - counter.v].entries()) assert.ok(Math.abs(out.diag[i]! - d) < 1e-9);
     }
+  });
+});
+
+describe("true distance's lengths", () => {
+  test("a square root of a sum of squares, exact on whole triangles, so no engine's hypot decides a tie", () => {
+    assert.equal(trueLength(3, 4, 0), 5);
+    assert.equal(trueLength(2, 3, 6), 7);
+    assert.equal(trueLength(1, 1, 0), Math.sqrt(2));
+    assert.equal(trueLength(0.5, 0.5, 0), Math.sqrt(0.5));
   });
 });
 
