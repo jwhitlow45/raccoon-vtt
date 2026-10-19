@@ -184,6 +184,13 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
 export const SAVE_IS_DMS = "only the DM sets a save that ends an effect";
 
 /**
+ * Why the scene the players are on cannot be deleted. Deleting it would
+ * send them to whichever scene comes first in the list, which may be one
+ * the DM is preparing in private. The scene menu shows these words too.
+ */
+export const MOVE_PLAYERS_FIRST = "Move the players to another scene first.";
+
+/**
  * Whether an op names a "save ends" save or occurrence on an effect. Only
  * the DM sets one, since its DC is the DM's, and only the server writes an
  * occurrence, so every op that carries effects is checked: an effect added
@@ -292,6 +299,9 @@ function forDm(op: Op, c: Check): Decision {
       return imageUsable(c, op.patch.defaultImage) ? OK : GONE;
     case "scene.create":
       return op.scene.map && !c.asset(op.scene.map.assetId, "map") ? GONE : OK;
+    case "scene.delete":
+      // Here, where ops arrive, never in the reducer: a stored delete of the players' scene from before the rule still replays, moving them on as it did.
+      return op.sceneId === c.state.meta.playerSceneId ? refuse("invalid", MOVE_PLAYERS_FIRST) : OK;
     case "scene.setMap":
       return op.map && !c.asset(op.map.assetId, "map") ? GONE : OK;
     case "scene.update": {

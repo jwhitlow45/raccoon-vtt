@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MoveAnyToken, RoomState } from "./model.ts";
-import { canApply, movesAnyToken, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, type AssetKind, type PermissionDeps } from "./permissions.ts";
+import { canApply, MOVE_PLAYERS_FIRST, movesAnyToken, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import { projectState } from "./project.ts";
 import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, RESIZE_KEEPS_PLACE, resizeSpot } from "./rules/resize.ts";
@@ -41,6 +41,18 @@ describe("DM", () => {
     assert.equal(code({ t: "member.update", memberId: "p1", name: "G" }, DM), "forbidden");
     assert.equal(code({ t: "undo" }, DM), "ok");
     assert.equal(code({ t: "sys.restore", entries: [{ key: "token:gob", value: null, expectRev: 1 }], from: "undo" }, DM), "ok");
+  });
+
+  // Deleting the players' scene sent them to the first scene in the list, which can be one the DM is preparing (LP9-PLAY-2).
+  test("may delete any scene but the players' one, which needs them moved first", () => {
+    const state = setup();
+    assert.equal(state.meta.playerSceneId, "s1");
+    const decision = canApply({ t: "scene.delete", sceneId: "s1" }, DM, state, deps);
+    assert.deepEqual(decision, { ok: false, code: "invalid", message: MOVE_PLAYERS_FIRST });
+    assert.equal(code({ t: "scene.delete", sceneId: "s2" }, DM, state), "ok");
+    state.meta.playerSceneId = "s2";
+    assert.equal(code({ t: "scene.delete", sceneId: "s1" }, DM, state), "ok");
+    assert.equal(code({ t: "scene.delete", sceneId: "s2" }, DM, state), "invalid");
   });
 
   test("roster changes never come from a socket", () => {
