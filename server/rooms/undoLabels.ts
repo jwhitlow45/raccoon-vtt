@@ -125,6 +125,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       const name = before.characters[op.characterId]?.name;
       if (op.patch.stats === null) return `removing ${quoted(name, "a character")}'s stat block`;
       if (op.patch.stats !== undefined) return `changing ${quoted(name, "a character")}'s stat block`;
+      if (op.patch.knownForms !== undefined) return `changing ${quoted(name, "a character")}'s known forms`;
       return `changing ${the("character", name)}`;
     }
     case "character.delete":

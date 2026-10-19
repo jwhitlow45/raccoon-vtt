@@ -616,6 +616,15 @@ const pcParts = {
 };
 const pcCritOn = z.union([z.literal(19), z.literal(18)]);
 
+/**
+ * A Druid's known forms (docs/design-v1-known-forms.md 3.1), the most the
+ * SRD's Beast Shapes table gives. Only the bound is checked: whether an id
+ * is a Beast, or one a level may take, is the table's call, and the server
+ * reads no SRD data for it, so a stored op never depends on that data.
+ */
+export const MAX_KNOWN_FORMS = 8;
+const knownForms = z.array(srdId).max(MAX_KNOWN_FORMS).refine(unique, { message: "a known form is listed twice" });
+
 const pcStats = z
   .strictObject({
     ...pcParts,
@@ -698,6 +707,8 @@ const characterPatch = z.strictObject({
   level: characterLevel.nullable().optional(),
   /** Null removes the block. The actor keeps its last initiative and Passive Perception (docs/design-v1-pc-stats.md 3.5). */
   stats: pcStatsPatch.nullable().optional(),
+  /** Replaces the list whole. An empty one removes it, so none and absent are one state. */
+  knownForms: knownForms.optional(),
 });
 
 /** A stat block line the DM reads as text, such as the skills or the languages. */
@@ -1762,6 +1773,8 @@ export const savedEncounterFieldsForImport = savedEncounterFields;
 export const savedEncounterInputSchema = savedEncounterInput;
 /** A character's stat block, so the stored-state schema checks imported ones by the same bounds and the editor checks a draft before it saves. */
 export const pcStatsForImport = pcStats;
+/** A character's known forms, so the stored-state schema checks imported ones by the same bound. */
+export const knownFormsSchema = knownForms;
 /** A stat block's patch, for the editor to check what it sends. */
 export const pcStatsPatchSchema = pcStatsPatch;
 /** A fill as the D&D Beyond route answers it (docs/design-v1-pc-stats.md 6.3). */

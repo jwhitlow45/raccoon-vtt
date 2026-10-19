@@ -322,6 +322,24 @@ describe("token and character fields", () => {
     assert.equal(code({ t: "character.update", characterId: "c1", patch: { defaultImage: { assetId: "shared", crop: { cx: 0, cy: 0, zoom: 1 } } } }), "ok");
     assert.equal(code({ t: "character.update", characterId: "c1", patch: { defaultImage: { assetId: "dm1-x", crop: { cx: 0, cy: 0, zoom: 1 } } } }), "gone");
   });
+
+  test("a character's known forms are the DM's and its players' to choose, and no one else's (docs/design-v1-known-forms.md 3.2)", () => {
+    const state = setup();
+    state.characters.c1!.ownerIds = ["p1", "p2"];
+    state.characters.c2 = character("c2", { ownerIds: ["p1"] });
+    // P2 owns a token of c2, which is not owning c2.
+    state.tokens.lent = token("lent", { kind: "pc", ownerIds: ["p2"], actor: { ref: "c2" }, x: 4, y: 4 });
+    const forms = (characterId: string): Op => ({ t: "character.update", characterId, patch: { knownForms: ["wolf", "owl"] } });
+    assert.equal(code(forms("c1"), DM, state), "ok");
+    assert.equal(code(forms("c2"), DM, state), "ok");
+    assert.equal(code(forms("c1"), P1, state), "ok");
+    assert.equal(code(forms("c1"), P2, state), "ok", "a co-owner");
+    assert.equal(code({ t: "character.update", characterId: "c1", patch: { knownForms: [] } }, P1, state), "ok");
+    const refusal = canApply(forms("c2"), P2, state, deps);
+    assert.deepEqual(refusal, { ok: false, code: "forbidden", message: "that is not yours" }, "a token's owner, not the character's");
+    const other = setup();
+    assert.equal(code(forms("c1"), P2, other), "forbidden", "another player");
+  });
 });
 
 describe("HP and effects", () => {

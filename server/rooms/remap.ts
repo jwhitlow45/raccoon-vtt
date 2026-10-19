@@ -285,6 +285,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (mapped) next.defaultImage = mapped;
       else delete next.defaultImage;
     }
+    // Known forms are SRD ids, which no room renames. A hand-made file's empty list is stored as none, the one state the reducer keeps (docs/design-v1-known-forms.md 3.1).
+    if (c.knownForms?.length === 0) delete next.knownForms;
     out.characters[next.id] = next;
   }
   for (const t of liveTokens) {

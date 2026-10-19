@@ -18,6 +18,7 @@ import {
   areaTriggersSchema,
   moveAnyTokenSchema,
   pcStatsForImport,
+  knownFormsSchema,
   fogOpSchema,
   handoutSchemas,
   mapSchemas,
@@ -275,6 +276,8 @@ const character = z.strictObject({
   level: z.number().int().min(1).max(20).optional(),
   // Backups from before stat blocks for player characters have none (docs/design-v1-pc-stats.md 3.5).
   stats: pcStatsForImport.optional(),
+  // Backups from before known forms have none. A hand-made empty list passes here, and the remap stores it as none (docs/design-v1-known-forms.md 3.1).
+  knownForms: knownFormsSchema.optional(),
 });
 
 const areaFeet = z.number().min(5).max(1_000);

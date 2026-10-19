@@ -579,9 +579,9 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
     } as Partial<RoomState>);
   }
 
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 10);
-    assert.equal(SNAPSHOT_VERSION, 14);
+  test("is reached", () => {
+    assert.ok(OP_VERSION >= 10);
+    assert.ok(SNAPSHOT_VERSION >= 14);
   });
 
   test("a room that used the old id in every place names the dragon turtle by its new id there, and nothing else changes", () => {
@@ -744,5 +744,49 @@ describe("the dragon turtle's id: op version 10 and snapshot version 14", () => 
   test("a version 10 op and a version 14 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 10, 9, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 14, 13, snapshotMigrations), /down/);
+  });
+});
+
+describe("a Druid's known forms: op version 11 and snapshot version 15 (docs/design-v1-known-forms.md 3.4 and 3.5)", () => {
+  const OLD = "dragon-tur-t-le";
+  const NEW = "dragon-turtle";
+  const BOTH = [OLD, NEW, "wolf"];
+
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 11);
+    assert.equal(SNAPSHOT_VERSION, 15);
+  });
+
+  test("both steps return what they are given", () => {
+    const ops: unknown[] = [{ t: "character.update", characterId: "c1", patch: { knownForms: ["wolf", "owl"] } }, { t: "encounter.next" }];
+    for (const op of ops) assert.equal(runMigrations(op, 10, 11, opMigrations), op);
+    const state = room({ characters: { c1: character("c1", { knownForms: ["wolf"] }) } });
+    assert.equal(runMigrations(state, 14, 15, snapshotMigrations), state);
+  });
+
+  test("a version 11 op and a version 15 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 11, 10, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 15, 14, snapshotMigrations), /down/);
+  });
+
+  test("both spellings of the dragon turtle become one known form, the first kept in place, in a live op, a stored op and a snapshot", () => {
+    const op: Op = { t: "character.update", characterId: "c1", patch: { knownForms: BOTH } };
+    assert.ok(opSchema.safeParse(op).success, "two spellings are two ids to the schema");
+    const live = withTodaysSrdIds(op);
+    assert.deepEqual(live.t === "character.update" && live.patch.knownForms, [NEW, "wolf"]);
+    const stored = migrateOp(JSON.parse(JSON.stringify(op)), 9);
+    assert.deepEqual(stored, { ...op, patch: { knownForms: [NEW, "wolf"] } });
+    assert.ok(opSchema.safeParse(stored).success, "the stored op still replays");
+    const restore = { t: "sys.restore", entries: [{ key: "character:c1", value: character("c1", { knownForms: BOTH }) }] };
+    assert.deepEqual((migrateOp(restore, 9) as typeof restore).entries[0]!.value.knownForms, [NEW, "wolf"]);
+    const snapshot = migrateSnapshot(room({ characters: { c1: character("c1", { knownForms: [NEW, OLD] }) } }), 13);
+    assert.deepEqual(snapshot.characters.c1!.knownForms, [NEW]);
+  });
+
+  test("a list that names neither old id is the very same list", () => {
+    const op: Op = { t: "character.update", characterId: "c1", patch: { knownForms: [NEW, "wolf"] } };
+    assert.equal(withTodaysSrdIds(op), op);
+    const state = room({ characters: { c1: character("c1", { knownForms: ["wolf", "owl"] }) } });
+    assert.equal(runMigrations(state, 13, 14, snapshotMigrations), state);
   });
 });

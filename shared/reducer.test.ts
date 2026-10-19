@@ -712,6 +712,13 @@ describe("characters, templates and drawings", () => {
     assert.equal(leveled.characters.c1!.level, 4);
     assert.equal("level" in apply(leveled, { t: "character.update", characterId: "c1", patch: { level: null } }, DM, 5).characters.c1!, false);
     assert.equal(apply(fresh(), { t: "character.create", character: { id: "c3", name: "Cy", size: "medium", ownerIds: [], actor: actor(), level: 9 } }).characters.c3!.level, 9);
+    // Known forms are set and replaced whole, and an empty list is stored as none, the other fields kept (docs/design-v1-known-forms.md 3.2).
+    const known = apply(apply(leveled, { t: "character.update", characterId: "c1", patch: { knownForms: ["wolf", "owl"] } }, DM, 5), { t: "character.update", characterId: "c1", patch: { knownForms: ["black-bear", "wolf"] } }, DM, 6);
+    assert.deepEqual(known.characters.c1!.knownForms, ["black-bear", "wolf"]);
+    assert.equal(known.characters.c1!.level, 4);
+    const forgotten = apply(known, { t: "character.update", characterId: "c1", patch: { knownForms: [] } }, DM, 7).characters.c1!;
+    assert.equal("knownForms" in forgotten, false);
+    assert.deepEqual({ ...forgotten, rev: 0 }, { ...leveled.characters.c1!, rev: 0 });
     state = apply(owners.state, { t: "encounter.start", entries: [{ id: "n1", characterId: "c1", value: 10 }, { id: "n2", tokenId: "pc1", value: 9 }] }, DM, 3);
     state = apply(state, { t: "character.delete", characterId: "c1" }, DM, 4);
     assert.equal(state.characters.c1, undefined);

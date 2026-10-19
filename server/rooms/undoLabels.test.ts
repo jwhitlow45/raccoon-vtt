@@ -284,3 +284,12 @@ describe("wave 5 undo labels (docs/design-v1-dm-tools.md 2.2)", () => {
     assert.equal(addTally(tallyOf(first, s), tallyOf({ t: "token.updateMany", tokenIds: ["g2"], patch: { locked: true } })), undefined);
   });
 });
+
+describe("a known forms undo label (docs/design-v1-known-forms.md 3.4)", () => {
+  test("names the character's known forms, and a character the room lacks", () => {
+    const s = room({ characters: { bree: character("bree", { name: "Bree" }) } });
+    assert.equal(describeOp({ t: "character.update", characterId: "bree", patch: { knownForms: ["wolf"] } }, s), "changing Bree's known forms");
+    assert.equal(describeOp({ t: "character.update", characterId: "bree", patch: { knownForms: [] } }, s), "changing Bree's known forms");
+    assert.equal(describeOp({ t: "character.update", characterId: "gone", patch: { knownForms: ["wolf"] } }, s), "changing a character's known forms");
+  });
+});

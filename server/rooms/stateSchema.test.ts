@@ -6,6 +6,7 @@ import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
 import { actor, apply, character, companionBlock, customMonster, DM, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 describe("roomStateSchema", () => {
@@ -566,5 +567,39 @@ describe("roomStateSchema, pdf handouts (docs/design-v1-pdf-handouts.md 3.3)", (
     const migrated = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v9)), 9));
     assert.ok(migrated.ok, migrated.ok ? "" : migrated.message);
     assert.deepEqual(migrated.ok && migrated.state.companionBlocks, {});
+  });
+});
+
+describe("roomStateSchema, a Druid's known forms (docs/design-v1-known-forms.md 3.1)", () => {
+  const OLD = "dragon-tur-t-le";
+  const NEW = "dragon-turtle";
+  const withForms = (knownForms: string[]) => room({ characters: { bree: character("bree", { knownForms }), cy: character("cy") } });
+
+  test("up to 8 forms pass with the op's bounds, a ninth or a repeat does not, and a file without them still does", () => {
+    const eight = ["wolf", "owl", "black-bear", "brown-bear", "boar", "giant-wasp", "mastiff", NEW];
+    assert.ok(parseRoomState(structuredClone(withForms(eight))).ok);
+    assert.equal(parseRoomState(withForms([...eight, "ape"])).ok, false);
+    assert.equal(parseRoomState(withForms(["wolf", "wolf"])).ok, false);
+    assert.equal(parseRoomState(withForms(["Wolf"])).ok, false);
+    assert.ok(parseRoomState(room({ characters: { cy: character("cy") } })).ok);
+  });
+
+  test("an empty list imports, and the remap stores it as none", () => {
+    const parsed = parseRoomState(withForms([]));
+    assert.ok(parsed.ok);
+    const out = remapState(parsed.ok ? parsed.state : room(), { assets: new Map() });
+    for (const c of Object.values(out.characters)) assert.equal("knownForms" in c, false);
+  });
+
+  test("the forms travel through the remap as they are, since SRD ids are not room ids", () => {
+    const out = remapState(withForms(["wolf", "owl"]), { assets: new Map() });
+    assert.deepEqual(Object.values(out.characters).flatMap((c) => c.knownForms ?? []), ["wolf", "owl"]);
+  });
+
+  test("an import from before snapshot version 14 holding both spellings of the dragon turtle names it once", () => {
+    const v13 = withForms([OLD, "wolf", NEW]);
+    const parsed = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v13)), 13));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.deepEqual(parsed.ok && parsed.state.characters.bree?.knownForms, [NEW, "wolf"]);
   });
 });

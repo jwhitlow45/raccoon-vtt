@@ -9,7 +9,7 @@ import {
   serverOnlyOpSchema,
 } from "./protocol.ts";
 import { serializedBytes } from "./limits.ts";
-import { blockOf, companionBlock, customMonster } from "./testutil.ts";
+import { actor, blockOf, companionBlock, customMonster } from "./testutil.ts";
 
 const ok = (schema: { safeParse: (v: unknown) => { success: boolean } }, value: unknown) => assert.ok(schema.safeParse(value).success, JSON.stringify(value));
 const bad = (schema: { safeParse: (v: unknown) => { success: boolean } }, value: unknown) => assert.ok(!schema.safeParse(value).success, JSON.stringify(value));
@@ -113,6 +113,21 @@ describe("ops", () => {
     for (const level of [1, 20]) ok(clientOpSchema, { t: "character.update", characterId: "c", patch: { level } });
     for (const level of [0, 21, 2.5, "3"]) bad(clientOpSchema, { t: "character.update", characterId: "c", patch: { level } });
     ok(clientOpSchema, { t: "character.update", characterId: "c", patch: { level: null } });
+  });
+
+  test("a character's known forms are up to 8 SRD ids, each once, and an empty list clears them (docs/design-v1-known-forms.md 3.1)", () => {
+    const forms = (knownForms: unknown) => ({ t: "character.update", characterId: "c", patch: { knownForms } });
+    const eight = ["wolf", "owl", "black-bear", "brown-bear", "boar", "giant-wasp", "mastiff", "dragon-turtle"];
+    ok(clientOpSchema, forms(eight));
+    ok(clientOpSchema, forms([]));
+    bad(clientOpSchema, forms([...eight, "ape"]));
+    bad(clientOpSchema, forms(["wolf", "wolf"]));
+    for (const id of ["Wolf", "giant wasp", "-wolf", "", "a".repeat(81)]) bad(clientOpSchema, forms([id]));
+    bad(clientOpSchema, forms(null));
+    // A new character knows none.
+    const bree = { id: "c", name: "Bree", size: "medium", ownerIds: [], actor: actor() };
+    ok(clientOpSchema, { t: "character.create", character: bree });
+    bad(clientOpSchema, { t: "character.create", character: { ...bree, knownForms: ["wolf"] } });
   });
 
   test("entries need a token, a character or a label", () => {

@@ -837,6 +837,14 @@ export type Character = {
    * `passivePerception` follow it.
    */
   stats?: PcStats;
+  /**
+   * A Druid's known forms for Wild Shape (docs/design-v1-known-forms.md 3.1):
+   * SRD ids, 1 to MAX_KNOWN_FORMS, each once, in the order chosen. On the
+   * character, not its stat block, since a druid with no block still takes
+   * shapes. Absent is none, never an empty list, and rooms from before it
+   * have none.
+   */
+  knownForms?: string[];
 };
 
 /**

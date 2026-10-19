@@ -489,6 +489,8 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   if (p.ownerIds !== undefined) next.ownerIds = p.ownerIds;
   setOrDelete(next, "defaultImage", p.defaultImage);
   setOrDelete(next, "level", p.level);
+  // The list replaces the old one whole, and an empty one is stored as none. No SRD data is read, so replay never depends on it (docs/design-v1-known-forms.md 3.2).
+  if (p.knownForms !== undefined) setOrDelete(next, "knownForms", p.knownForms.length > 0 ? p.knownForms : null);
   if (p.stats === null) delete next.stats;
   else if (p.stats !== undefined) {
     next.stats = applyPcStatsPatch(character.stats ?? EMPTY_PC_STATS, p.stats);

@@ -1862,3 +1862,46 @@ describe("companion stat blocks (docs/design-v1-companion-stat-blocks.md 4.2)", 
     assert.ok(projectState(state, P1, ON_S1).characters.bree);
   });
 });
+
+/**
+ * Who receives a character's known forms (docs/design-v1-known-forms.md
+ * 3.3): exactly the viewers who receive its stat block, through the
+ * character's existing projection, held here as a matrix so a later edit of
+ * its fixed list cannot leak them.
+ */
+describe("who receives a character's known forms", () => {
+  const FORMS = ["black-bear", "wolf", "owl"];
+  const P3: Viewer = { memberId: "p3", role: "player" };
+  function setup(): RoomState {
+    return room({
+      members: { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2"), p3: member("p3") },
+      characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1", "p2"], knownForms: FORMS }), cy: character("cy", { ownerIds: ["p3"] }) },
+      // p3 owns one of Bree's tokens, which is not owning Bree.
+      tokens: { t: token("t", { kind: "pc", ownerIds: ["p3"], actor: { ref: "bree" } }) },
+    });
+  }
+  const seen = (state: RoomState, viewer: Viewer) => projectState(state, viewer, { sceneId: state.meta.playerSceneId }).characters.bree;
+
+  test("the DM, the character's player and its co-owner get them whole", () => {
+    for (const viewer of [DM, P1, P2]) assert.deepEqual(seen(setup(), viewer)?.knownForms, FORMS, viewer.memberId);
+  });
+
+  test("another player, a player who owns only one of its tokens, the table display and the DM's preview as one of them never", () => {
+    const state = setup();
+    const preview = (viewer: Viewer) => projectState(projectState(state, DM, { sceneId: state.meta.playerSceneId }) as unknown as RoomState, viewer, { sceneId: null });
+    for (const view of [projectState(state, P3, { sceneId: state.meta.playerSceneId }), projectState(state, DISPLAY, { sceneId: state.meta.playerSceneId }), preview(P3)]) {
+      assert.ok(view.characters.bree, "the character itself is seen");
+      assert.equal("knownForms" in view.characters.bree, false);
+      assert.equal(JSON.stringify(view).includes("black-bear"), false, "nowhere in the whole view");
+    }
+    assert.deepEqual(preview(P1).characters.bree?.knownForms, FORMS, "the preview as its player shows them, as that player sees them");
+  });
+
+  test("a blackout keeps them for the character's players, since a character is not scene data", () => {
+    const state = setup();
+    state.meta.view.blackout = true;
+    assert.deepEqual(seen(state, P1)?.knownForms, FORMS);
+    const other = seen(state, P3);
+    assert.equal(other === undefined || !("knownForms" in other), true);
+  });
+});

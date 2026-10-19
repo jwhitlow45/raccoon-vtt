@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 14;
-export const OP_VERSION = 10;
+export const SNAPSHOT_VERSION = 15;
+export const OP_VERSION = 11;
 
 export type MigrationStep = {
   from: number;
@@ -111,6 +111,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // of those spots takes today's id (renameSrdIdsInState). An initiative row's group key keeps its spelling, since it
   // may be a name rather than an id (SRD_ID_FIELDS).
   { from: 13, to: 14, apply: (state) => renameSrdIdsInState(state) },
+  // A Druid's known forms (Character.knownForms, docs/design-v1-known-forms.md 3.5) are an optional field whose absence
+  // reads as before, so a v14 room is a v15 room as it is. The number moves so that an older build, whose strict state
+  // schema refuses the field, refuses a v15 snapshot instead of failing on the character.
+  { from: 14, to: 15, apply: (state) => state },
 ];
 
 /**
@@ -348,6 +352,22 @@ export const opMigrations: MigrationStep[] = [
     to: 10,
     apply: (op) => renameSrdIdsInOp(op),
   },
+  {
+    // `character.update` takes a Druid's known forms (`knownForms`,
+    // docs/design-v1-known-forms.md 3.5). Older ops lack them and replay as
+    // they were, so the step is the identity, and no rule gates on it. An
+    // older build's strict schema refuses the field in a stored update,
+    // which the version makes that build refuse cleanly instead.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 11, and the shutdown writes version 15 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 10,
+    to: 11,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -374,8 +394,12 @@ const OLD_SRD_IDS: ReadonlyMap<string, string> = new Map([...RENAMED_SRD_IDS].ma
  * guard over the fight would stop matching. The tracker reads a stored old
  * id as today's instead (`todaysSrdId`, rowGroup in
  * shared/rules/initiative.ts).
+ *
+ * A character's `knownForms` is a list of SRD ids (SRD_ID_LIST_FIELDS).
  */
 const SRD_ID_FIELDS: ReadonlySet<string> = new Set(["srdId", "fromSrd"]);
+/** The fields that hold a list of SRD ids, each once: a character's known forms (docs/design-v1-known-forms.md 3.4). */
+const SRD_ID_LIST_FIELDS: ReadonlySet<string> = new Set(["knownForms"]);
 
 /** The parts of a room that can name an SRD monster, besides `srdImages`. A fight's rows name none but their group keys. */
 const SRD_NAMING_FIELDS = ["tokens", "characters", "savedEncounters", "companionBlocks", "log"] as const;
@@ -405,10 +429,30 @@ function withMappedSrdIds(value: unknown, ids: IdMap): unknown {
   }
   let out: Record<string, unknown> | undefined;
   for (const [field, item] of Object.entries(value)) {
-    const next = SRD_ID_FIELDS.has(field) ? mappedId(item, ids) : field === "shapeTemp" ? mappedShapes(item, ids) : withMappedSrdIds(item, ids);
+    const next = SRD_ID_FIELDS.has(field)
+      ? mappedId(item, ids)
+      : SRD_ID_LIST_FIELDS.has(field)
+        ? mappedIdList(item, ids)
+        : field === "shapeTemp"
+          ? mappedShapes(item, ids)
+          : withMappedSrdIds(item, ids);
     if (next !== item) (out ??= { ...value })[field] = next;
   }
   return out ?? value;
+}
+
+/**
+ * A list of SRD ids with each mapped, then repeats dropped in order,
+ * keeping the first, so a list that held both spellings of one creature
+ * holds it once: the protocol's schema refuses a repeat, and a replayed op
+ * that held one would leave its room read-only. A list that names none of
+ * the ids is the very same list.
+ */
+function mappedIdList(list: unknown, ids: IdMap): unknown {
+  if (!Array.isArray(list)) return list;
+  const mapped = list.map((id: unknown) => mappedId(id, ids));
+  if (mapped.every((id, i) => id === list[i])) return list;
+  return mapped.filter((id, i) => mapped.indexOf(id) === i);
 }
 
 /** An HP log line's `shapeTemp`, which names the shapes before and after by SRD id. An actor's own is `true`. */
