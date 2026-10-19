@@ -1,5 +1,5 @@
-import type { AreaSlows, AreaTemplate, Effect, PathStop, RoomState, Token } from "../model.ts";
-import { isPartyMember, playersSeeGround, withheldWhereItStands } from "../project.ts";
+import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token } from "../model.ts";
+import { isPartyMember, playersSeeGround, projectChunkForPlayer, withheldWhereItStands } from "../project.ts";
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { footprintRect, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
@@ -139,7 +139,7 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
       spaces.push({ id: other.id, x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, lo, hi });
     }
   }
-  const areaCtx = areaContext(state, token, shown);
+  const areaCtx = areaContext(state, token, shown, viewer.role === "dm" && !everything);
   const areas: WalkArea[] = [];
   const halfSpeed: AreaTemplate[] = [];
   for (const { template, kind } of slowingAreas(state, token, shown, everything)) {
@@ -165,12 +165,18 @@ function shownTokens(state: RoomState, token: Token, viewer: WalkViewer, everyth
   return new Map(onScene.filter((t) => everything || publicToken(state, t, viewer)).map((t) => [t.id, t]));
 }
 
-function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>): AreaContext {
+/**
+ * Where the areas reach, by the walls players know (review MV-O-10). Areas
+ * pass a secret door by its real state, and players hold one nobody found
+ * as a wall, so on the DM's device the public world reads the scene's
+ * chunks as players hold them (`asPlayers`). A player's copy already is.
+ */
+function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>, asPlayers: boolean): AreaContext {
   const scene = state.scenes[token.sceneId];
   return {
     settings: state.meta.settings,
     bounds: scene?.bounds ?? { w: 0, h: 0 },
-    walls: scene ? sceneWalls(scene, state.buildChunks) : null,
+    walls: scene ? sceneWalls(scene, asPlayers ? playersChunks(state, scene.id) : state.buildChunks) : null,
     tokens: Object.fromEntries([...shown].map(([id, t]) => [id, t as AreaToken])),
   };
 }
@@ -190,7 +196,32 @@ function slowingAreas(state: RoomState, token: Token, shown: ReadonlyMap<string,
 /** The Half Speed areas that affect `token` (4.2), as the public world holds them, for the movement marker where it stands. */
 export function speedAreas(state: RoomState, token: Token, viewer: WalkViewer): SpeedAreas {
   const shown = shownTokens(state, token, viewer);
-  return { halfSpeed: slowingAreas(state, token, shown).flatMap((a) => (a.kind === "halfSpeed" ? [a.template] : [])), areaCtx: areaContext(state, token, shown) };
+  return { halfSpeed: slowingAreas(state, token, shown).flatMap((a) => (a.kind === "halfSpeed" ? [a.template] : [])), areaCtx: areaContext(state, token, shown, viewer.role === "dm") };
+}
+
+/*
+ * A scene's chunks as players hold them (project.ts projectChunkForPlayer,
+ * kept per chunk object), by the room's chunk collection, which is replaced
+ * and never changed, and the scene's automatic walls rule, so the walls
+ * derived from them are kept too.
+ */
+const playerBuilds = new WeakMap<object, Map<string, Record<string, BuildChunk>>>();
+
+function playersChunks(state: RoomState, sceneId: string): Record<string, BuildChunk> {
+  let byScene = playerBuilds.get(state.buildChunks);
+  if (!byScene) playerBuilds.set(state.buildChunks, (byScene = new Map()));
+  const autoWalls = state.scenes[sceneId]?.autoWalls;
+  const key = `${sceneId},${autoWalls ?? ""}`;
+  const hit = byScene.get(key);
+  if (hit) return hit;
+  const out: Record<string, BuildChunk> = {};
+  for (const [key, chunk] of Object.entries(state.buildChunks)) {
+    if (!chunk || chunk.sceneId !== sceneId) continue;
+    const seen = projectChunkForPlayer(state.buildChunks, chunk, autoWalls);
+    if (seen) out[key] = seen;
+  }
+  byScene.set(key, out);
+  return out;
 }
 
 /**

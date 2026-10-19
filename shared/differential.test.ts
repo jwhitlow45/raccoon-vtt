@@ -81,6 +81,16 @@ const PAIRS: Pair[] = [
       s.buildChunks[chunkKey("s1", 0, 0)] = chunk({}, { "6,5,w": { kind: "door", state: "closed", secret: true, discovered: false } });
     },
   ),
+  pair(
+    "an unfound secret door left open beside Plant Growth",
+    (s) => {
+      s.buildChunks[chunkKey("s1", 0, 0)] = chunk({}, { "6,5,w": { kind: "door", state: "closed", secret: true, discovered: false } });
+      s.templates.pg = template("pg", { shape: "sphere", size: 15, origin: { x: 5, y: 5, z: 0 }, ownerId: "dm1", slows: { kind: "quarter" } });
+    },
+    (s) => {
+      s.buildChunks[chunkKey("s1", 0, 0)] = chunk({}, { "6,5,w": { kind: "door", state: "open", secret: true, discovered: false } });
+    },
+  ),
   pair("fogged rubble", fogged, (s) => {
     s.buildChunks[chunkKey("s1", 0, 0)] = chunk(Object.fromEntries(PATCH.map((k) => [k, "rubble" as TerrainId])));
   }, partyOnly, ["buildChunks"]),
