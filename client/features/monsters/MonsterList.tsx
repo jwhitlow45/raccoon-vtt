@@ -29,9 +29,13 @@ export type Listed = { key: string; view: StatBlockMonster } & ({ source: "room"
 /**
  * A row of any list: a room monster, an SRD monster, or a character's
  * companion stat block, which `tag` marks with whose it is, such as "Bree's"
- * (docs/design-v1-companion-stat-blocks.md 6.1).
+ * (docs/design-v1-companion-stat-blocks.md 6.1). A known form in Take a
+ * shape (docs/design-v1-known-forms.md 5.1 and 5.2) has its own name for
+ * what a tap does, `label`, such as "Wild Shape as Wolf", and a `tag` for a
+ * form the picked Druid level may not take. In the step that chooses them a
+ * row is a toggle, `pressed`, and `disabled` once the list is full.
  */
-export type ListedRow = { key: string; view: StatBlockMonster; source: "room" | "srd" | "block"; tag?: string };
+export type ListedRow = { key: string; view: StatBlockMonster; source: "room" | "srd" | "block"; tag?: string; label?: string; pressed?: boolean; disabled?: boolean };
 
 /**
  * Card rows, a gap apart, as every list of rows that are buttons is
@@ -48,6 +52,9 @@ export function MonsterList(props: { items: readonly ListedRow[]; onPick(key: st
         <li key={m.key}>
           <Row
             onClick={() => props.onPick(m.key)}
+            label={m.label}
+            pressed={m.pressed}
+            disabled={m.disabled}
             opener={props.subpages ? `monster-${m.key}` : undefined}
             title={m.view.name}
             detail={sizeAndType(m.view)}

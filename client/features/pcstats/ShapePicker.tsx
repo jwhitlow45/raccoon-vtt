@@ -1,21 +1,25 @@
-import { useDeferredValue, useId, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Character } from "#shared/model.ts";
+import { MAX_KNOWN_FORMS } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Input, Select } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { Help } from "../../components/Panel.tsx";
+import { Help, Note, SectionLabel } from "../../components/Panel.tsx";
+import { Row } from "../../components/Row.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { MonsterList, type ListedRow } from "../monsters/MonsterList.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { SrdCredit, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { editsPcStats } from "../tokens/access.ts";
 import { whose } from "../tokens/companionBlocks.ts";
+import { SmallButton } from "../tokens/ui.tsx";
 import { monsterMatcher } from "../tokens/monsterSearch.ts";
+import { formLabel, formMark, knownFormCountWords, knownFormPatch, knownFormsIn, missingFormText, rememberDruidLevel, rememberedDruidLevel, startDruidLevel, toggleKnownForm } from "./knownForms.ts";
 import { byCrThenName, DRUID_LEVELS, fitsShapeLimit, shapeLimit } from "./shapeLevel.ts";
 import { shapePatch, shapeTempHp, wildShapeDetail, type ShapeKind } from "./shape.ts";
 
@@ -31,39 +35,88 @@ function isBeast(m: SrdMonster): boolean {
  * character's own actor with the creature's AC and speeds and the shape's
  * temporary HP, a checkbox on by default (W7B-P-9). HP stays the
  * character's.
+ *
+ * A Druid's known forms come first, each taking Wild Shape in one tap, and
+ * "Change" opens the step that chooses them, sharing the search and both
+ * filters with the first page (docs/design-v1-known-forms.md 5.1 and 5.2).
  */
-export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats">; onClose(): void }) {
+export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats" | "knownForms">; onClose(): void }) {
   const actions = useRoomActions();
+  const ui = useRoomUi();
+  const roomId = useRoomView((s) => s.roomId);
+  const characterId = props.character.id;
   const { monsters, failed } = useSrdMonsters();
   const [query, setQuery] = useState("");
   const [beastsOnly, setBeastsOnly] = useState(true);
-  const [druidLevel, setDruidLevel] = useState<number | null>(null);
+  // The Druid level this device remembers for the character, which Wild Shape's Temporary HP follow (5.5).
+  const [remembered, setRemembered] = useState(() => rememberedDruidLevel(roomId, characterId));
+  const [druidLevel, setDruidLevel] = useState<number | null>(() => startDruidLevel(remembered, props.character));
   const [picked, setPicked] = useState<SrdMonster | null>(null);
+  const [choosing, setChoosing] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [kind, setKind] = useState<ShapeKind>("wild");
   const [gainTemp, setGainTemp] = useState(true);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const deferred = useDeferredValue(query);
   const matches = useMemo(() => monsterMatcher(deferred), [deferred]);
   const limit = useMemo(() => (druidLevel === null ? null : shapeLimit(druidLevel)), [druidLevel]);
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const kept = (monsters ?? []).filter((m) => (!beastsOnly || isBeast(m)) && matches(m) && (limit === null || fitsShapeLimit(limit, m)));
     if (limit !== null) kept.sort(byCrThenName);
-    return kept.map((m): ListedRow => ({ key: m.srdId, view: m, source: "srd" }));
+    return kept;
   }, [monsters, beastsOnly, matches, limit]);
+  const knownIds = props.character.knownForms;
+  const known = useMemo(() => knownFormsIn(knownIds, monsters ?? []), [knownIds, monsters]);
+  const count = knownFormCountWords(knownIds?.length ?? 0, druidLevel);
   // Wild Shape forms must be Beasts, so choosing a level turns the filter on. It stays the user's to turn off again.
   const chooseLevel = (value: string) => {
-    setDruidLevel(value === "" ? null : Number(value));
-    if (value !== "") setBeastsOnly(true);
+    const level = value === "" ? null : Number(value);
+    setDruidLevel(level);
+    if (level !== null) setBeastsOnly(true);
+    rememberDruidLevel(roomId, characterId, level);
+    setRemembered(level ?? undefined);
   };
   const name = props.character.name;
   const you = useRoomView((s) => s.you);
 
+  // One search and one pair of filters for both pages, so a level picked on either carries to the other (5.2).
+  const filters = (
+    <>
+      <Input type="search" aria-label="Search creatures" placeholder="Search: wolf, cr 0-1" value={query} enterKeyHint="search" onChange={(e) => setQuery(e.target.value)} style={{ width: "100%" }} />
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(4), rowGap: theme.space(1) }}>
+        <Checkbox label="Beasts only" checked={beastsOnly} onChange={setBeastsOnly} />
+        <label style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+          Druid level
+          <Select value={druidLevel === null ? "" : String(druidLevel)} onChange={(e) => chooseLevel(e.target.value)}>
+            <option value="">Any</option>
+            {DRUID_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </Select>
+        </label>
+      </div>
+      {limit ? <Help>{limit.label}</Help> : null}
+      {failed ? <SrdLoadFailed what="The creature list" /> : null}
+      {!monsters && !failed ? <Loading text="Loading the creatures…" /> : null}
+    </>
+  );
+
   if (picked) {
-    const temp = shapeTempHp(kind, props.character, picked);
+    const temp = shapeTempHp(kind, props.character, picked, remembered);
     const holding = props.character.actor.hp.temp;
     const take = () => {
       const patch = shapePatch(picked, kind, props.character, gainTemp ? temp : undefined);
-      if (actions.dispatch({ t: "character.update", characterId: props.character.id, patch: { actor: patch } }) !== null) props.onClose();
+      if (actions.dispatch({ t: "character.update", characterId, patch: { actor: patch } }) !== null) props.onClose();
     };
+    const druidWords = remembered !== undefined ? `Druid level ${remembered}, as picked in Take a shape.` : `The Druid level, read as ${whose(name)} level.`;
     return (
       <Dialog
         title={`Take the shape of ${picked.name}`}
@@ -89,7 +142,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
           ) : (
             <Checkbox
               label={`Gain ${temp} Temporary HP (${kind === "wild" ? "Wild Shape" : "Polymorph"})`}
-              help={kind === "wild" ? `The Druid level, read as ${whose(name)} level.` : `${whose(picked.name)} HP. What is left of them goes when the shape ends.`}
+              help={kind === "wild" ? druidWords : `${whose(picked.name)} HP. What is left of them goes when the shape ends.`}
               checked={gainTemp}
               onChange={setGainTemp}
             />
@@ -100,34 +153,110 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
     );
   }
 
+  if (choosing) {
+    const full = (knownIds?.length ?? 0) >= MAX_KNOWN_FORMS;
+    const chosen = new Set(knownIds ?? []);
+    // The known forms first, whatever the search and the level, so a marked one can still be taken out (5.2).
+    const knownRows = known.forms.map((m): ListedRow => ({ key: m.srdId, view: m, source: "srd", tag: formMark(limit, m)?.tag, pressed: true }));
+    const otherRows = filtered.filter((m) => !chosen.has(m.srdId)).map((m): ListedRow => ({ key: m.srdId, view: m, source: "srd", pressed: false, disabled: full }));
+    // Each tap sends the whole new list, as a condition's toggle sends its op: the prediction shows it at once, with no Save.
+    const toggle = (srdId: string) => {
+      setRefusal(null);
+      const knownForms = toggleKnownForm(props.character.knownForms, srdId);
+      // Quiet, so a refusal shows under the count in the server's words rather than in a toast behind the dialog.
+      actions.dispatch(
+        { t: "character.update", characterId, patch: { knownForms } },
+        {
+          quiet: true,
+          onAnswer: (answer, why) => {
+            if (answer !== "refused" || !why) return;
+            if (mounted.current) setRefusal(why.text);
+            else ui.notify(why.text, "error");
+          },
+        },
+      );
+    };
+    return (
+      <Dialog title={`${whose(name)} known forms`} onClose={props.onClose} back={{ label: "Back to the creatures", onBack: () => setChoosing(false) }} phone="fill" width="md">
+        <PickerBody>
+          <Help>{`The Beast forms ${name} knows for Wild Shape, listed first in Take a shape. By the rules a Druid replaces one after each Long Rest, and the DM may allow other Beasts.`}</Help>
+          {count.over ? <Note>{count.text}</Note> : <p style={{ margin: 0, fontSize: theme.font.body14 }}>{count.text}</p>}
+          {refusal ? (
+            <p role="alert" style={{ margin: 0, fontSize: theme.font.small, color: theme.color.dangerText }}>
+              {refusal}
+            </p>
+          ) : null}
+          {filters}
+          {monsters ? (
+            <div style={{ display: "grid", gap: theme.space(1) }}>
+              <MonsterList items={knownRows} onPick={toggle} />
+              {known.missing.length > 0 ? (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
+                  {known.missing.map((id) => (
+                    <li key={id}>
+                      <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app’s SRD list" />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <MonsterList items={otherRows} onPick={toggle} />
+              {otherRows.length === 0 ? <Help>No other creature matches.</Help> : null}
+            </div>
+          ) : null}
+          <SrdCredit />
+        </PickerBody>
+      </Dialog>
+    );
+  }
+
+  const takeForm = (srdId: string) => {
+    const m = monsters?.find((x) => x.srdId === srdId);
+    if (!m) return;
+    if (actions.dispatch({ t: "character.update", characterId, patch: { actor: knownFormPatch(m, props.character, remembered) } }) !== null) props.onClose();
+  };
+  const knownRows = known.forms.map((m): ListedRow => {
+    const mark = formMark(limit, m);
+    return { key: m.srdId, view: m, source: "srd", tag: mark?.tag, label: formLabel(m.name, mark) };
+  });
+  const none = (knownIds?.length ?? 0) === 0;
   return (
     <Dialog title="Take a shape" onClose={props.onClose} phone="fill" width="md">
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
+      <PickerBody>
         <Help>{`An SRD creature for ${whose(name)} token to take the shape of. The token keeps ${whose(name)} HP and conditions.`}</Help>
-        <Input type="search" aria-label="Search creatures" placeholder="Search: wolf, cr 0-1" value={query} enterKeyHint="search" onChange={(e) => setQuery(e.target.value)} style={{ width: "100%" }} />
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(4), rowGap: theme.space(1) }}>
-          <Checkbox label="Beasts only" checked={beastsOnly} onChange={setBeastsOnly} />
-          <label style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-            Druid level
-            <Select value={druidLevel === null ? "" : String(druidLevel)} onChange={(e) => chooseLevel(e.target.value)}>
-              <option value="">Any</option>
-              {DRUID_LEVELS.map((l) => (
-                <option key={l} value={l}>
-                  {l}
-                </option>
-              ))}
-            </Select>
-          </label>
-        </div>
-        {limit ? <Help>{limit.label}</Help> : null}
-        {failed ? <SrdLoadFailed what="The creature list" /> : null}
-        {!monsters && !failed ? <Loading text="Loading the creatures…" /> : null}
-        <MonsterList items={rows} onPick={(key) => setPicked(monsters?.find((m) => m.srdId === key) ?? null)} />
-        {monsters && rows.length === 0 ? <Help>No creature matches.</Help> : null}
+        {/* The rows need the SRD list's names, AC and speeds, so the group waits under the list's own loading and failure lines (5.1). */}
+        {monsters ? (
+          <div style={{ display: "grid", gap: theme.space(1) }}>
+            <SectionLabel
+              action={
+                <>
+                  {none ? null : <span style={{ fontSize: theme.font.small, color: count.over ? theme.color.warning : theme.color.textMuted, whiteSpace: "nowrap" }}>{count.short}</span>}
+                  <SmallButton wrap onClick={() => setChoosing(true)}>
+                    {none ? "Choose known forms" : "Change"}
+                  </SmallButton>
+                </>
+              }
+            >
+              Known forms
+            </SectionLabel>
+            {none ? <Help>{`${name} knows no forms yet. A Druid knows 4 Beast forms at level 2, 6 at level 4 and 8 at level 8.`}</Help> : <MonsterList items={knownRows} onPick={takeForm} />}
+            {known.missing.map((id) => (
+              <Help key={id}>{missingFormText(id)}</Help>
+            ))}
+          </div>
+        ) : null}
+        {filters}
+        {monsters ? <SectionLabel>All creatures</SectionLabel> : null}
+        <MonsterList items={filtered.map((m): ListedRow => ({ key: m.srdId, view: m, source: "srd" }))} onPick={(key) => setPicked(monsters?.find((m) => m.srdId === key) ?? null)} />
+        {monsters && filtered.length === 0 ? <Help>No creature matches.</Help> : null}
         <SrdCredit />
-      </div>
+      </PickerBody>
     </Dialog>
   );
+}
+
+/** Each page's body: one column no wider than the dialog, so a long name cuts or wraps rather than scroll it sideways. */
+function PickerBody(props: { children: ReactNode }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{props.children}</div>;
 }
 
 /** Wild Shape or another shape, as two radios each 44 px tall, whose words say what the shape keeps. */

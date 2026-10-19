@@ -1,5 +1,6 @@
 import { Children, isValidElement, type CSSProperties, type ReactNode, type Ref } from "react";
 import { theme } from "../lib/theme.ts";
+import { Icon } from "./Icon.tsx";
 
 /**
  * One line of a list (docs/design-v1-visual.md 2.3): members, scenes,
@@ -14,7 +15,10 @@ import { theme } from "../lib/theme.ts";
  * own, since a button inside a button is not allowed. `chosen` (the scene
  * you are on) takes the accent tint and outline. `turn` marks the
  * creature whose turn it is, in the fixed cream highlight, never the
- * accent.
+ * accent. `pressed` makes the row a toggle button, such as a known form
+ * chosen (docs/design-v1-known-forms.md 5.2): `chosen`'s look without its
+ * `aria-current`, and a check in the leading slot, which an unpressed one
+ * keeps empty so the titles line up.
  */
 export function Row(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -24,6 +28,8 @@ export function Row(props: {
   trailing?: ReactNode;
   chosen?: boolean;
   turn?: boolean;
+  /** A toggle row's state, as `aria-pressed`. Only with `onClick`. */
+  pressed?: boolean;
   /** Shows the card look without being a button, for a card whose actions sit in its trailing slot. */
   card?: boolean;
   disabled?: boolean;
@@ -42,7 +48,7 @@ export function Row(props: {
   style?: CSSProperties;
 }) {
   const card = props.card === true || props.onClick !== undefined;
-  const look: CSSProperties = props.chosen
+  const look: CSSProperties = props.chosen || props.pressed
     ? { background: theme.color.accentTint, border: `${theme.line.border}px solid ${theme.color.accent}` }
     : props.turn
       ? { background: theme.color.turnTint, border: `${theme.line.border}px solid ${theme.color.accentSoft}` }
@@ -56,16 +62,22 @@ export function Row(props: {
     width: "100%",
     minHeight: props.detail ? 56 : theme.touch,
     padding: `${theme.space(2)}px ${theme.space(3)}px`,
-    borderRadius: card || props.chosen || props.turn ? theme.radius.md : 0,
+    borderRadius: card || props.chosen || props.pressed || props.turn ? theme.radius.md : 0,
     color: props.disabled ? theme.color.textDisabled : theme.color.text,
     fontFamily: theme.font.body,
     textAlign: "left",
     ...look,
     ...props.style,
   };
+  const leading =
+    props.pressed === undefined ? props.leading : (
+      <span aria-hidden style={{ display: "grid", placeItems: "center", width: 20, height: 20, color: theme.color.accent }}>
+        {props.pressed ? <Icon name="check" size="md" /> : null}
+      </span>
+    );
   const body = (
     <>
-      {props.leading ? <span style={{ flex: "none", display: "grid", placeItems: "center" }}>{props.leading}</span> : null}
+      {leading ? <span style={{ flex: "none", display: "grid", placeItems: "center" }}>{leading}</span> : null}
       <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
         <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {props.title}
@@ -93,6 +105,7 @@ export function Row(props: {
       data-opener={props.opener}
       aria-label={props.label}
       aria-current={props.chosen ? true : undefined}
+      aria-pressed={props.pressed}
       aria-expanded={props.expanded}
       disabled={props.disabled}
       onClick={(e) => {

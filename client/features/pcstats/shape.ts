@@ -14,11 +14,13 @@ export type ShapeKind = "wild" | "other";
 
 /**
  * The temporary HP a shape gives by the 2024 rules (W7B-P-9): the Druid
- * level for Wild Shape, read as the character's level, and the creature's
- * HP for Polymorph.
+ * level for Wild Shape, and the creature's HP for Polymorph. The Druid level
+ * is the one this device remembers picking in Take a shape when there is
+ * one, since a multiclassed Druid's differs from the character's, and else
+ * the character's level (docs/design-v1-known-forms.md 5.5).
  */
-export function shapeTempHp(kind: ShapeKind, character: Pick<Character, "level">, creature: Pick<SrdMonster, "hp">): number {
-  return kind === "wild" ? (character.level ?? 1) : creature.hp.average;
+export function shapeTempHp(kind: ShapeKind, character: Pick<Character, "level">, creature: Pick<SrdMonster, "hp">, druidLevel?: number): number {
+  return kind === "wild" ? (druidLevel ?? character.level ?? 1) : creature.hp.average;
 }
 
 /**

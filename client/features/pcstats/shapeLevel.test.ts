@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 import { loadMonsters } from "#shared/srd/monsters.ts";
-import { byCrThenName, fitsShapeLimit, shapeLimit } from "./shapeLevel.ts";
+import { byCrThenName, fitsShapeLimit, knownFormCount, shapeLimit, shapeLimitMiss } from "./shapeLevel.ts";
 
 describe("a Druid's Beast Shapes limit", () => {
   test("the limit by level", () => {
@@ -44,6 +44,23 @@ describe("a Druid's Beast Shapes limit", () => {
     assert.equal(fitsShapeLimit(shapeLimit(7), named("Brown Bear")), false);
     assert.equal(fitsShapeLimit(shapeLimit(8), named("Brown Bear")), true);
     assert.equal(fitsShapeLimit(shapeLimit(20), named("Wolf")), true);
+  });
+
+  test("the Beast Shapes table's known forms by level (docs/design-v1-known-forms.md 2)", () => {
+    assert.deepEqual([2, 3, 4, 7, 8, 20].map(knownFormCount), [4, 4, 6, 6, 8, 8]);
+  });
+
+  test("a miss names the CR or the Fly Speed, the CR first, and the filter keeps exactly the forms that miss nothing", () => {
+    assert.equal(shapeLimitMiss(shapeLimit(4), named("Owl")), "fly");
+    assert.equal(shapeLimitMiss(shapeLimit(2), named("Black Bear")), "cr");
+    assert.equal(shapeLimitMiss(shapeLimit(4), named("Giant Wasp")), "fly", "CR 1/2 fits at 4, its Fly Speed does not");
+    assert.equal(shapeLimitMiss(shapeLimit(2), named("Giant Wasp")), "cr", "over CR and flying reads as the CR");
+    assert.equal(shapeLimitMiss(shapeLimit(8), named("Owl")), null);
+    assert.equal(shapeLimitMiss(shapeLimit(1), named("Wolf")), "cr", "no form below level 2");
+    for (const level of [1, 2, 4, 8]) {
+      const limit = shapeLimit(level);
+      for (const m of SRD_MONSTERS) assert.equal(fitsShapeLimit(limit, m), shapeLimitMiss(limit, m) === null, `${m.name} at ${level}`);
+    }
   });
 
   test("sorts by CR highest first, then name", () => {

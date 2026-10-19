@@ -18,12 +18,28 @@ export function shapeLimit(level: number): ShapeLimit {
   return { maxCr, fly, label: fly ? `Up to CR ${cr}.` : `Up to CR ${cr}, no Fly Speed.` };
 }
 
-/** Whether a Druid of the level may take the creature's form, on its CR and Fly Speed. The Beast type is the picker's own checkbox. */
-export function fitsShapeLimit(limit: ShapeLimit, m: StatBlockMonster): boolean {
-  if (limit.maxCr === null) return false;
+/**
+ * Why a Druid of the level may not take the creature's form, on its CR and
+ * Fly Speed, or null when they may. Below level 2 every form misses on its
+ * CR, since `maxCr` is null there. The Beast type is the picker's own
+ * checkbox. A known form's mark and the level filter both read this, so
+ * they never disagree (docs/design-v1-known-forms.md 5.1).
+ */
+export function shapeLimitMiss(limit: ShapeLimit, m: StatBlockMonster): "cr" | "fly" | null {
+  if (limit.maxCr === null) return "cr";
   const f = monsterFacts(m);
-  if (f.cr === null || f.cr > limit.maxCr) return false;
-  return limit.fly || !f.movement.has("fly");
+  if (f.cr === null || f.cr > limit.maxCr) return "cr";
+  return limit.fly || !f.movement.has("fly") ? null : "fly";
+}
+
+/** Whether a Druid of the level may take the creature's form, on its CR and Fly Speed. */
+export function fitsShapeLimit(limit: ShapeLimit, m: StatBlockMonster): boolean {
+  return shapeLimitMiss(limit, m) === null;
+}
+
+/** How many Beast forms a Druid of the level knows, by the Beast Shapes table: 4 from level 2, 6 from 4, 8 from 8, and none before Wild Shape. */
+export function knownFormCount(level: number): number {
+  return level >= 8 ? 8 : level >= 4 ? 6 : level >= 2 ? 4 : 0;
 }
 
 /** Highest CR first, then by name, so a Druid reads their options from the strongest down. A CR the app cannot read sorts last. */
