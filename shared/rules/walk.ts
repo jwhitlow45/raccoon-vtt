@@ -1,7 +1,7 @@
 import { CHUNK_CELLS, type BuildChunk } from "../model.ts";
 import type { BuildState } from "../ruleHooks.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
-import { canSqueeze, footprintSize } from "./footprint.ts";
+import { canSqueeze, footprintSize, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footprintGround, standing } from "./heights.ts";
 import { legStop, stepTester, type MovingToken, type StepTester } from "./movement.ts";
@@ -137,6 +137,9 @@ export class WalkWorld {
   readonly H: number;
   readonly tester: StepTester | null;
   readonly squeezes: boolean;
+  /** How far the squeezed footprint stands in from the full one on each side (4.1, 4.5). */
+  readonly #ox: number;
+  readonly #oy: number;
   readonly height: number;
   readonly flags: Uint8Array;
   readonly #ground: Float64Array;
@@ -171,6 +174,9 @@ export class WalkWorld {
     const blocks = scene?.blockMovement === true;
     this.tester = blocks ? stepTester(build, { ...token, squeeze: undefined }) : null;
     this.squeezes = canSqueeze(token) && this.tester !== null;
+    const squeezed = squeezedSize(token);
+    this.#ox = (this.w - squeezed.w) / 2;
+    this.#oy = (this.h - squeezed.h) / 2;
     const nodes = this.nx * this.ny;
     this.#pinch = new Uint8Array(this.squeezes ? nodes : 0);
     this.#ground = new Float64Array(this.mode === "ground" ? nodes : 0).fill(NaN);
@@ -258,17 +264,30 @@ export class WalkWorld {
    */
   endOnly(x: number, y: number, elevation: number): boolean {
     if (this.mode === "inside") return false;
-    const x1 = x + this.w;
-    const y1 = y + this.h;
+    const k = this.#squeezedAt(x, y, -2) ? 1 : 0;
+    const x0 = x + k * this.#ox;
+    const y0 = y + k * this.#oy;
+    const x1 = x + this.w - k * this.#ox;
+    const y1 = y + this.h - k * this.#oy;
     if (this.mode === "ground") {
-      for (let cy = Math.max(0, Math.floor(y + EPS)); cy < Math.min(this.H, Math.ceil(y1 - EPS)); cy++)
-        for (let cx = Math.max(0, Math.floor(x + EPS)); cx < Math.min(this.W, Math.ceil(x1 - EPS)); cx++) if ((this.flags[cy * this.W + cx]! & PIT) !== 0) return true;
+      for (let cy = Math.max(0, Math.floor(y0 + EPS)); cy < Math.min(this.H, Math.ceil(y1 - EPS)); cy++)
+        for (let cx = Math.max(0, Math.floor(x0 + EPS)); cx < Math.min(this.W, Math.ceil(x1 - EPS)); cx++) if ((this.flags[cy * this.W + cx]! & PIT) !== 0) return true;
     }
     let blocked = false;
-    this.#creaturesUnder(x, y, (c) => {
-      if (c.way === "blocked" && overlaps(c, x, y, x1, y1) && c.lo < elevation + this.height && elevation < c.hi) blocked = true;
+    this.#creaturesUnder(x0, y0, x1, y1, (c) => {
+      if (c.way === "blocked" && overlaps(c, x0, y0, x1, y1) && c.lo < elevation + this.height && elevation < c.hi) blocked = true;
     });
     return blocked;
+  }
+
+  /**
+   * Whether the rules read the squeezed footprint at a stored position
+   * (4.1): where the squeeze rule finds a narrow space, it stands centered
+   * in the full one, `#ox` and `#oy` in from each side. `n` is the
+   * position's node, -1 off the lattice, or -2 to look it up.
+   */
+  #squeezedAt(x: number, y: number, n: number): boolean {
+    return this.squeezes && this.#pinched(x, y, n === -2 ? this.nodeAt({ x, y }) : n);
   }
 
   /**
@@ -276,24 +295,33 @@ export class WalkWorld {
    * the swimming foot (4.1). Ground sources pay by entry on the continuous
    * footprint: the step pays when the part of B's rectangle outside A's
    * overlaps a source's inside, so leaving rubble pays nothing and a Large
-   * creature's two half steps across a square of it pay half each. Ground
+   * creature's two half steps across a square of it pay half each. Where a
+   * spot squeezes, its rectangle is the squeezed one, so a Large creature in
+   * a 5 ft corridor never pays for rubble beside the corridor. Ground
    * sources are a walker's alone, while creatures' spaces count wherever
    * heights overlap and squeezing for any creature. Crawling and dragging pay
    * on every step.
    */
   extraOf(ax: number, ay: number, bx: number, by: number, elevation: number, b: number): { extra: number; swim: 0 | 1 } {
     if (this.mode === "inside") return { extra: this.input.drag ?? 0, swim: 0 };
-    const { w, h } = this;
-    const bx1 = bx + w;
-    const by1 = by + h;
+    const ka = this.#squeezedAt(ax, ay, -2) ? 1 : 0;
+    const kb = this.#squeezedAt(bx, by, b) ? 1 : 0;
+    const ax0 = ax + ka * this.#ox;
+    const ay0 = ay + ka * this.#oy;
+    const ax1 = ax + this.w - ka * this.#ox;
+    const ay1 = ay + this.h - ka * this.#oy;
+    const bx0 = bx + kb * this.#ox;
+    const by0 = by + kb * this.#oy;
+    const bx1 = bx + this.w - kb * this.#ox;
+    const by1 = by + this.h - kb * this.#oy;
     let ground = 0;
     let swim = false;
     if (this.mode === "ground") {
-      for (let cy = Math.max(0, Math.floor(by + EPS)); cy < Math.min(this.H, Math.ceil(by1 - EPS)); cy++) {
-        for (let cx = Math.max(0, Math.floor(bx + EPS)); cx < Math.min(this.W, Math.ceil(bx1 - EPS)); cx++) {
+      for (let cy = Math.max(0, Math.floor(by0 + EPS)); cy < Math.min(this.H, Math.ceil(by1 - EPS)); cy++) {
+        for (let cx = Math.max(0, Math.floor(bx0 + EPS)); cx < Math.min(this.W, Math.ceil(bx1 - EPS)); cx++) {
           const f = this.flags[cy * this.W + cx]!;
           if ((f & (DIFFICULT | QUARTER | WATER)) === 0) continue;
-          if (!newlyCovered(Math.max(cx, bx), Math.max(cy, by), Math.min(cx + 1, bx1), Math.min(cy + 1, by1), ax, ay, ax + w, ay + h)) continue;
+          if (!newlyCovered(Math.max(cx, bx0), Math.max(cy, by0), Math.min(cx + 1, bx1), Math.min(cy + 1, by1), ax0, ay0, ax1, ay1)) continue;
           if (f & QUARTER) ground = 3;
           else if (f & DIFFICULT) ground = Math.max(ground, 1);
           if (f & WATER) swim = true;
@@ -301,17 +329,17 @@ export class WalkWorld {
       }
     }
     if (ground < 1) {
-      this.#creaturesUnder(bx, by, (c) => {
+      this.#creaturesUnder(bx0, by0, bx1, by1, (c) => {
         if (c.way === "free" || ground >= 1) return;
         if (!(c.lo < elevation + this.height && elevation < c.hi)) return;
-        const x0 = Math.max(c.x0, bx);
-        const y0 = Math.max(c.y0, by);
+        const x0 = Math.max(c.x0, bx0);
+        const y0 = Math.max(c.y0, by0);
         const x1 = Math.min(c.x1, bx1);
         const y1 = Math.min(c.y1, by1);
-        if (x1 - x0 > EPS && y1 - y0 > EPS && newlyCovered(x0, y0, x1, y1, ax, ay, ax + w, ay + h)) ground = 1;
+        if (x1 - x0 > EPS && y1 - y0 > EPS && newlyCovered(x0, y0, x1, y1, ax0, ay0, ax1, ay1)) ground = 1;
       });
     }
-    if (ground < 1 && this.squeezes && this.#pinched(bx, by, b)) ground = 1;
+    if (ground < 1 && kb === 1) ground = 1;
     const crawl = this.input.prone;
     return { extra: ground + (swim || crawl ? 1 : 0) + (this.input.drag ?? 0), swim: swim && !crawl ? 1 : 0 };
   }
@@ -325,12 +353,12 @@ export class WalkWorld {
     return p;
   }
 
-  #creaturesUnder(x: number, y: number, fn: (c: WalkCreature) => void): void {
+  #creaturesUnder(x0: number, y0: number, x1: number, y1: number, fn: (c: WalkCreature) => void): void {
     const creatures = this.input.creatures;
     if (creatures.length === 0 || this.mode === "inside") return;
     const stamp = ++this.#stamp;
-    for (let cy = Math.max(0, Math.floor(y + EPS)); cy < Math.min(this.H, Math.ceil(y + this.h - EPS)); cy++) {
-      for (let cx = Math.max(0, Math.floor(x + EPS)); cx < Math.min(this.W, Math.ceil(x + this.w - EPS)); cx++) {
+    for (let cy = Math.max(0, Math.floor(y0 + EPS)); cy < Math.min(this.H, Math.ceil(y1 - EPS)); cy++) {
+      for (let cx = Math.max(0, Math.floor(x0 + EPS)); cx < Math.min(this.W, Math.ceil(x1 - EPS)); cx++) {
         const cell = cy * this.W + cx;
         for (let p = this.#byCell[cell]!; p < this.#byCell[cell + 1]!; p++) {
           const k = this.#cellItems[p]!;

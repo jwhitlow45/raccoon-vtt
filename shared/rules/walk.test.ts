@@ -91,6 +91,28 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assert.equal(findRoute(input(flat, tok(flat, { x: 5, y: 8 })), { x: 15, y: 2 }), "none");
   });
 
+  test("a squeezed creature's terrain, pits and creatures are read on its squeezed footprint", () => {
+    // A 5 ft corridor between walls along x = 1 and x = 2, and a Large creature squeezed in it, its full footprint reaching over both walls.
+    const edges = { ...line("w", 1, 0, 10), ...line("w", 2, 0, 10) };
+    const walk = (cells: Record<string, TerrainId>, over: Partial<WalkInput> = {}) => {
+      const w = world({ w: 4, h: 10, edges, cells });
+      const i = input(w, tok(w, { size: "large", x: 0.5, y: 0.5, squeeze: true }), over);
+      const r = findRoute(i, { x: 0.5, y: 4.5 });
+      return r === null || r === "none" ? r : pieceFeet(i, r);
+    };
+    // 4 squares down the corridor, each paying double for the squeeze.
+    assert.equal(walk({}), 40);
+    // Beside the corridor at (0, 3), under the full footprint but not the squeezed one.
+    assert.equal(walk({}, { areas: [{ extra: 3, cells: [{ x: 0, y: 3 }] }] }), 40, "Plant Growth beside the corridor");
+    assert.equal(walk({ "0,3": "rubble" }), 40, "rubble beside the corridor");
+    assert.equal(walk({ "0,3": "pit" }), 40, "a pit beside the corridor");
+    const beside: WalkCreature = { x0: 0, y0: 3, x1: 1, y1: 4, lo: 0, hi: 5, way: "blocked" };
+    assert.equal(walk({}, { creatures: [beside] }), 40, "a creature beside the corridor");
+    // In the corridor they still count.
+    assert.equal(walk({ "1,3": "pit" }), "none");
+    assert.equal(walk({ "1,3": "rubble" }), 40, "rubble inside costs what the squeeze already does: difficult terrain does not stack");
+  });
+
   test("a straight leg over a rise and down again is searched, and an even stair is not", () => {
     const stairs = (feet: number[]) => world({ w: feet.length, h: 1, heights: Object.fromEntries(feet.map((f, x) => [`${x},0`, f])), marks: Object.fromEntries(feet.map((_, x) => [`${x},0`, "a" as const])) });
     // Up 10 ft and down again: two steps of 2 squares each, the second vertical diagonal doubled under 5-10-5, and 5 by 10 ft twice under true distance, rounded to the foot.
