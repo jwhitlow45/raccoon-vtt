@@ -1,7 +1,7 @@
 import { ReloadButton } from "../../components/LoadBoundary.tsx";
+import { LoadFailed } from "../../components/LoadFailed.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { rememberReopen, type Reopen } from "../../lib/reopen.ts";
-import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 
 /**
@@ -11,8 +11,10 @@ import { useRoomView } from "../../state/view.ts";
  * (components/LoadBoundary.tsx ReloadButton), and opens `reopen` again on
  * the other side. Never a Retry: the list is a module, and Chrome keeps a
  * module that failed to load for the life of the page and never fetches it
- * again. `inline` sits in a line of the token bar or a section, a notice
- * elsewhere.
+ * again. `inline` is the one line of a load that failed beside what still
+ * works (components/LoadFailed.tsx), in the token bar or a section.
+ * Without it the failure stands in the place of a whole list, such as the
+ * SRD monster list, as a danger notice.
  */
 export function SrdLoadFailed(props: { what: string; reopen?: Reopen; inline?: boolean }) {
   const roomId = useRoomView((s) => s.roomId);
@@ -20,14 +22,7 @@ export function SrdLoadFailed(props: { what: string; reopen?: Reopen; inline?: b
   const connection = useRoomView((s) => s.connection);
   const text = `${props.what} did not load. Reload to try again.`;
   const reload = <ReloadButton pending={pending} connection={connection} beforeReload={props.reopen ? () => rememberReopen(roomId, props.reopen!) : undefined} />;
-  if (props.inline) {
-    return (
-      <div role="alert" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
-        <p style={{ margin: 0, color: theme.color.dangerText }}>{text}</p>
-        {reload}
-      </div>
-    );
-  }
+  if (props.inline) return <LoadFailed reload={reload}>{text}</LoadFailed>;
   return (
     <Notice tone="danger" role="alert" action={reload}>
       {text}

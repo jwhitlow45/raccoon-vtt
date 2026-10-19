@@ -3,6 +3,7 @@ import type { IconImage } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { PINNED_FOOT } from "../../components/Dialog.tsx";
 import { Input } from "../../components/Field.tsx";
+import { LoadFailed } from "../../components/LoadFailed.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Swatches } from "../../components/Swatches.tsx";
@@ -41,19 +42,14 @@ export function IconsTab(props: { disabled: boolean; initial?: IconImage; onUse(
   const catalog = index.status === "ready" ? index.catalog : null;
   const results = useMemo(() => (catalog ? searchIcons(catalog, deferred) : []), [catalog, deferred]);
   const credit = selected ? iconCredit(selected) : null;
+  // Try again's line gives way to the loading line, so focus goes back up to the search it sits under.
+  const search = useRef<HTMLInputElement>(null);
 
   return (
     <div style={{ display: "grid", gap: theme.space(3) }}>
-      <Input aria-label="Search icons" type="search" enterKeyHint="search" placeholder="goblin, dragon head, skull lorc" maxLength={80} value={query} onChange={(e) => setQuery(e.target.value)} />
+      <Input ref={search} aria-label="Search icons" type="search" enterKeyHint="search" placeholder="goblin, dragon head, skull lorc" maxLength={80} value={query} onChange={(e) => setQuery(e.target.value)} />
       {index.status === "loading" ? <Loading text="Loading the icons…" /> : null}
-      {index.status === "failed" ? (
-        <div role="alert" style={{ display: "flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
-          <span style={{ flex: 1 }}>The icon list did not load. Check the connection and try again.</span>
-          <Button icon="retry" size="sm" onClick={index.retry}>
-            Try again
-          </Button>
-        </div>
-      ) : null}
+      {index.status === "failed" ? <LoadFailed retry={index.retry} focusTo={() => search.current}>The icon list did not load. Check the connection and try again.</LoadFailed> : null}
       {catalog ? (
         <>
           <p aria-live="polite" style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body }}>
