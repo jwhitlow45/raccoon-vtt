@@ -29,7 +29,7 @@ import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHeader } from "../panels.ts";
 import type { TokenAccess } from "./access.ts";
-import { DISCARD, useLeaveForm } from "./characterPage.ts";
+import { DISCARD, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { ChooseBlockDialog } from "./CompanionBlocks.tsx";
 import { characterBlocks, fromTheBlock, srdTitle, whose, type PickerRow } from "./companionBlocks.ts";
 import {
@@ -174,7 +174,10 @@ export function CompanionForm(props: {
   /** Whether the panel holding the form is on screen (PanelProps.shown). */
   shown: boolean;
   close(): void;
-  onDone(): void;
+  /** `back` once added, or left by Back or Cancel, and `page` for a page opened from outside the panel (characterPage.ts). */
+  onDone(to: LeaveFor): void;
+  /** The Characters panel's count of pages opened from outside it (characterPage.ts openCharacterPage). */
+  opened: number;
 }) {
   const { character } = props;
   const view = useRoomView((s) => s.view);
@@ -195,7 +198,8 @@ export function CompanionForm(props: {
   const focusChange = useRef(false);
   // Typed changes ask first, but not once Add sent them: then leaving throws nothing away.
   const [start] = useState(() => JSON.stringify(draft));
-  const leave = useLeaveForm(draft, !waiting && JSON.stringify(draft) !== start, props.onDone);
+  const { typed, pending } = usePendingNumbers(draft, draftWith);
+  const leave = useLeaveForm(typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened);
   usePanelHeader({
     title: `Add a companion for ${character.name}`,
     parent: character.name,
@@ -278,7 +282,7 @@ export function CompanionForm(props: {
         if (!mounted.current) return;
         // Still open out of sight: done once added, else showing why for when the user comes back.
         setWaiting(false);
-        if (answer === "taken") props.onDone();
+        if (answer === "taken") props.onDone("back");
         else setError(answer === "refused" && refusal?.message ? capitalized(refusal.message) : "It may not have been added. Check the map before trying again.");
         return;
       }
@@ -287,7 +291,7 @@ export function CompanionForm(props: {
         // Selected with its bar open on the map, as a tap on it does, and the sheet gets out of the way so the player can drag it on.
         ui.tap(id);
         props.close();
-        props.onDone();
+        props.onDone("back");
       } else if (answer === "refused") setError(refusal?.message ? capitalized(refusal.message) : "The server refused it.");
       else setError("It may not have been added. Check the map before trying again.");
     };
@@ -332,11 +336,11 @@ export function CompanionForm(props: {
       {draft.what === "creature" ? (
         <>
           <FieldRow label="HP">
-            <NumberField label="HP" value={draft.hp ?? undefined} min={1} max={100_000} nullable onCommit={(hp) => set({ hp })} />
+            <NumberField label="HP" value={draft.hp ?? undefined} min={1} max={100_000} nullable onCommit={(hp) => set({ hp })} onPending={pending("hp")} />
           </FieldRow>
           {draft.block ? <Help>{blockHpHelp(draft.block.view)}</Help> : null}
           <FieldRow label="AC" hint="Optional">
-            <NumberField label="AC" value={draft.ac ?? undefined} min={0} max={100} nullable onCommit={(ac) => set({ ac })} />
+            <NumberField label="AC" value={draft.ac ?? undefined} min={0} max={100} nullable onCommit={(ac) => set({ ac })} onPending={pending("ac")} />
           </FieldRow>
         </>
       ) : null}

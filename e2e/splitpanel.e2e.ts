@@ -53,6 +53,7 @@ const run = {
   password: "",
   thornChar: randomUUID(),
   thorn: randomUUID(),
+  pip: randomUUID(),
   goblins: Array.from({ length: GOBLINS }, () => randomUUID()),
   lore: randomUUID(),
   pinPage: randomUUID(),
@@ -1163,6 +1164,79 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await preview.getByRole("button", { name: "Exit", exact: true }).click();
     await preview.waitFor({ state: "detached" });
     assert.deepEqual(await stored(dm), before, "neither the DM's entry nor the player's changed");
+    await oneOnly(dm);
+  });
+
+  test("lp1-split-a. Companion of Thorn pressed in the Token panel above leaves a Characters form below for Thorn's page: at once with nothing typed, after Discard changes? with something typed, and Back where it came from once a change takes the question back", async () => {
+    const PIP_AT = { x: 6, y: 9 };
+    await ops.send({ t: "token.create", token: { id: run.pip, sceneId: run.sceneId, kind: "npc", name: "Pip", size: "small", ...PIP_AT, visibility: "all", disposition: "ally", companion: { of: run.thornChar, turn: "none" }, actor: { inline: actor(4) } } });
+    await waitFor("Pip in the DM's view", () => dmSocket.state?.tokens[run.pip] ?? null);
+    await splitWith(dm, "Token", "Characters");
+    const p = await pagePoint(dm, run.bounds, { x: PIP_AT.x + 0.5, y: PIP_AT.y + 0.5 });
+    await dm.mouse.click(p.x, p.y);
+    await tokenBar(dm, "Pip").waitFor();
+    const link = topPane(dm, "Token").getByRole("button", { name: "Companion of Thorn", exact: true });
+    await link.waitFor();
+    const characters = bottomPane(dm, "Characters");
+    const thornsPage = characters.locator("[data-creature-heading]").filter({ hasText: "Thorn" });
+    const backToList = dm.getByRole("button", { name: "Back to Characters" });
+    const asks = dm.getByRole("button", { name: "Discard changes?" });
+    const newCharacter = async () => {
+      if (await backToList.isVisible()) await backToList.click();
+      await characters.locator('[data-opener="new-character"]').click();
+      await dm.getByRole("heading", { name: "New character" }).waitFor();
+    };
+    const lands = async (why: string) => {
+      await thornsPage.waitFor();
+      assert.equal(await dm.getByRole("heading", { name: "New character" }).count(), 0, why);
+    };
+
+    // Thorn's own form, untouched: the link leaves it at once for Thorn's page.
+    if (await backToList.isVisible()) await backToList.click();
+    await characters.locator(`[data-opener="character:${run.thornChar}"]`).click();
+    await characters.locator(`[data-opener="companion:${run.thornChar}"]`).click();
+    await dm.getByRole("heading", { name: "Add a companion for Thorn" }).waitFor();
+    await link.click();
+    await thornsPage.waitFor();
+    assert.equal(await dm.getByRole("heading", { name: "Add a companion for Thorn" }).count(), 0, "the form left for the page");
+    // Thorn's stat blocks page holds nothing typed, so it goes at once too.
+    await characters.locator(`[data-opener="blocks:${run.thornChar}"]`).click();
+    await dm.getByRole("heading", { name: "Thorn’s stat blocks" }).waitFor();
+    await link.click();
+    await thornsPage.waitFor();
+
+    // Typed into, the form asks first, and its Discard changes? goes on to Thorn's page.
+    await newCharacter();
+    await characters.getByRole("textbox", { name: "Name", exact: true }).fill("Zed");
+    await link.click();
+    await asks.first().waitFor();
+    assert.equal(await asks.count(), 2, "Back and Cancel ask");
+    await shots.take(dm, "splitpanel-lp1-link-asks");
+    await asks.last().click();
+    await lands("Discard changes? went on to Thorn's page");
+    // A second press of the link answers its own question.
+    await newCharacter();
+    await characters.getByRole("textbox", { name: "Name", exact: true }).fill("Zed");
+    await link.click();
+    await asks.first().waitFor();
+    await link.click();
+    await lands("the link pressed again went to Thorn's page");
+    // A change takes the question back, and with it the link's page: the form's Back goes back to the list it came from.
+    await newCharacter();
+    const name = characters.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("Zed");
+    await link.click();
+    await asks.first().waitFor();
+    await name.fill("Zedd");
+    await backToList.waitFor();
+    assert.equal(await asks.count(), 0, "a change takes the question back");
+    await backToList.click();
+    await asks.first().click();
+    await characters.locator('[data-opener="new-character"]').waitFor();
+    assert.equal(await thornsPage.count(), 0, "Back went to the list, not to Thorn's page");
+
+    await ops.send({ t: "token.delete", tokenId: run.pip });
+    await waitFor("Pip gone", () => (dmSocket.state?.tokens[run.pip] ? null : true));
     await oneOnly(dm);
   });
 

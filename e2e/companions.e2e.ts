@@ -745,6 +745,30 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await lands(`button ${(await blocks.textContent())?.trim()}`, "Back hands focus to Stat blocks");
   });
 
+  test("lp1-comp-b. a number typed into the add form and still focused counts: Back and Cancel pressed without moving focus ask first, a number changed after they ask takes the question back, and the second press leaves", async () => {
+    const focusedLabel = () => ana.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") ?? "none");
+    const add = ana.locator(`[data-opener="companion:${run.bree.characterId}"]`);
+    await add.click();
+    await ana.getByRole("heading", { name: "Add a companion for Bree" }).waitFor();
+    const hp = ana.getByRole("textbox", { name: "HP", exact: true });
+    const back = ana.getByRole("button", { name: "Back to Bree" });
+    const asks = ana.getByRole("button", { name: "Discard changes?" });
+    // A click sent to the button alone takes no focus, as a press may not: the field keeps it, and its number is not yet committed.
+    await hp.fill("7");
+    await back.dispatchEvent("click");
+    await asks.first().waitFor();
+    assert.equal(await asks.count(), 2, "Back and Cancel both ask");
+    assert.equal(await focusedLabel(), "HP", "the field kept focus");
+    await hp.fill("8");
+    await back.waitFor();
+    assert.equal(await asks.count(), 0, "a number changed after the question takes it back");
+    await ana.getByRole("button", { name: "Cancel", exact: true }).dispatchEvent("click");
+    await asks.first().waitFor();
+    await asks.last().dispatchEvent("click");
+    await add.waitFor();
+    assert.equal(await ana.getByRole("heading", { name: "Add a companion for Bree" }).count(), 0, "the second press left");
+  });
+
   test("8b. a block saved from either picker is the pick: New and Paste, in Attach and in Choose", async () => {
     const save = async (editor: Locator) => {
       await editor.getByRole("button", { name: "Save", exact: true }).click();

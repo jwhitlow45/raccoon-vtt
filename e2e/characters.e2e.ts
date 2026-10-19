@@ -558,6 +558,30 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await noSideScroll(sheet, "the list at 130%");
   });
 
+  test("lp1-page-c. New character counts a number still being typed: Back and Cancel pressed without moving focus ask first, a number changed after they ask takes the question back, and the second press leaves", async () => {
+    const panel = await openCharacters(dm);
+    const back = dm.getByRole("button", { name: "Back to Characters" });
+    if (await back.isVisible()) await backToList(panel);
+    await panel.locator('[data-opener="new-character"]').click();
+    await dm.getByRole("heading", { name: "New character" }).waitFor();
+    const hp = panel.getByRole("textbox", { name: "Max HP", exact: true });
+    const asks = dm.getByRole("button", { name: "Discard changes?" });
+    // A click sent to the button alone takes no focus, as a press may not: the field keeps it, and its number is not yet committed.
+    await hp.fill("20");
+    await back.dispatchEvent("click");
+    await asks.first().waitFor();
+    assert.equal(await asks.count(), 2, "Back and Cancel both ask");
+    await focusStartsWith(dm, "input [] Max HP", "the field kept focus");
+    await hp.fill("30");
+    await back.waitFor();
+    assert.equal(await asks.count(), 0, "a number changed after the question takes it back");
+    await panel.getByRole("button", { name: "Cancel", exact: true }).dispatchEvent("click");
+    await asks.first().waitFor();
+    await asks.first().dispatchEvent("click");
+    await panel.locator('[data-opener="new-character"]').waitFor();
+    assert.equal(await dm.getByRole("heading", { name: "New character" }).count(), 0, "the second press left");
+  });
+
   test("8. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(patConsole.errors, [], "Pat's page logged errors");

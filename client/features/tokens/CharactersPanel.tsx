@@ -21,7 +21,7 @@ import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { characterPageSlot, DISCARD, pageBackTo, shownPage, useLeaveForm } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, pageBackTo, shownPage, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
 import { CompanionForm } from "./CompanionsSection.tsx";
 import { CREATURE_HEADING } from "./CreatureHeader.tsx";
@@ -52,6 +52,7 @@ export default function CharactersPanel(props: PanelProps) {
   const characters = useRoomView((s) => s.view?.characters);
   const pageStore = useScoped(characterPageSlot);
   const picked = useStore(pageStore, (s) => s.characterId);
+  const opened = useStore(pageStore, (s) => s.opened);
   const [creating, setCreating] = useState(false);
   /** The character whose "Add a companion" form shows in the panel's place. */
   const [addingFor, setAddingFor] = useState<string | null>(null);
@@ -90,6 +91,13 @@ export default function CharactersPanel(props: PanelProps) {
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   const blocksOf = blocksFor !== null ? characters?.[blocksFor] : undefined;
   const form = companionOf !== undefined || blocksOf !== undefined || creating;
+  // A page opened from outside the panel takes the stat blocks page's place at once: it holds nothing typed. The forms leave through their own question (useLeaveForm).
+  const openedAt = useRef(opened);
+  useEffect(() => {
+    if (openedAt.current === opened) return;
+    openedAt.current = opened;
+    setBlocksFor(null);
+  }, [opened]);
   usePanelHeader(
     page && !form
       ? {
@@ -102,16 +110,24 @@ export default function CharactersPanel(props: PanelProps) {
       : null,
   );
 
-  if (companionOf) return <CompanionForm character={companionOf} shown={props.shown} close={props.close} onDone={() => setAddingFor(null)} />;
+  if (companionOf) {
+    // Back where it came from, its character's page, which a page opened from outside may have taken the slot from while the form stayed.
+    const done = (to: LeaveFor) => {
+      setAddingFor(null);
+      if (to === "back") openPage(companionOf.id);
+    };
+    return <CompanionForm character={companionOf} shown={props.shown} close={props.close} opened={opened} onDone={done} />;
+  }
   if (blocksOf) return <CharacterBlocksPage character={blocksOf} onBack={() => setBlocksFor(null)} />;
   if (creating) {
     return (
       <NewCharacter
         close={props.close}
         {...(!dm && you ? { owner: you.memberId } : {})}
-        onDone={(id) => {
+        opened={opened}
+        onDone={(id, to) => {
           setCreating(false);
-          if (id) openPage(id);
+          if (id || to === "back") openPage(id);
         }}
       />
     );
@@ -327,7 +343,7 @@ function PartyRow(props: { character: Character }) {
  * the map they are looking at. A subpage of the panel, "New character" with
  * "Back to Characters", and Cancel at its foot beside its buttons.
  */
-function NewCharacter(props: { onDone(id: string | null): void; close(): void; owner?: string }) {
+function NewCharacter(props: { onDone(id: string | null, to: LeaveFor): void; close(): void; owner?: string; opened: number }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -348,7 +364,8 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5).
   useUnsavedSince(draft);
   const [start] = useState(() => JSON.stringify(draft));
-  const leave = useLeaveForm(draft, JSON.stringify(draft) !== start, () => props.onDone(null));
+  const { typed, pending } = usePendingNumbers(draft);
+  const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened);
   usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 
   const create = (placeAfter: boolean) => {
@@ -382,7 +399,7 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
       ui.setTool(PLACE_TOOL_ID);
       props.close();
     }
-    props.onDone(id);
+    props.onDone(id, "back");
   };
 
   return (
@@ -401,20 +418,20 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
         </Select>
       </FieldRow>
       <FieldRow label="Max HP">
-        <NumberField label="Max HP" value={hpMax} min={1} max={100_000} onCommit={(n) => n !== null && setHpMax(n)} />
+        <NumberField label="Max HP" value={hpMax} min={1} max={100_000} onCommit={(n) => n !== null && setHpMax(n)} onPending={pending("hpMax")} />
       </FieldRow>
       <FieldRow label="Armor Class">
-        <NumberField label="Armor Class" value={ac} min={0} max={100} onCommit={(n) => n !== null && setAc(n)} />
+        <NumberField label="Armor Class" value={ac} min={0} max={100} onCommit={(n) => n !== null && setAc(n)} onPending={pending("ac")} />
       </FieldRow>
       <FieldRow label="Speed">
-        <NumberField label="Speed" value={walk} min={0} max={1000} onCommit={(n) => n !== null && setWalk(n)} />
+        <NumberField label="Speed" value={walk} min={0} max={1000} onCommit={(n) => n !== null && setWalk(n)} onPending={pending("walk")} />
         <span style={{ color: theme.color.textMuted }}>ft</span>
       </FieldRow>
       <FieldRow label="Initiative bonus">
-        <NumberField label="Initiative bonus" value={initBonus} min={-20} max={40} onCommit={(n) => n !== null && setInitBonus(n)} />
+        <NumberField label="Initiative bonus" value={initBonus} min={-20} max={40} onCommit={(n) => n !== null && setInitBonus(n)} onPending={pending("initBonus")} />
       </FieldRow>
       <FieldRow label="Passive Perception">
-        <NumberField label="Passive Perception" value={pp} min={0} max={60} onCommit={(n) => n !== null && setPp(n)} />
+        <NumberField label="Passive Perception" value={pp} min={0} max={60} onCommit={(n) => n !== null && setPp(n)} onPending={pending("pp")} />
       </FieldRow>
       {props.owner ? (
         <Help>You play this character. The DM can still change it.</Help>

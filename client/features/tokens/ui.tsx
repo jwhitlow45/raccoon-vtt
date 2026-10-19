@@ -173,7 +173,31 @@ type NumberFieldProps = {
   describedBy?: string;
   /** Pixels, or a length such as "100%" for a field that fills a box its caller sizes. */
   width?: number | string;
+  /**
+   * What a commit would send as the field now stands, told whenever that
+   * changes: a number, null to unset, or undefined for nothing. For a form
+   * that sends only from its own button, whose Back must know of a number
+   * typed and not yet committed, since the field commits on blur and a
+   * press can leave focus where it is (characterPage.ts usePendingNumbers).
+   */
+  onPending?(value: number | null | undefined): void;
 };
+
+/**
+ * What committing a number field's `draft` does: the text it then `shows`,
+ * and what it `sends`, absent when it sends nothing. Empty unsets a
+ * `nullable` field that has a value, and otherwise snaps back, as text that
+ * is no number does. A number is rounded and clamped to the bounds.
+ */
+export function numberCommit(draft: string, field: Pick<NumberFieldProps, "value" | "min" | "max" | "nullable">): { shows: string; sends?: number | null } {
+  const text = field.value === undefined ? "" : String(field.value);
+  const trimmed = draft.trim().replace(/[\u2212\u2013]/g, "-");
+  if (trimmed === "") return field.nullable && field.value !== undefined ? { shows: "", sends: null } : { shows: text };
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return { shows: text };
+  const clamped = Math.min(field.max, Math.max(field.min, Math.round(n)));
+  return clamped === field.value ? { shows: String(clamped) } : { shows: String(clamped), sends: clamped };
+}
 
 /**
  * A whole number within bounds. Empty means "unset" when `nullable`, and
@@ -188,23 +212,19 @@ export function NumberField(props: NumberFieldProps) {
 function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
   const text = props.value === undefined ? "" : String(props.value);
   const [draft, setDraft, focus, leave] = useDraft(text);
+  const result = numberCommit(draft, props);
   const commit = () => {
-    const trimmed = draft.trim().replace(/[\u2212\u2013]/g, "-");
-    if (trimmed === "") {
-      if (props.nullable && props.value !== undefined) props.onCommit(null);
-      else setDraft(text);
-      return;
-    }
-    const n = Number(trimmed);
-    if (!Number.isFinite(n)) {
-      setDraft(text);
-      return;
-    }
-    const clamped = Math.min(props.max, Math.max(props.min, Math.round(n)));
-    setDraft(String(clamped));
-    if (clamped !== props.value) props.onCommit(clamped);
+    setDraft(result.shows);
+    if ("sends" in result) props.onCommit(result.sends ?? null);
   };
   leave.current = commit;
+  const pending = "sends" in result ? result.sends : undefined;
+  const onPending = useRef(props.onPending);
+  onPending.current = props.onPending;
+  useEffect(() => {
+    onPending.current?.(pending);
+  }, [pending]);
+  useEffect(() => () => onPending.current?.(undefined), []);
   const describedBy = useRowHint(props.describedBy);
   return (
     <input

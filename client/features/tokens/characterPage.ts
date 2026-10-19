@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { StoreApi } from "zustand/vanilla";
 import { createStore } from "zustand/vanilla";
 import type { Character } from "#shared/model.ts";
 import { scopeSlot } from "../../state/scope.ts";
@@ -13,7 +14,23 @@ import { scopeSlot } from "../../state/scope.ts";
  * which is when a player with one character lands on its page. `null` is
  * the list.
  */
-export const characterPageSlot = scopeSlot(() => createStore<{ characterId: string | null | undefined }>(() => ({ characterId: undefined })));
+export const characterPageSlot = scopeSlot(() => createStore<CharacterPageState>(() => ({ characterId: undefined, opened: 0 })));
+
+type CharacterPageState = {
+  characterId: string | null | undefined;
+  /** How many times a page was opened from outside the panel (openCharacterPage), which a form open in the panel leaves for. */
+  opened: number;
+};
+
+/**
+ * Opens a character's page from outside the panel, as a companion's
+ * "Companion of Thorn" does. A form open in the panel leaves for it, asking
+ * first if it holds typed changes (useLeaveForm), so the press is never lost
+ * behind a form, even one for that same character.
+ */
+export function openCharacterPage(store: StoreApi<CharacterPageState>, characterId: string): void {
+  store.setState((s) => ({ characterId, opened: s.opened + 1 }));
+}
 
 /** The page that shows: the one picked, while it is one of the viewer's characters, else a player's only character until they pick. */
 export function shownPage(picked: string | null | undefined, mine: readonly Pick<Character, "id">[], dm: boolean): string | null {
@@ -39,21 +56,74 @@ export function pageBackTo(characterId: string, mine: readonly Pick<Character, "
 export const DISCARD = "Discard changes?";
 
 /**
+ * Where a form of the panel goes as it leaves: `back` to where it was
+ * opened, by its Back or Cancel, or to the `page` opened from outside it
+ * (openCharacterPage).
+ */
+export type LeaveFor = "back" | "page";
+
+/**
  * Leaving a form of the Characters panel (docs/design-v1-look-pass.md 3.1):
  * with typed changes the first press of Back or Cancel asks DISCARD and the
  * second leaves. A change in between takes the question back, since it was
  * asked of the draft as it stood. `draft` is what the form holds, compared
- * as JSON.
+ * as JSON, with what its number fields would commit (usePendingNumbers).
+ *
+ * A page opened from outside (`opened`, the slot's count) asks the same
+ * question, or leaves at once with nothing typed. A Back or Cancel that
+ * answers it goes on to that page, as the press that asked would have. The
+ * outside press itself never asks twice: with the question standing, it
+ * leaves for its page.
  */
-export function useLeaveForm(draft: unknown, changed: boolean, leave: () => void): { asking: boolean; press(): void } {
+export function useLeaveForm(draft: unknown, changed: boolean, leave: (to: LeaveFor) => void, opened: number): { asking: boolean; press(): void } {
   const now = JSON.stringify(draft);
-  const [askedAt, setAskedAt] = useState<string | null>(null);
-  const asking = changed && askedAt === now;
+  const [asked, setAsked] = useState<{ at: string; to: LeaveFor } | null>(null);
+  const asking = changed && asked?.at === now;
+  const press = (to: LeaveFor, answers: boolean) => {
+    if (changed && !asking) setAsked({ at: now, to });
+    else leave(asking && answers && asked ? asked.to : to);
+  };
+  const seen = useRef(opened);
+  useEffect(() => {
+    if (seen.current === opened) return;
+    seen.current = opened;
+    press("page", false);
+  });
+  return { asking, press: () => press("back", true) };
+}
+
+/**
+ * A form's draft with what its number fields would commit as they stand
+ * (NumberField `onPending`). A number field keeps what is typed into it
+ * until it loses focus, and a Back or Cancel pressed while it keeps focus,
+ * as a press that takes no focus does, would otherwise see the draft
+ * without that number: it would leave without asking, or keep asking after
+ * the number changed. `pending(key)` is the `onPending` of the field that
+ * commits the draft's `key`. `apply` puts numbers into the draft as the
+ * form's own commit does, so a field that commits after the question was
+ * asked leaves the draft, and the question, as they were.
+ */
+export function usePendingNumbers<D extends object>(
+  draft: D,
+  apply: (draft: D, numbers: PendingNumbers<D>) => D = (d, numbers) => ({ ...d, ...numbers }),
+): { typed: D; pending(key: NumberKey<D>): (value: number | null | undefined) => void } {
+  const [held, setHeld] = useState<PendingNumbers<D>>({});
   return {
-    asking,
-    press: () => {
-      if (changed && !asking) setAskedAt(now);
-      else leave();
-    },
+    typed: Object.keys(held).length > 0 ? apply(draft, held) : draft,
+    pending: (key) => (value) =>
+      setHeld((h) => {
+        if (value === undefined) {
+          if (!(key in h)) return h;
+          const rest = { ...h };
+          delete rest[key];
+          return rest;
+        }
+        return h[key] === value ? h : { ...h, [key]: value };
+      }),
   };
 }
+
+/** The draft's fields that hold a number. */
+type NumberKey<D> = { [K in keyof D]-?: D[K] extends number | null | undefined ? K : never }[keyof D];
+
+type PendingNumbers<D> = Partial<Pick<D, NumberKey<D>>>;

@@ -20,7 +20,7 @@ import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
-import { characterPageSlot } from "../features/tokens/characterPage.ts";
+import { characterPageSlot, openCharacterPage } from "../features/tokens/characterPage.ts";
 import { CreatureHeader } from "../features/tokens/CreatureHeader.tsx";
 import { kindLine, sizeText, tokenKind } from "../features/tokens/creatureKind.ts";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
@@ -253,7 +253,7 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
   const openKeeper =
     keeper && (you?.role === "dm" || ownsCharacter(you?.memberId, keeper))
       ? () => {
-          scope.get(characterPageSlot).setState({ characterId: keeper.id });
+          openCharacterPage(scope.get(characterPageSlot), keeper.id);
           ui.openPanel("characters", here ? { from: here } : undefined);
         }
       : null;
