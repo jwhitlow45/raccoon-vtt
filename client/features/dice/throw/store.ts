@@ -561,10 +561,14 @@ export class ThrowStore {
           return;
         }
       }
+      const set = this.#inputs.set;
       this.#safely((stage) =>
-        stage.warm(this.#panel?.kinds() ?? ["d20", "d6"], this.#inputs.set).then(
+        stage.warm(this.#panel?.kinds() ?? ["d20", "d6"], set).then(
           () => {
-            if (run === this.#warmRun) this.#warm = "warm";
+            if (run !== this.#warmRun) return;
+            this.#warm = "warm";
+            // A set picked while this ran missed setInputs' warm-up, which waits for a warm stage.
+            if (this.#inputs.set !== set && this.#stage === stage) this.#warmSet(stage, this.#inputs.set);
           },
           () => {
             if (run === this.#warmRun) this.#warm = "cold";
@@ -620,6 +624,9 @@ export class ThrowStore {
    * Runs a call on the stage. One that throws, such as a texture drawn
    * where iOS Safari has no canvas memory left, lets the stage go for the
    * session, and any throw ends with its result shown. False then.
+   *
+   * The error goes to the console, since the page only shows the dice
+   * stop, never why. It is logged once: no stage comes back after it.
    */
   #safely(call: (stage: Stage) => unknown): boolean {
     const stage = this.#stage;
@@ -627,7 +634,8 @@ export class ThrowStore {
     try {
       call(stage);
       return true;
-    } catch {
+    } catch (error) {
+      console.warn("raccoon: the dice stage failed and is off for this session", error);
       this.#noStage = true;
       this.#clearTimers();
       this.#pressed = false;

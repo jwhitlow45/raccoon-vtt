@@ -279,6 +279,20 @@ describe("the throw's store", () => {
     assert.deepEqual(stage.warmSets, ["ivory", "ruby"], "the new set warms up once the dice are gone");
   });
 
+  test("a dice set picked during the first warm-up is drawn ahead once that warm-up ends", () => {
+    const h = harness();
+    h.loader.finish(h.module);
+    h.open();
+    h.idle.runAll();
+    const stage = h.stage()!;
+    h.store.setInputs({ set: "ruby" });
+    h.idle.runAll();
+    assert.deepEqual(stage.warmSets, ["ivory"], "never two warm-ups at once");
+    stage.warmups[0]!.finish(true);
+    h.idle.runAll();
+    assert.deepEqual(stage.warmSets, ["ivory", "ruby"]);
+  });
+
   test("turning the dice off or Low power on lets the renderer go and stops a warm-up on its way", () => {
     const h = harness();
     h.ready();
@@ -587,7 +601,8 @@ describe("every way a panel control rolls", () => {
     }
   });
 
-  test("a stage that throws as it plays shows the result at once, goes for the session, and the tracker's other listeners still run", () => {
+  test("a stage that throws as it plays shows the result at once, goes for the session, and the tracker's other listeners still run", (t) => {
+    const warn = t.mock.method(console, "warn", () => undefined);
     const h = setup();
     h.stage().failPlay = true;
     let told = 0;
@@ -603,6 +618,8 @@ describe("every way a panel control rolls", () => {
     const next = h.panel.roll([ROLL], { origin: h.origin() })!;
     h.answerAll();
     assert.equal(h.store.held(next), false, "no throws for the session");
+    assert.equal(warn.mock.callCount(), 1, "the failure is logged once");
+    assert.ok(warn.mock.calls[0]?.arguments[1] instanceof TypeError, "with the stage's own error");
   });
 
   test("a result still in the air as the panel closes goes to the toasts, in either cleanup order", () => {
@@ -698,7 +715,9 @@ describe("every way a panel control rolls", () => {
 });
 
 describe("the throw's store, randomized", () => {
-  test("2,000 random sequences keep its promises", () => {
+  test("2,000 random sequences keep its promises", (t) => {
+    // A stage that throws as it plays logs its error, which would flood the output here.
+    t.mock.method(console, "warn", () => undefined);
     for (let seed = 1; seed <= 2_000; seed++) run(seed);
   });
 });
