@@ -410,6 +410,7 @@ export function randomState(r: () => number): RoomState {
     if (chance(r, 0.5)) c.defaultImage = { assetId: `img-${id}`, crop: { cx: 0, cy: 0, zoom: 1 } };
     // Without drawing from r, so the rest of every random room stays as it was.
     if (i !== 1) c.level = 3 + 4 * i;
+    if (i !== 0) c.knownForms = i === 1 ? ["wolf", "owl"] : ["black-bear"];
     state.characters[id] = c;
   }
 
@@ -1353,8 +1354,12 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
       return { t: "savedEncounter.update", encounterId: anyEncounter(), patch: chance(r, 0.5) ? { name: "Renamed", party: chance(r, 0.5) ? [{ count: 4, level: int(r, 1, 20) }] : null } : { monsters: [{ srdId: "owlbear", count: 1, inLair: chance(r, 0.5) }] } };
     case 47:
       return { t: "savedEncounter.delete", encounterId: anyEncounter() };
-    case 48:
-      return { t: "character.update", characterId: anyCharacter(), patch: { level: chance(r, 0.8) ? int(r, 1, 20) : null } };
+    case 48: {
+      const characterId = anyCharacter();
+      const level = chance(r, 0.8) ? int(r, 1, 20) : null;
+      // A Druid's known forms ride along, read from the level drawn rather than from r, so every other random op stays as it was.
+      return { t: "character.update", characterId, patch: { level, knownForms: level === null ? [] : ["wolf", "owl", "black-bear"].slice(0, level % 4) } };
+    }
     default:
       return { t: "member.update", memberId: "dm1", name: `DM ${int(r, 1, 9)}` };
   }

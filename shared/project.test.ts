@@ -254,6 +254,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
     if (!c.ownerIds.includes(viewer.memberId)) {
       assert.ok(!("ownerIds" in pc) && !("ac" in pc.actor), `${label}: character ${id} stats leaked`);
       assert.ok(!("level" in pc), `${label}: character ${id} level leaked`);
+      assert.ok(!("knownForms" in pc), `${label}: character ${id} known forms leaked`);
       const exact = state.meta.settings.pcHpVisibleToParty;
       assert.equal("hp" in pc.actor, exact, `${label}: character ${id} hp`);
       assert.equal("hpLabel" in pc.actor, !exact, `${label}: character ${id} label`);
