@@ -504,7 +504,7 @@ export class WalkSearch {
   #swim = new Int8Array(1024);
   #dz = new Int32Array(1024);
   #done = new Uint8Array(1024);
-  /** States at the starting vertical residue, by node and horizontal residue; others by key. */
+  /** States at the starting vertical residue, by node and horizontal residue. Others by key. */
   readonly #dense: Int32Array;
   readonly #sparse = new Map<number, number>();
   /** The first state settled at each node: the cheapest way there. */

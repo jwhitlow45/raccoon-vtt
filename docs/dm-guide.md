@@ -317,7 +317,7 @@ The **Difficult** and **Rubble** terrains from the Brush are difficult terrain. 
 A few other things cost extra too, and the app counts them the same way:
 
 - **Water** costs double for a creature without a Swim Speed.
-- **Another creature's space** is difficult terrain, unless the creature is an ally or Tiny. A walk never passes through a creature it couldn't pass in the rules (one that isn't Incapacitated and is less than two sizes apart), but it can end there, and the label warns that it would.
+- **Another creature's space** is difficult terrain, unless the creature is an ally or Tiny. On a scene where walls stop moves, a walk never passes through a creature it couldn't pass in the rules (one that isn't Incapacitated and is less than two sizes apart), but it can end there, and the label warns that it would. Where walls don't stop moves, nothing stops a walk, and such a space is just difficult terrain.
 - **A Prone creature** crawls, so every foot costs 1 extra.
 - **Areas** marked to slow movement, such as Web or Plant Growth (see [Areas that slow movement](#areas-that-slow-movement)).
 
