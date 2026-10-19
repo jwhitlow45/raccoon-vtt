@@ -510,7 +510,7 @@ export const SURFACES = [
   "Token and character fields",
   "Label, pin and light panes",
   "Dialogs",
-  "Choose an image",
+  "Adding an image",
 ] as const;
 
 export type Surface = (typeof SURFACES)[number];
@@ -550,6 +550,15 @@ export const BEHAVIORS: readonly Behavior[] = [
   },
   // lib/backClose.ts. Only Android has the button.
   { id: "back", input: "Back button", does: "Close what opened last, such as a pop-up, a sheet, a dialog, a handout or the action bar", roles: EVERYONE, device: "android" },
+  // A paste no image entry took: features/images/pasteRouter.ts, and the offer in features/images/RoomPaste.tsx. The app hears the paste, never the key, so it is not rebound.
+  {
+    id: "roomPaste",
+    input: "Ctrl+V (Cmd+V on a Mac)",
+    does: "Use a copied image as a new scene, the selected token's picture, a stamp or a handout",
+    roles: DM,
+    when: "with nothing open that takes it",
+    device: "keys",
+  },
 
   // The map with a key or another button: canvas/Stage.tsx, canvas/TokenNode.tsx, state/selection.ts addsToSelection.
   {
@@ -775,15 +784,14 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "dialogEscape", input: "Escape", does: "Close it. A journal page or a monster with unsaved changes asks first", roles: EVERYONE, device: "keys", surface: "Dialogs" },
   { id: "dialogTab", input: "Tab, Shift+Tab", does: "Move through its controls without leaving it", roles: EVERYONE, device: "keys", surface: "Dialogs" },
 
-  // The image picker: features/images/ImagePicker.tsx.
+  // Every image entry: features/images/pasteRouter.ts, which picks the one a paste lands in (docs/design-v1-paste.md 1.3).
   {
     id: "pickerPaste",
     input: "Ctrl+V (Cmd+V on a Mac)",
-    does: "Paste an image to upload it, or an https link to import it",
+    does: "Paste a copied image there. Choose an image also takes an https link",
     roles: EVERYONE,
-    when: "with focus outside a text field",
     device: "keys",
-    surface: "Choose an image",
+    surface: "Adding an image",
   },
 ];
 
@@ -814,6 +822,8 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Two panels": "On a screen 900 px or wider, with two panels in the side panel. With the bar's grip focused, the arrow keys move the bar and never move a token.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
+  "Adding an image":
+    "Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.",
 };
 
 function keyRow(s: Shortcut, keys: KeyMap): SheetRow {

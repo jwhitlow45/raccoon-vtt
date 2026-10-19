@@ -673,7 +673,11 @@ describe("the sheet's rows beside the keys", () => {
     assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter"]);
     assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
     assert.deepEqual(inputs("player", IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
-    assert.deepEqual(inputs("player", IPHONE, "Choose an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
+    assert.deepEqual(inputs("player", IPHONE, "Adding an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
+    assert.deepEqual(inputs("dm", IPHONE, "Adding an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
+    // A paste over the map is the DM's alone, in Keys after Escape.
+    assert.deepEqual(section("dm", IPHONE, "Keys")!.rows.slice(-2).map((r) => r.id), ["escape", "roomPaste"]);
+    assert.ok(!section("player", IPHONE, "Keys")!.rows.some((r) => r.id === "roomPaste"));
   });
 
   test("no section lists the same thing twice", () => {

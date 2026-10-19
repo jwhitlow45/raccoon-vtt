@@ -14,6 +14,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
 - Making maps
   - [Scenes](#scenes)
   - [Starter art](#starter-art)
+  - [Pasting a picture](#pasting-a-picture)
   - [Lining up the grid](#lining-up-the-grid)
   - [The map builder](#the-map-builder)
   - [Walls and doors](#walls-and-doors)
@@ -197,6 +198,16 @@ Stamps work differently. A starter stamp isn't copied into the room at all: the 
 **Credits.** A picked image keeps its credit, which you can read in the Library's viewer and in the token panel: who made it, its license, the credit line its author asks for where there is one (such as "Cartography by Dyson Logos"), and what was changed. That is usually only its size and file format, or for the ink maps, a reduction to four shades of gray that keeps every line sharp. The About page credits every pack. If you share a starter map or picture beyond your table, keep its credit with it, since that is what its license asks of you.
 
 Players get the **Starter** tab too, in the image picker for their own characters' tokens, so a player without a portrait can pick one. Maps, handouts and stamps stay yours.
+
+## Pasting a picture
+
+You don't need to save a picture to your computer before you use it. Copy it (on a web page, right-click it and choose **Copy image**, or press and hold it on a phone), then paste it wherever the app asks for an image: in the image picker, in **New scene**, a scene's **Map image** and phases, **Show a handout** and the stamp picker. Press Ctrl+V (Cmd+V on a Mac), or press **Paste an image** (**Paste from the clipboard** in the image picker). A pasted picture goes exactly where a chosen file would: a map is searched for its grid, a token picture opens in the crop editor, and a handout is ready to show.
+
+A phone may ask your permission the first time, or show its own small **Paste** button for you to tap. If it won't let the app read the clipboard, press and hold in the box that appears and tap **Paste** there.
+
+On a computer you can also just press Ctrl+V over the map, and the app asks what the picture is for: a new scene, the selected token's picture, a stamp or a handout. Nothing uploads until you choose. A scene's **Map image** and **Add a phase** take Ctrl+V only while one of their own buttons has focus, and on the players' scene only after you've confirmed, so a stray Ctrl+V never replaces the map your players are looking at. Their **Paste an image** buttons work whenever their other buttons do.
+
+![Use the pasted image, over a cave map: an owlbear picture pasted with the Owlbear token selected, offered first as its picture, then as a new scene, a stamp or a handout.](dm-guide/paste-offer.webp)
 
 ## Lining up the grid
 

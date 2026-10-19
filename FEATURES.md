@@ -137,7 +137,7 @@ The Builder tool is the DM's. Its modes:
 
 ## Images and art
 
-- The image picker gets an image six ways: Icons, Starter, Device (an upload, or the camera roll on a phone), Link (an image's web address), Search the web, and Library. Pasting an image from the clipboard works too.
+- The image picker gets an image six ways: Icons, Starter, Device (an upload, or the camera roll on a phone), Link (an image's web address), Search the web, and Library. Pasting a copied image works there too, and in New scene's Map image, a scene's Map image and phases, Show a handout and the stamp picker. On a computer, the DM can paste over the map and choose what it is for.
 - **Icons**: 4,180 game-icons.net icons, each on a colored disk, found by name or artist. Picking one needs no upload and no search, so it works when web search is used up, and once the icon list has loaded it works offline too. Each icon names its artist and license where you pick it.
 - **Search the web**: type "goblin archer" and tap a result. It searches Google Images, with safe search on, while the server has a Google search key and searches left this month. Otherwise it searches Openverse's openly licensed images, and "Search Openverse instead" asks Openverse on purpose. An Openverse image keeps its credit (title, author, license and what was changed), shown in the library and the token panel.
 - **Starter packs**: 501 openly licensed works in 14 packs, each from one artist or project, ready for a DM with no art of their own. They have a selector of their own wherever art is picked, showing only the packs that fit: the image picker's Starter tab (tokens and portraits), "From starter packs" under New scene's Map image (maps) and in Show a handout (pictures to show), and the stamp picker's Starter tab (props). Each lists its works by pack and then by category inside the pack, such as Dragons or Undead, with a search over names, categories and tags across the packs shown. A tap on a work shows its name, pack, author and license, and Use takes it. On a short screen, such as a phone held sideways, that line and Use stay at the foot of the window, as the Icons tab's do. Thumbnails show loading, and Use shows busy until the copy lands or says plainly why it failed.
@@ -443,6 +443,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | W | Enter or leave full screen, where the browser can | everyone |
 | ? | Show the shortcuts | everyone |
 | Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape | everyone |
+| Ctrl+V (Cmd+V on a Mac) | Use a copied image as a new scene, the selected token's picture, a stamp or a handout | DM, with nothing open that takes it |
 
 ### Mouse with keys
 
@@ -574,11 +575,13 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | Escape | Close it. A journal page or a monster with unsaved changes asks first | everyone |
 | Tab, Shift+Tab | Move through its controls without leaving it | everyone |
 
-### Choose an image
+### Adding an image
+
+Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.
 
 | Key | Does | Who |
 | --- | --- | --- |
-| Ctrl+V (Cmd+V on a Mac) | Paste an image to upload it, or an https link to import it | everyone, with focus outside a text field |
+| Ctrl+V (Cmd+V on a Mac) | Paste a copied image there. Choose an image also takes an https link | everyone |
 
 ## Look and accessibility
 

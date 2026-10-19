@@ -145,7 +145,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const titles = await headings(sheet);
     assert.deepEqual(titles.slice(0, 2), ["Keys", "Mouse with keys"], titles.join(", "));
     assert.ok(!titles.includes("Android"), titles.join(", "));
-    for (const surface of ["Side panel tabs", "Handout viewer", "Token window", "Initiative", "Roll requests", "Token and character fields", "Label, pin and light panes", "Dialogs", "Choose an image"]) {
+    for (const surface of ["Side panel tabs", "Handout viewer", "Token window", "Initiative", "Roll requests", "Token and character fields", "Label, pin and light panes", "Dialogs", "Adding an image"]) {
       assert.ok(titles.includes(surface), `${surface} in ${titles.join(", ")}`);
     }
     // Request a roll's fields send it (docs/design-v1-roll-request.md 8).
@@ -153,7 +153,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.equal(await sheet.getByRole("region").count(), 0, "headings, not landmarks");
 
     const keys = await inputs(sheet, "Keys");
-    for (const k of ["Ctrl+Z", "T", "H", "/", "?", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
+    for (const k of ["Ctrl+Z", "T", "H", "/", "?", "Escape", "Ctrl+V (Cmd+V on a Mac)"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
     assert.deepEqual(await inputs(sheet, "Mouse with keys"), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
@@ -187,7 +187,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
 
     const keys = await inputs(sheet, "Keys");
     for (const k of ["Ctrl+Z", "V", "N", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
-    for (const k of ["T", "H", "/"]) assert.ok(!keys.includes(k), `the DM's ${k} is not a player's`);
+    for (const k of ["T", "H", "/", "Ctrl+V (Cmd+V on a Mac)"]) assert.ok(!keys.includes(k), `the DM's ${k} is not a player's`);
     assert.deepEqual(await inputs(sheet, "Android"), ["Back button"]);
     assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
     assert.deepEqual(await inputs(sheet, "Handout viewer"), ["+, -", "0", "Arrow keys", "Page Down, Page Up", "Space, Shift+Space", "Home, End"]);
@@ -209,7 +209,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.getByRole("button", { name: "Show the shortcuts" }).click();
     const sheet = player.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
-    const paste = sheet.getByRole("heading", { name: "Choose an image", exact: true });
+    const paste = sheet.getByRole("heading", { name: "Adding an image", exact: true });
     await paste.scrollIntoViewIfNeeded();
     const wide = await sheet.evaluate((root) => {
       type El = { scrollWidth: number; clientWidth: number; tagName: string; textContent: string | null };
