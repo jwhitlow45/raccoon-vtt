@@ -9,6 +9,20 @@ import { cutRoute, landedElevation, type Point, type Role } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
+/**
+ * What a drag's frame tells others besides the token (6.5): the route's
+ * corners and the leg's cost, and for a walk cut short the spot it lands
+ * on, so their line ends where it will, not at the finger (review
+ * ASTRA-11). The board's own token still follows the finger.
+ */
+export function frameFields(route: Pick<DragRoute, "to" | "cut" | "corners" | "read">): { x?: number; y?: number; path?: number[]; ft?: number } {
+  return {
+    ...(route.cut ? { x: route.to.x, y: route.to.y } : {}),
+    ...(route.corners.length > 0 ? { path: route.corners.flatMap((c) => [c.x, c.y]) } : {}),
+    ft: route.read.dragFt,
+  };
+}
+
 export function speedsOf(view: RoomState, token: Token): Speeds | undefined {
   // Speeds are the actor's, which only the DM and the creature's owners receive.
   return "inline" in token.actor ? token.actor.inline.speeds : view.characters[token.actor.ref]?.actor.speeds;
@@ -34,7 +48,7 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
  * drop lands it, and its frames carry no more corners than that. With no
  * route, a walk held at the wall (`held`) is drawn and read to the wall.
  */
-export function walkPreview(input: { view: RoomState; token: Token; target: Point; answer: RouteAnswer; held: Point | null; world: PublicWorld | null; role: Role }): Pick<DragRoute, "to" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: { view: RoomState; token: Token; target: Point; answer: RouteAnswer; held: Point | null; world: PublicWorld | null; role: Role }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
   const found = answer.kind === "route" ? answer.route : null;
   const cut = found ? cutRoute(view, token, found.pieces) : null;
@@ -73,6 +87,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   });
   return {
     to: { x: to.x, y: to.y },
+    cut: cut !== null,
     corners: pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
     read,
     endsIn: world ? endsIn(view, world, token, points[points.length - 1]!) : null,

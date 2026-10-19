@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { walkPreview } from "./preview.ts";
+import { frameFields, walkPreview } from "./preview.ts";
 import { line, thorn, world } from "./testing.ts";
 
 /** A lone drag's picture and frames (docs/design-v1-movement.md 3.1, review MV-O-6 and MV-O-9). */
@@ -16,6 +16,12 @@ describe("the picture of a drag's walk", () => {
     assert.equal(preview.corners.length, 63, "one corner short of the 64 pieces, 126 numbers in a frame");
     // Each piece of the zigzag is one square down and one across: 5 ft under every diagonal 5 ft.
     assert.equal(preview.read.dragFt, 64 * 5);
+    // Others' line ends where the walk lands too, not at the finger.
+    assert.equal(preview.cut, true);
+    const frame = frameFields(preview);
+    assert.deepEqual([frame.x, frame.y, frame.path!.length, frame.ft], [zigzag[63]![0], zigzag[63]![1], 126, 320]);
+    const whole = walkPreview({ view, token, target: { x: 1, y: 5 }, answer: { kind: "route", route: { pieces: zigzag.slice(0, 5), points: [], endsBlocked: false } }, held: null, world: null, role: "player" });
+    assert.deepEqual([whole.cut, frameFields(whole).x], [false, undefined], "a walk not cut leaves the frame at the token");
   });
 
   test("a walk held at a wall is drawn and read to the wall, not through it", () => {

@@ -8,7 +8,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
 import { pathNow } from "../measure/movement.ts";
 import { dropMode, keyStep, planGroup, planOne, planWalk, rebased, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
-import { walkPreview } from "./preview.ts";
+import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { RouteDrag, type Frames, type RouteAnswer } from "./routeDrag.ts";
 import { sendPlan } from "./send.ts";
 import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute } from "./store.ts";
@@ -32,8 +32,8 @@ export type DragStops = {
    * or the ledge, so a drop never bounces back.
    */
   frame(node: DragNode, token: DropToken): void;
-  /** What a frame sends others besides where the token is: the route's corners and the leg's cost (6.5). */
-  frameFields(tokenId: string): { path?: number[]; ft?: number };
+  /** What a frame sends others besides where the token is: the route's corners and the leg's cost (6.5), and where a cut walk lands. */
+  frameFields(tokenId: string): { x?: number; y?: number; path?: number[]; ft?: number };
   /**
    * Where the drop puts the dragged token, and the rest of its group, by
    * the rules, at once: an arrow key's step of one square, never searched
@@ -214,7 +214,7 @@ export function useDragStops(role: Role): DragStops {
       frameFields(tokenId) {
         const route = routes.getState().route;
         if (!route || route.tokenId !== tokenId) return {};
-        return { ...(route.corners.length > 0 ? { path: route.corners.flatMap((c) => [c.x, c.y]) } : {}), ft: route.read.dragFt };
+        return routeFrame(route);
       },
       plan(node, drawn, drawnGroup) {
         const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };

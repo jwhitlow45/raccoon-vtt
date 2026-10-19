@@ -39,6 +39,8 @@ export type DragRoute = {
   tokenId: string;
   /** Where the drop would land. */
   to: Point;
+  /** The walk is cut short of the finger's spot, after 64 pieces: `to` is where it lands. */
+  cut: boolean;
   /** The route's corners, none for the straight leg. */
   corners: Point[];
   /** The search has not settled the spot yet: the line waits grey and straight. */
