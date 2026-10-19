@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { CustomMonster } from "#shared/model.ts";
 import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
 import { sizeAndType } from "#shared/statBlock.ts";
@@ -47,34 +48,45 @@ export type ListedRow = { key: string; view: StatBlockMonster; source: "room" | 
  */
 export function MonsterList(props: { items: readonly ListedRow[]; onPick(key: string): void; subpages?: boolean }) {
   return (
-    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
+    <ul style={ROWS}>
       {props.items.map((m) => (
         <li key={m.key}>
-          <Row
-            onClick={() => props.onPick(m.key)}
-            label={m.label}
-            pressed={m.pressed}
-            disabled={m.disabled}
-            opener={props.subpages ? `monster-${m.key}` : undefined}
-            title={m.view.name}
-            detail={sizeAndType(m.view)}
-            trailing={
-              <>
-                {m.source === "room" ? (
-                  <RoomBadge />
-                ) : m.tag ? (
-                  // A character's name, of any length: cut so the row keeps room for the block's own name.
-                  <Tag tone="muted" cut={SOURCE_TAG_PX}>
-                    {m.tag}
-                  </Tag>
-                ) : null}
-                <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, whiteSpace: "nowrap" }}>CR {m.view.cr}</span>
-              </>
-            }
-          />
+          <MonsterRow item={m} onPick={props.onPick} subpages={props.subpages} />
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A list of card rows: a gap apart, with no bullets. */
+export const ROWS: CSSProperties = { listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) };
+
+/** One of MonsterList's rows, for a caller that keeps other rows in the same list, such as Take a shape's known forms step. */
+export function MonsterRow(props: { item: ListedRow; onPick(key: string): void; subpages?: boolean }) {
+  const m = props.item;
+  return (
+    <Row
+      onClick={() => props.onPick(m.key)}
+      label={m.label}
+      pressed={m.pressed}
+      disabled={m.disabled}
+      opener={props.subpages ? `monster-${m.key}` : undefined}
+      title={m.view.name}
+      detail={sizeAndType(m.view)}
+      trailing={
+        <>
+          {m.source === "room" ? (
+            <RoomBadge />
+          ) : m.tag ? (
+            // A character's name, of any length: cut so the row keeps room for the block's own name.
+            <Tag tone="muted" cut={SOURCE_TAG_PX}>
+              {m.tag}
+            </Tag>
+          ) : null}
+          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, whiteSpace: "nowrap" }}>CR {m.view.cr}</span>
+        </>
+      }
+    />
   );
 }
 

@@ -95,11 +95,13 @@ export function PcStatBlock(props: {
 
 /**
  * A Druid's known forms as one-tap buttons, sorted as in Take a shape. One
- * takes the form as Wild Shape, as there. In Wild Shape the current form is
- * pressed and the others change to theirs, which is using Wild Shape again:
- * the reducer keeps the first AC and speeds to put back, and the new form's
- * Temporary HP go only where they are more than held. Each button's text
- * names it, with no `label`, which would also set a native tooltip.
+ * takes the form as Wild Shape, as there. In Wild Shape the buttons are
+ * toggles: the current form is pressed and unavailable, keeping the focus a
+ * tap just gave it, and the others change to theirs, which is using Wild
+ * Shape again. The reducer keeps the first AC and speeds to put back, and
+ * the new form's Temporary HP go only where they are more than held. Out of
+ * a shape they are plain buttons, never toggles. Each button's text names
+ * it, with no `label`, which would also set a native tooltip.
  */
 function KnownFormsSection(props: { character: Character }) {
   const { character } = props;
@@ -121,8 +123,8 @@ function KnownFormsSection(props: { character: Character }) {
               <SmallButton
                 key={m.srdId}
                 wrap
-                pressed={m.srdId === current}
-                disabled={m.srdId === current}
+                pressed={current !== undefined ? m.srdId === current : undefined}
+                unavailable={m.srdId === current}
                 onClick={() => actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: knownFormPatch(m, character, rememberedDruidLevel(roomId, character.id)) } })}
               >
                 {m.name}

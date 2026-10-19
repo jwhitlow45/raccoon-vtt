@@ -81,10 +81,12 @@ export function formLabel(name: string, mark: FormMark | null): string {
 /**
  * The one patch a known form's tap sends: Wild Shape, with the Temporary HP
  * the step's checkbox gives by default, which shapePatch adds only where
- * they are more than the character holds (5.1).
+ * they are more than the character holds (5.1). `druidLevel` is the one this
+ * device remembers (rememberedDruidLevel).
  */
-export function knownFormPatch(creature: Pick<SrdMonster, "srdId" | "ac" | "speeds" | "hp">, character: Pick<Character, "level" | "actor">, druidLevel: number | undefined): ActorPatch {
-  return shapePatch(creature, "wild", character, shapeTempHp("wild", character, creature, druidLevel));
+export function knownFormPatch(creature: Pick<SrdMonster, "srdId" | "ac" | "speeds" | "hp">, character: Pick<Character, "level" | "actor">, druidLevel: number | null | undefined): ActorPatch {
+  // Any picked (null) names no Druid level, so the character's level stands in, as when none was picked.
+  return shapePatch(creature, "wild", character, shapeTempHp("wild", character, creature, druidLevel ?? undefined));
 }
 
 // ------------------------------------------------------------ the Druid level on this device
@@ -92,37 +94,39 @@ export function knownFormPatch(creature: Pick<SrdMonster, "srdId" | "ac" | "spee
 /**
  * The Druid level picked in Take a shape, per character, on this device
  * (5.5), as the dice history is kept: an object by character id under
- * `rvtt.druidLevel.<room>`. Every read and write is in try and catch, so a
- * device with storage blocked starts at the character's level each time.
+ * `rvtt.druidLevel.<room>`, where null is Any. Any is kept too, so a
+ * player who turns into other creatures with Polymorph is not taken back
+ * to the character's level each time. Every read and write is in try and
+ * catch, so a device with storage blocked starts at the character's level
+ * each time.
  */
 function druidLevelKey(roomId: string): string {
   return `rvtt.druidLevel.${roomId}`;
 }
 
-function readDruidLevels(roomId: string): Record<string, number> {
+function readDruidLevels(roomId: string): Record<string, number | null> {
   try {
     const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(druidLevelKey(roomId));
     const parsed: unknown = raw ? JSON.parse(raw) : {};
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, number> = {};
-    for (const [id, level] of Object.entries(parsed)) if (typeof level === "number" && DRUID_LEVELS.includes(level)) out[id] = level;
+    const out: Record<string, number | null> = {};
+    for (const [id, level] of Object.entries(parsed)) if (level === null || (typeof level === "number" && DRUID_LEVELS.includes(level))) out[id] = level;
     return out;
   } catch {
     return {};
   }
 }
 
-/** The Druid level this device remembers for the character, if any. */
-export function rememberedDruidLevel(roomId: string, characterId: string): number | undefined {
+/** The Druid level this device remembers for the character: a level, null for Any, or undefined when none was picked here. */
+export function rememberedDruidLevel(roomId: string, characterId: string): number | null | undefined {
   return readDruidLevels(roomId)[characterId];
 }
 
-/** Remembers a level picked for the character, or forgets it on Any (null). */
+/** Remembers the level picked for the character, or Any (null). */
 export function rememberDruidLevel(roomId: string, characterId: string, level: number | null): void {
   try {
     const all = readDruidLevels(roomId);
-    if (level === null) delete all[characterId];
-    else all[characterId] = level;
+    all[characterId] = level;
     localStorage.setItem(druidLevelKey(roomId), JSON.stringify(all));
   } catch {
     // Storage blocked or full: the level lasts while Take a shape is open.
@@ -130,11 +134,11 @@ export function rememberDruidLevel(roomId: string, characterId: string, level: n
 }
 
 /**
- * Where the Druid level select starts (5.5): the level remembered, else the
- * character's level once it has known forms and is level 2 or more, else
- * Any. The select offers no level 1, since Wild Shape starts at 2.
+ * Where the Druid level select starts (5.5): the level or Any remembered,
+ * else the character's level once it has known forms and is level 2 or
+ * more, else Any. The select offers no level 1, since Wild Shape starts at 2.
  */
-export function startDruidLevel(remembered: number | undefined, character: Pick<Character, "level" | "knownForms">): number | null {
+export function startDruidLevel(remembered: number | null | undefined, character: Pick<Character, "level" | "knownForms">): number | null {
   if (remembered !== undefined) return remembered;
   const level = character.level;
   return (character.knownForms?.length ?? 0) > 0 && level !== undefined && level >= 2 ? level : null;

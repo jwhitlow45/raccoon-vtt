@@ -428,6 +428,106 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await ana.locator(".konvajs-content").first().waitFor();
   });
 
+  test("4c. knownforms-b: Enter on a form keeps the focus on its row as it moves, a form the filters drop hands it to the next row, and Any is remembered", async () => {
+    const panel = await showBree(ana);
+    await panel.getByRole("button", { name: "Take a shape" }).click();
+    const picker = ana.getByRole("dialog", { name: "Take a shape" });
+    // Druid level 4 was the last picked on this device, in 4b.
+    assert.equal(await picker.getByLabel("Druid level").inputValue(), "4");
+    await picker.getByRole("button", { name: "Change", exact: true }).click();
+    const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
+    const row = (name: RegExp) => step.getByRole("button", { name }).first();
+    const rowKeys = () => step.locator("li[data-form] > button").evaluateAll((els) => els.map((el) => el.parentElement?.dataset.form ?? ""));
+    // The focused row's key, or the tag of whatever else has the focus.
+    const focused = () =>
+      ana.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; parentElement: { dataset: Record<string, string | undefined> } | null } | null } }).document.activeElement;
+        return a?.parentElement?.dataset.form ?? a?.tagName ?? null;
+      });
+    const pressedIs = (name: RegExp, value: string) => waitFor(`${name} pressed ${value}`, async () => ((await row(name).getAttribute("aria-pressed")) === value ? true : null));
+
+    // knownforms-b: the Wolf leaves the known forms for the rest of the list and comes back, keeping the focus both ways.
+    await row(/^Wolf /).focus();
+    await ana.keyboard.press("Enter");
+    await pressedIs(/^Wolf /, "false");
+    assert.equal(await focused(), "wolf", "the focus stays on the Wolf taken out");
+    await ana.keyboard.press("Enter");
+    await pressedIs(/^Wolf /, "true");
+    assert.equal(await focused(), "wolf", "the focus stays on the Wolf put back");
+
+    // knownforms-b: the Owl, marked at level 4, leaves the list once taken out, and the row now in its place takes the focus.
+    const at = (await rowKeys()).indexOf("owl");
+    assert.ok(at >= 0, "the Owl is listed as a known form");
+    await row(/^Owl /).focus();
+    await ana.keyboard.press("Enter");
+    await waitFor("the Owl out of the list", async () => ((await row(/^Owl /).count()) === 0 ? true : null));
+    assert.equal(await focused(), (await rowKeys())[at], "the next row has the focus");
+    await waitFor("the Owl forgotten", () => (anaSocket.state?.characters[run.bree.characterId]?.knownForms?.includes("owl") === false ? true : null));
+
+    // knownforms-b: Any is remembered too, so Take a shape opens on Any again for Polymorph.
+    await step.getByLabel("Druid level").selectOption("Any");
+    await ana.keyboard.press("Escape");
+    await step.waitFor({ state: "detached" });
+    await panel.getByRole("button", { name: "Take a shape" }).click();
+    assert.equal(await picker.getByLabel("Druid level").inputValue(), "", "Any, as picked");
+    await ana.keyboard.press("Escape");
+    await picker.waitFor({ state: "detached" });
+  });
+
+  test("4d. knownforms-b: a toggle refused after Back shows its refusal on Take a shape's first page, and Change clears it", async () => {
+    // A second device of Ana's whose room socket goes through a route: its toggle goes out with an id no SRD monster has, and the refusal waits.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    await context.addCookies(await anaContext.cookies(server.origin));
+    const page = await context.newPage();
+    const watch = new ConsoleWatch("ana-2");
+    watch.attach(page);
+    let spoil = false;
+    let hold = false;
+    const held: (string | Buffer)[] = [];
+    let toPage: ((m: string | Buffer) => void) | null = null;
+    await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+      const upstream = ws.connectToServer();
+      ws.onMessage((m) => {
+        const frame = spoil && typeof m === "string" ? (JSON.parse(m) as { t?: string; op?: { t?: string; patch?: { knownForms?: string[] } } }) : null;
+        if (frame?.t === "op" && frame.op?.t === "character.update" && frame.op.patch?.knownForms) {
+          frame.op.patch.knownForms = [...frame.op.patch.knownForms, "Not An Id"];
+          upstream.send(JSON.stringify(frame));
+        } else upstream.send(m);
+      });
+      upstream.onMessage((m) => (hold && String(m).includes('"rejects"') ? held.push(m) : ws.send(m)));
+      toPage = (m) => ws.send(m);
+    });
+    try {
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      const panel = await showBree(page);
+      await panel.getByRole("button", { name: "Take a shape" }).click();
+      const picker = page.getByRole("dialog", { name: "Take a shape" });
+      await picker.getByRole("button", { name: "Change", exact: true }).click();
+      const step = page.getByRole("dialog", { name: "Bree’s known forms" });
+      spoil = true;
+      hold = true;
+      await step.getByRole("button", { name: /^Wolf / }).first().click();
+      await waitFor("the refusal held back", () => (held.length > 0 ? true : null));
+      await step.getByRole("button", { name: "Back to the creatures" }).click();
+      await picker.getByRole("button", { name: "Change", exact: true }).waitFor();
+      hold = false;
+      for (const m of held.splice(0)) toPage!(m);
+      // The server's words, as a toast would say them.
+      await picker.getByRole("alert").getByText(/^Not saved\. /).waitFor();
+      await picker.getByRole("button", { name: "Wild Shape as Wolf", exact: true }).waitFor();
+      await shots.take(page, "pcstats-known-forms-refused");
+      await picker.getByRole("button", { name: "Change", exact: true }).click();
+      // This device remembers no level, so the step starts at Bree's level 9.
+      await step.getByText("2 of 8 known forms at Druid level 9.").waitFor();
+      assert.equal(await step.getByRole("alert").count(), 0, "Change clears the refusal");
+      assert.deepEqual(watch.errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("5. a D&D Beyond character's JSON pasted fills the review, and Use it then Save keeps Ana's own block parts it did not read", async () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Edit", exact: true }).click();

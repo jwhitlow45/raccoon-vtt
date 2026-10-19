@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from "react";
 import { Button } from "../../components/Button.tsx";
 import type { IconName } from "../../components/Icon.tsx";
+import { buttonLook } from "../../components/looks.ts";
 import { FieldRow as PanelFieldRow, fieldStyle, NUMBER_FIELD_WIDTH, Select as FieldSelect } from "../../components/Field.tsx";
 import { Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
@@ -270,19 +271,28 @@ export function SmallButton(props: {
   armed?: boolean;
   pressed?: boolean;
   disabled?: boolean;
+  /**
+   * Disabled to the eye and to a screen reader (`aria-disabled`), where a
+   * press does nothing, but still focusable: for a button that turns
+   * unavailable as it is pressed, such as the known form just taken, whose
+   * native `disabled` would drop the keyboard's focus to the page
+   * (features/measure/controls.tsx OptButton).
+   */
+  unavailable?: boolean;
   grow?: boolean;
   type?: "button" | "submit";
   /** A long label that wraps inside the button, which grows taller, where a line is narrower than it. */
   wrap?: boolean;
 }) {
   const { onClick } = props;
+  const variant = BUTTON_VARIANT[props.tone ?? "default"];
   return (
     <Button
       ref={props.ref}
       size="sm"
-      variant={BUTTON_VARIANT[props.tone ?? "default"]}
+      variant={variant}
       type={props.type ?? "button"}
-      onClick={onClick ? () => onClick() : undefined}
+      onClick={onClick && !props.unavailable ? () => onClick() : undefined}
       aria-label={props.label}
       title={props.label}
       icon={props.icon}
@@ -290,7 +300,12 @@ export function SmallButton(props: {
       pressed={props.pressed}
       armed={props.armed}
       disabled={props.disabled}
-      style={{ flex: props.grow ? 1 : "none", ...(props.wrap ? { minWidth: 0, maxWidth: "100%", whiteSpace: "normal", textAlign: "center" } : { whiteSpace: "nowrap" }) }}
+      aria-disabled={props.unavailable || undefined}
+      style={{
+        flex: props.grow ? 1 : "none",
+        ...(props.wrap ? { minWidth: 0, maxWidth: "100%", whiteSpace: "normal", textAlign: "center" } : { whiteSpace: "nowrap" }),
+        ...(props.unavailable ? { ...buttonLook(variant, { pressed: props.pressed, disabled: true }), cursor: "default" } : null),
+      }}
     >
       {props.children}
     </Button>

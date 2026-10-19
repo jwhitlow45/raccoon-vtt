@@ -72,16 +72,17 @@ describe("a Druid's known forms", () => {
     assert.equal(formLabel("Owl", formMark(shapeLimit(4), named("Owl"))), "Wild Shape as Owl, has a Fly Speed");
   });
 
-  test("the select starts at the level remembered, else the character's from level 2 once it has known forms, else Any", () => {
+  test("the select starts at the level or Any remembered, else the character's from level 2 once it has known forms, else Any", () => {
     const forms = ["wolf"];
     assert.equal(startDruidLevel(4, { level: 9, knownForms: forms }), 4);
+    assert.equal(startDruidLevel(null, { level: 9, knownForms: forms }), null, "Any picked stays Any, for Polymorph");
     assert.equal(startDruidLevel(undefined, { level: 9, knownForms: forms }), 9);
     assert.equal(startDruidLevel(undefined, { level: 1, knownForms: forms }), null, "a level 1 character reopened starts at Any");
     assert.equal(startDruidLevel(undefined, { knownForms: forms }), null, "no level");
     assert.equal(startDruidLevel(undefined, { level: 9 }), null, "no known forms");
   });
 
-  test("the level is remembered per character and room, Any forgets it, and storage that throws or holds junk remembers none", () => {
+  test("the level is remembered per character and room, Any is remembered as Any, and storage that throws or holds junk remembers none", () => {
     blocked = false;
     device.clear();
     assert.equal(rememberedDruidLevel("ROOM", "bree"), undefined);
@@ -91,7 +92,8 @@ describe("a Druid's known forms", () => {
     assert.equal(rememberedDruidLevel("OTHER", "bree"), undefined);
     assert.deepEqual(JSON.parse(device.get("rvtt.druidLevel.ROOM")!), { bree: 4, cy: 8 });
     rememberDruidLevel("ROOM", "bree", null);
-    assert.equal(rememberedDruidLevel("ROOM", "bree"), undefined);
+    assert.equal(rememberedDruidLevel("ROOM", "bree"), null);
+    assert.deepEqual(JSON.parse(device.get("rvtt.druidLevel.ROOM")!), { bree: null, cy: 8 });
     assert.equal(rememberedDruidLevel("ROOM", "cy"), 8);
     device.set("rvtt.druidLevel.ROOM", JSON.stringify({ bree: 1, cy: "4", dee: 21, eve: 6 }));
     assert.deepEqual(["bree", "cy", "dee", "eve"].map((id) => rememberedDruidLevel("ROOM", id)), [undefined, undefined, undefined, 6]);
@@ -111,6 +113,7 @@ describe("a Druid's known forms", () => {
     const bree = (temp: number) => ({ level: 9, actor: actor({ hp: { cur: 30, max: 30, temp } }) });
     assert.deepEqual(knownFormPatch(wolf, bree(0), 4), { srdId: "wolf", wildShape: true, ac: wolf.ac, speeds: wolf.speeds, hp: { temp: 4 } });
     assert.deepEqual(knownFormPatch(wolf, bree(0), undefined).hp, { temp: 9 });
+    assert.deepEqual(knownFormPatch(wolf, bree(0), null).hp, { temp: 9 }, "Any picked names no Druid level");
     assert.equal(knownFormPatch(wolf, bree(9), 4).hp, undefined, "Bree's 9 stay");
   });
 });

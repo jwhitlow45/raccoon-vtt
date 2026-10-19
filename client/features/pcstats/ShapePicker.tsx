@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Character } from "#shared/model.ts";
 import { MAX_KNOWN_FORMS } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
@@ -12,7 +12,7 @@ import { Checkbox } from "../../components/Checkbox.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { MonsterList, type ListedRow } from "../monsters/MonsterList.tsx";
+import { MonsterList, MonsterRow, ROWS, type ListedRow } from "../monsters/MonsterList.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { SrdCredit, useSrdMonsters } from "../monsters/StatBlockView.tsx";
 import { editsPcStats } from "../tokens/access.ts";
@@ -48,7 +48,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   const { monsters, failed } = useSrdMonsters();
   const [query, setQuery] = useState("");
   const [beastsOnly, setBeastsOnly] = useState(true);
-  // The Druid level this device remembers for the character, which Wild Shape's Temporary HP follow (5.5).
+  // The Druid level this device remembers for the character, null for Any, which Wild Shape's Temporary HP follow (5.5).
   const [remembered, setRemembered] = useState(() => rememberedDruidLevel(roomId, characterId));
   const [druidLevel, setDruidLevel] = useState<number | null>(() => startDruidLevel(remembered, props.character));
   const [picked, setPicked] = useState<SrdMonster | null>(null);
@@ -63,6 +63,10 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       mounted.current = false;
     };
   }, []);
+  // The known forms step's list, its count line, and the row a key press toggled, to give the focus back to (refocusAfterToggle).
+  const formsList = useRef<HTMLUListElement>(null);
+  const countLine = useRef<HTMLParagraphElement>(null);
+  const toggled = useRef<{ key: string; index: number } | null>(null);
   const deferred = useDeferredValue(query);
   const matches = useMemo(() => monsterMatcher(deferred), [deferred]);
   const limit = useMemo(() => (druidLevel === null ? null : shapeLimit(druidLevel)), [druidLevel]);
@@ -73,6 +77,12 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   }, [monsters, beastsOnly, matches, limit]);
   const knownIds = props.character.knownForms;
   const known = useMemo(() => knownFormsIn(knownIds, monsters ?? []), [knownIds, monsters]);
+  // Once the toggled list shows, which the prediction does in the same task as the tap.
+  useLayoutEffect(() => {
+    const was = toggled.current;
+    toggled.current = null;
+    if (was && formsList.current) refocusAfterToggle(formsList.current, was, countLine.current);
+  }, [knownIds]);
   const count = knownFormCountWords(knownIds?.length ?? 0, druidLevel);
   // Wild Shape forms must be Beasts, so choosing a level turns the filter on. It stays the user's to turn off again.
   const chooseLevel = (value: string) => {
@@ -80,7 +90,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
     setDruidLevel(level);
     if (level !== null) setBeastsOnly(true);
     rememberDruidLevel(roomId, characterId, level);
-    setRemembered(level ?? undefined);
+    setRemembered(level);
   };
   const name = props.character.name;
   const you = useRoomView((s) => s.you);
@@ -109,19 +119,31 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
     </>
   );
 
+  // A refused toggle's words, on whichever page is open when the answer comes, so going Back never hides one (5.2).
+  const refusalLine = refusal ? (
+    <p role="alert" style={{ margin: 0, fontSize: theme.font.small, color: theme.color.dangerText }}>
+      {refusal}
+    </p>
+  ) : null;
+  // Back and Change clear it, so a page never opens on an old refusal.
+  const leaving = (go: () => void) => () => {
+    setRefusal(null);
+    go();
+  };
+
   if (picked) {
-    const temp = shapeTempHp(kind, props.character, picked, remembered);
+    const temp = shapeTempHp(kind, props.character, picked, remembered ?? undefined);
     const holding = props.character.actor.hp.temp;
     const take = () => {
       const patch = shapePatch(picked, kind, props.character, gainTemp ? temp : undefined);
       if (actions.dispatch({ t: "character.update", characterId, patch: { actor: patch } }) !== null) props.onClose();
     };
-    const druidWords = remembered !== undefined ? `Druid level ${remembered}, as picked in Take a shape.` : `The Druid level, read as ${whose(name)} level.`;
+    const druidWords = typeof remembered === "number" ? `Druid level ${remembered}, as picked in Take a shape.` : `The Druid level, read as ${whose(name)} level.`;
     return (
       <Dialog
         title={`Take the shape of ${picked.name}`}
         onClose={props.onClose}
-        back={{ label: "Back to the creatures", onBack: () => setPicked(null) }}
+        back={{ label: "Back to the creatures", onBack: leaving(() => setPicked(null)) }}
         phone="sheet"
         width="md"
         footer={
@@ -136,6 +158,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
         {/* Its step rises from the bottom on a phone, so a shape other than Wild Shape, which only Take the shape sends, holds it against a swipe (docs/design-v1-sheet-swipe.md 4.6). */}
         <UnsavedInput unsaved={kind !== "wild" || !gainTemp} />
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
+          {refusalLine}
           <ShapeChoice name={name} creature={picked.name} wild={wildShapeDetail(props.character, picked.name, editsPcStats(you, props.character))} value={kind} onChange={setKind} />
           {holding >= temp ? (
             <Help>{`${whose(name)} ${holding} Temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
@@ -163,8 +186,11 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
     const toggle = (srdId: string) => {
       setRefusal(null);
       const knownForms = toggleKnownForm(props.character.knownForms, srdId);
+      const rows = formsList.current ? formRows(formsList.current) : [];
+      const index = rows.findIndex((b) => b.parentElement?.dataset.form === srdId);
+      toggled.current = index >= 0 && rows[index] === document.activeElement ? { key: srdId, index } : null;
       // Quiet, so a refusal shows under the count in the server's words rather than in a toast behind the dialog.
-      actions.dispatch(
+      const sent = actions.dispatch(
         { t: "character.update", characterId, patch: { knownForms } },
         {
           quiet: true,
@@ -175,33 +201,37 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
           },
         },
       );
+      if (sent === null) toggled.current = null;
     };
+    const rowItem = (m: ListedRow) => (
+      <li key={m.key} data-form={m.key}>
+        <MonsterRow item={m} onPick={toggle} />
+      </li>
+    );
     return (
-      <Dialog title={`${whose(name)} known forms`} onClose={props.onClose} back={{ label: "Back to the creatures", onBack: () => setChoosing(false) }} phone="fill" width="md">
+      <Dialog title={`${whose(name)} known forms`} onClose={props.onClose} back={{ label: "Back to the creatures", onBack: leaving(() => setChoosing(false)) }} phone="fill" width="md">
         <PickerBody>
           <Help>{`The Beast forms ${name} knows for Wild Shape, listed first in Take a shape. By the rules a Druid replaces one after each Long Rest, and the DM may allow other Beasts.`}</Help>
-          {count.over ? <Note>{count.text}</Note> : <p style={{ margin: 0, fontSize: theme.font.body14 }}>{count.text}</p>}
-          {refusal ? (
-            <p role="alert" style={{ margin: 0, fontSize: theme.font.small, color: theme.color.dangerText }}>
-              {refusal}
-            </p>
-          ) : null}
+          {/* Where the focus goes when a toggled row leaves the list and no row follows it. */}
+          <div ref={countLine} tabIndex={-1} style={{ outline: "none" }}>
+            {count.over ? <Note>{count.text}</Note> : <p style={{ margin: 0, fontSize: theme.font.body14 }}>{count.text}</p>}
+          </div>
+          {refusalLine}
           {filters}
           {monsters ? (
-            <div style={{ display: "grid", gap: theme.space(1) }}>
-              <MonsterList items={knownRows} onPick={toggle} />
-              {known.missing.length > 0 ? (
-                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
-                  {known.missing.map((id) => (
-                    <li key={id}>
-                      <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app’s SRD list" />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              <MonsterList items={otherRows} onPick={toggle} />
+            <>
+              {/* One keyed list, so a row that moves between the known forms and the rest stays one element (refocusAfterToggle). */}
+              <ul ref={formsList} style={ROWS}>
+                {knownRows.map(rowItem)}
+                {known.missing.map((id) => (
+                  <li key={id} data-form={id}>
+                    <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app’s SRD list" />
+                  </li>
+                ))}
+                {otherRows.map(rowItem)}
+              </ul>
               {otherRows.length === 0 ? <Help>No other creature matches.</Help> : null}
-            </div>
+            </>
           ) : null}
           <SrdCredit />
         </PickerBody>
@@ -223,6 +253,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
     <Dialog title="Take a shape" onClose={props.onClose} phone="fill" width="md">
       <PickerBody>
         <Help>{`An SRD creature for ${whose(name)} token to take the shape of. The token keeps ${whose(name)} HP and conditions.`}</Help>
+        {refusalLine}
         {/* The rows need the SRD list's names, AC and speeds, so the group waits under the list's own loading and failure lines (5.1). */}
         {monsters ? (
           <div style={{ display: "grid", gap: theme.space(1) }}>
@@ -230,7 +261,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
               action={
                 <>
                   {none ? null : <span style={{ fontSize: theme.font.small, color: count.over ? theme.color.warning : theme.color.textMuted, whiteSpace: "nowrap" }}>{count.short}</span>}
-                  <SmallButton wrap onClick={() => setChoosing(true)}>
+                  <SmallButton wrap onClick={leaving(() => setChoosing(true))}>
                     {none ? "Choose known forms" : "Change"}
                   </SmallButton>
                 </>
@@ -252,6 +283,24 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       </PickerBody>
     </Dialog>
   );
+}
+
+/** The known forms step's row buttons, in order. */
+function formRows(list: HTMLElement): HTMLButtonElement[] {
+  return [...list.querySelectorAll<HTMLButtonElement>("li[data-form] > button")];
+}
+
+/**
+ * Gives the keyboard's focus back after a toggle took it from a row (5.2).
+ * A row that moves between the known forms and the rest can still lose it,
+ * since the browser blurs an element React moves, so the toggled row takes
+ * it back. A known form the filters drop leaves the list, such as the Owl
+ * at Druid level 4, and the row now in its place takes it, else the count.
+ */
+function refocusAfterToggle(list: HTMLElement, was: { key: string; index: number }, count: HTMLElement | null): void {
+  const rows = formRows(list);
+  const target = rows.find((b) => b.parentElement?.dataset.form === was.key) ?? rows.slice(was.index).find((b) => !b.disabled) ?? count;
+  if (target && document.activeElement !== target) target.focus();
 }
 
 /** Each page's body: one column no wider than the dialog, so a long name cuts or wraps rather than scroll it sideways. */
