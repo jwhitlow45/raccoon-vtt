@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useStore } from "zustand";
 import type { Character, CompanionTurn, CreatureSize, Token } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import { SIX_SIZES } from "#shared/rules/resize.ts";
@@ -29,7 +30,7 @@ import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHeader } from "../panels.ts";
 import type { TokenAccess } from "./access.ts";
-import { characterPageSlot, DISCARD, formKey, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, patchForm, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { ChooseBlockDialog } from "./CompanionBlocks.tsx";
 import { characterBlocks, fromTheBlock, srdTitle, whose, type PickerRow } from "./companionBlocks.ts";
 import {
@@ -170,6 +171,10 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
  * open with the reason.
  */
 export function CompanionForm(props: {
+  /** This opening of the form, which a remount keeps (characterPage.ts PanelForm). */
+  formId: string;
+  /** The count of outside opens when it opened (useLeaveForm). */
+  since: number;
   character: Character;
   /** Whether the panel holding the form is on screen (PanelProps.shown). */
   shown: boolean;
@@ -187,22 +192,30 @@ export function CompanionForm(props: {
   const ui = useRoomUi();
   const scope = useRoomScope();
   const pageStore = useScoped(characterPageSlot);
-  const keptKey = `companion:${character.id}`;
-  const { initial, start } = useKeptDraft<CompanionDraft>(keptKey, () => NEW_COMPANION);
+  const { formId } = props;
+  const { initial, start } = useKeptDraft<CompanionDraft>(formId, () => NEW_COMPANION);
   const [draft, setDraft] = useState<CompanionDraft>(initial);
   const { typed, pending } = usePendingNumbers(draft, draftWith);
   // Only Add sends it, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
   useUnsavedSince(typed);
-  useKeepDraft(keptKey, typed, start);
+  useKeepDraft(formId, typed, start);
   const [error, setError] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState(false);
+  // Kept with the form instance, so a form a remount opened again stays busy until its Add is answered.
+  const waiting = useStore(pageStore, (s) => s.form?.id === formId && s.form.kind === "companion" && s.form.sending === true);
+  const setWaiting = (on: boolean) =>
+    patchForm(pageStore, formId, (form) => {
+      if (form.kind !== "companion") return form;
+      if (on) return { ...form, sending: true };
+      const { sending: _sent, ...rest } = form;
+      return rest;
+    });
   const [choosing, setChoosing] = useState(false);
   const [blockGone, setBlockGone] = useState(false);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const changeRef = useRef<HTMLButtonElement>(null);
   const focusChange = useRef(false);
   // Typed changes ask first, but not once Add sent them: then leaving throws nothing away.
-  const leave = useLeaveForm(typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened);
+  const leave = useLeaveForm(typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened, props.since);
   usePanelHeader({
     title: `Add a companion for ${character.name}`,
     parent: character.name,
@@ -282,9 +295,10 @@ export function CompanionForm(props: {
       if (!mounted.current || !inSight.current) {
         const text = lateCompanionText(sentName, answer, refusal);
         if (text) ui.notify(text, "error");
-        // A remount opened this form again with its draft (characterPage.ts): once added, that form goes, so the companion is never added twice.
+        // A remount opened this form instance again, busy (characterPage.ts): once added it goes, so the companion is never added twice, else it takes Add again. An instance closed or replaced meanwhile is left alone.
         if (!mounted.current) {
-          if (answer === "taken") pageStore.setState((s) => (formKey(s.form) === keptKey ? { form: null } : {}));
+          if (answer === "taken") patchForm(pageStore, formId, () => null);
+          else setWaiting(false);
           return;
         }
         // Still open out of sight: done once added, else showing why for when the user comes back.

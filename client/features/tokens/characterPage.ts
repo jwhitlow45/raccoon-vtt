@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { createStore } from "zustand/vanilla";
+import { uuidv7 } from "#shared/ids.ts";
 import type { Character } from "#shared/model.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 
@@ -14,9 +15,13 @@ import { scopeSlot, useScoped } from "../../state/scope.ts";
  * which is when a player with one character lands on its page. `null` is
  * the list.
  */
-export const characterPageSlot = scopeSlot(() => createStore<CharacterPageState>(() => ({ characterId: undefined, opened: 0, form: null })));
+export const characterPageSlot = scopeSlot(() => createCharacterPageStore());
 
-type CharacterPageState = {
+export function createCharacterPageStore(): StoreApi<CharacterPageState> {
+  return createStore<CharacterPageState>(() => ({ characterId: undefined, opened: 0, form: null }));
+}
+
+export type CharacterPageState = {
   characterId: string | null | undefined;
   /** How many times a page was opened from outside the panel (openCharacterPage), which a form open in the panel leaves for. */
   opened: number;
@@ -26,32 +31,50 @@ type CharacterPageState = {
 
 /**
  * New character, Add a companion and a character's stat blocks, each a
- * subpage in the panel's place. A form keeps what it holds as it changes
- * (useKeptDraft), so a tablet turned across 900 px opens it again as it
- * was. The stat blocks page is a list and holds nothing typed.
+ * subpage in the panel's place. Each opening is an instance of its own
+ * (`id`), which a remount keeps: a form keeps what it holds as it changes
+ * (useKeptDraft), and Add a companion keeps that its Add is on its way
+ * (`sending`), so a tablet turned across 900 px opens it again as it was,
+ * still busy. An answer touches only the instance that sent it
+ * (patchForm). `opened` is the slot's count of outside opens when it
+ * opened, so a form or list that mounts after an outside open meets that
+ * open as a mounted one would (useLeaveForm, staleList). The stat blocks
+ * page is a list and holds nothing typed.
  */
-export type PanelForm = { kind: "new"; kept?: KeptDraft } | { kind: "companion"; characterId: string; kept?: KeptDraft } | { kind: "blocks"; characterId: string };
+export type PanelForm =
+  | { kind: "new"; id: string; opened: number; kept?: KeptDraft }
+  | { kind: "companion"; characterId: string; id: string; opened: number; kept?: KeptDraft; sending?: true }
+  | { kind: "blocks"; characterId: string; id: string; opened: number };
 
 /** A form's draft with its numbers still being typed folded in, and the draft it opened with, against which Back asks. */
 type KeptDraft = { typed: unknown; start: string };
 
-/** Names a form, so a kept draft is only ever read back by the form it came from: "new", "companion:<id>" or "blocks:<id>". */
-export function formKey(form: PanelForm | null): string | null {
-  if (form === null) return null;
-  return form.kind === "new" ? "new" : `${form.kind}:${form.characterId}`;
+/** Opens a form or the stat blocks page in the panel's place, as a new instance. */
+export function openForm(store: StoreApi<CharacterPageState>, form: { kind: "new" } | { kind: "companion" | "blocks"; characterId: string }): void {
+  store.setState((s) => ({ form: { ...form, id: uuidv7(), opened: s.opened } }));
+}
+
+/** Changes the form instance `id` alone, to null to close it: an instance closed or replaced meanwhile is left as it is. */
+export function patchForm(store: StoreApi<CharacterPageState>, id: string, patch: (form: PanelForm) => PanelForm | null): void {
+  store.setState((s) => (s.form?.id === id ? { form: patch(s.form) } : {}));
+}
+
+/** A stat blocks page an outside open has passed since it opened, which gives way to that page, as nothing typed holds it. */
+export function staleList(s: Pick<CharacterPageState, "form" | "opened">): boolean {
+  return s.form?.kind === "blocks" && s.form.opened !== s.opened;
 }
 
 /**
- * A form's starting draft: what the slot kept for this form, else `fresh`,
- * and the draft it first opened with, so a form opened again by a remount
- * still asks before it discards what was typed before it. Read once, as
- * the form mounts.
+ * A form's starting draft: what the slot kept for this form instance, else
+ * `fresh`, and the draft it first opened with, so a form opened again by a
+ * remount still asks before it discards what was typed before it. Read
+ * once, as the form mounts.
  */
-export function useKeptDraft<D>(key: string, fresh: () => D): { initial: D; start: string } {
+export function useKeptDraft<D>(formId: string, fresh: () => D): { initial: D; start: string } {
   const store = useScoped(characterPageSlot);
   const [kept] = useState(() => {
     const form = store.getState().form;
-    const draft = form && formKey(form) === key && form.kind !== "blocks" ? form.kept : undefined;
+    const draft = form && form.id === formId && form.kind !== "blocks" ? form.kept : undefined;
     if (draft) return { initial: draft.typed as D, start: draft.start };
     const initial = fresh();
     return { initial, start: JSON.stringify(initial) };
@@ -65,12 +88,12 @@ export function useKeptDraft<D>(key: string, fresh: () => D): { initial: D; star
  * field that held them before it can commit, so they are kept as if
  * committed, and the form opens again showing them.
  */
-export function useKeepDraft(key: string, typed: unknown, start: string): void {
+export function useKeepDraft(formId: string, typed: unknown, start: string): void {
   const store = useScoped(characterPageSlot);
   const now = JSON.stringify(typed);
   useEffect(() => {
-    store.setState((s) => (s.form && formKey(s.form) === key && s.form.kind !== "blocks" ? { form: { ...s.form, kept: { typed: JSON.parse(now) as unknown, start } } } : {}));
-  }, [store, key, now, start]);
+    patchForm(store, formId, (form) => (form.kind === "blocks" ? form : { ...form, kept: { typed: JSON.parse(now) as unknown, start } }));
+  }, [store, formId, now, start]);
 }
 
 /**
@@ -124,9 +147,11 @@ export type LeaveFor = "back" | "page";
  * question, or leaves at once with nothing typed. A Back or Cancel that
  * answers it goes on to that page, as the press that asked would have. The
  * outside press itself never asks twice: with the question standing, it
- * leaves for its page.
+ * leaves for its page. `since` is the count when the form opened
+ * (PanelForm), so a form a remount opens again after an outside open, as
+ * a panel switched away from and back is, meets that open on its mount.
  */
-export function useLeaveForm(draft: unknown, changed: boolean, leave: (to: LeaveFor) => void, opened: number): { asking: boolean; press(): void } {
+export function useLeaveForm(draft: unknown, changed: boolean, leave: (to: LeaveFor) => void, opened: number, since: number): { asking: boolean; press(): void } {
   const now = JSON.stringify(draft);
   const [asked, setAsked] = useState<{ at: string; to: LeaveFor } | null>(null);
   const asking = changed && asked?.at === now;
@@ -134,7 +159,7 @@ export function useLeaveForm(draft: unknown, changed: boolean, leave: (to: Leave
     if (changed && !asking) setAsked({ at: now, to });
     else leave(asking && answers && asked ? asked.to : to);
   };
-  const seen = useRef(opened);
+  const seen = useRef(since);
   useEffect(() => {
     if (seen.current === opened) return;
     seen.current = opened;

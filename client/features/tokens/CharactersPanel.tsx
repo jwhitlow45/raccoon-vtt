@@ -21,7 +21,7 @@ import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { characterPageSlot, DISCARD, formKey, pageBackTo, shownPage, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor, type PanelForm } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, openForm, pageBackTo, patchForm, shownPage, staleList, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
 import { CompanionForm } from "./CompanionsSection.tsx";
 import { CREATURE_HEADING } from "./CreatureHeader.tsx";
@@ -59,11 +59,13 @@ export default function CharactersPanel(props: PanelProps) {
    * character whose "Add a companion" form shows, or the character whose
    * stat blocks page shows (docs/design-v1-companion-stat-blocks.md 6.4).
    */
-  const shownForm = useStore(pageStore, (s) => formKey(s.form));
-  const setForm = (form: PanelForm | null) => pageStore.setState({ form });
-  const creating = shownForm === "new";
-  const addingFor = shownForm?.startsWith("companion:") ? shownForm.slice("companion:".length) : null;
-  const blocksFor = shownForm?.startsWith("blocks:") ? shownForm.slice("blocks:".length) : null;
+  const shownForm = useStore(pageStore, (s) => (s.form ? `${s.form.kind}|${s.form.kind === "new" ? "" : s.form.characterId}|${s.form.id}|${s.form.opened}` : null));
+  const [formKind, formFor = "", formId = "", formSince = "0"] = shownForm?.split("|") ?? [];
+  const closeForm = () => patchForm(pageStore, formId, () => null);
+  const creating = formKind === "new";
+  const addingFor = formKind === "companion" ? formFor : null;
+  const blocksFor = formKind === "blocks" ? formFor : null;
+  const since = Number(formSince);
   const dm = you?.role === "dm";
 
   const list = useMemo(
@@ -97,13 +99,10 @@ export default function CharactersPanel(props: PanelProps) {
   const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
   const blocksOf = blocksFor !== null ? characters?.[blocksFor] : undefined;
   const form = companionOf !== undefined || blocksOf !== undefined || creating;
-  // A page opened from outside the panel takes the stat blocks page's place at once: it holds nothing typed. The forms leave through their own question (useLeaveForm).
-  const openedAt = useRef(opened);
+  // A page opened from outside the panel takes the stat blocks page's place at once, an open made while the panel was away included: it holds nothing typed. The forms leave through their own question (useLeaveForm).
   useEffect(() => {
-    if (openedAt.current === opened) return;
-    openedAt.current = opened;
-    pageStore.setState((s) => (s.form?.kind === "blocks" ? { form: null } : {}));
-  }, [opened, pageStore]);
+    pageStore.setState((s) => (staleList(s) ? { form: null } : {}));
+  }, [opened, shownForm, pageStore]);
   usePanelHeader(
     page && !form
       ? {
@@ -119,20 +118,23 @@ export default function CharactersPanel(props: PanelProps) {
   if (companionOf) {
     // Back where it came from, its character's page, which a page opened from outside may have taken the slot from while the form stayed.
     const done = (to: LeaveFor) => {
-      setForm(null);
+      closeForm();
       if (to === "back") openPage(companionOf.id);
     };
-    return <CompanionForm character={companionOf} shown={props.shown} close={props.close} opened={opened} onDone={done} />;
+    return <CompanionForm key={formId} formId={formId} since={since} character={companionOf} shown={props.shown} close={props.close} opened={opened} onDone={done} />;
   }
-  if (blocksOf) return <CharacterBlocksPage character={blocksOf} onBack={() => setForm(null)} />;
+  if (blocksOf) return <CharacterBlocksPage character={blocksOf} onBack={closeForm} />;
   if (creating) {
     return (
       <NewCharacter
+        key={formId}
+        formId={formId}
+        since={since}
         close={props.close}
         {...(!dm && you ? { owner: you.memberId } : {})}
         opened={opened}
         onDone={(id, to) => {
-          setForm(null);
+          closeForm();
           if (id || to === "back") openPage(id);
         }}
       />
@@ -142,7 +144,7 @@ export default function CharactersPanel(props: PanelProps) {
   if (page) {
     return (
       <div ref={root}>
-        <CharacterPage character={page} close={props.close} onAddCompanion={() => setForm({ kind: "companion", characterId: page.id })} onBlocks={() => setForm({ kind: "blocks", characterId: page.id })} onDelete={() => remove(page.id)} />
+        <CharacterPage character={page} close={props.close} onAddCompanion={() => openForm(pageStore, { kind: "companion", characterId: page.id })} onBlocks={() => openForm(pageStore, { kind: "blocks", characterId: page.id })} onDelete={() => remove(page.id)} />
       </div>
     );
   }
@@ -150,7 +152,7 @@ export default function CharactersPanel(props: PanelProps) {
   return (
     <div ref={root} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       {dm || own?.allowed ? (
-        <Button variant="primary" size="sm" block onClick={() => setForm({ kind: "new" })} data-opener="new-character">
+        <Button variant="primary" size="sm" block onClick={() => openForm(pageStore, { kind: "new" })} data-opener="new-character">
           New character
         </Button>
       ) : null}
@@ -351,14 +353,14 @@ type NewCharacterDraft = { name: string; owners: string[]; size: CreatureSize; h
  * the map they are looking at. A subpage of the panel, "New character" with
  * "Back to Characters", and Cancel at its foot beside its buttons.
  */
-function NewCharacter(props: { onDone(id: string | null, to: LeaveFor): void; close(): void; owner?: string; opened: number }) {
+function NewCharacter(props: { formId: string; since: number; onDone(id: string | null, to: LeaveFor): void; close(): void; owner?: string; opened: number }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
   const view = useRoomView((s) => s.view);
   const members = useRoomView((s) => s.view?.members);
   const players = Object.values(members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
-  const { initial, start } = useKeptDraft<NewCharacterDraft>("new", () => ({
+  const { initial, start } = useKeptDraft<NewCharacterDraft>(props.formId, () => ({
     name: "",
     owners: props.owner ? [props.owner] : [],
     size: "medium",
@@ -383,8 +385,8 @@ function NewCharacter(props: { onDone(id: string | null, to: LeaveFor): void; cl
   const { typed, pending } = usePendingNumbers(draft);
   // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
   useUnsavedSince(typed);
-  useKeepDraft("new", typed, start);
-  const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened);
+  useKeepDraft(props.formId, typed, start);
+  const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened, props.since);
   usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 
   const create = (placeAfter: boolean) => {

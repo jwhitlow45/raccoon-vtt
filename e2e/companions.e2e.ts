@@ -14,7 +14,10 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, w
  * numbers step and its size through the token window's resize, Change and
  * Detach, what another player and the DM see, a room monster's link, a
  * growth beside a wall and in a corridor, the saves budget, a deleted
- * block, view as a player, and every screen size.
+ * block, view as a player, and every screen size. Add a companion and the
+ * stat blocks page meet a Companion of Bree pressed while the Characters
+ * sheet was away, and the add form keeps its Add waiting through a turn
+ * across 900 px, its answer touching only the form that sent it.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus sixteen.
  */
@@ -195,6 +198,8 @@ async function showCompanion(page: Page, name: string, characterId: string = run
 async function openCard(page: Page, characterId: string): Promise<void> {
   await openPanel(page, "Characters");
   const blocks = page.locator(`[data-opener="blocks:${characterId}"]`);
+  // The panel's code may still be loading on a page just opened: its page, its list or another subpage, whichever it lands on.
+  await blocks.or(page.locator(`[data-opener="character:${characterId}"]`)).or(page.getByRole("button", { name: /^Back to / })).first().waitFor();
   if (!(await blocks.isVisible())) {
     const back = page.getByRole("button", { name: "Back to Characters" });
     if (await back.isVisible()) await back.click();
@@ -767,6 +772,118 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await asks.last().dispatchEvent("click");
     await add.waitFor();
     assert.equal(await ana.getByRole("heading", { name: "Add a companion for Bree" }).count(), 0, "the second press left");
+  });
+
+  test("lp10-comp-a. on a phone, Companion of Bree pressed in the Token panel while the Characters sheet is away: the stat blocks page gives way to Bree's page, and a form with typing asks Discard changes? first", async () => {
+    const cdp = await anaContext.newCDPSession(ana);
+    await setUp(ana, cdp, { width: 390, height: 844, scale: 1 });
+    try {
+      const sheet = (title: string) => ana.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
+      /** Away from the Characters sheet to the Token panel, from the tool bar's Panels, and the link to Bree's page there. A subpage's sheet has no All panels, and Panels first closes it. */
+      const viaToken = async () => {
+        const panels = ana.getByRole("region", { name: "Panels" });
+        const toolbarPanels = ana.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
+        await toolbarPanels.click();
+        await ana.waitForTimeout(300);
+        if (!(await panels.isVisible())) await toolbarPanels.click();
+        await panels.getByRole("button", { name: /^Token/ }).click();
+        await sheet("Token").getByRole("button", { name: "Companion of Bree", exact: true }).click();
+        await sheet("Characters").waitFor();
+      };
+      await showCompanion(ana, "Hoot");
+      await openCard(ana, run.bree.characterId);
+      await ana.locator(`[data-opener="blocks:${run.bree.characterId}"]`).click();
+      await ana.getByRole("heading", { name: "Bree’s stat blocks" }).waitFor();
+      await viaToken();
+      await ana.locator("[data-creature-heading]").filter({ hasText: "Bree" }).waitFor();
+      assert.equal(await ana.getByRole("heading", { name: "Bree’s stat blocks" }).count(), 0, "the stat blocks page gave way to Bree's page");
+
+      await ana.locator(`[data-opener="companion:${run.bree.characterId}"]`).click();
+      await ana.getByRole("textbox", { name: "Name", exact: true }).fill("Moss");
+      await viaToken();
+      // The form held typing, so it asks first, its draft still there.
+      await ana.getByRole("button", { name: "Discard changes?" }).first().waitFor();
+      // The armed Back stands in the header in the title's place.
+      await ana.getByRole("button", { name: "Add and place" }).waitFor();
+      assert.equal(await ana.getByRole("textbox", { name: "Name", exact: true }).inputValue(), "Moss");
+      await shots.take(ana, "companions-lp10-outside-open-asks");
+      await ana.getByRole("button", { name: "Discard changes?" }).first().click();
+      await ana.locator("[data-creature-heading]").filter({ hasText: "Bree" }).waitFor();
+      assert.equal(await ana.getByRole("button", { name: "Add and place" }).count(), 0, "Discard changes? went on to Bree's page");
+    } finally {
+      await setUp(ana, cdp, { width: 1280, height: 800, scale: 1 });
+    }
+  });
+
+  test("lp10-comp-b. a turn across 900 px while Add waits keeps the form adding and takes no second Add; Cancel while Add waits, then a new draft, which the first Add's answer leaves alone", async () => {
+    // Ana on another computer, whose answers from the server are held back on the way to the page.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, storageState: await anaContext.storageState() });
+    const page = await context.newPage();
+    const watch = new ConsoleWatch("ana-held");
+    watch.attach(page);
+    let hold = false;
+    const held: (string | Buffer)[] = [];
+    let toPage: ((m: string | Buffer) => void) | null = null;
+    await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+      const upstream = ws.connectToServer();
+      upstream.onMessage((m) => (hold ? held.push(m) : ws.send(m)));
+      toPage = (m) => ws.send(m);
+    });
+    const release = () => {
+      hold = false;
+      for (const m of held.splice(0)) toPage!(m);
+    };
+    const named = (name: string) => Object.values(dmSocket.state?.tokens ?? {}).filter((t) => t?.name === name && t.companion !== undefined);
+    const opener = page.locator(`[data-opener="companion:${run.bree.characterId}"]`);
+    const form = page.getByRole("heading", { name: "Add a companion for Bree" });
+    try {
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openCard(page, run.bree.characterId);
+      await opener.click();
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("Sprite");
+      await page.getByRole("textbox", { name: "HP", exact: true }).fill("5");
+      hold = true;
+      await page.getByRole("button", { name: "Add and place" }).click();
+      await page.getByRole("button", { name: "Adding…" }).waitFor();
+      await waitFor("Sprite on the server", () => named("Sprite")[0]);
+      // Turned upright: the form opens again in the sheet, still adding, and a press of its Add sends nothing.
+      await page.setViewportSize({ width: 820, height: 1180 });
+      const adding = page.locator('dialog[data-rvtt-sheet][aria-label="Characters"]').getByRole("button", { name: "Adding…" });
+      await adding.waitFor();
+      await adding.dispatchEvent("click");
+      await page.waitForTimeout(500);
+      assert.equal(named("Sprite").length, 1, "a second Add went");
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.getByRole("button", { name: "Adding…" }).waitFor();
+      release();
+      await form.waitFor({ state: "detached" });
+      assert.equal(named("Sprite").length, 1);
+
+      // Cancel while Add waits, then the form again with a new draft: the first Add's late answer leaves it as it is.
+      await openCard(page, run.bree.characterId);
+      await opener.click();
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("Sprout");
+      await page.getByRole("textbox", { name: "HP", exact: true }).fill("6");
+      hold = true;
+      await page.getByRole("button", { name: "Add and place" }).click();
+      await page.getByRole("button", { name: "Adding…" }).waitFor();
+      await waitFor("Sprout on the server", () => named("Sprout")[0]);
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      await form.waitFor({ state: "detached" });
+      await opener.click();
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("Nix");
+      release();
+      await page.waitForTimeout(500);
+      await form.waitFor();
+      assert.equal(await page.getByRole("textbox", { name: "Name", exact: true }).inputValue(), "Nix", "the late answer cleared the new draft");
+      await discardForm(page);
+      assert.deepEqual(watch.errors, []);
+    } finally {
+      release();
+      for (const t of [...named("Sprite"), ...named("Sprout")]) await ops.send({ t: "token.delete", tokenId: t!.id }).catch(() => undefined);
+      await context.close();
+    }
   });
 
   test("8b. a block saved from either picker is the pick: New and Paste, in Attach and in Choose", async () => {
