@@ -64,6 +64,17 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assert.ok(r.points.some((p) => p.y >= 6));
   });
 
+  test("among equal routes, the fewest corners, whichever way the search first reached a spot", () => {
+    const pillars = ["3,0", "4,0", "3,2", "4,2", "1,3", "2,3", "4,3", "3,4", "4,4", "0,5", "3,5"];
+    const w = world({ w: 6, h: 6, cells: Object.fromEntries(pillars.map((k) => [k, "pillar" as TerrainId])) });
+    const i = input(w, tok(w, { x: 0, y: 0 }));
+    const r = routeOf(i, { x: 5, y: 5 });
+    assertPiecesPass(i, r);
+    assert.equal(pieceFeet(i, r), 40);
+    assert.equal(cornersOf(r), 3);
+    assert.equal(bruteCorners(i, { x: 5, y: 5 }), 3);
+  });
+
   test("through an open door, and not a closed one or a secret door nobody found", () => {
     const wall = (door: EdgeFeature) => world({ edges: { ...line("w", 5, 0, 30), "5,4,w": door } });
     const open = wall(OPEN_DOOR);
@@ -419,6 +430,87 @@ function bruteCost(i: WalkInput, to: { x: number; y: number }): number | null {
   return best;
 }
 
+/** The corners of a route: where one piece's direction differs from the last's. Pieces split for other reasons (an extra, a climb) keep their direction. */
+function cornersOf(r: WalkRoute): number {
+  let corners = 0;
+  let last = "";
+  for (let k = 1; k < r.points.length; k++) {
+    const a = r.points[k - 1]!;
+    const b = r.points[k]!;
+    const d = `${Math.sign(b.x - a.x)},${Math.sign(b.y - a.y)}`;
+    if (last !== "" && d !== last) corners++;
+    last = d;
+  }
+  return corners;
+}
+
+/**
+ * The fewest corners among the cheapest walks, by brute force: the same
+ * steps as `bruteCost`, each state also keyed by the direction it arrived
+ * from, relaxed on cost and then corners until nothing changes.
+ */
+function bruteCorners(i: WalkInput, to: { x: number; y: number }): number | null {
+  const world = new WalkWorld(i);
+  const S = 2 * i.rules.feetPerCell;
+  const Lu = Math.round(world.L * S);
+  const fiveTen = i.rules.diagonal === "fiveTen";
+  const best = new Map<string, [number, number]>();
+  const start = world.startNode;
+  const h0 = fiveTen ? (((Math.round(i.counter.h * S) % (2 * S)) + 2 * S) % (2 * S)) : 0;
+  const v0 = fiveTen ? (((Math.round(i.counter.v * S) % (2 * S)) + 2 * S) % (2 * S)) : 0;
+  best.set(`${start},${h0},${v0},-1`, [0, 0]);
+  const DX = [1, 0, -1, 0, 1, -1, -1, 1];
+  const DY = [0, 1, 0, -1, 1, 1, -1, -1];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [key, [c, k]] of [...best.entries()]) {
+      const [a, h, v, from] = key.split(",").map(Number) as [number, number, number, number];
+      const ax = world.xOf(a);
+      const ay = world.yOf(a);
+      const ea = world.elevationAt(a);
+      if (a !== start && world.endOnly(ax, ay, ea)) continue;
+      for (let d = 0; d < 8; d++) {
+        const bi = (a % world.nx) + DX[d]!;
+        const bj = Math.floor(a / world.nx) + DY[d]!;
+        if (bi < 0 || bj < 0 || bi >= world.nx || bj >= world.ny) continue;
+        const b = bj * world.nx + bi;
+        const bx = world.xOf(b);
+        const by = world.yOf(b);
+        if (!world.seenAt(bx, by) || !world.wallsClear(a, d, b)) continue;
+        const eb = world.elevationAt(b);
+        const { extra } = world.extraOf(ax, ay, bx, by, eb, b);
+        const Z = Math.round(Math.abs(eb - ea) * 2);
+        let step: number;
+        let nh = h;
+        let nv = v;
+        if (!fiveTen) step = Math.max(Lu, Z);
+        else {
+          const horizontal = d >= 4 ? Lu + S * (Math.floor((h + Lu) / (2 * S)) - Math.floor(h / (2 * S))) : Lu;
+          if (d >= 4) nh = (h + Lu) % (2 * S);
+          const vMin = Math.min(horizontal, Z);
+          step = Math.max(horizontal, Z) + S * (Math.floor((v + vMin) / (2 * S)) - Math.floor(v / (2 * S)));
+          nv = (v + vMin) % (2 * S);
+        }
+        const next: [number, number] = [c + step * (1 + extra), k + (from >= 0 && from !== d ? 1 : 0)];
+        const nk = `${b},${nh},${nv},${d}`;
+        const old = best.get(nk);
+        if (old === undefined || next[0] < old[0] - 1e-9 || (Math.abs(next[0] - old[0]) <= 1e-9 && next[1] < old[1])) {
+          best.set(nk, next);
+          changed = true;
+        }
+      }
+    }
+  }
+  const target = world.nodeAt(to);
+  let out: [number, number] | null = null;
+  for (const [key, v] of best) {
+    if (Number(key.split(",")[0]) !== target) continue;
+    if (out === null || v[0] < out[0] - 1e-9 || (Math.abs(v[0] - out[0]) <= 1e-9 && v[1] < out[1])) out = v;
+  }
+  return out === null ? null : out[1];
+}
+
 describe("the search against a brute-force reference", () => {
   test("stairs of 1 ft and 3 ft rises at 5 ft and 3 ft per square, under 5-10-5", () => {
     for (const rise of [1, 3]) {
@@ -496,6 +588,7 @@ describe("the search against a brute-force reference", () => {
       else assert.ok(pieceFeet(i, r) <= search.costTo(to)! + 0.5, `${label}: taut is never longer`);
       const last = r.points[r.points.length - 1]!;
       assert.deepEqual([last.x, last.y], [to.x, to.y], label);
+      if (diagonal !== "euclid") assert.equal(cornersOf(r), bruteCorners(i, to), `${label}: corners`);
     }
   });
 });
