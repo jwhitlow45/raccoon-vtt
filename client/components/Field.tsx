@@ -1,4 +1,4 @@
-import { useId, type CSSProperties, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { createContext, useContext, useId, type CSSProperties, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { theme } from "../lib/theme.ts";
 
 /**
@@ -27,14 +27,39 @@ export function fieldStyle(state: { error?: boolean; disabled?: boolean } = {}):
 /** A number field's width in a FieldRow, right aligned so digits line up down a panel. */
 export const NUMBER_FIELD_WIDTH = 88;
 
+/**
+ * The id of the hint under the FieldRow a control sits in. A row's control
+ * far more often names itself (`aria-label`, as a Stepper does) than takes
+ * the row's label through `htmlFor`, so the hint cannot ride on the label:
+ * each field control reads this and lists it in its `aria-describedby`.
+ */
+const RowHint = createContext<string | undefined>(undefined);
+
+/** A field control's `aria-describedby`: its own descriptions, then the hint of the FieldRow it sits in. */
+export function useRowHint(own?: string): string | undefined {
+  const hint = useContext(RowHint);
+  return [own, hint].filter(Boolean).join(" ") || undefined;
+}
+
+/**
+ * Ends a FieldRow's hint at a dialog's edge. Context passes through a
+ * portal, so without it a picker a row opens, such as the image picker
+ * under an Image row, would have its fields described by that row's hint.
+ */
+export function RowHintScope(props: { children: ReactNode }) {
+  return <RowHint.Provider value={undefined}>{props.children}</RowHint.Provider>;
+}
+
 /** A plain input in the field look, for a place that labels it another way (`aria-label`, a FieldRow). */
 export function Input(props: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement>; error?: boolean }) {
   const { error, style, ...rest } = props;
   const number = props.type === "number";
+  const describedBy = useRowHint(props["aria-describedby"]);
   return (
     <input
       aria-invalid={error ? true : undefined}
       {...rest}
+      aria-describedby={describedBy}
       style={{ ...fieldStyle({ error, disabled: props.disabled }), ...(number ? { width: NUMBER_FIELD_WIDTH, textAlign: "right", fontVariantNumeric: "tabular-nums" } : null), ...style }}
     />
   );
@@ -43,17 +68,20 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref
 /** A native select in the field look. Native, since it is the best picker on a phone, and `color-scheme` draws its menu dark. */
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement> & { ref?: Ref<HTMLSelectElement>; error?: boolean }) {
   const { error, style, ...rest } = props;
-  return <select aria-invalid={error ? true : undefined} {...rest} style={{ ...fieldStyle({ error, disabled: props.disabled }), ...style }} />;
+  const describedBy = useRowHint(props["aria-describedby"]);
+  return <select aria-invalid={error ? true : undefined} {...rest} aria-describedby={describedBy} style={{ ...fieldStyle({ error, disabled: props.disabled }), ...style }} />;
 }
 
 /** A text area in the field look, growing from three lines. */
 export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: Ref<HTMLTextAreaElement>; error?: boolean }) {
   const { error, style, ...rest } = props;
+  const describedBy = useRowHint(props["aria-describedby"]);
   return (
     <textarea
       aria-invalid={error ? true : undefined}
       rows={3}
       {...rest}
+      aria-describedby={describedBy}
       style={{ ...fieldStyle({ error, disabled: props.disabled }), padding: `${theme.space(2)}px ${theme.space(3)}px`, lineHeight: theme.leading.body, resize: "vertical", ...style }}
     />
   );
@@ -106,15 +134,31 @@ export function Field(
  * wide and right aligned (Input does it for `type="number"`), text takes
  * the rest of the row. `htmlFor` names the control's id, so a tap on the
  * label focuses it.
+ *
+ * The hint runs under the whole row, not in the label's column, where a
+ * long one beside a number field stood five lines tall. It describes the
+ * row's controls through `RowHint`, so the label stays the control's name
+ * alone. Only the field controls read it (Input, Select, TextArea and the
+ * token panel's text and number fields, Stepper's included). A bare
+ * `<input>` or a row of buttons keeps its hint as text under it, unread
+ * as a description.
  */
 export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
+  const hintId = useId();
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
       <label htmlFor={props.htmlFor} style={{ flex: "1 1 110px", minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}>
         {props.label}
-        {props.hint ? <span style={{ display: "block", marginTop: theme.space(0.5), fontSize: theme.font.small, color: theme.color.textMuted }}>{props.hint}</span> : null}
       </label>
-      <div style={{ flex: "1 1 160px", minWidth: 0, display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>{props.children}</div>
+      <div style={{ flex: "1 1 160px", minWidth: 0, display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
+        <RowHint.Provider value={props.hint ? hintId : undefined}>{props.children}</RowHint.Provider>
+      </div>
+      {props.hint ? (
+        // 4 px under the controls, as Field's hint sits under its input, where the row's wrap gap is 8.
+        <div id={hintId} style={{ flexBasis: "100%", marginTop: -theme.space(1), fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>
+          {props.hint}
+        </div>
+      ) : null}
     </div>
   );
 }

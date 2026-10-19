@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, t
 import { Button } from "../../components/Button.tsx";
 import type { IconName } from "../../components/Icon.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { FieldRow as PanelFieldRow, fieldStyle, NUMBER_FIELD_WIDTH, Select as FieldSelect } from "../../components/Field.tsx";
+import { FieldRow as PanelFieldRow, fieldStyle, NUMBER_FIELD_WIDTH, Select as FieldSelect, useRowHint } from "../../components/Field.tsx";
 import { Help, Section as PanelSection } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 
@@ -115,9 +115,11 @@ export function TextField(props: {
     if (draft !== props.value) props.onCommit(draft);
   };
   leave.current = commit;
+  const describedBy = useRowHint();
   const common = {
     id: props.id,
     "aria-label": props.label,
+    "aria-describedby": describedBy,
     value: draft,
     placeholder: props.placeholder,
     maxLength: props.maxLength,
@@ -203,6 +205,7 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
     if (clamped !== props.value) props.onCommit(clamped);
   };
   leave.current = commit;
+  const describedBy = useRowHint(props.describedBy);
   return (
     <input
       id={props.id}
@@ -215,7 +218,7 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
       disabled={props.disabled}
       readOnly={props.unavailable}
       aria-disabled={props.unavailable && !props.disabled ? true : undefined}
-      aria-describedby={props.describedBy}
+      aria-describedby={describedBy}
       onFocus={focus.onFocus}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {

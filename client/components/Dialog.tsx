@@ -5,6 +5,7 @@ import { useBackClose } from "../lib/backClose.ts";
 import { useModalDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
+import { RowHintScope } from "./Field.tsx";
 import { SheetGrabber } from "./SheetGrabber.tsx";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
 
@@ -217,7 +218,9 @@ export function Dialog(props: DialogProps) {
         <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: BODY_PAD, ...props.bodyStyle, ...(headlessSheet ? { position: "relative" } : null) }}>
           {/* With no header to hold it, the X-card's pill sits at the top of its body, all it has to swipe by, in the 20 px its content keeps above its first line. */}
           {headlessSheet ? <SheetGrabber /> : null}
-          <DraftScope value={drafts}>{props.children}</DraftScope>
+          <DraftScope value={drafts}>
+            <RowHintScope>{props.children}</RowHintScope>
+          </DraftScope>
         </div>
         {props.footer || props.status ? (
           <footer
