@@ -18,7 +18,8 @@
  *
  * The gates: a Medium route within a Dash under 5 ms and a whole-scene flood
  * under 150 ms on a development laptop, a Large route within 30 squares
- * under 40 ms, and the throttled Dash row under 20 ms.
+ * under 40 ms, the throttled Dash row under 20 ms, and a sliced walk's
+ * longest slice, true distance's included, under 8 ms.
  */
 import type { BuildChunk, EdgeFeature, FreeWall, RoomState, Scene, TerrainId } from "../shared/model.ts";
 import { LIMITS } from "../shared/limits.ts";
@@ -162,25 +163,33 @@ export function runLongTraceRow(runs = 15): RouteRow {
 }
 
 /**
- * The same walk as a drag finds it, a 4 ms slice a frame (review ASTRA-08):
- * the settle and then the trace, each slice ended by the same deadline. Rows:
- * the whole route over all its slices, and the longest slice, which a frame
- * pays. `settled` holds the slices.
+ * Walks as a drag finds them, a 4 ms slice a frame (review ASTRA-08): the
+ * settle, the trace and its pieces, true distance's pulling taut included,
+ * each slice ended by the same deadline. Rows: the whole route over all its
+ * slices, and the longest slice, which a frame pays and which may run past
+ * the 4 ms by no more than one poll of the clock. `settled` holds the
+ * slices.
  */
 export function runSlicedRows(runs = 15): RouteRow[] {
+  return [
+    ...slicedRows("Large past a 60-square wall, about 148 squares, as a drag finds it", "five", { x: 150, y: 72 }, runs),
+    ...slicedRows("Large past a 60-square wall to the far side, true distance, as a drag finds it", "euclid", { x: 198, y: 100 }, runs),
+  ];
+}
+
+function slicedRows(row: string, diagonal: "five" | "euclid", to: { x: number; y: number }, runs: number): RouteRow[] {
   const SLICE = 4;
   const edges = new Map<string, EdgeFeature>();
   for (let y = 0; y < 60; y++) edges.set(`10,${y},w`, { kind: "wall" });
-  const sceneId = "bench-route-sliced";
+  const sceneId = `bench-route-sliced-${diagonal}`;
   const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, sceneId);
   const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId };
-  const to = { x: 150, y: 72 };
   const whole: number[] = [];
   const longest: number[] = [];
   let slices = 0;
   for (let r = 0; r < runs + 3; r++) {
     forgetStepCaches();
-    const search = new WalkSearch(new WalkWorld({ build: state, token, rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } }));
+    const search = new WalkSearch(new WalkWorld({ build: state, token, rules: { feetPerCell: 5, diagonal }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } }));
     let total = 0;
     let worst = 0;
     let n = 0;
@@ -198,10 +207,9 @@ export function runSlicedRows(runs = 15): RouteRow[] {
       slices = n;
     }
   }
-  const row = "Large past a 60-square wall, about 148 squares, as a drag finds it";
   return [
-    { row: `${row}: settle and trace, ${SLICE} ms slices (settled holds the slices)`, settled: slices, ms: stats(whole) },
-    { row: `${row}: its longest slice`, settled: slices, ms: stats(longest) },
+    { row: `${row}: settle, trace and pieces, ${SLICE} ms slices (settled holds the slices)`, settled: slices, ms: stats(whole) },
+    { row: `${row}: its longest slice`, budget: 2 * SLICE, settled: slices, ms: stats(longest) },
   ];
 }
 

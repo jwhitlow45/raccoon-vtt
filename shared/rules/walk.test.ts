@@ -120,6 +120,35 @@ describe("walking around walls (docs/design-v1-movement.md 4.4, 5)", () => {
     assert.deepEqual((got as WalkRoute).pieces, all.pieces);
   });
 
+  test("every slice of an answer ends near its deadline, the pieces and true distance's pulling taut included (review ASTRA-08)", () => {
+    // A Large creature past a wall 60 squares long to the far side of a 200-square map, under true distance, on a clock that counts the search's work, so the test reads no wall time.
+    const w = world({ w: 200, h: 200, edges: line("w", 10, 0, 60) });
+    const i = input(w, tok(w, { size: "large", x: 2, y: 2 }), { rules: { feetPerCell: 5, diagonal: "euclid" } });
+    const to = { x: 198, y: 100 };
+    const whole = new WalkSearch(new WalkWorld(i));
+    whole.settle(to);
+    const all = whole.routeTo(to)!;
+    // A settle polls the clock every 256 states, a trace every 16 units, where one straight leg checked whole counts its lattice steps.
+    const walkWorld = new WalkWorld(i);
+    const poll = Math.max(256, 16 + Math.ceil(200 / walkWorld.L));
+    for (const budget of [0, 50, 500, 2000]) {
+      const search: WalkSearch = new WalkSearch(walkWorld, undefined, () => search.work);
+      let worst = 0;
+      let slices = 0;
+      let got: ReturnType<WalkSearch["traceTo"]> = "paused";
+      while (got === "paused" && slices < 100_000) {
+        const deadline = search.work + budget;
+        const settled = search.settle(to, deadline);
+        got = settled === "paused" ? "paused" : search.traceTo(to, deadline);
+        worst = Math.max(worst, search.work - deadline);
+        slices++;
+      }
+      assert.notEqual(got, "paused", `budget ${budget}`);
+      assert.ok(worst <= poll, `budget ${budget}: a slice ran ${worst} units past its deadline, over ${poll}`);
+      assert.deepEqual((got as WalkRoute).pieces, all.pieces, `budget ${budget}`);
+    }
+  });
+
   test("through an open door, and not a closed one or a secret door nobody found", () => {
     const wall = (door: EdgeFeature) => world({ edges: { ...line("w", 5, 0, 30), "5,4,w": door } });
     const open = wall(OPEN_DOOR);
