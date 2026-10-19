@@ -194,8 +194,8 @@ export function FileButton(props: { label: string; accept: string; disabled?: bo
 /**
  * A secret shown once, such as a new DM link: selectable, with copy and
  * share. Copying acts on the side of whatever the page is for, so both are
- * secondary, and the copy icon says what the first one does. `size` is
- * `sm` in a panel.
+ * secondary, and each wears the icon that says what it does, a pair alike.
+ * `size` is `sm` in a panel.
  */
 export function SecretLink(props: { value: string; label: string; size?: "md" | "sm" }) {
   const [copied, setCopied] = useState(false);
@@ -232,7 +232,7 @@ export function SecretLink(props: { value: string; label: string; size?: "md" | 
           {copied ? "Copied" : "Copy link"}
         </Button>
         {canShare ? (
-          <Button size={props.size} onClick={() => void navigator.share({ title: props.label, url: props.value }).catch(() => {})}>
+          <Button size={props.size} icon="share" onClick={() => void navigator.share({ title: props.label, url: props.value }).catch(() => {})}>
             Share
           </Button>
         ) : null}

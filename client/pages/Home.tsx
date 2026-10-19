@@ -364,7 +364,9 @@ function DmLinkReveal(props: { roomId: string; dmLink: string; password: string 
             {copied ? "Copied" : "Copy link"}
           </Button>
           {canShare ? (
-            <Button onClick={() => void navigator.share({ title: "DM link", url: link }).catch(() => {})}>Share</Button>
+            <Button icon="share" onClick={() => void navigator.share({ title: "DM link", url: link }).catch(() => {})}>
+              Share
+            </Button>
           ) : null}
         </div>
         {/* Folded away, so a player at the table scans the player link's code below, never this one. */}
