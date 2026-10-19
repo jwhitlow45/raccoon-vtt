@@ -2,16 +2,17 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Dialog } from "../../../components/Dialog.tsx";
 import { Empty } from "../../../components/Empty.tsx";
 import { ErrorText, Input } from "../../../components/Field.tsx";
+import { LoadFailed } from "../../../components/LoadFailed.tsx";
 import { Loading } from "../../../components/Loading.tsx";
 import { choiceLook } from "../../../components/looks.ts";
-import { Help, SectionLabel } from "../../../components/Panel.tsx";
-import { api } from "../../../lib/api.ts";
+import { SectionLabel } from "../../../components/Panel.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useAssets, useRoomView } from "../../../state/view.ts";
 import { STAMP_TILE_FLOOR } from "./draw.ts";
 import { libraryFootprint, matchStamps, shippedChoice, starterChoice, type ChosenArt } from "./rules.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
 import { imageErrorMessage } from "../../images/errors.ts";
+import { useLibrary } from "../../images/library.ts";
 import { PasteButton, PasteStatus, usePasteTarget, type PasteHandle } from "../../images/PasteImage.tsx";
 import { useHandoff } from "../../images/roomPaste.ts";
 import { PickError, uploadTokenImage } from "../../images/upload.ts";
@@ -116,7 +117,12 @@ export function StampPicker(props: {
               type="button"
               role="tab"
               aria-selected={tab === t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => {
+                if (t.id === tab) return;
+                // Paste an image and its box sit on the Stamps tab, so a tab change closes the box, its note and a read still waiting, as a form that folds away does. The note would otherwise point at a box no longer drawn.
+                paste.control.close();
+                setTab(t.id);
+              }}
               style={{
                 flex: "1 0 auto",
                 minHeight: theme.touch,
@@ -222,26 +228,18 @@ function Tile(props: { name: string; src: string; chosen: boolean; onPick(): voi
  * server's list, plus every image already on a token or character in view,
  * which still shows when the list cannot load. Each stamps one cell across
  * on its long side, keeping its shape, so its size is read from the list,
- * or from the image itself when the list does not have it.
+ * or from the image itself when the list does not have it. The list is the
+ * Library's (images/library.ts), so a failed load offers the same Try again.
  */
 function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): void; onMeasured(chosen: ChosenArt): void; paste: PasteHandle }) {
   const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
   const tokens = useRoomView((s) => s.view?.tokens);
   const characters = useRoomView((s) => s.view?.characters);
-  const [listed, setListed] = useState<Map<string, { width: number; height: number }> | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    api.listAssets(roomId).then(
-      (r) => live && setListed(new Map(r.assets.filter((a) => a.kind === "token").map((a) => [a.id, { width: a.width, height: a.height }]))),
-      () => live && setFailed(true),
-    );
-    return () => {
-      live = false;
-    };
-  }, [roomId]);
+  const library = useLibrary(roomId);
+  const listed = useMemo(() => (library.rows ? new Map(library.rows.filter((a) => a.kind === "token").map((a) => [a.id, { width: a.width, height: a.height }])) : null), [library.rows]);
+  // Try again's line gives way to the loading line, so the section takes focus from it.
+  const section = useRef<HTMLElement>(null);
 
   const ids = useMemo(() => {
     const seen = new Set<string>(listed?.keys() ?? []);
@@ -274,15 +272,19 @@ function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): v
   };
 
   return (
-    <section aria-label="This room's images" style={{ display: "grid", gap: theme.space(2), marginTop: theme.space(4) }}>
+    <section ref={section} tabIndex={-1} aria-label="This room's images" style={{ display: "grid", gap: theme.space(2), marginTop: theme.space(4), outline: "none" }}>
       <SectionLabel>This room's images</SectionLabel>
       <div style={{ display: "flex" }}>
         <PasteButton paste={props.paste} />
       </div>
       <PasteStatus paste={props.paste} only="box" />
-      <Loading text="Loading this room's images…" active={listed === null && !failed} />
-      {failed ? <Help>The room's library did not load. Images already on the map are below.</Help> : null}
-      {ids.length === 0 && (listed !== null || failed) ? <Empty>No token images yet. Add one in the Library panel or on a token.</Empty> : null}
+      <Loading text="Loading this room's images…" active={library.rows === null && !library.failed} />
+      {library.failed ? (
+        <LoadFailed retry={library.retry} focusTo={() => section.current}>
+          The room's library did not load. Images already on the map are below.
+        </LoadFailed>
+      ) : null}
+      {ids.length === 0 && (listed !== null || library.failed) ? <Empty>No token images yet. Add one in the Library panel or on a token.</Empty> : null}
       <ul style={gridStyle}>
         {ids.map((id) => (
           <li key={id}>

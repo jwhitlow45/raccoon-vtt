@@ -636,6 +636,49 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await dm.setViewportSize({ width: 1280, height: 800 });
   });
 
+  test("lp4-stamp-tabs. the stamp picker's paste box and its note stay with Paste an image on the Stamps tab: a tab change closes them, and a read still waiting no longer counts", async () => {
+    await pickTool(dm, "Map builder");
+    await pickOption(dm, "Map builder", "Builder mode", "Stamp");
+    await dm.getByRole("button", { name: /^(Choose a stamp|Placing .*Choose another stamp)/ }).first().click();
+    const stamps = dm.getByRole("dialog", { name: "Stamps" });
+    const tab = (name: string) => stamps.getByRole("tab", { name, exact: true });
+    const refused = stamps.getByText("The browser did not let the app read the clipboard.", { exact: false });
+    const box = stamps.getByRole("textbox", { name: /right-click here and choose Paste/ });
+    await readMode(dm, "deny");
+    try {
+      await stamps.getByRole("button", { name: "Paste an image" }).click();
+      await refused.waitFor();
+      await box.waitFor();
+      await shots.take(dm, "lp4-stamp-box-on-stamps");
+      // The Starter tab draws no box, so its words go with it rather than point at nothing.
+      await tab("Starter").click();
+      await box.waitFor({ state: "detached" });
+      assert.equal(await refused.count(), 0, "the refusal's words stayed on the Starter tab");
+      await shots.take(dm, "lp4-stamp-starter-no-box");
+      await tab("Stamps").click();
+      await stamps.getByRole("button", { name: "Paste an image" }).waitFor();
+      assert.equal(await box.count(), 0, "the box came back with the tab");
+      assert.equal(await refused.count(), 0, "the refusal came back with the tab");
+
+      // A read still waiting as the tab changes is dropped: nothing uploads and no stamp is chosen.
+      const tokens = dmUploads.token ?? 0;
+      await seedClipboard(dm, await swatch([30, 90, 200]));
+      await readMode(dm, "hold");
+      await stamps.getByRole("button", { name: "Paste an image" }).click();
+      await tab("Starter").click();
+      await releaseRead(dm);
+      await dm.waitForTimeout(800);
+      assert.equal(dmUploads.token ?? 0, tokens, "a read answered after the tab changed uploaded a stamp");
+      assert.equal(await tab("Starter").getAttribute("aria-selected"), "true");
+      assert.equal(await stamps.getByText("Uploading…").count(), 0, "a read answered after the tab changed started an upload");
+    } finally {
+      await readMode(dm, "real");
+    }
+    await dm.keyboard.press("Escape");
+    await stamps.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
+
   test("pa-12. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);
