@@ -13,7 +13,7 @@ import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Input, Select, TextArea } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
-import { Help, SectionLabel } from "../../components/Panel.tsx";
+import { Help, Section, SectionLabel } from "../../components/Panel.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -544,16 +544,8 @@ const HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, overf
 
 type StatsProps = { stats: PcStats; level: number | undefined; setStats(update: (stats: PcStats) => PcStats): void };
 
-/** A group of fields under a section label. */
-function Group(props: { title: string; hint?: ReactNode; children: ReactNode; action?: ReactNode }) {
-  return (
-    <section style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      <SectionLabel action={props.action}>{props.title}</SectionLabel>
-      {props.hint}
-      {props.children}
-    </section>
-  );
-}
+/** The editor's parts are sections with no line between, spaced by the form's own gap, so none adds the space a panel's section leaves under it. */
+const STACKED: CSSProperties = { paddingBottom: 0, minWidth: 0 };
 
 /**
  * A whole number. The text is the field's own while it has focus, so a
@@ -649,7 +641,8 @@ function Abilities(props: StatsProps) {
   const { stats, level, setStats } = props;
   const d = pcDerived(stats, level);
   return (
-    <Group title="Abilities" hint={<Help>Each save shows its total. Type a different total to keep a bonus the rules do not know, such as a Cloak of Protection’s.</Help>}>
+    <Section label="Abilities" divider={false} style={STACKED}>
+      <Help>Each save shows its total. Type a different total to keep a bonus the rules do not know, such as a Cloak of Protection’s.</Help>
       {ABILITY_KEYS.map((a) => {
         const proficient = stats.saves.includes(a);
         return (
@@ -683,7 +676,7 @@ function Abilities(props: StatsProps) {
           />
         );
       })}
-    </Group>
+    </Section>
   );
 }
 
@@ -704,7 +697,7 @@ function Skills(props: StatsProps) {
       return { ...s, skills };
     });
   return (
-    <Group title="Skills">
+    <Section label="Skills" divider={false} style={STACKED}>
       <Checkbox label="Jack of All Trades" help="Half the Proficiency Bonus, rounded down, on every skill with neither" checked={stats.jack === true} onChange={(on) => setStats((s) => withFlag(s, "jack", on))} />
       {SKILL_KEYS.map((skill) => (
         <NumberRow
@@ -726,7 +719,7 @@ function Skills(props: StatsProps) {
           }
         />
       ))}
-    </Group>
+    </Section>
   );
 }
 
@@ -744,7 +737,7 @@ function OtherNumbers(props: StatsProps) {
   const held = pcActorNumbers(stats, level);
   const total = (key: TotalKey) => (t: number | null) => setStats((s) => withTotal(s, level, key, t));
   return (
-    <Group title="Other numbers">
+    <Section label="Other numbers" divider={false} style={STACKED}>
       <NumberRow
         name="Initiative"
         hint={held.initBonus === d.initiative.total ? partsText(d.initiative) : `${partsText(d.initiative)}. The token’s Initiative stops at ${signed(held.initBonus)}.`}
@@ -794,7 +787,7 @@ function OtherNumbers(props: StatsProps) {
           </Select>
         }
       />
-    </Group>
+    </Section>
   );
 }
 
@@ -805,7 +798,7 @@ function Spellcasting(props: StatsProps) {
   const total = (key: TotalKey) => (t: number | null) => setStats((s) => withTotal(s, level, key, t));
   const usesSpell = stats.rolls.some((r) => r.ability === "spell");
   return (
-    <Group title="Spellcasting">
+    <Section label="Spellcasting" divider={false} style={STACKED}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(3) }}>
         <label htmlFor={id} style={{ fontWeight: theme.weight.strong }}>
           Spellcasting ability
@@ -840,7 +833,7 @@ function Spellcasting(props: StatsProps) {
       ) : usesSpell ? (
         <Notice tone="warning">Choose a spellcasting ability. Rolls that use it add nothing until you do.</Notice>
       ) : null}
-    </Group>
+    </Section>
   );
 }
 
@@ -921,7 +914,7 @@ function Rolls(props: StatsProps & { newId(): string }) {
   return (
     <>
       {ROLL_GROUPS.map((group) => (
-        <Group key={group.kind} title={group.title}>
+        <Section key={group.kind} label={group.title} divider={false} style={STACKED}>
           {stats.rolls
             .filter((r) => r.kind === group.kind)
             .map((roll) => (
@@ -942,7 +935,7 @@ function Rolls(props: StatsProps & { newId(): string }) {
             </Button>
             <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>{full ? "At most 40 rolls." : `${stats.rolls.length} of ${MAX_PC_ROLLS} rolls`}</span>
           </div>
-        </Group>
+        </Section>
       ))}
     </>
   );

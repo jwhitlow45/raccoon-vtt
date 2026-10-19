@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
@@ -7,7 +7,7 @@ import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Input, NUMBER_FIELD_WIDTH, Select } from "../../components/Field.tsx";
-import { Help, Note, Section, SectionLabel } from "../../components/Panel.tsx";
+import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -193,7 +193,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
         <fieldset disabled={sending} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
           <div style={{ display: "grid", gap: theme.space(4) }}>
             {recent.length > 0 ? (
-              <Group title="Recent">
+              <Section label="Recent" divider={false} style={STACKED}>
                 <div role="group" aria-label="Recent requests" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), minWidth: 0 }}>
                   {recent.map((entry) => {
                     const label = recentLabel(entry);
@@ -210,7 +210,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                     );
                   })}
                 </div>
-              </Group>
+              </Section>
             ) : null}
             <div ref={pickers} style={{ display: "grid", gap: theme.space(4) }}>
               {draft.choices.map((_, i) => (
@@ -266,7 +266,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                 </div>
               </PickRow>
             </div>
-            <Group title="Who rolls">
+            <Section label="Who rolls" divider={false} style={STACKED}>
               {options.length === 0 ? <Help>No player plays a character yet.</Help> : null}
               <ChipRow label="Who rolls">
                 {options.map((o) => (
@@ -275,7 +275,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                   </Chip>
                 ))}
               </ChipRow>
-            </Group>
+            </Section>
             <Section label="What players see" divider={false} fold={{ open: seenOpen, onToggle: () => setSeenOpen((v) => !v), summary: <span style={{ color: theme.color.textMuted }}>{seen}</span> }}>
               {/* Options that Send reads, so checkboxes rather than switches (docs/design-v1-visual.md 3.7). Each shows only while it applies (4.6). */}
               <div style={{ display: "grid" }}>
@@ -322,9 +322,11 @@ function ChoicePicker(props: { draft: AskDraft; index: number; disabled: boolean
     ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_ABBR[a], title: ABILITY_NAMES[a], disabled: disabled.includes(a) }));
   return (
     <div role={two ? "group" : undefined} aria-label={two ? title : undefined} aria-describedby={view.why ? whyId : undefined} data-choice={props.index}>
-      <Group
-        title={title}
-        aside={
+      <Section
+        label={title}
+        divider={false}
+        style={STACKED}
+        action={
           two ? (
             <Button size="sm" aria-label={`Remove the ${props.index === 0 ? "first" : "second"} choice`} onClick={props.onRemove}>
               Remove
@@ -397,7 +399,7 @@ function ChoicePicker(props: { draft: AskDraft; index: number; disabled: boolean
           </PickRow>
         </div>
         {view.why ? <Help id={whyId}>{view.why}</Help> : null}
-      </Group>
+      </Section>
     </div>
   );
 }
@@ -414,17 +416,8 @@ function PickRow(props: { label: string; children: ReactNode }) {
   );
 }
 
-/** One part of the sheet under its label. */
-function Group(props: { title: string; aside?: ReactNode; children: ReactNode }) {
-  return (
-    <section style={{ display: "grid", gap: theme.space(2) }}>
-      <SectionLabel action={props.aside}>
-        {props.title}
-      </SectionLabel>
-      {props.children}
-    </section>
-  );
-}
+/** The sheet's parts are sections with no line between, spaced by the form's own gap, so none adds the space a panel's section leaves under it. */
+const STACKED: CSSProperties = { paddingBottom: 0 };
 
 function sameRef(a: ActorTarget, b: ActorTarget): boolean {
   return "tokenId" in a ? "tokenId" in b && a.tokenId === b.tokenId : "characterId" in b && a.characterId === b.characterId;

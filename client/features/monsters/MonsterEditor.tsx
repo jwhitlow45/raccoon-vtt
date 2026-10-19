@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ABILITY_KEYS, CR_VALUES, type Actor, type Character, type CompanionBlock, type CustomMonster, type MonsterSize, type StatBlock, type StatBlockEntry } from "#shared/model.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { companionBlockInputSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema, type ClientOp } from "#shared/protocol.ts";
@@ -22,7 +22,7 @@ import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { Input, Select, TextArea } from "../../components/Field.tsx";
 import { Markdown } from "../../components/Markdown.tsx";
 import { Notice } from "../../components/Notice.tsx";
-import { Help, SectionLabel } from "../../components/Panel.tsx";
+import { Help, Section } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import type { OpAnswer, OpRefusal, UnknownCause } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -312,14 +312,14 @@ export function MonsterEditor(props: {
               replacing={(target ? target.existing : opened.monster) !== null}
               focus={props.paste ?? false}
             />
-            <Group title={target ? "Picture" : "Token image"}>
+            <Section label={target ? "Picture" : "Token image"} divider={false} style={STACKED}>
               <MonsterImageField value={draft.defaultImage} onChange={(image) => setDraft((d) => withImage(d, image))} name={draft.name} onOpen={setImageOpen} />
               <Help>
                 {target
                   ? "Each companion added from this stat block starts with this picture."
                   : "Every token placed from this monster starts with this image. After you save, its page offers to put it on its tokens already on this scene."}
               </Help>
-            </Group>
+            </Section>
             <Basics draft={draft} set={set} />
             <Abilities draft={draft} setDraft={setDraft} />
             <Details draft={draft} set={set} setDraft={setDraft} />
@@ -398,16 +398,8 @@ function PasteBox(props: {
   );
 }
 
-/** A group of the stat block's fields under a section label, in muted capitals rather than the accent, which means "act here". */
-function Group(props: { title: string; children: ReactNode; hint?: ReactNode }) {
-  return (
-    <section style={{ display: "grid", gap: theme.space(2) }}>
-      <SectionLabel>{props.title}</SectionLabel>
-      {props.hint}
-      {props.children}
-    </section>
-  );
-}
+/** The editor's parts are sections with no line between, spaced by the form's own gap, so none adds the space a panel's section leaves under it. */
+const STACKED: CSSProperties = { paddingBottom: 0 };
 
 /** Fields side by side where they fit, one per row on a narrow phone. */
 function Row(props: { children: ReactNode; min?: number }) {
@@ -504,7 +496,7 @@ function Basics(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void 
   const { draft, set } = props;
   const average = hpAverage(draft.hp.formula);
   return (
-    <Group title="Basics">
+    <Section label="Basics" divider={false} style={STACKED}>
       <Text label="Name" value={draft.name} onChange={(name) => set({ name })} maxLength={80} />
       <Row>
         <Choice label="Size" value={draft.size} options={SIZE_OPTIONS} onChange={(size) => set({ size })} />
@@ -540,7 +532,7 @@ function Basics(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void 
         />
       </Row>
       <Text label="Speed" value={draft.speed} onChange={(speed) => set({ speed })} placeholder="30 ft., Fly 60 ft. (hover)" hint={`Tokens get ${speedSummary(speedsOf(draft.speed))}`} />
-    </Group>
+    </Section>
   );
 }
 
@@ -548,7 +540,8 @@ function Basics(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void 
 function Abilities(props: { draft: StatBlock; setDraft(update: (d: StatBlock) => StatBlock): void }) {
   const { draft, setDraft } = props;
   return (
-    <Group title="Ability scores" hint={<Help>The save is the modifier unless the monster is proficient. Type the printed save when it differs.</Help>}>
+    <Section label="Ability scores" divider={false} style={STACKED}>
+      <Help>The save is the modifier unless the monster is proficient. Type the printed save when it differs.</Help>
       <div style={{ display: "grid", gap: theme.space(2), gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
         {ABILITY_KEYS.map((key) => {
           const row = draft.abilities[key];
@@ -571,7 +564,7 @@ function Abilities(props: { draft: StatBlock; setDraft(update: (d: StatBlock) =>
           );
         })}
       </div>
-    </Group>
+    </Section>
   );
 }
 
@@ -580,7 +573,7 @@ const CR_OPTIONS = CR_VALUES.map((value) => ({ value, label: value }));
 function Details(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void; setDraft(update: (d: StatBlock) => StatBlock): void }) {
   const { draft, set } = props;
   return (
-    <Group title="Details">
+    <Section label="Details" divider={false} style={STACKED}>
       <Text label="Skills" value={draft.skills} onChange={(skills) => set({ skills })} placeholder="Perception +5, Stealth +6" />
       <Row>
         <Text label="Vulnerabilities" value={draft.vulnerabilities} onChange={(vulnerabilities) => set({ vulnerabilities })} />
@@ -604,7 +597,7 @@ function Details(props: { draft: StatBlock; set(patch: Partial<StatBlock>): void
         <Num label="XP" value={draft.xp} min={0} max={1_000_000} onChange={(xp) => set({ xp: xp ?? 0 })} hint={`Proficiency Bonus +${proficiencyBonus(draft.cr)}`} />
         <Num label="XP in lair" value={draft.xpInLair} min={0} max={1_000_000} optional onChange={(xpInLair) => set({ xpInLair })} />
       </Row>
-    </Group>
+    </Section>
   );
 }
 
@@ -659,7 +652,8 @@ function Entries(props: { section: SectionKey; title: string; entries: StatBlock
     onChange(next);
   };
   return (
-    <Group title={props.title} hint={props.hint}>
+    <Section label={props.title} divider={false} style={STACKED}>
+      {props.hint}
       {entries.map((entry, i) => (
         <EntryEditor
           key={i}
@@ -675,7 +669,7 @@ function Entries(props: { section: SectionKey; title: string; entries: StatBlock
       <Button size="sm" onClick={() => onChange([...entries, { name: "", text: "" }])}>
         {ADD_LABELS[props.section]}
       </Button>
-    </Group>
+    </Section>
   );
 }
 

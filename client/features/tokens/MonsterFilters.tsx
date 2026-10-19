@@ -173,25 +173,25 @@ function FilterSheet(props: {
       }
     >
       {/* The chips under the search follow this order (filterChips). */}
-      <Group first title="Challenge rating" hint="Or type it in the search: cr 5, cr 1-5, cr 1/2-3.">
+      <FilterSection first title="Challenge rating" hint="Or type it in the search: cr 5, cr 1-5, cr 1/2-3.">
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
           <CrSelect label="Lowest CR" value={filters.crMin ?? "any"} onChange={(v) => set({ crMin: crChoice(v) })} />
           <span style={{ color: theme.color.textMuted }}>to</span>
           <CrSelect label="Highest CR" value={filters.crMax ?? "any"} onChange={(v) => set({ crMax: crChoice(v) })} />
         </div>
-      </Group>
-      <Group title="Creature type" hint="Any type picked.">
+      </FilterSection>
+      <FilterSection title="Creature type" hint="Any type picked.">
         <Picks title="Creature type" options={CREATURE_TYPES} picked={filters.types} label={titleWords} onChange={(types) => set({ types })} />
-      </Group>
-      <Group title="Legendary and lair">
+      </FilterSection>
+      <FilterSection title="Legendary and lair">
         <div>
           <Checkbox checked={filters.legendary} onChange={(legendary) => set({ legendary })} label="Legendary" help="Has Legendary Actions." />
           <Checkbox checked={filters.lair} onChange={(lair) => set({ lair })} label="Has a lair" help="More XP or legendary uses in its lair." />
         </div>
-      </Group>
-      <Group title="Size" hint="Any size picked. A Medium or Small creature counts as both.">
+      </FilterSection>
+      <FilterSection title="Size" hint="Any size picked. A Medium or Small creature counts as both.">
         <Picks title="Size" options={SIZES} picked={filters.sizes} label={titleWords} onChange={(sizes) => set({ sizes })} />
-      </Group>
+      </FilterSection>
       <Fold title="Condition immunities" picked={filters.conditionImmunities.length} hint="Immune to every condition picked.">
         <Picks title="Condition immunities" options={CONDITION_KEYS} picked={filters.conditionImmunities} label={titleWords} onChange={(conditionImmunities) => set({ conditionImmunities })} />
       </Fold>
@@ -239,7 +239,8 @@ const LABEL_STYLE: CSSProperties = {
   color: theme.color.textMuted,
 };
 
-function Group(props: { title: string; hint?: string; first?: boolean; children: ReactNode }) {
+/** One filter under its label, a section parted from the one above by a line. Named for what it holds, since a Group is a panel's fold. */
+function FilterSection(props: { title: string; hint?: string; first?: boolean; children: ReactNode }) {
   return (
     <Section label={props.title} divider={props.first !== true} style={{ paddingTop: theme.space(3), paddingBottom: theme.space(3) }}>
       {props.hint ? <Help>{props.hint}</Help> : null}
