@@ -376,6 +376,25 @@ export function legStop(state: BuildState, token: MovingToken, to: LegEnd): LegS
   return firstStop(leg);
 }
 
+/**
+ * Whether the straight path alone is clear, never a shifted one: the test
+ * every step of a route takes (docs/design-v1-movement.md 5.1), the half
+ * lattice holding the shifted spots itself. A route's piece made of such
+ * steps passes `legStop` too, since its straight sweep is theirs joined.
+ */
+export function straightClear(state: BuildState, token: MovingToken, to: LegEnd): boolean {
+  const scene = state.scenes[token.sceneId];
+  if (!scene) return true;
+  const leg = legOf(sceneWalls(scene, state.buildChunks), scene, token, to);
+  const { px, py, qx, qy, hx, hy } = leg;
+  if (px === qx && py === qy) return true;
+  const segs = touching(leg.walls, px, py, qx, qy, hx, hy, leg.floor);
+  if (segs.length === 0) return true;
+  const xy = leg.walls.stored.xy;
+  const atStart = new Set(segs.filter((k) => sweptTouches(px, py, px, py, hx, hy, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!)));
+  return partClear(leg, segs, atStart, px, py, qx, qy, true);
+}
+
 /** Section 4.1's test as the core asks it (shared/ruleHooks.ts). */
 export function legBlocker(state: BuildState, token: Token, to: LegEnd): Blocker | null {
   return legStop(state, token, to)?.blocker ?? null;

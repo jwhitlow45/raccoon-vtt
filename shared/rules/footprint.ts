@@ -140,6 +140,33 @@ export function occupiedCells(token: PlacedToken): Point[] {
   return cells;
 }
 
+/** The six sizes the rules name, smallest first. */
+export type SizeCategory = Exclude<Token["size"], "custom">;
+const SIZE_ORDER: readonly SizeCategory[] = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+
+/**
+ * The size the rules read for a creature (docs/design-v1-movement.md 4.5):
+ * a standard size is itself, and a custom one is the smallest standard size
+ * whose square holds its footprint's longer side. The longer side, since a
+ * creature's size is the space it controls, and a 1 by 3 creature controls
+ * a run of 3 squares. Custom never reads as Small, since Small and Medium
+ * share a square.
+ */
+export function sizeCategory(token: Pick<PlacedToken, "size" | "w" | "h">): SizeCategory {
+  if (token.size !== "custom") return token.size;
+  const side = Math.max(customSide(token.w), customSide(token.h));
+  if (side <= 0.5) return "tiny";
+  if (side <= 1) return "medium";
+  if (side <= 2) return "large";
+  if (side <= 3) return "huge";
+  return "gargantuan";
+}
+
+/** How many sizes apart two creatures are by `sizeCategory`. */
+export function sizeSteps(a: Pick<PlacedToken, "size" | "w" | "h">, b: Pick<PlacedToken, "size" | "w" | "h">): number {
+  return Math.abs(SIZE_ORDER.indexOf(sizeCategory(a)) - SIZE_ORDER.indexOf(sizeCategory(b)));
+}
+
 /**
  * Height in feet. Without an explicit height it is the footprint side, 5 ft
  * for Medium and 10 ft for Large at 5 ft per cell. A custom footprint that is

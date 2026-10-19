@@ -1,8 +1,9 @@
 import type { PathStop, TokenPath, TurnStart } from "#shared/model.ts";
-import { legFeet, type DiagonalCounter } from "#shared/rules/distance.ts";
-import { footprintRect, footprintSize, isSqueezed, type PlacedToken } from "#shared/rules/footprint.ts";
+import type { DiagonalCounter } from "#shared/rules/distance.ts";
+import { footprintRect, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
 import { pathThisTurn, sameSpot } from "#shared/rules/path.ts";
+import { spotRect, straightFeet as movedFeet, type SizedSpot } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 
 /**
@@ -32,53 +33,12 @@ export type TurnView = {
 };
 
 /**
- * A spot with the footprint the creature had there, squeeze and all, where
- * that differs from the token's footprint now (PathStop.footprint).
- * Without it, the spot is read with the token's footprint now.
+ * A spot with the footprint the creature had there, and the feet between
+ * two spots of a plain straight leg, are the shared rules' own
+ * (shared/rules/route.ts), since the reducer counts a leg by them too.
  */
-export type SizedSpot = Spot & Pick<PathStop, "footprint">;
-
-/** The token as it stood at a spot, at the size it had there and squeezed if it was. */
-function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
-  if (!spot.footprint) return { ...token, x: spot.x, y: spot.y };
-  const { w, h, squeeze } = spot.footprint;
-  return { size: "custom", w, h, x: spot.x, y: spot.y, ...(squeeze ? { squeeze } : {}) };
-}
-
-/** The footprint a trail draws at a spot, in cells, at the size the creature had there. */
-export function spotRect(token: PlacedToken, spot: SizedSpot): Rect {
-  return footprintRect(standingAt(token, spot));
-}
-
-/**
- * Feet between two spots of one token: the steps its snapped top-left
- * corner takes, with its change of elevation as the vertical steps. Counting
- * the corner means a Large creature moved one square has moved 5 ft, where
- * an edge-to-edge reading would call its old and new footprints overlapping.
- * Each end is snapped and measured at its own size, so a Tiny's half-square
- * leg keeps its 2.5 ft after it grows. A leg whose ends differ in size, a
- * resize's or legs joined across one once the path is full (rules/path.ts
- * withStop), or whose ends differ in squeeze, a move into or out of one,
- * runs between the two footprints' middles: a squeezed footprint sits
- * centered and unsnapped, so its corner is no measure beside a full one's.
- *
- * `counter` carries the diagonals of earlier legs under the 5-10-5 rule,
- * which counts every second diagonal of the whole move double, and is
- * updated in place, as a ruler's legs do (rules/distance.ts).
- */
-export function movedFeet(token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceRules, counter?: DiagonalCounter): number {
-  const a = spotRect(token, from);
-  const b = spotRect(token, to);
-  const standA = standingAt(token, from);
-  const standB = standingAt(token, to);
-  const sizeA = footprintSize(standA);
-  const sizeB = footprintSize(standB);
-  const differ = sizeA.w !== sizeB.w || sizeA.h !== sizeB.h || isSqueezed(standA) !== isSqueezed(standB);
-  const across = differ ? { x: (b.w - a.w) / 2, y: (b.h - a.h) / 2 } : { x: 0, y: 0 };
-  const dz = Math.abs(to.elevation - from.elevation) / rules.feetPerCell;
-  const ft = legFeet(Math.abs(b.x - a.x + across.x), Math.abs(b.y - a.y + across.y), dz, rules.diagonal, rules.feetPerCell, counter);
-  return rules.diagonal === "euclid" ? Math.round(ft) : ft;
-}
+export type { SizedSpot } from "#shared/rules/route.ts";
+export { spotRect, straightFeet as movedFeet } from "#shared/rules/route.ts";
 
 /**
  * The token's path this turn as this viewer holds it, or null. A DM's copy
