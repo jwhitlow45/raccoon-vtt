@@ -346,7 +346,7 @@ Tiers:
   - Built in v1 wave 2. The DM opens Damage on a placed area, from the area tool or the Areas panel. It lists everyone the area catches, hidden creatures included.
   - Players roll their own dice, so the DM types the damage the caster rolled, once for everyone as SRD 5.2.1 says. A creature that passes takes half, rounded down. Every creature fails until marked, and the dead are skipped.
   - Objects the area catches (a door, a cart) are listed too, after the creatures, since a fireball can burn them, but they are skipped until the DM marks one. "All fail" and "All pass" mark only the creatures.
-  - Only the DM applies it, so no player ever sees a list with a hidden creature in it. A caster's player proposing it for the DM to confirm is not built.
+  - Only the DM applies it, so no player ever sees a list with a hidden creature in it. Since v1 (docs/design-v1-player-save-spell.md) a caster's player asks for it from their own area or the spell's row, with the damage rolled on their own dice, and the DM opens it from a card, filled from the caster's stat block, and applies it.
   - It goes through the usual HP rules, so temporary HP is spent first and concentration checks follow. One undo takes it all back.
   - Since v1 wave 7 (docs/design-v1-roll-options.md 5) the area's button is "Save and damage" and opens the group save: the area's spell and caster fill the save, DC and damage, the monsters roll on the server, players' creatures are asked, damage rolls once and keeps its types, and resistances, immunities, Evasion, conditions on a fail and Legendary Resistance apply per creature in one step.
 - Reminders for areas that hit creatures as they enter or end a turn inside, for example "Goblin 2 ended its turn in Spirit Guardians".
@@ -539,6 +539,7 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
 - The server also rolls a request's answer (`roll.dice`) with the creature's bonus or one the player types, keeps the dice on the answer, and makes a rolled answer final for its player. The request card's Roll button comes with docs/design-v1-roll-request.md.
 - Players can still type any total from real dice, as before.
 - Roll options and the group save (v1 wave 7, docs/design-v1-roll-options.md): a creature's saves, checks, skills, initiative, death saves, attacks and save actions from its stat block in the Dice panel, with its conditions' advantage, disadvantage or extra die, and for the DM one save, check, initiative or shared attack for several creatures, and the group save with one Apply and one undo.
+- A player's save spell (v1, docs/design-v1-player-save-spell.md): a player's Ask for saves on a save spell's row or their own area asks the DM for the group save, with the casting level, the targets or the area, and the damage rolled on the player's own dice. The DM's card opens the group save filled from the caster's stat block, and Apply, Close the ask, Dismiss or the player's Withdraw closes the ask once for every device.
 
 ## 15. Characters and monsters
 

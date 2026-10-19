@@ -700,6 +700,8 @@ Under **⋯**, you can still change settings such as its aim, reminders and colo
 
 The **Areas** panel lists every area along with who is in it, kept up to date as creatures move, and offers **Edit**, **Save and damage** and **Delete** (a trash can) on each row. Only you and an area's owner can change it. Players see each other's areas, unless you turn off the room setting "Players see each other's areas".
 
+Players don't get **Save and damage**. On their own area they get **Ask for saves** instead, which sends the spell to you as an ask (see [the group save](#the-group-save)). While the ask waits, the area reads "Saves asked", and its player can't move it, resize it or delete it, so what you resolve is what they cast. You can still move it yourself.
+
 ### Auras
 
 An Emanation cast from a token with **Moves with token** on (the default) is attached to that token. It follows the token around, and its "In area" list updates as creatures move in and out. Spirit Guardians, a Paladin's aura and the like work this way. You can't drag an attached area, so move its token instead.
@@ -730,6 +732,14 @@ When you start it from an area, the page fills itself in from the spell and its 
 6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and Concentration saves are handled for you, and the app confirms: "Applied to 4. Undo takes it all back."
 
 With **No save** ("No save: everyone takes it"), **Apply** shows at once, for damage that everyone in the area simply takes. An open group save stays on your device through a reload, and the Dice panel's **Open** brings you back to it.
+
+**When a player asks for saves.** Players can't run a group save, but they can ask you for one. A player who casts Fireball from an area they placed, or Hold Person on the creatures they selected, presses **Ask for saves** under the spell in their Dice panel, and usually rolls the damage in the same tap. You get a card above the roll requests: "Thorn asks for saves: Fireball, level 4", then their roll ("Thorn rolled 31 Fire"), then who it hits ("In the area: 4", which counts hidden creatures too, or "Targets: Goblin 1, Goblin 2").
+
+Press **Open** to start the group save from it. The page fills itself in from the caster's stat block as you see it, never from anything the player sent, and their roll is already in the damage: "From Thorn's Fireball at level 4: Dexterity save, DC 15 (Thorn's spell save DC), 9d6 Fire, rolled 31 (Thorn's roll), half on a pass." From there it is an ordinary group save, and everything on it is yours to change. **Roll again** or a typed amount replaces their roll, and changing the **Slot level** refills the damage for the new level. If the ask is on a scene you aren't looking at, the button reads **Go to Crypt and open**.
+
+**Apply** resolves the ask, and the caster's player sees "The DM resolved Fireball." When there is nothing to apply, say a Hold Person that every creature shrugged off, the button reads **Close the ask** instead. **Discard** leaves the ask waiting with its card back. To turn an ask down without a group save, press **Dismiss** on its card.
+
+If the player withdraws the ask while you have it open, the page says so and carries on as a plain group save. If another of your devices already resolved it, **Apply** stays off with the reason, so a spell never lands twice. **Discard** is the way out.
 
 ## Alerts during a fight
 
