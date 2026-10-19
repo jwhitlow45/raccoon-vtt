@@ -5,6 +5,7 @@ import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
+import { turnMoverId } from "../attach/turns.ts";
 import { towingWord } from "../attach/walk.ts";
 import { cutPieces, landedElevation, routeLanding, samePose, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
@@ -83,7 +84,8 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
         { x: to.x, y: to.y, elevation: landedElevation(view.buildChunks, token, to) },
       ];
   const encounter = view.encounter;
-  const activeTokenId = encounter?.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId ?? null;
+  // A controlled mount sharing its rider's turn reads its own path and speeds (docs/design-v1-attach.md 7.2).
+  const activeTokenId = turnMoverId(view) ?? null;
   const read = dragReading({
     token,
     to,

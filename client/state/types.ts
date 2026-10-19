@@ -83,7 +83,15 @@ export const EMPTY_EPHEMERAL: Ephemeral = Object.freeze({
   focus: null,
 });
 
-export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie };
+export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction };
+
+/**
+ * A toast's one button, beside its words, such as the falling off
+ * reminder's "Ask for the save" (docs/design-v1-attach.md 4.5). Pressing it
+ * runs `run` and dismisses the toast. A toast with one stays a while longer,
+ * so there is time to reach it.
+ */
+export type ToastAction = { label: string; run(): void };
 
 /**
  * The flat d20 that leads a toast of someone else's D20 Test

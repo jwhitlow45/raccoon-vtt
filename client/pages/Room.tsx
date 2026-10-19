@@ -59,7 +59,7 @@ import { sceneGate, selectionScene } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
-import { TOAST_MS } from "../state/store.ts";
+import { ACTION_TOAST_MS, TOAST_MS } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
@@ -1448,7 +1448,7 @@ function Toasts() {
   }, [slot, ui]);
   useEffect(() => {
     if (toasts.length === 0) return;
-    const timers = toasts.map((t) => setTimeout(() => ui.dismissToast(t.id), TOAST_MS));
+    const timers = toasts.map((t) => setTimeout(() => ui.dismissToast(t.id), t.action ? ACTION_TOAST_MS : TOAST_MS));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   if (toasts.length === 0) return null;
@@ -1472,29 +1472,44 @@ function Toasts() {
 function ToastNote(props: { toast: Toast; onDismiss(): void }) {
   const t = props.toast;
   const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
+  const look: CSSProperties = {
+    pointerEvents: "auto",
+    width: "100%",
+    maxWidth: 520,
+    minHeight: theme.touch,
+    borderRadius: theme.radius.md,
+    background: tone.fill,
+    border: `${theme.line.border}px solid ${tone.outline}`,
+    color: tone.text,
+    fontFamily: theme.font.body,
+    fontSize: theme.font.body14,
+    lineHeight: theme.leading.body,
+    textAlign: "left",
+    boxShadow: theme.shadow.float,
+  };
+  const action = t.action;
+  if (action) {
+    // A button cannot hold another, so the words dismiss as a button of their own beside the action's.
+    return (
+      <div role="status" style={{ ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }}>
+        <button type="button" onClick={props.onDismiss} style={{ flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, padding: 0, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }}>
+          {t.text}
+        </button>
+        <Button
+          size="sm"
+          onClick={() => {
+            props.onDismiss();
+            action.run();
+          }}
+          style={{ flex: "none" }}
+        >
+          {action.label}
+        </Button>
+      </div>
+    );
+  }
   return (
-    <button
-      type="button"
-      role="status"
-      onClick={props.onDismiss}
-      style={{
-        pointerEvents: "auto",
-        width: "100%",
-        maxWidth: 520,
-        minHeight: theme.touch,
-        padding: `${theme.space(2)}px ${theme.space(3)}px`,
-        borderRadius: theme.radius.md,
-        background: tone.fill,
-        border: `${theme.line.border}px solid ${tone.outline}`,
-        color: tone.text,
-        fontFamily: theme.font.body,
-        fontSize: theme.font.body14,
-        lineHeight: theme.leading.body,
-        textAlign: "left",
-        boxShadow: theme.shadow.float,
-        cursor: "pointer",
-      }}
-    >
+    <button type="button" role="status" onClick={props.onDismiss} style={{ ...look, padding: `${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" }}>
       {t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
     </button>
   );

@@ -4,6 +4,7 @@ import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
+import { SteerControl, usePanelLinkTags } from "../features/attach/SteerControl.tsx";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
@@ -258,10 +259,13 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
         }
       : null;
   const fp = footprint(token);
+  // What carries it and what it carries, from the links in this copy (docs/design-v1-attach.md 4.5).
+  const linkTags = usePanelLinkTags(token);
   const tags: string[] = [];
   if (token.visibility === "dm") tags.push("Hidden from players");
   if (token.locked) tags.push("Locked");
   if (token.nameHidden) tags.push("Name hidden");
+  tags.push(...linkTags);
   const kind = tokenKind({ token, companionOf: keeper?.name, character: props.character, cr: props.actor?.cr });
   return (
     <CreatureHeader
@@ -271,6 +275,7 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
       line={kindLine(kind, sizeText(token.size, fp, props.feetPerCell))}
       onCompanionOf={openKeeper}
       tags={tags}
+      afterTags={<SteerControl token={token} />}
     >
       {props.children}
     </CreatureHeader>

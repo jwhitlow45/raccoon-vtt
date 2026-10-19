@@ -7,7 +7,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
 import { DM, P1, P2, room, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
-import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
+import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -52,6 +52,17 @@ describe("movement since the turn began", () => {
     assert.equal(diagonal.movedFt, 15, "the 5-10-5 count runs along the whole path, not leg by leg");
     const shoved = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 3, y: 3, path: { turn: 7, stops: [stop(0, 0), stop(1, 1), { ...stop(2, 2), uncounted: true }, stop(3, 3)] } }), rules: fiveTen, role: "dm" })!;
     assert.equal(shoved.movedFt, 15, "a shove's diagonal is not the creature's");
+  });
+
+  test("the DM's trail draws no leg a holder carried the creature, which its holder's own trail shows (docs/design-v1-attach.md 7.2)", () => {
+    const stops: PathStop[] = [stop(2, 2), stop(4, 2), { ...stop(8, 2), uncounted: true, carried: true }, stop(8, 4)];
+    const trail = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 8, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
+    assert.deepEqual(trail.legs.map((l) => [l.counted, l.carried]), [[true, false], [false, true], [true, false]]);
+    assert.equal(trail.movedFt, 20, "the carried leg counts nothing");
+    assert.deepEqual(trailSegments(trail).map((s) => s.leg), [0, 2]);
+    // A player's copy holds the same leg as an uncounted one, without the mark: drawn faint, as any leg that does not count.
+    const theirs = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 8, y: 4, path: { turn: 7, stops: stops.map(({ carried: _c, ...rest }) => rest) } }), rules: five, role: "player" })!;
+    assert.deepEqual(trailSegments(theirs).map((s) => [s.leg, s.counted]), [[0, true], [1, false], [2, true]]);
   });
 
   test("an earlier turn's path, another row's turn or another scene draws no trail, and a turn from before paths reads straight from its start", () => {

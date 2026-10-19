@@ -9,6 +9,7 @@ import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { DragPreview } from "../../state/types.ts";
 import { useRoomView } from "../../state/view.ts";
+import { turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
 import { groupLanding } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
@@ -77,14 +78,15 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const diagonal = settings?.diagonal ?? "five";
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
   const route = useStore(useScoped(routeSlot), (s) => s.route);
+  // The turn's walker: the active creature, or the controlled mount sharing its turn (docs/design-v1-attach.md 7.2).
+  const activeTokenId = useRoomView((s) => turnMoverId(s.view) ?? null);
   const read = useMemo<ReadDrag>(() => {
-    const activeTokenId = encounter?.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId ?? null;
     return (token, to, walk, landing) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.
       const speeds: Speeds | undefined = "inline" in token.actor ? token.actor.inline.speeds : characters?.[token.actor.ref]?.actor.speeds;
       return dragReading({ token, to, encounter, activeTokenId, speeds, rules, role, ...(walk ? { walk: remoteWalk(token, to, walk.corners) } : {}), ...(walk?.costFt !== undefined ? { costFt: walk.costFt } : {}), ...(landing ? { landing } : {}) });
     };
-  }, [encounter, characters, rules, role]);
+  }, [encounter, activeTokenId, characters, rules, role]);
   if (!settings) return <Group ref={groupRef} listening={false} />;
   const colorOf = (id: string) => members?.[id]?.color ?? theme.color.crest;
   const kept = Object.values(drawings).filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === props.scene.id);

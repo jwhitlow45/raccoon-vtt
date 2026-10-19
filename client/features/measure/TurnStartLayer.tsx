@@ -9,10 +9,12 @@ import { overlaps, type Box } from "../../lib/boardText.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
+import { riderLine, turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
-import { ellipseExit, halvedSpeeds, movementText, speedsLeft, turnTrail, type MovingToken, type Speeds, type TurnTrail } from "./movement.ts";
+import { speedsOf } from "../movement/preview.ts";
+import { halvedSpeeds, movementText, speedsLeft, trailSegments, turnTrail, type MovingToken, type TurnTrail } from "./movement.ts";
 import { Pill, pillPlace } from "./Pill.tsx";
-import type { DistanceRules, Point } from "./ruler.ts";
+import type { DistanceRules } from "./ruler.ts";
 
 /**
  * Where the active creature has been this turn (features sections 4 and
@@ -37,6 +39,13 @@ import type { DistanceRules, Point } from "./ruler.ts";
  * ft"), and what is left by the Speed the creature has where it stands,
  * halved inside a Half Speed area that affects it
  * (docs/design-v1-movement.md 3.2 and 4.2).
+ *
+ * While the active creature rides a controlled mount that shares its turn
+ * (docs/design-v1-attach.md 7.2, attach/turns.ts), the mount's walk is the
+ * turn's movement: the one pill sits on the mount and reads its path and
+ * speeds, with a second line for the rider's own feet when they are not
+ * 0. The rider's own trail still draws, without a pill. Until the mount
+ * has moved, the rider's pill reads as before.
  */
 
 const LINE_PX = 2.5;
@@ -52,15 +61,19 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
     const e = s.view?.encounter;
     return e?.entries.find((entry) => entry.id === e.activeEntryId)?.tokenId;
   });
-  const token = useRoomView((s) => (activeTokenId ? s.view?.tokens[activeTokenId] : undefined));
-  const speeds = useRoomView((s): Speeds | undefined => {
-    if (!token) return undefined;
-    return "inline" in token.actor ? token.actor.inline.speeds : s.view?.characters[token.actor.ref]?.actor.speeds;
-  });
+  const moverId = useRoomView((s) => turnMoverId(s.view));
+  const rider = useRoomView((s) => (activeTokenId ? s.view?.tokens[activeTokenId] : undefined));
+  const mount = useRoomView((s) => (moverId !== undefined && moverId !== activeTokenId ? s.view?.tokens[moverId] : undefined));
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const diagonal = useRoomView((s) => s.view?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
-  const trail = useMemo(() => turnTrail({ encounter, sceneId: props.scene.id, token, rules, role }), [encounter, props.scene.id, token, rules, role]);
+  const riderTrail = useMemo(() => turnTrail({ encounter, sceneId: props.scene.id, token: rider, rules, role }), [encounter, props.scene.id, rider, rules, role]);
+  const mountTrail = useMemo(() => (mount ? turnTrail({ encounter, sceneId: props.scene.id, token: mount, rules, role }) : null), [encounter, props.scene.id, mount, rules, role]);
+  // The pill's creature: the mount once it has a trail, else the active creature.
+  const token = mountTrail ? mount : rider;
+  const trail = mountTrail ?? riderTrail;
+  const speeds = useRoomView((s) => (token && s.view ? speedsOf(s.view, token) : undefined));
+  const second = mountTrail && rider ? riderLine(displayName(rider), riderTrail) : null;
   const templates = useRoomView((s) => s.view?.templates);
   const halved = useRoomView((s) => {
     // Only a viewer who knows the speeds reads them, and a Half Speed area halves them where the creature stands.
@@ -70,30 +83,19 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const scale = props.scale;
   const marker = useMemo(() => {
     if (!trail || !token) return null;
-    const value = movementText(trail.movedFt, speedsLeft(halved ? halvedSpeeds(speeds) : speeds, token.elevation, trail.usedFt), trail.usedFt);
-    return markerPlace({ from: trail.from, token, value, scale });
-  }, [trail, token, speeds, halved, scale]);
+    const moved = movementText(trail.movedFt, speedsLeft(halved ? halvedSpeeds(speeds) : speeds, token.elevation, trail.usedFt), trail.usedFt);
+    return markerPlace({ from: trail.from, token, value: second ? `${moved}\n${second}` : moved, scale });
+  }, [trail, token, speeds, halved, scale, second]);
   // Token labels keep off the marker (useBoardText.ts).
   const spec = marker ? { x: marker.x, y: marker.y, value: marker.value, size: "screen" as const, small: true, below: marker.below, above: !marker.below } : null;
   const specKey = spec ? JSON.stringify(spec) : "";
   usePublishPills("turnStart", useMemo(() => (spec ? [spec] : []), [specKey]));
   if (!trail || !token || !marker) return null;
 
-  const { from } = trail;
   const color = theme.color.accentSoft;
   return (
     <>
-      <Ellipse
-        x={from.x + from.w / 2}
-        y={from.y + from.h / 2}
-        radiusX={from.w / 2}
-        radiusY={from.h / 2}
-        stroke={color}
-        strokeWidth={LINE_PX}
-        strokeScaleEnabled={false}
-        dash={[6, 4]}
-        listening={false}
-      />
+      {mountTrail && riderTrail ? <TrailLines trail={riderTrail} color={color} scale={scale} /> : null}
       <TrailLines trail={trail} color={color} scale={scale} />
       <Pill x={marker.x} y={marker.y} scale={scale} value={marker.value} size="screen" color={color} small below={marker.below} above={!marker.below} />
     </>
@@ -125,40 +127,38 @@ function markerPlace(input: { from: { x: number; y: number; w: number; h: number
 }
 
 /**
- * The legs between footprint centers, each stop's footprint at the size
- * the creature had there, through the corners of the route each walked,
- * the first and last cut back to the round edges of the start ring and the
- * token so the line never crosses their art, and a dot at each stop, never
- * at a route's corners. A resize that kept the middle leaves no line.
+ * A ring where the turn began, the legs (movement.ts trailSegments) and a
+ * dot at each stop, never at a route's corners.
  */
 function TrailLines(props: { trail: TurnTrail; color: string; scale: number }) {
   const { trail, color, scale } = props;
-  const centers = trail.rects.map(center);
-  const last = centers.length - 1;
+  const { from } = trail;
+  const centers = trail.rects.map((r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 }));
   return (
     <>
-      {trail.legs.map((leg, i) => {
-        const r = trail.rects[i + 1]!;
-        const bends = leg.via.map((p) => ({ x: p.x + r.w / 2, y: p.y + r.h / 2 }));
-        const a = i === 0 ? ellipseExit(trail.from, bends[0] ?? centers[1]!) : centers[i]!;
-        const b = i + 1 === last ? ellipseExit(trail.to, bends[bends.length - 1] ?? centers[last - 1]!) : centers[i + 1]!;
-        // Overlapping footprints, as after a short step or a climb in place, leave no gap to draw a line in.
-        if (bends.length === 0 && Math.hypot(b.x - a.x, b.y - a.y) <= 0.05) return null;
-        const points = [a, ...bends, b].flatMap((p) => [p.x, p.y]);
+      <Ellipse
+        x={from.x + from.w / 2}
+        y={from.y + from.h / 2}
+        radiusX={from.w / 2}
+        radiusY={from.h / 2}
+        stroke={color}
+        strokeWidth={LINE_PX}
+        strokeScaleEnabled={false}
+        dash={[6, 4]}
+        listening={false}
+      />
+      {trailSegments(trail).map((seg) => {
+        const points = seg.points.flatMap((p) => [p.x, p.y]);
         return (
-          <Group key={i} opacity={leg.counted ? 1 : UNCOUNTED_OPACITY} listening={false}>
+          <Group key={seg.leg} opacity={seg.counted ? 1 : UNCOUNTED_OPACITY} listening={false}>
             <Line points={points} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
             <Line points={points} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={[2, 6]} />
           </Group>
         );
       })}
-      {centers.slice(1, last).map((c, i) => (
+      {centers.slice(1, centers.length - 1).map((c, i) => (
         <Circle key={i} x={c.x} y={c.y} radius={DOT_PX / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
       ))}
     </>
   );
-}
-
-function center(r: { x: number; y: number; w: number; h: number }): Point {
-  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }

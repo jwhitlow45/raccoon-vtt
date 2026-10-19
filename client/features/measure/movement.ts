@@ -57,8 +57,13 @@ export function pathNow(encounter: TurnView | null | undefined, token: Pick<Movi
   return encounter.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId === token.id ? token.path : null;
 }
 
-/** One leg of a trail: from one spot to the next through the corners it walked, top-left as stops are, and whether it counts against speed. */
-export type TrailLeg = { from: Spot; to: Spot; counted: boolean; via: Point[] };
+/**
+ * One leg of a trail: from one spot to the next through the corners it
+ * walked, top-left as stops are, whether it counts against speed, and
+ * whether its holder carried it there (docs/design-v1-attach.md 7.2), a
+ * mark only the DM's copy holds.
+ */
+export type TrailLeg = { from: Spot; to: Spot; counted: boolean; carried: boolean; via: Point[] };
 
 export type TurnTrail = {
   /** Where the turn began, each stop since, and where the creature stands now, in order. */
@@ -111,7 +116,7 @@ export function turnTrail(input: {
   if (!sameSpot(last, token)) stops.push({ x: token.x, y: token.y, elevation: token.elevation });
   if (stops.length < 2) return null;
   const spots = stops.map((s): Spot => ({ x: s.x, y: s.y, elevation: s.elevation }));
-  const legs = spots.slice(1).map((to, i): TrailLeg => ({ from: spots[i]!, to, counted: stops[i + 1]!.uncounted !== true, via: corners(stops[i + 1]!) }));
+  const legs = spots.slice(1).map((to, i): TrailLeg => ({ from: spots[i]!, to, counted: stops[i + 1]!.uncounted !== true, carried: stops[i + 1]!.carried === true, via: corners(stops[i + 1]!) }));
   // A leg that does not count takes no diagonals either, so the 5-10-5 count runs on across it, a resize's leg included.
   const diagonals: DiagonalCounter = { h: 0, v: 0 };
   let movedFt = 0;
@@ -143,6 +148,37 @@ function corners(stop: Pick<PathStop, "via">): Point[] {
  */
 function legRead(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceRules, counter: DiagonalCounter): LegCost {
   return to.moved !== undefined || to.cost !== undefined ? legTaken(token, from, to, rules, counter) : legGeometry(token, from, to, rules, counter);
+}
+
+/**
+ * The lines a trail draws, one per leg: between footprint centers, each
+ * stop's footprint at the size the creature had there, through the
+ * corners of the route each walked, the first and last cut back to the
+ * round edges of the start ring and the token so the line never crosses
+ * their art. A resize that kept the middle leaves no line, and neither
+ * does a leg its holder carried it (docs/design-v1-attach.md 7.2): the
+ * holder's own trail shows the way, so the DM, whose copy marks such legs,
+ * sees one line, not two.
+ */
+export function trailSegments(trail: TurnTrail): { leg: number; points: Point[]; counted: boolean }[] {
+  const centers = trail.rects.map(rectCenter);
+  const last = centers.length - 1;
+  const out: { leg: number; points: Point[]; counted: boolean }[] = [];
+  for (const [i, leg] of trail.legs.entries()) {
+    if (leg.carried) continue;
+    const r = trail.rects[i + 1]!;
+    const bends = leg.via.map((p) => ({ x: p.x + r.w / 2, y: p.y + r.h / 2 }));
+    const a = i === 0 ? ellipseExit(trail.from, bends[0] ?? centers[1]!) : centers[i]!;
+    const b = i + 1 === last ? ellipseExit(trail.to, bends[bends.length - 1] ?? centers[last - 1]!) : centers[i + 1]!;
+    // Overlapping footprints, as after a short step or a climb in place, leave no gap to draw a line in.
+    if (bends.length === 0 && Math.hypot(b.x - a.x, b.y - a.y) <= 0.05) continue;
+    out.push({ leg: i, points: [a, ...bends, b], counted: leg.counted });
+  }
+  return out;
+}
+
+function rectCenter(r: Rect): Point {
+  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
 /**

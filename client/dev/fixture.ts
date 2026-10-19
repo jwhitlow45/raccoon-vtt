@@ -636,6 +636,29 @@ function attachedTokens(state: RoomState, riding: boolean): void {
   state.tokens[thorn.id] = { ...thorn, x: 6, y: 5, attached: { to: "t-attach-horse", kind: "ride", steer: true } };
   add(token({ name: "Saddlebag", size: "tiny", kind: "object", layer: "object", x: 7.5, y: 6.5, disposition: "neutral", ownerIds: [FIXTURE_IDS.thorn], hpVisibility: "hidden", attached: { to: "t-attach-horse", kind: "carry" }, actor: { inline: actor([1, 1]) } }), "t-attach-bag");
   add(token({ name: "Pack mule", x: 6, y: 7, disposition: "ally", kind: "npc", ownerIds: [FIXTURE_IDS.thorn], hpVisibility: "label", attached: { to: "t-attach-horse", kind: "drag" }, actor: { inline: actor([11, 11]) } }), "t-attach-mule");
+  // In the fight, the warhorse shares Thorn's turn (docs/design-v1-attach.md 7.1): its row right after his marks time, and
+  // this turn Thorn walked to it, got on, and rode it two squares, which its own path holds and his marks as carried.
+  const encounter = state.encounter;
+  if (!encounter?.turnStart) return;
+  const turn = encounter.turnStart.seq ?? 1;
+  state.encounter = {
+    ...encounter,
+    entries: [...encounter.entries, { id: "i-horse", tokenId: "t-attach-horse", value: 18, tieOrder: 1, hidden: false, reactionUsed: false, inLair: false, hadTurn: true, markRound: encounter.round }],
+    turnStart: { ...encounter.turnStart, mounts: ["t-attach-horse"] },
+  };
+  state.tokens[thorn.id] = {
+    ...state.tokens[thorn.id]!,
+    path: {
+      turn,
+      stops: [
+        { x: 2, y: 4, elevation: 0, seen: true },
+        { x: 4, y: 3, elevation: 0, seen: true },
+        { x: 8, y: 5, elevation: 0, seen: true },
+        { x: 6, y: 5, elevation: 0, seen: true, uncounted: true, carried: true },
+      ],
+    },
+  };
+  state.tokens["t-attach-horse"] = { ...state.tokens["t-attach-horse"]!, path: { turn, stops: [{ x: 8, y: 5, elevation: 0, seen: true }, { x: 6, y: 5, elevation: 0, seen: true }] } };
 }
 
 /**

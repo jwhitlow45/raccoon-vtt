@@ -20,6 +20,7 @@ import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "../dice/useRollOption.ts";
 import { ownResultText } from "../dice/useRollToasts.ts";
+import { marksTime, moveAfterRider, rowLink } from "../attach/tags.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { ownsToken } from "../tokens/access.ts";
 import { opensStatBlock, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
@@ -27,7 +28,7 @@ import { displayName } from "../../lib/scene.ts";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
 import { usePanelHere } from "../panels.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
-import { useSend } from "./hooks.ts";
+import { useSend, useSendAll } from "./hooks.ts";
 import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollReminder, rowAc, SECRET_ROW, secretUntilItsTurn, valueText, type HpView } from "./logic.ts";
 import { Chips, DescribedHp, DescribedItems, Portrait, RollBadge, Spinner } from "./parts.tsx";
 import { readiedEffect, rowTarget, type ReactionTarget } from "./ready.ts";
@@ -101,6 +102,12 @@ export function EntryRow(props: {
   });
   // An own-turn companion's row names whose it is, in the words of the token panel's name block, for every viewer whose copy says so.
   const companionOf = useRoomView((s) => (token?.companion ? s.view?.characters[token.companion.of]?.name : undefined));
+  // A rider's mount and a controlled mount's rider, from the links in this copy (docs/design-v1-attach.md 4.5 and 7.1).
+  const link = useMemo(() => rowLink(tokens ?? {}, token), [tokens, token]);
+  // A controlled mount's row whose turn was its rider's this round only lets time pass for it, and reads muted.
+  const muted = useRoomView((s) => marksTime(s.view?.encounter, entry));
+  const encounter = useRoomView((s) => s.view?.encounter);
+  const moveAfter = useMemo(() => (dm && props.expanded && encounter ? moveAfterRider({ tokens: tokens ?? {}, encounter }, entry) : null), [dm, props.expanded, encounter, tokens, entry]);
   const effects = actor?.effects ?? [];
   // Whoever rolls this creature's initiative sees the reminder: the DM for every row, a player for their own.
   const reminder = dm || mine ? rollReminder(entry, effects) : undefined;
@@ -178,14 +185,14 @@ export function EntryRow(props: {
             cursor: "pointer",
           }}
         >
-          <Portrait entry={entry} size={36} ring={active ? theme.color.accentSoft : undefined} dim={dead} />
+          <Portrait entry={entry} size={36} ring={active ? theme.color.accentSoft : undefined} dim={dead || muted} />
           <span style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(0.5) }}>
             <span
               data-row-name=""
               style={{
                 fontSize: theme.font.input,
                 fontWeight: active ? theme.weight.bold : theme.weight.strong,
-                color: active ? theme.color.accentSoft : dead ? theme.color.textMuted : theme.color.text,
+                color: dead || muted ? theme.color.textMuted : active ? theme.color.accentSoft : theme.color.text,
                 textDecoration: dead ? "line-through" : undefined,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -231,6 +238,18 @@ export function EntryRow(props: {
                       Companion of {companionOf}
                     </Tag>
                   ) : null,
+                  link.riding !== null ? (
+                    // A mount's name of any length: cut, so the row's other tags keep their room.
+                    <Tag tone="muted" dense cut={160}>
+                      {link.riding}
+                    </Tag>
+                  ) : null,
+                  link.controlled !== null ? (
+                    // Too long for a tag that never wraps: its own line, which wraps on a phone.
+                    <span data-controlled-by="" style={{ flexBasis: "100%", minWidth: 0, overflowWrap: "anywhere" }}>
+                      {link.controlled}
+                    </span>
+                  ) : null,
                   legendary && legendary.actionsMax > 0 ? (
                     <Tag tone="turn" dense>
                       LA {legendary.actionsMax - legendary.actionsUsed}/{legendary.actionsMax}
@@ -271,6 +290,7 @@ export function EntryRow(props: {
           playerOwned={playerOwned}
           statBlockTokenId={token && ((dm ? token.kind === "monster" || token.kind === "npc" : playerBlock) || pcBlock) ? token.id : null}
           revive={offersRevive(life, token?.kind)}
+          moveAfter={moveAfter}
         />
       ) : null}
       {companions.length > 0 ? (
@@ -804,6 +824,8 @@ function RowMenu(props: {
   revive: boolean;
   /** The row's Roll, here when its line has no room for it beside the value box, or the row has a value it would replace. */
   roll?: ReactNode;
+  /** The DM's "Move after Bree" on a controlled mount's acting row (docs/design-v1-attach.md 7.1, attach/tags.ts). */
+  moveAfter?: ReturnType<typeof moveAfterRider>;
 }) {
   const { entry, role, drag } = props;
   const reviveNoteId = useId();
@@ -813,6 +835,7 @@ function RowMenu(props: {
   const here = usePanelHere();
   const remove = useSend();
   const reaction = useSend();
+  const moving = useSendAll();
   const dm = role === "dm";
   const update = (patch: { hidden?: boolean; reactionUsed?: boolean; inLair?: boolean; advantage?: "adv" | "dis" | null }) =>
     actions.dispatch({ t: "encounter.update", entryId: entry.id, patch });
@@ -894,6 +917,14 @@ function RowMenu(props: {
               used={legendary.resistUsed}
               onChange={(resistUsed) => setLegendary({ ...legendary, resistUsed })}
             />
+          ) : null}
+          {props.moveAfter ? (
+            <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>For after its turn: its rider's initiative, right after its rider</span>
+              <Button size="sm" busy={moving.waiting} onClick={() => props.moveAfter && !moving.waiting && moving.send(props.moveAfter.ops)}>
+                Move after {props.moveAfter.riderName}
+              </Button>
+            </div>
           ) : null}
           {drag && (drag.canMoveUp || drag.canMoveDown) ? (
             <div style={{ display: "flex", gap: theme.space(1), alignItems: "center" }}>

@@ -37,7 +37,7 @@ import { drawMap, drawPortrait } from "./placeholders.ts";
  * - `rolls=1` links the goblins to the SRD's Goblin Warrior, for the Dice panel's roll options (docs/design-v1-roll-options.md).
  * - `party=1` adds six players' characters with long names to the party, two of them off the scene (docs/design-v1-side-headers.md).
  * - `diceui=1` adds to `rolls=1` and `pcstats=1` save spells, riders, a long weapon name, the SRD's Owlbear and an Adult Red Dragon, and rolls in the log (docs/design-v1-dice-ui.md).
- * - `attach=1` puts a warhorse, a torch, a Grappled kobold and a cart beside Thorn, and a lantern and a dragged prisoner on Goblin 1 (docs/design-v1-attach.md). `attach=riding` also sits Thorn on the warhorse, controlled, with a saddlebag on it and a pack mule it drags.
+ * - `attach=1` puts a warhorse, a torch, a Grappled kobold and a cart beside Thorn, and a lantern and a dragged prisoner on Goblin 1 (docs/design-v1-attach.md). `attach=riding` also sits Thorn on the warhorse, controlled, with a saddlebag on it and a pack mule it drags, and gives the warhorse a row that shares his turn.
  */
 function readOptions() {
   const q = new URLSearchParams(location.search);

@@ -20,8 +20,9 @@ export type CreaturePicture = {
 /**
  * The top of a creature's details (docs/design-v1-look-pass.md 2.11): its
  * picture at 48 px beside its name, whole and wrapping, then the kind line,
- * which says what it is and its size (creatureKind.ts), its tags, and the
- * quick numbers as `children`. The token panel opens with it, so a token's
+ * which says what it is and its size (creatureKind.ts), its tags, a
+ * control that belongs with them (`afterTags`, a rider's Controlled or
+ * Independent), and the quick numbers as `children`. The token panel opens with it, so a token's
  * details and a character's read alike.
  *
  * A companion's picture carries its character's portrait (`badge`) as a
@@ -39,6 +40,7 @@ export function CreatureHeader(props: {
   /** The name takes focus from script, as a character's page's heading does after a delete it refused (CREATURE_HEADING). */
   focusable?: boolean;
   tags: readonly string[];
+  afterTags?: ReactNode;
   children?: ReactNode;
 }) {
   const { picture, badge, line } = props;
@@ -76,6 +78,7 @@ export function CreatureHeader(props: {
             ))}
           </div>
         ) : null}
+        {props.afterTags}
         {props.children}
       </div>
     </div>
