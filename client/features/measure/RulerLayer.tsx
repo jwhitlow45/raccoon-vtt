@@ -12,7 +12,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
-import { dragLabel, dragReading, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
+import { dragLabel, dragReading, remoteWalk, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
 import { Pill, pillGeometry } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { measureWalk, walkText } from "./walkRuler.ts";
@@ -79,8 +79,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
     return (token, to, walk) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.
       const speeds: Speeds | undefined = "inline" in token.actor ? token.actor.inline.speeds : characters?.[token.actor.ref]?.actor.speeds;
-      const reading = dragReading({ token, to, encounter, activeTokenId, speeds, rules, role, ...(walk ? { walk: remoteWalk(token, to, walk.corners) } : {}) });
-      return walk?.costFt !== undefined ? { ...reading, dragFt: walk.costFt } : reading;
+      return dragReading({ token, to, encounter, activeTokenId, speeds, rules, role, ...(walk ? { walk: remoteWalk(token, to, walk.corners) } : {}), ...(walk?.costFt !== undefined ? { costFt: walk.costFt } : {}) });
     };
   }, [encounter, characters, rules, role]);
   if (!settings) return <Group ref={groupRef} listening={false} />;
@@ -229,17 +228,6 @@ function Ruler(props: { stops: readonly RulerStop[]; tokens: Record<string, Toke
       ) : null}
     </>
   );
-}
-
-/** The walk a remote frame's corners draw, for its band: straight pieces with nothing extra, as players read a leg from its geometry. */
-function remoteWalk(token: Token, to: Point, corners: readonly Point[]) {
-  const all = [...corners, to];
-  return {
-    route: { points: [{ x: token.x, y: token.y, elevation: token.elevation }, ...all.map((p) => ({ x: p.x, y: p.y, elevation: token.elevation }))], pieces: all.map((p): [number, number, number, 0 | 1] => [p.x, p.y, 0, 0]) },
-    build: { buildChunks: {} },
-    halved: () => null,
-    prone: false,
-  };
 }
 
 /**

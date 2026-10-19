@@ -271,6 +271,8 @@ export function dragReading(input: {
   rules: DistanceRules;
   role: "dm" | "player";
   walk?: DragWalk;
+  /** The leg's cost as another device's frame gives it, terrain included, which the corners alone cannot tell: the band and what is left read it. */
+  costFt?: number;
 }): DragRead {
   const { token, encounter, rules, walk } = input;
   const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: token.elevation };
@@ -285,14 +287,15 @@ export function dragReading(input: {
   const legCost = (upTo: readonly RoutePoint[]) =>
     walk?.route ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step }) : straightCost(token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
   const leg = legCost(points);
-  const out: DragRead = { dragFt: leg.cost };
+  const legFt = input.costFt ?? leg.cost;
+  const out: DragRead = { dragFt: legFt };
   const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed) : [];
   if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
   if (fighting && !active) return out;
   const before = trail?.usedFt ?? 0;
   const endHalved = walk ? walk.halved(points[points.length - 1]!) : null;
   if (endHalved) out.halfSpeed = endHalved;
-  const atEnd = speedsLeft(endHalved ? halvedSpeeds(input.speeds) : input.speeds, token.elevation, before + leg.cost)[0];
+  const atEnd = speedsLeft(endHalved ? halvedSpeeds(input.speeds) : input.speeds, token.elevation, before + legFt)[0];
   if (!atEnd) return out;
   let band = atEnd.band;
   // The last spot inside a Half Speed area before the end, if the leg leaves one: its band may be worse than the end's.
@@ -302,10 +305,21 @@ export function dragReading(input: {
     const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost).find((s) => s.kind === atEnd.kind);
     if (there && BAND_ORDER.indexOf(there.band) > BAND_ORDER.indexOf(band)) band = there.band;
   }
-  const total = before + leg.cost;
+  const total = before + legFt;
   const leftFt = band === "walk" ? atEnd.speed - total : band === "dash" ? atEnd.speed * 2 - total : total - atEnd.speed * 2;
   out.left = { ...atEnd, band, leftFt };
   return out;
+}
+
+/** The walk another device's frame draws, for its band: straight pieces through its corners with nothing extra, as players read a leg from its geometry. Its cost comes with the frame (`costFt`). */
+export function remoteWalk(token: MovingToken, to: Point, corners: readonly Point[]): DragWalk {
+  const all = [...corners, to];
+  return {
+    route: { points: [{ x: token.x, y: token.y, elevation: token.elevation }, ...all.map((p) => ({ x: p.x, y: p.y, elevation: token.elevation }))], pieces: all.map((p): RoutePiece => [p.x, p.y, 0, 0]) },
+    build: { buildChunks: {} },
+    halved: () => null,
+    prone: false,
+  };
 }
 
 /** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on. */

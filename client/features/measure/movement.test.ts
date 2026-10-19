@@ -7,7 +7,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
 import { DM, P1, P2, room, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
-import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, speedsLeft, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
+import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -110,6 +110,17 @@ describe("movement since the turn began", () => {
     assert.equal(movementText(70, speedsLeft({ walk: 30 }, 0, 70)), "Moved 70 ft\n10 ft past Dash");
     assert.equal(movementText(15, speedsLeft({ walk: 30, fly: 60, swim: 10 }, 0, 15)), "Moved 15 ft\n15 ft left · Fly 45 ft", "a speed already passed is left out");
     assert.equal(movementText(35, speedsLeft({ walk: 30, fly: 60 }, 10, 35)), "Moved 35 ft\nFly: 25 ft left");
+  });
+
+  test("another member's drag reads its band and what is left from the cost its frame carries, terrain included", () => {
+    // A 30 ft Speed, 25 ft of corners, and 45 ft as the dragging device counted it through rubble.
+    const walker = tok({ x: 0, y: 0 });
+    const to = { x: 5, y: 0 };
+    const read = dragReading({ token: walker, to, encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm", walk: remoteWalk(walker, to, []), costFt: 45 });
+    assert.equal(dragLabel(read), "45 ft · 15 ft left with Dash");
+    assert.equal(read.left!.band, "dash", "drawn yellow");
+    const plain = dragReading({ token: walker, to, encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm", walk: remoteWalk(walker, to, []) });
+    assert.equal(dragLabel(plain), "25 ft · 5 ft left", "a frame without a cost reads its corners");
   });
 
   test("a drag reads against the speed: from the turn's start for the active creature, from the drag's start outside a fight", () => {
