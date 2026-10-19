@@ -41,9 +41,11 @@ function send(id: string, spell: string, over: Partial<CastSend> = {}): CastSend
 }
 
 /** Thorn's two sends, each refused, and the block open on the first, as `cast` says. */
-function render(input: { picked: string | null; cast: { spell: string; roll?: string; area?: string; sent: string } | null; offScene?: boolean; only?: "list" }): string {
+function render(input: { picked: string | null; cast: { spell: string; roll?: string; area?: string; sent: string } | null; offScene?: boolean; only?: "list"; shaped?: true }): string {
   const state = castTable();
   state.characters["thorn-c"] = character("thorn-c", { name: "Thorn", ownerIds: ["p1"], level: 5, stats: THORN });
+  // In a beast's shape Thorn's options wait for the SRD's chunks, which a server render never loads.
+  if (input.shaped) state.characters["thorn-c"]!.actor.srdId = "wolf";
   state.characters["bree-c"]!.ownerIds = ["p1"];
   if (input.offScene) {
     // The DM moved Thorn and Bree to the other scene: the player sees neither, and has no creature to pick.
@@ -70,7 +72,7 @@ function render(input: { picked: string | null; cast: { spell: string; roll?: st
   if (input.picked !== null) options.setState({ picked: input.picked });
   options.getInitialState = options.getState;
   const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: P1, sceneId: "s1", local: { selectedIds: [], multi: false }, ephemeral: { drags: {} } }));
-  const body = input.only === "list" ? createElement(WaitingAsks, { view, pickedKey: input.picked }) : createElement(PlayerOptions, { view, selected: [] });
+  const body = input.only === "list" ? createElement(WaitingAsks, { view, pickedKey: input.picked, blockDraws: false }) : createElement(PlayerOptions, { view, selected: [] });
   return renderToStaticMarkup(
     createElement(RoomProvider, {
       store: store as never,
@@ -113,6 +115,15 @@ describe("the sends leading the options", () => {
     assert.doesNotMatch(markup, /aria-label="Ask for saves: Fireball"/, "the block does not draw for Bree");
     assert.match(list(markup), /Thorn&#x27;s Fireball: not asked\./);
     assert.match(list(markup), /Thorn&#x27;s Hold Person: not asked\./);
+  });
+
+  test("while the block's creature's options load, the block does not draw, so its send shows in the list", () => {
+    const markup = render({ picked: "c:thorn-c", cast: { spell: "Fireball", area: "a1", sent: "f1" }, shaped: true });
+    assert.doesNotMatch(markup, /Rolls for Thorn/, "the options still load");
+    assert.doesNotMatch(markup, /aria-label="Ask for saves: Fireball"/, "no block yet");
+    assert.match(markup, /Fireball: not asked\./);
+    assert.match(markup, /Hold Person: not asked\./);
+    assert.equal(count(markup, REFUSED), 2);
   });
 
   test("with no creature to pick, every send still shows, the block's included", () => {

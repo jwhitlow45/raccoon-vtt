@@ -130,18 +130,20 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
   const last = props.selected[props.selected.length - 1];
   const selectedKey = last !== undefined ? creatureKey(view, { tokenId: last }) : null;
   const current = options.find((o) => o.key === picked) ?? options.find((o) => o.key === selectedKey) ?? options[0];
+  const loaded = useCreatureRolls(current?.creature ?? null);
   // An ask stays in reach with no creature to pick, as for a lent token off the players' scene (docs/design-v1-player-save-spell.md 3.2).
   if (!current) {
     return (
       <>
-        <WaitingAsks view={view} pickedKey={null} />
+        <WaitingAsks view={view} pickedKey={null} blockDraws={false} />
         <Note>Your character's rolls show here once you play one.</Note>
       </>
     );
   }
   return (
     <>
-      <WaitingAsks view={view} pickedKey={current.key} />
+      {/* The open block draws only with its creature's options, so while they load or after a load failed its send shows here. */}
+      <WaitingAsks view={view} pickedKey={current.key} blockDraws={loaded.dice !== null && loaded.rolls !== null && !loaded.failed} />
       {options.length > 1 ? (
         <ChipRow label="Roll for">
           {options.map((o) => (
@@ -151,19 +153,29 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
           ))}
         </ChipRow>
       ) : null}
-      <CreatureOptions key={current.key} creature={current.creature} tokenId={current.tokenId} name={current.name} />
+      <LoadedOptions key={current.key} loaded={loaded} creature={current.creature} tokenId={current.tokenId} name={current.name} />
     </>
   );
 }
 
-function CreatureOptions(props: { creature: ActorTarget; tokenId?: string | undefined; name: string }) {
-  const { creature } = props;
-  const creatures = useMemo(() => [creature], [creature]);
+type Loaded = { dice: DiceView | null; rolls: CreatureRolls | null; failed: boolean };
+
+/** A creature's view and rolls, with its SRD chunks loaded on first need: no rolls while one loads. */
+function useCreatureRolls(creature: ActorTarget | null): Loaded {
+  const creatures = useMemo(() => (creature ? [creature] : []), [creature]);
   const { dice, failed } = useDiceView(creatures);
-  const rolls = dice ? creatureRolls(dice, creature) : null;
+  return { dice, rolls: dice && creature ? creatureRolls(dice, creature) : null, failed };
+}
+
+function CreatureOptions(props: { creature: ActorTarget; tokenId?: string | undefined; name: string }) {
+  return <LoadedOptions loaded={useCreatureRolls(props.creature)} {...props} />;
+}
+
+function LoadedOptions(props: { loaded: Loaded; creature: ActorTarget; tokenId?: string | undefined; name: string }) {
+  const { dice, rolls, failed } = props.loaded;
   if (failed) return <SrdLoadFailed what="The roll options" inline />;
   if (!dice || !rolls) return <Loading text="Loading the roll options…" />;
-  return <OptionsList dice={dice} rolls={rolls} creature={creature} tokenId={props.tokenId} name={props.name} />;
+  return <OptionsList dice={dice} rolls={rolls} creature={props.creature} tokenId={props.tokenId} name={props.name} />;
 }
 
 type Ctx = {
@@ -211,9 +223,9 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
   const numbers = rolls.numbers;
   const named = rolls.named.filter((r) => r.section !== "spells");
   const spells = rolls.named.filter((r) => r.section === "spells");
-  // A block opens under its row where that row draws: its roll's, else the spell's found by name. Else it opens at the top (3.1), as for an area whose spell has no row or a row gone since, so an open block always draws for its creature (WaitingAsks leaves its send to it).
-  const drawn = new Set([...named.filter((r) => ACTION_SECTIONS.some(([section]) => section === r.section)), ...spells].map((r) => r.key));
-  const castRow = cast ? ((cast.roll !== undefined && drawn.has(cast.roll) ? cast.roll : undefined) ?? rolls.named.find((r) => drawn.has(r.key) && sameSpell(r.name, cast.spell))?.key ?? null) : null;
+  // Every named roll draws a row. A block opens under its roll's row, else under the spell's found by name. A roll with no row, as for an area whose spell has none or a row gone since, opens the block at the top (3.1), so an open block always draws for its creature (WaitingAsks leaves its send to it).
+  const drawn = new Set(rolls.named.map((r) => r.key));
+  const castRow = cast ? ((cast.roll !== undefined && drawn.has(cast.roll) ? cast.roll : undefined) ?? rolls.named.find((r) => sameSpell(r.name, cast.spell))?.key ?? null) : null;
   const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
 
   // The effects that bear on a group's rolls, named once in its label rather than under each of its buttons.

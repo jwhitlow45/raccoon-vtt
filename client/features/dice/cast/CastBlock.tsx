@@ -383,13 +383,14 @@ function OwnLevel(props: { spell: string; min: number; value: number; onChange(n
  * Ask again. They show with the panel scrolled off any row, for a caster
  * with no chip (a lent token off the players' scene) and for an area whose
  * spell has no row, after a reload or a replaced block too. The send an
- * open block shows in place is left to it.
+ * open block shows in place is left to it while `blockDraws` says the
+ * picked creature's options, and so the block, are drawn.
  */
-export function WaitingAsks(props: { view: RoomState; pickedKey: string | null }) {
+export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; blockDraws: boolean }) {
   const env = useCastEnv();
   const sends = useSends();
-  // An open block shows its own send in place, but only while it draws: for the picked creature, never with none to pick.
-  const held = useOption((s) => (s.cast !== null && s.cast.key === props.pickedKey ? (s.cast.sent ?? null) : null));
+  // An open block shows its own send in place, but only while it draws: for the picked creature once its options draw, never with none to pick.
+  const held = useOption((s) => (props.blockDraws && s.cast !== null && s.cast.key === props.pickedKey ? (s.cast.sent ?? null) : null));
   const lines = waitingLines(props.view, sends, (id) => env.tracker.state(id), held);
   if (lines.length === 0) return null;
   const casterName = (id: string) => {
