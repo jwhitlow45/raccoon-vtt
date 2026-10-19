@@ -287,6 +287,40 @@ describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
   }
 });
 
+/*
+ * The class of AT-ASTRA-3: a player's undo and redo take the rights the
+ * forward op took. Each case is an op a player may make by a right of
+ * attached tokens, then its undo, its redo and its undo again, each with
+ * nothing changed between.
+ */
+describe("a player's undo and redo take the forward op's rights (6 and 8.3)", () => {
+  const grappled = { actor: { inline: actor({ effects: [effect("g", { key: "grappled" })] }) } };
+  /** The DM's warhorse, which P1's Thorn rides by a controlled ride. */
+  const dmHorse = (s: RoomState) => {
+    s.tokens.horse = { ...s.tokens.horse!, ownerIds: [], x: 4, y: 4 };
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 4, y: 5, attached: { to: "horse", kind: "ride", steer: true } };
+  };
+  const cases: { name: string; setup: (s: RoomState) => void; op: Op }[] = [
+    { name: "a move of the DM's horse Thorn directs", setup: dmHorse, op: { t: "token.move", tokenId: "horse", x: 8, y: 4 } },
+    { name: "a moveMany naming the directed horse", setup: dmHorse, op: { t: "token.moveMany", moves: [{ tokenId: "horse", x: 8, y: 2 }] } },
+    { name: "a Get off the DM's horse by Thorn's player, Thorn locked", setup: (s) => (dmHorse(s), (s.tokens.thorn = { ...s.tokens.thorn!, locked: true })), op: { t: "token.detach", tokenId: "thorn", x: 4, y: 6 } },
+    { name: "a Drag of a goblin the DM marked Grappled", setup: (s) => (s.tokens.gob = { ...s.tokens.gob!, x: 5, y: 7, ...grappled }), op: { t: "token.attach", tokenId: "gob", to: "thorn", kind: "drag", x: 5, y: 7, elevation: 0 } },
+    { name: "a Carry of a Small goblin the DM marked Grappled", setup: (s) => (s.tokens.gob = { ...s.tokens.gob!, size: "small", x: 6, y: 4, ...grappled }), op: { t: "token.attach", tokenId: "gob", to: "horse", kind: "carry", x: 5, y: 4, elevation: 0 } },
+    { name: "a Let go of the goblin Thorn drags", setup: (s) => (s.tokens.gob = { ...s.tokens.gob!, x: 5, y: 7, ...grappled, attached: { to: "thorn", kind: "drag" } }), op: { t: "token.detach", tokenId: "gob" } },
+    { name: "a Put down of the DM's torch Thorn holds", setup: (s) => (s.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 4, y: 6, attached: { to: "thorn", kind: "carry" } })), op: { t: "token.detach", tokenId: "torch" } },
+    { name: "a new seat for the DM's torch on Thorn", setup: (s) => (s.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 4, y: 6, attached: { to: "thorn", kind: "carry" } })), op: { t: "token.move", tokenId: "torch", x: 4.5, y: 6.5 } },
+  ];
+  for (const c of cases) {
+    test(c.name, () => {
+      const t = table(c.setup);
+      assert.equal(t.play(P1, c.op), "ok", "the op");
+      assert.equal(t.undo(), "ok", "its undo");
+      assert.equal(t.redo(), "ok", "its redo");
+      assert.equal(t.undo(), "ok", "its undo again");
+    });
+  }
+});
+
 describe("redo checks walls on the holder and the public dragged creatures only (8.3)", () => {
   const WALL: EdgeFeature = { kind: "wall" };
   /** Thorn drags a goblin marked Grappled at 4,7. In room b a hidden rat is dragged too at 4,5. */

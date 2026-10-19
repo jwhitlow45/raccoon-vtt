@@ -1345,7 +1345,11 @@ function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
   if (!token) return GONE;
   const restored = value && typeof value === "object" ? (value as Token) : null;
   const inPlace = restored !== null && restored.sceneId === current.sceneId && restored.x === current.x && restored.y === current.y;
-  const may = (inPlace && ownsToken(c.state, c.actor, token)) || viaHolder(c, current, restored) ? OK : moveCheck(c, tokenId);
+  // An undo or a redo takes the right its op took (docs/design-v1-attach.md 6 and 8.3): a move's, a controlled mount's
+  // and a new seat's (namedMoveCheck), and a link's own, which its owner may always undo, locked or not, as detachCheck lets them.
+  const linkChanges = restored !== null && restored.attached?.to !== current.attached?.to;
+  const may =
+    (inPlace && ownsToken(c.state, c.actor, token)) || viaHolder(c, current, restored) || (linkChanges && ownsToken(c.state, c.actor, token)) ? OK : namedMoveCheck(c, tokenId, restored ?? undefined);
   if (!may.ok) return may;
   if (!restored) return FORBIDDEN;
   return withoutPose(restored) === withoutPose(current) ? OK : refuse("forbidden", "an undo of yours only moves tokens back");
