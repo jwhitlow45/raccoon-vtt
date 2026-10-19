@@ -450,6 +450,7 @@ export async function createRoom(): Promise<void> {
   const password = await dm.getByLabel("Player password").inputValue();
   await dm.getByRole("button", { name: "Create room" }).click();
   await dm.getByRole("heading", { name: "Save your DM link" }).waitFor();
+  assert.equal(await dm.locator('header img[src="/icon.svg"]').count(), 1, "the DM link opens under the crest, as Join and Claim do");
   const link = (await dm.locator("code").first().textContent()) ?? "";
   const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
   assert.ok(match, `DM link looks wrong: ${link}`);

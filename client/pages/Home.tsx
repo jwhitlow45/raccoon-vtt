@@ -60,9 +60,10 @@ export function Home() {
 }
 
 /**
- * The logo and a name over a page outside a room: Home, Join, a DM link's
- * claim, the error pages and Admin. An error page that carries it still
- * reads as this app, where a bare card looked like a server's error page.
+ * The logo and a name over a page outside a room: Home, a new room's DM
+ * link, Join, a DM link's claim, the error pages and Admin. An error page
+ * that carries it still reads as this app, where a bare card looked like a
+ * server's error page.
  */
 export function HomeHeader(props: { title?: string; tagline?: string; actions?: ReactNode }) {
   return (
@@ -344,7 +345,7 @@ function DmLinkReveal(props: { roomId: string; dmLink: string; password: string 
 
   return (
     <Page>
-      <h1 style={{ margin: 0, fontSize: theme.font.display, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>Save your DM link</h1>
+      <HomeHeader title="Save your DM link" />
       <p style={{ margin: 0, color: theme.color.textMuted }}>
         Opening this link on any device makes it a DM device for this room. It is shown only this once. Keep it
         somewhere safe, like a password manager, and do not share it with players.
