@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
-import type { ActorTarget, DoorRef, Op, OpOf, RefusalCode, TokenInput, TokenPatch } from "./protocol.ts";
+import { MAX_ROUTE_REACH, type ActorTarget, type DoorRef, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
@@ -9,9 +9,10 @@ import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { footprintSize } from "./rules/footprint.ts";
-import { groundAt } from "./rules/heights.ts";
+import { footprintGround, groundAt, standing } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY } from "./rules/movement.ts";
+import { onRouteLattice, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
@@ -177,7 +178,36 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   if (!decision.ok) return decision;
   if (actor.role !== "dm" && setsSave(op)) return refuse("forbidden", SAVE_IS_DMS);
   const levels = levelsFit(op, check);
-  return levels.ok ? squeezeFits(op, check) : levels;
+  if (!levels.ok) return levels;
+  const squeezed = squeezeFits(op, check);
+  return squeezed.ok ? routeFits(op, check) : squeezed;
+}
+
+/** The refusals of a route whose shape no walk has (docs/design-v1-movement.md 7.1), whoever sends it. */
+export const ROUTE_OFF_LATTICE = "a route steps by half squares from where the token stands, inside the scene";
+export const ROUTE_TOO_LONG = `a route reaches at most ${MAX_ROUTE_REACH} squares`;
+
+/**
+ * A move's route, for every role (7.1): each point on the half-square
+ * lattice from where the token stands, its footprint inside the scene,
+ * consecutive points apart, and at most 300 squares of reach in all, each
+ * piece's change of elevation by the walk's own rule (route.ts
+ * `routePoints`). The DM's routes are checked this far and no further.
+ */
+function routeFits(op: Op, c: Check): Decision {
+  if (op.t !== "token.move" || !op.route) return OK;
+  const token = c.state.tokens[op.tokenId];
+  const scene = token ? c.state.scenes[token.sceneId] : undefined;
+  if (!token || !scene) return OK;
+  const fp = footprintSize(token);
+  let prev: Point = { x: token.x, y: token.y };
+  for (const [x, y] of op.route) {
+    const inside = x >= 0 && y >= 0 && x + fp.w <= scene.bounds.w + 1e-9 && y + fp.h <= scene.bounds.h + 1e-9;
+    if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
+    prev = { x, y };
+  }
+  const points = routePoints(c.state.buildChunks, token, op.route, op.elevation ?? token.elevation);
+  return routeReach(points, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
 /** The refusal of a player's op that names an effect's save or its occurrence (docs/design-v1-roll-options.md 6.1). */
@@ -505,7 +535,11 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "token.move": {
       const d = moveCheck(c, op.tokenId);
-      return d.ok ? legCheck(c, op.tokenId, op, op.teleport !== undefined) : d;
+      if (!d.ok) return d;
+      if (!op.route) return legCheck(c, op.tokenId, op, op.teleport !== undefined);
+      // A route of no walk's shape is refused as such before its pieces meet the walls.
+      const shape = routeFits(op, c);
+      return shape.ok ? routeCheck(c, op.tokenId, [op.route], op) : shape;
     }
     case "token.moveMany": {
       for (const move of op.moves) {
@@ -733,7 +767,8 @@ function forPlayer(op: Op, c: Check): Decision {
         if (entry.key.startsWith("token:")) {
           // An undo retraces a move that was allowed when made. A redo makes it again, so walls stop it as they would a new
           // move, except a teleport's, which passed them the first time too (docs/design-v1-maps-vision.md 4.1).
-          const d = restorePoseCheck(c, entry.key.slice("token:".length), entry.value, op.from === "redo" && !op.teleport);
+          const tokenId = entry.key.slice("token:".length);
+          const d = restorePoseCheck(c, tokenId, entry.value, op.from === "redo" && !op.teleport, op.routes?.[tokenId]);
           if (!d.ok) return d;
           continue;
         }
@@ -1151,12 +1186,14 @@ const SIZE_FIELDS = ["size", "w", "h"] as const;
  * Then the footprint put back is judged as a resize to it (resizeRefusal),
  * and nothing but the pose and the size may differ.
  */
-function restorePoseCheck(c: Check, tokenId: string, value: unknown, redo: boolean): Decision {
+function restorePoseCheck(c: Check, tokenId: string, value: unknown, redo: boolean, routes?: readonly (readonly RoutePiece[])[]): Decision {
   const current = c.state.tokens[tokenId];
   const restored = value && typeof value === "object" ? (value as Token) : null;
   if (!current || !restored || SIZE_FIELDS.every((field) => restored[field] === current[field])) {
     const d = restoreMoveCheck(c, tokenId, value);
-    return d.ok && redo && restored ? legCheck(c, tokenId, restored, false) : d;
+    if (!d.ok || !redo || !restored) return d;
+    // A redo of walks meets the walls along each piece of the routes they took, in order, and never routes again (7.4).
+    return routes && routes.length > 0 ? routeCheck(c, tokenId, routes, restored) : legCheck(c, tokenId, restored, false);
   }
   const token = c.visibleToken(tokenId);
   if (!token) return GONE;
@@ -1217,6 +1254,50 @@ function legCheck(c: Check, tokenId: string, to: Pick<Token, "x" | "y"> & { elev
   const blocker = movementRules.legBlocker(c.state, token, end);
   if (blocker === null) return OK;
   return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+}
+
+/**
+ * A player's walk along routes on a scene that blocks movement
+ * (docs/design-v1-movement.md 7.1, 7.4): today's leg test, shifts and all,
+ * on each piece, from the token where the piece starts with the walk's own
+ * elevation there. The first piece stopped refuses the move in today's
+ * words. A redo's routes run one after another from where the token stands
+ * now, each ending where its move landed. When they end anywhere but where
+ * the redo puts the token, the last stretch is a straight leg, as a redo
+ * of plain moves is.
+ */
+function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RoutePiece[])[], to: Pick<Token, "x" | "y"> & { elevation?: number }): Decision {
+  const token = c.state.tokens[tokenId];
+  const scene = token ? c.state.scenes[token.sceneId] : undefined;
+  if (!token || !scene || scene.blockMovement !== true) return OK;
+  let at: Token = token;
+  for (const [n, route] of routes.entries()) {
+    const last = n === routes.length - 1;
+    const end = route[route.length - 1];
+    const landing = last && end && end[0] === to.x && end[1] === to.y ? (to.elevation ?? at.elevation) : undefined;
+    const points = routePoints(c.state.buildChunks, at, route, landing ?? groundOrHeight(c.state, at, end));
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1]!;
+      const b = points[i]!;
+      const from: Token = { ...at, x: a.x, y: a.y, elevation: a.elevation };
+      // Squeezed only where it starts: a walk squeezes nowhere between.
+      if (i > 1) delete from.squeeze;
+      const blocker = movementRules.legBlocker(c.state, from, b);
+      if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+    }
+    const stop = points[points.length - 1]!;
+    at = { ...at, x: stop.x, y: stop.y, elevation: stop.elevation };
+    delete at.squeeze;
+  }
+  if (at.x === to.x && at.y === to.y) return OK;
+  const blocker = movementRules.legBlocker(c.state, at, { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation });
+  return blocker === null ? OK : refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+}
+
+/** Where a kept route of a merged step ended, by the walk's rule: a walker on the ground there, any other token at its height. */
+function groundOrHeight(state: RoomState, token: Token, end: RoutePiece | undefined): number {
+  if (!end || standing(token.elevation, footprintGround(state.buildChunks, token)) !== "ground") return token.elevation;
+  return footprintGround(state.buildChunks, { ...token, x: end[0], y: end[1], squeeze: undefined });
 }
 
 function insideScene(scene: Scene, token: Token, at: Point): boolean {

@@ -84,6 +84,17 @@ describe("drag previews", () => {
     assert.deepEqual(t.p2.got.at(-1), { k: "dragCancel", tokenId: "gob" });
   });
 
+  test("a drag's route cost reaches the DM and the token's owners, never other players (docs/design-v1-movement.md 6.5)", () => {
+    const state = room();
+    state.tokens.mine = token("mine", { ownerIds: ["p1"] });
+    const t = table(state);
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "mine", x: 5, y: 5, path: [3, 4], ft: 35 });
+    assert.deepEqual(t.p1.got.at(-1), { k: "dragMove", tokenId: "mine", x: 5, y: 5, path: [3, 4], ft: 35 });
+    assert.deepEqual(t.p2.got.at(-1), { k: "dragMove", tokenId: "mine", x: 5, y: 5, path: [3, 4] });
+    t.send(t.p1.conn, { k: "dragMove", tokenId: "mine", x: 6, y: 5, ft: 40 });
+    assert.deepEqual(t.dm.got.at(-1), { k: "dragMove", tokenId: "mine", x: 6, y: 5, ft: 40 });
+  });
+
   test("on a fogged scene a player never receives the path, the DM does", () => {
     const state = room();
     state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };

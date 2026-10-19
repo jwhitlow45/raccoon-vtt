@@ -30,6 +30,7 @@ import {
   type StatBlock,
   type TerrainId,
   type Token,
+  type TokenPath,
   type Viewer,
   type WallFeature,
 } from "./model.ts";
@@ -1721,4 +1722,17 @@ function trackerOp(
     default:
       return { t: "encounter.update", entryId: anyEntry(), patch: { reactionUsed: chance(r, 0.6) } };
   }
+}
+
+/**
+ * A path without what each leg took and its bends (docs/design-v1-movement.md
+ * 6.2), for tests of the marks a stop carries, which read as they did
+ * before walking routes. The route tests check those fields themselves.
+ */
+export function withoutWalked(path: TokenPath | undefined): TokenPath | undefined {
+  if (!path) return path;
+  return {
+    turn: path.turn,
+    stops: path.stops.map(({ moved: _m, cost: _c, diag: _d, via: _v, routeSeen: _r, ...rest }) => rest),
+  };
 }

@@ -1,7 +1,7 @@
 import { keys } from "#shared/keys.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
-import { projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
+import { ownsToken, projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
 import type { EphEvent } from "#shared/protocol.ts";
 import { previewSqueezed } from "#shared/rules/movement.ts";
 import type { Connection, PreviewKind } from "./connection.ts";
@@ -80,11 +80,21 @@ function mayMove(state: RoomState, sender: Connection, tokenId: string): boolean
  * into view), so a player gets only the position, which the check below
  * already passed (docs/design-v1-maps-vision.md 4.3.5).
  */
-function forPlayer(state: RoomState, sceneId: string, e: EphEvent): EphEvent {
-  if (e.k !== "dragMove" || e.path === undefined) return e;
+function forPlayer(state: RoomState, sceneId: string, e: EphEvent, receiver: Connection): EphEvent {
+  if (e.k !== "dragMove") return e;
+  let out = e;
+  // A route's cost reads private facts, such as a Swim Speed, so only the token's owners get it (docs/design-v1-movement.md 6.5).
+  if (out.ft !== undefined) {
+    const token = state.tokens[e.tokenId];
+    if (!token || !ownsToken(state, receiver.viewer, token)) {
+      const { ft: _ft, ...rest } = out;
+      out = rest;
+    }
+  }
+  if (out.path === undefined) return out;
   const scene = state.scenes[sceneId];
-  if (!scene?.fogEnabled && scene?.vision?.on !== true) return e;
-  const { path: _path, ...rest } = e;
+  if (!scene?.fogEnabled && scene?.vision?.on !== true) return out;
+  const { path: _path, ...rest } = out;
   return rest;
 }
 
@@ -172,7 +182,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
       continue;
     }
     if (senderMay && allowed(state, receiver, e, withheld)) {
-      receiver.send({ t: "eph", from: sender.memberId, e: receiver.role === "player" ? forPlayer(state, sceneId, e) : e });
+      receiver.send({ t: "eph", from: sender.memberId, e: receiver.role === "player" ? forPlayer(state, sceneId, e, receiver) : e });
       if (heldKey && preview) {
         if (preview.ends) receiver.previewsHeld.delete(heldKey);
         else receiver.previewsHeld.add(heldKey);

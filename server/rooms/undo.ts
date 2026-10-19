@@ -1,6 +1,9 @@
 import { parseKey } from "#shared/keys.ts";
 import type { RoomState, Token } from "#shared/model.ts";
-import { MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
+import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
+
+/** A route as `token.move` carries it. */
+export type KeptRoute = NonNullable<OpOf<"token.move">["route"]>;
 import { guardMatches } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { stableStringify } from "#shared/project.ts";
@@ -67,7 +70,20 @@ export type UndoEntry = {
    * the teleport did. Undone and redone it stays one.
    */
   teleport?: true;
+  /**
+   * The routes of the step's walks, by token, in the order the moves were
+   * made (docs/design-v1-movement.md 7.4), a plain move kept as one piece.
+   * A redo built from the step carries them, so a player's redo meets the
+   * walls along each piece. Kept only while every move the step merged left
+   * one, and `routed` once one of them walked a real route: a step of plain
+   * moves alone redoes as before, by the straight leg.
+   */
+  routes?: Record<string, KeptRoute[]>;
+  routed?: true;
 };
+
+/** One walk an op made, for the step's routes: the token, its route, and whether it bent or cost extra (UndoEntry.routes). */
+export type Walk = { tokenId: string; route: KeptRoute; routed: boolean };
 
 /** A client op: the client it came from (connection.ts clientKey) and its `n`. */
 export type Origin = { client: string; n: number };
@@ -122,7 +138,7 @@ export class UndoStacks {
    * It keeps where its last op left each token, and names its last op as its
    * origin.
    */
-  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false): void {
+  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk): void {
     const s = this.#stacks(memberId);
     s.redo = [];
     if (inverse.length > MAX_RESTORE_ENTRIES) {
@@ -145,6 +161,7 @@ export class UndoStacks {
         else if (!whole && top.opLabel !== undefined) top.label = top.opLabel;
         // A walk merged into a teleport's step is tested again on redo.
         if (!teleport) delete top.teleport;
+        withWalk(top, walk);
         return;
       }
     }
@@ -152,6 +169,10 @@ export class UndoStacks {
     const entry: UndoEntry = group === undefined ? { entries: inverse, label } : { entries: inverse, label: named ?? label, group };
     if (named !== undefined && named !== label) entry.opLabel = label;
     if (teleport) entry.teleport = true;
+    if (walk) {
+      entry.routes = { [walk.tokenId]: [walk.route] };
+      if (walk.routed) entry.routed = true;
+    }
     s.undo.push(withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin));
     if (s.undo.length > UNDO_DEPTH) s.undo.splice(0, s.undo.length - UNDO_DEPTH);
   }
@@ -186,7 +207,7 @@ export class UndoStacks {
    * still the one its op made. It carries no group, so nothing sent later
    * merges into a step that was undone and redone.
    */
-  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false): void {
+  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed">): void {
     const s = this.#stacks(memberId);
     if (inverse.length > MAX_RESTORE_ENTRIES) {
       s.undo = [];
@@ -194,7 +215,11 @@ export class UndoStacks {
       return;
     }
     const target = from === "undo" ? s.redo : s.undo;
-    target.push(withExtras(teleport ? { entries: inverse, label, teleport: true } : { entries: inverse, label }, poses, origin));
+    const entry: UndoEntry = teleport ? { entries: inverse, label, teleport: true } : { entries: inverse, label };
+    // Undone and redone, the step keeps the routes its walks took.
+    if (walked?.routes) entry.routes = walked.routes;
+    if (walked?.routed) entry.routed = true;
+    target.push(withExtras(entry, poses, origin));
     if (target.length > UNDO_DEPTH) target.splice(0, target.length - UNDO_DEPTH);
   }
 
@@ -211,6 +236,27 @@ export class UndoStacks {
     }
     return s;
   }
+}
+
+/**
+ * A merged step's routes: the walk joins its token's list in order. A move
+ * that left none, such as a group's, or a list past MAX_KEPT_ROUTES, drops
+ * them all, and the step redoes as plain moves do, by the straight leg.
+ */
+function withWalk(entry: UndoEntry, walk: Walk | undefined): void {
+  if (!entry.routes || !walk) {
+    delete entry.routes;
+    delete entry.routed;
+    return;
+  }
+  const list = [...(entry.routes[walk.tokenId] ?? []), walk.route];
+  if (list.length > MAX_KEPT_ROUTES) {
+    delete entry.routes;
+    delete entry.routed;
+    return;
+  }
+  entry.routes = { ...entry.routes, [walk.tokenId]: list };
+  if (walk.routed) entry.routed = true;
 }
 
 function withExtras(entry: UndoEntry, poses: Record<string, Pose> | undefined, origin: Origin | undefined): UndoEntry {

@@ -296,7 +296,8 @@ describe("roomStateSchema", () => {
     };
     assert.equal(withPath([stop, { ...stop, x: 5, via: [3, 2, 3, 4], moved: 25, cost: 35, diag: [1, 0.2], routeSeen: true }]).ok, true);
     assert.equal(withPath([stop, { ...stop, x: 5, routeSeen: false }]).ok, false);
-    assert.equal(withPath([stop, { ...stop, x: 5, via: Array.from({ length: 128 }, () => 1) }]).ok, false, "a route has at most 63 corners");
+    assert.equal(withPath([stop, { ...stop, x: 5, via: Array.from({ length: 200 }, () => 1) }]).ok, true, "joined legs keep up to the path's 100 corners");
+    assert.equal(withPath([stop, { ...stop, x: 5, via: Array.from({ length: 202 }, () => 1) }]).ok, false);
     assert.equal(withPath([stop, { ...stop, x: 5, cost: -5 }]).ok, false);
     const chunk = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
     const withChunk = (rough: string) => parseRoomState(JSON.parse(JSON.stringify(room({ buildChunks: { "s1:0,0": { ...chunk, rough } } }))));

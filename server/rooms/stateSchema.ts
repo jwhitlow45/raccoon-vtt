@@ -12,7 +12,7 @@ import {
   MAX_OWNERS,
   MAX_PATH_STOPS,
   MAX_RANGE_RINGS,
-  MAX_ROUTE_PIECES,
+  MAX_PATH_CORNERS,
   MAX_RANGE_RING_FT,
   MAX_RULER_STOPS,
   MAX_TURN_TIMER_SEC,
@@ -227,8 +227,8 @@ const pathStop = z.strictObject({
   seen: z.literal(true).optional(),
   joinedUnseen: z.literal(true).optional(),
   footprint: z.strictObject({ w: z.number().min(0.5).max(20), h: z.number().min(0.5).max(20), squeeze: z.literal(true).optional() }).optional(),
-  // Walking routes (docs/design-v1-movement.md 6.2): the leg's corners, at most a route's 63, and what it took.
-  via: z.array(coord).max(2 * (MAX_ROUTE_PIECES - 1)).optional(),
+  // Walking routes (docs/design-v1-movement.md 6.2): the leg's corners, at most the path's 100 once legs join, and what it took.
+  via: z.array(coord).max(2 * MAX_PATH_CORNERS).optional(),
   moved: z.number().min(0).max(1_000_000).optional(),
   cost: z.number().min(0).max(1_000_000).optional(),
   diag: z.tuple([z.number().min(0).max(1_000_000), z.number().min(0).max(1_000_000)]).optional(),

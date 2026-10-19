@@ -5,7 +5,7 @@ import type { PathStop, RoomState, Token, TokenPath, Viewer } from "../model.ts"
 import { dependents, projectState } from "../project.ts";
 import { MAX_PATH_STOPS, type Op } from "../protocol.ts";
 import { pathThisTurn, stopsForNonOwners, stopsForOwners, withStop } from "../rules/path.ts";
-import { DM, P1, P2, apply, entry, refused, reveal, room, token } from "../testutil.ts";
+import { DM, P1, P2, apply, entry, refused, reveal, room, token, withoutWalked } from "../testutil.ts";
 import { applyOp } from "../reducer.ts";
 
 const START: Op = { t: "encounter.start", entries: [{ id: "n1", tokenId: "wolf", value: 20 }, { id: "n2", tokenId: "gob", value: 10 }] };
@@ -31,8 +31,9 @@ function fight(setup?: (state: RoomState) => void) {
       f.state = apply(f.state, op, who, f.seq);
       return f;
     },
+    // The marks these tests read, without what each leg took (route tests check that).
     path(id: string): TokenPath | undefined {
-      return f.state.tokens[id]!.path;
+      return withoutWalked(f.state.tokens[id]!.path);
     },
   };
   return f.run(START).run(NEXT);
@@ -50,7 +51,7 @@ describe("the active creature's path this turn", () => {
     f.run({ t: "token.update", tokenId: "wolf", patch: { x: 6 } });
     assert.deepEqual(f.path("wolf"), { turn: 2, stops: [at(1, 1), at(4, 1), at(4, 3), at(4, 3, 10), at(5, 3, 10), at(6, 3, 10)] }, "turning in place is no leg");
     assert.equal(f.path("gob"), undefined, "a creature moved out of its turn gets none");
-    assert.equal(pathThisTurn(f.state.encounter, f.state.tokens.wolf!), f.path("wolf"));
+    assert.equal(pathThisTurn(f.state.encounter, f.state.tokens.wolf!), f.state.tokens.wolf!.path);
   });
 
   test("moves outside a fight, a drop where it stood, and a turn from before paths add nothing", () => {
@@ -68,11 +69,11 @@ describe("the active creature's path this turn", () => {
   test("a copy without the turn's start, as a player who could not see it begin holds, leaves the active creature's path as it is", () => {
     const f = fight();
     f.run(move("wolf", 4, 1));
-    const path = f.path("wolf");
+    const path = f.state.tokens.wolf!.path;
     const { turnStart: _start, ...unknown } = f.state.encounter!;
     f.state = { ...f.state, encounter: unknown };
     f.run(move("wolf", 6, 1));
-    assert.equal(f.path("wolf"), path, "the server's answer brings the leg");
+    assert.equal(f.state.tokens.wolf!.path, path, "the server's answer brings the leg");
     f.run(move("gob", 12, 1));
     assert.equal(f.path("gob"), undefined);
   });
@@ -97,7 +98,7 @@ describe("the active creature's path this turn", () => {
   test("Previous brings the earlier turn's path back with the turn, and Next after it starts afresh", () => {
     const f = fight();
     f.run(move("wolf", 4, 1));
-    const path = f.path("wolf");
+    const path = f.state.tokens.wolf!.path;
     f.run(NEXT).run({ t: "encounter.prev" });
     assert.equal(pathThisTurn(f.state.encounter, f.state.tokens.wolf!), path);
     f.run(NEXT).run({ t: "encounter.prev" });

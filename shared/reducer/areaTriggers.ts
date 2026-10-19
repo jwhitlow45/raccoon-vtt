@@ -1,7 +1,9 @@
+import { walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
+import { pieceReach, routePoints, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
 
@@ -192,6 +194,50 @@ function lerp(a: number, b: number, f: number): number {
   return a + (b - a) * f;
 }
 
+/** A routed move's walk (docs/design-v1-movement.md 7.2): its token and its points, elevations by the walk's rule from the state before. */
+type Walked = { tokenId: string; points: RoutePoint[] };
+
+/**
+ * The walk of a `token.move` that carries a route, since op version 13. An
+ * op without one, and every older op, is a straight leg as before.
+ */
+function walkOf(before: RoomState, after: RoomState, op: Op, opVersion: number | undefined): Walked | null {
+  if (op.t !== "token.move" || !op.route || !walksRoutes(opVersion)) return null;
+  const from = before.tokens[op.tokenId];
+  const to = after.tokens[op.tokenId];
+  if (!from || !to || from.sceneId !== to.sceneId) return null;
+  return { tokenId: op.tokenId, points: routePoints(before.buildChunks, from, op.route, to.elevation) };
+}
+
+/** A route's sweep never takes more than this: every half square of 300 squares of reach, and one more a piece for rounding (section 10). */
+const MAX_ROUTE_SWEEP = 664;
+
+/**
+ * The room along a routed walk, piece by piece at the straight leg's own
+ * density (`ceil(reach / 0.5)` samples a piece, elevation interpolated
+ * between its ends), so a route never skips an area a straight leg of its
+ * length would catch, ending with `after` itself.
+ */
+function alongWalk(after: RoomState, walk: Walked): RoomState[] {
+  const fpc = after.meta.settings.feetPerCell;
+  const token = after.tokens[walk.tokenId]!;
+  const out: RoomState[] = [];
+  const { points } = walk;
+  for (let i = 1; i < points.length && out.length < MAX_ROUTE_SWEEP; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const n = Math.max(1, Math.ceil(pieceReach(a, b, fpc) / SWEEP_STEP));
+    for (let k = 1; k <= n && out.length < MAX_ROUTE_SWEEP; k++) {
+      if (i === points.length - 1 && k === n) break;
+      const f = k / n;
+      const placed = { ...after.tokens, [token.id]: { ...token, x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f), elevation: lerp(a.elevation, b.elevation, f) } };
+      out.push({ ...after, tokens: placed });
+    }
+  }
+  out.push(after);
+  return out;
+}
+
 /** The room at each point along the op's leg after it began, ending with `after` itself. */
 function alongLeg(before: RoomState, after: RoomState, moved: { tokens: Set<string>; templateId: string | null }): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
@@ -242,6 +288,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
   if (!inTurn(after)) return;
   const moved = movedBy(op, before, after);
   if (moved.tokens.size === 0 && moved.templateId === null) return;
+  const walk = moved.tokens.size > 0 ? walkOf(before, after, op, tx.env.opVersion) : null;
   let swept: RoomState[] | null = null;
   for (const template of Object.values(after.templates).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (!(template.triggers?.includes("enter") ?? false)) continue;
@@ -259,7 +306,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
-    const leg = outside.length > 0 ? (swept ??= alongLeg(before, after, moved)) : [];
+    const leg = outside.length > 0 ? (swept ??= walk ? alongWalk(after, walk) : alongLeg(before, after, moved)) : [];
     for (const at of leg) {
       const area = at.templates[template.id];
       if (!area) continue;

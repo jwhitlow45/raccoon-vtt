@@ -5,7 +5,7 @@ import { MAX_PATH_STOPS, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { creaturesInArea } from "../rules/aoe.ts";
 import { tokenHeightFt } from "../rules/footprint.ts";
-import { DM, P1, apply, entry, env, refused, room, template, token } from "../testutil.ts";
+import { DM, P1, apply, entry, env, refused, room, template, token, withoutWalked } from "../testutil.ts";
 import { RESHAPE_NOT_A_MOVE } from "./tokens.ts";
 
 /**
@@ -34,7 +34,8 @@ function fight(over: Parameters<typeof token>[1] = {}) {
       f.state = apply(f.state, op, who, f.seq);
       return f;
     },
-    stops: () => f.state.tokens.thorn!.path!.stops,
+    // The marks these tests read, without what each leg took (route tests check that).
+    stops: () => withoutWalked(f.state.tokens.thorn!.path)!.stops,
   };
   return f.run(START).run({ t: "encounter.next" });
 }

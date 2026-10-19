@@ -224,35 +224,24 @@ function latticePiece(dx: number, dy: number, step: number): boolean {
   return Math.abs(dx) < SLACK || Math.abs(dy) < SLACK || Math.abs(Math.abs(dx) - Math.abs(dy)) < SLACK;
 }
 
+/** A spot of a walk without what standing there needs: where the footprint is, how high, and how far along. */
+export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
+
 /**
- * The spots the footprint passes along a walk (6.1, contract 4.3), the start
- * first: `n = ceil(max(|dx|, |dy|) / step)` per piece, exactly along the
- * lattice for an eight-direction piece and snapped as a stopped walk's
+ * The positions the footprint passes along a walk, the start first (6.1,
+ * contract 4.3): `n = ceil(max(|dx|, |dy|) / step)` per piece, exactly along
+ * the lattice for an eight-direction piece and snapped as a stopped walk's
  * spots are (movement.ts `lastClearSpot`) for any other, a repeat dropped.
- * `step` is the token's own lattice unless a caller sets one for a group.
- *
- * A spot is a `stand` when the token may stop there: its core fits, it is
- * squeezed only where the squeeze rule holds and off its own snap grid only
- * squeezed, and the walk cut there is allowed. The cut is allowed for free
- * on the segment of a piece whose straight sweep is clear, which every piece
- * of a searched route is. Any other spot runs the leg test on the cut piece:
- * a snapped spot, and a spot of a plain straight leg allowed only by a
- * shifted path, since a clear segment does not make a snapped part of it
- * clear. On a scene that stops no moves, nothing cuts a walk. The start is
- * a stand by definition. `squeeze` says whether the last spot squeezes, as
- * the op does.
+ * A walker's spots take the ground under them, any other token's rise and
+ * fall evenly between its pieces' ends.
  */
-export function routeSpots(build: BuildState, route: readonly RoutePoint[], token: MovingToken, step?: number, opts: { squeeze?: boolean } = {}): RouteSpot[] {
+export function routeWalk(route: readonly RoutePoint[], token: MovingToken, build: Pick<BuildState, "buildChunks">, step?: number): WalkSpot[] {
   const first = route[0];
   if (!first) return [];
   const lattice = step ?? routeLattice(token);
-  const grid = snapStep(token);
   const grounded = standing(token.elevation, footprintGround(build.buildChunks, token)) === "ground";
-  const blocks = build.scenes[token.sceneId]?.blockMovement === true;
-  const squeezes = canSqueeze(token);
   const stepsOf = (a: RoutePoint, b: RoutePoint) => Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / lattice - SLACK));
-  const n0 = route.length > 1 ? stepsOf(first, route[1]!) : 0;
-  const spots: RouteSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, squeezed: isSqueezed(token), stand: true, progress: [0, 0, n0] }];
+  const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, route.length > 1 ? stepsOf(first, route[1]!) : 0] }];
   const snap = (v: number) => Math.round(v / lattice) * lattice + 0;
   for (let i = 1; i < route.length; i++) {
     const a = route[i - 1]!;
@@ -261,12 +250,6 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
     const dy = b.y - a.y;
     const n = stepsOf(a, b);
     const exact = latticePiece(dx, dy, lattice);
-    const from = spots[spots.length - 1]!;
-    // The token where this piece starts, squeezed if it was there: ledges and the leg test count from here.
-    const at: MovingToken = { ...token, x: a.x, y: a.y, elevation: a.elevation, squeeze: from.squeezed ? true : undefined };
-    let sweep: boolean | undefined;
-    const sweepClear = () => (sweep ??= !blocks || straightClear(build, at, { x: b.x, y: b.y, elevation: b.elevation }));
-    const last = i === route.length - 1;
     for (let k = 1; k <= n; k++) {
       const end = k === n;
       const x = end ? b.x : exact ? a.x + (dx * k) / n : a.x + snap((dx * k) / n);
@@ -274,15 +257,60 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
       const prev = spots[spots.length - 1]!;
       if (!end && x === prev.x && y === prev.y) continue;
       const elevation = end ? b.elevation : grounded ? footprintGround(build.buildChunks, { ...token, x, y, squeeze: undefined }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
-      const p = { x, y };
-      const squeezed = last && end && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, at, p);
-      const onGrid = multipleOf(x - token.x, grid) && multipleOf(y - token.y, grid);
-      const stand =
-        (squeezed || onGrid) &&
-        !coreBlocked(build, at, p) &&
-        (!blocks || ((exact || end) && sweepClear()) || legStop(build, at, { x, y, elevation }) === null);
-      spots.push({ x, y, elevation, squeezed, stand, progress: [i - 1, k, n] });
+      spots.push({ x, y, elevation, progress: [i - 1, k, n] });
     }
+  }
+  return spots;
+}
+
+/**
+ * The spots of a walk (`routeWalk`) with whether the token may stop at each
+ * (6.1, contract 4.3). A spot is a `stand` when its core fits, it is
+ * squeezed only where the squeeze rule holds and off the token's own snap
+ * grid only squeezed, and the walk cut there is allowed. The cut is allowed
+ * for free on the segment of a piece whose straight sweep is clear, which
+ * every piece of a searched route is. Any other spot runs the leg test on
+ * the cut piece: a snapped spot, and a spot of a plain straight leg allowed
+ * only by a shifted path, since a clear segment does not make a snapped
+ * part of it clear. On a scene that stops no moves, nothing cuts a walk.
+ * The start is a stand by definition. `squeeze` says whether the last spot
+ * squeezes, as the op does.
+ */
+export function routeSpots(build: BuildState, route: readonly RoutePoint[], token: MovingToken, step?: number, opts: { squeeze?: boolean } = {}): RouteSpot[] {
+  const walk = routeWalk(route, token, build, step);
+  if (walk.length === 0) return [];
+  const lattice = step ?? routeLattice(token);
+  const grid = snapStep(token);
+  const blocks = build.scenes[token.sceneId]?.blockMovement === true;
+  const squeezes = canSqueeze(token);
+  const spots: RouteSpot[] = [{ ...walk[0]!, squeezed: isSqueezed(token), stand: true }];
+  let piece = -1;
+  let at: MovingToken = token;
+  let exact = false;
+  let sweep: boolean | undefined;
+  for (let s = 1; s < walk.length; s++) {
+    const w = walk[s]!;
+    const [i, k, n] = w.progress;
+    const a = route[i]!;
+    const b = route[i + 1]!;
+    if (i !== piece) {
+      piece = i;
+      // The token where this piece starts, squeezed if it was there: ledges and the leg test count from here.
+      at = { ...token, x: a.x, y: a.y, elevation: a.elevation, squeeze: spots[spots.length - 1]!.squeezed ? true : undefined };
+      exact = latticePiece(b.x - a.x, b.y - a.y, lattice);
+      sweep = undefined;
+    }
+    const end = k === n;
+    const last = end && i === route.length - 2;
+    const p = { x: w.x, y: w.y };
+    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, at, p);
+    const onGrid = multipleOf(w.x - token.x, grid) && multipleOf(w.y - token.y, grid);
+    const sweepClear = () => (sweep ??= !blocks || straightClear(build, at, { x: b.x, y: b.y, elevation: b.elevation }));
+    const stand =
+      (squeezed || onGrid) &&
+      !coreBlocked(build, at, p) &&
+      (!blocks || ((exact || end) && sweepClear()) || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
+    spots.push({ ...w, squeezed, stand });
   }
   return spots;
 }

@@ -392,6 +392,21 @@ export function inSightOfNonOwners(state: RoomState, token: Token, env: Pick<Env
   return !withheldFromPlayers(state, fogReader(state), sightReader(state), token, revealSeenAnywhere(env.opVersion));
 }
 
+/**
+ * Whether players who do not own the token would see it at every one of
+ * these spots, each asked of the token placed there against the state as it
+ * is (docs/design-v1-movement.md 7.2): the stops' rule, `inSightOfNonOwners`,
+ * with the fog and sight read once for the whole walk.
+ */
+export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x: number; y: number; elevation: number; squeezed?: boolean }[], env: Pick<Env, "opVersion">): boolean {
+  if (behindBlackout(state) || token.visibility === "dm") return false;
+  const fogged = fogReader(state);
+  const sight = sightReader(state);
+  const revealed = revealSeenAnywhere(env.opVersion);
+  const { squeeze: _squeeze, ...rest } = token;
+  return spots.every((p) => !withheldFromPlayers(state, fogged, sight, { ...rest, x: p.x, y: p.y, elevation: p.elevation, ...(p.squeezed ? { squeeze: true as const } : {}) }, revealed));
+}
+
 /** The same question for an initiative row, by the encounter projection's rule: not hidden, in the order players see, and its creature in sight. */
 export function rowSeenByNonOwners(state: RoomState, entry: InitEntry, env: Pick<Env, "opVersion">): boolean {
   if (entry.hidden || behindBlackout(state) || !orderShown(state, entry)) return false;

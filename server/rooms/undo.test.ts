@@ -598,3 +598,65 @@ describe("asks for saves and undo (docs/design-v1-player-save-spell.md 5.6)", ()
     assert.equal(undone.log.filter((e) => e.data?.type === "cast").length, 1, "the undo writes no line of its own, so no toast");
   });
 });
+
+describe("a player's walks around walls on undo and redo (docs/design-v1-movement.md 7.4)", () => {
+  const visible = () => true;
+  const deps = { canUseAsset: () => true };
+  const route: [number, number, number, 0 | 1][] = [
+    [1, 4, 0, 0],
+    [6, 4, 0, 0],
+    [6, 1, 0, 0],
+  ];
+
+  /** A wall along x = 3 from y = 0 to 3, which Thorn walks around. */
+  function walled() {
+    const state = room({ tokens: { thorn: token("thorn", { name: "Thorn", ownerIds: ["p1"], x: 1, y: 1 }) } });
+    state.buildChunks["s1:0,0"] = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: { "3,0,w": { kind: "wall" }, "3,1,w": { kind: "wall" }, "3,2,w": { kind: "wall" } } };
+    state.scenes.s1!.blockMovement = true;
+    return state;
+  }
+
+  test("the step keeps the route, its redo carries it and passes the wall the straight leg would meet, undone and redone again", () => {
+    let state = walled();
+    const stacks = new UndoStacks();
+    const op: Op = { t: "token.move", tokenId: "thorn", x: 6, y: 1, route };
+    const moved = applyOp(state, op, P1, env(1));
+    assert.ok(moved.ok);
+    state = moved.state;
+    stacks.push("p1", moved.inverse!, "moving Thorn", undefined, posesAfter(state, moved.inverse!), undefined, undefined, false, { tokenId: "thorn", route, routed: true });
+    for (const [from, seq] of [["undo", 2], ["redo", 3], ["undo", 4], ["redo", 5]] as const) {
+      const step = from === "undo" ? stacks.popUndo("p1")! : stacks.popRedo("p1")!;
+      assert.deepEqual(step.routes, { thorn: [route] });
+      assert.equal(step.routed, true);
+      const built = poseRestore(state, { ...step, poses: step.poses! }, visible);
+      assert.ok(built.ok);
+      const restore: Op = { t: "sys.restore", entries: built.entries, from, deps: true, ...(from === "redo" && step.routed ? { routes: step.routes! } : {}) };
+      assert.ok(canApply(restore, P1, state, deps).ok, `the ${from} passes`);
+      if (from === "redo") {
+        const { routes: _routes, ...straight } = restore as Extract<Op, { t: "sys.restore" }>;
+        assert.equal(canApply(straight, P1, state, deps).ok, false, "the straight leg meets the wall");
+      }
+      const result = applyOp(state, restore, P1, env(seq));
+      assert.ok(result.ok);
+      state = result.state;
+      stacks.pushRestored("p1", from, result.inverse!, step.label, posesAfter(state, result.inverse!), step.origin, false, step);
+    }
+  });
+
+  test("a merged step keeps its walks in order, a plain move among them as one piece, and drops them when a move left none", () => {
+    const stacks = new UndoStacks();
+    const entry = (k: string): RestoreEntry[] => [{ key: `token:${k}`, value: null, expectHash: k.repeat(32) }];
+    // Entries of their own keys, so the two merge whatever their guards say: only the walks are under test.
+    stacks.push("p1", entry("a"), "moving a", "g", {}, undefined, undefined, false, { tokenId: "a", route: [[2, 2, 0, 0]], routed: false });
+    stacks.push("p1", entry("c"), "moving a", "g", {}, undefined, undefined, false, { tokenId: "a", route, routed: true });
+    const merged = stacks.popUndo("p1")!;
+    assert.deepEqual(merged.routes, { a: [[[2, 2, 0, 0]], route] });
+    assert.equal(merged.routed, true);
+    stacks.push("p1", entry("a"), "moving a", "h", {}, undefined, undefined, false, { tokenId: "a", route: [[2, 2, 0, 0]], routed: false });
+    assert.equal(stacks.popUndo("p1")!.routed, undefined, "plain moves alone redo by the straight leg");
+    stacks.push("p1", entry("a"), "moving a", "i", {}, undefined, undefined, false, { tokenId: "a", route, routed: true });
+    stacks.push("p1", entry("b"), "moving b", "i", {});
+    const dropped = stacks.popUndo("p1")!;
+    assert.deepEqual([dropped.routes, dropped.routed], [undefined, undefined]);
+  });
+});

@@ -1,11 +1,12 @@
 import { keys } from "../keys.ts";
-import { healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers } from "../migrate.ts";
+import { healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
-import { inSightOfNonOwners } from "../project.ts";
+import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
 import { MAX_RULER_STOPS, type ActorPatch, type OpOf, type TokenPatch } from "../protocol.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
-import { footprintSize, isSqueezed, stopFootprint } from "../rules/footprint.ts";
-import { pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
+import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
+import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
+import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -348,7 +349,7 @@ function judgedIn(tx: Tx, tokens: readonly Token[]): Judged {
 }
 
 function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; next: Token }, judged: Judged): void {
-  tx.write(keys.token(token.id), withPath(tx, token, next, judged, move.teleport !== undefined));
+  tx.write(keys.token(token.id), withPath(tx, token, next, judged, move.teleport !== undefined, move.route));
   if (move.teleport !== undefined) tx.addEvent({ type: "teleport", tokenId: token.id, past: move.teleport });
 }
 
@@ -374,7 +375,7 @@ function placeMoved(tx: Tx, { move, token, next }: { move: Move; token: Token; n
  * footprint now unless it holds its own. Ops stored before version 6 did
  * neither (`resizeStop`), and replay as they were.
  */
-function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false): Token {
+function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[]): Token {
   if (after.sceneId !== before.sceneId) return withoutPath(after);
   const from = footprintSize(before);
   const to = footprintSize(after);
@@ -392,18 +393,61 @@ function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted
     return active?.tokenId === after.id ? after : withoutPath(after);
   }
   if (turn.tokenId !== after.id) return withoutPath(after);
+  // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
+  const walked: Walked | undefined = walksRoutes(tx.env.opVersion) ? { token: after, rules: tx.state.meta.settings } : undefined;
   let path: TokenPath = before.path?.turn === turn.seq ? before.path : { turn: turn.seq, stops: turn.sceneId === before.sceneId ? [startStop(turn)] : [] };
   // Every move of the creature this turn is a leg, so the last stop is where it stood. The check keeps a stop from being skipped if not.
   const last = path.stops[path.stops.length - 1];
-  if (!last || !sameSpot(last, before)) path = withStop(path, stopAt(judged.before, before, tx.env));
+  if (!last || !sameSpot(last, before)) path = withStop(path, stopAt(judged.before, before, tx.env), undefined, walked);
   // Where it stops is judged as the finished move will be: with it and every token moving with it there, their lights too.
-  const stop = stopAt(judged.after(), after, tx.env);
+  let stop = stopAt(judged.after(), after, tx.env);
   if (reshaped) {
     const old = stopFootprint(before);
     path = { turn: path.turn, stops: path.stops.map((s): PathStop => (s.footprint ? s : { ...s, footprint: old })) };
   }
+  if (walked) stop = walkedStop(tx, path, stop, before, after, judged, route);
   const counts = !resized && !(reshaped && inPlace) && !uncounted;
-  return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to) };
+  return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to, walked) };
+}
+
+/**
+ * The new stop with what its leg took (docs/design-v1-movement.md 6.2):
+ * `moved`, `cost` and `diag` by one pure rule from the op's route, or from
+ * the plain straight leg's geometry, with the 5-10-5 count running on from
+ * the turn's counted legs. A Swim Speed, which only the DM and the owners
+ * receive, takes the swimming foot off `cost` alone. The route's corners
+ * are `via`, and `routeSeen` marks a leg players who do not own the token
+ * saw at every spot, before and after the move (7.2).
+ */
+function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined): PathStop {
+  const rules = tx.state.meta.settings;
+  const from = path.stops[path.stops.length - 1]!;
+  const counter = pathCounters(after, path.stops, rules);
+  let taken: LegCost;
+  let walk: RoutePoint[];
+  if (route) {
+    walk = routePoints(tx.state.buildChunks, before, route, after.elevation);
+    const swimSpeed = (speedsOf(tx.state, before)?.swim ?? 0) > 0;
+    taken = routeFeet(walk, route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
+  } else {
+    walk = [
+      { x: before.x, y: before.y, elevation: before.elevation },
+      { x: after.x, y: after.y, elevation: after.elevation },
+    ];
+    taken = straightCost(after, from, stop, rules, counter);
+  }
+  const out: PathStop = { ...stop, moved: taken.moved, cost: taken.cost };
+  if (taken.diag[0] !== 0 || taken.diag[1] !== 0) out.diag = taken.diag;
+  if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
+  // Squeezed where it starts and ends as it was and will be. A walk squeezes nowhere between, as its elevation rule reads the full footprint.
+  const spots = routeWalk(walk, before, judged.before).map((p, i, all) => ({ ...p, squeezed: i === 0 ? isSqueezed(before) : i === all.length - 1 ? isSqueezed(after) : false }));
+  if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
+  return out;
+}
+
+/** The speeds the token's actor holds: its own, or its character's. */
+function speedsOf(state: RoomState, token: Token): Actor["speeds"] | undefined {
+  return "inline" in token.actor ? token.actor.inline.speeds : state.characters[token.actor.ref]?.actor.speeds;
 }
 
 function startStop(turn: TurnStart): PathStop {
