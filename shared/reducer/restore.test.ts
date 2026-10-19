@@ -4,6 +4,7 @@ import type { RoomState, Viewer } from "../model.ts";
 import type { Op, RestoreEntry } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { actor, chance, character, companionBlock, env, int, member, pick, rng, room, token } from "../testutil.ts";
+import { MOVE_PLAYERS_FIRST } from "../permissions.ts";
 import { DEPENDED_ON, PARENT_GONE } from "./misc.ts";
 
 const A: Viewer = { memberId: "dmA", role: "dm" };
@@ -83,9 +84,21 @@ describe("a restore never strands work on a scene, character or token that is go
       const used = run(created.state, op, B, 2);
       const r = undo(used.state, created.inverse, 3);
       assert.ok(!r.ok);
-      assert.equal(r.message, DEPENDED_ON);
+      // The players on it are moved first, as a delete of their scene says.
+      assert.equal(r.message, what === "player scene" ? MOVE_PLAYERS_FIRST : DEPENDED_ON);
     });
   }
+
+  test("redoing a scene's delete after the players moved back onto it says to move them first", () => {
+    const created = run(twoDms(), newScene, A, 1);
+    const deleted = run(created.state, { t: "scene.delete", sceneId: "crypt" }, A, 2);
+    const back = undo(deleted.state, deleted.inverse, 3);
+    assert.ok(back.ok, back.ok ? "" : back.message);
+    const moved = run(back.state, onScene["player scene"]!, B, 4);
+    const redo = applyOp(moved.state, { t: "sys.restore", entries: back.inverse!, from: "redo", deps: true }, A, env(5));
+    assert.ok(!redo.ok);
+    assert.equal(redo.message, MOVE_PLAYERS_FIRST);
+  });
 
   test("a stored restore without the server's mark applies as the older build applied it, so its room still replays", () => {
     const created = run(twoDms(), newScene, A, 1);
