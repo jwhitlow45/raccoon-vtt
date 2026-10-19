@@ -4,7 +4,7 @@ import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts"
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { Group, Help } from "../../components/Panel.tsx";
+import { Group, Help, Section } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -13,6 +13,7 @@ import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { useSrdList } from "../tokens/StatSummary.tsx";
 import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
+import { knownFormPatch, knownFormsIn, missingFormText, rememberedDruidLevel } from "./knownForms.ts";
 import { useOpenPcStats } from "./open.ts";
 import { PcStatsView } from "./PcStatsView.tsx";
 import { END_SHAPE, shapeNote } from "./shape.ts";
@@ -28,7 +29,8 @@ import { ShapePicker } from "./ShapePicker.tsx";
  * "Take a shape". With a block or a shape, "Take a shape" sits on the fold's
  * row. A shape shows what it does, the numbers the character rolls with in
  * it, the creature's block and "End the shape". Without one, the block's
- * view and Edit.
+ * view and Edit. A Druid's known forms come first, each a one-tap Wild
+ * Shape, in no shape or in Wild Shape (docs/design-v1-known-forms.md 5.3).
  */
 export function PcStatBlock(props: {
   character: Character;
@@ -53,10 +55,14 @@ export function PcStatBlock(props: {
       </SmallButton>
     ) : null;
   const picker = picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null;
+  // In another shape, such as Polymorph, the forms are not drawn: End the shape first.
+  const forms = edits && (character.knownForms?.length ?? 0) > 0 && pcShape(character) !== "other" ? <KnownFormsSection character={character} /> : null;
   if (!character.stats && !shaped) {
+    const count = character.knownForms?.length ?? 0;
     return (
       <>
-        <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary="None yet">
+        <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={count > 0 ? `${count} known ${count === 1 ? "form" : "forms"}` : "None yet"}>
+          {forms}
           {edits ? (
             <>
               <Help>Add this character’s stat block, or take a shape such as Wild Shape.</Help>
@@ -74,6 +80,7 @@ export function PcStatBlock(props: {
   return (
     <>
       <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} action={take}>
+        {forms}
         {shaped ? <ShapeBody character={character} edits={edits} /> : <PcStatsView character={character} />}
         {edits ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
@@ -83,6 +90,51 @@ export function PcStatBlock(props: {
       </Group>
       {picker}
     </>
+  );
+}
+
+/**
+ * A Druid's known forms as one-tap buttons, sorted as in Take a shape. One
+ * takes the form as Wild Shape, as there. In Wild Shape the current form is
+ * pressed and the others change to theirs, which is using Wild Shape again:
+ * the reducer keeps the first AC and speeds to put back, and the new form's
+ * Temporary HP go only where they are more than held. Each button's text
+ * names it, with no `label`, which would also set a native tooltip.
+ */
+function KnownFormsSection(props: { character: Character }) {
+  const { character } = props;
+  const actions = useRoomActions();
+  const roomId = useRoomView((s) => s.roomId);
+  const { list, failed } = useSrdList(true);
+  const known = knownFormsIn(character.knownForms, list ?? []);
+  const current = pcShape(character) === "wild" ? character.actor.srdId : undefined;
+  return (
+    <Section label="Known forms">
+      {failed ? (
+        <SrdLoadFailed what="The known forms" inline />
+      ) : !list ? (
+        <Loading text="Loading the known forms…" />
+      ) : (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+            {known.forms.map((m) => (
+              <SmallButton
+                key={m.srdId}
+                wrap
+                pressed={m.srdId === current}
+                disabled={m.srdId === current}
+                onClick={() => actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: knownFormPatch(m, character, rememberedDruidLevel(roomId, character.id)) } })}
+              >
+                {m.name}
+              </SmallButton>
+            ))}
+          </div>
+          {known.missing.map((id) => (
+            <Note key={id}>{missingFormText(id)}</Note>
+          ))}
+        </>
+      )}
+    </Section>
   );
 }
 
