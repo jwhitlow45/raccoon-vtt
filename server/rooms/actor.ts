@@ -933,6 +933,7 @@ export class RoomActor {
       }
       restoredFrom = op.t;
       let entries = step.entries;
+      let quiet: string[] | undefined;
       if (step.poses) {
         const state = this.#staged.state;
         const moved = poseRestore(state, { ...step, poses: step.poses }, (id) => viewer.role === "dm" || projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) !== null);
@@ -941,13 +942,14 @@ export class RoomActor {
           return;
         }
         entries = moved.entries;
+        quiet = moved.quiet;
       }
       // `deps` turns on the reference checks (design 7.7). It is stored with the op, so replay checks it the same way.
       // A redo of walks around walls keeps their routes, which only permissions read (docs/design-v1-movement.md 7.4).
       const routes = op.t === "redo" && step.routed && step.routes ? { routes: step.routes } : {};
       // A controlled ride the step ended or made shares its turn again when put back on that turn (docs/design-v1-attach.md 8.3).
       const rides = step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {};
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides });
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}) });
       if (!checked.ok) {
         this.#refuse(key, wm, n, "invalid", checked.message);
         return;

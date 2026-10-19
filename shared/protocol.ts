@@ -1741,6 +1741,14 @@ export const serverOnlyOps = [
      * redone mounting shares the turn again and nothing else ever does.
      */
     rides: z.array(z.strictObject({ seq: z.number().int().min(0), mount: id, rider: id })).min(1).max(LIMITS.turnMounts).optional(),
+    /**
+     * The silent passengers among the entries (docs/design-v1-attach.md
+     * 8.3): tokens that rode along by a chain not every player sees when the
+     * step was made, put back by their holder's move alone. A player's
+     * restore checks never read them, so no hidden change answers. Only
+     * permissions read it, and only the server builds a restore.
+     */
+    quiet: z.array(id).min(1).max(MAX_RESTORE_ENTRIES).optional(),
   }),
   /**
    * What the party saw this batch that the scene's explored layer lacked

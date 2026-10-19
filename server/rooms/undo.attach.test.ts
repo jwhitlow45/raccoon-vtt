@@ -62,12 +62,21 @@ const getOff: Op = { t: "token.detach", tokenId: "thorn", x: 4, y: 6 };
 const endTurn = (t: Table): Op => ({ t: "encounter.next", from: { entry: t.state.encounter!.activeEntryId ?? null, round: t.state.encounter!.round } });
 const row = (t: Table, tokenId: string) => t.state.encounter!.entries.find((e) => e.tokenId === tokenId)!;
 
-/** Both rooms' answers to the same step, which must agree, and every player's copies after it. */
-function both(a: Table, b: Table, step: (t: Table) => string, players: readonly Viewer[] = [P1, P2]): string {
+/**
+ * Both rooms' answers to the same step, which must agree, and every
+ * player's copies after it. `revealed` names visible tokens the
+ * carried-object reveal may move in one room and not the other (8.0).
+ */
+function both(a: Table, b: Table, step: (t: Table) => string, players: readonly Viewer[] = [P1, P2], revealed: readonly string[] = []): string {
   const ra = step(a);
   const rb = step(b);
   assert.equal(ra, rb, "the answer differs");
-  for (const p of players) assert.deepEqual(projectState(a.state, p, { sceneId: "s1" }), projectState(b.state, p, { sceneId: "s1" }), `${p.memberId} sees the rooms differ`);
+  const copy = (t: Table, p: Viewer) => {
+    const out = projectState(t.state, p, { sceneId: "s1" });
+    for (const id of revealed) delete out.tokens[id];
+    return out;
+  };
+  for (const p of players) assert.deepEqual(copy(a, p), copy(b, p), `${p.memberId} sees the rooms differ`);
   return ra;
 }
 
@@ -219,6 +228,63 @@ describe("a player's undo of a group move (8.3)", () => {
       assert.equal(b.t("torch").attached?.to, stalkerMoves ? undefined : "sa");
     }
   });
+});
+
+/*
+ * The class of AT-ASTRA-1: no hidden state may change a player's undo or
+ * redo answer. Each generator is a pair of rooms that start alike, take the
+ * same player's group move, and then differ only by what the DM does unseen
+ * in room b (room a takes a neutral edit in its place). Every player's copy
+ * stays the same, so the player's undo, and then their redo, must answer
+ * alike in both rooms and leave their copies alike.
+ */
+describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
+  /** P1's horse carries an imp no player sees, which carries a torch every player sees and nobody owns. */
+  const imp = (s: RoomState) => {
+    s.tokens.imp = token("imp", { name: "Imp", size: "tiny", x: 5, y: 5, visibility: "dm", attached: { to: "horse", kind: "perch" } });
+    s.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 5, y: 5, attached: { to: "imp", kind: "carry" } });
+  };
+  /** Thorn drags a rat no player sees, a row up. */
+  const rat = (s: RoomState) => (s.tokens.rat = token("rat", { name: "Rat", size: "small", x: 4, y: 5, visibility: "dm", attached: { to: "thorn", kind: "drag" } }));
+  const neutral: Op = { t: "token.update", tokenId: "gob", patch: { name: "Goblin" } };
+  const moveHorse: Op = { t: "token.move", tokenId: "horse", x: 8, y: 4 };
+  const moveThorn: Op = { t: "token.move", tokenId: "thorn", x: 8, y: 6 };
+  const pairs: { name: string; setup: (s: RoomState) => void; move: Op; unseen: Op[] }[] = [
+    { name: "the DM puts down the visible torch the hidden imp carries", setup: imp, move: moveHorse, unseen: [{ t: "token.detach", tokenId: "torch" }] },
+    { name: "the DM deletes the hidden imp, so the torch comes loose", setup: imp, move: moveHorse, unseen: [{ t: "token.delete", tokenId: "imp" }] },
+    {
+      name: "the DM hands the torch to another hidden creature in the same spot",
+      setup: (s) => {
+        imp(s);
+        s.tokens.sprite = token("sprite", { name: "Sprite", size: "tiny", x: 9, y: 5, visibility: "dm" });
+      },
+      move: moveHorse,
+      unseen: [{ t: "token.attach", tokenId: "torch", to: "sprite", kind: "carry", x: 9, y: 5, elevation: 0 }],
+    },
+    {
+      name: "the DM puts a new hidden passenger on the horse",
+      setup: (s) => (s.tokens.sprite = token("sprite", { name: "Sprite", size: "tiny", x: 12, y: 2, visibility: "dm" })),
+      move: moveHorse,
+      unseen: [{ t: "token.attach", tokenId: "sprite", to: "horse", kind: "perch", x: 8, y: 4, elevation: 0 }],
+    },
+    { name: "the DM takes the hidden imp off and away with its torch hidden too", setup: (s) => (imp(s), (s.tokens.torch = { ...s.tokens.torch!, visibility: "dm" })), move: moveHorse, unseen: [{ t: "token.detach", tokenId: "imp" }, { t: "token.move", tokenId: "imp", x: 14, y: 10 }] },
+    { name: "the DM lets the hidden rat go and moves it off", setup: rat, move: moveThorn, unseen: [{ t: "token.detach", tokenId: "rat" }, { t: "token.move", tokenId: "rat", x: 2, y: 10 }] },
+    { name: "the DM moves the hidden rat beside Thorn, still dragged", setup: rat, move: moveThorn, unseen: [{ t: "token.move", tokenId: "rat", x: 9, y: 7 }] },
+  ];
+  for (const pair of pairs) {
+    test(pair.name, () => {
+      const a = table(pair.setup);
+      const b = table(pair.setup);
+      both(a, b, (t) => t.play(P1, pair.move));
+      for (const op of pair.unseen) assert.equal(b.play(DM, op), "ok", `${op.t} in room b`);
+      a.play(DM, neutral);
+      // The torch follows its hidden holder back and forth in room a only, by the reveal: its copy is the one thing that may differ.
+      const revealed = ["torch"];
+      both(a, b, (t) => t.undo(), [P1, P2], revealed);
+      both(a, b, (t) => t.redo(), [P1, P2], revealed);
+      both(a, b, (t) => t.undo(), [P1, P2], revealed);
+    });
+  }
 });
 
 describe("redo checks walls on the holder and the public dragged creatures only (8.3)", () => {

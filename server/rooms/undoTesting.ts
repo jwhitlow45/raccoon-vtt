@@ -75,10 +75,12 @@ export class UndoTable {
     const step = from === "undo" ? this.stacks.popUndo(who.memberId) : this.stacks.popRedo(who.memberId);
     if (!step) return `nothing to ${from}`;
     let entries = step.entries;
+    let quiet: string[] | undefined;
     if (step.poses) {
       const moved = poseRestore(this.state, { ...step, poses: step.poses }, this.#shows(who));
       if (!moved.ok) return moved.message;
       entries = moved.entries;
+      quiet = moved.quiet;
     }
     const op: Op = {
       t: "sys.restore",
@@ -88,6 +90,7 @@ export class UndoTable {
       ...(step.teleport ? { teleport: true as const } : {}),
       ...(from === "redo" && step.routed && step.routes ? { routes: step.routes } : {}),
       ...(step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {}),
+      ...(quiet ? { quiet } : {}),
     };
     const allowed = canApply(op, who, this.state, deps);
     if (!allowed.ok) return allowed.message;

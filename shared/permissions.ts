@@ -772,11 +772,19 @@ function forPlayer(op: Op, c: Check): Decision {
     case "sys.restore": {
       // A player's stack holds only their own drawings and token moves and resizes (design 7.7), so that is all a restore may touch.
       const restoring = restoredTokens(op);
+      const quiet = new Set(op.quiet ?? []);
       for (const entry of op.entries) {
         if (entry.key.startsWith("token:")) {
           // An undo retraces a move that was allowed when made. A redo makes it again, so walls stop it as they would a new
           // move, except a teleport's, which passed them the first time too (docs/design-v1-maps-vision.md 4.1).
           const tokenId = entry.key.slice("token:".length);
+          // A silent passenger of the step answers nothing, whatever the DM changed about it unseen since (docs/design-v1-attach.md 8.3).
+          if (quiet.has(tokenId)) {
+            const current = c.state.tokens[tokenId];
+            const restored = entry.value && typeof entry.value === "object" ? (entry.value as Token) : null;
+            if (!current || !restored || withoutPose(restored) !== withoutPose(current)) return FORBIDDEN;
+            continue;
+          }
           const redo = op.from === "redo" && !op.teleport;
           const holder = carriedThroughout(c, tokenId, entry.value, restoring);
           const d = holder ? restoreCarriedCheck(c, tokenId, entry.value, redo, holder, op.routes?.[holder], restoring) : restorePoseCheck(c, tokenId, entry.value, redo, op.routes?.[tokenId]);

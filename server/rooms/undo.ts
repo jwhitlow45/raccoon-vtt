@@ -39,7 +39,19 @@ type Place = Pick<Token, "x" | "y" | "elevation" | "rotation" | "squeeze">;
  * (docs/design-v1-token-window.md 8.7), and an undo of a move or a resize
  * would put back a footprint someone changed since.
  */
-export type Pose = Place & Pick<Token, "sceneId" | "size" | "w" | "h"> & { path: string; attached: string };
+export type Pose = Place &
+  Pick<Token, "sceneId" | "size" | "w" | "h"> & {
+    path: string;
+    attached: string;
+    /**
+     * The token rode along when the step was made by a chain not every
+     * player sees (docs/design-v1-attach.md 8.3): a silent passenger, which
+     * its undo and redo take back quietly or leave as it is, and which never
+     * answers. Fixed when the step is made, so no hidden change since can
+     * turn it into a token the answer reads. Not part of the comparison.
+     */
+    silent?: true;
+  };
 
 /** Which tokens the step's player sees now: a pose holds a link only as their copy shows it (docs/design-v1-attach.md 8.3). */
 export type Shows = (tokenId: string) => boolean;
@@ -343,13 +355,24 @@ function samePose(a: Pose, b: Pose): boolean {
   );
 }
 
-/** Where each token an op or a restore touched stands in `state`, the state it left, its link as the player's copy shows it. */
+/**
+ * Where each token an op or a restore touched stands in `state`, the state
+ * it left, its link as the player's copy shows it, and whether it rode
+ * along as a silent passenger.
+ */
 export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Shows = () => true): Record<string, Pose> {
-  const poses: Record<string, Pose> = {};
+  const restoring = new Set<string>();
   for (const entry of inverse) {
     const parsed = parseKey(entry.key);
-    const token = parsed?.kind === "token" ? state.tokens[parsed.id] : undefined;
-    if (token) poses[token.id] = poseOf(token, shows);
+    if (parsed?.kind === "token") restoring.add(parsed.id);
+  }
+  const poses: Record<string, Pose> = {};
+  for (const id of restoring) {
+    const token = state.tokens[id];
+    if (!token) continue;
+    const pose = poseOf(token, shows);
+    if (silentPassenger(state, id, restoring)) pose.silent = true;
+    poses[id] = pose;
   }
   return poses;
 }
@@ -375,7 +398,24 @@ function silentPassenger(state: RoomState, tokenId: string, restoring: ReadonlyS
   return false;
 }
 
-export type PoseRestore = { ok: true; entries: RestoreEntry[] } | { ok: false; code: RefusalCode; message: string };
+/** `quiet` names the silent passengers among the entries, which the restore's checks leave alone (shared/permissions.ts). */
+export type PoseRestore = { ok: true; entries: RestoreEntry[]; quiet?: string[] } | { ok: false; code: RefusalCode; message: string };
+
+/**
+ * Whether a silent passenger of the step still rides under the group now:
+ * up its links, through tokens of the step, to one that is not a silent
+ * passenger, the step's named tokens and their public members. One the DM
+ * took off since, or whose own holder left the group, stays where it is.
+ */
+function stillUnder(state: RoomState, tokenId: string, restoring: ReadonlySet<string>, silent: ReadonlySet<string>): boolean {
+  const visited = new Set<string>([tokenId]);
+  for (let up = holderOf(state.tokens, state.tokens[tokenId]!)?.id; up !== undefined && !visited.has(up); up = state.tokens[up] ? holderOf(state.tokens, state.tokens[up]!)?.id : undefined) {
+    visited.add(up);
+    if (!restoring.has(up)) return false;
+    if (!silent.has(up)) return true;
+  }
+  return false;
+}
 
 /**
  * The restore for a step of a player's token moves or resizes (features
@@ -396,11 +436,13 @@ export type PoseRestore = { ok: true; entries: RestoreEntry[] } | { ok: false; c
 export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<string, Pose> }, visible: (tokenId: string) => boolean): PoseRestore {
   const tokens: { key: string; before: Token; current: Token; left: Pose | undefined }[] = [];
   const quiet: RestoreEntry[] = [];
+  const quietIds: string[] = [];
   const restoring = new Set<string>();
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
     if (parsed?.kind === "token") restoring.add(parsed.id);
   }
+  const silent = new Set([...restoring].filter((id) => step.poses[id]?.silent === true));
   for (const entry of step.entries) {
     const parsed = parseKey(entry.key);
     // An attach's rows and the turn's list stay as they are: the undo takes back the link and the seat only (docs/design-v1-attach.md 8.3).
@@ -408,9 +450,14 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     if (parsed?.kind !== "token") return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     const current = state.tokens[parsed.id];
     const before = entry.value as Token | null | undefined;
-    if (current && silentPassenger(state, parsed.id, restoring)) {
-      const back = quietlyBack(current, before, step.poses[parsed.id], visible);
-      if (back) quiet.push({ key: entry.key, value: back, expectHash: guardHash(entry.key, current) });
+    // A silent passenger of the step rides back quietly while it is still under the group, and is left as it is otherwise,
+    // gone or not. Either way it never answers (docs/design-v1-attach.md 8.3).
+    if (silent.has(parsed.id)) {
+      const back = current && stillUnder(state, parsed.id, restoring, silent) ? quietlyBack(current, before, step.poses[parsed.id], visible) : null;
+      if (back && current) {
+        quiet.push({ key: entry.key, value: back, expectHash: guardHash(entry.key, current) });
+        quietIds.push(parsed.id);
+      }
       continue;
     }
     // A passenger gone since, or one the player cannot see now and no longer under the group, is left out: it rode
@@ -424,6 +471,7 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
   return {
     ok: true,
     entries: [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined), expectHash: guardHash(t.key, t.current) })), ...quiet],
+    ...(quietIds.length > 0 ? { quiet: quietIds } : {}),
   };
 }
 
