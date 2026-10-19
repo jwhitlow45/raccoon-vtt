@@ -197,16 +197,39 @@ export function cutRoute(state: BuildState, token: DropToken, pieces: readonly R
  * What an arrow key's press finds (design 14.17, review MV-O-12): one
  * square, never searched round a wall. A press the leg test stops, or into
  * open ground, is the straight drop, stopped at the wall as before. One
- * into ground that costs extra goes as a one-piece route, so its terrain
- * counts, as rubble's 10 ft does.
+ * into ground that costs extra goes as a route along the straight step, so
+ * its terrain counts, as rubble's 10 ft does. The route steps at the
+ * creature's own lattice spacing and splits where the cost or the rise
+ * changes, as the search's pieces do, so a Tiny creature's half square into
+ * rubble pays for that half alone (review ASTRA-10).
  */
 export function keyStep(world: WalkWorld, target: Point): Found {
   const { token, build } = world.input;
   if (openLeg(world, target)) return { kind: "open" };
   if (world.tester && legStop(build, token, { x: target.x, y: target.y, elevation: token.elevation }) !== null) return { kind: "open" };
-  const node = world.nodeAt(target);
-  const { extra, swim } = world.extraOf(token.x, token.y, target.x, target.y, node >= 0 ? world.elevationAt(node) : token.elevation, node);
-  return extra > 0 || swim === 1 ? { kind: "route", route: { pieces: [[target.x, target.y, extra, swim]] } } : { kind: "open" };
+  const dx = target.x - token.x;
+  const dy = target.y - token.y;
+  const n = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / world.L));
+  const pieces: RoutePiece[] = [];
+  let px = token.x;
+  let py = token.y;
+  let pe = token.elevation;
+  let last = "";
+  for (let k = 1; k <= n; k++) {
+    const x = k === n ? target.x : token.x + (dx * k) / n;
+    const y = k === n ? target.y : token.y + (dy * k) / n;
+    const node = world.nodeAt({ x, y });
+    const e = node >= 0 ? world.elevationAt(node) : pe;
+    const { extra, swim } = world.extraOf(px, py, x, y, e, node);
+    const key = `${extra},${swim},${e - pe}`;
+    if (key === last) pieces[pieces.length - 1] = [x, y, extra, swim];
+    else pieces.push([x, y, extra, swim]);
+    last = key;
+    px = x;
+    py = y;
+    pe = e;
+  }
+  return pieces.some(([, , extra, swim]) => extra > 0 || swim === 1) ? { kind: "route", route: { pieces } } : { kind: "open" };
 }
 
 /** The note when a walk turned too often for one move and landed partway. */

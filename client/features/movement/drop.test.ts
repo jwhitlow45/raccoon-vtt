@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
 import { MAX_MOVES } from "#shared/protocol.ts";
+import { routeFeet, routePoints } from "#shared/rules/route.ts";
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { P1, token } from "#shared/testutil.ts";
@@ -251,6 +252,18 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     const rubble = press({ x: 2, y: 2 }, { x: 3, y: 2 }, { "3,2": "rubble" });
     assert.deepEqual(rubble.found, { kind: "route", route: { pieces: [[3, 2, 1, 0]] } });
     assert.deepEqual(rubble.plan.moves[0]!.route, [[3, 2, 1, 0]], "the press into rubble goes with its route, so it costs 10 ft");
+  });
+
+  test("an arrow key's step pays each lattice step's own terrain: a Tiny creature's half squares into rubble", () => {
+    const state = world({});
+    const chunk = state.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
+    state.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "1,0": "rubble" } };
+    const sprite = token("sprite", { size: "tiny", x: 0, y: 0 });
+    const found = keyStep(new WalkWorld(publicWorld(state, sprite, { role: "dm" }).input), { x: 1, y: 0 });
+    assert.deepEqual(found, { kind: "route", route: { pieces: [[0.5, 0, 0, 0], [1, 0, 1, 0]] } }, "the first half square is plain, the second in rubble");
+    const pieces = found.kind === "route" ? found.route.pieces : [];
+    const feet = routeFeet(routePoints(state.buildChunks, sprite, pieces, 0), pieces.map(([, , extra, swim]) => ({ extra, swim })), { feetPerCell: 5, diagonal: "five" }, { h: 0, v: 0 }, { swimSpeed: false, step: 0.5 });
+    assert.equal(feet.cost, 7.5, "2.5 ft, then 5 ft for the half square of rubble");
   });
 
   test("a walk cut inside a 5 ft corridor lands squeezed, at a piece end where the squeeze is a real one", () => {
