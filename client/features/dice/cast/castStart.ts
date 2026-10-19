@@ -7,7 +7,7 @@ import { actionFill, areaFill, fromLine, type FillInput } from "../groupSave/fil
 import { parseParts } from "../groupSave/outcome.ts";
 import type { StartInput } from "../groupSave/start.ts";
 import { creatureKey } from "../options.ts";
-import { areaPresetOf, sameSpell, spellLevel } from "./cast.ts";
+import { areaPresetOf, byName, sameSpell, spellLevel } from "./cast.ts";
 
 /**
  * The DM's side of a player's ask for saves (docs/design-v1-player-save-spell.md
@@ -188,7 +188,7 @@ export function castCardText(view: Pick<RoomState, "tokens" | "members" | "templ
       return t ? [tokenName(t)] : [];
     });
     const missing = ids.length - names.length;
-    where = `Targets: ${[...names, ...(missing > 0 ? [`${missing} gone`] : [])].join(", ")}`;
+    where = `Targets: ${[...byName(names), ...(missing > 0 ? [`${missing} gone`] : [])].join(", ")}`;
   }
   return {
     title: `${who} asks for saves: ${spell}${level}`,

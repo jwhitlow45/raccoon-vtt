@@ -231,6 +231,8 @@ describe("the DM's card", () => {
   test("a targets ask names its targets, and one with no roll says so", () => {
     const text = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g1", "g2"], spell: "Hold Person", slot: 3 }), { viewing: "s1", caught: null });
     assert.deepEqual([text.rolled, text.where], ["No damage rolled", "Targets: Goblin 1, Goblin 2"]);
+    const reversed = castCardText(view(), castAsk("d2", { area: undefined, targets: ["g2", "g1"], spell: "Hold Person" }), { viewing: "s1", caught: null });
+    assert.equal(reversed.where, "Targets: Goblin 1, Goblin 2", "by name and number, whatever order the ask holds (LP10-SAVE-3)");
   });
 
   test("an ask on another scene goes there to open, and only an ask here reads its area or caster as gone", () => {

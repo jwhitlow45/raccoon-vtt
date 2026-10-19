@@ -164,9 +164,18 @@ export function sendWords(input: { rolls: readonly PanelRoll[]; save: boolean })
   return { first: input.save ? "Ask the DM" : "Ask the DM to apply", dmRolls: null };
 }
 
+/**
+ * Target names in reading order: by name, a trailing number counted as a
+ * number, so "Mook 1, Mook 10, Mook 32" and not the order a box drag
+ * picked them in.
+ */
+export function byName(names: readonly string[]): string[] {
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
 /** The words a targets line starts with: "Targets (2): Goblin 1, Goblin 2". */
 export function targetsLine(names: readonly string[]): string {
-  return names.length === 0 ? "Select the creatures it targets on the map." : `Targets (${names.length}): ${names.join(", ")}`;
+  return names.length === 0 ? "Select the creatures it targets on the map." : `Targets (${names.length}): ${byName(names).join(", ")}`;
 }
 
 /** The refusal of a selection past what one ask names, before anything rolls, so no target is dropped unseen. */

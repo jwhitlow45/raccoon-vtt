@@ -65,7 +65,8 @@ describe("the block", () => {
     const view = castTable();
     view.tokens.far = token("far", { sceneId: "s2" });
     assert.deepEqual(selectionTargets(view, ["thorn", "g1", "far", "gone", "g1", "bree"], "thorn", "s1"), ["g1", "bree"]);
-    assert.equal(targetsLine(["Goblin 1", "Bree"]), "Targets (2): Goblin 1, Bree");
+    assert.equal(targetsLine(["Goblin 1", "Bree"]), "Targets (2): Bree, Goblin 1");
+    assert.equal(targetsLine(["Mook 32", "Mook 1", "Mook 10"]), "Targets (3): Mook 1, Mook 10, Mook 32", "a box drag's order, read by name and number (LP10-SAVE-3)");
     assert.equal(targetsLine([]), "Select the creatures it targets on the map.");
   });
 
