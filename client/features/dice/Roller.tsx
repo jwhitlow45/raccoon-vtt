@@ -29,7 +29,6 @@ const PAD_TOP = "var(--pane-pad-top, 0px)";
 /** The sticky line's height (Appendix C). */
 export const LAST_LINE_PX = 40;
 
-// The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
 /**
  * The line under the field is always this tall, empty or not, so a reading,
  * a refusal or the blocked note coming and going while someone types never
@@ -38,6 +37,7 @@ export const LAST_LINE_PX = 40;
  * with an ellipsis and the full words stay in the field's description.
  */
 const NOTE_LINE = 1.3;
+// The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
 const QUICK_DICE = [20, 4, 6, 8, 10, 12, 100] as const;
 
 /**

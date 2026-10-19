@@ -45,7 +45,7 @@ export const FORMULA_ERRORS = {
   long: "That roll is too long.",
   tooMuch: "That is too much to roll at once. Roll fewer at a time.",
   label: "Label: 60 characters at most.",
-  mode: "Advantage and Disadvantage need one d20 in the roll.",
+  mode: "Adv or Dis needs one d20.",
   other: "Try 1d20+5 or 2d6+3 fire.",
 } as const;
 

@@ -97,7 +97,7 @@ describe("the field", () => {
   test("its reading names the formula, the label and the range, or the refusal", () => {
     assert.deepEqual(readingOf("2d6+3 fire"), { ok: true, text: "2d6+3, fire: 5 to 15" });
     assert.deepEqual(readingOf("1d20+5 Stealth adv"), { ok: true, text: "1d20+5 with Advantage, Stealth: 6 to 25" });
-    assert.deepEqual(readingOf("2d6 adv"), { ok: false, error: "Advantage and Disadvantage need one d20 in the roll." });
+    assert.deepEqual(readingOf("2d6 adv"), { ok: false, error: "Adv or Dis needs one d20." });
     assert.equal(readingOf("   "), null);
     assert.equal(readingOf("fire")?.ok, false);
   });

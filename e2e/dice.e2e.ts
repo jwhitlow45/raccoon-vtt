@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
@@ -658,7 +659,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       label: `1d20 ${"x".repeat(61)}`,
       other: "xyz",
     };
-    const blockedWords = ["Rolls are not sent from a preview.", "Rolling needs a connection."];
+    const blockedWords = ["Rolls are not sent from a preview.", "Rolling needs a connection.", FORMULA_ERRORS.mode];
     for (const [width, height, scale] of [[390, 844, 1], [390, 844, 1.3], [320, 568, 1.3], [320, 568, 1]] as const) {
       const label = `${width} x ${height} at ${Math.round(scale * 100)}%`;
       await player.setViewportSize({ width, height });
