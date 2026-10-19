@@ -226,8 +226,9 @@ async function runChrome(): Promise<string> {
     ],
     build: { write: false, minify: false, rollupOptions: { input: entry, external: ["vite", "playwright-core"], output: { format: "es" } } },
   });
-  const output = (Array.isArray(out) ? out[0] : out) as { output: { type: string; code?: string }[] };
-  const code = output.output.find((o) => o.type === "chunk")?.code;
+  const output = (Array.isArray(out) ? out[0] : out) as { output: { type: string; code?: string; isEntry?: boolean }[] };
+  // The entry, should the bundle ever hold another chunk.
+  const code = output.output.find((o) => o.type === "chunk" && o.isEntry === true)?.code;
   if (!code) throw new Error("Vite gave no bundle");
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
@@ -248,7 +249,8 @@ async function runChrome(): Promise<string> {
 const argv = (globalThis as { process?: { argv?: string[] } }).process?.argv;
 if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
   // The walking ruler's and the public world's rows read client code and the test rooms, so only the Node run loads them, never the Chrome bundle.
-  const { runPublicWorldRow, runRulerRows } = await import("./bench-ruler.ts");
+  const nodeOnly = "./bench-ruler.ts";
+  const { runPublicWorldRow, runRulerRows } = (await import(/* @vite-ignore */ nodeOnly)) as typeof import("./bench-ruler.ts");
   console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
   if (argv.includes("--chrome")) {
     console.log("");
