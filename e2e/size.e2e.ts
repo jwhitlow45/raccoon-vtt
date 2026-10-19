@@ -127,7 +127,12 @@ async function openPanel(name: string, phone: boolean): Promise<void> {
   if (await picker.isVisible()) {
     // The list is already open.
   } else if (await all.isVisible()) await all.click();
-  else await page.locator('button[title="Panels"]').click();
+  else {
+    // A sheet on a subpage, such as New character, has Back where All panels was, and the tool bar's Panels would only close it.
+    const close = page.locator("dialog[data-rvtt-sheet]").getByRole("button", { name: /^Close / }).filter({ visible: true });
+    if ((await close.count()) > 0) await close.first().click();
+    await page.locator('button[title="Panels"]').click();
+  }
   await picker.getByRole("button", { name: new RegExp(`^${name}( ?\\d+ unread)?$`) }).click();
 }
 
@@ -558,7 +563,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await closeSheet(phone);
         await openPanel("Characters", phone);
         const blocks = page.getByRole("button", { name: /^Stat blocks \(\d+\)$/ });
-        // A DM's list of characters starts folded. On a computer the party bar above it holds a Thorn too.
+        // A DM's Characters panel starts on the list, and Thorn's row opens his page. On a computer the party bar above it holds a Thorn too.
         const characters = phone ? page : page.getByRole("tabpanel", { name: sideTabName("Characters") });
         if (!(await blocks.first().isVisible())) await characters.getByRole("button", { name: /^Thorn/ }).first().click();
         await blocks.first().click();
@@ -567,7 +572,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await checkDialog(blockEditor, `${label}, New stat block for Thorn`, { name: "Save", in: "footer" });
         await shoot("companion-block-editor");
         await closeDialog(blockEditor);
-        await page.getByRole("button", { name: "Done", exact: true }).click();
+        await page.getByRole("button", { name: "Back to Thorn", exact: true }).click();
 
         // SheetDialog: More, for the goblin and the orc together, picked with a Shift box over both.
         await closeSheet(phone);

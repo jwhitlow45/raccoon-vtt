@@ -1095,7 +1095,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await preview.getByRole("textbox", { name: "Name" }).click();
     await preview.getByRole("button", { name: "Add and place" }).click();
     await preview.getByText("Read-only: nothing you do here is saved.").waitFor();
+    // What was typed was never taken, so Cancel asks before it throws it away (docs/design-v1-look-pass.md 3.1).
     await preview.getByRole("button", { name: "Cancel" }).first().click();
+    await preview.getByRole("button", { name: "Discard changes?" }).last().click();
     await preview.getByRole("button", { name: /^Wildfire Spirit\. Show it on the map/ }).click();
     const b = preview.getByRole("dialog", { name: "Wildfire Spirit actions" });
     await b.getByRole("button", { name: "Dismiss" }).click();
@@ -1307,11 +1309,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       }
     };
 
-    // Ana's Add a companion: into the form's heading, and back to the opener on Cancel.
+    // Ana's Add a companion: into the title of the subpage it opens, and back to the opener on Cancel.
     await setUp(ana, await anaContext.newCDPSession(ana), { ...DESK, scale: 1 });
     await openSideTab(ana, "Characters");
     await press(ana, ana.getByRole("button", { name: "Add a companion" }));
-    await lands(ana, /^h3 Add a companion for Bree/, "Add a companion opened");
+    await lands(ana, /^h2 Add a companion for Bree/, "Add a companion opened");
     await press(ana, ana.getByRole("button", { name: "Cancel" }));
     await lands(ana, /^button Add a companion$/, "Add a companion cancelled");
 
@@ -1319,7 +1321,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openSideTab(dm, "Characters");
     await press(dm, dm.getByRole("button", { name: "New character" }));
-    await lands(dm, /^h3 New character/, "New character opened");
+    await lands(dm, /^h2 New character/, "New character opened");
     await press(dm, dm.getByRole("button", { name: "Cancel" }));
     await lands(dm, /^button New character$/, "New character cancelled");
 

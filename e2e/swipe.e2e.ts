@@ -696,7 +696,9 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));
     assert.equal(await settled(sheet), "rest", "a companion being added let the sheet close");
     assert.equal(await companion.inputValue(), "Ash the wolf");
+    // Typed, Cancel asks before it throws the name away (docs/design-v1-look-pass.md 3.1).
     await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+    await sheet.getByRole("button", { name: "Discard changes?" }).last().click();
     await add.click();
     await companion.waitFor();
     await swipe(dmCdp, await headerPoint(sheet), far(await steadyRect(sheet)));

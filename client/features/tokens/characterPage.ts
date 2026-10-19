@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createStore } from "zustand/vanilla";
 import type { Character } from "#shared/model.ts";
 import { scopeSlot } from "../../state/scope.ts";
@@ -32,4 +33,27 @@ export function pageBackTo(characterId: string, mine: readonly Pick<Character, "
   const at = mine.findIndex((c) => c.id === characterId);
   const neighbors = at < 0 ? [] : [...mine.slice(at + 1), ...mine.slice(0, at).reverse()];
   return [characterId, ...neighbors.map((c) => c.id)].map((id) => `character:${id}`).concat("new-character", "characters-empty");
+}
+
+/** What Back and Cancel ask on a form with typed changes, as the encounter editor's Back does. */
+export const DISCARD = "Discard changes?";
+
+/**
+ * Leaving a form of the Characters panel (docs/design-v1-look-pass.md 3.1):
+ * with typed changes the first press of Back or Cancel asks DISCARD and the
+ * second leaves. A change in between takes the question back, since it was
+ * asked of the draft as it stood. `draft` is what the form holds, compared
+ * as JSON.
+ */
+export function useLeaveForm(draft: unknown, changed: boolean, leave: () => void): { asking: boolean; press(): void } {
+  const now = JSON.stringify(draft);
+  const [askedAt, setAskedAt] = useState<string | null>(null);
+  const asking = changed && askedAt === now;
+  return {
+    asking,
+    press: () => {
+      if (changed && !asking) setAskedAt(now);
+      else leave();
+    },
+  };
 }

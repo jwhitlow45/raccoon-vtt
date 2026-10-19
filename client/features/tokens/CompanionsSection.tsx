@@ -27,7 +27,9 @@ import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { usePanelHeader } from "../panels.ts";
 import type { TokenAccess } from "./access.ts";
+import { DISCARD, useLeaveForm } from "./characterPage.ts";
 import { ChooseBlockDialog } from "./CompanionBlocks.tsx";
 import { characterBlocks, fromTheBlock, srdTitle, whose, type PickerRow } from "./companionBlocks.ts";
 import {
@@ -56,8 +58,8 @@ import { FieldRow, NumberField, Select } from "./ui.tsx";
 
 /**
  * Companions in the interface (docs/design-v1-combat-flow.md 3.6.3, 3.6.9
- * and 3.7.5): the list and "Add a companion" in a character's card, the
- * form that replaces the Characters panel, the Companion section of a
+ * and 3.7.5): the list and "Add a companion" in a character's page, the
+ * form it opens as a subpage of the Characters panel, the Companion section of a
  * companion's token panel, and the DM's "Make a companion" in Token
  * settings. Every change of what a companion is waits for the server
  * (shared/reads.ts), so each control shows busy until it answers.
@@ -156,14 +158,16 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
 }
 
 /**
- * The form a character's "Add a companion" opens in the panel's place, as
- * New character does. A player's companion goes only next to the
- * character's token on the players' scene, at the first free spot within
- * 5 ft with a clear line, which the server checks again; the button says
- * why when there is none. The DM's goes on the scene in view, beside the
- * character's token when it stands there, else in the middle of the view.
- * It is busy until the server answers, and a refusal keeps the form open
- * with the reason.
+ * The form a character's "Add a companion" opens, a subpage of the
+ * Characters panel as New character is: "Add a companion for Bree" with
+ * "Back to Bree" in the header, and Cancel at its foot beside Add and place
+ * (docs/design-v1-look-pass.md 3.1). A player's companion goes only next to
+ * the character's token on the players' scene, at the first free spot
+ * within 5 ft with a clear line, which the server checks again. The button
+ * says why when there is none. The DM's goes on the scene in view, beside
+ * the character's token when it stands there, else in the middle of the
+ * view. It is busy until the server answers, and a refusal keeps the form
+ * open with the reason.
  */
 export function CompanionForm(props: {
   character: Character;
@@ -189,9 +193,17 @@ export function CompanionForm(props: {
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const changeRef = useRef<HTMLButtonElement>(null);
   const focusChange = useRef(false);
-  const heading = useRef<HTMLHeadingElement>(null);
-  // The opener went with the panel the form replaced, so focus starts at the form's heading.
-  useEffect(() => heading.current?.focus(), []);
+  // Typed changes ask first, but not once Add sent them: then leaving throws nothing away.
+  const [start] = useState(() => JSON.stringify(draft));
+  const leave = useLeaveForm(draft, !waiting && JSON.stringify(draft) !== start, props.onDone);
+  usePanelHeader({
+    title: `Add a companion for ${character.name}`,
+    parent: character.name,
+    id: `companion:${character.id}`,
+    onBack: leave.press,
+    armed: leave.asking ? DISCARD : null,
+    backTo: [`companion:${character.id}`],
+  });
   /*
    * An answer moves the screen only while this form is still open and in
    * sight. After Cancel, or with another panel opened since, a late one may
@@ -289,16 +301,8 @@ export function CompanionForm(props: {
   };
 
   return (
-    // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form, and a character's long unbroken name wraps in the heading and the lines that name it.
+    // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form, and a character's long unbroken name wraps in the lines that name it.
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, minWidth: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
-          Add a companion for {name}
-        </h3>
-        <Button size="sm" onClick={props.onDone}>
-          Cancel
-        </Button>
-      </div>
       <FieldRow label="Name">
         <Input aria-label="Name" value={draft.name} maxLength={80} error={error !== null && !draft.name.trim()} onChange={(e) => set({ name: e.target.value })} style={{ flex: 1 }} />
       </FieldRow>
@@ -346,9 +350,14 @@ export function CompanionForm(props: {
         initials={initials(draft.name || "?")}
       />
       <ErrorText>{error}</ErrorText>
-      <Button variant="primary" size="sm" block busy={waiting} disabled={!placement?.ok} aria-describedby="companion-where" onClick={add}>
-        {waiting ? "Adding…" : "Add and place"}
-      </Button>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+        <Button variant="primary" size="sm" busy={waiting} disabled={!placement?.ok} aria-describedby="companion-where" onClick={add} style={{ flex: "1 1 auto" }}>
+          {waiting ? "Adding…" : "Add and place"}
+        </Button>
+        <Button size="sm" onClick={leave.press} style={{ flex: "1 1 auto" }}>
+          {leave.asking ? DISCARD : "Cancel"}
+        </Button>
+      </div>
       {where ? <Help id="companion-where">{where}</Help> : null}
       {choosing ? <ChooseBlockDialog character={character} name={draft.name} onChoose={choose} onClose={() => setChoosing(false)} /> : null}
     </div>

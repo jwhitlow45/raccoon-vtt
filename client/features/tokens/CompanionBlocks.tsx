@@ -13,6 +13,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useSend } from "../encounter/hooks.ts";
 import { useOpenEditor } from "../monsters/EditorHost.tsx";
+import { usePanelHeader } from "../panels.ts";
 import { CompanionPickerBody } from "../monsters/MonsterPicker.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { blockLines, viewOf } from "../monsters/draft.ts";
@@ -315,13 +316,16 @@ export function ChooseBlockDialog(props: { character: Pick<Character, "id" | "na
 }
 
 /**
- * "Bree's stat blocks" (6.4), in the Characters panel's place for the DM
- * and the character's players: "Paste a stat block" and "New stat block",
- * then each block as a disclosure row that opens its view with Edit and
- * Delete. A delete takes two taps, and the companions that used it keep
- * their numbers and show that it was deleted. Done hands focus back.
+ * "Bree's stat blocks" (6.4), a subpage of the Characters panel for the DM
+ * and the character's players, opened from the character's page and named
+ * in the panel's header with "Back to Bree" (docs/design-v1-look-pass.md
+ * 3.1): "Paste a stat block" and "New stat block", then each block as a
+ * disclosure row that opens its view with Edit and Delete. A delete takes
+ * two taps, and the companions that used it keep their numbers and show
+ * that it was deleted. A list, not a form, so Back is all it needs, and
+ * Back hands focus to the page's "Stat blocks".
  */
-export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "name">; onDone(): void }) {
+export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "name">; onBack(): void }) {
   const { character } = props;
   const stored = useRoomView((s) => s.view?.companionBlocks);
   const blocks = useMemo(() => characterBlocks({ companionBlocks: stored ?? {} }, character.id), [stored, character.id]);
@@ -329,20 +333,10 @@ export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "
   const newBlock = useNewBlock(character, (row) => setOpenId("blockId" in row.link ? row.link.blockId : null));
   const openEditor = useOpenEditor();
   const edit = (block: CompanionBlock) => openEditor({ monster: null, initial: blockLines(block), block: { character, existing: block } });
-  const heading = useRef<HTMLHeadingElement>(null);
-  // The opener went with the card this page replaced, so focus starts at the page's heading.
-  useEffect(() => heading.current?.focus(), []);
+  usePanelHeader({ title: `${whose(character.name)} stat blocks`, parent: character.name, id: `blocks:${character.id}`, onBack: props.onBack, backTo: [`blocks:${character.id}`] });
   return (
-    // The heading, the empty line and the rows name the character, whose name may be long and unbroken: it wraps rather than run out of the page.
+    // The empty line and the rows name the character, whose name may be long and unbroken: it wraps rather than run out of the page.
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, minWidth: 0, overflowWrap: "anywhere", fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
-          {whose(character.name)} stat blocks
-        </h3>
-        <Button size="sm" onClick={props.onDone}>
-          Done
-        </Button>
-      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
         <Button size="sm" onClick={() => newBlock(true)}>
           Paste a stat block

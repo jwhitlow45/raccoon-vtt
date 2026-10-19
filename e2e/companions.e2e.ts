@@ -203,6 +203,14 @@ async function openCard(page: Page, characterId: string): Promise<void> {
   await blocks.waitFor();
 }
 
+/** Leaves the add form, whose block or fields were changed, by its Cancel and then Discard changes? (docs/design-v1-look-pass.md 3.1). */
+async function discardForm(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Cancel", exact: true }).last().click();
+  // The header's Back asks the same question: the form's own button is the last.
+  await page.getByRole("button", { name: "Discard changes?" }).last().click();
+  await page.getByRole("button", { name: "Add and place" }).waitFor({ state: "detached" });
+}
+
 /** A stat block's lines, for blocks the DM makes by op. */
 const LINES = {
   size: "small",
@@ -383,7 +391,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     assert.equal(moth.resistances, "Cold");
     await ana.getByRole("button", { name: /^Moth Spirit/ }).waitFor();
     await shots.take(ana, "companions-blocks-page");
-    await ana.getByRole("button", { name: "Done" }).click();
+    await ana.getByRole("button", { name: "Back to Bree" }).click();
     await ana.getByRole("button", { name: /^Stat blocks \(1\)$/ }).waitFor();
   });
 
@@ -682,13 +690,59 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await ana.getByRole("button", { name: "Delete", exact: true }).click();
     await ana.getByRole("button", { name: "Tap again to delete" }).click();
     await waitFor("the block gone", () => (Object.values(dmSocket.state?.companionBlocks ?? {}).some((b) => b?.name === "Moth Spirit") ? null : true));
-    await ana.getByRole("button", { name: "Done" }).click();
+    await ana.getByRole("button", { name: "Back to Bree" }).click();
     await ana.getByText("Stat block deleted · On Bree's turn, listed").waitFor();
     await showCompanion(ana, "Hoot");
     await bar(ana, "Hoot").getByRole("button", { name: "Details", exact: true }).click();
     await tokenPanel(ana).getByText("This companion’s stat block was deleted.").waitFor();
     assert.equal(inline("Hoot")!.ac, ac);
     await shots.take(ana, "companions-deleted-block");
+  });
+
+  test("lp1-comp-a. Hoot's header names Bree in its kind line, a link to Bree's page; the add form's Back asks before it throws typing away, Cancel with nothing typed leaves at once, and each hands focus back to its opener", async () => {
+    const focused = () =>
+      ana.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        return a ? `${a.tagName.toLowerCase()} ${(a.getAttribute("aria-label") ?? a.textContent ?? "").trim()}` : "none";
+      });
+    const lands = (on: string, what: string) => waitFor(what, async () => ((await focused()) === on ? true : null), 5_000).catch(async () => assert.fail(`${what}: focus is on "${await focused()}"`));
+    await showCompanion(ana, "Hoot");
+    await bar(ana, "Hoot").getByRole("button", { name: "Details", exact: true }).click();
+    const panel = tokenPanel(ana);
+    const line = panel.locator("[data-kind-line]");
+    assert.match((await line.textContent()) ?? "", /^Companion of Bree · \w+ \([\d.]+ ft\)$/, "the kind line says what Hoot is, then its size");
+    await shots.take(ana, "companions-lp1-kind-line");
+    await line.getByRole("button", { name: "Companion of Bree" }).click();
+    // Bree's page, in the Characters panel, with focus on its title.
+    await ana.getByRole("button", { name: "Back to Characters" }).waitFor();
+    await ana.locator("[data-creature-heading]").filter({ hasText: "Bree" }).waitFor();
+    await lands("h2 Bree", "focus on Bree's page's title");
+    // Typed, the add form's Back asks first, and any change takes the question back.
+    const add = ana.locator(`[data-opener="companion:${run.bree.characterId}"]`);
+    await add.click();
+    await lands("h2 Add a companion for Bree", "focus on the form's title");
+    await ana.getByRole("textbox", { name: "Name", exact: true }).fill("Ferret");
+    await ana.getByRole("button", { name: "Back to Bree" }).click();
+    await ana.getByRole("button", { name: "Discard changes?" }).first().waitFor();
+    await shots.take(ana, "companions-lp1-form-asks");
+    await ana.getByRole("textbox", { name: "Name", exact: true }).fill("Ferrets");
+    await ana.getByRole("button", { name: "Back to Bree" }).waitFor();
+    assert.equal(await ana.getByRole("button", { name: "Discard changes?" }).count(), 0, "a change takes the question back");
+    await ana.getByRole("button", { name: "Back to Bree" }).click();
+    await ana.getByRole("button", { name: "Discard changes?" }).first().click();
+    await lands("button Add a companion", "Back hands focus to Add a companion");
+    assert.equal(companionOf("Ferrets"), undefined, "nothing was added");
+    // Untouched, Cancel at the form's foot leaves at once.
+    await add.click();
+    await ana.getByRole("button", { name: "Cancel", exact: true }).click();
+    await lands("button Add a companion", "Cancel hands focus to Add a companion");
+    // The stat blocks page is a list: Back alone, which hands focus to its opener.
+    const blocks = ana.locator(`[data-opener="blocks:${run.bree.characterId}"]`);
+    await blocks.click();
+    await ana.getByRole("heading", { name: "Bree’s stat blocks" }).waitFor();
+    assert.equal(await ana.getByRole("button", { name: "Done", exact: true }).count(), 0, "no Done");
+    await ana.getByRole("button", { name: "Back to Bree" }).click();
+    await lands(`button ${(await blocks.textContent())?.trim()}`, "Back hands focus to Stat blocks");
   });
 
   test("8b. a block saved from either picker is the pick: New and Paste, in Attach and in Choose", async () => {
@@ -743,7 +797,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await choose.waitFor({ state: "detached" });
     await ana.locator("strong").getByText("Ash Wisp", { exact: true }).waitFor();
     await shots.take(ana, "companions-pasted-block-chosen");
-    await ana.getByRole("button", { name: "Cancel" }).first().click();
+    await discardForm(ana);
     for (const name of ["Gale Spirit", "Dusk Moth", "Cinder Imp", "Ash Wisp"]) assert.ok(Object.values(dmSocket.state!.companionBlocks).some((b) => b?.name === name && b.characterId === run.bree.characterId), `${name} saved`);
   });
 
@@ -944,7 +998,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     await editor.getByRole("button", { name: "Save", exact: true }).click();
     await editor.waitFor({ state: "detached" });
     await waitFor("Ember Spirit saved", () => Object.values(dmSocket.state?.companionBlocks ?? {}).find((b) => b?.name === "Ember Spirit"));
-    await ana.getByRole("button", { name: "Done" }).click();
+    await ana.getByRole("button", { name: "Back to Bree" }).click();
   });
 
   test("10. at 390 x 844, 844 x 390 and 1280 x 800, at 100% and 130%: the add form, both picker steps and the stat blocks page fit, with Attach and Save in reach", async () => {
@@ -975,17 +1029,18 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       const pane = ana.locator("[data-pane-body]").filter({ has: form }).first();
       await noSideScroll(pane, `${label}: the add form`);
       await shots.take(ana, `companions-form-${tag}`);
-      await ana.getByRole("button", { name: "Cancel" }).first().click();
-      // The stat blocks page.
+      await discardForm(ana);
+      // The stat blocks page, named in the panel's header, outside the pane's body.
       await ana.getByRole("button", { name: /^Stat blocks \(\d+\)$/ }).click();
-      const page = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("heading", { name: "Bree’s stat blocks" }) }).first();
+      await ana.getByRole("heading", { name: "Bree’s stat blocks" }).waitFor();
+      const page = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("button", { name: "New stat block" }) }).first();
       await noSideScroll(page, `${label}: the stat blocks page`);
       await shots.take(ana, `companions-blocks-page-${tag}`);
       await ana.getByRole("button", { name: "New stat block" }).click();
       const editor = ana.getByRole("dialog", { name: "New stat block for Bree" });
       await inReach(ana, editor.getByRole("button", { name: "Save", exact: true }), `${label}: Save`);
       await editor.getByRole("button", { name: "Cancel", exact: true }).click();
-      await ana.getByRole("button", { name: "Done" }).click();
+      await ana.getByRole("button", { name: "Back to Bree" }).click();
       // Both picker steps, from Hoot's panel.
       await ana.getByRole("button", { name: /^Hoot\. Show it on the map/ }).click();
       await bar(ana, "Hoot").getByRole("button", { name: "Details", exact: true }).click();
@@ -1022,13 +1077,14 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       const label = i === 0 ? "the spaced name" : "the unbroken name";
       // The stat blocks page.
       await openCard(ana, c.id);
-      await noSideScroll(ana.locator("[data-pane-body]").first(), `${label}: the card`);
+      await noSideScroll(ana.locator("[data-pane-body]").first(), `${label}: the page`);
       await ana.locator(`[data-opener="blocks:${c.id}"]`).click();
-      const page = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("heading", { name: `${c.name}’s stat blocks` }) }).first();
+      await ana.getByRole("heading", { name: `${c.name}’s stat blocks` }).waitFor();
+      const page = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("button", { name: "New stat block" }) }).first();
       await page.waitFor();
       await noSideScroll(page, `${label}: the stat blocks page`);
       await shots.take(ana, `companions-long-name-${i}-blocks-page`);
-      await ana.getByRole("button", { name: "Done", exact: true }).click();
+      await ana.getByRole("button", { name: `Back to ${c.name}`, exact: true }).click();
       // The add form's picker and the form with the block chosen.
       await ana.locator(`[data-opener="companion:${c.id}"]`).click();
       await ana.getByRole("button", { name: "Choose a stat block" }).click();
@@ -1041,7 +1097,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       const form = ana.locator("[data-pane-body]").filter({ has: ana.getByRole("button", { name: "Add and place" }) }).first();
       await noSideScroll(form, `${label}: the add form`);
       await shots.take(ana, `companions-long-name-${i}-form`);
-      await ana.getByRole("button", { name: "Cancel" }).first().click();
+      await discardForm(ana);
       // The companion's panel and its picker.
       await ana.getByRole("button", { name: new RegExp(`^${c.companion}\\. Show it on the map`) }).click();
       await bar(ana, c.companion).getByRole("button", { name: "Details", exact: true }).click();

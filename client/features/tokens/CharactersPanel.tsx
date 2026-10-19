@@ -21,7 +21,7 @@ import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { characterPageSlot, pageBackTo, shownPage } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, pageBackTo, shownPage, useLeaveForm } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
 import { CompanionForm } from "./CompanionsSection.tsx";
 import { CREATURE_HEADING } from "./CreatureHeader.tsx";
@@ -75,78 +75,41 @@ export default function CharactersPanel(props: PanelProps) {
 
   const own = !dm && view && you ? newCharacterState(view, you.memberId) : null;
 
-  /*
-   * A form opened from a page takes the panel's place, and its opener goes
-   * with the page. Closed, the form hands focus back to the opener once the
-   * page is drawn again, while the panel is in sight.
-   */
   const root = useRef<HTMLDivElement>(null);
-  const returnTo = useRef<string | null>(null);
-  useEffect(() => {
-    const opener = returnTo.current;
-    if (opener === null || !root.current) return;
-    returnTo.current = null;
-    if (props.shown) root.current.querySelector<HTMLElement>(opener)?.focus();
-  });
-
   const remove = useDeleteHandOff(root, mine, (characterId) => {
     // A page whose character went shows the list from now on, so the id never comes back to a later page.
     if (pageStore.getState().characterId === characterId) openPage(null);
   });
 
+  /*
+   * New character, Add a companion and a character's stat blocks are
+   * subpages too, each naming itself in the header (docs/design-v1-look-pass.md
+   * 3.1). They name the control that opened them in their `backTo`, so
+   * leaving one hands focus back to it on the page it returns to.
+   */
+  const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
+  const blocksOf = blocksFor !== null ? characters?.[blocksFor] : undefined;
+  const form = companionOf !== undefined || blocksOf !== undefined || creating;
   usePanelHeader(
-    page
+    page && !form
       ? {
           title: page.name,
           parent: "Characters",
           id: `character:${page.id}`,
           backTo: pageBackTo(page.id, mine),
-          onBack: () => {
-            setAddingFor(null);
-            setBlocksFor(null);
-            openPage(null);
-          },
+          onBack: () => openPage(null),
         }
       : null,
   );
 
-  const companionOf = addingFor !== null ? characters?.[addingFor] : undefined;
-  if (companionOf) {
-    const opener = `[data-opener="companion:${companionOf.id}"]`;
-    return (
-      <CompanionForm
-        character={companionOf}
-        shown={props.shown}
-        close={props.close}
-        onDone={() => {
-          returnTo.current = opener;
-          setAddingFor(null);
-        }}
-      />
-    );
-  }
-
-  const blocksOf = blocksFor !== null ? characters?.[blocksFor] : undefined;
-  if (blocksOf) {
-    const opener = `[data-opener="blocks:${blocksOf.id}"]`;
-    return (
-      <CharacterBlocksPage
-        character={blocksOf}
-        onDone={() => {
-          returnTo.current = opener;
-          setBlocksFor(null);
-        }}
-      />
-    );
-  }
-
+  if (companionOf) return <CompanionForm character={companionOf} shown={props.shown} close={props.close} onDone={() => setAddingFor(null)} />;
+  if (blocksOf) return <CharacterBlocksPage character={blocksOf} onBack={() => setBlocksFor(null)} />;
   if (creating) {
     return (
       <NewCharacter
         close={props.close}
         {...(!dm && you ? { owner: you.memberId } : {})}
         onDone={(id) => {
-          returnTo.current = '[data-opener="new-character"]';
           setCreating(false);
           if (id) openPage(id);
         }}
@@ -359,9 +322,10 @@ function PartyRow(props: { character: Character }) {
 
 /**
  * The quick entry for a new PC: enough for the table, and the player fills
- * in the rest of the card. The DM picks who plays it. A player making their
+ * in the rest of the page. The DM picks who plays it. A player making their
  * own (`owner`) plays it alone, and "Create and place" puts it straight on
- * the map they are looking at.
+ * the map they are looking at. A subpage of the panel, "New character" with
+ * "Back to Characters", and Cancel at its foot beside its buttons.
  */
 function NewCharacter(props: { onDone(id: string | null): void; close(): void; owner?: string }) {
   const actions = useRoomActions();
@@ -370,9 +334,6 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   const view = useRoomView((s) => s.view);
   const members = useRoomView((s) => s.view?.members);
   const players = Object.values(members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
-  const heading = useRef<HTMLHeadingElement>(null);
-  // The opener went with the list the form replaced, so focus starts at the form's heading.
-  useEffect(() => heading.current?.focus(), []);
   const [name, setName] = useState("");
   const [owners, setOwners] = useState<string[]>(props.owner ? [props.owner] : []);
   const [size, setSize] = useState<CreatureSize>("medium");
@@ -383,8 +344,12 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
   const [pp, setPp] = useState(10);
   const [image, setImage] = useState<ImageRef | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const draft = { name, owners, size, hpMax, ac, walk, initBonus, pp, image };
   // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5).
-  useUnsavedSince({ name, owners, size, hpMax, ac, walk, initBonus, pp, image });
+  useUnsavedSince(draft);
+  const [start] = useState(() => JSON.stringify(draft));
+  const leave = useLeaveForm(draft, JSON.stringify(draft) !== start, () => props.onDone(null));
+  usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 
   const create = (placeAfter: boolean) => {
     if (!name.trim()) {
@@ -422,14 +387,6 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-        <h3 ref={heading} tabIndex={-1} style={{ margin: 0, flex: 1, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>
-          New character
-        </h3>
-        <Button size="sm" onClick={() => props.onDone(null)}>
-          Cancel
-        </Button>
-      </div>
       <ImageField value={image ?? undefined} onChange={setImage} shape="circle" aspect={1} canEdit ring={theme.color.ally} />
       <FieldRow label="Name">
         <Input aria-label="Name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} error={error !== null} style={{ flex: 1 }} />
@@ -478,11 +435,14 @@ function NewCharacter(props: { onDone(id: string | null): void; close(): void; o
       )}
       <ErrorText>{error}</ErrorText>
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-        <Button variant="primary" size="sm" style={{ flex: 1 }} onClick={() => create(true)}>
+        <Button variant="primary" size="sm" style={{ flex: "1 1 auto" }} onClick={() => create(true)}>
           Create and place
         </Button>
-        <Button size="sm" style={{ flex: 1 }} onClick={() => create(false)}>
+        <Button size="sm" style={{ flex: "1 1 auto" }} onClick={() => create(false)}>
           Create
+        </Button>
+        <Button size="sm" style={{ flex: "1 1 auto" }} onClick={leave.press}>
+          {leave.asking ? DISCARD : "Cancel"}
         </Button>
       </div>
     </div>
