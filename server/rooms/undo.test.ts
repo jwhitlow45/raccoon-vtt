@@ -7,7 +7,7 @@ import { CHANGED_SINCE } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { canApply } from "#shared/permissions.ts";
 import { NO_ROOM_TO_GROW } from "#shared/rules/resize.ts";
-import { actor, apply, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
+import { actor, apply, castAsk, castTable, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
 import { MOVED_SINCE, mergeInverses, poseRestore, posesAfter, UNDO_DEPTH, UndoStacks } from "./undo.ts";
 import { tallyOf } from "./undoLabels.ts";
 
@@ -570,5 +570,31 @@ describe("a player's resize undo (docs/design-v1-token-window.md 8.7)", () => {
     let moved = play(bear(), { t: "token.move", tokenId: "wolf", x: 12, y: 4 }, moveStacks, 1);
     moved = give(moved, 2);
     settled(restore(moved, moveStacks, "undo", 5));
+  });
+});
+
+describe("asks for saves and undo (docs/design-v1-player-save-spell.md 5.6)", () => {
+  test("no close of an ask goes on a stack, the DM's Dismiss and Close the ask included, nor a player's ask", () => {
+    for (const end of ["done", "dismissed", "withdrawn"] as const) {
+      assert.equal(UndoStacks.records("dm", { t: "cast.close", castId: "k1", end }), false, end);
+      assert.equal(UndoStacks.records("player", { t: "cast.close", castId: "k1", end }), false, end);
+    }
+    assert.equal(UndoStacks.records("player", { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", area: "a1" } }), false);
+  });
+
+  test("the Apply goes on the DM's stack, and its undo brings the ask back with the caster's roll", () => {
+    const before = castTable({ casts: { k1: castAsk("k1", { damage: { tag: "dmg", parts: 1 }, rolled: [{ formula: "8d6", total: 28, type: "fire" }] }) } });
+    const outcome: Op = { t: "actor.outcome", plan: "pl1", label: "Fireball", cast: "k1", targets: [{ target: { tokenId: "g1" }, amount: 14 }] };
+    assert.equal(UndoStacks.records("dm", outcome), true);
+    const r = applyOp(before, outcome, DM, env(60));
+    assert.ok(r.ok && r.inverse);
+    const stacks = new UndoStacks();
+    stacks.push("dm1", r.inverse, "applying Fireball to Goblin 1");
+    const step = stacks.popUndo("dm1")!;
+    const undone = apply(r.state, { t: "sys.restore", entries: step.entries, from: "undo", deps: true }, DM, 61);
+    const { rev: _rev, ...back } = undone.casts.k1!;
+    const { rev: _was, ...was } = before.casts.k1!;
+    assert.deepEqual(back, was);
+    assert.equal(undone.log.filter((e) => e.data?.type === "cast").length, 1, "the undo writes no line of its own, so no toast");
   });
 });

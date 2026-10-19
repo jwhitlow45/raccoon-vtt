@@ -611,3 +611,49 @@ describe("companion block ops", () => {
     bad(clientOpSchema, { t: "companionBlock.delete", blockId: "" });
   });
 });
+
+describe("a player's ask for saves (docs/design-v1-player-save-spell.md 5.3)", () => {
+  const cast = (fields: Record<string, unknown> = {}) => ({ t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", area: "a1", ...fields } });
+
+  test("names an area or its targets, one of the two", () => {
+    ok(clientOpSchema, cast());
+    ok(clientOpSchema, cast({ area: undefined, targets: ["g1", "g2"], roll: "spells:Hold Person" }));
+    bad(clientOpSchema, cast({ targets: ["g1"] }));
+    bad(clientOpSchema, cast({ area: undefined }));
+  });
+
+  test("keeps within its bounds: the spell's name, the level, the targets and the roll's batches", () => {
+    ok(clientOpSchema, cast({ spell: "A".repeat(60), slot: 9, damage: { tag: "dmg", parts: 20 } }));
+    bad(clientOpSchema, cast({ spell: "A".repeat(61) }));
+    bad(clientOpSchema, cast({ spell: "" }));
+    bad(clientOpSchema, cast({ spell: "Fire\nball" }));
+    bad(clientOpSchema, cast({ slot: 0 }));
+    bad(clientOpSchema, cast({ slot: 10 }));
+    bad(clientOpSchema, cast({ damage: { tag: "dmg", parts: 0 } }));
+    bad(clientOpSchema, cast({ damage: { tag: "dmg", parts: 21 } }));
+    ok(clientOpSchema, cast({ area: undefined, targets: Array.from({ length: 50 }, (_, i) => `t${i}`) }));
+    bad(clientOpSchema, cast({ area: undefined, targets: Array.from({ length: 51 }, (_, i) => `t${i}`) }));
+    bad(clientOpSchema, cast({ area: undefined, targets: [] }));
+  });
+
+  test("never carries what the server writes", () => {
+    bad(clientOpSchema, cast({ by: "p1" }));
+    bad(clientOpSchema, cast({ at: "2026-10-18T20:00:00.000Z" }));
+    bad(clientOpSchema, cast({ rolled: [{ formula: "8d6", total: 28 }] }));
+    bad(clientOpSchema, cast({ rev: 1 }));
+  });
+
+  test("closes with one of three ends", () => {
+    for (const end of ["done", "dismissed", "withdrawn"]) ok(clientOpSchema, { t: "cast.close", castId: "k1", end });
+    bad(clientOpSchema, { t: "cast.close", castId: "k1", end: "applied" });
+    bad(clientOpSchema, { t: "cast.close", castId: "k1" });
+  });
+
+  test("an outcome may close one ask, and settles nothing else beside it", () => {
+    const outcome = { t: "actor.outcome", plan: "pl1", targets: [{ target: { tokenId: "g1" }, amount: 5 }] };
+    ok(clientOpSchema, outcome);
+    ok(clientOpSchema, { ...outcome, cast: "k1" });
+    // Traps' `trap` joins `cast` under a refine that refuses both (docs/design-v1-traps.md 6.2). Until then no outcome carries one.
+    bad(clientOpSchema, { ...outcome, cast: "k1", trap: "tr1" });
+  });
+});

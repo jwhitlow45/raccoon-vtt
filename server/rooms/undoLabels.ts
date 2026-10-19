@@ -272,6 +272,14 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       if (first) return `closing the request for ${testText(first.test)}`;
       return op.rollIds.length === 1 ? "closing a roll request" : `closing ${op.rollIds.length} roll requests`;
     }
+    // Neither goes on a stack (docs/design-v1-player-save-spell.md 5.6), but every op has a phrase.
+    case "cast.ask":
+      return `asking for saves against ${op.cast.spell}`;
+    case "cast.close": {
+      const spell = before.casts[op.castId]?.spell;
+      const what = spell ? `the ask for saves against ${spell}` : "an ask for saves";
+      return op.end === "dismissed" ? `setting aside ${what}` : op.end === "withdrawn" ? `withdrawing ${what}` : `resolving ${what}`;
+    }
     // A roll is on no stack (docs/design-v1-dice.md 4.5): the stored op is the server's `sys.dice`.
     case "dice.roll":
       return "rolling dice";

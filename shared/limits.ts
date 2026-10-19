@@ -223,6 +223,9 @@ export const LIMITS = {
   pinsPerScene: 200,
   /** Roll requests (section 3.3): open at once in a room, creatures each, and choices each. */
   openRollsPerRoom: 20,
+  /** A player's asks for saves (docs/design-v1-player-save-spell.md 5.4): waiting at once per member, and in a room. */
+  castsPerMember: 3,
+  openCastsPerRoom: 20,
   rollTargets: 50,
   rollChoices: 2,
   rollNoteChars: 80,
@@ -394,6 +397,7 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
   const handoutPages = checkHandoutPages(state, before);
   if (!handoutPages.ok) return handoutPages;
   if (Object.keys(state.rolls).length > LIMITS.openRollsPerRoom) return over(`at most ${n(LIMITS.openRollsPerRoom)} roll requests can be open at once. Close one first`);
+  if (Object.keys(state.casts).length > LIMITS.openCastsPerRoom) return over(`at most ${n(LIMITS.openCastsPerRoom)} asks for saves can wait at once. The DM resolves one first`);
   for (const scene of Object.values(state.scenes)) {
     if (scene.bounds.w > LIMITS.sceneCells || scene.bounds.h > LIMITS.sceneCells) {
       return over(`a scene is at most ${n(LIMITS.sceneCells)} cells a side`);

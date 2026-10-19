@@ -259,6 +259,45 @@ describe("room export and import", () => {
     dmSocket.close();
   });
 
+  test("an import drops a player's open asks for saves, as it drops open requests, and keeps their lines on the caster's new id (docs/design-v1-player-save-spell.md 5.7)", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Save spell");
+    const player = t.client();
+    const pipId = await player.join(roomId, "Pip");
+    const dmSocket = await t.connect(roomId, dm);
+    const sceneId = ((await dmSocket.snapshot("dm")).state as ProjectedState).meta.playerSceneId!;
+    const characterId = uuidv7();
+    const tokenId = uuidv7();
+    const ops: Record<string, unknown>[] = [
+      { t: "character.create", character: { id: characterId, name: "Thorn", size: "medium", ownerIds: [pipId], actor } },
+      { t: "token.create", token: { id: tokenId, sceneId, kind: "pc", name: "Thorn", size: "medium", x: 2, y: 2, actor: { ref: characterId } } },
+    ];
+    for (const op of ops) assert.deepEqual((await dmSocket.apply(op)).rejects ?? [], [], String(op.t));
+    const pipSocket = await t.connect(roomId, player);
+    await pipSocket.snapshot("pip");
+    const asked = await pipSocket.apply({ t: "cast.ask", cast: { id: uuidv7(), caster: tokenId, sceneId, spell: "Hold Person", slot: 2, targets: [tokenId] } });
+    assert.deepEqual(asked.rejects ?? [], []);
+    const res = await dm.get(`/api/rooms/${roomId}/export`);
+    assert.equal(res.statusCode, 200, res.body);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    assert.equal(Object.keys(room.state.casts).length, 1, "the export is the stored state, open asks included");
+
+    const importer = t.client();
+    const imported = await importZip(importer, res.rawPayload);
+    assert.equal(imported.statusCode, 201, imported.body);
+    const { roomId: copyId } = imported.json<{ roomId: string }>();
+    t.track(copyId);
+    const copy = await t.connect(copyId, importer);
+    const state = (await copy.snapshot("i")).state as ProjectedState;
+    assert.deepEqual(state.casts, {}, "open asks stay behind");
+    const thorn = Object.values(state.tokens).find((tk) => tk.name === "Thorn")!;
+    const lines = state.log.flatMap((e) => (e.data?.type === "cast" ? [e.data] : []));
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0]?.tokenId, thorn.id);
+    assert.notEqual(thorn.id, tokenId);
+    for (const s of [copy, pipSocket, dmSocket]) s.close();
+  });
+
   test("a hostile manifest cannot smuggle a non-image, lie about a kind, or escape the asset folder", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Hostile source");

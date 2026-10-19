@@ -752,9 +752,9 @@ describe("a Druid's known forms: op version 11 and snapshot version 15 (docs/des
   const NEW = "dragon-turtle";
   const BOTH = [OLD, NEW, "wolf"];
 
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 11);
-    assert.equal(SNAPSHOT_VERSION, 15);
+  test("is the version or older", () => {
+    assert.ok(OP_VERSION >= 11);
+    assert.ok(SNAPSHOT_VERSION >= 15);
   });
 
   test("both steps return what they are given", () => {
@@ -788,5 +788,30 @@ describe("a Druid's known forms: op version 11 and snapshot version 15 (docs/des
     assert.equal(withTodaysSrdIds(op), op);
     const state = room({ characters: { c1: character("c1", { knownForms: ["wolf", "owl"] }) } });
     assert.equal(runMigrations(state, 13, 14, snapshotMigrations), state);
+  });
+});
+
+describe("a player's asks for saves: op version 12 and snapshot version 16 (docs/design-v1-player-save-spell.md 5.7)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 12);
+    assert.equal(SNAPSHOT_VERSION, 16);
+  });
+
+  test("a room from before them starts with no asks, and one that has them keeps them", () => {
+    const { casts: _casts, ...before } = room();
+    const migrated = runMigrations(before, 15, 16, snapshotMigrations) as RoomState;
+    assert.deepEqual(migrated.casts, {});
+    const held = room({ casts: { k1: { id: "k1", rev: 1, by: "p1", caster: "t1", sceneId: "s1", spell: "Fireball", area: "a1", at: "2026-10-18T20:00:00.000Z" } } });
+    assert.equal(runMigrations(held, 15, 16, snapshotMigrations), held);
+  });
+
+  test("the op step returns what it is given, an outcome with no ask among them", () => {
+    const ops: unknown[] = [{ t: "actor.outcome", plan: "pl1", targets: [{ target: { tokenId: "t1" }, amount: 3 }] }, { t: "roll.close", rollIds: ["r1"] }];
+    for (const op of ops) assert.equal(runMigrations(op, 11, 12, opMigrations), op);
+  });
+
+  test("a version 12 op and a version 16 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 12, 11, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 16, 15, snapshotMigrations), /down/);
   });
 });

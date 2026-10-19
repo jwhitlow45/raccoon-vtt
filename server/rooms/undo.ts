@@ -84,11 +84,14 @@ export class UndoStacks {
    * DM did, not a picture nobody asked for. Nor does an ask to change a
    * roll or its end (docs/design-v1-roll-request.md 7.5): the ask is the
    * player's, so a DM's undo of Keep would bring back an ask the player was
-   * told was settled. Keep stands, as the Allow's roll does.
+   * told was settled. Keep stands, as the Allow's roll does. Nor does a
+   * close of an ask for saves, for the same reason.
    */
   static records(role: "dm" | "player", op: Op): boolean {
     if (op.t.startsWith("sys.")) return false;
     if (op.t === "roll.change") return false;
+    // A dismissal answers the player, as Keep does, and a withdrawal is the player's own (docs/design-v1-player-save-spell.md 5.6).
+    if (op.t === "cast.close") return false;
     if (op.t === "scene.update" && Object.keys(op.patch).every((field) => field === "thumb")) return false;
     if (role === "dm") return true;
     return onPlayerUndoStack(op);

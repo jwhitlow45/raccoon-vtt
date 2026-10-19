@@ -1,6 +1,8 @@
 import type { OpOf } from "../protocol.ts";
 import { actorHp, effectAdd, effectRemove } from "./actors.ts";
-import { invalid, type Tx } from "./tx.ts";
+import { ASK_CLOSED } from "../permissions.ts";
+import { closeCast } from "./casts.ts";
+import { Refuse, invalid, type Tx } from "./tx.ts";
 
 /** The refusal of a Legendary Resistance a creature has no use of left. */
 export const NO_RESISTANCE_LEFT = "it has no Legendary Resistance left";
@@ -12,9 +14,16 @@ export const NO_RESISTANCE_LEFT = "it has no Legendary Resistance left";
  * Legendary Resistance it spends, the effects it loses (a save-ends effect a
  * resisted save ends), its damage by `actor.hp`'s rules, concentration
  * prompts included, then the conditions it gains as `actor.effects` adds
- * them. Any refusal refuses the whole.
+ * them. Any refusal refuses the whole. An outcome that resolves a player's
+ * ask for saves closes it first (docs/design-v1-player-save-spell.md 5.3),
+ * so two DM devices that opened one ask apply it once.
  */
 export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
+  if (op.cast !== undefined) {
+    const ask = tx.state.casts[op.cast];
+    if (!ask) throw new Refuse("gone", ASK_CLOSED);
+    closeCast(tx, ask, "done");
+  }
   const holders = new Set<string>();
   for (const item of op.targets) {
     const resolved = tx.resolveActor(item.target);

@@ -204,6 +204,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     rolls: {},
     handoutDocs: {},
     companionBlocks: {},
+    // Open asks for saves belong to a moment of play too, and the import keeps their lines (docs/design-v1-player-save-spell.md 5.7).
+    casts: {},
   };
 
   const moveAny = state.meta.settings.playersMoveAny;
@@ -508,6 +510,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
             return next;
           }),
         };
+      case "cast":
+        return { ...data, tokenId: tokens.of(data.tokenId) };
     }
   };
   // Log ids are `"<seq>:<index>"`. The new room's ops start at seq 1, so seq 0 can never collide.

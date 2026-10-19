@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
-import type { CustomMonster, Handout, HandoutPage } from "#shared/model.ts";
+import type { CastAsk, CustomMonster, Handout, HandoutPage } from "#shared/model.ts";
 import { PLAYED_WITH_OTHERS } from "#shared/permissions.ts";
 import { blockOf, character as testCharacter, companionBlock, customMonster, drawing } from "#shared/testutil.ts";
 import type { ProjectedState, ProjectedToken } from "#shared/project.ts";
@@ -480,5 +480,56 @@ describe("projection over the socket", () => {
     const lost = await anaSocket.next("ev", ofKey);
     assert.ok(lost.changes.some((c) => c.key === key && !("value" in c)));
     for (const s of [dm, anaSocket, anaAgain, cySocket, display]) s.close();
+  });
+
+  test("a player's ask for saves reaches the DM and the asker with the roll they sent first, and not another player, and sent twice it asks once (docs/design-v1-player-save-spell.md 8)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Save spell");
+    const playerClient = t.client();
+    const playerMemberId = await playerClient.join(roomId, "Pip");
+    const dm = await t.connect(roomId, dmClient);
+    const player = await t.connect(roomId, playerClient);
+    const sceneId = playerScene(await dm.snapshot("dm1"));
+    await player.snapshot("p1");
+    const otherClient = t.client();
+    await otherClient.join(roomId, "Quin");
+    const other = await t.connect(roomId, otherClient);
+    await other.snapshot("quin");
+    const thornId = uuidv7();
+    const { rev: _rev, ...thorn } = testCharacter(thornId, { name: "Thorn", ownerIds: [playerMemberId] });
+    assert.equal((await dm.apply({ t: "character.create", character: thorn } as Op)).rejects, undefined);
+    const pc = tokenOp(sceneId, { kind: "pc", name: "Thorn", actor: { ref: thornId } });
+    const goblin = tokenOp(sceneId);
+    for (const { op } of [pc, goblin]) assert.equal((await dm.apply(op)).rejects, undefined);
+
+    const tag = uuidv7();
+    const rolled = await player.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "8d6", label: "Fireball damage, Fire", creature: { tokenId: pc.id } }] });
+    assert.equal(rolled.rejects, undefined);
+    const id = uuidv7();
+    const ask: Op = { t: "cast.ask", cast: { id, caster: pc.id, sceneId, spell: "Fireball", slot: 3, targets: [goblin.id], damage: { tag, parts: 1 } } };
+    const key = `cast:${id}`;
+    const ofKey = (m: { changes: Change[] }) => m.changes.some((c) => c.key === key);
+    // The same ask twice on one socket: the second is answered from the first's receipt.
+    const first = player.op(ask);
+    const second = player.op(ask);
+    const answered = await player.next("ev", (m) => m.acks?.includes(second) ?? false);
+    assert.equal(answered.rejects, undefined);
+    const toDm = await dm.next("ev", ofKey);
+    const held = (toDm.changes.find((c) => c.key === key) as { value: CastAsk }).value;
+    assert.deepEqual([held.by, held.caster, held.targets, held.rolled?.length, held.rolled?.[0]?.type], [playerMemberId, pc.id, [goblin.id], 1, "fire"]);
+    assert.ok(first < second);
+    assert.equal(await other.maybe("ev", ofKey, 300), null, "another player never learns of it");
+
+    const again = await Promise.all([t.connect(roomId, dmClient), t.connect(roomId, playerClient), t.connect(roomId, otherClient)]);
+    const [dmAgain, mineAgain, theirsAgain] = again;
+    const dmSnap = (await dmAgain!.snapshot("dm-again")).state as ProjectedState;
+    assert.equal(Object.keys(dmSnap.casts).length, 1, "asked once");
+    assert.equal(dmSnap.log.filter((e) => e.data?.type === "cast").length, 1, "one line");
+    const mine = (await mineAgain!.snapshot("p1-again")).state as ProjectedState;
+    assert.equal(mine.casts[id]?.rolled?.[0]?.total, held.rolled?.[0]?.total, "the asker holds their roll");
+    const theirs = (await theirsAgain!.snapshot("quin-again")).state as ProjectedState;
+    assert.deepEqual(theirs.casts, {});
+    assert.equal(theirs.log.some((e) => e.data?.type === "cast"), false);
+    for (const s of [dm, player, other, ...again]) s.close();
   });
 });

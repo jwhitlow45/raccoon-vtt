@@ -4,6 +4,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
   MAX_ALT_IMAGES,
+  castSchemas,
   diceSchemas,
   dmToolSchemas,
   rollAnswerSchemas,
@@ -441,6 +442,17 @@ const rollRequest = z.strictObject({
   targets: z.array(rollTarget).min(1).max(LIMITS.rollTargets),
 });
 
+/** A player's ask for saves (docs/design-v1-player-save-spell.md 5.2), as its op carries it with what the server wrote. */
+const castAsk = z
+  .strictObject({
+    ...castSchemas.castInput.shape,
+    rev,
+    by: id,
+    rolled: z.array(castSchemas.castRolled).min(1).max(LIMITS.diceBatchesPerTag * LIMITS.diceRollsPerOp).optional(),
+    at: iso,
+  })
+  .refine((c) => (c.area === undefined) !== (c.targets === undefined), { message: "an ask names an area or its targets, one of the two" });
+
 /** A handout of pages has them in order (docs/design-v1-pdf-handouts.md 3.3). One image has none. */
 const handout = z.strictObject({
   id,
@@ -556,6 +568,15 @@ const logEvent = z.discriminatedUnion("type", [
     changed: rollAnswerSchemas.rollChange.optional(),
     mark: z.literal(true).optional(),
   }),
+  // A player's ask for saves and its end (docs/design-v1-player-save-spell.md 5.2).
+  z.strictObject({
+    type: z.literal("cast"),
+    castId: id,
+    tokenId: id,
+    spell: castSchemas.castInput.shape.spell,
+    slot: castSchemas.castInput.shape.slot,
+    end: castSchemas.castEnd.optional(),
+  }),
   // A free roll's line with what was drawn (docs/design-v1-dice.md 5.3).
   z.strictObject({
     type: z.literal("dice"),
@@ -627,6 +648,8 @@ export const roomStateSchema = z.strictObject({
   handoutDocs: record(handoutDoc),
   // Companion stat blocks. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
   companionBlocks: record(companionBlock),
+  // Players' asks for saves. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
+  casts: record(castAsk),
 });
 
 export function parseRoomState(value: unknown): { ok: true; state: RoomState } | { ok: false; message: string } {

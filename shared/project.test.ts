@@ -169,6 +169,32 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
     const owned = state.characters[block.characterId]?.ownerIds.includes(viewer.memberId) === true;
     assert.equal(block.id in ownBlocks, owned, `${label}: companion block ${block.id}`);
   }
+  // An ask for saves and its lines reach only its caster's players now, with the targets and area they see and the
+  // damage roll for its asker alone (docs/design-v1-player-save-spell.md 5.5).
+  const paused = state.meta.view.blackout;
+  const ownsCaster = (caster: string) => {
+    const t = state.tokens[caster];
+    return !paused && t !== undefined && ownsToken(state, viewer, t);
+  };
+  for (const ask of Object.values(state.casts)) assert.equal(ask.id in p.casts, ownsCaster(ask.caster), `${label}: ask ${ask.id}`);
+  for (const [id, pa] of Object.entries(p.casts)) {
+    const ask = state.casts[id]!;
+    for (const t of pa.targets ?? []) assert.ok(p.tokens[t], `${label}: ask ${id} names unseen target ${t}`);
+    if (pa.area !== undefined) assert.ok(p.templates[pa.area], `${label}: ask ${id} names an unseen area`);
+    assert.equal((pa.targets ?? []).length, (ask.targets ?? []).filter((t) => p.tokens[t] !== undefined).length, `${label}: ask ${id} drops a target the viewer sees`);
+    const asker = ask.by === viewer.memberId;
+    assert.equal("damage" in pa, asker && ask.damage !== undefined, `${label}: ask ${id} damage`);
+    assert.equal("rolled" in pa, asker && ask.rolled !== undefined, `${label}: ask ${id} rolled`);
+  }
+  for (const e of p.log) {
+    if (e.data?.type === "cast") assert.ok(ownsCaster(e.data.tokenId), `${label}: cast line ${e.id} leaked`);
+    // A Secret roll's totals reach only its roller and the DM (the Secret chip), so an ask's damage roll never passes them.
+    const stored = state.log.find((x) => x.id === e.id)?.data;
+    if (e.data?.type === "dice" && stored?.type === "dice" && stored.to === "dm" && stored.by !== viewer.memberId) {
+      assert.deepEqual(e.data.rolls, [], `${label}: Secret roll ${e.id} leaked`);
+      assert.ok(!("tag" in e.data), `${label}: Secret roll ${e.id} tag leaked`);
+    }
+  }
   assert.deepEqual(p.encounterHistory, [], `${label}: history`);
   assert.deepEqual(p.monsters, {}, `${label}: custom monsters`);
   for (const m of Object.values(state.monsters)) {
@@ -405,8 +431,8 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
       const t = state.tokens[stored.tokenId];
       assert.ok(t && ownsToken(state, viewer, t), `${label}: log entry ${e.id} from while its creature was unseen leaked`);
     }
-    // A roll line follows its creature's owners, wherever the creature stands (below).
-    if ("tokenId" in data && data.tokenId !== undefined && data.type !== "roll") {
+    // A roll line follows its creature's owners, wherever the creature stands (below), and so does an ask's line (above).
+    if ("tokenId" in data && data.tokenId !== undefined && data.type !== "roll" && data.type !== "cast") {
       assert.ok(p.tokens[data.tokenId], `${label}: log entry about an unseen token leaked`);
       if ((data.type === "hp" || data.type === "rest") && ("amount" in data || "left" in data)) {
         assert.equal(hpAccess(state, viewer, holderOf(state, state.tokens[data.tokenId])), "exact", `${label}: hp amount leaked`);

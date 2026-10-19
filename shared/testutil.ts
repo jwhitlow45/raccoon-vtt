@@ -4,9 +4,11 @@ import {
   ORDER_REVEALS,
   type Actor,
   type AreaTemplate,
+  type CastAsk,
   type Character,
   type CompanionBlock,
   type CustomMonster,
+  type DiceRoll,
   type Drawing,
   type Effect,
   type FreeWall,
@@ -32,6 +34,7 @@ import {
   type WallFeature,
 } from "./model.ts";
 import { wallChunk } from "./keys.ts";
+import { ownsToken } from "./project.ts";
 import { applyOp, type Env } from "./reducer.ts";
 import { normalizeCompanionState } from "./reducer/companions.ts";
 import { hpUndoRestore } from "./reducer/hpUndo.ts";
@@ -226,6 +229,55 @@ export function companionBlock(id: string, characterId: string, overrides: Parti
   return { ...block, id, rev: 0, characterId, ...overrides };
 }
 
+/**
+ * A player's open ask for saves (docs/design-v1-player-save-spell.md 5.2):
+ * by default p1's Fireball for the token `thorn` over the area `a1`, cast at
+ * level 3. An override set to undefined leaves its field out, so a targets
+ * ask reads `{ area: undefined, targets: [...] }`.
+ */
+export function castAsk(id: string, overrides: Partial<CastAsk> = {}): CastAsk {
+  const ask: CastAsk = { id, rev: 1, by: "p1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", at: AT, ...overrides };
+  for (const key of Object.keys(ask) as (keyof CastAsk)[]) if (ask[key] === undefined) delete ask[key];
+  return ask;
+}
+
+/**
+ * The table the save spell tests share (docs/design-v1-player-save-spell.md
+ * 8): Thorn, p1's character, with a token `thorn` on the players' scene and
+ * p1's Fireball area `a1` around it, Bree, p2's, with the token `bree`, the
+ * goblin `g1` in the open and `g2` hidden from players, and p2's own area
+ * `a2`. No ask is open.
+ */
+export function castTable(overrides: Partial<RoomState> = {}): RoomState {
+  return room({
+    characters: {
+      "thorn-c": character("thorn-c", { name: "Thorn", ownerIds: ["p1"] }),
+      "bree-c": character("bree-c", { name: "Bree", ownerIds: ["p2"] }),
+    },
+    tokens: {
+      thorn: token("thorn", { kind: "pc", name: "Thorn", ownerIds: [], actor: { ref: "thorn-c" }, x: 4, y: 4 }),
+      bree: token("bree", { kind: "pc", name: "Bree", ownerIds: [], actor: { ref: "bree-c" }, x: 6, y: 4 }),
+      g1: token("g1", { name: "Goblin", number: 1, x: 5, y: 5 }),
+      g2: token("g2", { name: "Goblin", number: 2, x: 5, y: 6, visibility: "dm" }),
+    },
+    templates: {
+      a1: template("a1", { ownerId: "p1", casterId: "thorn", spell: "Fireball" }),
+      a2: template("a2", { ownerId: "p2", spell: "Thunderwave" }),
+    },
+    ...overrides,
+  });
+}
+
+/** A damage roll of the caster's, as the server logs a free roll: `8d6` for 28 Fire on `thorn` by p1, unless told otherwise. */
+export function damageRoll(overrides: Partial<DiceRoll> = {}): DiceRoll {
+  return { formula: "8d6", faces: [6, 5, 4, 3, 3, 3, 2, 2], total: 28, label: "Fireball damage, Fire", tokenId: "thorn", ...overrides };
+}
+
+/** A `dice` line under a tag (docs/design-v1-dice.md 5.1), by p1 to everyone unless told otherwise. */
+export function diceLine(id: string, tag: string, rolls: DiceRoll[], overrides: Partial<Extract<LogEvent, { type: "dice" }>> = {}): LogEntry {
+  return { id, at: AT, kind: "event", data: { type: "dice", tag, by: "p1", to: "all", rolls, ...overrides } };
+}
+
 /** A monster's stat block without its id and rev: what a create op carries beside an id. */
 export function blockOf(m: CustomMonster): StatBlock {
   const { id: _id, rev: _rev, ...block } = m;
@@ -274,6 +326,7 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     rolls: {},
     handoutDocs: {},
     companionBlocks: {},
+    casts: {},
     ...overrides,
   };
 }
@@ -621,7 +674,57 @@ export function randomState(r: () => number): RoomState {
   addCompanions(r, state);
   addCompanionBlocks(state);
   addOrderReveal(r, state);
+  addCasts(r, state);
   return state;
+}
+
+/**
+ * Players' asks for saves (docs/design-v1-player-save-spell.md 5.2), each
+ * with its line, and the lines of asks closed before: for any token, a gone
+ * one now and then, over an area or targets some of which are hidden or
+ * gone, with a damage roll whose line is now and then Secret, or rolled by
+ * another player, and whose results the ask now and then holds.
+ */
+function addCasts(r: () => number, state: RoomState): void {
+  const tokenIds = Object.keys(state.tokens);
+  const templateIds = Object.keys(state.templates);
+  if (tokenIds.length === 0) return;
+  let dice = 0;
+  // After every dice line, in the log's own order of ids.
+  const lines: LogEvent[] = [];
+  for (let i = 0; i < int(r, 0, 3); i++) {
+    const id = `k${i}`;
+    const by = pick(r, ["p1", "p2"]);
+    const caster = chance(r, 0.9) ? pick(r, tokenIds) : "missing-token";
+    const ask: CastAsk = { id, rev: 1, by, caster, sceneId: state.tokens[caster]?.sceneId ?? "s1", spell: pick(r, ["Fireball", "Hold Person", "Sacred Flame"]), at: AT };
+    if (chance(r, 0.5)) ask.slot = int(r, 1, 9);
+    if (templateIds.length > 0 && chance(r, 0.5)) ask.area = chance(r, 0.9) ? pick(r, templateIds) : "missing-template";
+    else {
+      ask.targets = [...new Set(Array.from({ length: int(r, 1, 4) }, () => (chance(r, 0.9) ? pick(r, tokenIds) : "missing-token")))];
+      ask.roll = "spells:Hold Person";
+    }
+    if (chance(r, 0.6)) {
+      const tag = `dmg-${id}`;
+      ask.damage = { tag, parts: 1 };
+      const roll = damageRoll({ label: `${ask.spell} damage, Fire`, tokenId: caster, ...(chance(r, 0.6) ? { seen: true as const } : {}) });
+      state.log.push(diceLine(`8:${dice++}`, tag, [roll], { by: chance(r, 0.85) ? by : pick(r, ["p1", "p2", "dm1"]), to: chance(r, 0.4) ? "dm" : "all", batch: `batch${id}xxxxxxxxx`.slice(0, 16) }));
+      if (chance(r, 0.8)) ask.rolled = [{ formula: roll.formula, total: roll.total, type: "fire" }];
+    }
+    state.casts[id] = ask;
+    lines.push({ type: "cast", castId: id, tokenId: caster, spell: ask.spell, ...(ask.slot !== undefined ? { slot: ask.slot } : {}) });
+  }
+  for (let i = 0; i < int(r, 0, 2); i++) {
+    const end = pick(r, ["done", "dismissed", "withdrawn"] as const);
+    lines.push({ type: "cast", castId: `closed${i}`, tokenId: pick(r, tokenIds), spell: "Fireball", slot: 3, end });
+  }
+  // Damage rolls no ask names yet, which a random ask may take.
+  for (let i = 0; i < int(r, 0, 3); i++) {
+    const by = pick(r, ["p1", "p2"]);
+    const own = tokenIds.filter((id) => ownsToken(state, { memberId: by, role: "player" }, state.tokens[id]!));
+    const tokenId = own.length > 0 && chance(r, 0.8) ? pick(r, own) : pick(r, tokenIds);
+    state.log.push(diceLine(`8:${dice++}`, `free-${i}`, [damageRoll({ tokenId, ...(chance(r, 0.3) ? { crit: "doubleDice" as const } : {}) })], { by, to: chance(r, 0.4) ? "dm" : "all" }));
+  }
+  lines.forEach((data, i) => state.log.push({ id: `9:${i}`, at: AT, kind: "event", data }));
 }
 
 /** The order setting (docs/design-v1-combat-flow.md 11), and rows whose turn has come in the fight and its saved steps. */
@@ -1182,6 +1285,8 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
   if (chance(r, 0.16)) return dmToolOp(r, state, who, { anyToken, target, seqId });
   // Companions (docs/design-v1-combat-flow.md 3.6), about one in twelve.
   if (chance(r, 0.08)) return companionOp(r, state, who, { anyToken, anyCharacter, seqId });
+  // Asks for saves (docs/design-v1-player-save-spell.md 5.3), about one in sixteen.
+  if (chance(r, 0.06)) return castOp(r, state, who, { anyToken, seqId });
 
   if (who.role === "player") {
     // Wave 4's moves, doors and lights, now and then.
@@ -1532,6 +1637,43 @@ function companionOp(r: () => number, state: RoomState, who: Viewer, helpers: { 
 }
 
 /** A character's stat block saved, edited or deleted, by anyone, of a character they may or may not own. */
+/**
+ * A player's ask for saves for one of their creatures, or any, over an area
+ * of theirs or targets, with a damage roll's tag from the log now and then,
+ * and their withdrawals. The DM's resolves, dismissals and outcomes that
+ * close an ask, of an open one or one that is gone.
+ */
+function castOp(r: () => number, state: RoomState, who: Viewer, helpers: { anyToken(): string; seqId: string }): Op {
+  const askIds = Object.keys(state.casts);
+  const anyAsk = () => (askIds.length > 0 && chance(r, 0.9) ? pick(r, askIds) : "missing-ask");
+  if (who.role === "player") {
+    if (chance(r, 0.3)) return { t: "cast.close", castId: anyAsk(), end: chance(r, 0.9) ? "withdrawn" : "dismissed" };
+    const sceneId = state.meta.playerSceneId ?? "s1";
+    const own = Object.values(state.tokens).filter((t) => t.sceneId === sceneId && (t.ownerIds.includes(who.memberId) || ("ref" in t.actor && state.characters[t.actor.ref]?.ownerIds.includes(who.memberId))));
+    const caster = own.length > 0 && chance(r, 0.8) ? pick(r, own).id : helpers.anyToken();
+    const areas = Object.values(state.templates).filter((t) => t.ownerId === who.memberId && t.sceneId === sceneId);
+    const rolls = state.log.flatMap((e) => (e.data?.type === "dice" && e.data.tag !== undefined && e.data.by === who.memberId ? [{ tag: e.data.tag, tokenId: e.data.rolls[0]?.tokenId }] : []));
+    const roll = rolls.length > 0 && chance(r, 0.6) ? pick(r, rolls) : undefined;
+    const pickArea = areas.length > 0 && chance(r, 0.5);
+    return {
+      t: "cast.ask",
+      cast: {
+        id: helpers.seqId,
+        // The roll's own creature now and then, so its results go with the ask.
+        caster: roll?.tokenId !== undefined && chance(r, 0.7) ? roll.tokenId : caster,
+        sceneId,
+        spell: pick(r, ["Fireball", "Hold Person"]),
+        ...(chance(r, 0.5) ? { slot: int(r, 3, 9) } : {}),
+        ...(pickArea ? { area: pick(r, areas).id } : { targets: [...new Set([helpers.anyToken(), helpers.anyToken()])], roll: "spells:Hold Person" }),
+        ...(roll ? { damage: { tag: roll.tag, parts: 1 } } : {}),
+      },
+    };
+  }
+  if (chance(r, 0.5)) return { t: "cast.close", castId: anyAsk(), end: chance(r, 0.6) ? "done" : "dismissed" };
+  const castId = anyAsk();
+  return { t: "actor.outcome", plan: helpers.seqId, label: state.casts[castId]?.spell ?? "Fireball", cast: castId, targets: [{ target: { tokenId: helpers.anyToken() }, amount: int(r, 1, 12) }] };
+}
+
 function companionBlockOp(r: () => number, state: RoomState, helpers: { anyCharacter(): string; seqId: string }): Op {
   const blocks = Object.keys(state.companionBlocks);
   const anyBlock = () => (blocks.length > 0 && chance(r, 0.9) ? pick(r, blocks) : "missing-block");

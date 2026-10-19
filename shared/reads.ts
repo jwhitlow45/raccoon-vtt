@@ -72,6 +72,8 @@ export function reads(op: Op, state: RoomState): Reads {
     case "dice.roll":
     case "roll.dice":
     case "actor.deathRoll":
+    // An ask reads its damage roll's lines from the log, which only the server holds whole (docs/design-v1-player-save-spell.md 5.6).
+    case "cast.ask":
       return NEVER;
 
     case "room.update":
@@ -146,6 +148,7 @@ export function reads(op: Op, state: RoomState): Reads {
           else if (of_ && "characterId" in of_) r.push({ key: keys.character(of_.characterId) });
         }
       }
+      if (op.cast !== undefined) r.push({ key: keys.cast(op.cast) });
       return of(r);
     }
     case "actor.deathSave":
@@ -343,6 +346,11 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([{ key: keys.roll(op.rollId) }]);
     case "roll.close":
       return of([...op.rollIds.map((id) => ({ key: keys.roll(id) })), ...endsReads(state, op.rollIds)]);
+    // The ask and its caster, whose owners may withdraw it: a player's view of a lent caster on another scene lacks the token, so it waits.
+    case "cast.close": {
+      const ask = state.casts[op.castId];
+      return of([{ key: keys.cast(op.castId) }, ...(ask ? [{ key: keys.token(ask.caster) }] : [])]);
+    }
   }
 }
 

@@ -213,6 +213,8 @@ const DELETIONS = new Set<Op["t"]>([
   "handoutDoc.delete",
   // The space a room at its quota most needs back, which a block's players may free too (docs/design-v1-companion-stat-blocks.md 3.6).
   "companionBlock.delete",
+  // A player's Withdraw and the DM's Dismiss of an ask for saves free a waiting ask (docs/design-v1-player-save-spell.md 5.4).
+  "cast.close",
 ]);
 
 /**

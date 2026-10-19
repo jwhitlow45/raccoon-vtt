@@ -5,7 +5,7 @@ import { migrateSnapshot } from "#shared/migrate.ts";
 import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
-import { actor, apply, character, companionBlock, customMonster, DM, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { actor, apply, castAsk, castTable, character, companionBlock, customMonster, DM, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -601,5 +601,36 @@ describe("roomStateSchema, a Druid's known forms (docs/design-v1-known-forms.md 
     const parsed = parseRoomState(migrateSnapshot(JSON.parse(JSON.stringify(v13)), 13));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     assert.deepEqual(parsed.ok && parsed.state.characters.bree?.knownForms, [NEW, "wolf"]);
+  });
+});
+
+describe("roomStateSchema, a player's asks for saves (docs/design-v1-player-save-spell.md 5.7)", () => {
+  const line = (data: Record<string, unknown>) => ({ id: "40:0", at: "2026-10-18T20:00:00.000Z", kind: "event" as const, data: { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", ...data } });
+  const asks = () =>
+    castTable({
+      casts: {
+        k1: castAsk("k1", { damage: { tag: "dmg", parts: 1 }, rolled: [{ formula: "8d6", total: 28, type: "fire" }] }),
+        k2: castAsk("k2", { area: undefined, slot: undefined, targets: ["g1", "bree"], roll: "spells:Hold Person", spell: "Hold Person" }),
+      },
+      log: [line({ slot: 3 }) as never, { ...line({ end: "done" }), id: "41:0" } as never],
+    });
+
+  test("asks and their lines parse as their ops stored them, and a backup from before them still imports, with none", () => {
+    const parsed = parseRoomState(structuredClone(asks()));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const { casts: _casts, ...before } = room();
+    const old = parseRoomState(migrateSnapshot(structuredClone(before), 15));
+    assert.ok(old.ok, old.ok ? "" : old.message);
+    assert.deepEqual(old.ok && old.state.casts, {});
+  });
+
+  test("what no op stores is refused: both an area and targets, neither, a bad end, a type no damage has", () => {
+    const one = (ask: object) => room({ casts: { k1: ask as never } });
+    assert.equal(parseRoomState(one({ ...castAsk("k1"), targets: ["g1"] })).ok, false);
+    const { area: _area, ...neither } = castAsk("k1");
+    assert.equal(parseRoomState(one(neither)).ok, false);
+    assert.equal(parseRoomState(one({ ...castAsk("k1"), rolled: [{ formula: "8d6", total: 28, type: "healing" }] })).ok, false);
+    assert.equal(parseRoomState(room({ log: [line({ end: "applied" }) as never] })).ok, false);
+    assert.equal(parseRoomState(room({ log: [line({ spell: "" }) as never] })).ok, false);
   });
 });

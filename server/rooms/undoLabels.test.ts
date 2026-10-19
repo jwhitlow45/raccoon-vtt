@@ -79,7 +79,7 @@ describe("undo step labels", () => {
     for (const schema of clientOps) {
       const t = schema.shape.t.value;
       // The smallest op of each type the label can read: fields it does not use stay unset.
-      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, block: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } } } as never, s);
+      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, block: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } }, cast: { spell: "x" } } as never, s);
       assert.ok(label.length > 0 && label.length <= 200, `${t}: ${label}`);
     }
   });
@@ -244,6 +244,16 @@ describe("wave 5 undo labels (docs/design-v1-dm-tools.md 2.2)", () => {
     assert.equal(describeOp({ t: "roll.reopen", rollId: "r1", target: { characterId: "c1" }, change: "a1" }, s), "letting Ayla fix the total");
     assert.equal(describeOp({ t: "roll.close", rollIds: ["r1"] }, s), "closing the request for a Dexterity saving throw");
     assert.equal(describeOp({ t: "roll.close", rollIds: ["r1", "r9"] }, s), "closing 2 roll requests");
+  });
+
+  test("an ask for saves and its end name the spell, though neither goes on a stack (docs/design-v1-player-save-spell.md 5.6)", () => {
+    const s = wave5();
+    s.casts.k1 = { id: "k1", rev: 1, by: "p1", caster: "g2", sceneId: "s1", spell: "Fireball", area: "a1", at: "2026-10-18T20:00:00.000Z" };
+    assert.equal(describeOp({ t: "cast.ask", cast: { id: "k2", caster: "g2", sceneId: "s1", spell: "Hold Person", targets: ["g2"] } }, s), "asking for saves against Hold Person");
+    assert.equal(describeOp({ t: "cast.close", castId: "k1", end: "done" }, s), "resolving the ask for saves against Fireball");
+    assert.equal(describeOp({ t: "cast.close", castId: "k1", end: "dismissed" }, s), "setting aside the ask for saves against Fireball");
+    assert.equal(describeOp({ t: "cast.close", castId: "k1", end: "withdrawn" }, s), "withdrawing the ask for saves against Fireball");
+    assert.equal(describeOp({ t: "cast.close", castId: "gone", end: "dismissed" }, s), "setting aside an ask for saves");
   });
 
   test("group edits name the group: changing or deleting 6 tokens, adding Frightened to 4 creatures", () => {

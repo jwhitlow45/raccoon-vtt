@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 15;
-export const OP_VERSION = 11;
+export const SNAPSHOT_VERSION = 16;
+export const OP_VERSION = 12;
 
 export type MigrationStep = {
   from: number;
@@ -115,6 +115,13 @@ export const snapshotMigrations: MigrationStep[] = [
   // reads as before, so a v14 room is a v15 room as it is. The number moves so that an older build, whose strict state
   // schema refuses the field, refuses a v15 snapshot instead of failing on the character.
   { from: 14, to: 15, apply: (state) => state },
+  // v15 had no players' asks for saves (docs/design-v1-player-save-spell.md 5.7). Rooms and backups from before them
+  // start with none. The `cast` log line and an outcome's `cast` are new, and nothing stored names them.
+  {
+    from: 15,
+    to: 16,
+    apply: (state) => (state !== null && typeof state === "object" && !("casts" in state) ? { ...state, casts: {} } : state),
+  },
 ];
 
 /**
@@ -366,6 +373,23 @@ export const opMigrations: MigrationStep[] = [
     // since.
     from: 10,
     to: 11,
+    apply: (op) => op,
+  },
+  {
+    // A player's ask for saves (docs/design-v1-player-save-spell.md 5.7):
+    // two new ops, `cast.ask` and `cast.close`, and an optional `cast` on
+    // `actor.outcome`. No older op names a cast, and an outcome without one
+    // applies as before, so the step is the identity and no rule gates on
+    // it. An older build's strict schemas refuse the new ops and field,
+    // which the version makes that build refuse cleanly instead.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 12, and the shutdown writes version 16 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 11,
+    to: 12,
     apply: (op) => op,
   },
 ];

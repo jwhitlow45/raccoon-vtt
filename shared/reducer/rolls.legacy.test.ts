@@ -36,6 +36,17 @@ const UNDO = 3;
 const envelope = (i: number, opVersion?: number) => ({ seq: 2000 + i, at: new Date(Date.UTC(2026, 9, 1, 20, 0, i)).toISOString(), ...(opVersion === undefined ? {} : { opVersion }) });
 const viewer = (step: Step): Viewer => (step.who === "dm" ? DM : P1);
 
+/**
+ * A state as that build would have written it: without the collections added
+ * since, while they are empty. The snapshot migration adds them empty (asks
+ * for saves at version 16), and nothing in this history fills them, so the
+ * build's bytes are the rest.
+ */
+function asThatBuild(state: RoomState): unknown {
+  const { casts, ...rest } = state;
+  return Object.keys(casts ?? {}).length === 0 ? rest : state;
+}
+
 /** The fixture's steps from `from` on, each op migrated from its stored version, at a replay version (none: as live ops). */
 function replay(start: RoomState, from: number, opVersion: number | undefined, change: (op: Op) => Op = (op) => op) {
   let state = start;
@@ -47,7 +58,7 @@ function replay(start: RoomState, from: number, opVersion: number | undefined, c
     const r = applyOp(state, change(migrateOp(step.op, fixture.opVersion)), viewer(step), envelope(i, opVersion));
     refusals.push(r.ok ? null : r.message);
     if (!r.ok) break;
-    hashes.push(hash128(stableStringify({ state: r.state, log: r.log })));
+    hashes.push(hash128(stableStringify({ state: asThatBuild(r.state), log: r.log })));
     states.push(r.state);
     state = r.state;
   }
@@ -78,7 +89,8 @@ describe("a DM's Pass mark from before wave 7", () => {
   test("loaded from the version 10 snapshot, the state is the replay's, with equal hashes, and the undo's guard matches there too", () => {
     const loaded = migrateSnapshot(structuredClone(fixture.snapshot), fixture.snapshotVersion);
     const replayed = replay(fixture.state, 0, fixture.opVersion);
-    const atMark = replayed.states[MARK]!;
+    // The replay starts from the build's own state, so it lacks what the migration adds empty.
+    const atMark = migrateSnapshot(structuredClone(replayed.states[MARK]!), fixture.snapshotVersion);
     assert.deepEqual(loaded, atMark, "equal states");
     assert.equal(hash128(stableStringify(loaded)), hash128(stableStringify(atMark)), "equal hashes");
     const restore = fixture.steps[UNDO]!.op;
@@ -88,7 +100,7 @@ describe("a DM's Pass mark from before wave 7", () => {
     const undone = replay(loaded, UNDO, fixture.opVersion);
     assert.deepEqual(undone.refusals, [null], "the stored undo applies on the snapshot");
     assert.deepEqual(undone.hashes, [fixture.steps[UNDO]!.after]);
-    assert.deepEqual(undone.state, replayed.state, "both histories end the same");
+    assert.deepEqual(undone.state, migrateSnapshot(structuredClone(replayed.state), fixture.snapshotVersion), "both histories end the same");
   });
 
   test("the answer reads Pass from resultOf: a total of 3 against DC 13, by the stored result of an answer with no tag", () => {

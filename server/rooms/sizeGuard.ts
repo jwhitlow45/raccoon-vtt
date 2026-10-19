@@ -241,6 +241,7 @@ const ROOM_LEVEL = [
   "journal",
   "rolls",
   "handoutDocs",
+  "casts",
 ] as const satisfies readonly (keyof RoomState)[];
 
 const SCENE_LEVEL = [

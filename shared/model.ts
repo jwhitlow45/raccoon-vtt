@@ -34,6 +34,7 @@ export type LightId = string;
 export type JournalPageId = string;
 export type PinId = string;
 export type RollId = string;
+export type CastId = string;
 /**
  * A shipped game-icons.net icon (docs/design-v1-dm-tools.md 3.12):
  * `"<author>/<name>"`, such as "lorc/wolf-head". The author is part of the
@@ -117,6 +118,13 @@ export type RoomState = {
    * before them.
    */
   companionBlocks: Record<CompanionBlockId, CompanionBlock>;
+  /**
+   * Players' open asks for saves against their creatures' spells
+   * (docs/design-v1-player-save-spell.md 5.2), room level as roll requests
+   * are. Closing one removes it, so every ask here is open. Empty in rooms
+   * from before them.
+   */
+  casts: Record<CastId, CastAsk>;
 };
 
 export type RoomMeta = {
@@ -1472,6 +1480,49 @@ export type RollTarget = { tokenId?: TokenId; characterId?: CharacterId } & Roll
   };
 
 /**
+ * A player's ask for saves against their creature's spell or save action
+ * (docs/design-v1-player-save-spell.md 5.2). Open until the DM resolves or
+ * dismisses it, or a player of its caster withdraws it. It holds
+ * references, never numbers the DM trusts: the DC, the dice and the
+ * conditions come from the DM's view of the caster's stat block. The one
+ * exception is `rolled`, which only the reducer writes, from lines the
+ * server rolled.
+ */
+export type CastAsk = {
+  /** Also the ask's receipt tag, so the same ask sent again asks once (5.3). */
+  id: CastId;
+  rev: number;
+  /** The asker. */
+  by: MemberId;
+  /** A creature the asker owned when asking. */
+  caster: TokenId;
+  /** The players' scene when asked, the caster's and the area's. */
+  sceneId: SceneId;
+  /** 1 to 60 characters: the name the row or the area shows. Display text only. */
+  spell: string;
+  /** With targets: the NamedRoll key on the caster's stat block, read on the DM's device. */
+  roll?: string;
+  /** 1 to 9, the casting level. */
+  slot?: number;
+  /** Exactly one of `area` and `targets`. */
+  area?: TemplateId;
+  /** 1 to 50 tokens the asker saw. */
+  targets?: TokenId[];
+  /** The caster's damage roll: its tag, and how many batches it went in. */
+  damage?: { tag: string; parts: number };
+  /** That roll's results in part order, written by the reducer from its lines. Absent when they did not all check out. */
+  rolled?: CastRolled[];
+  /** The envelope time. */
+  at: string;
+};
+
+/** One roll of the caster's damage: its formula as rolled, its total, and the damage type its label names. */
+export type CastRolled = { formula: string; total: number; type?: DamageType };
+
+/** How an ask for saves ended: resolved by the DM (an Apply, or a close with nothing to apply), set aside, or withdrawn. */
+export type CastEnd = "done" | "dismissed" | "withdrawn";
+
+/**
  * A roll the DM asked players for (wave 5, docs/design-v1-dm-tools.md
  * 3.3): "DEX save, DC 15". Each player rolls the answer on the server or
  * types the total they rolled (docs/design-v1-roll-request.md). A player's projection holds only their own targets,
@@ -1765,7 +1816,14 @@ export type LogEvent =
    * viewer groups a group's batches as one roll without learning the
    * roller's ids.
    */
-  | { type: "dice"; tag?: string; part?: number; batch?: string; by: MemberId; to: "all" | "dm"; dc?: number; ac?: number; rolls: DiceRoll[] };
+  | { type: "dice"; tag?: string; part?: number; batch?: string; by: MemberId; to: "all" | "dm"; dc?: number; ac?: number; rolls: DiceRoll[] }
+  /**
+   * A player's ask for saves (docs/design-v1-player-save-spell.md 5.2):
+   * written first in the op that asks, and again with `end` first in the op
+   * that closes it. It reaches the DM and the players who own its caster
+   * now, as the ask does. Its end reads the same whatever the saves did.
+   */
+  | { type: "cast"; castId: CastId; tokenId: TokenId; spell: string; slot?: number; end?: CastEnd };
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and

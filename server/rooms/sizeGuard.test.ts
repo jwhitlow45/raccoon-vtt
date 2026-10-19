@@ -251,6 +251,19 @@ describe("SizeGuard's room-level part (docs/design-v1-dm-tools.md 2.4)", () => {
     }
   });
 
+  test("asks for saves count, since they ride in every DM snapshot (docs/design-v1-player-save-spell.md 5.6)", () => {
+    const state = twoScenes();
+    state.tokens.thorn = token("thorn", { kind: "pc", ownerIds: ["p1"] });
+    const ask: Op = { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "A".repeat(60), targets: Array.from({ length: 50 }, (_, i) => `target-${i}`), damage: { tag: "dmg", parts: 1 } } };
+    const r = applyOp(state, ask, { memberId: "p1", role: "player" }, { seq: 9, at: "2026-10-18T20:00:00.000Z" });
+    assert.ok(r.ok);
+    for (const sceneId of ["s1", "s2"]) {
+      const bytes = serializedBytes(projectState({ ...r.state, sight: {} } as unknown as RoomState, DM, { sceneId }));
+      assert.equal(new SizeGuard({ sceneLimit: bytes }).check(r.state, [sceneId], 0).ok, true, sceneId);
+      assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(r.state, [sceneId], 0).ok, false, sceneId);
+    }
+  });
+
   test("every whisper counts, so an op that fits the DM with fewer whispers but not the other is refused", () => {
     const state = room();
     state.members.dm2 = { ...state.members.dm1!, id: "dm2", name: "Second DM" };

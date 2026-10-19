@@ -5,6 +5,7 @@ import {
   type AutoWalls,
   type AreaTemplate,
   type BuildChunk,
+  type CastAsk,
   type Character,
   type CustomMonster,
   type Drawing,
@@ -936,6 +937,33 @@ function projectHandoutDocCtx(ctx: Ctx, doc: HandoutDoc): HandoutDoc | null {
 }
 
 /**
+ * A player's ask for saves (docs/design-v1-player-save-spell.md 5.5): the
+ * DM gets it whole. A player gets it only while they own its caster now,
+ * and never behind a pause, so another player, a table display and the
+ * caster's former owners never learn of it. Its targets are cut to the
+ * tokens the viewer sees now, its area to one they see, and its damage roll
+ * and what it rolled reach only the asker, since a Secret roll's totals
+ * reach only its roller and the DM.
+ */
+function projectCastCtx(ctx: Ctx, ask: CastAsk): CastAsk | null {
+  if (ctx.viewer.role === "dm") return ask;
+  if (ctx.paused || !ownsRollCreature(ctx, { tokenId: ask.caster })) return null;
+  const out: CastAsk = { id: ask.id, rev: ask.rev, by: ask.by, caster: ask.caster, sceneId: ask.sceneId, spell: ask.spell, at: ask.at };
+  if (ask.roll !== undefined) out.roll = ask.roll;
+  if (ask.slot !== undefined) out.slot = ask.slot;
+  if (ask.area !== undefined) {
+    const area = ctx.state.templates[ask.area];
+    if (area && projectTemplateCtx(ctx, area)) out.area = ask.area;
+  }
+  if (ask.targets !== undefined) out.targets = ask.targets.filter((id) => tokenVisibleById(ctx, id));
+  if (ask.by === ctx.viewer.memberId) {
+    if (ask.damage !== undefined) out.damage = ask.damage;
+    if (ask.rolled !== undefined) out.rolled = ask.rolled;
+  }
+  return out;
+}
+
+/**
  * A character's stat blocks for its companions reach the DM and whoever
  * owns the character, who are exactly the owners of its companions
  * (docs/design-v1-companion-stat-blocks.md 4.2). The character's ownership
@@ -1397,6 +1425,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     }
     case "dice":
       return projectDiceCtx(ctx, data);
+    case "cast":
+      // As the ask itself (projectCastCtx): its caster's players now, never behind a pause.
+      return ctx.paused || !ownsRollCreature(ctx, data) ? null : data;
   }
 }
 
@@ -1515,6 +1546,8 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectHandoutDocCtx(ctx, value as HandoutDoc) : null;
     case "companionBlock":
       return value ? projectCompanionBlockCtx(ctx, value as CompanionBlock) : null;
+    case "cast":
+      return value ? projectCastCtx(ctx, value as CastAsk) : null;
     case "log":
       return value ? projectLogEntryCtx(ctx, value as LogEntry) : null;
     case "encounter":
@@ -1565,6 +1598,7 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     rolls: projectMap(state.rolls, (request) => projectRollCtx(ctx, request)),
     handoutDocs: projectMap(state.handoutDocs, (doc) => projectHandoutDocCtx(ctx, doc)),
     companionBlocks: projectMap(state.companionBlocks, (block) => projectCompanionBlockCtx(ctx, block)),
+    casts: projectMap(state.casts, (ask) => projectCastCtx(ctx, ask)),
     sight: sightTilesCtx(ctx),
   };
 }
@@ -1612,6 +1646,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.rolls)) out.push(keys.roll(id));
   for (const id of Object.keys(state.handoutDocs)) out.push(keys.handoutDoc(id));
   for (const id of Object.keys(state.companionBlocks)) out.push(keys.companionBlock(id));
+  for (const id of Object.keys(state.casts ?? {})) out.push(keys.cast(id));
   for (const e of state.log) out.push(keys.log(e.id));
   return out;
 }
@@ -1723,6 +1758,11 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
   for (const request of Object.values(state.rolls)) {
     const named = request.targets.some((t) => (t.tokenId !== undefined && tokenIds.has(t.tokenId)) || (t.characterId !== undefined && characterIds.has(t.characterId)));
     if (named) add(keys.roll(request.id));
+  }
+  // An ask reaches a player through its caster, and its targets and area follow what they see (docs/design-v1-player-save-spell.md 5.5).
+  for (const ask of Object.values(state.casts)) {
+    const named = tokenIds.has(ask.caster) || (ask.targets?.some((id) => tokenIds.has(id)) ?? false) || (ask.area !== undefined && templateIds.has(ask.area));
+    if (named) add(keys.cast(ask.id));
   }
   if (state.encounter) {
     const hit = state.encounter.entries.some(

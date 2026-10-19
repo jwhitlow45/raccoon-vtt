@@ -99,6 +99,7 @@ function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
     rolls: {},
     handoutDocs: {},
     companionBlocks: {},
+    casts: {},
   };
 }
 

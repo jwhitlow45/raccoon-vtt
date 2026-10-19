@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { AT, DM, P1, actor, apply, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -550,5 +550,26 @@ describe("remapState, pdf handouts (docs/design-v1-pdf-handouts.md 3.6)", () => 
     assert.deepEqual(out.handoutDocs[docs[0]!.id], docs[0]);
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+});
+
+describe("remapState, a player's asks for saves (docs/design-v1-player-save-spell.md 5.7)", () => {
+  const asks = () =>
+    castTable({
+      casts: { k1: castAsk("k1"), k2: castAsk("k2", { area: undefined, targets: ["g1"], spell: "Hold Person" }) },
+      log: [
+        { id: "40:0", at: AT, kind: "event", data: { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3 } },
+        { id: "41:0", at: AT, kind: "event", data: { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3, end: "done" } },
+      ],
+    });
+
+  test("an import drops the open asks, as it drops open requests, and keeps their lines with the caster's new id", () => {
+    const out = remapState(asks(), { assets: new Map() });
+    assert.deepEqual(out.casts, {});
+    const lines = out.log.filter((e) => e.data?.type === "cast");
+    assert.equal(lines.length, 2);
+    const thorn = Object.values(out.tokens).find((t) => t.name === "Thorn")!;
+    for (const e of lines) assert.equal(e.data?.type === "cast" && e.data.tokenId, thorn.id);
+    assert.notEqual(thorn.id, "thorn");
   });
 });

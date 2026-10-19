@@ -51,6 +51,7 @@ import { actorEffects, tokenDeleteMany, tokenUpdateMany } from "./reducer/many.t
 import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { actorOutcome } from "./reducer/outcome.ts";
+import { castAsk, castClose } from "./reducer/casts.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
@@ -351,6 +352,10 @@ function dispatch(tx: Tx, op: Op): void {
       return rollChange(tx, op);
     case "roll.close":
       return rollClose(tx, op);
+    case "cast.ask":
+      return castAsk(tx, op);
+    case "cast.close":
+      return castClose(tx, op);
     case "sys.dice":
       return sysDice(tx, op);
     case "undo":

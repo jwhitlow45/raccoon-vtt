@@ -1,6 +1,6 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
-import type { Actor, BuildChunk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import type { ActorTarget, DoorRef, Op, OpOf, RefusalCode, TokenInput, TokenPatch } from "./protocol.ts";
 import { ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { LIMITS } from "./limits.ts";
@@ -336,6 +336,15 @@ function forDm(op: Op, c: Check): Decision {
     // The rule of the op it carries (docs/design-v1-dice.md 4.2).
     case "sys.dice":
       return forDm(op.asked, c);
+    // A player asks for saves, and the DM resolves or sets the ask aside (docs/design-v1-player-save-spell.md 5.4).
+    case "cast.ask":
+      return refuse("forbidden", DM_RUNS_GROUP_SAVE);
+    case "cast.close":
+      if (op.end === "withdrawn") return refuse("forbidden", ONLY_ITS_PLAYER_WITHDRAWS);
+      return c.state.casts[op.castId] ? OK : refuse("gone", ASK_CLOSED);
+    // Two DM devices that opened one ask apply it once.
+    case "actor.outcome":
+      return op.cast === undefined || c.state.casts[op.cast] ? OK : refuse("gone", ASK_CLOSED);
     default:
       return OK;
   }
@@ -455,6 +464,11 @@ function forPlayer(op: Op, c: Check): Decision {
       return rollAnswerCheck(c, op);
     case "roll.change":
       return rollChangeCheck(c, op);
+
+    case "cast.ask":
+      return castAskCheck(c, op, playerScene);
+    case "cast.close":
+      return castCloseCheck(c, op, playerScene);
 
     case "dice.roll":
       return diceRollCheck(c, op);
@@ -604,6 +618,7 @@ function forPlayer(op: Op, c: Check): Decision {
       const template = c.state.templates[op.templateId];
       if (!template || !c.visible(keys.template(op.templateId))) return GONE;
       if (template.ownerId !== c.actor.memberId) return NOT_YOURS;
+      if (askedArea(c.state, template.id)) return refuse("forbidden", AREA_ASKED);
       if (op.patch.visibility !== undefined && op.patch.visibility !== "all") return refuse("forbidden", "players cannot hide areas");
       if (op.patch.attachedTo && !c.visibleToken(op.patch.attachedTo)) return GONE;
       if (op.patch.casterId && !c.visibleToken(op.patch.casterId)) return GONE;
@@ -612,7 +627,8 @@ function forPlayer(op: Op, c: Check): Decision {
     case "template.delete": {
       const template = c.state.templates[op.templateId];
       if (!template || !c.visible(keys.template(op.templateId))) return GONE;
-      return template.ownerId === c.actor.memberId ? OK : NOT_YOURS;
+      if (template.ownerId !== c.actor.memberId) return NOT_YOURS;
+      return askedArea(c.state, template.id) ? refuse("forbidden", AREA_ASKED) : OK;
     }
 
     case "drawing.create": {
@@ -972,6 +988,77 @@ function restoredAssetsUsable(op: OpOf<"sys.restore">, c: Check): Decision {
     if (!usable(ref.assetId, ref.kind)) return refuse("gone", "its image was deleted since");
   }
   return OK;
+}
+
+/** The refusal of a DM's ask for saves: the DM starts the group save itself (docs/design-v1-player-save-spell.md 5.4). */
+export const DM_RUNS_GROUP_SAVE = "The DM runs a group save directly.";
+/** The refusal of a DM's withdrawal: an ask is withdrawn by a player of its caster, and the DM dismisses it instead. */
+export const ONLY_ITS_PLAYER_WITHDRAWS = "Only its player withdraws an ask. Dismiss it instead.";
+/** The refusal of an outcome or a close for an ask that is gone: resolved on another device, set aside, or withdrawn. */
+export const ASK_CLOSED = "The ask was closed meanwhile.";
+/** The refusal of an ask naming a damage roll that another open ask names. */
+export const ROLL_ASKED_ALREADY = "That roll already went with another ask.";
+/** The refusal of a fourth waiting ask, in the block's own words. */
+export const ASKS_WAITING = `You have ${LIMITS.castsPerMember} asks waiting. Withdraw one first.`;
+/** The refusal of a change to an area its player asked saves for, until the ask closes (5.4). */
+export const AREA_ASKED = "Saves asked. Withdraw to change it.";
+
+/** Whether an open ask for saves names this area, which locks it for its player (docs/design-v1-player-save-spell.md 5.4). */
+export function askedArea(state: Pick<RoomState, "casts">, templateId: string): boolean {
+  return Object.values(state.casts).some((ask) => ask.area === templateId);
+}
+
+/**
+ * The member's asks that count against their cap of waiting asks: those
+ * they made whose caster exists and they own now. The block counts the
+ * same, so its "3 asks waiting" never disagrees with the server.
+ */
+export function waitingAsks(state: Pick<RoomState, "casts" | "tokens" | "characters">, viewer: Viewer): CastAsk[] {
+  return Object.values(state.casts).filter((ask) => {
+    if (ask.by !== viewer.memberId) return false;
+    const token = state.tokens[ask.caster];
+    return token !== undefined && ownsToken(state as RoomState, viewer, token);
+  });
+}
+
+/**
+ * A player's ask for saves (docs/design-v1-player-save-spell.md 5.4): for
+ * a creature they see and own on the players' scene, which the ask names,
+ * so nothing goes behind a pause. An area is one of theirs that they see
+ * there, and each target a token they see there, named once. A hidden
+ * caster, area or target answers as a missing one, so a refusal never says
+ * a hidden thing is there.
+ */
+function castAskCheck(c: Check, op: OpOf<"cast.ask">, playerScene: string | null): Decision {
+  const input = op.cast;
+  if (c.state.casts[input.id]) return GONE;
+  const caster = c.visibleToken(input.caster);
+  if (!caster || playerScene === null || caster.sceneId !== playerScene || input.sceneId !== playerScene) return GONE;
+  if (!ownsToken(c.state, c.actor, caster)) return NOT_YOURS;
+  if (input.area !== undefined) {
+    const area = c.state.templates[input.area];
+    if (!area || area.sceneId !== playerScene || !c.visible(keys.template(input.area))) return GONE;
+    if (area.ownerId !== c.actor.memberId) return NOT_YOURS;
+  }
+  if (input.targets !== undefined) {
+    for (const id of input.targets) {
+      const target = c.visibleToken(id);
+      if (!target || target.sceneId !== playerScene) return GONE;
+    }
+    if (new Set(input.targets).size !== input.targets.length) return refuse("invalid", "a target is named twice");
+  }
+  const tag = input.damage?.tag;
+  if (tag !== undefined && Object.values(c.state.casts).some((ask) => ask.damage?.tag === tag)) return refuse("invalid", ROLL_ASKED_ALREADY);
+  if (waitingAsks(c.state, c.actor).length >= LIMITS.castsPerMember) return refuse("quota", ASKS_WAITING);
+  return OK;
+}
+
+/** A player's withdrawal, of an ask whose caster they own now. The DM's resolve and dismissal are the DM's alone. */
+function castCloseCheck(c: Check, op: OpOf<"cast.close">, playerScene: string | null): Decision {
+  const ask = c.state.casts[op.castId];
+  // Behind a pause a player holds no ask (shared/project.ts), so none is there to withdraw.
+  if (!ask || playerScene === null || !c.ownsTokenId(ask.caster)) return refuse("gone", ASK_CLOSED);
+  return op.end === "withdrawn" ? OK : FORBIDDEN;
 }
 
 /** Movement (design 8.1): owners, or the players the room lets move any token, and never a locked token. */

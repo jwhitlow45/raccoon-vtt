@@ -1052,6 +1052,28 @@ const rollRequestInput = z.strictObject({
   ends: z.strictObject({ effect: id, occurrence: id }).optional(),
 });
 /**
+ * A player's ask for saves (docs/design-v1-player-save-spell.md 5.2 and
+ * 5.3): its caster and the players' scene, the spell's name as the row or
+ * the area shows it, and exactly one of an area and the targets. `damage`
+ * names the caster's damage roll, sent just before on the same socket, by
+ * its tag and its batches. The server writes `by`, `at` and `rolled`.
+ */
+const castInput = z
+  .strictObject({
+    id,
+    caster: id,
+    sceneId: id,
+    spell: line(LIMITS.diceLabelChars).min(1),
+    roll: id.optional(),
+    slot: z.number().int().min(1).max(9).optional(),
+    area: id.optional(),
+    targets: z.array(id).min(1).max(LIMITS.rollTargets).optional(),
+    damage: z.strictObject({ tag: id, parts: z.number().int().min(1).max(LIMITS.diceBatchesPerTag) }).optional(),
+  })
+  .refine((c) => (c.area === undefined) !== (c.targets === undefined), { message: "an ask names an area or its targets, one of the two" });
+const castEnd = z.enum(["done", "dismissed", "withdrawn"]);
+const castRolled = z.strictObject({ formula: z.string().min(1).max(LIMITS.diceFormulaChars), total: z.number().int().min(-100_000).max(100_000), type: z.enum(DAMAGE_TYPES).optional() });
+/**
  * A player's ask to change an answer (docs/design-v1-roll-request.md 1.1):
  * its own id, the `tag` of the answer it would change, the reason, and a
  * reroll's face (an index into the answer's `dice.faces`) or Bardic
@@ -1322,6 +1344,12 @@ export const clientOps = [
   op("actor.outcome", {
     plan: id,
     label: shortText.optional(),
+    /**
+     * The player's ask for saves this outcome resolves (docs/design-v1-player-save-spell.md 5.3), closed in the
+     * same op with end "done". An outcome settles at most one thing: traps' `trap` (docs/design-v1-traps.md 6.2)
+     * joins it here under a refine that refuses both.
+     */
+    cast: id.optional(),
     targets: z
       .array(
         z.strictObject({
@@ -1560,6 +1588,13 @@ export const clientOps = [
     ifSettled: z.literal(true).optional(),
   }),
   /**
+   * A player's ask for saves against their creature's spell (docs/design-v1-player-save-spell.md 5.3), and its end:
+   * the DM's resolve with nothing to apply or dismissal, or a withdrawal by a player of its caster. The ask's id is its
+   * receipt tag, so an ask sent again asks once.
+   */
+  op("cast.ask", { cast: castInput }),
+  op("cast.close", { castId: id, end: castEnd }),
+  /**
    * Rolls on the server (docs/design-v1-dice.md 4.1): 1 to 20 formulas, 100
    * dice in all after each mode, every formula parsing and every mode
    * applying, and the whole op at most 3 KiB serialized. The actor turns it
@@ -1743,6 +1778,7 @@ export type JournalPatch = z.infer<typeof journalPatch>;
 export type JournalBlockInput = z.infer<typeof journalBlockInput>;
 export type PinInput = z.infer<typeof pinInput>;
 export type RollRequestInput = z.infer<typeof rollRequestInput>;
+export type CastInput = z.infer<typeof castInput>;
 export type TokenGroupPatch = z.infer<typeof tokenGroupPatch>;
 export type HandoutInput = z.infer<typeof handoutInput>;
 export type HandoutDocInput = z.infer<typeof handoutDocInput>;
@@ -1825,6 +1861,8 @@ export const dmToolSchemas = {
 export const diceSchemas = { diceResult, critOn, advantageMode };
 /** Wave 7's answer fields, so the stored-state schema checks imported requests and lines by the same bounds. */
 export const rollAnswerSchemas = { rollChange };
+/** A player's ask for saves, so the stored-state schema checks imported asks by the same bounds (docs/design-v1-player-save-spell.md 5.7). */
+export const castSchemas = { castInput, castEnd, castRolled };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */

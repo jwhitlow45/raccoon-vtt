@@ -336,6 +336,40 @@ describe("a room whose replay failed", () => {
     }
   });
 
+  test("a room at its storage quota still takes a Withdraw and a Dismiss of an ask for saves, but no new ask (docs/design-v1-player-save-spell.md 5.4)", async () => {
+    const dm = member("DM", "dm");
+    const pc = member("Thorn's player", "player");
+    const { state, tokenId } = roomWithGoblin(dm);
+    state.members[pc.id] = pc;
+    const sceneId = state.meta.playerSceneId!;
+    state.tokens[tokenId] = { ...state.tokens[tokenId]!, ownerIds: [pc.id] };
+    const at = new Date().toISOString();
+    const ask = (id: string) => ({ id, rev: 1, by: pc.id, caster: tokenId, sceneId, spell: "Fireball", targets: [tokenId], at });
+    state.casts = { k1: ask("k1"), k2: ask("k2") };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db, { readOnly: true }));
+    assert.ok(actor);
+    try {
+      const player = connect(actor, pc, "player");
+      await actor.hello(player.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(player.conn, 1, { t: "cast.close", castId: "k1", end: "withdrawn" });
+      const withdrawn = await answerTo(player.sent, 1);
+      assert.ok(withdrawn !== "stuck" && withdrawn.rejects === undefined);
+      await actor.op(player.conn, 2, { t: "cast.ask", cast: { id: "k3", caster: tokenId, sceneId, spell: "Fireball", targets: [tokenId] } });
+      const asked = await answerTo(player.sent, 2);
+      assert.equal(asked !== "stuck" && asked.rejects?.[0]?.code, "quota");
+      const desk = connect(actor, dm);
+      await actor.hello(desk.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(desk.conn, 1, { t: "cast.close", castId: "k2", end: "dismissed" });
+      const dismissed = await answerTo(desk.sent, 1);
+      assert.ok(dismissed !== "stuck" && dismissed.rejects === undefined);
+      assert.deepEqual(actor.committed.state.casts, {});
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
   test("while a room at its storage quota still takes the deletion", async () => {
     const dm = member("DM", "dm");
     const { state, tokenId } = roomWithGoblin(dm);

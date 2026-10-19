@@ -522,6 +522,23 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       return `${memberName(names, data.memberId)} deleted ${data.name}${deletedWith(data)}.`;
     case "dice":
       return diceLineText(data, names);
+    case "cast":
+      return castText(data, creatureName(names, data));
+  }
+}
+
+/** A player's ask for saves and its end (docs/design-v1-player-save-spell.md 5.2): "Thorn asks for saves: Fireball, level 4." */
+export function castText(data: { spell: string; slot?: number; end?: "done" | "dismissed" | "withdrawn" }, who: string): string {
+  const inside = who === A_CREATURE ? "a creature" : who;
+  switch (data.end) {
+    case "done":
+      return `The DM resolved ${inside}'s ${data.spell}.`;
+    case "dismissed":
+      return `The DM set ${inside}'s ${data.spell} aside.`;
+    case "withdrawn":
+      return `${who}'s ask for saves against ${data.spell} was withdrawn.`;
+    default:
+      return `${who} asks for saves: ${data.spell}${data.slot !== undefined ? `, level ${data.slot}` : ""}.`;
   }
 }
 
