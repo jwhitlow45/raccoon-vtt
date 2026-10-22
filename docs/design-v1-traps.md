@@ -320,7 +320,7 @@ After movement's and attach's builds, on their tip:
 11. `feat(traps): pits open the ground`, with attach's group rules and second link pass.
 12. `perf(traps): bench the worst group move`.
 13. `test(e2e): traps`.
-14. `docs: traps in docs/design.md, FEATURES.md, the DM guide and the shortcut sheet`: design.md sections 6 (model), 7.3 (projection), 7.7 (the refused player undo), 8.1 (ops), 9.3 (the teleport sweep), a new 9.12 (traps), 10.5 (limits, reserves and the pit count), 16.2 (versioning) and 16.4 (export). The Trap tool's taps and drags go in the sheet registry.
+14. `docs: traps in docs/design.md, FEATURES.md and the DM guide`: design.md sections 6 (model), 7.3 (projection), 7.7 (the refused player undo), 8.1 (ops), 9.3 (the teleport sweep), a new 9.12 (traps), 10.5 (limits, reserves and the pit count), 16.2 (versioning) and 16.4 (export). The shortcut sheet holds keys and key-plus-pointer combinations only (the project owner's rule of 2026-10-16), and the Trap tool has neither, so the sheet gains no row: its taps and drags are told in FEATURES.md's Traps section and the guide's prose.
 
 ## 13. The shared move description
 

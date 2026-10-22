@@ -36,6 +36,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Alerts during a fight](#alerts-during-a-fight)
   - [Measuring and movement](#measuring-and-movement)
   - [Mounts, familiars and dragging](#mounts-familiars-and-dragging)
+  - [Traps](#traps)
 - Deeper tools
   - [Outliner](#outliner)
   - [DM panel](#dm-panel)
@@ -65,14 +66,14 @@ The screen has three main parts: the **map** in the middle, the **toolbar** unde
 
 Above the tabs sits the party bar, which shows your players' characters with their HP. Press **Party** to fold it down to a single line: the characters' names and HP in a strip that scrolls sideways when they don't all fit, followed by **Ask** for [asking the party for a roll](#asking-for-rolls).
 
-**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom, and you swipe the sheet down to close it. On a tablet held upright, the sheet keeps to the width of a dialog and sits in the middle of the screen. To save room, your setup tools (Add token, Pin, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
+**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom, and you swipe the sheet down to close it. On a tablet held upright, the sheet keeps to the width of a dialog and sits in the middle of the screen. To save room, your setup tools (Add token, Pin, Trap, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
 
 ![The DM's panel list on a phone, grouped under In play and Prepare.](dm-guide/screen-phone.webp)
 
-**The toolbar** holds ten tools. On a computer, each one has a key:
+**The toolbar** holds eleven tools. On a computer, each one but Trap has a key:
 
 - **Select** (`V`), **Ruler** (`R`), **Area** (`A`), **Fog** (`F`), **Draw** (`D`) and **Ping** (`P`).
-- Your setup tools: **Add token** (`T`), **Pin** (`M`), **Map builder** (`B`) and **Line up grid** (`G`).
+- Your setup tools: **Add token** (`T`), **Pin** (`M`), **Trap**, **Map builder** (`B`) and **Line up grid** (`G`).
 
 When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back.
 
@@ -120,6 +121,7 @@ None of these is needed to run a good session. Each one is there for when you wa
 - **Encounters.** Placing monsters straight from the Monsters panel works fine. Encounters let you prepare fights ahead of time and check them against the XP budget.
 - **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
 - **Areas.** Areas earn their place the first time someone casts Fireball, but you can leave reminders, height and the group save until you need them.
+- **Traps.** A hidden monster or a line in your notes can stand in for a trap at your first session. The Trap tool earns its place once you want a pressure plate that goes off by itself when a token walks onto it.
 - **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.** Each is worth learning, and each is easy to pick up once the basics feel familiar.
 
 # Making maps
@@ -776,6 +778,7 @@ Some moments in a fight need an answer from you, and the app shows them as cards
 - **Recharge**: at the start of a monster's turn, for an action marked **Used** in the Dice panel: "Fire Breath can recharge (5–6)." with **Roll** and **Dismiss**. A success clears Used. The Used mark is kept in the browser tab where you set it, so roll the breath weapon from the same tab you run the fight in.
 - **Legendary Resistance**: when a monster with uses left fails a roll on a Concentration or save-ends card, the card offers **Use Legendary Resistance (2 left)** or **Accept failure**.
 - **Time is up**: with a turn timer running, the device of whoever is acting gets a nudge. It never ends the turn.
+- **A trap went off**: "Hidden Pit went off", with who set it off and who it hits, **Save and damage** and **Dismiss**. It comes in and out of fights alike, and stays until you settle it. See [Traps](#traps).
 
 ## Measuring and movement
 
@@ -795,7 +798,7 @@ Here is how the turn's path works, and how to correct it:
 - When difficult terrain made the turn cost more than its distance, you and the creature's players read both: "Moved 15 ft, used 20 ft", and what is left of its Speed counts what it used. Other players see only "Moved".
 - Inside Spirit Guardians, or any area set to Half Speed that affects it, a creature's Speed is halved, rounded down, so a 25 ft Speed is 12 ft. The label says "Half Speed in Spirit Guardians" while the drag would end inside, and the colors count the halved Speed at each step. Leaving the area gives the full Speed back, less what was used.
 - **Doesn't count**, in the action bar, leaves the last leg out of the total, for a shove or a teleport.
-- Players get **Undo move** for their own newest move. Your own moves are undone with Undo in the top bar.
+- Players get **Undo move** for their own newest move. Your own moves are undone with Undo in the top bar. A move a trap stopped, or one that showed its player the trap's line, is the one a player can't undo (see [Traps](#traps)).
 
 **The walking ruler.** The Ruler's **Measure** chip chooses **Straight** or **Walking**, and your device remembers the choice. Walking measures how far the creature the ruler starts on would walk to each point, or a Medium creature when you start on empty ground: around walls, through open doors, up stairs and counting difficult terrain, just as a drag would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any, and a leg with no way through draws straight in red. A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know.
 
@@ -830,6 +833,72 @@ If a rider, or the mount under it, is knocked Prone or Unconscious, you get a re
 
 A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a group moves at most 20 tokens.
 
+## Traps
+
+A trap is something you build on the map and keep hidden: a pressure plate in a corridor, a trip wire across a doorway, a door that shoots a needle when it opens. When a creature it is set for walks onto it, crosses it or opens its door, the trap goes off by itself, as the SRD's rules for traps describe, and the app tells you what happened so you can resolve it with your table.
+
+### Building a trap
+
+Pick the **Trap** tool. On a computer it sits among your setup tools, after Pin. On a phone it is behind **Setup**. It has no key.
+
+The tool's options choose what your next trap starts from:
+
+- **Start from** offers **Blank**, **Alarm** and the example traps of the SRD: Collapsing Roof, Falling Net, Fire-Casting Statue, Hidden Pit, Poisoned Darts, Poisoned Needle, Rolling Stone and Spiked Pit. **Alarm** does nothing your players can see. It only tells you when someone crosses it, which suits an Alarm spell or a creaking floorboard.
+- **Party level** picks the SRD's column for an example trap (levels 1–4, 5–10, 11–16 or 17–20), which sets its save DC, its damage and the depth of its pit.
+- **Zone** chooses the trap's shape: **Squares**, a **Trip wire** or a **Door**. An example trap picks its own, and you can change it.
+
+Then draw it on the map. For squares, drag across them, or tap a single square. For a trip wire, drag from one end to the other: the ends snap to square corners and the middles of square edges, and a wire is at most 20 squares long. For a door, tap the door. The new trap's pane opens at once.
+
+### The trap pane
+
+The pane holds everything about the trap, in sections that fold to one line each, so you can read the whole trap at a glance and open only what you want to change. Every change is saved as you make it.
+
+1. **Name**: what your players see once they find it.
+2. **Goes off when**: a creature steps onto it, starts or ends its turn on it, or steps off it. **Who** sets it off: party creatures, other creatures or any creature. **Small or larger only** lets the cat walk over the plate, and **Only creatures on the floor** leaves out fliers, burrowers and riders.
+3. **Afterwards**: whether it goes off once or arms again at the start of the next turn, how many times at most, whether it stops the creature where it goes off, and whether it marks itself found when the players see it go off. A trap of squares can also open a pit as deep as you choose, and **Add squares** grows it with more rectangles.
+4. **Hits**: the creature that set it off, everyone on the trap, everyone in squares you draw, or everyone in an area, which you place with the Area tool's shapes and save into the trap.
+5. **Save and damage**: the group save's fields: a save and its DC, half or none on a pass, damage, and conditions on a fail with how long they last.
+6. **Players read**: the line your players see when it goes off, such as "The floor gives way!", and a sound to go with it. A silent trap has no line.
+7. **It also**: up to eight things it does to the map. Press **Add: tap a door, light, creature or stamp**, then tap a door to close, open or lock it, a light to put it out or light it, or a hidden creature or stamp to reveal it. This is how a trap drops a portcullis or springs an ambush.
+8. **Finding and disarming**: the checks that find it, such as "Wisdom (Perception) DC 15: the pressure plate", whether to hint when a creature's Passive Perception would notice it, and how it is disarmed.
+9. **DM note**: anything you want in front of you when it goes off.
+
+When a section asks for something on the map, such as **Add squares**, the squares a trap hits, or **Add: tap a door, light, creature or stamp**, the pane steps aside and the Trap tool's options say what to tap. Drag across squares or tap one, or tap the door, light, creature or stamp, then press **Done**. Outside that, a tap on the map away from the open trap closes its pane.
+
+At the foot of the pane, **Armed** and **Found** show the trap's state, and you can change either by hand. **Ask to search** and **Ask to disarm** send a roll request for the trap's checks to the creatures you have selected, or to the whole party. **Set it off** sets the trap off now, by the creatures you have selected or else by those standing on it, for when a character prods the plate with a pole. **Delete** asks for a second tap.
+
+On your map, an armed trap is hatched in red with its name over it, a sprung one turns grey, a disarmed one keeps a grey dashed outline, and an eye marks one the players have found. Tap a trap with the Trap tool to open its pane again, or find it under **Traps** in the Outliner. A scene holds up to 50 traps.
+
+> [!TIP]
+> Build your traps on a scene the players aren't on yet, or while their screens are blacked out. Traps go off by themselves only on the players' scene, and never during a blackout.
+
+### When a trap goes off
+
+A trap goes off when a creature it is set for walks onto it or across its wire, lands on it from the height controls, opens its door, or starts or ends its turn on it. It goes off at most once a move, at the point where a creature first reaches it, so a rogue who dashes across three plates sets off the nearest one first. If the trap stops creatures, the creature stops there, and anything it carries stops with it. Its player sees the token settle back to that spot as the server answers. A pit then opens under it, and the creature falls to the bottom.
+
+You get a toast, such as "Hidden Pit went off: Thorn.", and a card among your alerts that stays until you deal with it. The card says who set the trap off, who it hits, what it did ("Opened the pit.") and anything it could not do, with your note under them.
+
+- **Save and damage** opens the group save on the creatures the trap hits, as they stood when it went off, already filled with its save, DC and damage. Ask for the saves or roll them as usual, then press **Apply**, which also settles the card. A trap with conditions and no save shows **Apply** instead.
+- **Dismiss** sets the card aside without applying anything, for when the dice or the story go another way.
+
+Your players read the trap's line in their log, "Thorn: The floor gives way!", and Thorn's player also gets it as a toast, with the trap's sound. A request for a save names the trap only "Trap" until the players have found it, so the name in your notes never gives anything away.
+
+A player can't take back a move with **Undo move** once a trap stopped it or showed them its line. The trap happened, and stepping back would let them walk around it, so the app tells them to ask you. Your own **Undo** can still take the move back, trap and all, if you decide it shouldn't have happened.
+
+**When the players saw nothing.** A creature your players can't see may wander onto a trap during a player's move, such as an invisible imp riding along with the party. The trap then stays armed for the players, since nothing happened that they could see, and your toast ends "The players saw nothing." Its card offers **Do its effects**, to let the trap go off for real, doors, lights, pit and line included, and **Mark sprung**, to count it as spent without showing anything. A hidden creature you move yourself sets a trap off at once, doors and all, but your players read no line.
+
+### Found traps, searching and disarming
+
+Once the players know about a trap, mark it **Found** in its pane, or from the hint's toast below. Unless you turned it off, a trap also marks itself found when the players see it go off. Your players then see the trap's name and its outline, hatched in a warning color, and "Disarmed" once you disarm it, but never whether it is still armed, its DC or what it does. When a player drags a token across a found trap that is not disarmed, the drag's label warns them: "Crosses Hidden Pit". Your own drags warn you about every armed trap.
+
+To let the players look for traps, open the trap's pane and press **Ask to search**. It asks the selected creatures, or the party, for the trap's find check. **Ask to disarm** does the same with its disarm check. When they succeed, turn off **Armed**, and the trap is disarmed.
+
+**The Passive Perception hint.** When a party creature ends a walk within 10 feet of a trap nobody has found, and its Passive Perception meets the trap's Perception DC, you get a toast: "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15)." with **Mark found**. The app never marks the trap found by itself, so you decide whether to tell the player, and how. It hints once for each trap, until you change the trap's checks.
+
+### Pits
+
+A trap of squares can open a pit. When it goes off, its squares sink to the pit's floor, and every creature standing on them falls with them, along with whatever it carries. A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does.
+
 # Deeper tools
 
 This part covers the tools that help a long campaign run smoothly: the Outliner, the DM panel, characters' stat blocks, companions, pins, the table display and the room's settings. Read a section when you want what it offers. None of it is needed for a first session.
@@ -840,10 +909,10 @@ The **Outliner** (DM only) lists everything on the scene you are viewing, along 
 
 ![The Outliner on the crypt: the chips that show one group, groups that fold, and each row with what players get, such as Out of the party's sight.](dm-guide/outliner.webp)
 
-- Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings** and **Doors** (windows too). The chips at the top show one group at a time.
+- Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings**, **Doors** (windows too) and **Traps**. The chips at the top show one group at a time.
 - Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
 - **Search the scene** filters the list as you type. Every word must match a row's name or the line under it, so `companion` finds every companion and `secret` finds secret doors. The marks themselves aren't searched, so use the chips and scan the marks to find, say, everything under fog.
-- Tap a row to find it on the map. A token is selected, with its action bar open. A label, pin, stamp or light opens in its tool. A drawing, door or window flashes so you can spot it.
+- Tap a row to find it on the map. A token is selected, with its action bar open. A label, pin, stamp, light or trap opens in its tool. A drawing, door or window flashes so you can spot it.
 
 A companion whose character has no token on this scene reads **Away from Bree**, which is how you find companions left behind when the party moves on. See [The party travels between scenes](#the-party-travels-between-scenes).
 
