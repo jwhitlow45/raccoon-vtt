@@ -207,7 +207,9 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   const targets = planTargets(rows, ids.newId);
   if (targets.length === 0) return null;
   // The outcome closes the player's ask it answers in the same op (docs/design-v1-player-save-spell.md 3.3).
-  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), targets };
+  // A trap's springing is settled by the outcome that applies it, in the same op (docs/design-v1-traps.md 4.4).
+  const trap = page.source.kind === "trap" && !page.cast ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
+  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), ...trap, targets };
 }
 
 // ------------------------------------------------------------ a row in words (5.8)

@@ -1,6 +1,6 @@
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
-import type { AreaTemplate, Character } from "#shared/model.ts";
+import type { AreaTemplate, Character, Trap } from "#shared/model.ts";
 import { cantripTier, pcNamedRolls, pcSlots } from "#shared/rules/pcStats.ts";
 import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
@@ -175,4 +175,45 @@ export function areaFill(dice: DiceView, template: Pick<AreaTemplate, "spell" | 
 export function casterActions(dice: DiceView, template: Pick<AreaTemplate, "casterId">): NamedRoll[] {
   if (!template.casterId) return [];
   return creatureRolls(dice, { tokenId: template.casterId })?.named.filter((r) => r.save !== undefined) ?? [];
+}
+
+/** What players call a trap (docs/design-v1-traps.md 4.4): its name once found, else only "Trap". */
+export const UNFOUND_TRAP = "Trap";
+
+/**
+ * A trap's fill (docs/design-v1-traps.md 4.4): its save or No save, so a
+ * pit applies in one tap, its DC, damage, half or none, conditions on a
+ * fail and how long they last, and "Against a spell" off. The page and its
+ * line name the trap. What players read names it only once they found it.
+ * The DM note goes under the line, as it says what the page cannot know
+ * ("succeeds automatically if it's Huge or larger: mark those Pass").
+ */
+export function trapFill(trap: Pick<Trap, "name" | "found" | "rig">): FillInput {
+  const rig = trap.rig;
+  const test: GroupTest = rig?.save ? { kind: "save", ability: rig.save.ability } : { kind: "none" };
+  const dc = rig?.save?.dc ?? null;
+  const parts: Part[] = (rig?.damage ?? []).map((d) => ({ formula: d.formula, type: d.type }));
+  const damage = partsTextOf(parts);
+  const onPass = rig?.save?.onPass ?? "half";
+  const conditions = [...(rig?.conditions ?? [])];
+  const lasts = rig?.lasts;
+  return {
+    test,
+    dc,
+    spell: false,
+    fill: {
+      name: trap.name,
+      publicName: trap.found ? trap.name : UNFOUND_TRAP,
+      from: fromLine(trap.name, test, dc, null, damage, onPass, conditions),
+      ...(rig?.note ? { note: rig.note } : {}),
+      ...(parts[0]?.type ? { damageType: parts[0].type } : {}),
+    },
+    outcome: {
+      damage,
+      onPass,
+      conditions,
+      lasts: lasts ? { mode: lasts.mode, rounds: lasts.rounds ?? 10, anchor: "own" } : { mode: "none", rounds: 10, anchor: "own" },
+      saveEnds: null,
+    },
+  };
 }

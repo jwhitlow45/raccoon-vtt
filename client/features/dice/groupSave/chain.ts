@@ -27,15 +27,31 @@ export type Phase = "setup" | "rolled" | "applying" | "applied";
 /**
  * Where a page's rows come from until the roll freezes them (5.1): the
  * tokens a quick tap rolled, the room's selection as it changes (`live`,
- * less the creature acting, `except`), or an area's caught creatures.
+ * less the creature acting, `except`), an area's caught creatures, or a
+ * trap's springing (docs/design-v1-traps.md 4.4), whose rows are the
+ * creatures it hits, frozen when it went off, and which Apply settles.
  * `tokenIds` of a live source are its last picks (followSelection), kept in
  * the draft, so a reload, which selects nothing, shows the same rows.
  */
-export type Source = { kind: "selection"; tokenIds: string[]; live?: true; except?: string } | { kind: "area"; templateId: string };
+export type Source =
+  | { kind: "selection"; tokenIds: string[]; live?: true; except?: string }
+  | { kind: "area"; templateId: string }
+  | { kind: "trap"; trapId: string; due: string; tokenIds: string[] };
+
+/** The name players read in what the page sends them (Fill.publicName). */
+export function publicName(fill: Pick<Fill, "name" | "publicName">): string {
+  return fill.publicName ?? fill.name;
+}
+
+/** The name a server roll's label carries: the real one only on a roll players never see. */
+function rollName(page: Pick<Page, "fill" | "secret">): string {
+  return page.secret ? page.fill!.name : publicName(page.fill!);
+}
 
 /** The tokens a page in setup reads its rows from: the selection now for a live source, less the acting creature, or its last picks while nothing is selected. */
 export function sourceIds(source: Source, selected: readonly string[], area?: (templateId: string) => string[]): string[] {
   if (source.kind === "area") return area ? area(source.templateId) : [];
+  if (source.kind === "trap") return source.tokenIds;
   if (!source.live || selected.length === 0) return source.tokenIds;
   return selected.filter((id) => id !== source.except);
 }
@@ -50,8 +66,17 @@ export function followSelection(page: Page, selected: readonly string[]): Page {
 }
 
 export type Fill = {
-  /** The spell's or action's name: "Fireball". Notes and labels name it. */
+  /** The spell's or action's name: "Fireball". The page and the DM's own secret lines name it. */
   name: string;
+  /**
+   * The name every string the page sends to players uses, each request's
+   * note and the label of a roll made in the open, where it differs from
+   * `name`: a trap's name once found, else "Trap" (docs/design-v1-traps.md
+   * 4.4), so the page never names a trap the players have not found.
+   */
+  publicName?: string;
+  /** What the page cannot know, under the fill line: a trap's DM note. */
+  note?: string;
   /** The fill line: "From Fireball: Dexterity save, DC 15, 8d6 fire, half on a pass." */
   from: string;
   /** The recharge action it came from, marked Used on Apply (6.4). */
@@ -236,7 +261,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
   const serverRows = input.server.filter((s) => live.some((r) => r.holder === s.holder && stateOf(next, r).way === "server"));
   if (serverRows.length > 0) {
     const d20 = d20Of(test, page.spell)!;
-    const label = cutLabel(page.fill ? `${page.fill.name}, ${testLabel(d20)}` : testLabel(d20));
+    const label = cutLabel(page.fill ? `${rollName(page)}, ${testLabel(d20)}` : testLabel(d20));
     const rolls = serverRows.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources, ...input.taken] }, d20));
     send.push({ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) });
     next = { ...next, rolls: [...next.rolls, { tag: input.tag, holders: serverRows.map((s) => s.holder), state: "sending" }] };
@@ -252,7 +277,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
         dcShown: page.switches.dcShown,
         resultShown: page.switches.resultShown,
         ...(page.spell && test.kind === "save" ? { spell: true as const } : {}),
-        ...(page.fill ? { note: page.fill.name } : {}),
+        ...(page.fill ? { note: publicName(page.fill) } : {}),
         targets: chunk.map((r) => r.askRef!),
       },
       rollId,
@@ -366,7 +391,7 @@ export function rollAgain(page: Page, input: { holders: readonly string[]; serve
   })());
   if (again.length === 0) return { page, send: [] };
   const d20 = d20Of(page.test, page.spell)!;
-  const label = cutLabel(page.fill ? `${page.fill.name}, ${testLabel(d20)}` : testLabel(d20));
+  const label = cutLabel(page.fill ? `${rollName(page)}, ${testLabel(d20)}` : testLabel(d20));
   let next: Page = { ...page, rolls: [...page.rolls, { tag: input.tag, holders: again.map((s) => s.holder), state: "sending" }] };
   for (const s of again) next = withState(next, s.holder, { status: undefined, says: undefined, batch: { tag: input.tag, part: 0 } });
   const rolls = again.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources] }, d20));

@@ -54,6 +54,7 @@ import {
   setDc,
   followSelection,
   settleTag,
+  publicName,
   sourceIds,
   stateOf,
   syncRequests,
@@ -315,10 +316,13 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
 
   const rollDamage = () => {
     if (!parsedParts?.ok) return;
-    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${page.fill?.name ?? "Group save"} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60) }] : []));
+    const to = damageTo(page, view);
+    // A damage roll in the open names what players may know (Fill.publicName).
+    const named = page.fill ? (to === "dm" ? page.fill.name : publicName(page.fill)) : "Group save";
+    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${named} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60) }] : []));
     if (rollsToSend.length === 0) return;
     const tag = uuidv7();
-    if (panel.roll(rollsToSend, { to: damageTo(page, view), tag }) !== null) update(damageSent(pageRef.current, tag));
+    if (panel.roll(rollsToSend, { to, tag }) !== null) update(damageSent(pageRef.current, tag));
   };
 
   const doApply = () => {
@@ -520,6 +524,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     <div style={{ display: "grid", gap: theme.space(3) }}>
       <Watchers page={page} settle={(tag, receipt) => update(settleTag(pageRef.current, tag, settledOf(receipt), key))} />
       {page.fill ? <Note tone="info">{page.fill.from}</Note> : null}
+      {page.fill?.note ? <Note>{page.fill.note}</Note> : null}
       {page.cast?.says && page.damage === null ? <Note>{page.cast.says}</Note> : null}
       {page.castNote ? <Note tone="info">{page.castNote}</Note> : null}
       {page.cast?.blocked ? <Note tone="error">{page.cast.blocked}</Note> : null}
