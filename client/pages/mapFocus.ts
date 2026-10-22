@@ -14,6 +14,17 @@ import { scopeSlot } from "../state/scope.ts";
 export const mapFocusSlot = scopeSlot(() => ({ el: null as HTMLElement | null }));
 
 /**
+ * Room's way to hand focus to the panel it shows, as its own buttons do
+ * (Details, a tile in the list of panels): the chosen tab from 900 px up,
+ * else the sheet's heading. For a panel opened from outside Room's own
+ * controls, where the pressed control has gone, such as a card's Save and
+ * damage in the alerts over the screen (features/encounter/InitiativeStrip.tsx
+ * FightAlerts). `ui.openPanel` asks for no focus of its own. Room sets
+ * `focus` while it is mounted. Per Room page.
+ */
+export const panelFocusSlot = scopeSlot(() => ({ focus: null as ((panelId: string | null) => void) | null }));
+
+/**
  * Whether Space may hold the map for a drag (canvas/Stage.tsx): while
  * nothing has focus, or the map itself does. The map's focus target takes
  * no key press of its own, and focus lands there once the last roll card

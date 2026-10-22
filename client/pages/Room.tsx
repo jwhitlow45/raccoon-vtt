@@ -71,7 +71,7 @@ import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, useSideSheetRoom, type AlertsSummary } from "./fold.ts";
-import { mapFocusSlot } from "./mapFocus.ts";
+import { mapFocusSlot, panelFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { SideTabs } from "./SideTabs.tsx";
 import { SplitBar } from "./SplitBar.tsx";
@@ -822,6 +822,19 @@ function RoomPage() {
     else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
   };
   useLayoutEffect(placeFocus);
+  // The same for a panel opened from outside Room's controls (mapFocus.ts panelFocusSlot): asked now, and answered now or by the render that draws it.
+  const placeFocusNow = useRef(placeFocus);
+  placeFocusNow.current = placeFocus;
+  const panelFocus = scope.get(panelFocusSlot);
+  useLayoutEffect(() => {
+    panelFocus.focus = (panelId) => {
+      focusNext.current = { kind: "panel", ...(panelId !== null ? { id: panelId } : {}) };
+      placeFocusNow.current();
+    };
+    return () => {
+      panelFocus.focus = null;
+    };
+  }, [panelFocus]);
 
   if (ended) return <EndedScreen ended={ended} roomId={roomId} role={role} />;
   // A blackout is for a break or a reveal (features section 13), so players

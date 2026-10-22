@@ -104,7 +104,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
       store.setState({ page, shownIn: input.panel, restored: false });
       ui.openPanel(input.panel);
       // Started from a card in the alerts over the screen, the panel would open behind them, out of reach.
-      closeAlertsOverlay(scope);
+      closeAlertsOverlay(scope, input.panel);
       return true;
     },
     [store, roomId, sceneId, ui, actions, scope],

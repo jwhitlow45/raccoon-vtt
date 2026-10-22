@@ -867,12 +867,13 @@ describe("a card's action that opens a panel (LP13-TR-3)", () => {
   test("asks the alerts over the screen to close, each time, and asks nothing while they are where they are", () => {
     const scope = new RoomScope();
     const dock = scope.get(barDockSlot);
-    closeAlertsOverlay(scope);
+    closeAlertsOverlay(scope, "dice");
     assert.equal(dock.getState().alertsClose, 0, "no alerts over the screen: nothing to close");
     dock.setState({ alertsOverlay: true });
-    closeAlertsOverlay(scope);
-    closeAlertsOverlay(scope);
+    closeAlertsOverlay(scope, "dice");
+    closeAlertsOverlay(scope, "areas");
     assert.equal(dock.getState().alertsClose, 2, "each ask is a new one, so the column hears both");
+    assert.equal(dock.getState().alertsClosePanel, "areas", "the panel the last ask opened, which takes focus");
   });
 });
 

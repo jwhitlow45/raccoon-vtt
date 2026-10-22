@@ -115,6 +115,20 @@ function boardTexts(page: Page): Promise<string[]> {
   });
 }
 
+/** Where focus is: the element's role and name, and whether it is inside the side panel or which sheet holds it. */
+function focusAt(page: Page): Promise<{ role: string | null; name: string; side: boolean; sheet: string | null }> {
+  return page.evaluate(() => {
+    type Node = { getAttribute(n: string): string | null; textContent: string | null; closest(s: string): Node | null };
+    const a = (globalThis as unknown as { document: { activeElement: Node | null } }).document.activeElement;
+    return {
+      role: a?.getAttribute("role") ?? null,
+      name: (a?.getAttribute("aria-label") ?? a?.textContent ?? "").trim(),
+      side: a?.closest("aside") != null,
+      sheet: a?.closest("dialog[data-rvtt-sheet]")?.getAttribute("aria-label") ?? null,
+    };
+  });
+}
+
 /** Whether any frame Pat's page received names the trap. */
 function patHeardOfTrap(): boolean {
   return patSocket.received.some((frame) => frame.includes(run.trapId));
@@ -349,12 +363,56 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await alerts.waitFor({ state: "detached" });
     const page = dm.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.");
     await page.waitFor();
+    // The panel the card opened takes focus, at its chosen tab, as Details hands focus to the Token tab.
+    const at = await waitFor("focus in the side panel", async () => {
+      const f = await focusAt(dm);
+      return f.side ? f : null;
+    }).catch(async () => assert.fail(`focus is not in the side panel: ${JSON.stringify(await focusAt(dm))}`));
+    assert.equal(at.role, "tab", `focus went to ${JSON.stringify(at)}`);
     // Nothing is left inert behind the alerts, and the page's Ask takes a click once scrolled to on this short screen.
     assert.equal(await dm.locator("[inert]").count(), 0, "the page behind the alerts is still inert");
     const ask = dm.getByRole("button", { name: "Ask 1 player", exact: true });
     await ask.scrollIntoViewIfNeeded();
     assert.ok(await wholeInReach(ask), "the group save in the side panel takes no click");
     await shots.take(dm, "traps-fu20b-save-in-reach");
+  });
+
+  test("fu20b-r1-2. on a small phone at 130% the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading; closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
+    await dm.setViewportSize({ width: 480, height: 320 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    // The Ruler's options leave the column under one whole card, so its row stands for the cards.
+    await pickTool(dm, "Ruler");
+    await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).click();
+    const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
+    await card.waitFor();
+    // A phone's card starts folded to its first line: open, it no longer fits the column and goes over the screen.
+    const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await alerts.waitFor();
+    await shots.take(dm, "traps-fu20b-r1-phone-alerts");
+    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().getByRole("button", { name: "Save and damage", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    const dice = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+    await dice.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.").waitFor();
+    const at = await waitFor("focus in the Dice sheet", async () => {
+      const f = await focusAt(dm);
+      return f.sheet === "Dice" ? f : null;
+    }).catch(async () => assert.fail(`focus is not in the Dice sheet: ${JSON.stringify(await focusAt(dm))}`));
+    assert.equal(at.name, "Dice", `focus went to ${JSON.stringify(at)}`);
+    await shots.take(dm, "traps-fu20b-r1-phone-dice");
+    await dice.getByRole("button", { name: "Close Dice", exact: true }).click();
+    await dice.waitFor({ state: "detached" });
+    await dm.waitForTimeout(500);
+    assert.ok((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1, "no springing waits any more");
+    assert.equal(await alerts.count(), 0, "the alerts came back over the screen when the Dice sheet closed");
+    await shots.take(dm, "traps-fu20b-r1-phone-after-dice");
+    await pickTool(dm, "Select");
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
   });
 
   test("fu20b-2. on a DM phone held upright the waiting trap cards fold under the trap's pane, whose header and Close are whole in reach, and come back as it closes (LP13-TR-6)", async () => {

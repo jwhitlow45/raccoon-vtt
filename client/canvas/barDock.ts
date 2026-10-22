@@ -1074,27 +1074,28 @@ type BarDockState = {
   columnCramped: boolean;
   /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
   alertsOverlay: boolean;
-  /** Asks for the alerts over the screen to close (closeAlertsOverlay), counted so each ask is heard. */
+  /** Asks for the alerts over the screen to close (closeAlertsOverlay), counted so each ask is heard, and the panel the ask opened, which then takes focus. */
   alertsClose: number;
+  alertsClosePanel: string | null;
   /** A popover of the tool's options is open (pages/Room.tsx ToolOptions). It rises under a roll card at a narrow screen's foot, which folds while it is open. */
   toolPopover: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, alertsClose: 0, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
 );
 
 /**
- * Closes the alerts over the screen, as their Close does, for an action on
- * a card there that opens a panel, such as a trap's Save and damage or an
- * ask's Open: the alerts are modal, so the panel would stay out of reach
- * behind them (features/encounter/InitiativeStrip.tsx FightAlerts). With
- * the alerts where they are, it asks nothing.
+ * Closes the alerts over the screen for an action on a card there that
+ * opened `panel`, such as a trap's Save and damage or an ask's Open: the
+ * alerts are modal, so the panel would stay out of reach behind them, and
+ * it takes focus once they are gone (features/encounter/InitiativeStrip.tsx
+ * FightAlerts). With the alerts where they are, it asks nothing.
  */
-export function closeAlertsOverlay(scope: RoomScope): void {
+export function closeAlertsOverlay(scope: RoomScope, panel: string): void {
   const dock = scope.get(barDockSlot);
-  if (dock.getState().alertsOverlay) dock.setState((s) => ({ alertsClose: s.alertsClose + 1 }));
+  if (dock.getState().alertsOverlay) dock.setState((s) => ({ alertsClose: s.alertsClose + 1, alertsClosePanel: panel }));
 }
 
 function clamp(n: number, lo: number, hi: number): number {

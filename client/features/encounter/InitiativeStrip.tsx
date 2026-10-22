@@ -8,7 +8,7 @@ import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { containTab, inertOutside } from "../../lib/modalDialog.ts";
-import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
+import { focusMap, mapFocusSlot, panelFocusSlot } from "../../pages/mapFocus.ts";
 import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
@@ -683,14 +683,25 @@ function FightAlerts() {
     focusRow.current = true;
   }, []);
   useBackClose(overlay, closeOverlay);
-  // So does a card's action that opens a panel (barDock.ts closeAlertsOverlay), which would otherwise open out of reach behind them.
+  /*
+   * So does a card's action that opens a panel (barDock.ts closeAlertsOverlay),
+   * which would otherwise open out of reach behind them. The panel takes
+   * focus, not the row, as Room's own buttons hand it to a panel they open.
+   * A phone's sheet for that panel folds the column as it opens, which hides
+   * the alerts already, so the ask is met whether they show now or not: they
+   * must not come back over the screen when the sheet closes.
+   */
   const closeAsks = useStore(dock, (s) => s.alertsClose);
   const closesHeard = useRef(closeAsks);
+  const focusPanelNext = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (closesHeard.current === closeAsks) return;
     closesHeard.current = closeAsks;
-    if (overlay) closeOverlay();
-  }, [closeAsks, overlay, closeOverlay]);
+    if (asked !== "overlay" && asked !== "fullScreen") return;
+    setAsked(null);
+    focusPanelNext.current = dock.getState().alertsClosePanel;
+  }, [closeAsks, asked, dock]);
+  const panelFocus = useScoped(panelFocusSlot);
   // Modal as a <dialog> is (lib/modalDialog.ts) without becoming one, which would mount its cards afresh and drop a half-typed total: the page behind takes no focus and no tap, and Tab keeps inside.
   useLayoutEffect(() => {
     const box = boxRef.current;
@@ -716,6 +727,13 @@ function FightAlerts() {
   // Measured again once closed, the cards stand in the column for a moment before the row returns, so focus waits for it.
   const mapFocus = useScoped(mapFocusSlot);
   useLayoutEffect(() => {
+    // Once the alerts are gone, and the page behind them is no longer inert.
+    if (focusPanelNext.current !== null && !overlay) {
+      const panel = focusPanelNext.current;
+      focusPanelNext.current = null;
+      panelFocus.focus?.(panel);
+      return;
+    }
     if (focusMapNext.current && !overlay) {
       focusMapNext.current = false;
       focusRow.current = false;
