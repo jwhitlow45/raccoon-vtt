@@ -4,7 +4,7 @@ import type { EdgeFeature, RoomState, Token } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { findRoute } from "#shared/rules/walk.ts";
-import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
+import { groupWalkWorld, halvedAt, publicWorld, speedAreas } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, walkersStop, type Landed } from "../movement/drop.ts";
@@ -644,25 +644,106 @@ describe("a walking ruler's later legs search the room its earlier legs leave (r
     });
   }
 
-  test("an area on a token the walker carries goes with it, so a later leg pays for it where the leg before left it", () => {
-    // A lamp the PC carries holds a 15 ft area of overgrowth, 4 ft a foot. Each leg starts inside it, where the leg before ended.
-    const state = world({ tokens: [token("pc", { name: "Pc", kind: "pc", x: 3, y: 3 }), token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 3, y: 3, attached: { to: "pc", kind: "carry" } })] });
-    state.templates.pg = template("pg", { shape: "emanation", size: 15, attachedTo: "lamp", includeOrigin: true, slows: { kind: "quarter" } });
+  test("an area on a creature the walker drags goes with it, so a later leg pays for it where the leg before left it", () => {
+    // A goblin the PC drags holds a 15 ft emanation of overgrowth, 4 ft a foot. Each leg starts inside it, where the leg before
+    // left the goblin, a step behind the PC.
+    const state = world({ tokens: [token("pc", { name: "Pc", kind: "pc", x: 3, y: 3 }), token("gob", { name: "Gob", size: "small", disposition: "ally", x: 2, y: 3, attached: { to: "pc", kind: "drag" } })] });
+    state.templates.pg = template("pg", { shape: "emanation", size: 15, attachedTo: "gob", includeOrigin: true, slows: { kind: "quarter" } });
     const spots = [{ x: 8, y: 3 }, { x: 13, y: 3 }];
     const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: false })!;
     const drags = dragsFrom(state, "pc", spots);
     assert.equal(drags[0], drags[1]);
+    assert.ok(drags[0]! > 25, `the area costs: ${drags}`);
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), drags);
   });
 
-  test("an area on an object a holder carries goes with the holder, so its later leg pays for the area where it now stands", () => {
-    // A horse carries a lamp with a 10 ft emanation of difficult terrain. It walks east, then north, its first steps north in
-    // the area it carried east, far from where the area started.
-    const state = world({ tokens: [token("horse", { name: "Horse", size: "large", x: 4, y: 10 }), token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 4, y: 10, attached: { to: "horse", kind: "carry" } })] });
+  test("an area on what a creature the holder drags carries goes with the holder, so its later leg pays for the area where it now stands", () => {
+    // A horse drags a goblin that carries a lamp with a 10 ft emanation of difficult terrain. It walks east, then north, its
+    // first steps north in the area it towed east, far from where the area started.
+    const state = world({
+      tokens: [
+        token("horse", { name: "Horse", size: "large", x: 4, y: 10 }),
+        token("gob", { name: "Gob", size: "small", x: 3, y: 10, attached: { to: "horse", kind: "drag" } }),
+        token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 3, y: 10, attached: { to: "gob", kind: "carry" } }),
+      ],
+    });
     state.templates.dt = template("dt", { shape: "emanation", size: 10, attachedTo: "lamp", includeOrigin: true, slows: { kind: "difficult" } });
     const spots = [{ x: 12, y: 10 }, { x: 12, y: 4 }];
     const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.horse!), ...spots.map((p) => ({ x: p.x + 1, y: p.y + 1 }))], viewer: { role: "dm" }, everything: true })!;
-    assert.deepEqual(ruler.legs.map((leg) => leg.ft), dragsFrom(state, "horse", spots));
+    const drags = dragsFrom(state, "horse", spots);
+    assert.deepEqual(drags, [40, 35], "the first step north is in the area, 5 ft more than its distance");
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), drags);
+  });
+});
+
+describe("an area on a token carried rigidly with the mover never costs it (review AT-ASTRA-28)", () => {
+  /** The drags of `id` by `who` on their copy to each spot in turn, each from where the one before left it: what each label read. */
+  function dragsBy(state: RoomState, who: typeof DM, id: string, spots: readonly { x: number; y: number }[]): number[] {
+    let room = state;
+    return spots.map((spot, i) => {
+      const drag = dragOf(who.role === "dm" ? room : copyFor(room, who), who.role, id, spot);
+      const r = applyOp(room, drag.op as Op, who, env(9 + i));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      room = r.state;
+      return drag.preview.read.dragFt;
+    });
+  }
+
+  const lit = (kind: "quarter" | "halfSpeed", speeds?: { walk: number }) => {
+    const state = world({ tokens: [token("pc", { name: "Pc", kind: "pc", ownerIds: ["p1"], x: 3, y: 3, ...(speeds ? { actor: { inline: actor({ speeds }) } } : {}) }), token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 3, y: 3, attached: { to: "pc", kind: "carry" } })] });
+    state.templates.glow = template("glow", { shape: "emanation", size: 15, attachedTo: "lamp", includeOrigin: true, ownerId: "dm1", slows: { kind } });
+    return state;
+  };
+
+  test("a straight walk cut into 1, 2 or 10 stops past a lamp the walker carries costs its 50 ft, on the DM's drags and its owner's, and on their rulers", () => {
+    // A PC carries a Tiny lamp holding a 15 ft emanation of overgrowth, 4 ft a foot, which goes where the PC goes. Read where
+    // the lamp stood when each drag began, a walk cut into more stops paid more: 80, 110 and 200 ft.
+    const state = lit("quarter");
+    for (const cuts of [1, 2, 10]) {
+      const spots = Array.from({ length: cuts }, (_, i) => ({ x: 3 + ((i + 1) * 10) / cuts, y: 3 }));
+      for (const who of [DM, P1]) {
+        const read = dragsBy(state, who, "pc", spots);
+        assert.equal(read.reduce((a, b) => a + b, 0), 50, `${cuts} stops, ${who.memberId}'s drags read ${read}`);
+        const view = who.role === "dm" ? state : copyFor(state, who);
+        const ruler = measureWalk({ view, sceneId: "s1", stops: [tokenStop(view.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: who.role }, everything: who.role === "dm" })!;
+        assert.deepEqual(ruler.legs.map((leg) => leg.ft), read, `${cuts} stops, ${who.memberId}'s ruler`);
+      }
+    }
+  });
+
+  test("a Half Speed area on a lamp the walker carries never halves its Speed, on its drag or the turn's marker", () => {
+    const state = onTurn(lit("halfSpeed", { walk: 30 }), "pc");
+    for (const who of [DM, P1]) {
+      const view = who.role === "dm" ? state : copyFor(state, who);
+      const drag = dragOf(view, who.role, "pc", { x: 5, y: 3 });
+      assert.deepEqual(drag.preview.read.left, { kind: "walk", speed: 30, leftFt: 20, band: "walk" }, `${who.memberId}'s drag`);
+      assert.equal(halvedAt(speedAreas(view, view.tokens.pc!, { role: who.role }), view.tokens.pc!), null, `${who.memberId}'s marker`);
+    }
+  });
+
+  test("an area on the mover's holder, on a creature it drags or on what that creature carries still costs it, and so does one past a link players do not see", () => {
+    const glow = (on: string): RoomState["templates"] => ({ glow: template("glow", { shape: "emanation", size: 10, attachedTo: on, includeOrigin: true, ownerId: "dm1", slows: { kind: "difficult" } }) });
+    const pc = token("pc", { name: "Pc", kind: "pc", ownerIds: ["p1"], x: 5, y: 5 });
+    const lamp = (to: string, kind: "carry" | "drag" = "carry") => token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 5, y: 5, attached: { to, kind } });
+    const imp = (over: Partial<Token> = {}) => token("imp", { name: "Imp", size: "tiny", x: 5, y: 5, attached: { to: "pc", kind: "perch" }, ...over });
+    const cases: [string, Token[], string, number][] = [
+      ["a lamp it carries", [pc, lamp("pc")], "lamp", 0],
+      ["a lamp on an imp perched on it", [pc, imp(), lamp("imp")], "lamp", 0],
+      ["its own area", [pc], "pc", 0],
+      ["its mount", [token("horse", { name: "Horse", size: "large", x: 5, y: 5 }), { ...pc, attached: { to: "horse", kind: "ride" } }], "horse", 1],
+      ["a goblin it drags", [pc, token("gob", { name: "Gob", size: "small", x: 4, y: 5, attached: { to: "pc", kind: "drag" } })], "gob", 1],
+      ["a lamp on a goblin it drags", [pc, token("gob", { name: "Gob", size: "small", x: 4, y: 5, attached: { to: "pc", kind: "drag" } }), lamp("gob")], "lamp", 1],
+      ["a lamp on a hidden imp perched on it", [pc, imp({ visibility: "dm" }), lamp("imp")], "lamp", 1],
+    ];
+    for (const [name, tokens, on, areas] of cases) {
+      const state = world({ tokens });
+      state.templates = glow(on);
+      for (const who of [DM, P1]) {
+        const view = who.role === "dm" ? state : copyFor(state, who);
+        const mover = view.tokens.pc!;
+        assert.equal(groupWalkWorld(view, walkerFor(view, mover, () => true), { role: who.role }).input.areas.length, areas, `${name}, ${who.memberId}'s world`);
+      }
+    }
   });
 });
 

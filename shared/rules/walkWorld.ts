@@ -1,7 +1,7 @@
 import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, isPartyMember, playersSeeGround, projectChunkForPlayer, withheldWhereItStands } from "../project.ts";
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
-import { dragExtra, publicMembers } from "./attach.ts";
+import { carriedGroup, dragExtra, onHolder, publicMembers } from "./attach.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { footprintRect, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
@@ -144,6 +144,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const blocks = scene?.blockMovement === true;
   const everything = opts.everything === true && viewer.role === "dm";
   const shown = shownTokens(state, token, viewer, everything, opts);
+  const rigid = rigidWith(state, token, shownBy(state, viewer, opts));
   // A player's drag, the DM's of a party member and every shared ruler keep to ground players have seen. The DM's other drags read the DM's own map.
   const publicGround = !everything && (opts.seenGround === true || viewer.role === "player" || isPartyMember(state, token));
   const ground = publicGround && scene && scene.fogEnabled !== false ? playersSeeGround(state, scene.id) : null;
@@ -163,7 +164,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const areaCtx = areaContext(state, token, shown, viewer.role === "dm" && !everything);
   const areas: WalkArea[] = [];
   const halfSpeed: AreaTemplate[] = [];
-  for (const { template, kind } of slowingAreas(state, token, shown, everything)) {
+  for (const { template, kind } of slowingAreas(state, token, shown, rigid, everything)) {
     if (kind === "halfSpeed") halfSpeed.push(template);
     else areas.push({ extra: kind === "quarter" ? 3 : 1, cells: computeCoverage(template, areaCtx).cells });
   }
@@ -234,12 +235,29 @@ function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, 
   };
 }
 
-/** The public areas that slow this mover, each without a caster players cannot see. An area on the mover goes with it, so it never meets the mover along the way. */
-function slowingAreas(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>, everything = false): { template: AreaTemplate; kind: AreaSlows["kind"] }[] {
+/**
+ * The mover and the tokens carried rigidly with it (docs/design-v1-movement.md
+ * 15, review AT-ASTRA-28): its public members on links that sit on their
+ * holder (attach.ts onHolder), which go where it goes. A creature it drags
+ * trails behind it, and its holder stays where it is. Only links every
+ * player sees count, as `shown` judges them even for the DM's own ruler, so
+ * no hidden link changes what an area costs.
+ */
+function rigidWith(state: RoomState, token: Token, shown: (t: Token) => boolean): ReadonlySet<string> {
+  const pub = (t: { id: string }) => {
+    const other = state.tokens[t.id];
+    return other !== undefined && shown(other);
+  };
+  const rigid = carriedGroup(state.tokens, token.id, new Set(), (child, holder) => child.attached !== undefined && onHolder(child.attached.kind) && pub(child) && pub(holder));
+  return new Set([token.id, ...rigid]);
+}
+
+/** The public areas that slow this mover, each without a caster players cannot see. An area on the mover, or on a token carried rigidly with it (`rigid`), goes with it, so it never meets the mover along the way. */
+function slowingAreas(state: RoomState, token: Token, shown: ReadonlyMap<string, Token>, rigid: ReadonlySet<string>, everything = false): { template: AreaTemplate; kind: AreaSlows["kind"] }[] {
   const out: { template: AreaTemplate; kind: AreaSlows["kind"] }[] = [];
   for (const { template, caster } of publicAreas(state, token.sceneId, (id) => shown.get(id), everything)) {
     const slows = template.slows;
-    if (!slows || template.attachedTo === token.id || !slowsMover(slows, caster, token)) continue;
+    if (!slows || (template.attachedTo !== undefined && rigid.has(template.attachedTo)) || !slowsMover(slows, caster, token)) continue;
     const { casterId: _hidden, ...uncast } = template;
     out.push({ template: caster ? template : uncast, kind: slows.kind });
   }
@@ -249,7 +267,7 @@ function slowingAreas(state: RoomState, token: Token, shown: ReadonlyMap<string,
 /** The Half Speed areas that affect `token` (4.2), as the public world holds them, for the movement marker where it stands. */
 export function speedAreas(state: RoomState, token: Token, viewer: WalkViewer): SpeedAreas {
   const shown = shownTokens(state, token, viewer);
-  return { halfSpeed: slowingAreas(state, token, shown).flatMap((a) => (a.kind === "halfSpeed" ? [a.template] : [])), areaCtx: areaContext(state, token, shown, viewer.role === "dm") };
+  return { halfSpeed: slowingAreas(state, token, shown, rigidWith(state, token, shownBy(state, viewer, {}))).flatMap((a) => (a.kind === "halfSpeed" ? [a.template] : [])), areaCtx: areaContext(state, token, shown, viewer.role === "dm") };
 }
 
 /*

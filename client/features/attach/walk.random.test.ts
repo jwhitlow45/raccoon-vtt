@@ -334,7 +334,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
   });
 });
 
-type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: number; shared: number; lit: number; towed: number; compared: number; revealed: number };
+type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: number; shared: number; lit: number; trailing: number; towed: number; compared: number; revealed: number };
 
 /**
  * One random walking ruler of two or three legs against the drags it stands
@@ -342,11 +342,11 @@ type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: nu
  * copy, each leg must read what the drag to its stop read, made from where
  * the drags before it left the token, and a shared one must read the same on
  * the DM's room as on a player's copy. `lamps` adds now and then an area on
- * a lamp the mover or its holder carries, `drags` keeps the creatures a
- * holder drags, and `carts` asks for a cart's layout. Without the first
- * two, the walk is the one review round 10 drew.
+ * a lamp the mover, a creature it drags or its holder carries, `drags`
+ * keeps the creatures a holder drags, and `carts` asks for a cart's layout.
+ * Without the first two, the walk is the one review round 10 drew.
  */
-function rulerSeed(seed: number, opts: { lamps: boolean; drags: boolean; carts: boolean }, n: RulerCounts): void {
+function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolean; carts: boolean }, n: RulerCounts): void {
   const r = rng(seed);
   const drawn = randomCase(r, opts.carts ? "cart" : undefined);
   // A ruler has no turn (docs/design-v1-movement.md 3.3): it leaves out other creatures' spaces and a dismount's half Speed.
@@ -357,9 +357,12 @@ function rulerSeed(seed: number, opts: { lamps: boolean; drags: boolean; carts: 
       .filter((t) => opts.drags || t!.attached?.kind !== "drag")
       .map((t): [string, Token] => [t!.id, { ...t!, disposition: "ally", ...(t!.attached?.kind === "ride" ? { attached: { to: t!.attached.to, kind: "carry" } } : {}) }]),
   );
-  // Now and then a lamp the mover carries, or one on its holder, holds an area that costs, which goes where the lamp goes
-  // (reviews AT-ASTRA-26 and AT-SOL-6).
-  const lampOn = opts.lamps && chance(r, 0.5) ? (chance(r, 0.7) ? drawn.mover : tokens[drawn.mover]!.attached?.to) : undefined;
+  // Now and then a lamp holds an area that slows: on the mover, which it never costs since it goes where the mover goes
+  // (review AT-ASTRA-28), or else on a creature the mover drags or on the mover's holder, which it costs, going where the
+  // lamp goes (reviews AT-ASTRA-26 and AT-SOL-6).
+  const towed = Object.values(tokens).find((t) => t.attached?.kind === "drag" && t.attached.to === drawn.mover)?.id;
+  // `lamps: "towed"` puts it on such a creature whenever there is one.
+  const lampOn = opts.lamps && chance(r, 0.5) ? (opts.lamps === "towed" && towed ? towed : chance(r, 0.7) ? drawn.mover : (towed ?? tokens[drawn.mover]!.attached?.to)) : undefined;
   if (lampOn) {
     const under = tokens[lampOn]!;
     tokens.lamp = token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: under.x, y: under.y, elevation: under.elevation, attached: { to: lampOn, kind: "carry" } });
@@ -404,8 +407,10 @@ function rulerSeed(seed: number, opts: { lamps: boolean; drags: boolean; carts: 
     room = applied.state;
   }
   if (read.length < 2) return;
-  // The DM's own ruler walks as the DM's drag does, a player's as the player's drag does. Only under fog does the DM's own
-  // ruler know more than the DM's drag: the ground a party member's drag keeps off, and an area on a token players do not see.
+  // The DM's own ruler walks as the DM's drag does, a player's as the player's drag does. The DM's own ruler also knows what
+  // players do not: DM-only areas and an area's reach past a secret door, which these rooms have none of, and under the fog
+  // the ground a party member's drag keeps off and an area on a token players do not see. So here only under fog can it read
+  // more than the DM's drag.
   const ruler = measureWalk({ view: startCopy, sceneId: "s1", stops, viewer: { role: c.who.role }, everything: dm });
   if (revealed) n.revealed++;
   else if (!dm || !fog || (!isPartyMember(c.state, c.state.tokens[c.mover]!) && !lampOn)) {
@@ -416,6 +421,7 @@ function rulerSeed(seed: number, opts: { lamps: boolean; drags: boolean; carts: 
   n.legs += read.length;
   if (fog) n.fogged++;
   if (lampOn === c.mover) n.lit++;
+  if (lampOn !== undefined && lampOn === towed) n.trailing++;
   if (Object.values(c.state.tokens).some((t) => t?.attached?.kind === "drag" && t.attached.to === c.mover)) n.towed++;
   // Shared, the DM's ruler reads on the DM's room what it reads on a player's copy that shows the creature where it starts (review AT-SOL-5).
   const copy = copyFor(c.state, P1);
@@ -426,13 +432,13 @@ function rulerSeed(seed: number, opts: { lamps: boolean; drags: boolean; carts: 
   n.shared++;
 }
 
-const noRulers = (): RulerCounts => ({ rulers: 0, legs: 0, offHolder: 0, fogged: 0, shared: 0, lit: 0, towed: 0, compared: 0, revealed: 0 });
+const noRulers = (): RulerCounts => ({ rulers: 0, legs: 0, offHolder: 0, fogged: 0, shared: 0, lit: 0, trailing: 0, towed: 0, compared: 0, revealed: 0 });
 
 describe("a walking ruler reads each leg as the drag it stands for (reviews AT-ASTRA-25, AT-SOL-5, AT-ASTRA-26, AT-O-31 and AT-O-32)", () => {
   test("random rulers of two and three legs, the DM's own on the room and a player's on their copy: each leg reads what the drag to its stop read, made from where the drags before it left the token, and a shared one reads the same on every copy", () => {
     const n = noRulers();
-    for (let seed = 1; seed <= 400; seed++) rulerSeed(seed, { lamps: true, drags: true, carts: seed > 250 }, n);
-    assert.ok(n.rulers > 150 && n.compared > 130 && n.offHolder > 40 && n.fogged > 60 && n.shared > 60 && n.lit > 40 && n.towed > 20, JSON.stringify(n));
+    for (let seed = 1; seed <= 400; seed++) rulerSeed(seed, { lamps: seed % 3 === 0 ? "towed" : true, drags: true, carts: seed > 250 }, n);
+    assert.ok(n.rulers > 150 && n.compared > 130 && n.offHolder > 40 && n.fogged > 60 && n.shared > 60 && n.lit > 40 && n.trailing > 10 && n.towed > 20, JSON.stringify(n));
   });
 
   test("two walks a wider sweep found read the same shared on the DM's room as on a player's copy: a creature dragged in the fog, and one a leg drags into it", () => {
