@@ -102,7 +102,8 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     const bree = state.tokens.bree!;
     const answer = pieces ? { kind: "route" as const, route: { pieces, points: [], endsBlocked: false } } : { kind: "open" as const };
     const preview = walkPreview({ view: state, token: bree, target, answer, held: null, world: publicWorld(state, bree, { role: "dm" }), role: "dm" });
-    const r = applyOp(state, { t: "token.move", tokenId: "bree", x: target.x, y: target.y, ...(pieces ? { route: pieces } : {}) }, DM, env(9));
+    const move: Op = { t: "token.move", tokenId: "bree", x: target.x, y: target.y, ...(pieces ? { route: pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } : {}) };
+    const r = applyOp(state, move, DM, env(9));
     assert.ok(r.ok);
     const before = bree.path?.stops.length ?? 1;
     const stored = r.state.tokens.bree!.path!.stops.slice(before).reduce((sum, s) => sum + (s.cost ?? 0), 0);
