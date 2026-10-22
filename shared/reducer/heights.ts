@@ -21,6 +21,11 @@ type Cell = { x: number; y: number };
  * the edit leaves as it was is not written.
  */
 function editChunks(tx: Tx, scene: Scene, cells: readonly Cell[], edit: (chunk: BuildChunk, cells: readonly Cell[]) => BuildChunk): void {
+  for (const next of editedChunks(tx.state.buildChunks, scene, cells, edit)) writeChunk(tx, next);
+}
+
+/** The chunks an edit changes, edited, in key order. */
+function editedChunks(chunks: Readonly<Record<string, BuildChunk>>, scene: Scene, cells: readonly Cell[], edit: (chunk: BuildChunk, cells: readonly Cell[]) => BuildChunk): BuildChunk[] {
   const byChunk = new Map<string, { cx: number; cy: number; cells: Cell[] }>();
   for (const cell of cells) {
     if (!inBounds(scene, cell)) throw invalid("cell outside the scene");
@@ -31,12 +36,14 @@ function editChunks(tx: Tx, scene: Scene, cells: readonly Cell[], edit: (chunk: 
     if (!group) byChunk.set(key, (group = { cx, cy, cells: [] }));
     group.cells.push(cell);
   }
+  const out: BuildChunk[] = [];
   for (const key of [...byChunk.keys()].sort()) {
     const group = byChunk.get(key)!;
-    const chunk = tx.state.buildChunks[key] ?? emptyChunk(scene.id, group.cx, group.cy);
+    const chunk = chunks[key] ?? emptyChunk(scene.id, group.cx, group.cy);
     const next = edit(chunk, group.cells);
-    if (next.heights !== chunk.heights || next.up !== chunk.up || next.rough !== chunk.rough) writeChunk(tx, next);
+    if (next.heights !== chunk.heights || next.up !== chunk.up || next.rough !== chunk.rough) out.push(next);
   }
+  return out;
 }
 
 /**
@@ -49,13 +56,29 @@ export function buildHeight(tx: Tx, op: OpOf<"build.height">): void {
   const scene = tx.scene(op.sceneId);
   const cells = op.cells.map(parseCell);
   const standing = standingOn(tx, scene.id, new Set(cells.map((c) => `${c.x},${c.y}`)));
-  editChunks(tx, scene, cells, (chunk, here) => {
-    const heights = decodeHeights(chunk.heights);
-    for (const c of here) heights[cellIndex(chunk, c.x, c.y)] = op.height;
-    return withHeightFields(chunk, encodeHeights(heights), chunk.up);
-  });
+  editChunks(tx, scene, cells, paintHeight(op.height));
   landOnGround(tx, standing);
   tx.bumpWalls(scene.id);
+}
+
+const paintHeight =
+  (height: number) =>
+  (chunk: BuildChunk, here: readonly Cell[]): BuildChunk => {
+    const heights = decodeHeights(chunk.heights);
+    for (const c of here) heights[cellIndex(chunk, c.x, c.y)] = height;
+    return withHeightFields(chunk, encodeHeights(heights), chunk.up);
+  };
+
+/**
+ * The build chunks as a `build.height` would leave them, written nowhere,
+ * so a pit can check its opened ground against the caps before it opens
+ * (docs/design-v1-traps.md 5.7). Throws as the op would on a cell outside
+ * the scene.
+ */
+export function heightsPainted(chunks: Readonly<Record<string, BuildChunk>>, scene: Scene, op: OpOf<"build.height">): Record<string, BuildChunk> {
+  const out = { ...chunks };
+  for (const next of editedChunks(chunks, scene, op.cells.map(parseCell), paintHeight(op.height))) out[chunkKey(next.sceneId, next.cx, next.cy)] = next;
+  return out;
 }
 
 /** Marks cells as stairs pointing up by the rule ("a") or one way, or takes the marks away with null. Terrain is untouched. */

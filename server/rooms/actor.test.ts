@@ -16,10 +16,11 @@ import {
   utf8Bytes,
 } from "#shared/limits.ts";
 import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
-import { sceneWalls, splitRefusal } from "#shared/rules/walls.ts";
+import { groundAt } from "#shared/rules/heights.ts";
+import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
-import type { Actor, Member, RoomState, Trap } from "#shared/model.ts";
+import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -28,6 +29,8 @@ import { RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./act
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import { roomExport, type RoomExport } from "./exportRoom.ts";
+import { assertWithinLimits } from "./importRoom.ts";
+import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { checkWholeScenes, measuredStateBytes, roomLevelBytes } from "./sizeGuard.ts";
@@ -2752,6 +2755,37 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
       assert.equal(actor.committed.state.tokens.thorn!.x, 1);
       assert.equal(actor.committed.state.traps.plate!.rig!.noticedBy, "thorn", "the hint stays");
     });
+  });
+
+  test("a pit whose opened ground would split its scene's walls past the cap: the import refuses it, and a room holding one keeps it shut", async () => {
+    // Short upright walls, 1/64 of a square apart, across four strips of pit: opened, each strip's two ledges cut every wall.
+    // Each cut makes two pieces: 500 walls make 8,000 extra, past the cap of 5,000, and 250 make 4,000.
+    const xs = Array.from({ length: 600 }, (_, k) => (1 + k) / 64).filter((x) => !Number.isInteger(x));
+    const strips = [1, 3, 5, 7].map((y) => ({ x: 0, y, w: 20, h: 1 }));
+    for (const count of [500, 250]) {
+      const { state, dm, pc, sceneId } = table();
+      state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 40, h: 30 } };
+      const walls: FreeWall[] = xs.slice(0, count).map((x, k) => ({ id: `w${String(k).padStart(11, "0")}`, a: [x, 0.5], b: [x, 8.5], f: { kind: "wall" } }));
+      const built = applyOp(state, { t: "build.walls", sceneId, put: walls }, { memberId: dm.id, role: "dm" }, { seq: 1, at: new Date().toISOString() });
+      assert.ok(built.ok);
+      const room = built.state;
+      room.traps = { plate: { ...plate(sceneId, { pit: { floor: -10 } }), zone: { cells: strips } } };
+      // Past the walls' east end, so his walk meets no wall.
+      room.tokens.thorn = { ...room.tokens.thorn!, x: 18 };
+      const opens = count === 250;
+      // The import counts every pit's border ahead, as the limits step does.
+      if (opens) assert.doesNotThrow(() => assertWithinLimits(room));
+      else assert.throws(() => assertWithinLimits(room), (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === splitRefusal("pieces"));
+      // A room that holds such a pit anyway, as one kept from before a cap was lowered, skips it.
+      await withTable(room, dm, pc, async (actor, _dmSend, pcSend) => {
+        assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 18, y: 3 }), null);
+        const line = actor.committed.state.trapLog.at(-1)?.data;
+        assert.equal(line?.type, "trap");
+        assert.deepEqual(line?.type === "trap" ? line.did : null, [{ action: -1, ok: opens }], `${count} walls`);
+        assert.equal(groundAt(actor.committed.state.buildChunks, sceneId, 18, 3), opens ? -10 : 0);
+        assert.ok(splitCheck(actor.committed.state, sceneId).ok, "the room stays within the split's caps");
+      });
+    }
   });
 
   test("rooms just under the size limit answer the same whether a silent trap goes off or not", async () => {

@@ -13,6 +13,7 @@ import { migrateSnapshot } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import type { Member, RoomState } from "#shared/model.ts";
+import { withPitsCounted } from "#shared/rules/pitCount.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import { isAssetError } from "../assets/errors.ts";
 import { KINDS, isAssetKind, type AssetKind } from "../assets/kinds.ts";
@@ -287,10 +288,12 @@ export function assertWithinLimits(state: RoomState): void {
     const scene = checkLimits(state, sceneId);
     if (!scene.ok) throw over(scene.message);
     // No op's limits step ever saw an imported scene's walls, so the split's caps are checked here
-    // (docs/design-v1-maps-vision.md 2.1).
-    const split = splitCheck(state, sceneId);
+    // (docs/design-v1-maps-vision.md 2.1), with every pit's border counted ahead as the limits step
+    // counts it, so no pit the room holds can open past them (docs/design-v1-traps.md 6.7).
+    const counted = withPitsCounted(state, sceneId);
+    const split = splitCheck(counted, sceneId);
     if (!split.ok) throw over(split.message);
-    const sight = sightPiecesCheck(state, sceneId);
+    const sight = sightPiecesCheck(counted, sceneId);
     if (!sight.ok) throw over(sight.message);
   }
   const bytes = measuredStateBytes(state);

@@ -34,7 +34,10 @@ describe("the DM's trap cards (docs/design-v1-traps.md 4.3)", () => {
     assert.deepEqual(whoLines(s, due("1:0")), { by: "Thorn set it off.", hits: "It hits Thorn." });
     assert.deepEqual(whoLines(s, s.traps.net!.rig!.due![0]!), { by: "You set it off for Thorn, Bree and 2 more.", hits: "It hits no one." });
     assert.equal(hiddenLine(s, due("1:0", { by: ["imp"] })), "Imp set it off, out of the players' sight. The trap is still armed for them.");
-    assert.deepEqual(didLines(s.traps.pit!, [{ action: 0, ok: true }, { action: 1, ok: false }, { action: -1, ok: false }], s), ["Showed Imp.", "Could not put out a light: it was deleted.", "Could not open the pit."]);
+    assert.deepEqual(didLines(s.traps.pit!, [{ action: 0, ok: true }, { action: 1, ok: false }, { action: -1, ok: false }], s), ["Showed Imp.", "Could not put out a light: it was deleted.", "Could not open the pit: the scene is at its wall limit."]);
+    const shrunk = { ...s, scenes: { ...s.scenes, s1: { ...s.scenes.s1!, bounds: { w: 2, h: 2 } } } };
+    const wide = { ...s.traps.pit!, zone: { cells: [{ x: 1, y: 1, w: 2, h: 2 }] } };
+    assert.deepEqual(didLines(wide, [{ action: -1, ok: false }], shrunk), ["Could not open the pit: some of its squares lie outside the scene."], "a scene made smaller since");
     const log: LogEntry[] = [{ id: "12:0", at: "", kind: "event", data: { type: "trap", trapId: "pit", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [{ action: 0, ok: true }] } }];
     assert.deepEqual(lineOf(log, "12:0")?.did, [{ action: 0, ok: true }]);
     assert.equal(lineOf(log, "13:0"), null, "a line the DM's log no longer holds");

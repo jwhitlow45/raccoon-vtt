@@ -5,7 +5,9 @@ import { seenByNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { groundAt } from "../rules/heights.ts";
 import { doorExists, isPlainId } from "../rules/traps.ts";
-import { buildHeight } from "./heights.ts";
+import { splitCheck } from "../rules/walls.ts";
+import { sightPiecesCheck } from "../visionLimits.ts";
+import { buildHeight, heightsPainted } from "./heights.ts";
 import { doorSet } from "./map.ts";
 import { gone, invalid, Refuse, type Tx } from "./tx.ts";
 
@@ -191,7 +193,8 @@ export const PIT_ACTION = -1;
  * None of them can refuse the op: a door's change is the door op's own, a
  * reveal of a lit token passes the lit token cap as a reveal on a turn
  * does, and a pit's geometry is counted from the moment the trap exists
- * (6.7). A pit already open changes nothing and has no outcome to name.
+ * (6.7), so only a pit whose opened ground would still pass a cap fails,
+ * shut. A pit already open changes nothing and has no outcome to name.
  */
 export function runActions(tx: Tx, trap: Trap): Did[] {
   const did: Did[] = [];
@@ -228,13 +231,26 @@ function openPit(tx: Tx, trap: Trap): boolean | null {
     }
   }
   if (!changes) return null;
+  const op: OpOf<"build.height"> = { t: "build.height", sceneId: trap.sceneId, cells, height: floor };
   try {
-    buildHeight(tx, { t: "build.height", sceneId: trap.sceneId, cells, height: floor });
+    if (!openedFits(tx, op)) return false;
+    buildHeight(tx, op);
     return true;
   } catch (err) {
     if (err instanceof Refuse) return false;
     throw err;
   }
+}
+
+/**
+ * Whether the scene's walls with the pit open stay within the split's caps
+ * and the sight pieces' (6.7), read before anything is written. Counting a
+ * pit's border ahead keeps every op within them, but nothing counted an
+ * imported room's pits so, and there a pit over a cap stays shut.
+ */
+function openedFits(tx: Tx, op: OpOf<"build.height">): boolean {
+  const opened = { scenes: tx.state.scenes, buildChunks: heightsPainted(tx.state.buildChunks, tx.scene(op.sceneId), op) };
+  return splitCheck(opened, op.sceneId).ok && sightPiecesCheck(opened, op.sceneId, tx.state).ok;
 }
 
 function runAction(tx: Tx, sceneId: string, action: TrapAction): boolean {

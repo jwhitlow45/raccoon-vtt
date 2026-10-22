@@ -61,14 +61,21 @@ const DOOR_DONE: Record<"open" | "closed" | "locked", [string, string]> = { open
  * the DM's line, whose outcomes name the actions by their place in the
  * list, and the pit as -1.
  */
-export function didLines(trap: Trap, did: readonly { action: number; ok: boolean }[], view: Pick<RoomState, "tokens" | "lights" | "stamps"> & { buildChunks: Readonly<Record<string, BuildChunk>> }): string[] {
+export function didLines(trap: Trap, did: readonly { action: number; ok: boolean }[], view: Pick<RoomState, "tokens" | "lights" | "stamps" | "scenes"> & { buildChunks: Readonly<Record<string, BuildChunk>> }): string[] {
   const actions = trap.rig?.actions ?? [];
   return did.map(({ action, ok }) => {
-    if (action === -1) return ok ? "Opened the pit." : "Could not open the pit.";
+    if (action === -1) return ok ? "Opened the pit." : `Could not open the pit: ${pitOutside(trap, view) ? "some of its squares lie outside the scene" : "the scene is at its wall limit"}.`;
     const a = actions[action];
     if (!a) return ok ? "Did something it no longer lists." : "Could not do something it no longer lists.";
     return actionLine(a, ok, view, trap.sceneId);
   });
+}
+
+/** Whether a squares trap reaches past its scene's edge, as a scene made smaller leaves it: the one other reason a pit cannot open. */
+function pitOutside(trap: Trap, view: Pick<RoomState, "scenes">): boolean {
+  const bounds = view.scenes[trap.sceneId]?.bounds;
+  if (!bounds || !("cells" in trap.zone)) return true;
+  return trap.zone.cells.some((r) => r.x + r.w > bounds.w || r.y + r.h > bounds.h);
 }
 
 function actionLine(a: TrapAction, ok: boolean, view: Pick<RoomState, "tokens" | "lights" | "stamps"> & { buildChunks: Readonly<Record<string, BuildChunk>> }, sceneId: string): string {
