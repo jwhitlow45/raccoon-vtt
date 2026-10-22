@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import net from "node:net";
 import { after, before, describe, test } from "node:test";
 import { MockAgent } from "undici";
-import { setTurnstileDispatcherForTests, verifyTurnstile } from "./turnstile.ts";
+import { setTurnstileDispatcherForTests, strictDispatcher, verifyTurnstile } from "./turnstile.ts";
 
 describe("verifyTurnstile", () => {
   let cloudflare: MockAgent;
@@ -37,5 +38,38 @@ describe("verifyTurnstile", () => {
 
   test("outside production the hostname is not checked, since test keys report a placeholder", async () => {
     assert.equal(await verifyTurnstile(config(false), "there", "203.0.113.5"), "ok");
+  });
+});
+
+describe("verifyTurnstile through a proxy that takes a CONNECT and never answers it (review HF22-F6)", () => {
+  test("answers unavailable near the strict port's limit, well before its own 10 s, and the next one reaches the proxy", { timeout: 15_000 }, async () => {
+    let connects = 0;
+    const sockets: net.Socket[] = [];
+    const proxy = net.createServer((socket) => {
+      sockets.push(socket);
+      socket.on("error", () => undefined);
+      socket.on("data", (chunk) => {
+        if (String(chunk).startsWith("CONNECT")) connects++;
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    const { port } = proxy.address() as net.AddressInfo;
+    const dispatcher = strictDispatcher(`http://127.0.0.1:${port}`, 300);
+    setTurnstileDispatcherForTests(dispatcher);
+    const config = { TURNSTILE_SECRET: "secret", EGRESS_STRICT_PROXY: undefined, production: false, publicOrigin: "https://vtt.example.com" };
+    try {
+      const started = Date.now();
+      assert.equal(await verifyTurnstile(config, "token", "203.0.113.5"), "unavailable");
+      const took = Date.now() - started;
+      assert.ok(took >= 250 && took < 5_000, `answered after ${took} ms`);
+      assert.equal(connects, 1);
+      assert.equal(await verifyTurnstile(config, "token", "203.0.113.5"), "unavailable");
+      assert.equal(connects, 2);
+    } finally {
+      setTurnstileDispatcherForTests(null);
+      for (const socket of sockets) socket.destroy();
+      await dispatcher.close();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
   });
 });

@@ -34,7 +34,7 @@ const CONNECT_ANSWER_MS = 10_000;
  * answers, or a DNS lookup that stalls. undici's own default there is five
  * minutes, and every request to that host queues behind it.
  */
-function proxyAgent(uri: string, connectAnswerMs: number): ProxyAgent {
+export function proxyAgent(uri: string, connectAnswerMs: number = CONNECT_ANSWER_MS): ProxyAgent {
   return new ProxyAgent({ uri, clientFactory: (origin, options) => new Pool(origin, { ...options, headersTimeout: connectAnswerMs }) });
 }
 

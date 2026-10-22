@@ -1,4 +1,5 @@
-import { Agent, type Dispatcher, fetch, ProxyAgent } from "undici";
+import { Agent, type Dispatcher, fetch } from "undici";
+import { proxyAgent } from "../assets/egress.ts";
 import type { Config } from "../config.ts";
 
 /**
@@ -25,10 +26,20 @@ export function setTurnstileDispatcherForTests(value: Dispatcher | null): void {
   testDispatcher = value;
 }
 
+/**
+ * The strict port's dispatcher, built by egress.ts's own proxy agent (review
+ * HF22-F6), so a CONNECT squid takes and never answers fails at the same
+ * limit as every other call through that port, and nothing queues behind it
+ * for undici's five minutes. `connectAnswerMs` is for tests.
+ */
+export function strictDispatcher(proxy: string | undefined, connectAnswerMs?: number): Dispatcher {
+  return proxy ? proxyAgent(proxy, connectAnswerMs) : new Agent();
+}
+
 function dispatcherFor(proxy: string | undefined): Dispatcher {
   const key = proxy ?? "direct";
   if (dispatcher?.key !== key) {
-    dispatcher = { key, value: proxy ? new ProxyAgent(proxy) : new Agent() };
+    dispatcher = { key, value: strictDispatcher(proxy) };
   }
   return dispatcher.value;
 }
