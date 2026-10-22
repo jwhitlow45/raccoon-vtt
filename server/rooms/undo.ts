@@ -373,32 +373,57 @@ export function rootsOf(poses: Record<string, Pose> | undefined): Set<string> {
 }
 
 /**
+ * How a step classes its passengers (Pose.silent), with `roots` the tokens
+ * it named. An op's are read off `planned`, the state the move was planned
+ * on, before a wall or the link pass broke any link on the way: a hidden
+ * creature dragged into a wall and out of reach still carried its torch
+ * along a chain no player sees. A restore's are the step's it takes back
+ * (`kept`), so nothing changed since turns a silent one into one that
+ * answers, through the undo and every redo after it.
+ */
+export type Passengers = { roots: ReadonlySet<string>; planned: RoomState } | { roots: ReadonlySet<string>; kept: Record<string, Pose> };
+
+/** An op's passengers, by the state before it. */
+export function plannedOn(before: RoomState, op: Op): Passengers {
+  return { roots: new Set(namedTokens(op)), planned: before };
+}
+
+/** A restore's passengers, as the step it takes back classed them. */
+export function keptFrom(poses: Record<string, Pose>): Passengers {
+  return { roots: rootsOf(poses), kept: poses };
+}
+
+/**
  * Where each token an op or a restore touched stands in `state`, the state
  * it left, its link as the player's copy shows it, and whether it rode
- * along as a silent passenger. `roots` are the tokens the op named, which
- * every passenger rides on: without them, each token's nearest holder in
- * the step stands for its root.
+ * along as a silent passenger (Passengers). Without `passengers`, each
+ * token's nearest holder in the step stands for its root, in `state`.
  */
-export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Shows = () => true, roots?: ReadonlySet<string>): Record<string, Pose> {
+export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Shows = () => true, passengers?: Passengers): Record<string, Pose> {
   const restoring = new Set<string>();
   for (const entry of inverse) {
     const parsed = parseKey(entry.key);
     if (parsed?.kind === "token") restoring.add(parsed.id);
   }
+  const roots = passengers?.roots;
+  const silent = (id: string) => {
+    if (!passengers) return silentPassenger(state, id, restoring);
+    return "kept" in passengers ? passengers.kept[id]?.silent === true : silentPassenger(passengers.planned, id, restoring, roots);
+  };
   const poses: Record<string, Pose> = {};
   for (const id of restoring) {
     const token = state.tokens[id];
     if (!token) continue;
     const pose = poseOf(token, shows);
     if (roots?.has(id)) pose.root = true;
-    if (silentPassenger(state, id, restoring, roots)) pose.silent = true;
+    if (silent(id)) pose.silent = true;
     poses[id] = pose;
   }
   return poses;
 }
 
 /**
- * Whether a token is carried now under a root of the step by a chain not
+ * Whether a token is carried in `state` under a root of the step by a chain not
  * every player sees (docs/design-v1-attach.md 8.3): a hidden passenger,
  * one only some players see, or a visible one with a hidden token or link
  * anywhere between it and its root, however deep, so a visible light on a

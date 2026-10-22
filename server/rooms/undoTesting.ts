@@ -5,7 +5,7 @@ import { projectEntity } from "#shared/project.ts";
 import { isPoseOp, isResizeOp, type Op } from "#shared/protocol.ts";
 import { applyOp, type Applied } from "#shared/reducer.ts";
 import { env } from "#shared/testutil.ts";
-import { namedTokens, poseRestore, posesAfter, ridesChanged, rootsOf, UndoStacks, type Walk } from "./undo.ts";
+import { keptFrom, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type Walk } from "./undo.ts";
 
 /**
  * A room's ops and its members' undo stacks as the room actor keeps them
@@ -60,7 +60,7 @@ export class UndoTable {
     const r = this.#apply(who, op);
     if (typeof r === "string") return r;
     if (r.inverse && UndoStacks.records(who.role, op)) {
-      const poses = who.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.state, r.inverse, this.#shows(who), new Set(namedTokens(op))) : undefined;
+      const poses = who.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.state, r.inverse, this.#shows(who), plannedOn(before, op)) : undefined;
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       const walk: Walk | undefined = poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.state) : undefined;
@@ -96,7 +96,7 @@ export class UndoTable {
     if (!allowed.ok) return allowed.message;
     const r = this.#apply(who, op);
     if (typeof r === "string") return r;
-    if (r.inverse) this.stacks.pushRestored(who.memberId, from, r.inverse, step.label, step.poses ? posesAfter(this.state, r.inverse, this.#shows(who), rootsOf(step.poses)) : undefined, step.origin, step.teleport === true, step);
+    if (r.inverse) this.stacks.pushRestored(who.memberId, from, r.inverse, step.label, step.poses ? posesAfter(this.state, r.inverse, this.#shows(who), keptFrom(step.poses)) : undefined, step.origin, step.teleport === true, step);
     return "ok";
   }
 

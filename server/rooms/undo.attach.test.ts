@@ -331,6 +331,32 @@ describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
   }
 });
 
+describe("a passenger whose link breaks on the move is classed by the move's plan (8.3, review AT-ASTRA-1)", () => {
+  test("a visible torch carried by a hidden creature the horse drags, both stopped at a wall, answers nothing on the undo", () => {
+    // Room a: P1's horse drags a hidden lizard that holds the DM's torch. Room b: the torch lies loose where the lizard stood.
+    // A wall stops the lizard and the torch at 5,5, out of the horse's reach, so the drag breaks on the move.
+    const wall = (s: RoomState) => {
+      s.tokens.horse = { ...s.tokens.horse!, x: 3, y: 3 };
+      s.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 3, y: 5 });
+      s.buildChunks["s1:0,0"] = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: { "6,5,w": { kind: "wall" }, "6,6,w": { kind: "wall" } } };
+    };
+    const a = table((s) => {
+      wall(s);
+      s.tokens.lizard = token("lizard", { name: "Lizard", size: "small", x: 3, y: 5, visibility: "dm", attached: { to: "horse", kind: "drag" } });
+      s.tokens.torch = { ...s.tokens.torch!, attached: { to: "lizard", kind: "carry" } };
+    });
+    const b = table(wall);
+    both(a, b, (t) => t.play(P1, { t: "token.move", tokenId: "horse", x: 9, y: 3 }), [P1, P2], ["torch"]);
+    assert.deepEqual([a.t("lizard").x, a.t("lizard").y, a.t("lizard").attached], [5, 5, undefined], "the wall broke the drag");
+    assert.deepEqual([a.t("torch").x, a.t("torch").y], [5, 5]);
+    // The DM's move of the torch to where it stopped makes every copy alike.
+    both(a, b, (t) => t.play(DM, { t: "token.move", tokenId: "torch", x: 5, y: 5 }));
+    both(a, b, (t) => t.undo());
+    both(a, b, (t) => t.redo());
+    both(a, b, (t) => t.undo());
+  });
+});
+
 /*
  * The class of AT-ASTRA-3: a player's undo and redo take the rights the
  * forward op took. Each case is an op a player may make by a right of

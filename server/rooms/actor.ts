@@ -44,7 +44,7 @@ import {
 } from "./persistence.ts";
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
 import { growthBound, SizeGuard, touchedScenes } from "./sizeGuard.ts";
-import { namedTokens, NOT_NEWEST, poseRestore, posesAfter, ridesChanged, rootsOf, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { keptFrom, NOT_NEWEST, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 
 /**
@@ -1042,12 +1042,12 @@ export class RoomActor {
       const inverse = reduced.inverse;
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
-      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), rootsOf(step.poses)) : undefined, step.origin, step.teleport === true, step);
+      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses)) : undefined, step.origin, step.teleport === true, step);
     } else if (UndoStacks.records(viewer.role, op) && reduced.inverse) {
       const inverse = reduced.inverse;
       // A player's move or resize takes back only the move or the resize (undo.ts poseRestore). The DM's undo restores whole
       // values, as for every other op.
-      const poses = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), new Set(namedTokens(op))) : undefined;
+      const poses = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), plannedOn(before, op)) : undefined;
       // A teleport's step remembers it, so its redo passes the wall again (docs/design-v1-maps-vision.md 4.1).
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       // A player's walk keeps its route for the redo (docs/design-v1-movement.md 7.4), a plain move as its one straight piece.
