@@ -33,6 +33,49 @@ export function drawsInset(tokens: Tokens, token: Token): boolean {
   return holder !== undefined && coversHolder(token, holder);
 }
 
+/** A box in cells. */
+export type CellBox = { x: number; y: number; w: number; h: number };
+
+/**
+ * The part of a carried token where a press goes on to its holder (4.4,
+ * review LP12-AT-3): the holder's middle, a box half a square wide about
+ * its center, or half its footprint where that is smaller. So a phone
+ * grabs a Medium holder that carries a Tiny lamp, owl and chest by its
+ * middle, and each of them nearer the holder's edges. In the carried
+ * token's own cells from its top left, as its node draws. Null for a token
+ * on no holder in this copy, one the holder's middle misses, and one that
+ * covers its holder's whole footprint, which moves its holder anyway.
+ */
+export function holderMiddle(tokens: Tokens, token: Token): CellBox | null {
+  const link = token.attached;
+  if (!link || link.kind === "drag") return null;
+  const holder = holderOf(tokens, token) as Token | undefined;
+  if (!holder || coversHolder(token, holder)) return null;
+  const h = fullRect(holder);
+  const t = fullRect(token);
+  const mx = Math.min(0.25, h.w / 4);
+  const my = Math.min(0.25, h.h / 4);
+  const x0 = Math.max(t.x, h.x + h.w / 2 - mx);
+  const y0 = Math.max(t.y, h.y + h.h / 2 - my);
+  const x1 = Math.min(t.x + t.w, h.x + h.w / 2 + mx);
+  const y1 = Math.min(t.y + t.h, h.y + h.h / 2 + my);
+  if (x1 - x0 < 1e-9 || y1 - y0 < 1e-9) return null;
+  return { x: x0 - t.x, y: y0 - t.y, w: x1 - x0, h: y1 - y0 };
+}
+
+/** A footprint `w` by `h` less a box inside it, as at most four boxes: the strips above and below it, then those beside it. */
+export function boxesAround(w: number, h: number, hole: CellBox): CellBox[] {
+  const out: CellBox[] = [];
+  const add = (x: number, y: number, bw: number, bh: number) => {
+    if (bw > 1e-9 && bh > 1e-9) out.push({ x, y, w: bw, h: bh });
+  };
+  add(0, 0, w, hole.y);
+  add(0, hole.y + hole.h, w, h - hole.y - hole.h);
+  add(0, hole.y, hole.x, hole.h);
+  add(hole.x + hole.w, hole.y, w - hole.x - hole.w, hole.h);
+  return out;
+}
+
 /**
  * The tokens in the order they draw (4.4): each carried token right after
  * its holder, whatever its layer, what it carries in turn right after it,

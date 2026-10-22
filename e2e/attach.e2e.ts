@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { RoomState, Token } from "../shared/model.ts";
-import { ConsoleWatch, dragCells, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, dragWorld, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * Attached tokens end to end (docs/design-v1-attach.md 13), on the real
@@ -305,5 +305,34 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     const goblin = await waitFor("the goblin along", () => (token(samSocket, run.goblin)?.x === 7 ? token(samSocket, run.goblin) : null));
     assert.equal(goblin.attached?.to, run.bree, "the goblin stays dragged within reach");
     for (const socket of [patSocket, samSocket]) assert.equal(everNamed(socket, run.imp), false, `a frame to ${socket.label} named the imp`);
+  });
+
+  test("at-6-fu20a. the DM drags a mule by its middle while it carries a lamp and a chest and an owl perches on it: all four go, and a press near the mule's edge on the lamp takes the lamp alone (review LP12-AT-3)", async () => {
+    const mule = randomUUID();
+    const lamp = randomUUID();
+    const chest = randomUUID();
+    const owl = randomUUID();
+    await ops.send(tokenOp(mule, { kind: "npc", name: "Mule", x: 2, y: 9, disposition: "ally", actor: { inline: actor() } }));
+    // Three of the mule's four quarters, as the live play's carrier had them.
+    await ops.send(tokenOp(lamp, { kind: "object", name: "Lamp", size: "tiny", x: 2.5, y: 9, actor: { inline: actor() } }));
+    await ops.send(tokenOp(chest, { kind: "object", name: "Chest", size: "tiny", x: 2.5, y: 9.5, actor: { inline: actor() } }));
+    await ops.send(tokenOp(owl, { kind: "npc", name: "Owl", size: "tiny", x: 2, y: 9, disposition: "ally", actor: { inline: actor() } }));
+    await ops.send({ t: "token.attach", tokenId: lamp, to: mule, kind: "carry", x: 2.5, y: 9, elevation: 0 });
+    await ops.send({ t: "token.attach", tokenId: chest, to: mule, kind: "carry", x: 2.5, y: 9.5, elevation: 0 });
+    await ops.send({ t: "token.attach", tokenId: owl, to: mule, kind: "perch", x: 2, y: 9, elevation: 0 });
+    await waitFor("the mule's load", () => [lamp, chest, owl].every((id) => token(dmSocket, id)?.attached?.to === mule) || null);
+    // A press a little off the mule's center, on the lamp, which draws over the mule.
+    await dragWorld(dm, BOUNDS, { x: 2.55, y: 9.45 }, { x: 2.55, y: 10.45 });
+    await waitFor("the mule moved", () => token(dmSocket, mule)?.y === 10 || null);
+    for (const [id, x, y] of [[lamp, 2.5, 10], [chest, 2.5, 10.5], [owl, 2, 10]] as const) {
+      const t = await waitFor("its load along", () => (token(dmSocket, id)?.y === y ? token(dmSocket, id) : null));
+      assert.deepEqual([t.x, t.attached?.to], [x, mule]);
+    }
+    await shots.take(dm, "attach-fu20a-mule-middle");
+    // Near the mule's edge the lamp is on top, and a drag of it alone off the mule lets it go.
+    await dragWorld(dm, BOUNDS, { x: 2.9, y: 10.1 }, { x: 4.9, y: 10.1 });
+    const dropped = await waitFor("the lamp put down", () => (token(dmSocket, lamp)?.attached === undefined ? token(dmSocket, lamp) : null));
+    assert.ok(dropped.x >= 4, `the lamp at ${dropped.x}, ${dropped.y}`);
+    assert.deepEqual([token(dmSocket, mule)?.x, token(dmSocket, mule)?.y], [2, 10], "the mule stays");
   });
 });

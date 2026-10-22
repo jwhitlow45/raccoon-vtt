@@ -70,7 +70,7 @@ The app reminds and moves tokens. It decides nothing a die decides, and it never
 
 ### 4.4 On the map
 
-- **Draw order.** A carried token draws right after its holder, whatever its layer, so a torch on the objects layer shows on the character holding it. Taps hit the topmost token, as today.
+- **Draw order.** A carried token draws right after its holder, whatever its layer, so a torch on the objects layer shows on the character holding it. Taps hit the topmost token, as today, but in a holder's middle: a press within a box half a square wide about its center, or half its footprint where that is smaller, starts on the holder, whatever it carries there (review LP12-AT-3). So a phone drags a Medium creature that carries a lamp, an owl and a chest, which take three of its quarters, by its middle, and each of them by its part nearer the holder's edge. A carried token that covers its holder's whole footprint keeps the whole press, since its drag moves the holder anyway.
 - **Covering riders** (a carried token whose footprint covers its holder's whole footprint) draw inset to 70% of their size, so the mount's edge and ring show around the rider.
 - **Tethers.** A drag link draws a thin dashed line from the dragged creature's center to its holder's, in the holder's ring color at half opacity, under the tokens. It shows who holds whom at the table.
 - **The group line.** The action bar's summary area shows one line of buttons, each at least 44 px tall: on a carried token "On Warhorse" (or "Dragged by Thorn"), and on a holder "Carrying Bree, Torch". A tap selects that token and opens its bar. This is how a phone reaches a rider that hides its mount, and a familiar too small to tap.

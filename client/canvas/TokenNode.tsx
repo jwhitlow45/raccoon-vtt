@@ -22,7 +22,7 @@ import type { PlacedLines, TokenText } from "./useBoardText.ts";
 import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../features/images/icons.ts";
-import { COVER_INSET } from "../features/attach/groups.ts";
+import { boxesAround, COVER_INSET, type CellBox } from "../features/attach/groups.ts";
 
 /** How the canvas wants to hear about taps, menus, drags and the mouse over tokens. */
 export type TokenInteraction = {
@@ -67,6 +67,12 @@ type DecorProps = {
  * at COVER_INSET of its size about its middle, so the mount's edge and
  * ring show around the rider (docs/design-v1-attach.md 4.4). A tap on the
  * mount's edge then reaches the mount.
+ *
+ * A carried token smaller than its holder leaves the holder's middle to it
+ * (`hole`, groups.ts holderMiddle, review LP12-AT-3): only the rest of its
+ * footprint takes a press, so a press in a holder's middle reaches the
+ * holder under it, and a phone can drag a Medium creature that carries a
+ * lamp, an owl and a chest. Everywhere else a press hits the topmost token.
  */
 export const TokenNode = memo(function TokenNode(props: DecorProps & {
   token: ViewToken;
@@ -76,8 +82,9 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   draggable: boolean;
   decor: boolean;
   inset?: boolean;
+  hole?: CellBox | null;
 }) {
-  const { token, scale, selected, active, draggable } = props;
+  const { token, scale, selected, active, draggable, hole } = props;
   const interaction = useContext(TokenInteractionContext);
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
@@ -107,6 +114,13 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
         <Group x={(fp.w * (1 - COVER_INSET)) / 2} y={(fp.h * (1 - COVER_INSET)) / 2} scaleX={COVER_INSET} scaleY={COVER_INSET}>
           <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} name={name} active={active} selected={selected} />
         </Group>
+      ) : hole ? (
+        <>
+          <Group listening={false}>
+            <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
+          </Group>
+          <PressArea w={fp.w} h={fp.h} hole={hole} />
+        </>
       ) : (
         <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
       )}
@@ -114,6 +128,21 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
     </Group>
   );
 });
+
+/** Where a carried token takes a press: its footprint less its holder's middle (`hole`), drawn on the hit canvas alone. */
+function PressArea(props: { w: number; h: number; hole: CellBox }) {
+  const boxes = useMemo(() => boxesAround(props.w, props.h, props.hole), [props.w, props.h, props.hole]);
+  return (
+    <Shape
+      sceneFunc={() => {}}
+      hitFunc={(ctx, shape) => {
+        ctx.beginPath();
+        for (const b of boxes) ctx.rect(b.x, b.y, b.w, b.h);
+        ctx.fillStrokeShape(shape);
+      }}
+    />
+  );
+}
 
 /** The token's own picture: its shadow, its body and the rings that mark it active or selected. */
 function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean }) {

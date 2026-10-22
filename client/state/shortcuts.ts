@@ -612,7 +612,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "dragHolder",
     input: "Drag a token that carries others",
-    does: "Move it with what it carries, and what those carry",
+    does: "Move it with what it carries, and what those carry. A press in its middle takes it, even on a small token it carries",
     roles: EVERYONE,
     when: "with the Select tool",
     device: "pointer",
@@ -628,7 +628,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "dragCarried",
     input: "Drag any other carried token",
-    does: "Move it alone. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose",
+    does: "Move it alone, from nearer its holder's edge than its middle. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose",
     roles: EVERYONE,
     when: "with the Select tool",
     device: "pointer",

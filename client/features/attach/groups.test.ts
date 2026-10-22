@@ -3,10 +3,65 @@ import { describe, test } from "node:test";
 import type { Token } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
 import { groupFollowers } from "../../lib/group.ts";
-import { carriesText, coversHolder, dragLead, dragNamed, drawOrder, drawsInset, dragWalkers, groupLine, groupMembers, pressLead, reseatText, tethers } from "./groups.ts";
+import { boxesAround, carriesText, coversHolder, dragLead, dragNamed, drawOrder, drawsInset, dragWalkers, groupLine, groupMembers, holderMiddle, pressLead, reseatText, tethers, type CellBox } from "./groups.ts";
 
 const byId = (...list: Token[]) => Object.fromEntries(list.map((t) => [t.id, t]));
 const everyone = () => true;
+
+describe("a press in a holder's middle (docs/design-v1-attach.md 4.4, review LP12-AT-3)", () => {
+  /** Whether a press at a point in cells falls on the carried token's part that takes it, as its node's hit area draws. */
+  const takes = (carried: Token, hole: CellBox | null, at: { x: number; y: number }) => {
+    const x = at.x - carried.x;
+    const y = at.y - carried.y;
+    const w = carried.size === "tiny" ? 0.5 : carried.size === "large" ? 2 : 1;
+    if (x < 0 || y < 0 || x > w || y > w) return false;
+    return (hole ? boxesAround(w, w, hole) : [{ x: 0, y: 0, w, h: w }]).some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h);
+  };
+
+  test("a Medium holder's Tiny load leaves it the middle half square, so its quarters are grabbed only near its edges", () => {
+    const thorn = token("thorn", { name: "Thorn", x: 2, y: 2 });
+    const lamp = token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 2.5, y: 2, attached: { to: "thorn", kind: "carry" } });
+    const owl = token("owl", { name: "Owl", size: "tiny", x: 2, y: 2, attached: { to: "thorn", kind: "perch" } });
+    const tokens = byId(thorn, lamp, owl);
+    assert.deepEqual(holderMiddle(tokens, lamp), { x: 0, y: 0.25, w: 0.25, h: 0.25 });
+    assert.deepEqual(holderMiddle(tokens, owl), { x: 0.25, y: 0.25, w: 0.25, h: 0.25 });
+    for (const t of [lamp, owl]) {
+      const hole = holderMiddle(tokens, t);
+      assert.equal(takes(t, hole, { x: 2.5, y: 2.5 }), false, `${t.id}: the middle is the holder's`);
+      assert.equal(takes(t, hole, { x: 2.45, y: 2.4 }) || takes(t, hole, { x: 2.55, y: 2.4 }), false, `${t.id}: so is a little off it`);
+    }
+    assert.equal(takes(lamp, holderMiddle(tokens, lamp), { x: 2.9, y: 2.1 }), true, "near the edge the lamp is on top");
+    assert.equal(takes(owl, holderMiddle(tokens, owl), { x: 2.1, y: 2.1 }), true, "and so is the owl");
+  });
+
+  test("a large holder keeps a half square at its center, and a token on no holder, dragged beside one or covering its holder keeps all of itself", () => {
+    const horse = token("horse", { name: "Warhorse", size: "large", x: 4, y: 4 });
+    const knight = token("knight", { name: "Knight", x: 4, y: 4, attached: { to: "horse", kind: "ride" } });
+    const mastiff = token("mastiff", { name: "Mastiff", x: 8, y: 8 });
+    const halfling = token("halfling", { name: "Pip", size: "small", x: 8, y: 8, attached: { to: "mastiff", kind: "ride" } });
+    const goblin = token("goblin", { name: "Goblin", x: 6, y: 4, attached: { to: "horse", kind: "drag" } });
+    const tokens = byId(horse, knight, mastiff, halfling, goblin);
+    assert.deepEqual(holderMiddle(tokens, knight), { x: 0.75, y: 0.75, w: 0.25, h: 0.25 }, "the knight's corner nearest the horse's center");
+    for (const t of [horse, halfling, goblin]) assert.equal(holderMiddle(tokens, t), null, t.id);
+    const far = token("far", { name: "Far", size: "tiny", x: 4, y: 4, attached: { to: "horse", kind: "carry" } });
+    assert.equal(holderMiddle(byId(horse, far), far), null, "the middle misses a seat in the horse's corner");
+  });
+
+  test("the part that takes a press is the footprint less the hole, in at most four boxes", () => {
+    const boxes = boxesAround(1, 1, { x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
+    assert.deepEqual(boxes, [
+      { x: 0, y: 0, w: 1, h: 0.25 },
+      { x: 0, y: 0.75, w: 1, h: 0.25 },
+      { x: 0, y: 0.25, w: 0.25, h: 0.5 },
+      { x: 0.75, y: 0.25, w: 0.25, h: 0.5 },
+    ]);
+    assert.equal(boxes.reduce((sum, b) => sum + b.w * b.h, 0), 0.75);
+    assert.deepEqual(boxesAround(0.5, 0.5, { x: 0, y: 0.25, w: 0.25, h: 0.25 }), [
+      { x: 0, y: 0, w: 0.5, h: 0.25 },
+      { x: 0.25, y: 0.25, w: 0.25, h: 0.25 },
+    ]);
+  });
+});
 
 describe("the draw order", () => {
   test("a carried token draws right after its holder, whatever its layer, and what it carries after it", () => {
