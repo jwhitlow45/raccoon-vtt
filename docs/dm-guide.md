@@ -573,7 +573,7 @@ When a player's turn comes, they get "Your turn" and an **End turn** button. A s
 
 Revealing a token early doesn't always reveal its row, though. The row still follows the room's **Initiative order players see** setting (described below), and in a new room, players see a monster's row only from its first turn on. So a monster you reveal early shows its token at once, but it joins the players' order on its turn. If you want the row to appear along with the token, set **Initiative order players see** to **Everyone**.
 
-Sometimes you want the opposite: the token in plain sight, but its row kept out of the players' order. For that, turn on **Hidden from players** in the row's **⋯**, which hides the row alone.
+Sometimes you want the opposite: the token in plain sight, but its row kept out of the players' order. For that, turn on **Hidden from players** in the row's **⋯**, which hides the row alone. The creature's owners still learn its turn once it moves on that turn, whoever moves it, since their app then counts how far it has gone.
 
 ### Rows and what they hold
 

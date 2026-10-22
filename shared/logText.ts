@@ -535,7 +535,7 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       return who ? `${who}: ${data.message}` : data.message;
     }
     case "trapNotice": {
-      // "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15)."
+      // "Thorn's Passive Perception (16) would notice the pressure plate of Poisoned Darts (DC 15)."
       const trap = names.traps?.[data.trapId];
       const what = trap?.rig?.find.find((c) => c.skill === "perception" && c.dc === data.dc)?.what;
       const it = trap ? (what ? `${what} of ${trap.name}` : trap.name) : "a trap";
