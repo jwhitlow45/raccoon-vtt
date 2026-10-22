@@ -5,7 +5,7 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, changedSightKeys, hashValue, heldOf, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, P1, P2, env, randomOp, randomState, reveal, rng, room, scene } from "#shared/testutil.ts";
+import { DM, P1, P2, env, randomOp, randomState, reveal, rng, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch } from "./fanout.ts";
@@ -140,5 +140,44 @@ describe("the server's held maps", () => {
       assert.ok(ev && ev.changes.every((c) => !c.key.startsWith("chunk:") && !c.key.startsWith("fog:")), v.conn.memberId);
       for (const [key, entry] of v.conn.held!) if (key.startsWith("chunk:")) assert.equal(typeof entry, "object", `${v.conn.memberId} ${key} was never hashed`);
     }
+  });
+});
+
+describe("a mount's path in its rider's turn (docs/design-v1-attach.md 7.2)", () => {
+  test("reaches a player's socket and leaves it as the rider's row comes into sight and goes out of it, with no change to the mount", () => {
+    // The DM's goblin rides P1's horse under control on its own turn, both in the lifted fog. Then the goblin gets off into
+    // the fog and back out: its row is hidden and shown again, and with it the horse's path of the turn.
+    let state = room({
+      tokens: {
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: ["p1"], x: 2, y: 2 }),
+        gob: token("gob", { name: "Goblin", x: 2, y: 2, attached: { to: "horse", kind: "ride", steer: true } }),
+        thorn: token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"], x: 0, y: 8 }),
+      },
+    });
+    state.scenes.s1 = scene("s1", { fogEnabled: true });
+    reveal(state, "s1", { x: 0, y: 0, w: 10, h: 10 });
+    const viewers = [open(state, P1, "s1")];
+    let seq = 600;
+    const step = (op: Op) => {
+      const before = state;
+      const result = applyOp(state, op, DM, env(++seq));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      state = result.state;
+      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      for (const v of viewers) {
+        for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
+        assert.deepEqual(JSON.parse(JSON.stringify(v.view.tokens)), JSON.parse(JSON.stringify(projectState(state, P1, { sceneId: "s1" }).tokens)), `after ${op.t}`);
+      }
+    };
+    step({ t: "encounter.start", entries: [{ id: "eg", tokenId: "gob", value: 20 }, { id: "et", tokenId: "thorn", value: 5 }] });
+    step({ t: "encounter.next" });
+    assert.deepEqual(state.encounter?.turnStart?.mounts, ["horse"]);
+    step({ t: "token.move", tokenId: "horse", x: 4, y: 2 });
+    assert.ok(viewers[0]!.view.tokens.horse?.path, "the horse's path of the goblin's turn reaches P1");
+    step({ t: "token.detach", tokenId: "gob", x: 6, y: 2 });
+    step({ t: "token.move", tokenId: "gob", x: 15, y: 2 });
+    assert.equal(viewers[0]!.view.tokens.horse?.path, undefined, "with the goblin's row out of sight, so is the path");
+    step({ t: "token.move", tokenId: "gob", x: 7, y: 2 });
+    assert.ok(viewers[0]!.view.tokens.horse?.path, "and back with it");
   });
 });

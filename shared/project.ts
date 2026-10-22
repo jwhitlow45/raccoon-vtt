@@ -1804,6 +1804,13 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     add(keys.encounter);
     encounterTouched = true;
   }
+  // A path of the turn reaches a player while they see the turn's row, which follows the turn's own creature (projectPathCtx).
+  // A mount sharing the turn moves on a path of its own (docs/design-v1-attach.md 7.2), so the creature's change, into
+  // sight or out of it, re-projects every path of the turn, the mount's with no change to the mount.
+  const turn = state.encounter?.turnStart;
+  if (turn && tokenIds.has(turn.tokenId)) {
+    for (const token of Object.values(state.tokens)) if (token.path?.turn === turn.seq) add(keys.token(token.id));
+  }
   for (const template of Object.values(state.templates)) {
     if ((template.attachedTo !== undefined && tokenIds.has(template.attachedTo)) || (template.casterId !== undefined && tokenIds.has(template.casterId))) {
       add(keys.template(template.id));
