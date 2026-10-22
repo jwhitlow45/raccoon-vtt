@@ -141,7 +141,7 @@ function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice,
  */
 function stepStopped(view: RoomState, carried: Token, at: AttachRow["at"]): boolean {
   if (view.scenes[carried.sceneId]?.blockMovement !== true || (at.x === carried.x && at.y === carried.y)) return false;
-  // Walked as the server's check walks it (drop.ts walkerOf): as its rider until clear of a holder every player sees that stands on the ground, then on the ground.
+  // Walked as the server's check walks it (drop.ts walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
   const walking = walkerOf(dropView(view, "player"), carried);
   if (legStop(view, walking, at) !== null) return true;
   const from = { x: carried.x, y: carried.y, elevation: carried.elevation };

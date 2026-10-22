@@ -4,7 +4,7 @@ import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { legStop, offKey, stepTester, type MovingToken, type StepTester } from "./movement.ts";
+import { crossesInnerLedges, legStop, offKey, onOffHolder, pastHolder, stepTester, type MovingToken, type StepTester } from "./movement.ts";
 import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
@@ -220,6 +220,14 @@ function stepCache(walls: object, key: string, size: number): Uint8Array {
  * The world a drag walks in, built once per drag: the lattice, the per-cell
  * ground, the creatures by cell, and the step test. `extraOf` and `endOf`
  * answer for any two spots on the lattice, and the search caches them.
+ *
+ * A walk off a holder with inner ledges to cross (movement.ts MovingToken)
+ * crosses them only until it first stands clear of the holder, so the walk
+ * has two states (review AT-ASTRA-16). This world answers for the walk
+ * before it clears the holder, wherever it stands on it, and `post` for the
+ * walk after, which judges the holder's squares on the ground's rule. A
+ * straight leg leaves a rectangle once, so a leg from a spot this world
+ * answers for is this world's to its end. Any other world is its own `post`.
  */
 export class WalkWorld {
   readonly input: WalkInput;
@@ -235,6 +243,8 @@ export class WalkWorld {
   readonly W: number;
   readonly H: number;
   readonly tester: StepTester | null;
+  /** The world for the same walk once it has cleared the holder it walks off: this world when it has none to clear. */
+  readonly post: WalkWorld;
   readonly squeezes: boolean;
   /** How far the squeezed footprint stands in from the full one on each side (4.1, 4.5). */
   readonly #ox: number;
@@ -253,8 +263,11 @@ export class WalkWorld {
   readonly #pinch: Uint8Array;
   readonly #stamps: Uint32Array;
   #stamp = 0;
+  /** Per node, whether the footprint there is on the holder the walk leaves: 0 not yet known, 1 on it, 2 clear. */
+  readonly #on: Uint8Array;
 
-  constructor(input: WalkInput) {
+  /** `pre` is the world before the walk clears its holder, whose ground and creatures a `post` world shares. */
+  constructor(input: WalkInput, pre?: WalkWorld) {
     this.input = input;
     const { token, build } = input;
     const scene = build.scenes[token.sceneId];
@@ -283,10 +296,21 @@ export class WalkWorld {
     this.#oy = (this.h - squeezed.h) / 2;
     const nodes = this.nx * this.ny;
     this.#pinch = new Uint8Array(this.squeezes ? nodes : 0);
-    this.#ground = new Float64Array(this.mode === "ground" ? nodes : 0).fill(NaN);
+    this.#ground = pre ? pre.#ground : new Float64Array(this.mode === "ground" ? nodes : 0).fill(NaN);
+    // Keyed by the holder a walk has not yet cleared, so the walk before and after it never share an answer (movement.ts offKey).
     this.#walls = this.tester
       ? stepCache(this.tester.walls, `${this.w},${this.h},${this.mode === "flying" ? token.elevation : this.mode},${offKey(token)},${L},${x0},${y0},${this.nx},${this.ny}`, nodes * 8)
       : null;
+    const layered = !pre && this.tester !== null && crossesInnerLedges(build, token);
+    this.#on = new Uint8Array(layered ? nodes : 0);
+    if (pre) {
+      this.flags = pre.flags;
+      this.#byCell = pre.#byCell;
+      this.#cellItems = pre.#cellItems;
+      this.#stamps = new Uint32Array(pre.#stamps.length);
+      this.post = this;
+      return;
+    }
     this.flags = cellFlags(input, this.W, this.H, this.mode === "ground");
     // Creatures by the cells their footprints overlap, for the few a step's footprint can meet.
     const counts = new Int32Array(this.W * this.H + 1);
@@ -303,6 +327,7 @@ export class WalkWorld {
     this.#byCell = counts;
     this.#cellItems = items;
     this.#stamps = new Uint32Array(creatures.length);
+    this.post = layered ? new WalkWorld({ ...input, token: pastHolder(token) }, this) : this;
   }
 
   /** The stored position of lattice node `n`. */
@@ -325,6 +350,16 @@ export class WalkWorld {
 
   get startNode(): number {
     return this.i0 < this.nx && this.j0 < this.ny && this.i0 >= 0 && this.j0 >= 0 ? this.j0 * this.nx + this.i0 : -1;
+  }
+
+  /** Whether the walk is still before its holder at node `n`: this world has a `post` and the footprint there is on the holder. */
+  onHolder(n: number): boolean {
+    if (this.post === this) return false;
+    const known = this.#on[n]!;
+    if (known !== 0) return known === 1;
+    const on = onOffHolder(this.input.token, { x: this.xOf(n), y: this.yOf(n) });
+    this.#on[n] = on ? 1 : 2;
+    return on;
   }
 
   /** The elevation at a node: the ground under the footprint for a walker, the start's height for any other. */
@@ -635,9 +670,14 @@ export class WalkSearch {
   #swim = new Int8Array(1024);
   #dz = new Int32Array(1024);
   #done = new Uint8Array(1024);
+  /** Per state, 1 while the walk has not yet cleared the holder it walks off (WalkWorld `post`). */
+  #pre = new Uint8Array(1024);
   /** States at the starting vertical residue, by node and horizontal residue. Others by key. */
   readonly #dense: Int32Array;
   readonly #sparse = new Map<number, number>();
+  /** States of the walk before it clears its holder, by key, and the nodes that have any: a few, all on the holder. */
+  readonly #before = new Map<number, number>();
+  readonly #beforeAt: Uint8Array;
   /** The first state settled at each node: the cheapest way there. */
   readonly #best: Int32Array;
   #heap = new Heap();
@@ -679,9 +719,10 @@ export class WalkSearch {
     this.#dense = new Int32Array(nodes * this.#hr).fill(-1);
     this.#best = new Int32Array(nodes).fill(-1);
     this.#offResidue = new Uint8Array(this.#fiveTen ? nodes : 0);
+    this.#beforeAt = new Uint8Array(world.post !== world ? nodes : 0);
     const start = world.startNode;
     if (start >= 0) {
-      const s = this.#slot(start, 0, this.#v0);
+      const s = this.#slot(start, 0, this.#v0, world.post !== world);
       this.#cost[s] = 0;
       this.#corners[s] = 0;
       this.#len[s] = 0;
@@ -743,12 +784,22 @@ export class WalkSearch {
     }
   }
 
+  /** The world a state's steps are judged in: before or after the walk clears its holder. */
+  #worldOf(s: number): WalkWorld {
+    return this.#pre[s] === 1 ? this.world : this.world.post;
+  }
+
+  /** Whether the step from state `s` to node `b` leaves the walk still before its holder. */
+  #stillBefore(s: number, b: number): boolean {
+    return this.#pre[s] === 1 && this.world.onHolder(b);
+  }
+
   #settle(s: number): void {
     this.#done[s] = 1;
     this.settled++;
     this.work++;
     if (this.settled >= MAX_SETTLED) this.#capped = true;
-    const world = this.world;
+    const world = this.#worldOf(s);
     const a = this.#node[s]!;
     if (this.#best[a]! < 0) this.#best[a] = s;
     const ax = world.xOf(a);
@@ -763,13 +814,15 @@ export class WalkSearch {
       const bj = j + DY[d]!;
       if (bi < 0 || bj < 0 || bi >= world.nx || bj >= world.ny) continue;
       const b = bj * world.nx + bi;
-      if (this.#best[b]! >= 0 && !this.#fiveTen) continue;
+      // A walk with a holder to clear may reach a node twice, before and after it clears the holder, so only the state itself settles it.
+      if (this.#best[b]! >= 0 && !this.#fiveTen && this.world.post === this.world) continue;
+      const before = this.#stillBefore(s, b);
       const bx = world.xOf(b);
       const by = world.yOf(b);
       if (!world.seenAt(bx, by, b) || !world.wallsClear(a, d, b)) continue;
       const eb = world.elevationAt(b);
       const { extra, swim } = world.extraOf(ax, ay, bx, by, eb, b);
-      this.#relax(s, b, d, extra, swim, eb - ea);
+      this.#relax(s, b, d, extra, swim, eb - ea, before);
     }
   }
 
@@ -800,7 +853,7 @@ export class WalkSearch {
     this.#toCost = this.#cost[s]! + step * (1 + extra);
   }
 
-  #relax(s: number, b: number, d: number, extra: number, swim: 0 | 1, dzFt: number): void {
+  #relax(s: number, b: number, d: number, extra: number, swim: 0 | 1, dzFt: number, before: boolean): void {
     const diagonal = d >= 4;
     this.#advance(s, d, extra, dzFt);
     const h = this.#toH;
@@ -808,7 +861,7 @@ export class WalkSearch {
     const cost = this.#toCost;
     const corners = this.#corners[s]! + (this.#dir[s]! >= 0 && this.#dir[s] !== d ? 1 : 0);
     const len = this.#len[s]! + (diagonal ? Math.SQRT2 : 1) * this.world.L;
-    const t = this.#slot(b, h, v);
+    const t = this.#slot(b, h, v, before);
     if (this.#done[t] === 1) return;
     if (this.#parent[t] !== -2 && !less(cost, corners, len, this.#cost[t]!, this.#corners[t]!, this.#len[t]!)) return;
     this.#cost[t] = cost;
@@ -822,10 +875,17 @@ export class WalkSearch {
     this.#heap.push(cost, corners, len, t);
   }
 
-  /** The state for a node and residues, made unreached (parent -2) the first time it is asked for. */
-  #slot(node: number, h: number, v: number): number {
+  /** The state for a node, residues and whether the walk is still before its holder, made unreached (parent -2) the first time it is asked for. */
+  #slot(node: number, h: number, v: number, before: boolean): number {
     let s: number;
-    if (v === this.#v0) {
+    if (before) {
+      const k = (node * this.#hr + h) * 2 * this.#S + v;
+      const found = this.#before.get(k);
+      if (found !== undefined) return found;
+      s = this.#grow();
+      this.#before.set(k, s);
+      this.#beforeAt[node] = 1;
+    } else if (v === this.#v0) {
       const k = node * this.#hr + h;
       s = this.#dense[k]!;
       if (s >= 0) return s;
@@ -842,6 +902,7 @@ export class WalkSearch {
     this.#node[s] = node;
     this.#h[s] = h;
     this.#v[s] = v;
+    this.#pre[s] = before ? 1 : 0;
     this.#parent[s] = -2;
     this.#cost[s] = Infinity;
     return s;
@@ -868,6 +929,7 @@ export class WalkSearch {
       this.#swim = grow(this.#swim);
       this.#dz = grow(this.#dz);
       this.#done = grow(this.#done);
+      this.#pre = grow(this.#pre);
     }
     return s;
   }
@@ -1088,8 +1150,8 @@ export class WalkSearch {
 
   /** One state of the back phase: every settled state with a step into it that keeps its cost exact. */
   #traceBack(job: TraceJob, toK: number): void {
-    const world = this.world;
     const t = job.states[toK]!;
+    const world = this.#worldOf(t);
     const b = this.#node[t]!;
     const bx = world.xOf(b);
     const by = world.yOf(b);
@@ -1102,15 +1164,17 @@ export class WalkSearch {
       const aj = bj - DY[d]!;
       if (ai < 0 || aj < 0 || ai >= world.nx || aj >= world.ny) continue;
       const a = aj * world.nx + ai;
-      const from = this.#statesAt(a).filter((s) => this.#done[s] === 1 && this.#cost[s]! < this.#cost[t]!);
-      if (from.length === 0 || !world.wallsClear(a, d, b)) continue;
+      // Only a step that keeps the walk where `t` has it, before or after its holder, judged in the world of its start.
+      const from = this.#statesAt(a).filter((s) => this.#done[s] === 1 && this.#cost[s]! < this.#cost[t]! && this.#stillBefore(s, b) === (this.#pre[t] === 1));
+      if (from.length === 0) continue;
       const ax = world.xOf(a);
       const ay = world.yOf(a);
       const ea = world.elevationAt(a);
-      const stops = world.endOnly(ax, ay, ea);
-      const { extra, swim } = world.extraOf(ax, ay, bx, by, eb, b);
       for (const s of from) {
-        if (stops && this.#parent[s] !== -1) continue;
+        const w = this.#worldOf(s);
+        if (!w.wallsClear(a, d, b)) continue;
+        if (w.endOnly(ax, ay, ea) && this.#parent[s] !== -1) continue;
+        const { extra, swim } = w.extraOf(ax, ay, bx, by, eb, b);
         this.#advance(s, d, extra, eb - ea);
         if (this.#toH !== this.#h[t] || this.#toV !== this.#v[t] || this.#toCost !== this.#cost[t]) continue;
         const fromK = this.#traceAdd(job, s);
@@ -1123,16 +1187,22 @@ export class WalkSearch {
     }
   }
 
-  /** Every state at a node: its horizontal residues at the starting vertical one, and the others where it has any. */
+  /** Every state at a node: its horizontal residues at the starting vertical one, the others where it has any, and the walk's before its holder. */
   #statesAt(node: number): number[] {
     const out: number[] = [];
     for (let h = 0; h < this.#hr; h++) {
       const s = this.#dense[node * this.#hr + h]!;
       if (s >= 0) out.push(s);
-      if (this.#offResidue[node] !== 1) continue;
+      if (this.#offResidue[node] === 1) {
+        for (let v = 0; v < 2 * this.#S; v++) {
+          if (v === this.#v0) continue;
+          const found = this.#sparse.get((node * this.#hr + h) * 2 * this.#S + v);
+          if (found !== undefined) out.push(found);
+        }
+      }
+      if (this.#beforeAt[node] !== 1) continue;
       for (let v = 0; v < 2 * this.#S; v++) {
-        if (v === this.#v0) continue;
-        const found = this.#sparse.get((node * this.#hr + h) * 2 * this.#S + v);
+        const found = this.#before.get((node * this.#hr + h) * 2 * this.#S + v);
         if (found !== undefined) out.push(found);
       }
     }
@@ -1170,11 +1240,16 @@ export class PieceBuilder {
   #j = -1;
   #best = 0;
   #misses = 0;
+  /** How many of the walk's first steps stand before it clears its holder (WalkWorld `post`). */
+  readonly #before: number;
 
   /** `taut` pulls the pieces taut under true distance, as a search's route is. A straight leg has nothing to pull, so its check leaves it off. */
   constructor(world: WalkWorld, steps: WalkSteps, taut = world.input.rules.diagonal === "euclid") {
     this.#world = world;
     this.#steps = steps;
+    let before = 0;
+    while (before < steps.nodes.length && world.onHolder(steps.nodes[before]!)) before++;
+    this.#before = before;
     this.#fiveTen = world.input.rules.diagonal === "fiveTen";
     this.#taut = taut;
     const first = steps.nodes[0]!;
@@ -1185,7 +1260,12 @@ export class PieceBuilder {
   run(late: (units?: number) => boolean): WalkRoute | null {
     if (this.#taut ? !this.#pullTaut(late) : !this.#grid(late)) return null;
     const last = this.#points[this.#points.length - 1]!;
-    return { pieces: this.#pieces, points: this.#points, endsBlocked: this.#world.endOnly(last.x, last.y, last.elevation) };
+    return { pieces: this.#pieces, points: this.#points, endsBlocked: this.#worldAt(this.#steps.nodes.length - 1).endOnly(last.x, last.y, last.elevation) };
+  }
+
+  /** The world the walk from step `k` is judged in: a straight leg from a step before the walk clears its holder is that walk's to its end. */
+  #worldAt(k: number): WalkWorld {
+    return k < this.#before ? this.#world : this.#world.post;
   }
 
   #spot(k: number): RoutePoint {
@@ -1233,7 +1313,7 @@ export class PieceBuilder {
       for (; this.#j < n; this.#j++) {
         const j = this.#j;
         if (walk.extra[j] !== e || walk.swim[j] !== w || walk.dz[j] !== 0 || walk.dz[i + 1] !== 0) break;
-        const { holds, steps } = straightHolds(this.#world, from, this.#spot(j), e, w);
+        const { holds, steps } = straightHolds(this.#worldAt(i), from, this.#spot(j), e, w);
         if (holds) {
           this.#best = j;
           this.#misses = 0;

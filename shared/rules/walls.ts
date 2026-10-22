@@ -807,6 +807,9 @@ export type SightSet = { pieces: Float64Array; stored: SegmentIndex };
  * height: the split pieces that block it and the stored ones for the step
  * off a wall. `clipToBox` (segments.ts) cuts the pieces to a culled box.
  */
+/** How far off a whole square a footprint's side may lie and still count as on it, for `withoutLedgesInside`. */
+const EDGE_EPS = 1e-9;
+
 export class WallSet {
   /** Changes whenever the derived walls may differ: part of every cache key over them. */
   readonly version: string | number;
@@ -829,6 +832,7 @@ export class WallSet {
   #pieceTops: Int16Array | undefined;
   #tops: number[] | undefined;
   readonly #sight = new Map<number, SightSet>();
+  readonly #inside = new Map<string, WallSet>();
   #potential: number | undefined;
 
   constructor(version: string | number, grid: EdgeGrid, free: readonly FreeWallRef[], derived: { stored: Candidates; tops: Int16Array; origin: Int32Array }, bounds: { w: number; h: number } | null) {
@@ -839,6 +843,69 @@ export class WallSet {
     this.storedTops = derived.tops;
     this.#origin = derived.origin;
     this.bounds = bounds;
+  }
+
+  /**
+   * The movement test's set for a walk off a holder before it first clears
+   * the holder (movement.ts MovingToken, reviews AT-O-26 and AT-ASTRA-16):
+   * no ledge edge whose whole length lies strictly inside the holder's
+   * footprint `rect` stops the walk, so it crosses the step under a holder
+   * that straddles two heights. Raised edges are whole grid edges, merged
+   * into runs along grid lines, so a run on a line strictly inside the
+   * footprint is cut to the grid edges the footprint holds end to end. A
+   * ledge on the footprint's boundary or beyond it, and a grid edge only
+   * partly inside, as under a holder half a square off the grid, stop the
+   * walk as any ledge does. A wall or a door under the footprint still
+   * stops it. The set itself when no ledge is exempt. Kept per footprint,
+   * so a walk's tests share one set.
+   */
+  withoutLedgesInside(rect: { x: number; y: number; w: number; h: number }): WallSet {
+    const key = `${rect.x},${rect.y},${rect.w},${rect.h}`;
+    const known = this.#inside.get(key);
+    if (known) return known;
+    let exempt = false;
+    const s = this.stored;
+    const out = new CandidateList();
+    const x0 = rect.x;
+    const y0 = rect.y;
+    const x1 = rect.x + rect.w;
+    const y1 = rect.y + rect.h;
+    for (let k = 0; k < s.n; k++) {
+      const ax = s.xy[4 * k]!;
+      const ay = s.xy[4 * k + 1]!;
+      const bx = s.xy[4 * k + 2]!;
+      const by = s.xy[4 * k + 3]!;
+      const tags = s.tags[k]!;
+      const free = s.free[k] === 1;
+      const top = this.storedTops[k]!;
+      const origin = this.#origin[k]!;
+      const along = ax === bx && x0 < ax && ax < x1 ? "y" : ay === by && y0 < ay && ay < y1 ? "x" : null;
+      if ((tags & LEDGE) === 0 || along === null) {
+        out.add(ax, ay, bx, by, tags, free, top, origin);
+        continue;
+      }
+      // The run's span along its line, and the whole grid edges of it the footprint holds: there the run is no ledge.
+      const lo = along === "y" ? Math.min(ay, by) : Math.min(ax, bx);
+      const hi = along === "y" ? Math.max(ay, by) : Math.max(ax, bx);
+      const inLo = Math.max(lo, Math.ceil((along === "y" ? y0 : x0) - EDGE_EPS));
+      const inHi = Math.min(hi, Math.floor((along === "y" ? y1 : x1) + EDGE_EPS));
+      const piece = (from: number, to: number, pieceTags: number) => {
+        if (to <= from) return;
+        if (along === "y") out.add(ax, from, ax, to, pieceTags, free, top, origin);
+        else out.add(from, ay, to, ay, pieceTags, free, top, origin);
+      };
+      if (inHi <= inLo) {
+        out.add(ax, ay, bx, by, tags, free, top, origin);
+        continue;
+      }
+      piece(lo, inLo, tags);
+      piece(inLo, inHi, tags & ~LEDGE);
+      piece(inHi, hi, tags);
+      exempt = true;
+    }
+    const set = !exempt ? this : new WallSet(`${this.version}|off:${key}`, this.#grid, this.free, out.done(), this.bounds);
+    this.#inside.set(key, set);
+    return set;
   }
 
   /** Every effective grid edge, sorted, for drawing. */

@@ -94,7 +94,7 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
     }
     if (!walls) return true;
     const to = { x: at.x, y: at.y, elevation };
-    // Walked off as the server's check walks it (drop.ts walkerOf): as its rider until clear of the holder, then on the ground.
+    // Walked off as the server's check walks it (drop.ts walkerOf): on the ground, crossing only the holder's inner ledges.
     const walking = walkerOf(seen, carried);
     return legStop(view, walking, to) === null && walkersStop(view, walking, [seat, to], walkers) === null;
   }, landing);

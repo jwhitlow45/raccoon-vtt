@@ -196,32 +196,31 @@ export function getOffFits(settings: DistanceSettings, bounds: { w: number; h: n
 type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached">;
 
 /**
- * The token as it walks (4.3, reviews AT-ASTRA-13, AT-O-22 and AT-O-25):
- * one that sits on a holder standing on the ground walks as its rider up to
- * its first spot clear of the holder (dismount.ts dismountSplit's `off`),
- * where a ledge stops it only when its top is above the rider's seat, so it
- * crosses the step under a holder that straddles two heights and climbs no
- * ledge for free. From there it walks on the ground, as it lands there,
- * whatever the ground under its seat, and every ledge stops it (movement.ts
- * MovingToken). A walk that never clears the holder is the rider's
- * throughout. The route search, every leg test, the walk's points and its
- * cost read it so, on the player's device and on the server alike, wherever
- * the walk ends, so both judge the one walk whatever cuts it short. This
- * reads only a link every player sees (`seen`, both tokens): off a holder
- * some player cannot see the token walks as itself, as it does with no
- * holder at all (8.0). So does one on a holder that flies. The copy is for
- * the walk alone and is never stored.
+ * The token as it walks (4.3, reviews AT-ASTRA-13, AT-O-22, AT-O-26 and
+ * AT-ASTRA-16): one that sits on a holder standing on the ground walks on
+ * the ground, as it lands there, whatever the ground under its seat, and
+ * every ledge stops it but those whose whole length lies strictly inside
+ * the holder's footprint, until the walk first stands clear of the holder
+ * (movement.ts MovingToken). So it crosses the step under a holder that
+ * straddles two heights, and steps off no cliff at the holder's side and
+ * climbs no ledge beyond it. The route search, every leg test, the walk's
+ * points and its cost read it so, on the player's device and on the server
+ * alike, wherever the walk ends, so both judge the one walk whatever cuts
+ * it short. This reads only a link every player sees (`seen`, both
+ * tokens): off a holder some player cannot see the token walks as itself,
+ * as it does with no holder at all (8.0). So does one on a holder that
+ * flies. The copy is for the walk alone and is never stored.
  */
 export function walkerFor<T extends Walking>(
   state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0] },
   token: T,
   seen: SeenByAll,
-): T & { footing?: "ground"; offHolder?: PlacedToken & { seat: number } } {
+): T & { footing?: "ground"; offHolder?: PlacedToken } {
   const link = token.attached;
   if (!link || !onHolder(link.kind)) return token;
   const holder = holderOf(state.tokens, token) as Walking | undefined;
   if (!holder || !seen(token) || !seen(holder) || standing(holder.elevation, footprintGround(state.buildChunks, { ...holder, squeeze: undefined })) !== "ground") return token;
-  const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}), seat: token.elevation };
+  const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
   return { ...token, footing: "ground", offHolder };
 }
 

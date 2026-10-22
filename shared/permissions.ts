@@ -13,7 +13,7 @@ import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { footing, footprintGround, groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY } from "./rules/movement.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, walkAlong } from "./rules/movement.ts";
 import { onRouteLattice, routeBlocker, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
@@ -1562,7 +1562,7 @@ function legCheck(c: Check, tokenId: string, to: Pick<Token, "x" | "y"> & { elev
   if (teleport) return insideScene(scene, token, end) ? OK : refuse("forbidden", TELEPORT_OFF_MAP);
   // A token rising or sinking where it stands crosses no edge.
   if (scene.blockMovement !== true || (end.x === token.x && end.y === token.y)) return OK;
-  // Off a holder on the ground it walks as its rider until clear of it, then on the ground, as its route and the drag's own check do (rules/attach.ts walkerFor).
+  // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges, as its route and the drag's own check do (rules/attach.ts walkerFor).
   const blocker = movementRules.legBlocker(c.state, walkerFor(c.state, token, seenAllIn(c)), end);
   if (blocker === null) return OK;
   return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
@@ -1582,7 +1582,7 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   const token = c.state.tokens[tokenId];
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene || scene.blockMovement !== true) return OK;
-  // Off a holder on the ground it walks as its rider until clear of it, then on the ground, as the drag searched it (rules/attach.ts walkerFor).
+  // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges until clear of it, as the drag searched it (rules/attach.ts walkerFor).
   let at: Token & { footing?: "ground" } = walkerFor(c.state, token, seenAllIn(c));
   for (const [n, route] of routes.entries()) {
     const last = n === routes.length - 1;
@@ -1592,8 +1592,8 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
     // Each piece from where it starts, squeezed only where the walk starts: the client checks its routes by this same rule before it sends them.
     const blocker = routeBlocker(c.state, at, route, points[points.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
     if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
-    const stop = points[points.length - 1]!;
-    at = { ...at, x: stop.x, y: stop.y, elevation: stop.elevation };
+    // The next route goes on from its end, off the holder for good once any stop was clear of it (movement.ts walkOn).
+    at = walkAlong(at, points);
     delete at.squeeze;
   }
   if (at.x === to.x && at.y === to.y) return OK;

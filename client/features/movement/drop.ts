@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footing, footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, previewSqueezed, squeezeFits, type DropMode, type OffHolder } from "#shared/rules/movement.ts";
+import { landing, legStop, previewSqueezed, squeezeFits, walkOn, type DropMode, type MovingToken, type OffHolder } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
@@ -136,10 +136,10 @@ export function dropLanding(state: DropState, token: DropToken, at: Point & { sq
 
 /**
  * The token as its walk reads it (rules/attach.ts walkerFor): off a holder
- * every player sees that stands on the ground, as its rider until it is
- * clear of the holder and on the ground from there, so the route search,
- * the drop, its picture and the server's checks all judge the one walk the
- * op sends.
+ * every player sees that stands on the ground, on the ground, crossing only
+ * the holder's inner ledges until it is clear of the holder, so the route
+ * search, the drop, its picture and the server's checks all judge the one
+ * walk the op sends.
  */
 export function walkerOf<T extends DropToken>(state: DropState, token: T): T & { footing?: "ground"; offHolder?: OffHolder } {
   const seated = state.tokens?.[token.id];
@@ -228,7 +228,7 @@ export function planOne(state: DropState, token: DropToken, raw: Point, mode: Ex
   const to = snapPosition(raw.x, raw.y, footprintSize(token));
   if (to.x === token.x && to.y === token.y) return { moves: [], stop: null, held: [] };
   const elevation = dropLanding(state, token, to);
-  // Walked as the route search, the server's check and the route walk it (walkerOf): as its rider until clear of a holder every player sees that stands on the ground, then on the ground.
+  // Walked as the route search, the server's check and the route walk it (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
   const land = landing(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, mode);
   const at = { x: land.x, y: land.y, squeeze: land.squeeze };
   const moves = moved(token, at) ? [landed(state, token, at)] : [];
@@ -268,11 +268,14 @@ export function cutRoute(state: DropState, token: DropToken, pieces: readonly Ro
   if (pieces.length <= MAX_ROUTE_PIECES) return null;
   const grid = snapStep(token);
   const onGrid = (v: number, from: number) => Math.abs((v - from) / grid - Math.round((v - from) / grid)) < 1e-9;
+  // Squeezed or not as the walk that stands at each piece's end judges it (walkerOf), off the holder for good once a stop before was clear of it (movement.ts walkOn).
+  const standing: MovingToken[] = [];
+  let walking: MovingToken = walkerOf(state, token);
+  for (const [x, y] of pieces.slice(0, MAX_ROUTE_PIECES)) standing.push((walking = walkOn(walking, { x, y, elevation: walking.elevation })));
   for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
     const [x, y] = pieces[k - 1]!;
     const at = { x, y };
-    // Squeezed or not as the walk that stands there judges it (walkerOf).
-    const walking = walkerOf(state, token);
+    const walking = standing[k - 1]!;
     if (!previewSqueezed(state, walking, at)) {
       if (onGrid(x, token.x) && onGrid(y, token.y)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: false } };
       continue;
@@ -347,7 +350,7 @@ function landingOf(state: DropState, token: DropToken, target: Point & { squeeze
   if (pieces.length === 0 || (pieces.length > MAX_ROUTE_PIECES && !cut)) return null;
   const at = cut ? cut.at : target;
   const elevation = dropLanding(state, token, at);
-  // Walked as the search and the server walk it (walkerOf): as its rider until clear of a holder every player sees that stands on the ground, then on the ground.
+  // Walked as the search and the server walk it (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
   const walking = walkerOf(state, token);
   const kept = passing(state, walking, cut ? cut.pieces : [...pieces], elevation);
   if (!kept) return null;
@@ -461,7 +464,7 @@ export function planGroup(state: DropState, tokens: readonly DropToken[], dx: nu
     if (to.x === token.x && to.y === token.y) continue;
     const elevation = dropLanding(state, token, to);
     const from = { x: token.x, y: token.y, elevation: token.elevation };
-    // Its leg and what it drags beside it, walked as the server walks them (walkerOf): as its rider until clear of a holder every player sees that stands on the ground, then on the ground.
+    // Its leg and what it drags beside it, walked as the server walks them (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
     const walking = walkerOf(state, token);
     const stopped = mode === "walk" ? (legStop(state, walking, { x: to.x, y: to.y, elevation }) ?? walkerStop(state, walking, walkersOf(token), from, { x: to.x, y: to.y, elevation })) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
@@ -525,12 +528,15 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
 export function walkersStop(state: BuildState, lead: DropToken, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
   if (walkers.length === 0) return null;
   const L = routeLattice(lead);
+  // The holder's walk as it goes on, off the holder it walks off once a stop is clear of it (movement.ts walkOn).
+  let walking: DropToken = lead;
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
+    walking = walkOn(walking, a);
     const stopped = walkerStop(state, lead, walkers, a, b);
     if (!stopped) continue;
-    const at = { ...lead, x: a.x, y: a.y, elevation: a.elevation, squeeze: undefined };
+    const at = { ...walking, squeeze: undefined };
     const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
     const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
     for (let k = n - 1; k >= 1; k--) {

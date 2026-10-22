@@ -4,7 +4,7 @@ import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { coreBlocked, legStop, squeezeFits, straightClear, type MovingToken } from "./movement.ts";
+import { coreBlocked, legStop, squeezeFits, straightClear, walkOn, type MovingToken } from "./movement.ts";
 
 /**
  * A move's route, what it costs and the spots it passes
@@ -84,9 +84,10 @@ export function routeBlocker<T extends MovingToken>(state: BuildState, token: T,
 /** `routeBlocker`, with the piece it stops at. */
 export function routeStop<T extends MovingToken>(state: BuildState, token: T, route: readonly RoutePiece[], landing: number, legBlocker: (state: BuildState, token: T, to: RoutePoint) => Blocker | null = (s, t, to) => legStop(s, t, to)?.blocker ?? null): { piece: number; blocker: Blocker } | null {
   const points = routePoints(state.buildChunks, token, route, landing);
+  let from: T = token;
   for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]!;
-    const from: T = { ...token, x: a.x, y: a.y, elevation: a.elevation };
+    // Each piece from the token where it starts, off the holder it walks off once a stop is clear of it (movement.ts walkOn).
+    from = walkOn(from, points[i - 1]!);
     if (i > 1) delete from.squeeze;
     const blocker = legBlocker(state, from, points[i]!);
     if (blocker !== null) return { piece: i - 1, blocker };
@@ -336,6 +337,8 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
   const spots: RouteSpot[] = [{ ...walk[0]!, squeezed: isSqueezed(token), stand: true }];
   let piece = -1;
   let at: MovingToken = token;
+  // The token as the walk goes on, off the holder it walks off once a piece's start is clear of it (movement.ts walkOn).
+  let walker: MovingToken = token;
   let exact = false;
   let sweep: boolean | undefined;
   for (let s = 1; s < walk.length; s++) {
@@ -346,7 +349,8 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
     if (i !== piece) {
       piece = i;
       // The token where this piece starts, squeezed if it was there: ledges and the leg test count from here.
-      at = { ...token, x: a.x, y: a.y, elevation: a.elevation, squeeze: spots[spots.length - 1]!.squeezed ? true : undefined };
+      walker = walkOn(walker, a);
+      at = { ...walker, squeeze: spots[spots.length - 1]!.squeezed ? true : undefined };
       exact = latticePiece(b.x - a.x, b.y - a.y, lattice);
       sweep = undefined;
     }

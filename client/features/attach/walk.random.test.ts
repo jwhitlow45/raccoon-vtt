@@ -6,8 +6,11 @@ import { inSightOfNonOwners } from "#shared/project.ts";
 import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
-import { legBlocker } from "#shared/rules/movement.ts";
-import { routePoints, routeReach, routeStop, type RoutePiece } from "#shared/rules/route.ts";
+import { LEDGE_IN_THE_WAY, legBlocker } from "#shared/rules/movement.ts";
+import { footprintRect } from "#shared/rules/footprint.ts";
+import { footprintGround } from "#shared/rules/heights.ts";
+import type { Point, Rect } from "#shared/rules/geom.ts";
+import { routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { DM, P1, actor, chance, effect, env, int, pick, rng, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { dropLanding, dropView, walkerOf } from "../movement/drop.ts";
@@ -15,33 +18,43 @@ import { world } from "../movement/testing.ts";
 import { copyFor } from "./testing.ts";
 
 /**
- * The planner's walks of attached tokens against the server (review
- * AT-ASTRA-13, the attach side of movement's drop tests): riders on a
- * holder that straddles a step, holders that drag a creature beside them
- * and riders that drag one, among walls and raised ground, under both
- * diagonal rules. Each drag is planned on the mover's own copy as the board
- * plans it, by the board's own drag stops (dragTesting.ts), and its op must
- * pass the server's check and the route check the drop runs (route.ts
- * routeStop), apply, land where the picture showed it, and store the cost
- * the picture and the frames read. A route the search found that the drop
- * did not take must be one that check refuses.
+ * The planner's walks of attached tokens against the server (reviews
+ * AT-ASTRA-13, AT-O-26, AT-ASTRA-16 and AT-ASTRA-17, the attach side of
+ * movement's drop tests): riders on a holder that straddles a step or stands
+ * wholly on a plateau at its edge, a rider on a cart that straddles a step
+ * among walls that send a walk off it and back over it, holders that drag
+ * a creature beside them and riders that drag one, among walls and raised
+ * ground, beside the holder too, under both diagonal rules. Each drag is
+ * planned on the mover's own copy as the board plans it, by the board's own
+ * drag stops (dragTesting.ts), and its op must pass the server's check and
+ * the route check the drop runs (route.ts routeStop), apply, land where the
+ * picture showed it, and store the cost the picture and the frames read.
+ * The search never finds a route that check refuses. Two checks of the
+ * walk's own read every sent leg apart from the rule's code: no leg's
+ * straight line crosses a wall, and no piece after the walk first clears
+ * the holder crosses a ledge.
  */
 
-type Case = { state: RoomState; mover: string; who: Viewer };
+type Layout = "straddle" | "plateau" | "cart" | "beside";
+
+type Case = { state: RoomState; mover: string; who: Viewer; walls: RoomState["buildChunks"]; layout: Layout };
 
 function grappled(id: string, over: Partial<Token>): Token {
   return token(id, { name: id, size: "small", actor: { inline: actor({ effects: [effect(`g${id}`, { key: "grappled" })] }) }, ...over });
 }
 
-function randomCase(r: () => number): Case {
+/** A random case, or one of `only`'s layout, a cart's with its walls. */
+function randomCase(r: () => number, only?: Layout): Case {
   const hx = int(r, 4, 12);
   const hy = int(r, 4, 12);
   const edges: Record<string, EdgeFeature> = {};
   const heights: Record<string, number> = {};
-  // The step under the horse, its high half on one side, the ground beyond it raised as far as the scene goes.
-  const high = chance(r, 0.5) ? hx + 1 : hx;
-  const right = high === hx + 1;
-  for (let y = 0; y < 30; y++) for (let x = right ? high : 0; x < (right ? 30 : high + 1); x++) heights[`${x},${y}`] = 10;
+  const picked = pick<Layout>(r, ["straddle", "straddle", "plateau", "cart", "beside"]);
+  const layout = only ?? picked;
+  const right = chance(r, 0.5);
+  // The ground's 10 ft step, as far as the scene goes: under the horse's middle, at the horse's own side for a plateau, along a cart's middle.
+  const step = layout === "plateau" ? (right ? hx : hx + 2) : layout === "cart" ? hx + 2 : hx + 1;
+  for (let y = 0; y < 30; y++) for (let x = right ? step : 0; x < (right ? 30 : step); x++) heights[`${x},${y}`] = 10;
   // Raised cells and walls around it.
   for (let i = int(r, 0, 4); i > 0; i--) heights[`${int(r, hx - 4, hx + 5)},${int(r, hy - 4, hy + 5)}`] = pick(r, [5, 15]);
   for (let i = int(r, 0, 3); i > 0; i--) {
@@ -54,6 +67,14 @@ function randomCase(r: () => number): Case {
     const at = int(r, hx - 4, hx + 6);
     for (let v = 0; v < 30; v++) edges[`${at},${v},w`] = { kind: "wall" };
   }
+  // Beside the horse, outside its footprint, a short wall or a raised square that a leg bent at the first square clear of it would miss.
+  if (layout === "beside") {
+    const side = pick(r, [hx - 1, hx, hx + 2, hx + 3]);
+    const along = pick(r, [hy - 2, hy + 2, hy + 3]);
+    if (chance(r, 0.5)) edges[chance(r, 0.5) ? `${side},${along},w` : `${along},${side},n`] = { kind: "wall" };
+    else heights[`${side},${along}`] = pick(r, [5, 20]);
+  }
+  if (layout === "cart") return cartCase(r, hx, hy, right, edges, heights, only === "cart");
   const flies = chance(r, 0.15);
   const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: chance(r, 0.7) ? ["p1"] : [], x: hx, y: hy, elevation: flies ? 20 : 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
   // An independent ride: a drag of a controlled mount's rider moves the mount instead (Stage.tsx), so the board never walks her alone.
@@ -74,6 +95,30 @@ function randomCase(r: () => number): Case {
   tokens.push(token("gob", { name: "Goblin", x: 25, y: 25 }));
   // A token of the player's far off, on its own ground, to drag in a group with the mover.
   tokens.push(token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], x: 25, y: 2, elevation: right ? 10 : 0 }));
+  return roomOf(r, edges, heights, tokens, mover, layout);
+}
+
+/**
+ * A 4 by 4 cart at the horse's spot, at 10 ft, along whose middle the step
+ * runs, with Bree on its low half. Now and then she sits on its first row
+ * and the walls keep her from walking across it or down it on it, so a
+ * walk to the rest of it leaves the cart and comes back over it (review
+ * AT-ASTRA-16): along the step down to the first row, and under the first
+ * row from beside the cart on.
+ */
+function cartCase(r: () => number, hx: number, hy: number, right: boolean, edges: Record<string, EdgeFeature>, heights: Record<string, number>, walls: boolean): Case {
+  const walled = chance(r, 0.6) || walls;
+  if (walled) {
+    for (let y = 0; y <= hy; y++) edges[`${hx + 2},${y},w`] = { kind: "wall" };
+    for (let x = right ? hx - 1 : 0; x < (right ? 30 : hx + 5); x++) edges[`${x},${hy + 1},n`] = { kind: "wall" };
+  }
+  const wagon = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: hx, y: hy, elevation: 10 });
+  const bree = token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], x: hx + (right ? int(r, 0, 1) : int(r, 2, 3)), y: hy + (walled ? 0 : int(r, 0, 3)), elevation: 10, actor: { inline: actor({ speeds: { walk: 30 } }) }, attached: { to: "cart", kind: "carry" } });
+  const tokens = [wagon, bree, token("gob", { name: "Goblin", x: 25, y: 25 }), token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], x: 25, y: 2, elevation: right ? 10 : 0 })];
+  return roomOf(r, edges, heights, tokens, "bree", "cart");
+}
+
+function roomOf(r: () => number, edges: Record<string, EdgeFeature>, heights: Record<string, number>, tokens: Token[], mover: string, layout: Layout): Case {
   let state = world({ blockMovement: chance(r, 0.75), edges, heights, tokens });
   state.meta.settings = { ...state.meta.settings, diagonal: pick(r, ["five", "fiveTen"] as const) };
   for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: mover, value: 20 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
@@ -81,7 +126,7 @@ function randomCase(r: () => number): Case {
     assert.ok(out.ok);
     state = out.state;
   }
-  return { state, mover, who: chance(r, 0.8) ? P1 : DM };
+  return { state, mover, who: chance(r, 0.8) ? P1 : DM, walls: world({ edges }).buildChunks, layout };
 }
 
 const seenAll = (state: RoomState) => (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
@@ -94,6 +139,52 @@ function plainLegStop(state: RoomState, tokenId: string, to: { x: number; y: num
   return legBlocker(state, walkerFor(state, token, seenAll(state)), end);
 }
 
+/**
+ * Two reads of a walk a player sends, apart from the rule's code (reviews
+ * AT-ASTRA-16 and AT-ASTRA-17), its start and then each piece's end, or
+ * where null. No piece's straight line crosses a wall, judged on the walls
+ * alone for the token with no holder, so no leg bends round one. And no
+ * piece from the walk's first stop clear of its holder on crosses a ledge,
+ * judged for the token off no holder, so a walk that comes back over the
+ * holder crosses no step under it. `reentered` hears of a walk that does
+ * come back over it.
+ */
+function walkFault(c: Case, tokenId: string, points: readonly RoutePoint[], reentered: () => void = () => {}): string | null {
+  const token = c.state.tokens[tokenId]!;
+  const walker = walkerFor(c.state, token, seenAll(c.state));
+  const holder = walker.offHolder ? footprintRect(walker.offHolder) : null;
+  const { offHolder: _holder, ...cleared } = walker;
+  const wallsOnly: RoomState = { ...c.state, buildChunks: c.walls };
+  let clear = false;
+  let back = false;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const squeeze = i === 1 ? token.squeeze : undefined;
+    if (legBlocker(wallsOnly, { ...token, attached: undefined, x: a.x, y: a.y, elevation: a.elevation, squeeze }, points[i]!) === "wall") return `piece ${i - 1} crosses a wall`;
+    if (!holder) continue;
+    const on = overlaps(footprintRect({ ...token, x: a.x, y: a.y, squeeze: undefined }), holder);
+    back ||= clear && on;
+    clear ||= !on;
+    if (clear && legBlocker(c.state, { ...cleared, x: a.x, y: a.y, elevation: a.elevation, squeeze }, points[i]!) === "ledge") return `piece ${i - 1}, after the walk cleared its holder, crosses a ledge`;
+  }
+  const end = points[points.length - 1]!;
+  if (holder && (back || (clear && overlaps(footprintRect({ ...token, x: end.x, y: end.y, squeeze: undefined }), holder)))) reentered();
+  return null;
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  const EPS = 1e-9;
+  return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
+}
+
+/** Where a drag goes: up to 5 squares off, or now and then for a rider on a cart, on the cart or just past it, so a walk may leave it and come back over it. */
+function target(r: () => number, c: Case): Point {
+  const mover = c.state.tokens[c.mover]!;
+  const wagon = c.state.tokens.cart;
+  if (c.layout === "cart" && wagon && chance(r, 0.6)) return { x: Math.min(28, wagon.x + int(r, -1, 6)), y: Math.min(28, wagon.y + int(r, 1, 5)) };
+  return { x: Math.max(0, Math.min(28, mover.x + int(r, -5, 5))), y: Math.max(0, Math.min(28, mover.y + int(r, -5, 5))) };
+}
+
 /** Whether a move's route is the one the search found, piece for piece. */
 function sameRoute(route: readonly RoutePiece[] | undefined, found: readonly RoutePiece[]): boolean {
   return route !== undefined && route.length === found.length && route.every((p, i) => p.every((v, k) => v === found[i]![k]));
@@ -104,13 +195,15 @@ describe("a drag of an attached token plans the walk the server takes and stores
     let moved = 0;
     let routed = 0;
     let off = 0;
-    let refusedRoutes = 0;
+    let farRoutes = 0;
     let held = 0;
+    let reentered = 0;
+    const walked = { plateau: 0, cart: 0 };
     for (let seed = 1; seed <= 400; seed++) {
       const r = rng(seed);
       const c = randomCase(r);
       const mover = c.state.tokens[c.mover]!;
-      const raw = { x: Math.max(0, Math.min(28, mover.x + int(r, -5, 5))), y: Math.max(0, Math.min(28, mover.y + int(r, -5, 5))) };
+      const raw = target(r, c);
       const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
       const drag = dragOf(copy, c.who.role, c.mover, raw);
       const where = `seed ${seed} (${c.who.memberId} drags ${c.mover} to ${raw.x},${raw.y}, ${drag.answer.kind})`;
@@ -127,17 +220,26 @@ describe("a drag of an attached token plans the walk the server takes and stores
       }
       // And a player's plain leg as the server's own leg test walks it, not only as canApply judges it. The DM's drop goes through.
       if (c.who.role === "player" && !route && op.t === "token.move") assert.equal(plainLegStop(c.state, c.mover, op), null, `${where}: the leg test stops ${JSON.stringify(op)}`);
+      if (c.who.role === "player" && blocks && op.t === "token.move") {
+        const landing = op.elevation ?? mover.elevation;
+        const points = route ? routePoints(c.state.buildChunks, walkerFor(c.state, mover, seenAll(c.state)), route, landing) : [{ x: mover.x, y: mover.y, elevation: mover.elevation }, { x: op.x, y: op.y, elevation: landing }];
+        assert.equal(walkFault(c, c.mover, points), null, `${where}: ${JSON.stringify(op)}`);
+        if (c.layout === "plateau" || c.layout === "cart") walked[c.layout]++;
+      }
       const found = drag.answer.kind === "route" ? drag.answer.route.pieces : null;
-      if (blocks && found && found.length <= MAX_ROUTE_PIECES && !drag.plan.stop && !sameRoute(route, found)) {
-        // The drop went another way than the search found: only since the check refuses that route, judged on the mover's copy as the drop judges it.
+      if (blocks && found && found.length <= MAX_ROUTE_PIECES) {
+        // The search finds only routes the check takes (review AT-ASTRA-16), judged on the mover's copy as the drop judges it, and the drop takes it unless it reaches too far.
         const view = dropView(copy, c.who.role);
         const end = found[found.length - 1]!;
         const at = { x: end[0], y: end[1] };
         const walking = walkerOf(view, view.tokens[c.mover]!);
         const landing = dropLanding(view, view.tokens[c.mover]!, at);
-        const refused = routeStop(view, walking, found, landing) !== null || routeReach(routePoints(view.buildChunks, walking, found, landing), view.meta.settings.feetPerCell) > MAX_ROUTE_REACH;
-        assert.ok(refused, `${where}: the drop left a route the check takes, ${JSON.stringify(found)} for ${JSON.stringify(op)}`);
-        refusedRoutes++;
+        assert.equal(routeStop(view, walking, found, landing), null, `${where}: the search found a route the check refuses, ${JSON.stringify(found)}`);
+        if (c.who.role === "player") assert.equal(walkFault(c, c.mover, routePoints(c.state.buildChunks, walkerFor(c.state, mover, seenAll(c.state)), found, landing), () => reentered++), null, `${where}: the search found ${JSON.stringify(found)}`);
+        if (!drag.plan.stop && !sameRoute(route, found)) {
+          assert.ok(routeReach(routePoints(view.buildChunks, walking, found, landing), view.meta.settings.feetPerCell) > MAX_ROUTE_REACH, `${where}: the drop left a route the check takes, ${JSON.stringify(found)} for ${JSON.stringify(op)}`);
+          farRoutes++;
+        }
       }
       const applied = applyOp(c.state, op, c.who, env(10));
       assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
@@ -152,8 +254,8 @@ describe("a drag of an attached token plans the walk the server takes and stores
       if (op.t === "token.move" && op.route) routed++;
       if (mover.attached && !after.attached) off++;
     }
-    // A run that never walks off a mount, along a route or held at a wall tests nothing.
-    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10, JSON.stringify({ moved, routed, off, held, refusedRoutes }));
+    // A run that never walks off a mount, along a route, held at a wall or back over a cart tests nothing.
+    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10 && reentered > 1 && walked.plateau > 20 && walked.cart > 20, JSON.stringify({ moved, routed, off, held, reentered, farRoutes, walked }));
   });
 
   test("random group drags of the same with a token of the player's far off: each leg is one the server's leg test takes, and the label reads what it stores", () => {
@@ -165,7 +267,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
       const r = rng(seed);
       const c = randomCase(r);
       const mover = c.state.tokens[c.mover]!;
-      const raw = { x: Math.max(0, Math.min(28, mover.x + int(r, -5, 5))), y: Math.max(0, Math.min(28, mover.y + int(r, -5, 5))) };
+      const raw = target(r, c);
       const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
       const drag = groupDragOf(copy, c.who.role, [c.mover, "mate"], raw);
       const where = `seed ${seed} (${c.who.memberId} drags ${c.mover} and mate to ${raw.x},${raw.y})`;
@@ -176,6 +278,13 @@ describe("a drag of an attached token plans the walk the server takes and stores
       assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message} for ${JSON.stringify(op)}`);
       const moves = op.t === "token.moveMany" ? op.moves : op.t === "token.move" ? [op] : [];
       if (c.who.role === "player") for (const m of moves) assert.equal(plainLegStop(c.state, m.tokenId, m), null, `${where}: the leg test stops ${JSON.stringify(m)}`);
+      if (c.who.role === "player" && c.state.scenes[mover.sceneId]!.blockMovement === true) {
+        for (const m of moves) {
+          const from = c.state.tokens[m.tokenId]!;
+          const points = [{ x: from.x, y: from.y, elevation: from.elevation }, { x: m.x, y: m.y, elevation: m.elevation ?? from.elevation }];
+          assert.equal(walkFault(c, m.tokenId, points), null, `${where}: ${JSON.stringify(m)}`);
+        }
+      }
       const applied = applyOp(c.state, op, c.who, env(10));
       assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
       for (const m of moves) assert.deepEqual([applied.state.tokens[m.tokenId]!.x, applied.state.tokens[m.tokenId]!.y], [m.x, m.y], `${where}: ${m.tokenId} landed elsewhere`);
@@ -191,5 +300,42 @@ describe("a drag of an attached token plans the walk the server takes and stores
       legs += moves.length;
     }
     assert.ok(groups > 200 && heldBack > 30 && groupOff > 40, JSON.stringify({ groups, legs, heldBack, groupOff }));
+  });
+});
+
+describe("the server takes a walk that comes back over a cart only when no piece after it cleared the cart crosses a ledge (review AT-ASTRA-16)", () => {
+  test("random routes off a cart round its walls and back over it, then on, as any client might send them", () => {
+    let taken = 0;
+    let refused = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed);
+      const c = randomCase(r, "cart");
+      if (c.state.scenes.s1!.blockMovement !== true) continue;
+      const bree = c.state.tokens.bree!;
+      const wagon = c.state.tokens.cart!;
+      // Off the cart past the end of the wall under its first row, down past that wall, back onto the cart's low half, then anywhere near.
+      const west = bree.x < wagon.x + 2;
+      const out = west ? wagon.x - 2 : wagon.x + 5;
+      const back = west ? wagon.x + int(r, 0, 1) : wagon.x + int(r, 2, 3);
+      const row = wagon.y + int(r, 2, 3);
+      const end = { x: Math.max(0, Math.min(28, wagon.x + int(r, -2, 6))), y: Math.max(0, Math.min(28, wagon.y + int(r, 1, 5))) };
+      const route: [number, number, number, 0 | 1][] = [
+        [out, bree.y, 0, 0],
+        [out, row, 0, 0],
+        [back, row, 0, 0],
+      ];
+      if (end.x !== back || end.y !== row) route.push([end.x, end.y, 0, 0]);
+      const elevation = footprintGround(c.state.buildChunks, { ...bree, x: end.x, y: end.y, squeeze: undefined });
+      const op: Op = { t: "token.move", tokenId: "bree", x: end.x, y: end.y, elevation, route };
+      const answer = canApply(op, P1, c.state, { canUseAsset: () => true });
+      const where = `seed ${seed}: ${JSON.stringify(op)}`;
+      if (!answer.ok) {
+        if (answer.message === LEDGE_IN_THE_WAY) refused++;
+        continue;
+      }
+      assert.equal(walkFault(c, "bree", routePoints(c.state.buildChunks, walkerFor(c.state, bree, seenAll(c.state)), route, elevation)), null, where);
+      taken++;
+    }
+    assert.ok(taken > 30 && refused > 30, JSON.stringify({ taken, refused }));
   });
 });

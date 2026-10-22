@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { EdgeFeature, RoomState, Token } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { findRoute } from "#shared/rules/walk.ts";
@@ -15,7 +15,7 @@ import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
 import { towingWord, walkersFor, walkersOfGroup } from "./walk.ts";
 import { detachOp, getOffPlace } from "./detach.ts";
-import { LEDGE_IN_THE_WAY, legBlocker } from "#shared/rules/movement.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreBlocked, legBlocker, walkAlong } from "#shared/rules/movement.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 
 const goblin = (over: Partial<Token> = {}) => token("goblin", { name: "Goblin", x: 3, y: 5, attached: { to: "thorn", kind: "drag" }, ...over });
@@ -179,7 +179,7 @@ describe("a group drag off a ride reads the dismount the reducer stores (review 
   });
 });
 
-describe("every check of a walk off a holder on the ground walks it as its rider until clear of the holder, then on the ground (reviews AT-ASTRA-13 and AT-O-25)", () => {
+describe("every check of a walk off a holder on the ground walks it on the ground, crossing only the ledges inside the holder (reviews AT-ASTRA-13, AT-O-25 and AT-O-26)", () => {
   /**
    * P1's Bree on the west half of a warhorse at 10 ft, in a 10 ft deep trench two squares wide (x 3 and 4) that runs the
    * scene's height, the horse's east half on the high ground at x 5. Her own turn, with a grappled goblin she may drag
@@ -232,7 +232,7 @@ describe("every check of a walk off a holder on the ground walks it as its rider
     assert.ok(held >= 3, `${held} held`);
   });
 
-  test("a drag east crosses the step under the horse, as its rider, onto the high ground, and routes round a wall from there", () => {
+  test("a drag east crosses the step under the horse onto the high ground, and routes round a wall from there", () => {
     for (const walled of [false, true]) {
       const state = trench();
       if (walled) state.buildChunks = world({ heights: { ...raised(0, 0, 3, 30, 10), ...raised(5, 0, 30, 30, 10) }, edges: line("w", 8, 0, 6) }).buildChunks;
@@ -248,7 +248,7 @@ describe("every check of a walk off a holder on the ground walks it as its rider
     }
   });
 
-  test("off a 10 ft horse she climbs no 20 ft ground: the step onto the first square clear of it is judged from her height", () => {
+  test("off a 10 ft horse she climbs no 20 ft ground: the ledge at the horse's side stops her", () => {
     const state = trench();
     // The ground beyond the horse's east half rises to 20 ft.
     state.buildChunks = world({ heights: { ...raised(0, 0, 3, 30, 10), ...raised(5, 0, 6, 30, 10), ...raised(6, 0, 30, 30, 20) } }).buildChunks;
@@ -273,5 +273,113 @@ describe("every check of a walk off a holder on the ground walks it as its rider
     const place = getOffPlace(copyFor(level, P1), { role: "player", memberId: "p1" }, copyFor(level, P1).tokens.bree!);
     assert.ok(place);
     assert.equal(canApply(detachOp("bree", place), P1, level, { canUseAsset: () => true }).ok, true, JSON.stringify(place));
+  });
+});
+
+describe("a walk off a holder crosses only the ledges whose whole length lies inside the holder, and only until it first clears it (reviews AT-O-26, AT-ASTRA-16 and AT-ASTRA-17)", () => {
+  const deps = { canUseAsset: () => true };
+  const refusal = (op: Op, state: RoomState) => {
+    const answer = canApply(op, P1, state, deps);
+    return answer.ok ? null : answer.message;
+  };
+  /** The room on `mover`'s turn. */
+  function onItsTurn(state: RoomState, mover: string): RoomState {
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: mover, value: 20 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    return state;
+  }
+  const bree = (over: Partial<Token>) => token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], x: 4, y: 4, elevation: 10, actor: { inline: actor({ speeds: { walk: 30 } }) }, ...over });
+  const gob = token("gob", { name: "Goblin", x: 25, y: 25 });
+
+  test("a horse wholly on a plateau at its edge: she steps off no cliff at its side, as a token there on its own does not", () => {
+    for (const riding of [true, false]) {
+      const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: riding ? 4 : 10, y: 4, elevation: 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+      const state = onItsTurn(world({ heights: raised(4, 0, 30, 30, 10), tokens: [horse, bree(riding ? { attached: { to: "horse", kind: "ride" } } : {}), gob] }), "bree");
+      assert.equal(refusal({ t: "token.move", tokenId: "bree", x: 2, y: 4 }, state), LEDGE_IN_THE_WAY, riding ? "riding" : "loose");
+      const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 2, y: 4 });
+      assert.deepEqual([drag.op, drag.plan.stop?.blocker, drag.preview.to], [null, "ledge", { x: 4, y: 4 }], riding ? "riding" : "loose");
+    }
+    // East, on the plateau, she walks off as ever.
+    const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, elevation: 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+    const state = onItsTurn(world({ heights: raised(4, 0, 30, 30, 10), tokens: [horse, bree({ attached: { to: "horse", kind: "ride" } }), gob] }), "bree");
+    const east = dragOf(copyFor(state, P1), "player", "bree", { x: 8, y: 4 });
+    assert.deepEqual(east.op, { t: "token.move", tokenId: "bree", x: 8, y: 4 });
+    assert.equal(refusal(east.op as Op, state), null);
+  });
+
+  /**
+   * A 4 by 4 cart at (4,4) at 10 ft, straddling a 10 ft step at x = 6 along its middle, P1's Bree on its west half, and walls
+   * that keep her from walking east or south on it: along x = 6 north of y = 5, and along y = 5 from x = 3 on.
+   */
+  function cart(): RoomState {
+    const edges: Record<string, EdgeFeature> = {};
+    for (let y = 0; y < 5; y++) edges[`6,${y},w`] = { kind: "wall" };
+    for (let x = 3; x < 30; x++) edges[`${x},5,n`] = { kind: "wall" };
+    const wagon = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 4, y: 4, elevation: 10 });
+    return onItsTurn(world({ heights: raised(6, 0, 30, 30, 10), edges, tokens: [wagon, bree({ attached: { to: "cart", kind: "carry" } }), gob] }), "bree");
+  }
+
+  test("a walk that clears the cart and comes back over it crosses the step under it on the ground's rule: the search finds no such way and the server refuses one", () => {
+    const state = cart();
+    const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 9, y: 6 });
+    assert.equal(drag.answer.kind, "none");
+    assert.equal(drag.op && "route" in drag.op ? drag.op.route : undefined, undefined);
+    const back: [number, number, number, 0 | 1][] = [[2, 4, 0, 0], [2, 5, 0, 0], [3, 6, 0, 0], [5, 6, 0, 0]];
+    assert.equal(refusal({ t: "token.move", tokenId: "bree", x: 9, y: 6, elevation: 10, route: [...back, [6, 6, 0, 0], [9, 6, 0, 0]] }, state), LEDGE_IN_THE_WAY);
+    // Back on the cart short of the step is a walk like any other.
+    const short = dragOf(copyFor(state, P1), "player", "bree", { x: 5, y: 6 });
+    assert.deepEqual(short.op, { t: "token.move", tokenId: "bree", x: 5, y: 6, route: back });
+    assert.equal(refusal(short.op as Op, state), null);
+    // A redo's routes carry it too: a first route that ends back on the cart, a second over the step.
+    const value = { ...state.tokens.bree!, x: 9, y: 6, elevation: 10 };
+    const redo: Op = { t: "sys.restore", entries: [{ key: "token:bree", value }], from: "redo", deps: true, routes: { bree: [back, [[9, 6, 0, 0]]] } };
+    assert.equal(refusal(redo, state), LEDGE_IN_THE_WAY);
+  });
+
+  test("a spot on the holder that a walk reaches after clearing it is judged on the ground's rule", () => {
+    // A Large ogre on the cart's west half, its core over the step under the cart, which rises only there.
+    const wagon = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 4, y: 4, elevation: 10 });
+    const ogre = token("ogre", { name: "Ogre", kind: "npc", size: "large", x: 5, y: 4, elevation: 10, attached: { to: "cart", kind: "carry" } });
+    const state = world({ heights: raised(6, 4, 8, 8, 10), tokens: [wagon, ogre] });
+    const walker = walkerFor(state, state.tokens.ogre!, () => true);
+    assert.equal(coreBlocked(state, walker, { x: 5, y: 4 }), false);
+    const cleared = walkAlong(walker, [
+      { x: 2, y: 4, elevation: 0 },
+      { x: 4, y: 4, elevation: 0 },
+    ]);
+    assert.equal(coreBlocked(state, cleared, { x: 5, y: 4 }), true);
+  });
+
+  test("a group drag that is no axis's tests the straight leg, so it never bends round a wall or a ledge beside the horse", () => {
+    for (const ledge of [false, true]) {
+      // Flat ground, and beside the horse a wall from (4,6) to (4,7), or a 10 ft square at (4,6), outside its footprint.
+      const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: ["p1"], x: 4, y: 4, elevation: 0, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+      const mate = token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], disposition: "ally", x: 12, y: 2 });
+      const room = ledge ? { heights: raised(4, 6, 5, 7, 10) } : { edges: { "4,6,w": { kind: "wall" } as EdgeFeature } };
+      const state = onItsTurn(world({ ...room, tokens: [horse, bree({ elevation: 0, attached: { to: "horse", kind: "ride" } }), mate, gob] }), "bree");
+      const words = ledge ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY;
+      const both: Op = { t: "token.moveMany", moves: [{ tokenId: "bree", x: 1, y: 14 }, { tokenId: "mate", x: 9, y: 12 }] };
+      assert.equal(refusal(both, state), words);
+      const loose = { ...state, tokens: { ...state.tokens, bree: { ...state.tokens.bree!, attached: undefined } } };
+      assert.equal(refusal(both, loose), words, "as for a token on its own");
+      const drag = groupDragOf(copyFor(state, P1), "player", ["bree", "mate"], { x: 1, y: 14 });
+      assert.deepEqual(drag.plan.held.map((h) => [h.token.id, h.blocker]), [["bree", ledge ? "ledge" : "wall"]]);
+      assert.deepEqual(drag.op, { t: "token.move", tokenId: "mate", x: 9, y: 12 });
+    }
+  });
+
+  test("under a holder off the whole squares, a grid edge only partly inside it is a ledge: she crosses the step only where its whole edge lies under the cart", () => {
+    // A 2.5 by 2 cart at (4,4) at 10 ft over a 10 ft step along y = 5: its edge from x = 6 to 7 lies half under the cart.
+    for (const [x, words] of [
+      [5, null],
+      [6, LEDGE_IN_THE_WAY],
+    ] as const) {
+      const wagon = token("cart", { name: "Cart", kind: "object", size: "custom", w: 2.5, h: 2, x: 4, y: 4, elevation: 10 });
+      const state = onItsTurn(world({ heights: raised(0, 5, 30, 30, 10), tokens: [wagon, bree({ x, attached: { to: "cart", kind: "carry" } }), gob] }), "bree");
+      assert.equal(refusal({ t: "token.move", tokenId: "bree", x, y: 7, elevation: 10 }, state), words, `from x ${x}`);
+    }
   });
 });

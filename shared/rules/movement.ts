@@ -35,18 +35,23 @@ import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
 /**
  * The token fields the movement rule reads. `footing` and `offHolder` are
  * set only on a copy made for a walk off a holder on the ground
- * (rules/attach.ts walkerFor), never on a stored token. Such a walk is
- * judged in two parts (docs/design-v1-attach.md 4.3, review AT-O-25). Up to
- * its first spot clear of the holder, dismount.ts dismountSplit's `off`, it
- * is the rider's: a ledge stops it only when its top is above the rider,
- * so the step under the holder is crossed and no ledge is climbed for free.
- * From there it walks on the ground (`footing`), whatever its height, and
- * every ledge stops it. Walls stop both parts.
+ * (rules/attach.ts walkerFor), never on a stored token. Such a walk is on
+ * the ground (`footing`), whatever its height, and every ledge stops it,
+ * but for one exemption (docs/design-v1-attach.md 4.3, reviews AT-O-26,
+ * AT-ASTRA-16 and AT-ASTRA-17). Until it first stands clear of the holder,
+ * no ledge whose whole length lies strictly inside the holder's footprint
+ * stops it (walls.ts `withoutLedgesInside`), so it crosses the step under a
+ * holder that straddles two heights. A ledge on the footprint's boundary
+ * stops it, so a rider steps off no cliff at her mount's side, and so does
+ * every ledge beyond, so she climbs none either. Each leg is one straight
+ * test, walls and ledges alike. `offHolder` is the walk's state: a walk
+ * drops it at its first spot clear of the holder (`walkOn`), and the walk
+ * comes back over the holder on the ground's rule.
  */
 export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: "ground"; offHolder?: OffHolder };
 
-/** The holder a walk off it leaves, where it stands, and `seat`, the rider's elevation on it, which that walk's first part is judged from. */
-export type OffHolder = PlacedToken & { seat: number };
+/** The holder a walk off it leaves, where it stands. */
+export type OffHolder = PlacedToken;
 
 /**
  * What a player hears when a wall or a ledge stops a move, or a resize,
@@ -362,64 +367,87 @@ function legClear(leg: Leg): boolean {
   return false;
 }
 
-function legOf(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd, floor = ledgeFloor(walls, scene, token, to.elevation)): Leg {
+function legOf(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd): Leg {
   const { w, h } = coreSize(token);
   const p = storedCenter(token);
   const q = storedCenter({ ...token, x: to.x, y: to.y });
-  return { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor };
+  return { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor: ledgeFloor(walls, scene, token, to.elevation) };
 }
 
-/** What a walk's tests read of the holder it walks off, the rider's height included, for what is kept per walker (MovingToken). */
+/** What a walk's tests read of the holder it walks off, for what is kept per walker (MovingToken). */
 export function offKey(token: MovingToken): string {
   const h = token.offHolder;
-  return h ? `${h.size},${h.w},${h.h},${h.x},${h.y},${h.seat}` : "";
+  return h ? `${h.size},${h.w},${h.h},${h.x},${h.y}` : "";
 }
 
 /** Whether the token's full footprint, standing at `at`, shares area with the holder it walks off. */
-function onOffHolder(token: MovingToken, at: Point): boolean {
+export function onOffHolder(token: MovingToken, at: Point): boolean {
   const holder = token.offHolder;
   if (!holder) return false;
   const a = footprintRect({ size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
-  const b = footprintRect({ size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) });
+  const b = holderRect(holder);
   const EPS = 1e-9;
   return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
 }
 
-/** The token as a walk reads it once clear of its holder: on its own footing, off no holder. */
-function clearOfHolder(token: MovingToken): MovingToken {
-  if (!token.offHolder) return token;
-  const { offHolder: _holder, ...rest } = token;
-  return rest;
-}
-
-/** The floor of a walk's part on the holder it walks off: a ledge stops it only when its top is above the rider's seat. */
-function riderFloor(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken): number {
-  return scene.blockMovement !== true || !walls.hasRelief ? Infinity : (token.offHolder?.seat ?? token.elevation);
-}
-
-/** Which ledges stop a token standing at `at`, as a leg from there is judged: the rider's on the holder it walks off, else its own. */
-function floorAt(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, at: Point, end: number): number {
-  return onOffHolder(token, at) ? riderFloor(walls, scene, token) : ledgeFloor(walls, scene, clearOfHolder(token), end);
+function holderRect(holder: OffHolder): { x: number; y: number; w: number; h: number } {
+  return footprintRect({ size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) });
 }
 
 /**
- * The parts a leg is judged in. A walk off a holder from a spot on it is
- * the rider's up to its first spot clear of the holder, the first of the
- * leg's spots (`legSpots`) whose footprint is clear, as dismountSplit finds
- * it, and walks on from there on its own footing. Any other leg is one part.
+ * The token standing at `at` as a walk goes on from there: off the holder
+ * it walks off for good once it stands clear of it (MovingToken, review
+ * AT-ASTRA-16). Every walk of more than one leg, a route's pieces and a
+ * redo's routes, carries the token from leg to leg by this.
  */
-function legParts(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd): Leg[] {
-  if (!onOffHolder(token, token)) return [legOf(walls, scene, clearOfHolder(token), to)];
-  const off = legSpots(token, to).find((at, i) => i > 0 && !onOffHolder(token, at)) ?? to;
-  const first = legOf(walls, scene, token, { x: off.x, y: off.y, elevation: to.elevation }, riderFloor(walls, scene, token));
-  if (off.x === to.x && off.y === to.y) return [first];
-  return [first, legOf(walls, scene, { ...clearOfHolder(token), x: off.x, y: off.y }, to)];
+export function walkOn<T extends MovingToken>(token: T, at: Point & { elevation: number }): T {
+  const next: T = { ...token, x: at.x, y: at.y, elevation: at.elevation };
+  return !next.offHolder || onOffHolder(token, at) ? next : pastHolder(next);
 }
 
-/** What stops a leg judged in parts: the first part's stop that is stopped, or null. */
-function partsStop(parts: readonly Leg[]): LegStop | null {
-  for (const leg of parts) if (!legClear(leg)) return firstStop(leg);
-  return null;
+/** The token as a walk that has cleared the holder it walks off reads it: on the ground, off no holder. */
+export function pastHolder<T extends MovingToken>(token: T): T {
+  if (!token.offHolder) return token;
+  const next: T = { ...token };
+  delete next.offHolder;
+  return next;
+}
+
+/**
+ * Whether a walk of the token from where it stands has inner ledges of its
+ * holder to cross (MovingToken): only then does a walk that leaves the
+ * holder and comes back judge its steps there differently, so only then
+ * does the route search keep the two apart (walk.ts WalkWorld `post`).
+ */
+export function crossesInnerLedges(state: BuildState, token: MovingToken): boolean {
+  const scene = state.scenes[token.sceneId];
+  if (!scene || scene.blockMovement !== true || !token.offHolder) return false;
+  const walls = sceneWalls(scene, state.buildChunks);
+  return wallsAt(walls, token, token) !== walls;
+}
+
+/** `walkOn` along a walk's stops in turn: the token at the last, off the holder for good once any of them is clear of it. */
+export function walkAlong<T extends MovingToken>(token: T, stops: readonly (Point & { elevation: number })[]): T {
+  let at = token;
+  for (const stop of stops) at = walkOn(at, stop);
+  return at;
+}
+
+/**
+ * The movement set for the token at `at` as a walk from where it stands
+ * reaches it: the holder's inner ledges left out while the walk has not
+ * cleared the holder (MovingToken). A straight leg leaves a rectangle once,
+ * so a spot of a leg from a spot on the holder that is on the holder too
+ * was reached before the walk cleared it. For a leg's own test, `at` is
+ * where it starts.
+ */
+function wallsAt(walls: WallSet, token: MovingToken, at: Point): WallSet {
+  const holder = token.offHolder;
+  return holder && onOffHolder(token, token) && onOffHolder(token, at) ? walls.withoutLedgesInside(holderRect(holder)) : walls;
+}
+
+function legFrom(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd): Leg {
+  return legOf(wallsAt(walls, token, token), scene, token, to);
 }
 
 /** What stopped a leg, and the door it was when a door edge or free door stopped it first. */
@@ -436,8 +464,9 @@ export type LegStop = { blocker: Blocker; door: DoorRef | null };
 export function legStop(state: BuildState, token: MovingToken, to: LegEnd): LegStop | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
-  const walls = sceneWalls(scene, state.buildChunks);
-  return partsStop(legParts(walls, scene, token, to));
+  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to);
+  if (legClear(leg)) return null;
+  return firstStop(leg);
 }
 
 /**
@@ -449,10 +478,7 @@ export function legStop(state: BuildState, token: MovingToken, to: LegEnd): LegS
 export function straightClear(state: BuildState, token: MovingToken, to: LegEnd): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return true;
-  return legParts(sceneWalls(scene, state.buildChunks), scene, token, to).every(straightPartClear);
-}
-
-function straightPartClear(leg: Leg): boolean {
+  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to);
   const { px, py, qx, qy, hx, hy } = leg;
   if (px === qx && py === qy) return true;
   const segs = touching(leg.walls, px, py, qx, qy, hx, hy, leg.floor);
@@ -468,6 +494,9 @@ function straightPartClear(leg: Leg): boolean {
  * per step, since a search asks up to a million steps. The ledges count as
  * for a leg from where the token stands, which a walk keeps all the way: a
  * walker on the ground is stopped by every ledge, a flier keeps its height.
+ * A step from a spot on the holder a walk leaves passes the holder's inner
+ * ledges (MovingToken), so a walk that has cleared the holder is tested by
+ * a tester of its own, for the token off it (walk.ts WalkWorld `post`).
  */
 export type StepTester = {
   walls: WallSet;
@@ -481,17 +510,16 @@ export function stepTester(state: BuildState, token: MovingToken): StepTester | 
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
   const walls = sceneWalls(scene, state.buildChunks);
-  const ownFloor = ledgeFloor(walls, scene, clearOfHolder(token), token.elevation);
-  // A step from a spot on the holder the token walks off is the rider's (MovingToken).
-  const onFloor = token.offHolder ? riderFloor(walls, scene, token) : ownFloor;
-  let floor = ownFloor;
+  const floor = ledgeFloor(walls, scene, token, token.elevation);
+  // A step from a spot on the holder the walk has not yet cleared leaves out its inner ledges (MovingToken).
+  const inner = wallsAt(walls, token, token);
+  let set = walls;
   const { w, h } = footprintSize(token);
   const core = coreSize(token);
   const hx = core.w / 2;
   const hy = core.h / 2;
-  const maskOf = (f: number) => MOVEMENT | (f === Infinity ? 0 : LEDGE);
-  const xy = walls.stored.xy;
-  const index = walls.storedIndex;
+  const mask = MOVEMENT | (floor === Infinity ? 0 : LEDGE);
+  let xy = walls.stored.xy;
   const EPS = 1e-7;
   let px = 0;
   let py = 0;
@@ -499,7 +527,7 @@ export function stepTester(state: BuildState, token: MovingToken): StepTester | 
   let qy = 0;
   let hit = false;
   const visit = (k: number) => {
-    if (hit || !blocksMove(walls, k, floor)) return;
+    if (hit || !blocksMove(set, k, floor)) return;
     const ax = xy[4 * k]!;
     const ay = xy[4 * k + 1]!;
     const bx = xy[4 * k + 2]!;
@@ -523,8 +551,9 @@ export function stepTester(state: BuildState, token: MovingToken): StepTester | 
       qy = by + h / 2;
       if (px === qx && py === qy) return true;
       hit = false;
-      floor = onFloor !== ownFloor && onOffHolder(token, { x: ax, y: ay }) ? onFloor : ownFloor;
-      index.query(Math.min(px, qx) - hx - EPS, Math.min(py, qy) - hy - EPS, Math.max(px, qx) + hx + EPS, Math.max(py, qy) + hy + EPS, maskOf(floor), visit);
+      set = inner !== walls && onOffHolder(token, { x: ax, y: ay }) ? inner : walls;
+      xy = set.stored.xy;
+      set.storedIndex.query(Math.min(px, qx) - hx - EPS, Math.min(py, qy) - hy - EPS, Math.max(px, qx) + hx + EPS, Math.max(py, qy) + hy + EPS, mask, visit);
       return !hit;
     },
     pinched(x, y) {
@@ -609,7 +638,7 @@ export function coreBlocked(state: BuildState, token: MovingToken, at: Point): b
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
-  return coreTouchesAt(walls, token, at, floorAt(walls, scene, token, at, token.elevation));
+  return coreTouchesAt(wallsAt(walls, token, at), token, at, ledgeFloor(walls, scene, token, token.elevation));
 }
 
 // ---------------------------------------------------------------------------
@@ -664,8 +693,9 @@ function squeezedThere(state: BuildState, token: MovingToken, at: Point, fit: bo
   if (!canSqueeze(token)) return false;
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
-  const walls = sceneWalls(scene, state.buildChunks);
-  const floor = floorAt(walls, scene, token, at, token.elevation);
+  const all = sceneWalls(scene, state.buildChunks);
+  const floor = ledgeFloor(all, scene, token, token.elevation);
+  const walls = wallsAt(all, token, at);
   if (coreTouchesAt(walls, token, at, floor)) return false;
   const c = storedCenter({ ...token, x: at.x, y: at.y });
   const { w, h } = footprintSize(token);
@@ -743,9 +773,10 @@ export function landing(state: BuildState, token: MovingToken, to: LegEnd, mode:
   const scene = state.scenes[token.sceneId];
   if (!scene) return { x: to.x, y: to.y, squeeze: false, stopped: null };
   const walls = sceneWalls(scene, state.buildChunks);
-  const legTo = (at: Point) => legParts(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation });
-  const fits = (at: Point) => !coreTouchesAt(walls, token, at, floorAt(walls, scene, token, at, to.elevation));
-  const allowed = (at: Point) => mode === "teleport" || partsStop(legTo(at)) === null;
+  const legTo = (at: Point) => legFrom(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation });
+  const floor = ledgeFloor(walls, scene, token, to.elevation);
+  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, token, at), token, at, floor);
+  const allowed = (at: Point) => mode === "teleport" || legClear(legTo(at));
   const squeeze = (at: Point) => squeezeFits(state, token, at);
   if (mode === "walk" ? allowed(to) : fits(to)) return { x: to.x, y: to.y, squeeze: squeeze(to), stopped: null };
   if (canSqueeze(token) && !fits(to)) {
@@ -755,8 +786,8 @@ export function landing(state: BuildState, token: MovingToken, to: LegEnd, mode:
     }
   }
   if (mode !== "walk") return { x: to.x, y: to.y, squeeze: false, stopped: null };
-  const spot = lastClearSpot(token, to, (at) => partsStop(legTo(at)) === null);
-  return { x: spot.x, y: spot.y, squeeze: squeeze(spot), stopped: partsStop(legTo(to)) };
+  const spot = lastClearSpot(token, to, (at) => legClear(legTo(at)));
+  return { x: spot.x, y: spot.y, squeeze: squeeze(spot), stopped: firstStop(legTo(to)) };
 }
 
 /*

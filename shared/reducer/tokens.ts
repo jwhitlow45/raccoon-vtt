@@ -452,7 +452,7 @@ function seenNow(tx: Tx): (t: { id: string }) => boolean {
  */
 export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number, route?: readonly RoutePiece[]): Token {
   const from = { x: rider.x, y: rider.y, elevation: rider.elevation };
-  // It walks off as its rider, then on the ground, where its mount stands on it (rules/attach.ts walkerFor), as the drag searched it.
+  // It walks off on the ground, crossing only its mount's inner ledges, where its mount stands on it (rules/attach.ts walkerFor), as the drag searched it.
   const walking = walkerFor(tx.state, rider, seenNow(tx));
   const points = route ? routePoints(tx.state.buildChunks, walking, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
   // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.

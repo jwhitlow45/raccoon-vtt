@@ -12,6 +12,7 @@ import type { Change, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { carriedGroup, getOffSpot, holderOf, seatSpot } from "#shared/rules/attach.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
+import { stopsForOwners } from "#shared/rules/path.ts";
 import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, rng, room, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf, type Drag, type GroupDrag } from "../movement/dragTesting.ts";
 import { turnMoverId } from "./turns.ts";
@@ -331,9 +332,17 @@ function frameOf(drag: Drag, who: Viewer): Frame {
   return { sent: drag.frame, to: drag.preview.to, ...(who.role === "player" ? { picture: drag.preview } : {}) };
 }
 
-/** Whether a copy holds the token's path as the room does. */
+/**
+ * Whether a copy holds every stop of the token's path the room does: as it
+ * is on the DM's, or as its owner gets it, without the marks of who could
+ * see each stop (rules/path.ts stopsForOwners, review AT-ASTRA-18).
+ */
 function wholePath(copy: RoomState, state: RoomState, id: string): boolean {
-  return JSON.stringify(copy.tokens[id]?.path ?? null) === JSON.stringify(state.tokens[id]?.path ?? null);
+  const own = copy.tokens[id]?.path;
+  const path = state.tokens[id]?.path;
+  if (!own || !path) return own === path;
+  const held = JSON.stringify(own);
+  return held === JSON.stringify(path) || held === JSON.stringify({ turn: path.turn, stops: stopsForOwners(path.stops) });
 }
 
 /** The same for a group drag: what its lead's frames send, and on a player's board its label. */
@@ -738,8 +747,9 @@ type Seen = {
   getOffsTaken: number;
   /** Drag frames compared between the rooms. */
   frames: number;
-  /** Group drags whose lead's label was checked against the cost the move stored. */
+  /** Group drags whose lead's label was checked against the cost the move stored, and those of a player's lead that had moved already this turn. */
   groupCosts: number;
+  playerPathCosts: number;
   /** A turn of a creature some player cannot see, riding a mount every player sees under its control. */
   hiddenRiderTurns: number;
   /** Trackers the DM's undo left apart, made alike by hand. */
@@ -749,7 +759,7 @@ type Seen = {
   rejoined: number;
 };
 
-const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
+const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, playerPathCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
 
 /** One run: its seed and the steps it took. */
 function run(seed: number, steps = 70): Seen {
@@ -979,6 +989,7 @@ function run(seed: number, steps = 70): Seen {
         const stored = stops.slice(pathsBefore[i]).reduce((sum, st) => sum + (st.cost ?? 0), 0);
         assert.equal(costs.ft[i], stored, `${where}: ${who.memberId}'s group label reads ${costs.ft[i]} ft where room ${i === 0 ? "a" : "b"} stores ${stored} for ${JSON.stringify(step.a)}`);
         seen.groupCosts++;
+        if (who.role === "player" && pathsBefore[i]! > 1) seen.playerPathCosts++;
       });
   };
   for (let i = 0; i < steps; i++) {
@@ -1074,7 +1085,7 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
     assert.ok(total.restoresApart * 20 < total.restoresCompared, summary);
     // And the devices' own steps: player attaches and Get offs the room takes, the DM's ops and frames compared, and turns
     // of a hidden rider on a mount every player sees.
-    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
+    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.playerPathCosts > 3 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
     if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
   });
 });

@@ -2,7 +2,7 @@ import type { Actor, RoomState, Token } from "#shared/model.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { offKey } from "#shared/rules/movement.ts";
+import { offKey, pastHolder, walkAlong, type MovingToken } from "#shared/rules/movement.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
@@ -213,6 +213,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   let totalFt = 0;
   let extraFt = 0;
   let searching = false;
+  // Off a holder, the walk crosses its inner ledges only until it first stands clear of it, on every later leg too (movement.ts walkOn).
+  let cleared = false;
   for (const [k, drawn] of stops.slice(1).entries()) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
@@ -226,7 +228,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walkerOf(seen, walker), input, counter, target, budget, progress));
+    const walking: Token & MovingToken = cleared ? pastHolder(walkerOf(seen, walker)) : walkerOf(seen, walker);
+    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walking, input, counter, target, budget, progress));
     if (answer) progress.answers[k] = answer;
     if (!answer) {
       searching = true;
@@ -235,7 +238,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
       continue;
     }
     if (answer.kind === "route") {
-      const points = routePoints(view.buildChunks, walkerOf(seen, walker), answer.pieces, landing);
+      const points = routePoints(view.buildChunks, walking, answer.pieces, landing);
+      cleared ||= walkAlong(walking, points).offHolder === undefined;
       taken = routeFeet(points, answer.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
       corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
       pieces.push(...answer.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
@@ -243,6 +247,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     } else {
       none = answer.kind === "none";
       taken = straightCost(walker, walker, end, rules, counter);
+      cleared ||= walkAlong(walking, [end]).offHolder === undefined;
     }
     counter.h += taken.diag[0];
     counter.v += taken.diag[1];
