@@ -303,7 +303,7 @@ function routeFits(op: Op, c: Check): Decision {
     if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
     prev = { x, y };
   }
-  const points = routePoints(c.state.buildChunks, walkerFor(c.state, token, seenAllIn(c)), op.route, op.elevation ?? token.elevation);
+  const points = routePoints(c.state.buildChunks, walkerFor(c.state, token, seenAllIn(c), { to: op }), op.route, op.elevation ?? token.elevation);
   return routeReach(points, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
@@ -362,7 +362,7 @@ function squeezeFits(op: Op, c: Check): Decision {
   if (op.t !== "token.move" || !op.squeeze) return OK;
   const token = c.state.tokens[op.tokenId];
   if (!token) return OK;
-  const walker = walkerFor(c.state, token, seenAllIn(c));
+  const walker = walkerFor(c.state, token, seenAllIn(c), { to: op });
   const points = op.route ? routePoints(c.state.buildChunks, walker, op.route, op.elevation ?? token.elevation) : [];
   return movementRules.squeezeFits(c.state, walkEnd(c.state, walker, { x: op.x, y: op.y }, points.slice(1, -1))) ? OK : refuse("invalid", NOT_A_SQUEEZE);
 }

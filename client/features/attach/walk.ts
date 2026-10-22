@@ -58,7 +58,7 @@ export function walkersCut(view: DropView, token: DropToken, target: Point, rout
   const long = route ? cutRoute(view, token, route.pieces) : null;
   const end = long ? long.at : target;
   const landing = dropLanding(view, token, end);
-  const walking = walkerOf(view, token);
+  const walking = walkerOf(view, token, end);
   const points = route
     ? routePoints(view.buildChunks, walking, long ? long.pieces : route.pieces, landing)
     : [

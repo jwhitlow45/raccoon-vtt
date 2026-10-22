@@ -495,8 +495,10 @@ export const opMigrations: MigrationStep[] = [
     // 8.6): no op changes shape, so the step is the identity. Two rules the
     // reducer replays an op by change from this version: a stopping trap
     // stops a walker at the first spot at or after it goes off where it may
-    // stand (`stopsOnTrap`), and a walk that leaves a holder on the ground
-    // starts on the ground under its own footprint (`walksOffFromGround`).
+    // stand, a pit that opens under one that fits in it once it lies wholly
+    // over the opening (`stopsOnTrap`), and a walk that leaves a holder on
+    // the ground starts on the ground under its own footprint
+    // (`walksOffFromGround`).
     // Older ops replay by the rules they were written under, so a stored
     // restore's hash guards still match.
     //
@@ -835,21 +837,23 @@ export function syncsFromDdb(opVersion: number | undefined): boolean {
 
 /**
  * Whether a stopping trap stops a walker at the first spot at or after it
- * goes off where the walker may stand, what it meets up to there counting
- * (docs/design-v1-traps.md 5.5, review LP13-TR-2). Ops stored before
- * version 17 stopped at the latest such spot at or before it and replay by
- * that rule. Live ops carry no stored version and take today's rule.
+ * goes off where the walker may stand, what it meets up to there counting,
+ * and a pit that opens stops one that fits in it wholly over the opening
+ * (docs/design-v1-traps.md 5.5, reviews LP13-TR-2 and FU20A-OP-2). Ops
+ * stored before version 17 stopped at the latest such spot at or before it
+ * and replay by that rule. Live ops carry no stored version and take
+ * today's rule.
  */
 export function stopsOnTrap(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 17);
 }
 
 /**
- * Whether a walk off a holder on the ground starts on the ground under the
- * walker's own footprint rather than at its seat (docs/design-v1-attach.md
- * 4.4, review LP12-AT-4). Ops stored before version 17 started at the seat
- * and replay by that rule. Live ops carry no stored version and take
- * today's rule.
+ * Whether a walk that leaves a holder on the ground starts on the ground
+ * under the walker's own footprint rather than at its seat
+ * (docs/design-v1-attach.md 8.0, reviews LP12-AT-4 and FU20A-OP-7). Ops
+ * stored before version 17 started at the seat and replay by that rule.
+ * Live ops carry no stored version and take today's rule.
  */
 export function walksOffFromGround(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 17);

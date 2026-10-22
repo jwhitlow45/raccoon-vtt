@@ -445,6 +445,14 @@ describe("replay below op version 17 (8.6, review LP12-AT-4)", () => {
     }
   });
 
+  test("a move that keeps her seat walks from it, a step to another seat or a change of height alike (review FU20A-OP-7)", () => {
+    const reseat = run(straddling("carry"), { t: "token.move", tokenId: "bree", x: 8, y: 14, elevation: 10 }, DM, 5);
+    assert.equal(reseat.tokens.bree!.attached?.to, "horse");
+    assert.deepEqual(leg(reseat), [[5, 5]], "one square across the horse's low half");
+    const higher = run(straddling("carry"), { t: "token.update", tokenId: "bree", patch: { elevation: 15 } }, DM, 5);
+    assert.deepEqual(leg(higher), [[5, 5]], "5 ft up from her seat");
+  });
+
   test("getting off a ride walks from the seat at version 16 and from the ground under her from version 17", () => {
     const op: Op = { t: "token.move", tokenId: "bree", x: 9, y: 13, elevation: 0 };
     assert.deepEqual(leg(run(straddling("ride"), op, DM, 5, 16)), [[10, 15]]);

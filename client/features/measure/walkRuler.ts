@@ -392,12 +392,14 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
   const from = { x: at.walker.x, y: at.walker.y };
   const elevation = move?.elevation ?? token.elevation;
   const route = move?.route;
-  const trace = move ? routeWalkers(at.sim.buildChunks, walking, route ?? [[move.x, move.y, 0, 0]], elevation) : null;
+  // Read as the move counts it, from its seat when it keeps it (drop.ts walkerOf).
+  const reading: Token & Walker = move ? walkerOf(at.seen, at.walker, move) : walking;
+  const trace = move ? routeWalkers(at.sim.buildChunks, reading, route ?? [[move.x, move.y, 0, 0]], elevation) : null;
   const towing = answer.search().world.input.drag === 1 ? towingWord(at.sim, token.id, role, at.seen.seen) : undefined;
   const read =
     move && trace
       ? dragReading({
-          token: walkStart(at.sim, walking),
+          token: walkStart(at.sim, reading),
           to: { x: move.x, y: move.y },
           encounter: null,
           activeTokenId: null,

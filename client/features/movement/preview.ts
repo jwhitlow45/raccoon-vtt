@@ -51,7 +51,7 @@ export function groupReading(view: DropView, token: Token, to: Point, role: Role
   const landing = groupLanding(view, token, to);
   const dismount = dismountOf(view, token, { x: to.x, y: to.y, elevation: landing.elevation }, role);
   return dragReading({
-    token: walkStart(view, walkerOf(view, token)),
+    token: walkStart(view, walkerOf(view, token, to)),
     to,
     landing,
     encounter: view.encounter,
@@ -140,7 +140,7 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
   if (walkers) to = walkers.at;
   // Landed as the drop lands it, by its holder while it sits on one, so the band reads the leg the op sends.
   // And walked as the search and the server walk it (drop.ts walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
-  const walking = walkerOf(view, token);
+  const walking = walkerOf(view, token, to);
   const start = walkStart(view, walking);
   const points = pieces
     ? walkers

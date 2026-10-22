@@ -98,6 +98,11 @@ function needsLarger(kind: AttachKind, carried: Pick<Token, "kind">, holder: Pic
 export function linkHolds(settings: DistanceSettings, kind: AttachKind, carried: Sized & FootprintToken & Pick<Token, "sceneId">, holder: Sized & FootprintToken & Pick<Token, "sceneId">): boolean {
   if (carried.sceneId !== holder.sceneId) return false;
   if (!onHolder(kind)) return withinReach(settings, carried, holder);
+  return seatHolds(kind, carried, holder);
+}
+
+/** Whether what sits on its holder by a link of this kind still has its seat as they stand: inside the holder's footprint, the holder large enough. */
+export function seatHolds(kind: AttachKind, carried: Sized & FootprintToken, holder: Sized & FootprintToken): boolean {
   if (!insideHolder(carried, holder)) return false;
   return !needsLarger(kind, carried, holder) || sizesLarger(holder, carried) >= 1;
 }
@@ -213,9 +218,13 @@ type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached
  * as it does with no holder at all (8.0). So does one on a holder that
  * flies. The copy is for the walk alone and is never stored.
  *
- * Its walk starts on the ground under its own footprint (movement.ts
- * `groundStart`), for the op version `off` names (migrate.ts
- * walksOffFromGround). An op stored before version 17 starts at the seat.
+ * A walk that leaves the holder, its move landing off it at `off.to`, starts
+ * on the ground under its own footprint (movement.ts `groundStart`). One
+ * whose move keeps its seat, a step to another seat on the holder or a
+ * change of height there, starts at the seat, as it stays on the holder
+ * (review FU20A-OP-7). With no `to`, as for a drag's search, which has
+ * no end yet, the walk is taken to leave. An op stored before version 17
+ * (migrate.ts walksOffFromGround) always starts at the seat.
  */
 export function walkerFor<T extends Walking>(
   state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0] },
@@ -229,11 +238,12 @@ export function walkerFor<T extends Walking>(
   const holder = holderOf(state.tokens, token) as Walking | undefined;
   if (!holder || !seen(token) || !seen(holder) || footing(state.buildChunks, holder) !== "ground") return token as T & Walker;
   const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
-  return { ...token, footing: "ground", offHolder, ...(walksOffFromGround(off.opVersion) ? { groundStart: true as const } : {}) } as T & Walker;
+  const leaves = walksOffFromGround(off.opVersion) && (off.to === undefined || !seatHolds(link.kind, { ...token, x: off.to.x, y: off.to.y }, holder));
+  return { ...token, footing: "ground", offHolder, ...(leaves ? { groundStart: true as const } : {}) } as T & Walker;
 }
 
-/** What a walk off a holder reads of its move (walkerFor): the op version it replays at, none for a live one. */
-export type WalkOff = { opVersion?: number };
+/** What a walk off a holder reads of its move (walkerFor): the op version it replays at, none for a live one, and where the move lands. */
+export type WalkOff = { opVersion?: number; to?: Point };
 
 /**
  * Whether a token set down at `spot` lands as a walk lands (4.3): on the

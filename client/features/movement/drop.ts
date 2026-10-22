@@ -142,23 +142,26 @@ function seenSeat(state: DropState, token: DropToken): { holder: DropToken; kept
  * every player sees that stands on the ground, on the ground, crossing only
  * the holder's inner ledges until it is clear of the holder, so the route
  * search, the drop, its picture and the server's checks all judge the one
- * walk the op sends.
+ * walk the op sends. `to` is where the walk lands, when it is known: one
+ * that keeps its seat starts at the seat, any other on the ground under it
+ * (rules/attach.ts walkerFor), as the server counts it.
  */
-export function walkerOf<T extends DropToken>(state: DropView, token: T): T & Walker {
+export function walkerOf<T extends DropToken>(state: DropView, token: T, to?: Point): T & Walker {
   const seated = state.tokens[token.id];
   // A token the room does not hold yet has no holder to leave.
   if (!seated) return ownWalk(token);
-  const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks }, seated, state.seen);
+  const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks }, seated, state.seen, to ? { to } : {});
   // The seated token's walk, at the place this one stands.
   return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder, ...(walker.groundStart ? { groundStart: true } : {}) } as T & Walker) : ownWalk(token);
 }
 
 /**
  * The walker where its walk starts, as the move counts it (movement.ts
- * walkFrom): off a holder on the ground, on the ground under its own
- * footprint, so stepping off a holder that straddles a step never reads
- * the drop as distance (review LP12-AT-4). A drag's label reads a plain
- * leg from here.
+ * walkFrom): off a holder on the ground, when the walk leaves it, on the
+ * ground under its own footprint, so stepping off a holder that straddles
+ * a step never reads the drop as distance (review LP12-AT-4), and at its
+ * seat when the walk keeps the seat. A drag's label reads a plain leg from
+ * here.
  */
 export function walkStart<T extends DropToken & Walker>(state: Pick<BuildState, "buildChunks">, walking: T): T {
   const elevation = walkFrom(state.buildChunks, walking).elevation;
@@ -369,7 +372,7 @@ function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?
   const at = cut ? cut.at : target;
   const elevation = dropLanding(state, token, at);
   // Walked as the search and the server walk it (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
-  const walking = walkerOf(state, token);
+  const walking = walkerOf(state, token, at);
   const kept = passing(state, walking, cut ? cut.pieces : [...pieces], elevation);
   if (!kept) return null;
   const points = routePoints(state.buildChunks, walking, kept, elevation);
@@ -595,7 +598,7 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
   const move = plan.moves.find((m) => m.tokenId === lead.id);
   if (mode !== "walk" || walkers.length === 0 || !move) return plan;
   const landing = move.elevation ?? lead.elevation;
-  const walking = walkerOf(state, lead);
+  const walking = walkerOf(state, lead, move);
   const points = move.route ? routePoints(state.buildChunks, walking, move.route, landing) : [{ x: lead.x, y: lead.y, elevation: lead.elevation }, { x: move.x, y: move.y, elevation: landing }];
   const stop = walkersStop(state, walking, points, walkers);
   if (!stop) return plan;

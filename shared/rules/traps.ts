@@ -1236,7 +1236,7 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
   } else {
     // A walker with a holder in the op walks as its trace has it, as itself and never squeezed (route.ts followerTrace): a creature
     // its holder drags beside it, or one on a holder some player cannot see.
-    const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion });
+    const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion, to: walk.entry.to });
     // The group's head walks its group's own walk at its step, so its spots are already there.
     const head = walk.entry === walk.group.head && walk.step === walk.group.step;
     stands = routeStands(before, walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd }, head ? walk.group.base(walk.group.step) : undefined);
@@ -1308,7 +1308,7 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
     const group = walks.groups.get(named);
     const walk = walks.byId.get(named);
     if (!stop || !group || !walk || walk.teleport) return null;
-    const token = walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion });
+    const token = walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion, to: walk.entry.to });
     const squeeze = op.t === "token.move" && op.tokenId === named && op.squeeze === true;
     // The named token's own walk, as its stop's search read it when it walks as the group's head.
     const stands = walk.holder ? routeStands(before, group.head.route, token, group.step, { squeeze }) : standSpots(walks, walk, before, seen);

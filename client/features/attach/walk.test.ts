@@ -259,6 +259,19 @@ describe("a walk off a holder that straddles a step starts on the ground under t
       assert.equal(drag.preview.read.dragFt, dust ? 25 : 20);
     }
   });
+
+  test("a step to another seat on the horse keeps her seat's height, so one square north reads 5 ft, as the move stores (review FU20A-OP-7)", () => {
+    const state = step(false);
+    const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 8, y: 12 });
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, op.elevation ?? 10], [8, 12, 10], "still on the horse, at its height");
+    const r = applyOp(state, op, P1, env(9));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.equal(r.state.tokens.bree!.attached?.to, "horse");
+    const stops = r.state.tokens.bree!.path!.stops.slice(1);
+    assert.deepEqual(stops.map((st) => [st.moved, st.cost]), [[5, 5]]);
+    assert.deepEqual([drag.preview.read.dragFt, drag.frame.ft], [5, 5]);
+  });
 });
 
 describe("a group drag off a ride reads the dismount the reducer stores (review AT-ASTRA-15)", () => {
