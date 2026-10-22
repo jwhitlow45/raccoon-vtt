@@ -1,5 +1,5 @@
 import type { Actor, Character } from "#shared/model.ts";
-import type { ActorPatch, CharacterPatch } from "#shared/protocol.ts";
+import type { ActorPatch, CharacterPatch, DdbSyncPatch } from "#shared/protocol.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
 import { hpForMax } from "#shared/rules/pcSync.ts";
 import { speedText } from "../tokens/companionBlocks.ts";
@@ -87,6 +87,26 @@ export function alsoPatch(also: AlsoSet, character: Pick<Character, "actor">): P
   if (also.hpMax !== undefined && also.hpMax !== character.actor.hp.max) actor.hp = hpForMax(character.actor, also.hpMax);
   if (Object.keys(actor).length > 0) out.actor = actor;
   return out;
+}
+
+/**
+ * The character as Save would leave it: the fields earlier fills set beside
+ * the block, and the record a D&D Beyond "Use it" made, else the saved one.
+ * A later fill before Save is reviewed against it, so it compares with what
+ * the earlier fill took, not with what was saved (docs/design-v1-resync.md 1.1).
+ */
+export function pendingCharacter(
+  character: Pick<Character, "name" | "actor" | "ddbSync">,
+  also: AlsoSet,
+  record: DdbSyncPatch | null,
+): Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch } {
+  const actor: Actor = { ...character.actor };
+  if (also.ac !== undefined) actor.ac = also.ac;
+  if (also.speeds !== undefined) actor.speeds = also.speeds;
+  if (also.senses !== undefined) actor.senses = also.senses;
+  if (also.sheetUrl !== undefined) actor.sheetUrl = also.sheetUrl;
+  if (also.hpMax !== undefined) actor.hp = { ...actor.hp, ...hpForMax(character.actor, also.hpMax) };
+  return { name: also.name ?? character.name, actor, ...(record ?? character.ddbSync ? { ddbSync: record ?? character.ddbSync } : {}) };
 }
 
 /** Whether a fill set anything beside the block. */

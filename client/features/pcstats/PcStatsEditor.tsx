@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey } from "#shared/model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
 import { fillSummary, type PcFill } from "#shared/rules/pcFill.ts";
-import { defaultTicks, planSync, sameRecord, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { defaultTicks, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { pcActorNumbers, pcDerived, pcProficiency, srdOnPass, unknownOnPass, type PcNumber } from "#shared/rules/pcStats.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -40,7 +40,7 @@ import {
   type TotalKey,
 } from "./draft.ts";
 import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } from "./fill.ts";
-import { openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
+import { editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
 import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
 import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
@@ -152,16 +152,10 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   // The character as last seen, so a D&D Beyond review still reads against it once the character left the view.
   const known = useRef(character);
   if (character) known.current = character;
-  /**
-   * A D&D Beyond read reviewed as a re-sync is (docs/design-v1-resync.md
-   * 1.1), against the draft as it is now: with no block yet and nothing
-   * typed, a first sync, which takes everything read.
-   */
-  const syncPlan = (fill: PcFill, draft: PcDraft): SyncPlan | null => {
+  /** A D&D Beyond read reviewed as a re-sync is (docs/design-v1-resync.md 1.1), against the editor's state as it is now (flow.ts). */
+  const syncPlan = (fill: PcFill, state: FlowState): SyncPlan | null => {
     const who = store.getState().view?.characters[props.characterId] ?? known.current;
-    if (!who) return null;
-    const block = opened.had || draftDirty(opened.draft, draft) ? draft.stats : undefined;
-    return planSync({ mode: "editor", stats: block, level: draft.level, character: who, fill });
+    return who ? editorSyncPlan(fill, state, opened, who) : null;
   };
   const startGet = (id: number) => {
     const controller = new AbortController();
@@ -171,7 +165,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         gets.current.delete(id);
         // A character gone from the view meanwhile still gets its review, with nothing beside the block to set.
         const live = store.getState().view?.characters[props.characterId];
-        const plan = syncPlan(fill, flowRef.current.draft);
+        const plan = syncPlan(fill, flowRef.current);
         if (open.current) send({ t: "got", id, result: { fill, lines: live ? alsoLines(fill, live) : [], ticks: plan ? defaultTicks(plan) : new Set() } });
       },
       (err: unknown) => {
@@ -252,7 +246,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         if (!open.current) return;
         if ("error" in result) setLinkError(result.error);
         else {
-          const plan = syncPlan(result.fill, flowRef.current.draft);
+          const plan = syncPlan(result.fill, flowRef.current);
           send({ t: "read", fill: result.fill, lines: live ? alsoLines(result.fill, live) : [], ticks: plan ? defaultTicks(plan) : new Set() });
         }
       },
@@ -343,16 +337,14 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   if (flow.step === "review" && flow.review) {
     const review = flow.review;
     const ticks = review.ticks;
-    const plan = ticks ? syncPlan(review.fill, draft) : null;
+    const plan = ticks ? syncPlan(review.fill, flow) : null;
     const result = plan && ticks ? syncResult(plan, ticks) : null;
     const use = () => {
       if (!plan || !result) {
         send({ t: "use" });
         return;
       }
-      const who = store.getState().view?.characters[props.characterId] ?? known.current;
-      const record = who && sameRecord(result.record, who.ddbSync) ? null : result.record;
-      send({ t: "use", sync: { stats: result.stats, level: result.level, also: result.also, record } });
+      send({ t: "use", sync: editorSyncUse(result, store.getState().view?.characters[props.characterId] ?? known.current) });
     };
     return (
       <Dialog

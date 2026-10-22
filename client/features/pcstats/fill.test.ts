@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PcFill } from "#shared/rules/pcFill.ts";
 import { actor, character } from "#shared/testutil.ts";
-import { alsoLines, alsoPatch, alsoSet, readLine } from "./fill.ts";
+import { alsoLines, alsoPatch, alsoSet, pendingCharacter, readLine } from "./fill.ts";
 
 /** The review's "Also set" (docs/design-v1-pc-stats.md 6.1). */
 
@@ -66,5 +66,17 @@ describe("max HP by one rule", () => {
       level: 5,
       actor: { ac: 16, speeds: { walk: 30 }, senses: "x", sheetUrl: "https://a" },
     });
+  });
+});
+
+describe("the character as Save would leave it (docs/design-v1-resync.md 1.1)", () => {
+  test("takes the fields a fill set and its record, else keeps the saved ones", () => {
+    const saved = { name: "Bree", actor: actor({ ac: 14, hp: { cur: 30, max: 30, temp: 2 }, speeds: { walk: 25 }, senses: "" }), ddbSync: { at: "2026-10-20T19:00:00.000Z", base: { ac: 14 }, rolls: {} } };
+    const record = { base: { ac: 16 }, rolls: {} };
+    const p = pendingCharacter(saved, { name: "Bree Tallow", ac: 16, hpMax: 38, speeds: { walk: 30 }, senses: "Darkvision 60 ft." }, record);
+    assert.deepEqual([p.name, p.actor.ac, p.actor.hp, p.actor.speeds, p.actor.senses, p.ddbSync], ["Bree Tallow", 16, { cur: 38, max: 38, temp: 2 }, { walk: 30 }, "Darkvision 60 ft.", record]);
+    assert.equal(saved.actor.ac, 14, "the saved character is left as it was");
+    assert.equal(pendingCharacter(saved, {}, null).ddbSync, saved.ddbSync);
+    assert.equal("ddbSync" in pendingCharacter({ name: "Bree", actor: actor() }, {}, null), false);
   });
 });

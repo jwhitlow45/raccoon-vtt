@@ -131,7 +131,8 @@ export type SyncInput = {
   /** The block merged into: the character's, or the editor's draft. Undefined with no block, a first sync. */
   stats: PcStats | undefined;
   level: number | undefined;
-  character: Pick<Character, "name" | "actor" | "ddbSync">;
+  /** The character as the merge sees it. In the editor, a record from an earlier fill before Save has no `at` yet. */
+  character: Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch };
   fill: PcFill;
 };
 

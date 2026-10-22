@@ -1,9 +1,10 @@
-import type { PcStats } from "#shared/model.ts";
+import type { Character, PcStats } from "#shared/model.ts";
 import type { DdbSyncPatch } from "#shared/protocol.ts";
 import type { FillMerge, PcFill } from "#shared/rules/pcFill.ts";
 import { mergeFill } from "#shared/rules/pcFill.ts";
-import type { PcDraft } from "./draft.ts";
-import { alsoSet, type AlsoKey, type AlsoLine, type AlsoSet } from "./fill.ts";
+import { planSync, sameRecord, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
+import { draftDirty, type PcDraft } from "./draft.ts";
+import { alsoSet, pendingCharacter, type AlsoKey, type AlsoLine, type AlsoSet } from "./fill.ts";
 
 /**
  * The stat block editor's steps and its Save as one state machine
@@ -21,6 +22,8 @@ import { alsoSet, type AlsoKey, type AlsoLine, type AlsoSet } from "./fill.ts";
  * 1.1): its ticks are the review's line ids, and its "Use it" carries the
  * block, the fields beside it and the sync record the editor worked out
  * from the draft as it is then, so Save sends the record with the block.
+ * A later read before Save is reviewed against what the earlier one took
+ * (`editorSyncPlan`), and its record replaces the earlier one.
  *
  * `step` returns the next state and the effects the editor runs: send the
  * Save's op, fetch or abort a D&D Beyond request, or close.
@@ -35,8 +38,35 @@ export type Step = "block" | "paste" | "ddb" | "review";
  */
 export type Review = { fill: PcFill; merge: FillMerge; lines: AlsoLine[]; from: "paste" | "ddb"; ticks?: ReadonlySet<string> };
 
-/** What a D&D Beyond review's Use it sets: the merged block and level, the fields beside it, and the record, or null when the record would not change. */
+/**
+ * What a D&D Beyond review's Use it sets: the merged block and level, the
+ * fields beside it, and the record Save sends, null when it equals the
+ * saved one. Either way it replaces the record an earlier Use it made, so
+ * a record equal to the saved one drops that earlier record.
+ */
 export type SyncUse = { stats: PcStats; level: number | undefined; also: AlsoSet; record: DdbSyncPatch | null };
+
+/**
+ * A D&D Beyond read in the editor, planned as a re-sync against the
+ * character as Save would leave it: the draft, the fields earlier fills set
+ * beside it and their record. With no block yet and nothing typed, a first
+ * sync, which takes everything read.
+ */
+export function editorSyncPlan(
+  fill: PcFill,
+  state: Pick<FlowState, "draft" | "also" | "record">,
+  opened: { draft: PcDraft; had: boolean },
+  saved: Pick<Character, "name" | "actor" | "ddbSync">,
+): SyncPlan {
+  const block = opened.had || draftDirty(opened.draft, state.draft) ? state.draft.stats : undefined;
+  return planSync({ mode: "editor", stats: block, level: state.draft.level, character: pendingCharacter(saved, state.also, state.record), fill });
+}
+
+/** A review's Use it, with its record compared with the saved one (`SyncUse`). */
+export function editorSyncUse(result: SyncResult, saved: Pick<Character, "ddbSync"> | undefined): SyncUse {
+  const record = saved && sameRecord(result.record, saved.ddbSync) ? null : result.record;
+  return { stats: result.stats, level: result.level, also: result.also, record };
+}
 
 export type FlowState = {
   step: Step;
@@ -150,7 +180,7 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
         const sync = event.sync;
         if (!sync) return { state, effects: NONE };
         const draft: PcDraft = { stats: sync.stats, level: sync.level };
-        return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record ?? state.record }, effects: NONE };
+        return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record }, effects: NONE };
       }
       const also = { ...state.also, ...alsoSet(review.fill, review.lines) };
       // The block is merged again from the draft as it is now, so the review never undoes an edit made since it was read.

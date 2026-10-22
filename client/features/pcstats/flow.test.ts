@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PcStats } from "#shared/model.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
+import { afterSync, defaultTicks, planSync, sameRecord, syncPatch, syncResult, type SyncCharacter } from "#shared/rules/pcSync.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
-import { openFlow, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { actor } from "#shared/testutil.ts";
+import { openDraft } from "./draft.ts";
+import { editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
 
 /** The editor's steps and Save (docs/design-v1-pc-stats.md 7.2). */
 
@@ -21,6 +24,40 @@ function run(state: FlowState, ...events: FlowEvent[]) {
 }
 
 describe("the editor's flow", () => {
+  test("several D&D Beyond fills before Save: each is reviewed against what the last one took, and its record replaces the last one (RSBUILD-ASTRA-02)", () => {
+    const AT = "2026-10-20T19:00:00.000Z";
+    const read = (dex: number, ac: number): PcFill => ({ source: "ddb", stats: { abilities: { ...EMPTY_PC_STATS.abilities, dex }, rolls: [] }, level: 5, name: "Bree", actor: { ac }, warnings: [], read: { weapon: true, spell: true, other: true } });
+    // Bree as saved: synced once from dex 14 and AC 15.
+    const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ ac: 15 }) };
+    const first = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read(14, 15) });
+    const saved = afterSync(bare, syncPatch(bare, syncResult(first, defaultTicks(first)))!.patch, AT);
+    const opened = openDraft(saved);
+    let state = openFlow(opened.draft);
+    const fill = (f: PcFill) => {
+      state = run(state, { t: "open", step: "ddb" }).state;
+      const plan = editorSyncPlan(f, state, opened, saved);
+      const ticks = defaultTicks(plan);
+      state = run(state, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: editorSyncUse(syncResult(plan, ticks), saved) }).state;
+      return plan;
+    };
+
+    const one = fill(read(16, 16));
+    assert.deepEqual(one.items.map((i) => [i.id, i.section]), [["field:abilities.dex", "changes"]]);
+    assert.deepEqual([state.draft.stats.abilities.dex, state.also.ac, state.record?.base.abilities?.dex, state.record?.base.ac], [16, 16, 16, 16]);
+    const pending = state.record;
+
+    // The same read again finds nothing new: not dex 16 as an edit of the player's against the saved dex 14, nor AC 16 still to set.
+    const two = fill(read(16, 16));
+    assert.deepEqual([two.source, two.items, two.also], ["same", [], []]);
+    assert.ok(pending && state.record && sameRecord(state.record, pending), "the pending record is kept");
+
+    // D&D Beyond back where the saved record has it: the pending record is replaced by none, so Save sends the saved one unchanged.
+    const three = fill(read(14, 15));
+    assert.deepEqual(three.items.map((i) => [i.id, i.section]), [["field:abilities.dex", "changes"]]);
+    assert.deepEqual(three.also.map((a) => [a.key, a.now, a.theirs]), [["ac", 16, 15]]);
+    assert.deepEqual([state.draft.stats.abilities.dex, state.also.ac, state.record], [14, 15, null]);
+  });
+
   test("paste, read, review, Use it fills the draft and the fields beside it, and Save sends one op", () => {
     const start = openFlow({ stats: BLOCK, level: 5 });
     const { state, effects } = run(start, { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [{ key: "ac", text: "AC 16, now 15", on: true }] }, { t: "use" }, { t: "save" }, { t: "save" });
@@ -52,9 +89,9 @@ describe("the editor's flow", () => {
     const record = { base: { level: 6 }, rolls: {} };
     const used = run(state, { t: "use", sync: { stats: { ...BLOCK, saves: ["wis"] }, level: 6, also: { level: 6, ac: 16 }, record } }).state;
     assert.deepEqual([used.step, used.draft.stats.saves, used.draft.level, used.also, used.record], ["block", ["wis"], 6, { level: 6, ac: 16 }, record]);
-    // A later Use it with nothing new keeps the record the first one made.
+    // A later Use it replaces the record, and null, one equal to the saved record, drops it.
     const again = run(used, { t: "open", step: "ddb" }, { t: "read", fill: ddb, lines: [], ticks: new Set() }, { t: "use", sync: { stats: used.draft.stats, level: 6, also: {}, record: null } }).state;
-    assert.equal(again.record, record);
+    assert.equal(again.record, null);
     assert.equal(run(start, { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [] }, { t: "tick", id: "x" }).state.review!.ticks, undefined, "pasted text keeps today's review");
   });
 
