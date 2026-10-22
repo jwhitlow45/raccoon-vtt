@@ -151,12 +151,17 @@ export function followOps(room: Pick<StoreApi<RoomView>, "getState" | "subscribe
     const was = slot.getState();
     let s: Offers = was;
     let seen = was.seen;
-    // A detached token's holder, as the server held it before this device's pending ops.
-    const holderBefore = (tokenId: string) => view.confirmed?.tokens[tokenId]?.attached?.to;
+    // Each token's holder just before each queued op: as the server held it, then through this device's pending ops in order,
+    // so a Let go queued behind the Carry it undoes still names the holder.
+    const holders = new Map<string, string>();
+    for (const [id, t] of Object.entries(view.confirmed?.tokens ?? {})) if (t?.attached) holders.set(id, t.attached.to);
     for (const p of view.pending) {
-      if (p.n <= seen) continue;
-      s = afterQueued(s, view.you?.role ?? "player", p, holderBefore);
-      seen = p.n;
+      if (p.n > seen) {
+        s = afterQueued(s, view.you?.role ?? "player", p, (id) => holders.get(id));
+        seen = p.n;
+      }
+      if (p.op.t === "token.attach") holders.set(p.op.tokenId, p.op.to);
+      else if (p.op.t === "token.detach") holders.delete(p.op.tokenId);
     }
     s = afterAnswers(s, view.pending, view.refused ?? []);
     if (s.offers !== was.offers || s.undoing !== was.undoing || seen !== was.seen) slot.setState({ offers: s.offers, undoing: s.undoing, seen });

@@ -138,6 +138,20 @@ describe("Undo move in the token bar", () => {
     assert.deepEqual(after([move("a")], "dm"), NONE);
   });
 
+  test("a Let go queued behind the Carry it undoes still offers Undo move on the holder's bar, before and after the answers", () => {
+    const view = { you: { memberId: "p1", role: "player" }, pending: [], refused: [], confirmed: { tokens: {} } } as unknown as RoomView;
+    const room = createStore<RoomView>()(() => view);
+    const slot = lastMoveSlot.create();
+    const stop = followOps(room, slot);
+    const carry = queued(1, { t: "token.attach", tokenId: "kobold", to: "thorn", kind: "carry", x: 5, y: 5, elevation: 0 });
+    room.setState({ pending: [carry] });
+    room.setState({ pending: [carry, queued(2, { t: "token.detach", tokenId: "kobold" })] });
+    assert.equal(offersUndo(offered(slot.getState()), ["thorn"]), true);
+    room.setState({ pending: [] });
+    assert.equal(offersUndo(offered(slot.getState()), ["thorn"]), true, "answered, the Let go is still the newest step");
+    stop();
+  });
+
   test("follows the store: each op queued once, the bar's undo answered, and refusals as they come", () => {
     const view = { you: { memberId: "p1", role: "player" }, pending: [], refused: [] } as unknown as RoomView;
     const room = createStore<RoomView>()(() => view);
