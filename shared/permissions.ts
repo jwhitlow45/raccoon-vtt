@@ -834,10 +834,11 @@ export function mayMoveToken(state: RoomState, viewer: Viewer, tokenId: string):
   const c = new Check(state, viewer, { canUseAsset: () => false });
   const d = namedMoveCheck(c, tokenId);
   if (d.ok || d.code === "gone") return d;
-  // A token a holder the player moves carries goes with it, however the player stands with it (docs/design-v1-attach.md 6).
+  // A token a holder the player moves carries goes with it, however the player stands with it (docs/design-v1-attach.md 6),
+  // up links the player sees alone, so a hidden holder lends no drag a right (8.0).
   const seen = new Set<string>([tokenId]);
   let at = state.tokens[tokenId];
-  for (let up = at && holderOf(state.tokens, at); up && !seen.has(up.id); up = at && holderOf(state.tokens, at)) {
+  for (let up = at && holderOf(state.tokens, at); up && !seen.has(up.id) && c.visibleToken(up.id); up = at && holderOf(state.tokens, at)) {
     seen.add(up.id);
     if (namedMoveCheck(c, up.id).ok) return OK;
     at = state.tokens[up.id];

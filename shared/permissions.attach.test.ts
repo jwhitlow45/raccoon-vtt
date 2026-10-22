@@ -216,6 +216,12 @@ describe("moving a group (6)", () => {
     assert.equal(answer(own, { t: "token.move", tokenId: "horse", x: 8, y: 4 }), "ok");
     assert.equal(mayMoveToken(own, P1, "gob").ok, true);
     assert.equal(mayMoveToken(own, P2, "gob").ok, false);
+    // A torch a hidden imp holds on P1's horse reaches P1 as a loose torch, and no drag frame of P1's moves it.
+    const imp = table((s) => {
+      s.tokens.imp = token("imp", { name: "Imp", size: "tiny", x: 4, y: 4, visibility: "dm", attached: { to: "horse", kind: "perch" } });
+      s.tokens.torch = { ...s.tokens.torch!, x: 4, y: 4, attached: { to: "imp", kind: "carry" } };
+    });
+    assert.equal(mayMoveToken(imp, P1, "torch").ok, false);
   });
 
   test("a new seat for a token a player may not move keeps its height, and a dragged creature's spot is on its ground or its own height", () => {
