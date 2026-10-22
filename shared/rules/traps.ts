@@ -1,4 +1,4 @@
-import { CHUNK_CELLS, type CellRect, type RoomState, type Token, type Trap, type TrapDoorRef, type TrapHow, type TrapRig, type TrapZone, type Viewer } from "../model.ts";
+import { CHUNK_CELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapDoorRef, type TrapHow, type TrapRig, type TrapZone, type Viewer } from "../model.ts";
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
@@ -6,7 +6,7 @@ import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, onHolder, walkerFor } from "./attach.ts";
 import { footprintRect, footprintSize, isSqueezed, occupiedRange, rangeAtInto, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
-import { footing, footprintGround, sceneGround, standing } from "./heights.ts";
+import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { planMove, type MovedToken } from "./moveLeg.ts";
 import { groundUnder } from "./movement.ts";
 import { onTrace, routeLattice, routeStands, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
@@ -113,6 +113,18 @@ export function wireCells(wire: { a: readonly [number, number]; b: readonly [num
     }
   }
   return out;
+}
+
+/** Where a pit's squares go when it opens (5.7): its stored floor, at least the height rules' lowest. */
+export function pitFloorOf(pit: { floor: number }): number {
+  return Math.max(MIN_HEIGHT_FT, pit.floor);
+}
+
+/** Whether a pit is open: every square of its zone stands at its floor, so opening it again changes nothing. */
+export function pitOpen(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, cells: readonly CellRect[], pit: { floor: number }): boolean {
+  const floor = pitFloorOf(pit);
+  for (const r of cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (groundAt(chunks, sceneId, x, y) !== floor) return false;
+  return true;
 }
 
 /** A door's two cells, one on each side (permissions.ts doorPlace), or none for a free door that is gone. */

@@ -5,7 +5,7 @@ import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type Buil
 import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, choiceText, SKILLS } from "#shared/rules/skills.ts";
-import { trapCreature } from "#shared/rules/traps.ts";
+import { pitOpen, trapCreature } from "#shared/rules/traps.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -42,6 +42,7 @@ import {
   disarmFill,
   findSummary,
   hitsSummary,
+  openedLine,
   pitFloor,
   presetLine,
   saveSummary,
@@ -170,7 +171,9 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
 
   const squares = "cells" in trap.zone;
   const ground = "cells" in trap.zone ? zoneGround(chunks, trap.sceneId, trap.zone.cells) : 0;
-  const pitDepth = rig.pit ? ground - rig.pit.floor : null;
+  // An open pit's squares stand at its floor, so the ground there says nothing of its depth (4.2): it reads Opened, and its depth stays.
+  const opened = rig.pit !== undefined && "cells" in trap.zone && pitOpen(chunks, trap.sceneId, trap.zone.cells, rig.pit);
+  const pitDepth = rig.pit && !opened ? ground - rig.pit.floor : null;
   const from = presetLine(rig);
   const doorGone = "door" in trap.zone && findDoor(chunks, trap.sceneId, trap.zone.door) === null;
 
@@ -238,7 +241,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
         <Checkbox label="Only creatures on the floor" help="Leaves out fliers, burrowers and riders." checked={rig.floor} onChange={(floor) => setRig({ floor })} />
       </Group>
 
-      <Group label="Afterwards" summary={afterSummary(rig, pitDepth)} holds="rows" {...fold("after")}>
+      <Group label="Afterwards" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
         <Segmented<TrapRig["resets"]>
           label="After it goes off"
           value={rig.resets}
@@ -254,7 +257,8 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
         <Switch label="Marks itself found when players see it go off" checked={rig.foundOnSpring} onChange={(foundOnSpring) => setRig({ foundOnSpring })} />
         {squares ? (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-            <Checkbox label="Opens a pit" checked={rig.pit !== undefined} onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })} />
+            <Checkbox label="Opens a pit" checked={rig.pit !== undefined} disabled={opened} onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })} />
+            {opened && rig.pit ? <span style={{ color: theme.color.textMuted }}>{openedLine(rig.pit)}</span> : null}
             {pitDepth !== null ? (
               <>
                 <NumberInput label="Pit depth, feet" value={pitDepth} min={1} max={ground - MIN_HEIGHT_FT} onChange={(depth) => setRig({ pit: { floor: pitFloor(ground, depth) } })} />

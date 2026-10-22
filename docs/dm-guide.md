@@ -899,7 +899,7 @@ To let the players look for traps, open the trap's pane and press **Ask to searc
 
 ### Pits
 
-A trap of squares can open a pit. When it goes off, its squares sink to the pit's floor, and every creature standing on them falls with them, along with whatever it carries. A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does.
+A trap of squares can open a pit. When it goes off, its squares sink to the pit's floor, and every creature standing on them falls with them, along with whatever it carries. A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does. Once the pit is open, its pane reads "Opened" with the depth of its floor, and its depth can no longer be changed.
 
 # Deeper tools
 

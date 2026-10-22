@@ -5,17 +5,20 @@ import { LIMITS } from "#shared/limits.ts";
 import { CHUNK_CELLS, type BuildChunk, type Trap, type TrapRig } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
+import { pitOpen } from "#shared/rules/traps.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LEVEL_BANDS, TRAP_PRESET_IDS } from "#shared/srd/traps.ts";
 import { actor, DM, env, room, token } from "#shared/testutil.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
+  afterSummary,
   cleanLine,
   crossedTraps,
   crossesText,
   warnsOf,
   disarmFill,
   newTrapInput,
+  openedLine,
   presetLine,
   rectBetween,
   saveSummary,
@@ -239,6 +242,18 @@ describe("the pane's lines and its asks for rolls", () => {
     assert.equal(saveSummary(rig({ save: { ability: "dex", dc: 13, onPass: "half" }, damage: [{ formula: "2d10", type: "bludgeoning" }] })), "Dexterity save, DC 13, 2d10 Bludgeoning, half on a pass");
     assert.equal(saveSummary(rig({ damage: [{ formula: "1d6", type: "bludgeoning" }] })), "No save, 1d6 Bludgeoning");
     assert.equal(saveSummary(rig({})), "None");
+  });
+
+  test("a pit reads its depth until it opens, and then Opened with its floor, its depth no longer read from the ground", () => {
+    const cells = [{ x: 2, y: 2, w: 2, h: 1 }];
+    const shut = ground({});
+    const open = ground({ "2,2": -10, "3,2": -10 });
+    assert.equal(pitOpen(shut, "s1", cells, { floor: -10 }), false);
+    assert.equal(pitOpen(open, "s1", cells, { floor: -10 }), true);
+    assert.equal(pitOpen(ground({ "2,2": -10 }), "s1", cells, { floor: -10 }), false, "one square still shut");
+    assert.equal(afterSummary(rig({}), 10), "Goes off once, stops the creature, opens a 10 ft pit");
+    assert.equal(afterSummary(rig({}), null, true), "Goes off once, stops the creature, its pit is open");
+    assert.equal(openedLine({ floor: -10 }), "Opened: its floor is at -10 ft.");
   });
 
   test("Ask to search fills its first check and DC with the note Search, never the trap's name, and Ask to disarm its disarm check", () => {

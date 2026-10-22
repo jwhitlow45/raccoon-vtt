@@ -1,10 +1,9 @@
 import { keys } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { MIN_HEIGHT_FT, type LogEntry, type LogEvent, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
+import { type LogEntry, type LogEvent, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
-import { groundAt } from "../rules/heights.ts";
-import { doorExists, isPlainId } from "../rules/traps.ts";
+import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
 import { splitCheck } from "../rules/walls.ts";
 import { sightPiecesCheck } from "../visionLimits.ts";
 import { buildHeight, heightsPainted } from "./heights.ts";
@@ -234,10 +233,10 @@ export function runActions(tx: Tx, trap: Trap): Did[] {
 function openPit(tx: Tx, trap: Trap): boolean | null {
   const pit = trap.rig?.pit;
   if (!pit || !("cells" in trap.zone)) return null;
-  const floor = Math.max(MIN_HEIGHT_FT, pit.floor);
+  if (pitOpen(tx.state.buildChunks, trap.sceneId, trap.zone.cells, pit)) return null;
+  const floor = pitFloorOf(pit);
   const cells: string[] = [];
   const seen = new Set<string>();
-  let changes = false;
   for (const r of trap.zone.cells) {
     for (let y = r.y; y < r.y + r.h; y++) {
       for (let x = r.x; x < r.x + r.w; x++) {
@@ -245,11 +244,9 @@ function openPit(tx: Tx, trap: Trap): boolean | null {
         if (seen.has(key)) continue;
         seen.add(key);
         cells.push(key);
-        if (groundAt(tx.state.buildChunks, trap.sceneId, x, y) !== floor) changes = true;
       }
     }
   }
-  if (!changes) return null;
   const op: OpOf<"build.height"> = { t: "build.height", sceneId: trap.sceneId, cells, height: floor };
   try {
     if (!openedFits(tx, op)) return false;

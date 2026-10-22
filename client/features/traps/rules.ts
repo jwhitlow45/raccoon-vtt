@@ -3,7 +3,7 @@ import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Tok
 import type { TrapInput } from "#shared/protocol.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
-import { trapCreature } from "#shared/rules/traps.ts";
+import { pitFloorOf, trapCreature } from "#shared/rules/traps.ts";
 import { ABILITY_NAMES, choiceText } from "#shared/rules/skills.ts";
 import { damageTypeName } from "#shared/rules/damage.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
@@ -432,12 +432,18 @@ export function triggerSummary(trap: Pick<Trap, "zone"> & { rig: TrapRig }): str
 }
 
 /** "Goes off once, stops the creature" or "Arms again each turn, at most 3 times". */
-export function afterSummary(rig: TrapRig, pitDepth: number | null): string {
+export function afterSummary(rig: TrapRig, pitDepth: number | null, opened = false): string {
   const parts = [rig.resets === "never" ? "Goes off once" : "Arms again each turn"];
   if (rig.usesLeft !== undefined) parts.push(rig.usesLeft === 0 ? "no uses left" : `${rig.usesLeft} ${rig.usesLeft === 1 ? "use" : "uses"} left`);
   if (rig.stops) parts.push("stops the creature");
-  if (pitDepth !== null) parts.push(`opens a ${pitDepth} ft pit`);
+  if (opened) parts.push("its pit is open");
+  else if (pitDepth !== null) parts.push(`opens a ${pitDepth} ft pit`);
   return parts.join(", ");
+}
+
+/** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at -10 ft." */
+export function openedLine(pit: { floor: number }): string {
+  return `Opened: its floor is at ${pitFloorOf(pit)} ft.`;
 }
 
 export function hitsSummary(rig: TrapRig): string {
