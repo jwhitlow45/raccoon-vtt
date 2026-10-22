@@ -335,4 +335,23 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     assert.ok(dropped.x >= 4, `the lamp at ${dropped.x}, ${dropped.y}`);
     assert.deepEqual([token(dmSocket, mule)?.x, token(dmSocket, mule)?.y], [2, 10], "the mule stays");
   });
+
+  test("lp15-at-1. Sam drags Bree into a closet whose 5 ft opening the goblin beside her cannot follow through: the note after the drop names the goblin (review LP15-FU-1)", async () => {
+    // A closet at x 12 to 14, y 7 to 9, open only at its south wall's west square, so Bree alone fits through and the goblin a square east of her meets the wall.
+    const wall = { kind: "wall" };
+    const edges: { key: string; feature: unknown }[] = [];
+    for (let x = 12; x <= 14; x++) edges.push({ key: `${x},7,n`, feature: wall });
+    for (const x of [13, 14]) edges.push({ key: `${x},10,n`, feature: wall });
+    for (let y = 7; y <= 9; y++) edges.push({ key: `12,${y},w`, feature: wall }, { key: `15,${y},w`, feature: wall });
+    await ops.send({ t: "build.edge", sceneId: run.sceneId, edges });
+    await ops.send({ t: "token.update", tokenId: run.bree, patch: { x: 9, y: 10, elevation: 0 } });
+    await waitFor("Bree and the goblin by the closet", () => (token(samSocket, run.bree)?.y === 10 && token(samSocket, run.goblin)?.x === 10 && token(samSocket, run.goblin)?.y === 10) || null);
+    await dragCells(sam, BOUNDS, { x: 9, y: 10 }, { x: 12, y: 8 });
+    const note = sam.getByRole("status").filter({ hasText: /through there|Stopped at a wall/ });
+    await note.first().waitFor();
+    await shots.take(sam, "attach-lp15-follower-note");
+    assert.equal((await note.first().innerText()).split("\n")[0], "Goblin can't follow through there.");
+    assert.ok((token(samSocket, run.bree)?.y ?? 0) >= 10, "Bree went into the closet without the goblin");
+    assert.equal(token(samSocket, run.goblin)?.attached?.to, run.bree, "the goblin was left behind");
+  });
 });
