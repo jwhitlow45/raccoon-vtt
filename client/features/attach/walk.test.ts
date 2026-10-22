@@ -5,7 +5,7 @@ import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, halvedAt, publicWorld, speedAreas } from "#shared/rules/walkWorld.ts";
-import { canApply } from "#shared/permissions.ts";
+import { canApply, LEDGE_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, walkersStop, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, reveal, template, token } from "#shared/testutil.ts";
@@ -338,7 +338,7 @@ describe("a walk off a holder crosses only the ledges whose whole length lies in
     // A redo's routes carry it too: a first route that ends back on the cart, a second over the step.
     const value = { ...state.tokens.bree!, x: 9, y: 6, elevation: 10 };
     const redo: Op = { t: "sys.restore", entries: [{ key: "token:bree", value }], from: "redo", deps: true, routes: { bree: [back, [[9, 6, 0, 0]]] } };
-    assert.equal(refusal(redo, state), LEDGE_IN_THE_WAY);
+    assert.equal(refusal(redo, state), LEDGE_IN_THE_WAY_BACK);
   });
 
   test("a spot on the holder that a walk reaches after clearing it is judged on the ground's rule", () => {

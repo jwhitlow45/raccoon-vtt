@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey } from "./keys.ts";
 import type { EdgeFeature, RoomState, Token } from "./model.ts";
-import { ROUTE_OFF_LATTICE, ROUTE_TOO_LONG, WALL_IN_THE_WAY, canApply, type PermissionDeps } from "./permissions.ts";
+import { ROUTE_OFF_LATTICE, ROUTE_TOO_LONG, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, canApply, type PermissionDeps } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { DM, P1, room, token } from "./testutil.ts";
 
@@ -82,9 +82,9 @@ describe("a player's redo of a walk (7.4)", () => {
     const redo = (state: RoomState): Op => ({ t: "sys.restore", entries: [{ key: "token:own", value: moved(state, 10, 4) }], from: "redo", deps: true, routes: { own: [through] } });
     assert.equal(decide(redo(open), P1, open), "ok");
     const shut = setup({ kind: "door", state: "closed", secret: false, discovered: false });
-    assert.equal(decide(redo(shut), P1, shut), `forbidden: ${WALL_IN_THE_WAY}`);
+    assert.equal(decide(redo(shut), P1, shut), `forbidden: ${WALL_IN_THE_WAY_BACK}`);
     // Without its route, the straight leg would meet the wall.
-    assert.equal(decide({ t: "sys.restore", entries: [{ key: "token:own", value: moved(open, 10, 4) }], from: "redo", deps: true }, P1, open), `forbidden: ${WALL_IN_THE_WAY}`);
+    assert.equal(decide({ t: "sys.restore", entries: [{ key: "token:own", value: moved(open, 10, 4) }], from: "redo", deps: true }, P1, open), `forbidden: ${WALL_IN_THE_WAY_BACK}`);
   });
 
   test("a step that merged two walks redoes both in order, and the DM's redo is not tested", () => {

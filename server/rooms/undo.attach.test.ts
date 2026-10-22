@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState, Viewer } from "#shared/model.ts";
-import { canApply } from "#shared/permissions.ts";
+import { canApply, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { DEPENDED_ON, PARENT_GONE } from "#shared/reducer/misc.ts";
-import { WALL_IN_THE_WAY } from "#shared/rules/movement.ts";
 import { DM, P1, P2, actor, effect, member, room, token } from "#shared/testutil.ts";
 import { MOVED_SINCE } from "./undo.ts";
 import { UndoTable } from "./undoTesting.ts";
@@ -425,7 +424,7 @@ describe("a restore walks up only links to holders the player sees, from its fir
       const d = canApply(op, P1, t.state, { canUseAsset: () => true });
       return d.ok ? "ok" : d.message;
     };
-    assert.equal(answer(false), WALL_IN_THE_WAY);
+    assert.equal(answer(false), WALL_IN_THE_WAY_BACK);
     assert.equal(answer(true), answer(false));
   });
 });
@@ -481,7 +480,7 @@ describe("redo checks walls on the holder and the public dragged creatures only 
         t.state = { ...t.state, buildChunks: { ...t.state.buildChunks, "s1:0,0": { ...chunk, edges } } };
       }
       const answer = both(a, b, (t) => t.redo());
-      assert.equal(answer, across === "gob" ? WALL_IN_THE_WAY : "ok");
+      assert.equal(answer, across === "gob" ? WALL_IN_THE_WAY_BACK : "ok");
     }
   });
 });

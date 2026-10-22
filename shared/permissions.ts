@@ -896,7 +896,7 @@ function forPlayer(op: Op, c: Check): Decision {
           const redo = op.from === "redo" && !op.teleport;
           const holder = carriedThroughout(c, tokenId, entry.value, restoring);
           const d = holder ? restoreCarriedCheck(c, tokenId, entry.value, redo, holder, op.routes?.[holder], restoring) : restorePoseCheck(c, tokenId, entry.value, redo, op.routes?.[tokenId]);
-          if (!d.ok) return d;
+          if (!d.ok) return restoreWords(d);
           continue;
         }
         if (!entry.key.startsWith("drawing:")) return FORBIDDEN;
@@ -1645,6 +1645,17 @@ function resizeCheck(c: Check, token: Token, patch: TokenPatch): Decision {
 
 // What a player hears when a wall or a ledge stops a move, kept with the move rules since a resize says it too.
 export { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY };
+/** The same, as an undo or redo refusal words them after "could not redo moving Thorn: ", like every restore's reason (MOVE_PLAYERS_FIRST_BACK). */
+export const WALL_IN_THE_WAY_BACK = "a wall is in the way";
+export const LEDGE_IN_THE_WAY_BACK = "a ledge is in the way";
+
+/** A restore's refusal in the words that follow its step's label: a wall's or a ledge's in its restore form, any other as it is. */
+function restoreWords(d: Decision): Decision {
+  if (d.ok) return d;
+  if (d.message === WALL_IN_THE_WAY) return { ...d, message: WALL_IN_THE_WAY_BACK };
+  if (d.message === LEDGE_IN_THE_WAY) return { ...d, message: LEDGE_IN_THE_WAY_BACK };
+  return d;
+}
 /** A teleport lands on the map, wherever the walls are (section 4.1). */
 export const TELEPORT_OFF_MAP = "a teleport lands inside the map";
 

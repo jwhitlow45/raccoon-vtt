@@ -10,7 +10,9 @@ import {
   LEDGE_IN_THE_WAY,
   NOT_A_SQUEEZE,
   TELEPORT_OFF_MAP,
+  LEDGE_IN_THE_WAY_BACK,
   WALL_IN_THE_WAY,
+  WALL_IN_THE_WAY_BACK,
   canApply,
   mayMoveToken,
   type PermissionDeps,
@@ -130,7 +132,10 @@ describe("a player's undo and redo of a move", () => {
     const back: Op = { t: "sys.restore", entries: [{ key: "token:own", value: moved(state, 12) }], from: "undo", deps: true };
     assert.equal(decide(back, P1, state), "ok");
     const redo: Op = { ...back, from: "redo" };
-    assert.equal(decide(redo, P1, state), `forbidden: ${WALL_IN_THE_WAY}`);
+    // In the restore's own words, which follow "could not redo moving Thorn: " (LP11-WALK-1).
+    assert.equal(decide(redo, P1, state), `forbidden: ${WALL_IN_THE_WAY_BACK}`);
+    const ledge: Op = { t: "sys.restore", entries: [{ key: "token:own", value: { ...state.tokens.own!, y: 12 } }], from: "redo", deps: true };
+    assert.equal(decide(ledge, P1, state), `forbidden: ${LEDGE_IN_THE_WAY_BACK}`);
     assert.equal(decide({ ...redo, teleport: true }, P1, state), "ok");
     assert.equal(decide({ t: "sys.restore", entries: [{ key: "token:own", value: moved(state, 4) }], from: "redo", deps: true }, P1, state), "ok");
   });

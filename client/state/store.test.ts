@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
+import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientOp, ServerMessage } from "#shared/protocol.ts";
 import { actor, character, companionBlock, DM, entry, P1, P2, room, token } from "#shared/testutil.ts";
@@ -459,6 +460,19 @@ describe("undo answers", () => {
         ["Nothing to redo.", "info"],
         ["Could not undo moving Goblin 2: it was changed since.", "error"],
       ],
+    );
+  });
+
+  test("a redo a wall or a ledge stops reads its reason in a restore's words, after the step's label (LP11-WALK-1)", () => {
+    const s = setup(room({ tokens: { g1: token("g1") } }));
+    s.connect();
+    for (const reason of [WALL_IN_THE_WAY_BACK, LEDGE_IN_THE_WAY_BACK]) {
+      const redo = s.room.dispatch({ t: "redo" })!;
+      answer(s, { rejects: [{ n: redo, code: "forbidden", message: `could not redo moving Thorn: ${reason}` }] });
+    }
+    assert.deepEqual(
+      s.state().toasts.map((t) => t.text),
+      ["Could not redo moving Thorn: a wall is in the way.", "Could not redo moving Thorn: a ledge is in the way."],
     );
   });
 });
