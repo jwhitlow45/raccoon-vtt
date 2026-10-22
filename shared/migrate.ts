@@ -504,9 +504,12 @@ export const opMigrations: MigrationStep[] = [
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 17, and the shutdown writes version 20 snapshots, as
-    // before. Rollback: an older build refuses to migrate either down
-    // (runMigrations), so going back restores that backup, losing the play
-    // since.
+    // before. Rollback: an older build refuses to migrate a version 17 op
+    // down (runMigrations), so a room whose log holds one after its last
+    // snapshot would not load there. A clean shutdown writes a snapshot
+    // after the last op, and an older build loads it, since nothing stored
+    // changed shape. So only a room with version 17 ops after its last
+    // snapshot needs the backup from before the deploy.
     from: 16,
     to: 17,
     apply: (op) => op,
