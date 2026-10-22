@@ -199,8 +199,18 @@ export type ExpectSubject = Pick<Character, "stats" | "level" | "name" | "ddbSyn
  * The value of a character's part as `expect` hashes it
  * (docs/design-v1-resync.md 4), absent as null: HP is the current and
  * maximum alone, and the shape its SRD id and whether it is Wild Shape.
+ *
+ * A part of the block, and the record that describes the block, is null
+ * with no block and wrapped with one, so a block deleted meanwhile never
+ * hashes as one that lacks an optional part or a record. Apply and Undo
+ * always expect the record, so neither puts a default block back.
  */
 function expectValue(character: ExpectSubject, part: ExpectPart): unknown {
+  if (part === "ddbSync" || part.startsWith("stats.")) {
+    const stats = character.stats;
+    if (stats === undefined) return null;
+    return [part === "ddbSync" ? (character.ddbSync ?? null) : (stats[part.slice("stats.".length) as keyof typeof stats] ?? null)];
+  }
   const actor = character.actor;
   switch (part) {
     case "level":
@@ -219,10 +229,6 @@ function expectValue(character: ExpectSubject, part: ExpectPart): unknown {
       return actor.hp ? { cur: actor.hp.cur, max: actor.hp.max } : undefined;
     case "actor.shape":
       return { srdId: actor.srdId, wildShape: actor.wildShape };
-    case "ddbSync":
-      return character.ddbSync;
-    default:
-      return character.stats?.[part.slice("stats.".length) as keyof NonNullable<Character["stats"]>];
   }
 }
 

@@ -169,4 +169,33 @@ describe("a re-sync's permissions (docs/design-v1-resync.md 4)", () => {
     assert.notEqual(expectHash(wild, "actor.shape"), expectHash(bear, "actor.shape"));
     assert.equal(expectHash(bear, "actor.ac"), expectHash(bree, "actor.ac"), "a shape alone leaves the AC's hash");
   });
+
+  test("a block's parts and the record hash apart with no block and with a block that lacks them (RSBUILD-ASTRA-03)", () => {
+    const bare = character("bare", { name: "Bree" });
+    const unsynced = character("bree", { name: "Bree", stats: BLOCK });
+    assert.equal(BLOCK.spellAbility, undefined);
+    for (const part of ["stats.spellAbility", "stats.critOn", "ddbSync"] as const) assert.notEqual(expectHash(unsynced, part), expectHash(bare, part), part);
+    assert.equal(expectHash(unsynced, "stats.spellAbility"), expectHash(unsynced, "stats.critOn"), "a block's absent parts hash alike");
+    assert.equal(expectHash(unsynced, "level"), expectHash(bare, "level"), "the parts beside the block do not ask for one");
+  });
+
+  test("a block deleted by the DM between a player's review and Apply refuses the Apply, which would put a default block back (RSBUILD-ASTRA-03)", () => {
+    const state = setup();
+    state.characters.bree = character("bree", { name: "Bree", ownerIds: ["p1"], level: 5, stats: BLOCK, actor: actor({ ac: 15 }) });
+    const seen = asSeen(state, P1);
+    // Two Applies: one writing an optional part the block lacks with the record, one writing the record beside the AC alone.
+    const spell = sync({ stats: { spellAbility: "wis" }, ddbSync: RECORD }, expectOf(seen, ["stats.spellAbility", "ddbSync", "actor.shape"]));
+    const record = sync({ actor: { ac: 16 }, ddbSync: RECORD }, expectOf(seen, ["actor.ac", "ddbSync", "actor.shape"]));
+    assert.equal(decide(spell, P1, state), "ok");
+    assert.equal(decide(record, P1, state), "ok");
+    const deleted = applyOp(state, { t: "character.update", characterId: "bree", patch: { stats: null } }, DM, env(2));
+    assert.ok(deleted.ok);
+    assert.equal(deleted.state.characters.bree!.stats, undefined);
+    assert.equal(decide(spell, P1, deleted.state), `invalid: ${CHARACTER_CHANGED}`);
+    assert.equal(decide(record, P1, deleted.state), `invalid: ${CHARACTER_CHANGED}`);
+    // Without the expect, the reducer would make a default block for the one part.
+    const unchecked = applyOp(deleted.state, sync({ stats: { spellAbility: "wis" }, ddbSync: RECORD }), P1, env(3));
+    assert.ok(unchecked.ok);
+    assert.equal(unchecked.state.characters.bree!.stats?.spellAbility, "wis");
+  });
 });

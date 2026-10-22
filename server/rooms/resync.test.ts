@@ -345,6 +345,20 @@ describe("a re-sync's race at the room actor (docs/design-v1-resync.md 5)", () =
     });
   });
 
+  test("the DM's deletion of Bree's block between Ana's review and her Apply refuses it, and no default block comes back (RSBUILD-ASTRA-03)", async () => {
+    // A block with no casting ability and no record, so the Apply's parts were absent before the deletion too.
+    const { spellAbility: _spell, ...plain } = BLOCK;
+    await play(table({ stats: plain }), async ({ actor, dm, ana, id }) => {
+      const review = ana.sees(id);
+      assert.equal(await dm.send({ t: "character.update", characterId: id, patch: { stats: null } }), null);
+      const before = structuredClone(actor.committed.state.characters[id]);
+      assert.equal(before?.stats, undefined);
+      assert.deepEqual(await ana.send(update(id, review, { stats: { spellAbility: "wis" }, ddbSync: SYNCED })), STALE);
+      assert.deepEqual(await ana.send(update(id, review, { actor: { ac: 16 }, ddbSync: SYNCED })), STALE, "a record with no block part is refused too");
+      assert.deepEqual(actor.committed.state.characters[id], before, "nothing changed");
+    });
+  });
+
   test("a shape taken between the review and Apply refuses it, though the AC it leaves is the same", async () => {
     await play(table(), async ({ actor, dm, ana, id }) => {
       const review = ana.sees(id);
