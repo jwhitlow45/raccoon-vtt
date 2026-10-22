@@ -1,5 +1,5 @@
 import { uuidv7 } from "#shared/ids.ts";
-import { chunkKey, tileKey } from "#shared/keys.ts";
+import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import type {
   AreaTemplate,
@@ -583,7 +583,8 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
  * chunks do. A trap's waiting occurrences and both trap logs come along,
  * named after the new ids, every list keeping only plain ids that came
  * through and counting the rest, as the reducer stores them (6.1). Lines
- * are numbered after the room log's, so no two imported lines share an id.
+ * are numbered after the room log's, in the old room's order, so no two
+ * imported lines share an id and the newest occurrence stays the newest.
  */
 function remapTraps(
   state: RoomState,
@@ -592,13 +593,13 @@ function remapTraps(
 ): void {
   const { scenes, tokens, stampIds, lightIds, newId } = ids;
   const trapIds = new Map<string, string>();
+  // Every old line id an occurrence or a trap log holds, numbered in the old room's order, so the newest stays the newest.
   const lineIds = new Map<string, string>();
-  let next = out.log.length;
-  const lineId = (old: string) => {
-    let id = lineIds.get(old);
-    if (id === undefined) lineIds.set(old, (id = `0:${next++}`));
-    return id;
-  };
+  const oldIds = new Set<string>();
+  for (const trap of Object.values(state.traps ?? {})) if (scenes.has(trap.sceneId)) for (const d of trap.rig?.due ?? []) oldIds.add(d.id);
+  for (const line of [...(state.trapLog ?? []), ...(state.trapSeen ?? [])]) oldIds.add(line.id);
+  for (const [i, id] of [...oldIds].sort(compareLogIds).entries()) lineIds.set(id, `0:${out.log.length + i}`);
+  const lineId = (id: string) => lineIds.get(id)!;
   const kept = (list: readonly string[], more = 0): { list: string[]; more: number } => {
     const mapped = list.filter((id) => tokens.has(id)).map((id) => tokens.of(id));
     const plain = mapped.filter(isPlainId);

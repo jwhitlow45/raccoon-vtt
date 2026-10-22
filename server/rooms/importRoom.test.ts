@@ -12,7 +12,7 @@ import { projectState } from "#shared/project.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { splitRefusal } from "#shared/rules/walls.ts";
 import type { FreeWall, RoomState } from "#shared/model.ts";
-import { apply, room, scene, token } from "#shared/testutil.ts";
+import { apply, AT, room, scene, token, trap } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
 import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
 import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter } from "./importRoom.ts";
@@ -75,6 +75,22 @@ describe("import limits", () => {
 
   test("a scene within the caps passes", () => {
     assert.doesNotThrow(() => assertWithinLimits(pile(20)));
+  });
+
+  test("a room with more trap springings waiting than the room's cap is refused, as the reducer never keeps more", () => {
+    const waiting = (perTrap: number[]) => {
+      const state = room({ scenes: { s1: scene("s1") } });
+      perTrap.forEach((count, i) => {
+        const t = trap(`t${i}`);
+        state.traps[t.id] = { ...t, rig: { ...t.rig!, due: Array.from({ length: count }, (_, k) => ({ id: `${i + 1}:${k}`, at: AT, how: "enter" as const, by: [], hits: [] })) } };
+      });
+      return state;
+    };
+    assert.doesNotThrow(() => assertWithinLimits(waiting([3, 3, 3, 1])));
+    assert.throws(
+      () => assertWithinLimits(waiting([3, 3, 3, 3])),
+      (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === `at most ${LIMITS.trapDuePerRoom} trap springings can wait for the DM at once`,
+    );
   });
 
   test("a scene with more drawn edges than the cap is refused", () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { compareLogIds } from "#shared/keys.ts";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
@@ -386,6 +387,20 @@ describe("remapState, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
     assert.equal(line?.characterId, character.id);
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("old line ids are numbered in the old room's order, whichever trap holds them, so the newest occurrence stays the newest", () => {
+    const state = room();
+    const due = (id: string) => ({ id, at: AT, how: "enter" as const, by: [], hits: [] });
+    // The trap listed first holds the newer occurrence.
+    state.traps.a = { ...trap("a"), name: "a", rig: { ...trap("a").rig!, due: [due("12:0")] } };
+    state.traps.b = { ...trap("b"), name: "b", rig: { ...trap("b").rig!, due: [due("4:0"), due("10:900000")] } };
+    state.trapSeen = [{ id: "12:1", at: AT, kind: "event", data: { type: "trapSeen", by: [], message: "Click." } }];
+    const out = remapState(state, { assets: new Map() });
+    const all = Object.values(out.traps).flatMap((t) => (t.rig?.due ?? []).map((d) => ({ name: t.name, id: d.id })));
+    const sorted = [...all].sort((x, y) => compareLogIds(x.id, y.id)).map((d) => d.name);
+    assert.deepEqual(sorted, ["b", "b", "a"], "4:0, then 10:900000, then 12:0");
+    assert.ok(compareLogIds(all.find((d) => d.name === "a")!.id, out.trapSeen[0]!.id) < 0, "12:0 before 12:1");
   });
 });
 

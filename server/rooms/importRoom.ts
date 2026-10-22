@@ -284,6 +284,10 @@ export function assertWithinLimits(state: RoomState): void {
   const over = (reason: string) => new HttpError(413, "over_room_limits", { extra: { reason } });
   const room = checkLimits(state);
   if (!room.ok) throw over(room.message);
+  // The reducer keeps a room's waiting springings to its cap, and the size guard reserves exactly that many (docs/design-v1-traps.md 6.7).
+  let waiting = 0;
+  for (const trap of Object.values(state.traps ?? {})) waiting += trap.rig?.due?.length ?? 0;
+  if (waiting > LIMITS.trapDuePerRoom) throw over(`at most ${LIMITS.trapDuePerRoom} trap springings can wait for the DM at once`);
   for (const sceneId of Object.keys(state.scenes)) {
     const scene = checkLimits(state, sceneId);
     if (!scene.ok) throw over(scene.message);
