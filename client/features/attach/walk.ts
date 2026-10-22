@@ -65,8 +65,9 @@ export function walkersCut(view: DropView, token: DropToken, target: Point, rout
         { x: token.x, y: token.y, elevation: token.elevation },
         { x: end.x, y: end.y, elevation: landing },
       ];
-  const cut = walkersStop(view, walking, points, walkers);
-  return cut ? { at: { x: cut.at.x, y: cut.at.y }, pieces: cut.pieces, blocker: cut.blocker } : null;
+  const pieces = route ? (long ? long.pieces : route.pieces) : undefined;
+  const cut = walkersStop(view, walking, points, walkers, { ...(pieces ? { route: pieces } : {}), landing: (at) => dropLanding(view, token, at) });
+  return cut ? { at: { x: cut.at.x, y: cut.at.y }, pieces: cut.pieces, blocker: cut.blocker, ...(cut.plain ? { plain: true as const } : {}) } : null;
 }
 
 /** For a drag of several tokens: what each named one drags beside it, judged with the others named. */

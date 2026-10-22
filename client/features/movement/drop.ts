@@ -534,8 +534,12 @@ function followersOf(state: BuildState, lead: Walker, points: readonly RoutePoin
   };
 }
 
-/** Where a holder's walk is cut so the creatures it drags can follow: the spot, and how many of its pieces it keeps whole before it. */
-export type WalkersCut = { at: Point; pieces: number };
+/**
+ * Where a holder's walk is cut so the creatures it drags can follow: the
+ * spot, and how many of its pieces it keeps whole before it. `plain` when
+ * the cut goes as the plain straight leg to the spot, with no route.
+ */
+export type WalkersCut = { at: Point; pieces: number; plain?: true };
 
 /**
  * A route cut at a walkers stop (walkersStop): the pieces kept whole, then
@@ -544,6 +548,7 @@ export type WalkersCut = { at: Point; pieces: number };
  * length is no piece.
  */
 export function cutPieces(points: readonly RoutePoint[], pieces: readonly RoutePiece[], cut: WalkersCut): RoutePiece[] {
+  if (cut.plain) return [];
   const start = points[cut.pieces];
   const piece = pieces[cut.pieces];
   const kept = pieces.slice(0, cut.pieces);
@@ -555,33 +560,60 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
  * Where a holder's walk along `points` (its start, then each piece's end)
  * stops so that every creature it drags beside it can walk too
  * (docs/design-v1-attach.md 4.2): the first piece some walker's leg is
- * stopped on is walked back, a lattice step at a time from its end, to
- * the last spot the holder and every walker reach clear, its start when
- * none. Each spot is snapped to the holder's lattice, as a route's are, so
- * a cut on a piece along no axis or diagonal is one the server takes.
- * Null when all of them walk the whole way. `pieces` counts the pieces
- * kept whole before it.
+ * stopped on is walked back, a lattice step at a time from its end and on
+ * back through the pieces before it, to the last spot the holder and
+ * every walker reach clear, its start when none. Each spot is snapped to
+ * the holder's lattice, as a route's are, so a cut on a piece along no
+ * axis or diagonal is one the server takes. Null when all of them walk
+ * the whole way. `pieces` counts the pieces kept whole before it.
+ *
+ * A walk along `route` keeps a spot only where the server takes the cut
+ * whole (review FU20A-CUTSTOP): the holder's own check of the cut route
+ * (route.ts routeStop), which may judge a straight walk's own route by
+ * its whole leg where a shorter cut of it has no such leg, else the plain
+ * straight leg there (`plain`), the holder's and every walker's. `landing`
+ * is the height the drop lands at a spot, as the op will carry it.
  */
-export function walkersStop(state: BuildState, lead: DropToken & Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
+export function walkersStop(
+  state: BuildState,
+  lead: DropToken & Walker,
+  points: readonly RoutePoint[],
+  walkers: readonly DropToken[],
+  walk: { route?: readonly RoutePiece[]; landing?: (at: Point) => number } = {},
+): { at: RoutePoint; pieces: number; blocker: Blocker; plain?: true } | null {
   if (walkers.length === 0) return null;
   const L = routeLattice(lead);
   // The holder's walk (route.ts WalkTrace): the leg test of each piece counts from its walker where it starts.
   const trace = walkTrace(state.buildChunks, lead, points);
   const followers = followersOf(state, lead, points, walkers);
+  const route = walk.route && state.scenes[lead.sceneId]?.blockMovement === true ? walk.route : undefined;
+  const start = points[0]!;
+  // The cut to `c`, `whole` pieces kept and then one on to it unless a piece starts there: as the route it sends, else as the plain leg.
+  const taken = (c: RoutePoint, whole: number): { plain?: true } | null => {
+    if (!route) return {};
+    if (routeStop(state, lead, cutPieces(points, route, { at: c, pieces: whole }), walk.landing ? walk.landing(c) : c.elevation) === null) return {};
+    return legStop(state, trace[0]!, c) === null && followersOf(state, lead, [start, c], walkers).stop(1, c) === null ? { plain: true } : null;
+  };
   for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]!;
-    const b = points[i]!;
-    const at = trace[i - 1]!;
-    const stopped = followers.stop(i, b);
+    const stopped = followers.stop(i, points[i]!);
     if (!stopped) continue;
-    const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
-    const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
-    for (let k = n - 1; k >= 1; k--) {
-      const c = { x: a.x + along(b.x - a.x, k), y: a.y + along(b.y - a.y, k), elevation: 0 };
-      c.elevation = landedElevation(state.buildChunks, at, c);
-      if (legStop(state, at, c) === null && followers.stop(i, c) === null) return { at: c, pieces: i - 1, blocker: stopped.blocker };
+    for (let j = i; j >= 1; j--) {
+      const a = points[j - 1]!;
+      const b = points[j]!;
+      const at = trace[j - 1]!;
+      const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
+      const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
+      for (let k = n - 1; k >= 1; k--) {
+        const c = { x: a.x + along(b.x - a.x, k), y: a.y + along(b.y - a.y, k), elevation: 0 };
+        c.elevation = landedElevation(state.buildChunks, at, c);
+        if (legStop(state, at, c) !== null || followers.stop(j, c) !== null) continue;
+        const kept = taken(c, j - 1);
+        if (kept) return { at: c, pieces: j - 1, blocker: stopped.blocker, ...kept };
+      }
+      const kept = j === 1 ? {} : taken(a, j - 1);
+      if (kept) return { at: a, pieces: j - 1, blocker: stopped.blocker, ...kept };
     }
-    return { at: a, pieces: i - 1, blocker: stopped.blocker };
+    return { at: start, pieces: 0, blocker: stopped.blocker };
   }
   return null;
 }
@@ -600,14 +632,14 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
   const landing = move.elevation ?? lead.elevation;
   const walking = walkerOf(state, lead, move);
   const points = move.route ? routePoints(state.buildChunks, walking, move.route, landing) : [{ x: lead.x, y: lead.y, elevation: lead.elevation }, { x: move.x, y: move.y, elevation: landing }];
-  const stop = walkersStop(state, walking, points, walkers);
+  const stop = walkersStop(state, walking, points, walkers, { ...(move.route ? { route: move.route } : {}), landing: (at) => dropLanding(state, lead, at) });
   if (!stop) return plan;
   const others = plan.moves.filter((m) => m !== move);
   const searched = plan.stop?.searched ? { searched: true as const, ...(plan.stop.capped ? { capped: true as const } : {}) } : {};
   const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y }, ...searched };
   if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted };
   const cut = landed(state, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
-  if (move.route) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+  if (move.route && !stop.plain) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
   return { ...plan, moves: [...others, cut], stop: halted };
 }
 

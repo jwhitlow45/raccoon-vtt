@@ -17,7 +17,7 @@ import { dropLanding, dropView, routeTarget, walkerOf } from "../movement/drop.t
 import { worldFor } from "../movement/press.ts";
 import { findRoute } from "#shared/rules/walk.ts";
 import { walkersCut, walkersFor } from "./walk.ts";
-import { world } from "../movement/testing.ts";
+import { onTurn, world } from "../movement/testing.ts";
 import { tokenStop, type RulerStop } from "../measure/ruler.ts";
 import { measureWalk } from "../measure/walkRuler.ts";
 import { copyFor } from "./testing.ts";
@@ -676,6 +676,7 @@ describe("a holder's route search walks the creatures it drags beside it with it
     let sent = 0;
     let aloft = 0;
     let routes = 0;
+    let cuts = 0;
     for (let seed = 1; seed <= 600; seed++) {
       const r = rng(seed);
       const c = towCase(r, true);
@@ -683,8 +684,7 @@ describe("a holder's route search walks the creatures it drags beside it with it
       const raw = { x: Math.max(0, Math.min(27, kira.x + int(r, -8, 8))), y: Math.max(0, Math.min(27, kira.y + int(r, -8, 8))) };
       const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
       const drag = dragOf(copy, c.who.role, "kira", raw);
-      // With no way found the drop goes as the straight leg, cut where a walker meets a wall or a ledge (drop.ts walkersStop).
-      if (!drag.op || drag.answer.kind === "none") continue;
+      if (!drag.op) continue;
       const where = `seed ${seed} (${c.who.memberId} drags kira to ${raw.x},${raw.y})`;
       const op = drag.op as Op;
       const allowed = canApply(op, c.who, c.state, { canUseAsset: () => true });
@@ -694,6 +694,7 @@ describe("a holder's route search walks the creatures it drags beside it with it
       assert.deepEqual(drag.preview.to, { x: applied.state.tokens.kira!.x, y: applied.state.tokens.kira!.y }, `${where}: the picture showed another spot`);
       sent++;
       if (c.towed.some((id) => c.state.tokens[id]!.elevation > 0)) aloft++;
+      if (drag.answer.kind === "none") cuts++;
       if (drag.answer.kind !== "route") continue;
       // The way found is one they all follow as the move puts them, so the drop is never cut where one of them meets a ledge.
       const view = dropView(copy, c.who.role);
@@ -701,8 +702,42 @@ describe("a holder's route search walks the creatures it drags beside it with it
       assert.equal(cut, null, `${where}: the route ${JSON.stringify(drag.answer.route.pieces)} leaves a creature behind`);
       routes++;
     }
-    // A run that never sends a drag of a creature held up, or round raised ground, tests nothing.
-    assert.ok(sent > 300 && aloft > 160 && routes > 220, JSON.stringify({ sent, aloft, routes }));
+    // A run that never sends a drag of a creature held up, or round raised ground, or one cut where none found a way, tests nothing.
+    assert.ok(sent > 300 && aloft > 160 && routes > 220 && cuts > 40, JSON.stringify({ sent, aloft, routes, cuts }));
+  });
+
+  test("a cut where no way was found is one the server takes whole, else the plain leg there, else a stand further back (review FU20A-CUTSTOP)", () => {
+    // Relief seed 65: a Large holder's straight walk, cut at (18, 11) up on 10 ft ground, sent its own route there, which a ledge stops.
+    const r65 = rng(65);
+    const relief = towCase(r65, true);
+    const k65 = relief.state.tokens.kira!;
+    const raw65 = { x: Math.max(0, Math.min(27, k65.x + int(r65, -8, 8))), y: Math.max(0, Math.min(27, k65.y + int(r65, -8, 8))) };
+    // Rugged ground under Large holders (Opus's probe, seeds 602, 1064 and 1257): each cut a straight walk's own route that
+    // the server took only as the whole leg's, never as the shorter cut. In seed 4508 no cut route passes there, and the plain leg does.
+    const cases = [{ where: "relief seed 65", state: relief.state, who: relief.who, raw: raw65 }, ...[602, 1064, 1257, 4508].map((seed) => ({ where: `rugged seed ${seed}`, ...ruggedTow(seed) }))];
+    const sent: Record<string, Op | null> = {};
+    for (const { where, state, who, raw } of cases) {
+      const drag = dragOf(copyFor(state, who), "player", "kira", raw);
+      assert.equal(drag.answer.kind, "none", where);
+      assert.ok(drag.plan.stop, `${where}: the walk is held`);
+      const kira = state.tokens.kira!;
+      sent[where] = drag.op as Op | null;
+      if (!drag.op) {
+        // Held where it stands: no stand on the way is one the server takes.
+        assert.deepEqual(drag.preview.to, { x: kira.x, y: kira.y }, where);
+        continue;
+      }
+      const allowed = canApply(drag.op as Op, who, state, { canUseAsset: () => true });
+      assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message} for ${JSON.stringify(drag.op)}`);
+      const applied = applyOp(state, drag.op as Op, who, env(10));
+      assert.ok(applied.ok, where);
+      assert.deepEqual(drag.preview.to, { x: applied.state.tokens.kira!.x, y: applied.state.tokens.kira!.y }, `${where}: the picture showed another spot`);
+    }
+    // Each kind of cut: a shorter route, a stand further back, the plain leg, and none at all.
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(sent).map(([where, op]) => [where, op && op.t === "token.move" ? [op.x, op.y, op.route?.length ?? 0] : null])),
+      { "relief seed 65": [18.5, 11, 1], "rugged seed 602": [16.5, 13, 1], "rugged seed 1064": null, "rugged seed 1257": [12, 8.5, 1], "rugged seed 4508": [21, 16.5, 0] },
+    );
   });
 });
 
@@ -787,3 +822,33 @@ describe("a holder's route search keeps the creatures it drags beside it to grou
     assert.ok(compared > 300 && towedAway > 80 && routes > 70 && named > 50 && walkerReads < 40, JSON.stringify({ compared, towedAway, routes, named, walkerReads }));
   });
 });
+
+/**
+ * Opus's rugged tow probe (review FU20A-CUTSTOP): a Medium, Large or Huge
+ * holder dragging a grappled goblin on its side, on its turn, over scattered
+ * raised squares 1 to 10 ft high, with a wall or two across the scene that
+ * leave a 10 ft gap, dragged up to 45 ft off.
+ */
+function ruggedTow(seed: number): { state: RoomState; who: Viewer; raw: Point } {
+  const r = rng(seed);
+  const edges: Record<string, EdgeFeature> = {};
+  for (let i = int(r, 0, 2); i > 0; i--) {
+    const at = int(r, 4, 24);
+    const across = chance(r, 0.5);
+    const gap = int(r, 1, 26);
+    for (let v = 0; v < 30; v++) if (v !== gap && v !== gap + 1) edges[across ? `${v},${at},n` : `${at},${v},w`] = { kind: "wall" };
+  }
+  const heights: Record<string, number> = {};
+  for (let k = int(r, 10, 40); k > 0; k--) heights[`${int(r, 0, 27)},${int(r, 0, 27)}`] = pick(r, [1, 3, 5, 10]);
+  const size = pick(r, ["large", "large", "huge", "medium"] as const);
+  const side = size === "huge" ? 3 : size === "large" ? 2 : 1;
+  const hx = int(r, 6, 18);
+  const hy = int(r, 6, 18);
+  const kira = token("kira", { name: "Kira", kind: "pc", size, ownerIds: ["p1"], x: hx, y: hy, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+  const [ox, oy] = pick(r, [[-1, 0], [side, 0], [0, -1], [0, side]] as const);
+  const gob = grappled("gob1", { name: "Goblin", x: hx + ox, y: hy + oy, attached: { to: "kira", kind: "drag" } });
+  for (const [t, w] of [[kira, side], [gob, 1]] as const) for (let y = t.y; y < t.y + w; y++) for (let x = t.x; x < t.x + w; x++) delete heights[`${x},${y}`];
+  const state = onTurn(world({ edges, heights, tokens: [kira, gob] }), "kira");
+  const raw = { x: Math.max(0, Math.min(26, hx + int(r, -9, 9))), y: Math.max(0, Math.min(26, hy + int(r, -9, 9))) };
+  return { state, who: P1, raw };
+}
