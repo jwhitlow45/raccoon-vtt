@@ -206,8 +206,8 @@ type TrapDue = { id: string, at: string, how: TrapHow,   // id: its line in trap
 
 | Op | Who | Notes |
 | --- | --- | --- |
-| `trap.create { trap }` | DM | A plain id. `due` and `noticedBy` refused, `usesLeft` 1 to 99 or absent. Every ref (the door, the lights, stamps and tokens of its actions) must be on the trap's scene, else `invalid`. |
-| `trap.update { trapId, patch: { name?, zone?, state?, found?, rig? } }` | DM | `rig` names only the fields that changed, each replaced whole, never `due` or `noticedBy`. A change of `find` clears `noticedBy`. `usesLeft` 1 to 99, or null for no limit. Arming a trap whose uses are 0 needs uses in the same patch: "Give it at least one use, or no limit." |
+| `trap.create { trap }` | DM | A plain id. `due` and `noticedBy` refused, `usesLeft` 1 to 99 or absent. Every ref (the door, the lights, stamps and tokens of its actions) must be on the trap's scene, else `invalid`, naming what is wrong ("Imp is on another scene", "a light it sets was deleted"). |
+| `trap.update { trapId, patch: { name?, zone?, state?, found?, rig? } }` | DM | `rig` names only the fields that changed, each replaced whole, never `due` or `noticedBy`. A change of `find` clears `noticedBy`. `usesLeft` 1 to 99, or null for no limit. Arming a trap whose uses are 0 needs uses in the same patch: "Give it at least one use, or no limit." An edit of `actions` checks only the actions it adds or changes, so one whose target has gone since stays, for the card to name when the trap goes off. |
 | `trap.delete { trapId }` | DM | |
 | `trap.spring { trapId, tokenIds }` | DM | 0 to 50 creatures on its scene as the ones that set it off. Whatever its state, stops nothing, uses down to 0 at least, its actions run as a DM op's springing does (5.5), and its line as 6.3 says. |
 | `trap.act { trapId, due }` | DM | Do its effects: runs the trap's actions and players' line for a pending occurrence not `acted`, which only a private springing in a player's op leaves, and marks it `acted` in the same op. Refused `invalid`, "It was done meanwhile.", otherwise. The save and damage stay pending, settled as below. |

@@ -195,6 +195,22 @@ describe("making, changing and deleting traps (docs/design-v1-traps.md 6.2)", ()
     state = { ...state, lights };
     assert.equal(apply(state, { t: "trap.update", trapId: "t", patch: { name: "Still here" } }).traps.t!.name, "Still here");
     assert.match(refused(state, { t: "trap.update", trapId: "t", patch: { rig: { actions: [{ light: "brazier", on: true }] } } }).message, /light/);
+    // An actions edit reads only the actions it adds or changes: the one with the gone light stays, for the card to name.
+    const more = apply(state, { t: "trap.update", trapId: "t", patch: { rig: { actions: [{ light: "brazier", on: false }, { door: { edge: "5,5,n" }, state: "locked" }] } } });
+    assert.equal(more.traps.t!.rig!.actions.length, 2);
+  });
+
+  test("a refused action names what is wrong with its target", () => {
+    const state = table();
+    state.lights.far = { ...state.lights.brazier!, id: "far", sceneId: "s2" };
+    state.tokens.away = token("away", { name: "Imp", sceneId: "s2" });
+    const base = input("t");
+    const withActions = (actions: TrapInput["rig"]["actions"]) => ({ t: "trap.create" as const, trap: { ...base, rig: { ...base.rig, actions } } });
+    assert.equal(refused(state, withActions([{ light: "far", on: false }])).message, 'the light "Light-Brazier" is on another scene');
+    assert.equal(refused(state, withActions([{ light: "gone", on: false }])).message, "a light it sets was deleted");
+    assert.equal(refused(state, withActions([{ show: { tokenId: "away" } }])).message, "Imp is on another scene");
+    assert.equal(refused(state, withActions([{ show: { tokenId: "nobody" } }])).message, "a creature it shows was deleted");
+    assert.equal(refused(state, withActions([{ show: { stampId: "nothing" } }])).message, "a stamp it shows was deleted");
   });
 
   test("delete takes the trap away, and a gone one says so", () => {

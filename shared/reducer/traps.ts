@@ -1,7 +1,7 @@
 import { keys } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { MIN_HEIGHT_FT, type LogEntry, type LogEvent, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
-import { seenByNonOwners } from "../project.ts";
+import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { groundAt } from "../rules/heights.ts";
 import { doorExists, isPlainId } from "../rules/traps.ts";
@@ -63,17 +63,36 @@ function trapProblem(tx: Tx, trap: Trap): string | null {
   return null;
 }
 
-/** Why a ref of the trap's own (its door, its actions' doors, lights, stamps and tokens) is not on its scene, or null. */
-function refProblem(tx: Tx, trap: Trap, zone: boolean, actions: boolean): string | null {
+/**
+ * Why a ref of the trap's own (its door, its actions' doors, lights,
+ * stamps and tokens) is not on its scene, or null, naming what is wrong.
+ * Only the actions an edit adds or changes are read: one whose target has
+ * gone since is the card's to name when the trap goes off (5.7), so it
+ * never blocks the DM's other edits.
+ */
+function refProblem(tx: Tx, trap: Trap, zone: boolean, actions: boolean, had: readonly TrapAction[] = []): string | null {
   const sceneId = trap.sceneId;
   if (zone && "door" in trap.zone && !doorExists(tx.state, sceneId, trap.zone.door)) return "that door is not on the trap's scene";
   if (!actions) return null;
+  const kept = new Set(had.map((a) => stableStringify(a)));
   for (const a of trap.rig?.actions ?? []) {
+    if (kept.has(stableStringify(a))) continue;
     if ("door" in a && !doorExists(tx.state, sceneId, a.door)) return "a door it sets is not on the trap's scene";
-    if ("light" in a && tx.state.lights[a.light]?.sceneId !== sceneId) return "a light it sets is not on the trap's scene";
+    if ("light" in a) {
+      const light = tx.state.lights[a.light];
+      if (!light) return "a light it sets was deleted";
+      if (light.sceneId !== sceneId) return `the light ${light.label ? `"${light.label}"` : "it sets"} is on another scene`;
+    }
     if ("show" in a) {
-      const on = "tokenId" in a.show ? tx.state.tokens[a.show.tokenId]?.sceneId : tx.state.stamps[a.show.stampId]?.sceneId;
-      if (on !== sceneId) return "what it shows is not on the trap's scene";
+      if ("tokenId" in a.show) {
+        const token = tx.state.tokens[a.show.tokenId];
+        if (!token) return "a creature it shows was deleted";
+        if (token.sceneId !== sceneId) return `${token.name} is on another scene`;
+      } else {
+        const stamp = tx.state.stamps[a.show.stampId];
+        if (!stamp) return "a stamp it shows was deleted";
+        if (stamp.sceneId !== sceneId) return "a stamp it shows is on another scene";
+      }
     }
   }
   return null;
@@ -116,7 +135,7 @@ export function trapUpdate(tx: Tx, op: OpOf<"trap.update">): void {
     next.rig = rig as TrapRig;
   }
   if (p.state === "armed" && next.rig?.usesLeft === 0) throw invalid(GIVE_IT_USES);
-  const why = trapProblem(tx, next) ?? refProblem(tx, next, p.zone !== undefined, p.rig?.actions !== undefined);
+  const why = trapProblem(tx, next) ?? refProblem(tx, next, p.zone !== undefined, p.rig?.actions !== undefined, trap.rig?.actions);
   if (why) throw invalid(why);
   tx.write(keys.trap(trap.id), next);
 }
