@@ -58,12 +58,14 @@ type Lifted = PlacedToken & { sceneId: SceneId; elevation: number };
  * How far a token is above the ground under its footprint, in feet, 0 when
  * it is on or inside the ground. With `at`, where a drag would drop it,
  * the lift it would land with there, by the drop's own landing rule
- * (features/movement/drop.ts `landedElevation`, section 4.2), so the shadow
- * during a drag never disagrees with where the token lands.
+ * (features/movement/drop.ts, section 4.2): `landing` when the caller has
+ * the drop's (dropLanding, which lands a token on a holder by the holder),
+ * else its own footing (`landedElevation`). So the shadow during a drag
+ * never disagrees with where the token lands.
  */
-export function tokenLift(chunks: Chunks, token: Lifted, at?: { x: number; y: number }): number {
+export function tokenLift(chunks: Chunks, token: Lifted, at?: { x: number; y: number }, landing?: number): number {
   if (!at || (at.x === token.x && at.y === token.y)) return Math.max(0, token.elevation - footprintGround(chunks, token));
   // A move without the squeeze flag clears it, so the landing is judged at full size, as the drop judges it.
   const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: undefined });
-  return Math.max(0, landedElevation(chunks, token, at) - there);
+  return Math.max(0, (landing ?? landedElevation(chunks, token, at)) - there);
 }

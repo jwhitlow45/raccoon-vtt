@@ -6,6 +6,7 @@ import type { ViewToken } from "../lib/scene.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomView } from "../state/view.ts";
+import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
 const EMPTY: Record<string, BuildChunk> = {};
@@ -32,11 +33,15 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   const at = props.at ?? spot;
   const ax = at?.x;
   const ay = at?.y;
-  const lift = useMemo(
-    () => tokenLift(chunks, token, ax === undefined || ay === undefined ? undefined : { x: ax, y: ay }),
-    // The fields that place the token, not the token itself, so a change of its HP reads no ground.
-    [chunks, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay],
-  );
+  // Only a token being dragged reads the room, for the drop's landing: by its holder while it sits on one every player sees.
+  const view = useRoomView((s) => (ax === undefined ? null : s.view));
+  const role = useRoomView((s) => s.you?.role ?? "player");
+  const lift = useMemo(() => {
+    const spotAt = ax === undefined || ay === undefined ? undefined : { x: ax, y: ay };
+    const landing = spotAt && view ? dropLanding(dropView(view, role), token, spotAt) : undefined;
+    return tokenLift(chunks, token, spotAt, landing);
+    // The fields that place the token, not the token itself, so a change of its HP reads no ground. The room only while dragged.
+  }, [chunks, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay, view, role]);
   const shape = shadowShape(lift, { w, h });
   if (!shape) return null;
   return (

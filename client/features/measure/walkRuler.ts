@@ -5,7 +5,7 @@ import { footprintGround } from "#shared/rules/heights.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
-import { landedElevation, routeTarget } from "../movement/drop.ts";
+import { dropLanding, dropView, routeTarget, walkerOf } from "../movement/drop.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
 import { extraWords, joinWords } from "./movement.ts";
 import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
@@ -111,7 +111,7 @@ function keptFor(view: RoomState, sceneId: string): Kept {
 }
 
 function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter): string {
-  return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
+  return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${(walker as { footing?: string }).footing ?? ""},${counter.h},${counter.v},${everything}`;
 }
 
 /**
@@ -204,6 +204,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   let walker = first ? walkerAt(view, input.sceneId, first) : null;
   if (!walker || stops.length < 2) return null;
   const size = footprintSize(walker);
+  const seen = dropView(view, input.viewer.role);
   const rules = { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal };
   const counter: DiagonalCounter = { h: 0, v: 0 };
   const legs: WalkLeg[] = [];
@@ -216,14 +217,15 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
     const stop = on ? tokenStop(on) : drawn;
     const from = { x: walker.x, y: walker.y };
-    const target = routeTarget(view, walker, { x: stop.x - size.w / 2, y: stop.y - size.h / 2 });
-    const landing = landedElevation(view.buildChunks, walker, target);
+    const target = routeTarget(seen, walker, { x: stop.x - size.w / 2, y: stop.y - size.h / 2 });
+    // Where a drag would land it and how it would walk there: off a holder every player sees, by the holder (drop.ts dropLanding, walkerOf).
+    const landing = dropLanding(seen, walker, target);
     const end = { x: target.x, y: target.y, elevation: landing };
     let taken: LegCost;
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walker, input, counter, target, budget, progress));
+    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walkerOf(seen, walker), input, counter, target, budget, progress));
     if (answer) progress.answers[k] = answer;
     if (!answer) {
       searching = true;
@@ -232,7 +234,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
       continue;
     }
     if (answer.kind === "route") {
-      const points = routePoints(view.buildChunks, walker, answer.pieces, landing);
+      const points = routePoints(view.buildChunks, walkerOf(seen, walker, target), answer.pieces, landing);
       taken = routeFeet(points, answer.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
       corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
       pieces.push(...answer.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
