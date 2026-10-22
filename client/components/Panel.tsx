@@ -20,11 +20,19 @@ import { Icon } from "./Icon.tsx";
  * deleting the room), in `dangerText`, 5.9:1 on a surface. `action` sits
  * at the right, such as "Reorder" beside "All scenes".
  */
-export function SectionLabel(props: { children: ReactNode; id?: string; tone?: "danger"; action?: ReactNode; level?: 2 | 3 | 4 }) {
+export function SectionLabel(props: {
+  children: ReactNode;
+  id?: string;
+  tone?: "danger";
+  action?: ReactNode;
+  level?: 2 | 3 | 4;
+  /** -1 for a label that takes focus when what had it went away, as a re-sync's sections do (docs/design-v1-resync.md 3.6). */
+  tabIndex?: number;
+}) {
   const Heading = props.level === 2 ? "h2" : props.level === 4 ? "h4" : "h3";
   const label = (
     // Its own width first ("1 1 auto", as FoldLabel's), so in the wrapping row below an action that does not fit beside it wraps under it. With a basis of 0 the action always took the line, and narrow fonts squeezed the label to a few pixels, its words running into the buttons.
-    <Heading id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}>
+    <Heading id={props.id} tabIndex={props.tabIndex} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}>
       {props.children}
     </Heading>
   );

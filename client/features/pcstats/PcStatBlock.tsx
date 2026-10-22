@@ -15,7 +15,9 @@ import { useSrdList } from "../tokens/StatSummary.tsx";
 import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
 import { knownFormPatch, knownFormsIn, missingFormText, rememberedDruidLevel } from "./knownForms.ts";
-import { useOpenPcStats } from "./open.ts";
+import { useOpenPcStats, useOpenResync } from "./open.ts";
+import { lastSyncedLine, resyncNumber } from "./resync.ts";
+import { ddbCharacterId } from "#shared/ddb/link.ts";
 import { PcStatsView } from "./PcStatsView.tsx";
 import { END_SHAPE, shapeNote } from "./shape.ts";
 import { useCharacterRollNumbers } from "./useRollNumbers.ts";
@@ -30,8 +32,11 @@ import { ShapePicker } from "./ShapePicker.tsx";
  * "Take a shape". With a block or a shape, "Take a shape" sits on the fold's
  * row. A shape shows what it does, the numbers the character rolls with in
  * it, the creature's block and "End the shape". Without one, the block's
- * view and Edit. A Druid's known forms come first, each a one-tap Wild
- * Shape, in no shape or in Wild Shape (docs/design-v1-known-forms.md 5.3).
+ * view and Edit. Edit has "Re-sync from D&D Beyond" beside it, in a shape
+ * too, for a character synced from D&D Beyond or linked to it, and when it
+ * last synced under them (docs/design-v1-resync.md 1.1). A Druid's known
+ * forms come first, each a one-tap Wild Shape, in no shape or in Wild
+ * Shape (docs/design-v1-known-forms.md 5.3).
  */
 export function PcStatBlock(props: {
   character: Character;
@@ -39,6 +44,7 @@ export function PcStatBlock(props: {
 }) {
   const { character, fold } = props;
   const openStats = useOpenPcStats();
+  const openSync = useOpenResync();
   const you = useRoomView((s) => s.you);
   // A token's owner who does not own its character gets no section at all (statBlockShown), and never the buttons that change it.
   const edits = editsPcStats(you, character);
@@ -88,8 +94,15 @@ export function PcStatBlock(props: {
         {edits ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
             {character.stats ? <SmallButton onClick={() => openStats(character.id)}>Edit</SmallButton> : add()}
+            {/* Re-sync needs a block and a D&D Beyond number to fetch, the sheet link's or the last sync's (docs/design-v1-resync.md 1.1). */}
+            {character.stats && resyncNumber(character, ddbCharacterId) ? (
+              <SmallButton wrap onClick={() => openSync(character.id)}>
+                Re-sync from D&amp;D Beyond
+              </SmallButton>
+            ) : null}
           </div>
         ) : null}
+        {edits && character.stats && character.ddbSync ? <Help>{lastSyncedLine(character.ddbSync.at)}</Help> : null}
       </Group>
       {picker}
     </>

@@ -1,4 +1,4 @@
-import { Children, isValidElement, type CSSProperties, type ReactNode, type Ref } from "react";
+import { Children, isValidElement, useId, type CSSProperties, type ReactNode, type Ref } from "react";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -39,6 +39,13 @@ export function Row(props: {
   /** For a row that shows or hides what is under it, as a disclosure: its button's `aria-expanded`. */
   expanded?: boolean;
   /**
+   * A detail that wraps onto as many lines as it needs, never cut, and that
+   * describes the button rather than naming it, so a disclosure is named by
+   * its title alone, as a re-sync's group of changes is with its summary
+   * (docs/design-v1-resync.md 3.3).
+   */
+  fullDetail?: boolean;
+  /**
    * A stable id for a row that opens a panel's subpage, as `data-opener`,
    * so Back finds this row again even after the list mounts anew,
    * reorders, or holds another row of the same name
@@ -48,6 +55,9 @@ export function Row(props: {
   style?: CSSProperties;
 }) {
   const card = props.card === true || props.onClick !== undefined;
+  const titleId = useId();
+  const detailId = useId();
+  const full = props.fullDetail === true && props.detail !== undefined && props.detail !== null;
   const look: CSSProperties = props.chosen || props.pressed
     ? { background: theme.color.accentTint, border: `${theme.line.border}px solid ${theme.color.accent}` }
     : props.turn
@@ -79,11 +89,19 @@ export function Row(props: {
     <>
       {leading ? <span style={{ flex: "none", display: "grid", placeItems: "center" }}>{leading}</span> : null}
       <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
-        <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span id={full ? titleId : undefined} style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {props.title}
         </span>
         {props.detail ? (
-          <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.tight, color: props.disabled ? theme.color.textDisabled : theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span
+            id={full ? detailId : undefined}
+            style={{
+              fontSize: theme.font.small,
+              lineHeight: full ? theme.leading.body : theme.leading.tight,
+              color: props.disabled ? theme.color.textDisabled : theme.color.textMuted,
+              ...(full ? { overflowWrap: "anywhere" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }),
+            }}
+          >
             {props.detail}
           </span>
         ) : null}
@@ -104,6 +122,8 @@ export function Row(props: {
       type="button"
       data-opener={props.opener}
       aria-label={props.label}
+      aria-labelledby={full && props.label === undefined ? titleId : undefined}
+      aria-describedby={full ? detailId : undefined}
       aria-current={props.chosen ? true : undefined}
       aria-pressed={props.pressed}
       aria-expanded={props.expanded}

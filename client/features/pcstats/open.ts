@@ -31,3 +31,23 @@ export function useOpenPcStats(): (characterId: string) => void {
   const scope = useRoomScope();
   return (characterId) => openPcStats(scope, characterId);
 }
+
+/**
+ * The re-sync dialogs open on this page (docs/design-v1-resync.md 1.2),
+ * held apart from the Stat block group that opened them, as the editors
+ * are, so a panel that shows another token never takes a review with it.
+ */
+export const openResyncSlot = scopeSlot(() => createStore<OpenPcStats>(() => ({ list: [], next: 1 })));
+
+/** Opens a character's re-sync dialog, one per character: a second press leaves the open one. */
+export function openResync(scope: RoomScope, characterId: string): void {
+  const store = scope.get(openResyncSlot);
+  if (store.getState().list.some((e) => e.characterId === characterId)) return;
+  store.setState((s) => ({ list: [...s.list, { characterId, key: s.next }], next: s.next + 1 }));
+}
+
+/** `openResync(characterId)` for a component, with this page's scope. */
+export function useOpenResync(): (characterId: string) => void {
+  const scope = useRoomScope();
+  return (characterId) => openResync(scope, characterId);
+}

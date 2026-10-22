@@ -44,17 +44,23 @@ import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/lin
 import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
 import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
 import { parseStatBlockText } from "../monsters/parse.ts";
-import { closePcStats, openPcStatsSlot } from "./open.ts";
+import { closePcStats, openPcStatsSlot, openResyncSlot } from "./open.ts";
+import { ResyncDialog } from "./Resync.tsx";
 import { partsText, rollReading } from "./reading.ts";
 
-/** Draws the player character stat block editors open on this page (open.ts), beside the page, as EditorHost does the monsters'. */
+/** Draws the player character stat block editors and re-sync dialogs open on this page (open.ts), beside the page, as EditorHost does the monsters'. */
 export function PcStatsHost() {
   const store = useScoped(openPcStatsSlot);
   const list = useStore(store, (s) => s.list);
+  const resyncs = useScoped(openResyncSlot);
+  const syncing = useStore(resyncs, (s) => s.list);
   return (
     <>
       {list.map((e) => (
         <PcStatsEditor key={e.key} characterId={e.characterId} onClose={() => closePcStats(store, e.key)} />
+      ))}
+      {syncing.map((e) => (
+        <ResyncDialog key={e.key} characterId={e.characterId} onClose={() => closePcStats(resyncs, e.key)} />
       ))}
     </>
   );
@@ -410,7 +416,7 @@ function FillFrom(props: { onPaste(): void; onDdb(): void }) {
  * number is known, the step links to the data's own page, whose text can be
  * copied whole.
  */
-function DdbStep(props: {
+export function DdbStep(props: {
   link: string;
   onLink(link: string): void;
   onGet(): void;
