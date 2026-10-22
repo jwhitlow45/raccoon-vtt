@@ -9,6 +9,7 @@ import { pitOpen } from "#shared/rules/traps.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LEVEL_BANDS, TRAP_PRESET_IDS } from "#shared/srd/traps.ts";
 import { actor, DM, env, room, token } from "#shared/testutil.ts";
+import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   afterSummary,
@@ -28,6 +29,7 @@ import {
   tapRect,
   tokensOn,
   trapAt,
+  trapNameShown,
   triggerSummary,
   wireBetween,
   wireEnd,
@@ -96,6 +98,15 @@ describe("drawing a trap's zone (docs/design-v1-traps.md 4.1)", () => {
     rects = Array.from({ length: LIMITS.trapRects }, (_, i) => ({ x: i, y: 0, w: 1, h: 1 }));
     const nine = withRect(rects, { x: 9, y: 9, w: 1, h: 1 });
     assert.equal(nine.ok, false);
+  });
+});
+
+describe("a trap's name on the map (LP13-TR-9)", () => {
+  test("shows only at a zoom where a Medium creature's name shows, so a zoomed-out map keeps its badges alone", () => {
+    assert.equal(trapNameShown(DECOR_MIN_PX), true);
+    assert.equal(trapNameShown(40), true);
+    assert.equal(trapNameShown(DECOR_MIN_PX - 0.5), false, "a phone held sideways at the fitted zoom of a 36 x 24 crypt");
+    assert.equal(trapNameShown(6), false);
   });
 });
 
