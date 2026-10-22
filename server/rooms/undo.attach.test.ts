@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState, Viewer } from "#shared/model.ts";
+import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { DEPENDED_ON, PARENT_GONE } from "#shared/reducer/misc.ts";
@@ -347,6 +348,34 @@ describe("a hidden link never lends a player's undo a right (8.0, review AT-O-16
     both(a, b, (t) => t.play(P1, { t: "token.move", tokenId: "thorn", x: 9, y: 6 }));
     both(a, b, (t) => t.play(DM, { t: "token.update", tokenId: "thorn", patch: { locked: true } }));
     assert.equal(both(a, b, (t) => t.undo()), "that token is locked");
+  });
+});
+
+describe("a restore walks up only links to holders the player sees, from its first step (8.0, review AT-O-20)", () => {
+  test("a redo that puts the DM's torch back on a hidden imp perched on Thorn's horse meets the walls as the same redo without the imp", () => {
+    // The same restore, sent to a room with the imp and one without it. The torch rides the horse now, and a wall
+    // since stands across its way to the spot put back: carried by the horse it would skip the wall.
+    const torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 4, y: 4, attached: { to: "horse", kind: "carry" } });
+    const answer = (withImp: boolean) => {
+      const t = table((s) => {
+        s.tokens.torch = torch;
+        if (withImp) s.tokens.imp = token("imp", { name: "Imp", size: "tiny", x: 5, y: 5, visibility: "dm", attached: { to: "horse", kind: "perch" } });
+        s.buildChunks["s1:0,0"] = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: { "6,4,w": { kind: "wall" }, "6,5,w": { kind: "wall" } } };
+      });
+      const op: Op = {
+        t: "sys.restore",
+        from: "redo",
+        deps: true,
+        entries: [
+          { key: "token:horse", value: t.state.tokens.horse! },
+          { key: "token:torch", value: { ...torch, x: 7, y: 5, attached: { to: "imp", kind: "carry" } } },
+        ],
+      };
+      const d = canApply(op, P1, t.state, { canUseAsset: () => true });
+      return d.ok ? "ok" : d.message;
+    };
+    assert.equal(answer(false), WALL_IN_THE_WAY);
+    assert.equal(answer(true), answer(false));
   });
 });
 

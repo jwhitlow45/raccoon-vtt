@@ -1404,16 +1404,16 @@ function restoredTokens(op: OpOf<"sys.restore">): Map<string, unknown> {
  * out, and needs no right to move it of its own.
  */
 function carriedThroughout(c: Check, tokenId: string, value: unknown, restoring: ReadonlyMap<string, unknown>): string | undefined {
-  const linkOf = (id: string, put: boolean): string | undefined => {
-    const v = put && restoring.has(id) ? restoring.get(id) : c.state.tokens[id];
+  // Up links the player sees alone, from the first: a hidden holder between never carries a token through (8.0).
+  const holderIn = (id: string, v: unknown): string | undefined => {
     const to = v && typeof v === "object" ? (v as Token).attached?.to : undefined;
-    // Up links the player sees alone: a hidden holder between never carries a token through (8.0).
     return to !== undefined && c.visibleToken(to) && c.state.tokens[to]?.sceneId === c.state.tokens[id]?.sceneId ? to : undefined;
   };
+  const linkOf = (id: string, put: boolean): string | undefined => holderIn(id, put && restoring.has(id) ? restoring.get(id) : c.state.tokens[id]);
   const under = (put: boolean): string | undefined => {
     const visited = new Set<string>([tokenId]);
     let found: string | undefined;
-    for (let up = put && value && typeof value === "object" ? (value as Token).attached?.to : linkOf(tokenId, false); up !== undefined && !visited.has(up); up = linkOf(up, put)) {
+    for (let up = put && value && typeof value === "object" ? holderIn(tokenId, value) : linkOf(tokenId, false); up !== undefined && !visited.has(up); up = linkOf(up, put)) {
       visited.add(up);
       if (restoring.has(up) && namedMoveCheck(c, up).ok) found = up;
     }
