@@ -31,7 +31,8 @@ const bree = (stats?: PcStats): Character => character("bree", { name: "Bree", l
 function render(c: Character, fill: PcFill, ticks?: Set<string>): { html: string; plan: SyncPlan } {
   const plan = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill });
   const t = ticks ?? defaultTicks(plan);
-  const html = renderToStaticMarkup(createElement(SyncReview, { plan, result: syncResult(plan, t), ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, labelId: (s: string) => `label-${s}` }));
+  const result = syncResult(plan, t);
+  const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}` }));
   return { html, plan };
 }
 
@@ -53,6 +54,23 @@ describe("the review's markup", () => {
     assert.match(html, /aria-pressed="false"[^>]*>Overwrite all/);
     assert.match(html, /Overwrite with Wisdom/);
     assert.match(html, /<p tabindex="-1"[^>]*>Read from D&amp;D Beyond: Bree, level 5\. Last synced on/);
+  });
+
+  test("Nothing new shows only when nothing would change, and an empty Changes is left out when Also set has a line (RS-O-31)", () => {
+    const c0 = bree();
+    const fill = fillOf({ spellAbility: "wis" });
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill });
+    const synced = { ...c0, ...afterSync(c0, syncPatch(c0, syncResult(p0, defaultTicks(p0)))!.patch, "2026-10-20T19:00:00.000Z") } as Character;
+    const same = render(synced, fill).html;
+    assert.match(same, />Nothing new from D&amp;D Beyond\.</);
+    const levelUp = render(synced, { ...fill, level: 6, actor: { ...fill.actor, hpMax: 45 } });
+    assert.deepEqual(levelUp.plan.items, []);
+    assert.deepEqual(levelUp.plan.also.map((a) => a.id), ["also:level", "also:hpMax"]);
+    assert.doesNotMatch(levelUp.html, /Nothing new/);
+    assert.doesNotMatch(levelUp.html, /label-changes/, "no Changes section");
+    assert.match(levelUp.html, /id="label-also"/);
+    // With every Also set line unticked, the record still takes the new level and maximum, so it is not nothing new.
+    assert.doesNotMatch(render(synced, { ...fill, level: 6, actor: { ...fill.actor, hpMax: 45 } }, new Set()).html, /Nothing new/);
   });
 
   test("past 10 lines Changes folds into its groups, each a disclosure named by its group and described by its summary", () => {

@@ -15,6 +15,7 @@ import {
   defaultTicks,
   fieldOf,
   hash12,
+  leavesAsIs,
   planSync,
   rollHash,
   recordFits,
@@ -689,6 +690,20 @@ describe("the review's checks (3.3)", () => {
     assert.deepEqual(afterSync(after, undo.patch, AT), first);
     assert.equal(undoSync(first, sent.patch, undefined), null, "with no at in Apply's answer, Undo is off");
     assert.equal(pcStatsForImport.safeParse(after.stats).success, true);
+  });
+
+  test("a result leaves the character as it is only when no part, field or record would change, as Apply's null says (RS-O-31)", () => {
+    const first = synced(fillOf(empty()));
+    for (const mode of ["resync", "editor"] as const) {
+      const same = plan(first, fillOf(empty()), mode);
+      assert.equal(leavesAsIs(same, syncResult(same, defaultTicks(same))), true, mode);
+      assert.equal(syncPatch(first, syncResult(same, defaultTicks(same))), null);
+      const up = plan(first, fillOf(empty(), { level: 6 }), mode);
+      assert.deepEqual(up.items.filter((i) => i.section === "changes"), [], "a level-up alone has no Changes line");
+      assert.equal(leavesAsIs(up, syncResult(up, defaultTicks(up))), false, `${mode}: the level comes in`);
+      assert.equal(leavesAsIs(up, syncResult(up, new Set())), false, `${mode}: unticked, the record still takes level 6`);
+    }
+    assert.equal(leavesAsIs(plan(bree(undefined), fillOf(empty())), syncResult(plan(bree(undefined), fillOf(empty())), new Set())), false, "a first sync makes a block");
   });
 
   test("a finished record fits only within the route's schema and 6 KiB, so Apply and Use it never send one the server refuses (RS-O-30)", () => {

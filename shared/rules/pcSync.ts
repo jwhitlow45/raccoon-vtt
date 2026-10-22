@@ -970,6 +970,16 @@ export function sameRecord(a: Omit<DdbSync, "at"> & { at?: string }, b: (Omit<Dd
   return same(x, y);
 }
 
+/**
+ * Whether a review's result leaves the block, the level, the fields beside
+ * it and the record as they are, so the review says it has nothing new
+ * (3.3). The dialog asks `syncPatch` for null, which is the same test.
+ */
+export function leavesAsIs(plan: SyncPlan, result: SyncResult): boolean {
+  const { input } = plan;
+  return input.stats !== undefined && same(result.stats, input.stats) && result.level === input.level && Object.keys(result.also).length === 0 && sameRecord(result.record, input.character.ddbSync);
+}
+
 /** The character a sync starts from, as the dialog holds it. */
 export type SyncCharacter = Pick<Character, "name" | "level" | "actor" | "stats" | "ddbSync">;
 

@@ -374,6 +374,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
             onBulk={(ticks) => send({ t: "bulk", ticks })}
             name={who}
             character={plan.input.character as Character}
+            nothingNew={nothing}
             disabled={applying}
             firstRef={first}
             labelId={labelId}

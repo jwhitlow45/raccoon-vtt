@@ -45,6 +45,8 @@ export function SyncReview(props: {
   onBulk(ticks: Set<string>): void;
   name: string;
   character: Pick<Character, "name" | "actor">;
+  /** Nothing would change: no part, field or record. Only then does an empty Changes say so, and otherwise it is left out. */
+  nothingNew: boolean;
   /** While Apply waits, the review holds still. */
   disabled?: boolean;
   firstRef?: Ref<HTMLParagraphElement>;
@@ -92,21 +94,23 @@ export function SyncReview(props: {
             )),
           )
         : null}
-      {section(
-        "changes",
-        changes.length > 0 ? `Changes from D&D Beyond (${changes.length})` : "Changes from D&D Beyond",
-        changes.length === 0 ? (
-          <p style={LINE}>{NOTHING_NEW}</p>
-        ) : changes.length > FOLD_PAST ? (
-          <Groups items={changes} blocks={blocks} first={first} folded render={(item) => <p style={LINE}>{changeLine(item, blocks, first)}</p>} />
-        ) : (
-          changes.map((item) => (
-            <p key={item.id} style={LINE}>
-              {changeLine(item, blocks, first)}
-            </p>
-          ))
-        ),
-      )}
+      {changes.length > 0
+        ? section(
+            "changes",
+            `Changes from D&D Beyond (${changes.length})`,
+            changes.length > FOLD_PAST ? (
+              <Groups items={changes} blocks={blocks} first={first} folded render={(item) => <p style={LINE}>{changeLine(item, blocks, first)}</p>} />
+            ) : (
+              changes.map((item) => (
+                <p key={item.id} style={LINE}>
+                  {changeLine(item, blocks, first)}
+                </p>
+              ))
+            ),
+          )
+        : props.nothingNew
+          ? section("changes", "Changes from D&D Beyond", <p style={LINE}>{NOTHING_NEW}</p>)
+          : null}
       {plan.also.length > 0
         ? section(
             "also",

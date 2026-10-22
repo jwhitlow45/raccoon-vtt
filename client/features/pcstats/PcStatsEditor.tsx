@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey } from "#shared/model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
 import { fillSummary, type PcFill } from "#shared/rules/pcFill.ts";
-import { defaultTicks, recordFits, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { defaultTicks, leavesAsIs, recordFits, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { pcActorNumbers, pcDerived, pcProficiency, srdOnPass, unknownOnPass, type PcNumber } from "#shared/rules/pcStats.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -378,6 +378,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
             onBulk={(next) => send({ t: "ticks", ticks: next })}
             name={name.current}
             character={plan.input.character as Character}
+            nothingNew={leavesAsIs(plan, result)}
             labelId={(section) => `${reviewId}-${section}`}
           />
         ) : (
