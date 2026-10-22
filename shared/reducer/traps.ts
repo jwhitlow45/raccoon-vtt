@@ -347,15 +347,16 @@ export function orderedBy(by: readonly string[], shown: (id: string) => boolean)
 }
 
 /**
- * The DM's line (6.3): the trap's name, how, who set it off, how many it
- * hits, what its actions did and which of its creatures players could see.
- * Its id names the occurrence.
+ * The DM's line (6.3): the trap's name and scene, how, who set it off, how
+ * many it hits, what its actions did, which of its creatures players could
+ * see, and its sound. Its id names the occurrence.
  */
 export function dmLine(tx: Tx, trap: Trap, line: { how: TrapDue["how"]; by: readonly string[]; more: number; hits: number; did: readonly Did[]; seen: ReadonlySet<string>; hidden: boolean }): LogEntry {
   const seen = line.by.flatMap((id, i) => (line.seen.has(id) ? [i] : []));
   const data: Extract<LogEvent, { type: "trap" }> = {
     type: "trap",
     trapId: trap.id,
+    sceneId: trap.sceneId,
     name: trap.name,
     how: line.how,
     by: [...line.by],
@@ -364,6 +365,7 @@ export function dmLine(tx: Tx, trap: Trap, line: { how: TrapDue["how"]; by: read
     did: [...line.did],
     ...(seen.length > 0 ? { seen } : {}),
     ...(line.hidden ? { hidden: true as const } : {}),
+    ...(trap.rig?.sound ? { sound: trap.rig.sound } : {}),
   };
   return tx.addTrapLine("trapLog", cutLine(data, tx), LIMITS.trapLogLines);
 }

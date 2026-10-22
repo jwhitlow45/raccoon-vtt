@@ -647,10 +647,10 @@ function remapTraps(
       const { more: _more, seen: _seen, ...rest } = data;
       // Which creatures players saw is the old room's history, read by index into the old list.
       const seen = (data.seen ?? []).map((i) => data.by[i]).filter((old): old is string => old !== undefined && tokens.has(old)).map((old) => by.list.indexOf(tokens.of(old))).filter((i) => i >= 0);
-      out.trapLog.push({ ...line, id: lineId(line.id), data: { ...rest, trapId: trapIds.get(data.trapId) ?? data.trapId, by: by.list, ...(by.more > 0 ? { more: by.more } : {}), ...(seen.length > 0 ? { seen } : {}) } });
+      out.trapLog.push({ ...line, id: lineId(line.id), data: { ...rest, trapId: trapIds.get(data.trapId) ?? data.trapId, sceneId: scenes.of(data.sceneId), by: by.list, ...(by.more > 0 ? { more: by.more } : {}), ...(seen.length > 0 ? { seen } : {}) } });
     } else if (data.type === "trapNotice") {
       if (!tokens.has(data.tokenId) || !isPlainId(tokens.of(data.tokenId))) continue;
-      out.trapLog.push({ ...line, id: lineId(line.id), data: { ...data, trapId: trapIds.get(data.trapId) ?? data.trapId, tokenId: tokens.of(data.tokenId) } });
+      out.trapLog.push({ ...line, id: lineId(line.id), data: { ...data, trapId: trapIds.get(data.trapId) ?? data.trapId, sceneId: scenes.of(data.sceneId), tokenId: tokens.of(data.tokenId) } });
     }
   }
   for (const line of state.trapSeen ?? []) {

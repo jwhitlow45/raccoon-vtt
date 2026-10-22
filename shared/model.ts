@@ -2049,9 +2049,10 @@ export type LogEvent =
    * did (`action` its index, -1 the pit), the indexes in `by` of creatures
    * players who do not own them could see then, and `hidden` for a private
    * springing in a player's op, whose effects wait for the DM. Its id is the
-   * occurrence's.
+   * occurrence's. Its scene and sound let a DM viewing another scene, who
+   * holds neither the trap nor its creatures, hear it and go there.
    */
-  | { type: "trap"; trapId: TrapId; name: string; how: TrapHow; by: TokenId[]; more?: number; hits: number; did: { action: number; ok: boolean }[]; seen?: number[]; hidden?: true }
+  | { type: "trap"; trapId: TrapId; sceneId: SceneId; name: string; how: TrapHow; by: TokenId[]; more?: number; hits: number; did: { action: number; ok: boolean }[]; seen?: number[]; hidden?: true; sound?: TrapSound }
   /**
    * What players read when a trap goes off (6.3), in the players' trap log:
    * every one reaches every player and every table display. `by` names only
@@ -2059,8 +2060,8 @@ export type LogEvent =
    * trap id, name or effects.
    */
   | { type: "trapSeen"; by: TokenId[]; more?: number; message: string; sound?: TrapSound }
-  /** The Passive Perception hint (4.6), in the DM's trap log: this creature would notice the trap. */
-  | { type: "trapNotice"; trapId: TrapId; tokenId: TokenId; passive: number; dc: number };
+  /** The Passive Perception hint (4.6), in the DM's trap log: this creature would notice the trap, on its scene. */
+  | { type: "trapNotice"; trapId: TrapId; sceneId: SceneId; tokenId: TokenId; passive: number; dc: number };
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and

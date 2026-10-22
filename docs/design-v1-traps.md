@@ -56,6 +56,8 @@ Status: draft 3, 2026-10-18, revised for review rounds 1 and 2 and the project o
 
 The DM gets a toast, "Hidden Pit went off: Thorn.", with **Save and damage** when the trap has a save, damage or conditions, and a **card on the DM desk** (`client/features/rolls/DmDesk.tsx:66`, where request cards live, in and out of fights) while it has a pending occurrence (6.1): who set it off, who it hits, what it did ("Closed the north door."), what it could not do ("Could not show Goblin 3: it was deleted."), the DM note, Save and damage (or Apply, for conditions with no save) and Dismiss. Its line goes to the DM's log, and its sound plays where sound is on.
 
+A DM viewing another scene than the trap's holds neither the trap nor its creatures, so the toast reads "Hidden Pit went off on Crypt." with its sound, and the hint reads "A creature's Passive Perception (16) would notice a trap on Crypt (DC 15)." Each offers **Show**, which switches to the trap's scene and, once it has loaded, toasts again with the creatures' names and Save and damage or Mark found. The card waits on that scene.
+
 When only a creature the players cannot all see set it off in a player's op (5.5), the card says so: "The imp set it off, out of the players' sight. The trap is still armed for them." It offers **Do its effects** (`trap.act`, once: the doors, lights, reveals, pit and players' line), **Mark sprung**, and Dismiss. In the DM's own op the effects run at once (5.5).
 
 Players:
@@ -219,7 +221,7 @@ Players send no trap op. Every string is bounded by zod (6.1). The import schema
 
 ### 6.3 Lines
 
-- **The DM's lines**, in `trapLog`, never the shared log: `{ type: 'trap', trapId, name, how: TrapHow, by: TokenId[], more?: number, hits: number, did: { action: number, ok: boolean }[], seen?: number[], hidden?: true }`, `how` one of `'enter' | 'leave' | 'turnStart' | 'turnEnd' | 'cross' | 'open' | 'hand'`, `by` as the occurrence's, `seen` the indexes in `by` of creatures players who do not own them could see at the moment (`seenByNonOwners`, `shared/project.ts:378`), and the hint's `{ type: 'trapNotice', trapId, tokenId, passive, dc }`. The DM's Log panel merges `trapLog` and `trapSeen` with the log by time.
+- **The DM's lines**, in `trapLog`, never the shared log: `{ type: 'trap', trapId, sceneId, name, how: TrapHow, by: TokenId[], more?: number, hits: number, did: { action: number, ok: boolean }[], seen?: number[], hidden?: true, sound?: TrapSound }`, `how` one of `'enter' | 'leave' | 'turnStart' | 'turnEnd' | 'cross' | 'open' | 'hand'`, `by` as the occurrence's, `seen` the indexes in `by` of creatures players who do not own them could see at the moment (`seenByNonOwners`, `shared/project.ts:378`), and the hint's `{ type: 'trapNotice', trapId, sceneId, tokenId, passive, dc }`. Both keep the trap's scene, and the springing its sound, since a DM viewing another scene holds neither the trap nor its creatures (6.4). The DM's Log panel merges `trapLog` and `trapSeen` with the log by time.
 - **The players' lines**, in `trapSeen`: `{ type: 'trapSeen', by, more?, message, sound? }`, written when the trap has a `message`: by a perceived public springing (6.4), and by the DM's `trap.act` and `trap.spring`. Every one reaches every player and every table display, so `trapSeen` holds only lines every player receives. `by` names only creatures seen by all, which is display, cut per viewer to those they may see now. No trap id, name, hits or actions. A line for some players only would go where the room log's own lines go, and traps writes none.
 - **Retention per audience.** `trapLog`'s audience is the DMs, `trapSeen`'s every player, and each ring drops only its own oldest, so no line a viewer cannot see ever pushes out one they could. Every line is cut to its ring's bound when written (dropping `by` from the end into `more`), so a ring never passes its reserve.
 - **Ids.** A line's id is its op's `seq:index`, as the room log's. The players' lines count with the room log's lines, since every player gets both. The DM's lines count on their own from 900000, so a line only the DM sees never moves the id of a line a player gets, and the DM's merged panel never holds two lines with one id.
@@ -417,7 +419,7 @@ Worst cases in JSON bytes, from the complete serialized write. A plain id is at 
 | Tokens a pit moves, per scene with a pit trap | 500 tokens, each an elevation up to 4 characters longer and a rev digit, with attach's riders among them | 4 KiB |
 | One occurrence | `{"id":27,"at":26,"how":18,"by":[10 x 66 + 9],"more":999,"hits":[50 x 66 + 49],"hitsMore":999,"perceived":true,"hidden":true,"acted":true}` with keys | 4,191 |
 | The room's 10 occurrences | 10 x 4,191 plus each trap's `"due":[]` | 42 KiB |
-| A DM line | envelope (id, at, `kind`, `data`) 90, type 14, trapId 76, name 250, how 18, `by` 677, `more` 11, `hits` count 11, `did` 200, `seen` 29, `hidden` 14 | 1,391, cut to 1,536 |
+| A DM line | envelope (id, at, `kind`, `data`) 90, type 14, trapId 76, sceneId `K + 11`, name 250, how 18, `by` 677, `more` 11, `hits` count 11, `did` 200, `seen` 29, `hidden` 14, sound 17 | `1,419 + K`, 1,485 for a plain scene id, cut to 1,536 |
 | `trapLog` | 30 x 1,536 | 45 KiB |
 | A players' line | envelope 90, type 18, `by` 677, `more` 11, message 613, sound 17 | 1,427, cut to 1,536 |
 | `trapSeen` | 20 x 1,536 | 30 KiB |

@@ -47,7 +47,7 @@ export function noticeStep(tx: Tx, op: Op, before: RoomState): boolean {
       if (!seen) visible.set(trap.sceneId, (seen = zoneSeen(after, trap.sceneId)));
       if (!seen(trap)) continue;
       tx.write(keys.trap(trap.id), { ...trap, rig: { ...rig, noticedBy: token.id } });
-      tx.addTrapLine("trapLog", { type: "trapNotice", trapId: trap.id, tokenId: token.id, passive, dc }, LIMITS.trapLogLines);
+      tx.addTrapLine("trapLog", { type: "trapNotice", trapId: trap.id, sceneId: trap.sceneId, tokenId: token.id, passive, dc }, LIMITS.trapLogLines);
       wrote = true;
       break;
     }

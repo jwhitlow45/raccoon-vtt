@@ -54,7 +54,7 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.equal(t.state, "sprung");
     assert.equal(t.rig!.usesLeft, 1);
     assert.equal(t.found, true);
-    assert.deepEqual(lines(r.state), [{ type: "trap", trapId: "plate", name: "plate", how: "enter", by: ["thorn"], hits: 1, did: [], seen: [0] }]);
+    assert.deepEqual(lines(r.state), [{ type: "trap", trapId: "plate", sceneId: "s1", name: "plate", how: "enter", by: ["thorn"], hits: 1, did: [], seen: [0] }]);
     assert.deepEqual(seenLines(r.state), [{ type: "trapSeen", by: ["thorn"], message: "A click underfoot." }]);
     const due = t.rig!.due!;
     assert.equal(due.length, 1);
@@ -125,8 +125,8 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.equal(applied(world([thorn()], [trap("plate", square(3, 5))]), { t: "token.update", tokenId: "thorn", patch: { x: 3, y: 5 } }).state.traps.plate!.state, "armed", "a placement");
   });
 
-  test("a hidden goblin the DM walks onto a plate slams its door, with no line for players, no stop and no found mark", () => {
-    const state = world([goblin({ visibility: "dm", y: 5 })], [trap("plate", square(3, 5), { actions: [{ door: { edge: "9,5,w" }, state: "locked" }] })], (s) => (s.buildChunks[chunkKey("s1", 0, 0)] = doorChunk()));
+  test("a hidden goblin the DM walks onto a plate slams its door, with no line for players, no stop and no found mark, and the DM's line keeps the sound", () => {
+    const state = world([goblin({ visibility: "dm", y: 5 })], [trap("plate", square(3, 5), { actions: [{ door: { edge: "9,5,w" }, state: "locked" }], sound: "crash" })], (s) => (s.buildChunks[chunkKey("s1", 0, 0)] = doorChunk()));
     const r = applied(state, { t: "token.move", tokenId: "gob", x: 8, y: 5 });
     assert.deepEqual(pos(r.state, "gob"), [8, 5], "a trap never stops a hidden creature");
     const edge = r.state.buildChunks[chunkKey("s1", 0, 0)]!.edges["9,5,w"];
@@ -135,7 +135,7 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.equal(t.state, "sprung");
     assert.equal(t.found, false);
     assert.deepEqual(r.state.trapSeen, []);
-    assert.deepEqual(lines(r.state), [{ type: "trap", trapId: "plate", name: "plate", how: "enter", by: ["gob"], hits: 1, did: [{ action: 0, ok: true }] }]);
+    assert.deepEqual(lines(r.state), [{ type: "trap", trapId: "plate", sceneId: "s1", name: "plate", how: "enter", by: ["gob"], hits: 1, did: [{ action: 0, ok: true }], sound: "crash" }]);
   });
 
   test("a hidden creature in a player's op leaves the trap armed for them: a hidden occurrence and the DM's line, then nothing more while it waits", () => {
@@ -148,7 +148,7 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.equal(t.found, false);
     assert.deepEqual(pos(r.state, "imp"), [8, 6]);
     assert.deepEqual(r.state.trapSeen, []);
-    assert.deepEqual(lines(r.state), [{ type: "trap", trapId: "plate", name: "plate", how: "enter", by: ["imp"], hits: 1, did: [], hidden: true }]);
+    assert.deepEqual(lines(r.state), [{ type: "trap", trapId: "plate", sceneId: "s1", name: "plate", how: "enter", by: ["imp"], hits: 1, did: [], hidden: true }]);
     assert.deepEqual(t.rig!.due!.map((d) => [d.hidden, d.acted]), [[true, undefined]]);
     assert.equal(r.trapped, undefined, "a private springing never marks a step");
     // Back and over it again: the trap still waits on the first, so nothing is added.

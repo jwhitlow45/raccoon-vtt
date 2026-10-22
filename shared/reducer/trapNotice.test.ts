@@ -39,7 +39,7 @@ describe("the Passive Perception hint", () => {
     const res = walk(world(), 8);
     const lines = notices(res.state);
     assert.equal(lines.length, 1);
-    assert.deepEqual(lines[0]!.data, { type: "trapNotice", trapId: "pit", tokenId: "thorn", passive: 16, dc: 15 });
+    assert.deepEqual(lines[0]!.data, { type: "trapNotice", trapId: "pit", sceneId: "s1", tokenId: "thorn", passive: 16, dc: 15 });
     assert.equal(describeEvent(lines[0]!.data!, res.state, true), "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15).");
     assert.equal(res.state.traps.pit!.rig!.noticedBy, "thorn");
     assert.equal(res.state.traps.pit!.found, false, "the DM marks it found");

@@ -667,7 +667,7 @@ const TRAP_PAIRS: OpPair[] = [
       const t = s.traps.plate!;
       const due = [{ id: "2:0", at: "2026-10-12T20:00:00.000Z", how: "enter" as const, by: ["gob"], hits: ["gob"], hidden: true as const }];
       s.traps.plate = { ...t, rig: { ...t.rig!, noticedBy: "cora", due } };
-      s.trapLog = [{ id: "2:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "trap", trapId: "plate", name: "plate", how: "enter", by: ["gob"], hits: 1, did: [], hidden: true } }];
+      s.trapLog = [{ id: "2:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "trap", trapId: "plate", sceneId: "s1", name: "plate", how: "enter", by: ["gob"], hits: 1, did: [], hidden: true } }];
     },
     [thornAcross, thornBack],
   ),

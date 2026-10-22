@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { LogEntry, TrapDue } from "#shared/model.ts";
 import { DM, P1, room, token, trap } from "#shared/testutil.ts";
-import { dmAlerts, linesAfter, metTrap, playerAlerts, watchOf } from "./alerts.ts";
+import { dmAlerts, linesAfter, metTrap, playerAlerts, shownAlert, watchOf } from "./alerts.ts";
 import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines } from "./desk.ts";
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["thorn"], hits: ["thorn"], ...over });
@@ -38,7 +38,7 @@ describe("the DM's trap cards (docs/design-v1-traps.md 4.3)", () => {
     const shrunk = { ...s, scenes: { ...s.scenes, s1: { ...s.scenes.s1!, bounds: { w: 2, h: 2 } } } };
     const wide = { ...s.traps.pit!, zone: { cells: [{ x: 1, y: 1, w: 2, h: 2 }] } };
     assert.deepEqual(didLines(wide, [{ action: -1, ok: false }], shrunk), ["Could not open the pit: some of its squares lie outside the scene."], "a scene made smaller since");
-    const log: LogEntry[] = [{ id: "12:0", at: "", kind: "event", data: { type: "trap", trapId: "pit", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [{ action: 0, ok: true }] } }];
+    const log: LogEntry[] = [{ id: "12:0", at: "", kind: "event", data: { type: "trap", trapId: "pit", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [{ action: 0, ok: true }] } }];
     assert.deepEqual(lineOf(log, "12:0")?.did, [{ action: 0, ok: true }]);
     assert.equal(lineOf(log, "13:0"), null, "a line the DM's log no longer holds");
   });
@@ -53,14 +53,14 @@ describe("the DM's trap cards (docs/design-v1-traps.md 4.3)", () => {
 describe("what a trap going off tells each device", () => {
   const line = (id: string, data: LogEntry["data"]): LogEntry => ({ id, at: "", kind: "event", data });
   const dmLog = [
-    line("12:0", { type: "trap", trapId: "pit", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [] }),
-    line("14:0", { type: "trap", trapId: "net", name: "Falling Net", how: "hand", by: ["thorn"], hits: 1, did: [] }),
-    line("15:1", { type: "trap", trapId: "pit", name: "Hidden Pit", how: "enter", by: ["imp"], hits: 1, did: [], hidden: true }),
+    line("12:0", { type: "trap", trapId: "pit", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["thorn"], hits: 1, did: [], sound: "crash" }),
+    line("14:0", { type: "trap", trapId: "net", sceneId: "s1", name: "Falling Net", how: "hand", by: ["thorn"], hits: 1, did: [] }),
+    line("15:1", { type: "trap", trapId: "pit", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["imp"], hits: 1, did: [], hidden: true, sound: "crash" }),
   ];
   const seen = [line("12:1", { type: "trapSeen", by: ["thorn"], message: "The floor gives way!", sound: "crash" }), line("16:0", { type: "trapSeen", by: ["bree"], message: "Click." })];
 
   test("the DM hears every trap that went off but their own Set it off, with its sound", () => {
-    assert.deepEqual(dmAlerts(dmLog, world()), [
+    assert.deepEqual(dmAlerts(dmLog, world(), "s1"), [
       { text: "Hidden Pit went off: Thorn.", sound: "crash", trapId: "pit", due: "12:0" },
       { text: "Hidden Pit went off: Imp (hidden from players). The players saw nothing.", sound: "crash", trapId: "pit", due: "15:1" },
     ]);
@@ -70,9 +70,28 @@ describe("what a trap going off tells each device", () => {
   test("the Passive Perception hint is a toast of its own, which offers Mark found", () => {
     const s = world();
     s.traps.pit = { ...s.traps.pit!, rig: { ...s.traps.pit!.rig!, find: [{ ability: "wis", skill: "perception", dc: 15, what: "the pressure plate" }] } };
-    assert.deepEqual(dmAlerts([line("17:0", { type: "trapNotice", trapId: "pit", tokenId: "thorn", passive: 16, dc: 15 })], s), [
+    assert.deepEqual(dmAlerts([line("17:0", { type: "trapNotice", trapId: "pit", sceneId: "s1", tokenId: "thorn", passive: 16, dc: 15 })], s, "s1"), [
       { text: "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15).", trapId: "pit", notice: true },
     ]);
+  });
+
+  test("a trap on another scene names the scene, keeps its sound and offers Show, which toasts it again there with its names and no sound", () => {
+    const here = world();
+    here.scenes.s1 = { ...here.scenes.s1!, name: "Crypt" };
+    // Viewing another scene, the DM holds neither the trap nor its creatures.
+    const away = { ...here, tokens: {}, traps: {} };
+    const notice = line("17:0", { type: "trapNotice", trapId: "pit", sceneId: "s1", tokenId: "thorn", passive: 16, dc: 15 });
+    assert.deepEqual(dmAlerts([...dmLog, notice], away, "s2"), [
+      { text: "Hidden Pit went off on Crypt.", sound: "crash", trapId: "pit", due: "12:0", show: { sceneId: "s1", line: "12:0" } },
+      { text: "Hidden Pit went off on Crypt. The players saw nothing.", sound: "crash", trapId: "pit", due: "15:1", show: { sceneId: "s1", line: "15:1" } },
+      { text: "A creature's Passive Perception (16) would notice a trap on Crypt (DC 15).", trapId: "pit", notice: true, show: { sceneId: "s1", line: "17:0" } },
+    ]);
+    assert.equal(dmAlerts(dmLog.slice(0, 1), away, null)[0]?.show?.sceneId, "s1", "a DM with no scene open");
+    assert.deepEqual(shownAlert(dmLog[0]!, here, "s1"), { text: "Hidden Pit went off: Thorn.", trapId: "pit", due: "12:0" });
+    assert.deepEqual(shownAlert(notice, here, "s1"), { text: "Thorn's Passive Perception (16) would notice Hidden Pit (DC 15).", trapId: "pit", notice: true });
+    assert.equal(shownAlert(dmLog[0]!, away, "s2"), null, "not there yet");
+    const gone = line("18:0", { type: "trap", trapId: "old", sceneId: "deleted", name: "Old Pit", how: "enter", by: [], hits: 0, did: [] });
+    assert.deepEqual(dmAlerts([gone], away, "s2"), [{ text: "Old Pit went off on another scene.", trapId: "old", due: "18:0" }], "a scene since deleted offers nothing to show");
   });
 
   test("a player hears a line that names a creature they play, and reads the rest in the log", () => {

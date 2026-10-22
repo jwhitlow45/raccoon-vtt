@@ -97,6 +97,12 @@ describe("the reserves hold the largest writes (Appendix B)", () => {
     for (let i = 0; i < LIMITS.trapLogLines + 3; i++) {
       dmLine(tx, t, { how: "turnStart", by: ids, more: 99, hits: 50, did: Array.from({ length: 8 }, (_, a) => ({ action: a, ok: false })), seen: new Set(ids), hidden: true });
     }
+    // A scene id escaping to its most, 386 bytes, costs a DM line some of its creatures, never its bound, and fits a hint's line whole.
+    const far = { ...t, sceneId: "\u0001".repeat(64) };
+    const cut = dmLine(tx, far, { how: "turnStart", by: ids, more: 99, hits: 50, did: Array.from({ length: 8 }, (_, a) => ({ action: a, ok: false })), seen: new Set(ids), hidden: true });
+    assert.ok(cut.data?.type === "trap" && cut.data.by.length > 0 && cut.data.by.length < ids.length, "some creatures kept, some counted");
+    const notice: LogEntry = { id: `${SEQ}:999999`, at: AT, kind: "event", data: { type: "trapNotice", trapId: t.id, sceneId: far.sceneId, tokenId: longId(0), passive: 60, dc: 30 } };
+    assert.ok(serializedBytes(notice) <= LIMITS.trapLineBytes, `${serializedBytes(notice)} bytes`);
     for (let i = 0; i < LIMITS.trapSeenLines + 3; i++) playersLine(tx, t, ids);
     for (const line of [...tx.state.trapLog, ...tx.state.trapSeen]) assert.ok(serializedBytes(line) <= LIMITS.trapLineBytes, `${serializedBytes(line)} bytes`);
     assert.equal(tx.state.trapLog.length, LIMITS.trapLogLines);

@@ -412,9 +412,9 @@ type HpRevert = { before: Vitals, after: Vitals, added?: Effect[], removed?: Eff
 // A roll answer or mark (v1 wave 5, section 9.11): { type: 'roll', test, tokenId? | characterId?, choice?, dc?,
 //   dcShown?: true, resultShown?: true, total?, result?, noRoll?: true }, the target as it stood after it
 // Traps (v1, section 9.12), in their own rings, never the log. In `trapLog`, DM only, a trap going off:
-//   { type: 'trap', trapId, name, how: 'enter' | 'leave' | 'turnStart' | 'turnEnd' | 'cross' | 'open' | 'hand',
-//   by: TokenId[], more?, hits: number, did: { action, ok }[], seen?: number[], hidden?: true }, and the hint:
-//   { type: 'trapNotice', trapId, tokenId, passive, dc }. In `trapSeen`, every player's: { type: 'trapSeen', by, more?, message, sound? }
+//   { type: 'trap', trapId, sceneId, name, how: 'enter' | 'leave' | 'turnStart' | 'turnEnd' | 'cross' | 'open' | 'hand',
+//   by: TokenId[], more?, hits: number, did: { action, ok }[], seen?: number[], hidden?: true, sound? }, and the hint:
+//   { type: 'trapNotice', trapId, sceneId, tokenId, passive, dc }. In `trapSeen`, every player's: { type: 'trapSeen', by, more?, message, sound? }
 
 type JournalPage = { id, rev, title, folder?: string,   // v1 wave 5, section 14.16. Title 80 characters, folder 40
   access: 'dm' | 'all' | { member: MemberId },

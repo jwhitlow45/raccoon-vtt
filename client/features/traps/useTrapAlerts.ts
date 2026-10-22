@@ -6,7 +6,7 @@ import { useStartGroupSave } from "../dice/groupSave/start.ts";
 import { playTrapSound } from "../encounter/alerts.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
-import { dmAlerts, linesAfter, metTrap, newestId, playerAlerts, watchOf, type TrapAlert, type Watched } from "./alerts.ts";
+import { dmAlerts, linesAfter, metTrap, newestId, playerAlerts, shownAlert, watchOf, type TrapAlert, type Watched } from "./alerts.ts";
 import { trapStart } from "./TrapSaveStart.tsx";
 
 const NO_LINES: readonly LogEntry[] = [];
@@ -18,6 +18,9 @@ const NO_LINES: readonly LogEntry[] = [];
  * damage or conditions, and the Passive Perception hint with Mark found. A
  * player gets one, with its sound, for each players' line that names a
  * creature they play. Sound plays only where this device has it on.
+ * A DM's toast for a trap on another scene offers Show, which goes there
+ * and toasts again with the creatures' names and the button, since only
+ * then does the DM hold the trap, its creatures and its card.
  * And once the server's answer to a player's move shows a trap stopped it
  * or told its players, the token bar's Undo move and the stopped walk's
  * Teleport here go, since the server would refuse them now.
@@ -54,6 +57,23 @@ export function useTrapAlerts(): void {
       };
     };
     if (display) return;
+    // The line a Show is taking the DM to, toasted again once the view holds its scene.
+    let showing: { sceneId: string; line: string } | null = null;
+    let viewed: string | null = null;
+    const shown = (to: { sceneId: string; line: string }) => {
+      const now = store.getState();
+      const line = (now.confirmed ?? now.view)?.trapLog?.find((e) => e.id === to.line);
+      const a = line && now.view ? shownAlert(line, now.view, now.sceneId) : null;
+      if (a) ui.notify(a.text, "info", undefined, saveAction(a));
+    };
+    const show = (to: { sceneId: string; line: string }) => ({
+      label: "Show",
+      run: () => {
+        if (store.getState().sceneId === to.sceneId) return shown(to);
+        showing = to;
+        actions.switchScene(to.sceneId);
+      },
+    });
     let started = false;
     let seenLog: string | null = null;
     let seenSeen: string | null = null;
@@ -64,6 +84,12 @@ export function useTrapAlerts(): void {
       const view = now.view;
       const you = now.you;
       if (!view || !you) return;
+      if (now.sceneId !== viewed) {
+        viewed = now.sceneId;
+        // Another scene coming in first means the DM went elsewhere, so the Show is dropped.
+        if (showing && showing.sceneId === viewed) shown(showing);
+        showing = null;
+      }
       // The lines the server holds, never a prediction: the DM's own walk replays its trap step here, and its line may come back under another id.
       const held = now.confirmed ?? view;
       const trapLog = held.trapLog ?? NO_LINES;
@@ -79,9 +105,9 @@ export function useTrapAlerts(): void {
       const freshSeen = linesAfter(trapSeen, seenSeen);
       if (freshLog.length > 0) seenLog = newestId(trapLog);
       if (freshSeen.length > 0) seenSeen = newestId(trapSeen);
-      const alerts = you.role === "dm" ? dmAlerts(freshLog, view) : playerAlerts(freshSeen, view, { memberId: you.memberId, role: you.role });
+      const alerts = you.role === "dm" ? dmAlerts(freshLog, view, now.sceneId) : playerAlerts(freshSeen, view, { memberId: you.memberId, role: you.role });
       for (const a of alerts) {
-        const action = you.role === "dm" ? saveAction(a) : undefined;
+        const action = you.role !== "dm" ? undefined : a.show ? show(a.show) : saveAction(a);
         ui.notify(a.text, "info", undefined, action);
         if (a.sound) playTrapSound(a.sound);
       }

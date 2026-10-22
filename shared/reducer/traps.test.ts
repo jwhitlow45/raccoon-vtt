@@ -423,7 +423,7 @@ describe("what players get of a trap (6.4)", () => {
 
   test("the DM's trap log is the DMs' alone, and the players' lines reach every player and table display, naming only the creatures each sees", () => {
     const state = table();
-    state.trapLog = [{ id: "4:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "trap", trapId: "pit", name: "Hidden Pit", how: "enter", by: ["imp"], hits: 1, did: [] } }];
+    state.trapLog = [{ id: "4:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "trap", trapId: "pit", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["imp"], hits: 1, did: [] } }];
     state.trapSeen = [{ id: "5:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "trapSeen", by: ["thorn", "imp"], message: "Click." } }];
     assert.equal(projectEntity(keys.trapLog("4:0"), state, P1, { sceneId: "s1" }), null);
     assert.deepEqual(projectEntity(keys.trapLog("4:0"), state, DM, { sceneId: "s1" }), state.trapLog[0]);

@@ -669,6 +669,7 @@ const trapLine = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("trap"),
     trapId: id,
+    sceneId: id,
     name: trapSchemas.trapName,
     how: trapHow,
     by: z.array(id).max(LIMITS.trapBy),
@@ -677,9 +678,10 @@ const trapLine = z.discriminatedUnion("type", [
     did: z.array(z.strictObject({ action: z.number().int().min(-1).max(LIMITS.trapActions - 1), ok: z.boolean() })).max(LIMITS.trapActions + 1),
     seen: z.array(z.number().int().min(0).max(LIMITS.trapBy - 1)).max(LIMITS.trapBy).optional(),
     hidden: z.literal(true).optional(),
+    sound: z.enum(TRAP_SOUNDS).optional(),
   }),
   z.strictObject({ type: z.literal("trapSeen"), by: z.array(id).max(LIMITS.trapBy), more: count.optional(), message: trapSchemas.trapMessage, sound: z.enum(TRAP_SOUNDS).optional() }),
-  z.strictObject({ type: z.literal("trapNotice"), trapId: id, tokenId: id, passive: z.number().int().min(0).max(60), dc: dmToolSchemas.rollDc }),
+  z.strictObject({ type: z.literal("trapNotice"), trapId: id, sceneId: id, tokenId: id, passive: z.number().int().min(0).max(60), dc: dmToolSchemas.rollDc }),
 ]);
 const trapLogEntry = z.strictObject({ id: lineId, at: iso, kind: z.literal("event"), data: trapLine });
 

@@ -622,7 +622,7 @@ describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
       due: [{ id: "7:0", at: AT, how: "enter", by: ["thorn", "nobody"], hits: ["thorn"] }],
     };
     state.traps.plate = t;
-    state.trapLog = [{ id: "7:0", at: AT, kind: "event", data: { type: "trap", trapId: "plate", name: "Hidden Pit", how: "enter", by: ["thorn", "nobody"], hits: 1, did: [], seen: [0] } }];
+    state.trapLog = [{ id: "7:0", at: AT, kind: "event", data: { type: "trap", trapId: "plate", sceneId: "s1", name: "Hidden Pit", how: "enter", by: ["thorn", "nobody"], hits: 1, did: [], seen: [0] } }];
     state.trapSeen = [{ id: "7:1", at: AT, kind: "event", data: { type: "trapSeen", by: ["thorn"], message: "Click." } }];
     const out = remapState(state, { assets: new Map() });
     const traps = Object.values(out.traps);
@@ -639,7 +639,7 @@ describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
     assert.deepEqual([due.by, due.more, due.hits], [[thorn.id], 1, [thorn.id]]);
     const line = out.trapLog[0]!;
     assert.equal(due.id, line.id, "the occurrence still names its line");
-    assert.deepEqual(line.data, { type: "trap", trapId: copy.id, name: "Hidden Pit", how: "enter", by: [thorn.id], more: 1, hits: 1, did: [], seen: [0] });
+    assert.deepEqual(line.data, { type: "trap", trapId: copy.id, sceneId, name: "Hidden Pit", how: "enter", by: [thorn.id], more: 1, hits: 1, did: [], seen: [0] });
     assert.deepEqual(out.trapSeen[0]!.data, { type: "trapSeen", by: [thorn.id], message: "Click." });
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);

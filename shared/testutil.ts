@@ -792,9 +792,10 @@ function addTraps(r: () => number, state: RoomState): void {
   const traps = Object.keys(state.traps);
   for (let i = 0; i < int(r, 0, 3); i++) {
     const trapId = traps.length > 0 ? pick(r, traps) : "gone-trap";
+    const sceneId = state.traps[trapId]?.sceneId ?? "s1";
     const data: LogEvent = chance(r, 0.7)
-      ? { type: "trap", trapId, name: "Hidden Pit", how: pick(r, ["enter", "hand"] as const), by: [pick(r, tokenIds)], hits: int(r, 0, 3), did: [], ...(chance(r, 0.5) ? { seen: [0] } : {}) }
-      : { type: "trapNotice", trapId, tokenId: pick(r, tokenIds), passive: 16, dc: 15 };
+      ? { type: "trap", trapId, sceneId, name: "Hidden Pit", how: pick(r, ["enter", "hand"] as const), by: [pick(r, tokenIds)], hits: int(r, 0, 3), did: [], ...(chance(r, 0.5) ? { seen: [0] } : {}) }
+      : { type: "trapNotice", trapId, sceneId, tokenId: pick(r, tokenIds), passive: 16, dc: 15 };
     state.trapLog.push({ id: `60:${i}`, at: AT, kind: "event", data });
   }
   for (let i = 0; i < int(r, 0, 3); i++) {
