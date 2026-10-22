@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome } from "../canvas/barDock.ts";
+import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, toastTop, type Chrome } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
@@ -697,7 +697,8 @@ function RoomPage() {
    * Otherwise it spans as before, and the column starts below the notices
    * that last (the offline banner, a layer that did not load, the DM's
    * frame bar and "Viewing as Pat"), while toasts keep their place, so a
-   * card never jumps under a finger for a toast. "Viewing as Pat" stays in
+   * card never jumps under a finger for a toast. A toast that shows while
+   * the column shows a card starts under that card instead (toastLow). "Viewing as Pat" stays in
    * the preview, outside this page, so a blackout and the ended screen keep
    * its Exit: the preview tells this page how tall it is, and this page
    * says where it goes. Spanning, this page's own notices start below it.
@@ -757,6 +758,18 @@ function RoomPage() {
     // The observer hears the stack's size only, so what moves it measures again: the turn band coming or going, the notch, the preview's notice.
   }, [barDock, besideLane, previewBottom, zoom, role, topInset, safe.top, laneTop]);
   const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields || s.columnCramped) && summary !== null;
+  /*
+   * Where a toast that shows now starts (barDock.ts toastTop): on a phone,
+   * where the notices span the map over the alerts column and the column
+   * shows a card, 8 px under its first card, so a toast never covers the
+   * card's buttons. Each toast takes its place once, as it shows (Toasts),
+   * in a layer of its own beside the notices, whose stack would move it.
+   */
+  const columnNow = useStore(barDock, (s) => s.column);
+  const alertsOverlay = useStore(barDock, (s) => s.alertsOverlay);
+  const cardsShow = !folded && !underPane && !columnSummary && !alertsOverlay;
+  const toastLow = chrome ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop: height - chrome.bottom }) : null;
+  const [toastLayer, setToastLayer] = useState<HTMLDivElement | null>(null);
   // Where the row and its line would stand above the last lasting notice's foot, they stand over it, so the tool's controls stay in reach (8).
   const lastingBottom = useStore(barDock, (s) => s.lasting);
   const overNotice = chrome !== null && lastingBottom !== null && height - chrome.bottom < lastingBottom;
@@ -869,8 +882,9 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts />
+          <Toasts low={toastLow} layer={toastLayer} />
         </div>
+        <div ref={setToastLayer} {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
           <Sheet
             // Each panel gets a sheet of its own, so one that replaces another in place, as the turn strip's Initiative replaces Token, never opens at the other's scroll (features/panels.ts usePanelScroll).
@@ -1435,23 +1449,33 @@ function Banner() {
   );
 }
 
+/** Where a toast first showed: at the top of the map's notices, under the alerts column's first card (at `low`, in the chrome's px), or in the very short sheet. */
+type ToastPlace = "map" | "sheet" | { low: number };
+
 /**
  * Refusals and notices from the store (design 7.4), each gone after a few
  * seconds or a tap, in the Notice look (components/Notice.tsx).
  *
  * While a sheet shows in the very short mode, a new toast shows and is read
  * out inside it, at the top of its body (pages/modalSlot.tsx), since the
- * modal leaves the map's notices out of reach. Each toast stays where it
- * first showed until it ends, so it is never moved and never announced
- * again: one shown in the sheet goes with the sheet.
+ * modal leaves the map's notices out of reach. On a phone whose alerts
+ * column shows a card, a new toast starts under that card (`low`,
+ * barDock.ts toastTop), in `layer`, and joins any toast already there,
+ * below it, so their stack keeps the place its first took. Each toast
+ * stays where it first showed until it ends, so it is never moved and
+ * never announced again: one shown in the sheet goes with the sheet.
  */
-function Toasts() {
+function Toasts(props: { low: number | null; layer: HTMLElement | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
-  // Where each toast first showed, by id: over the map, or in the very short sheet. Set once, so a toast never moves.
-  const places = useRef(new Map<number, "map" | "sheet">());
-  for (const t of toasts) if (!places.current.has(t.id)) places.current.set(t.id, slot ? "sheet" : "map");
+  // Where each toast first showed, by id. Set once, so a toast never moves.
+  const places = useRef(new Map<number, ToastPlace>());
+  for (const t of toasts) {
+    if (places.current.has(t.id)) continue;
+    const below = [...places.current.values()].find((p): p is { low: number } => typeof p === "object");
+    places.current.set(t.id, slot ? "sheet" : props.low !== null && props.layer ? (below ?? { low: props.low }) : "map");
+  }
   useEffect(() => {
     for (const id of places.current.keys()) if (!toasts.some((t) => t.id === id)) places.current.delete(id);
   }, [toasts]);
@@ -1465,13 +1489,25 @@ function Toasts() {
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   if (toasts.length === 0) return null;
-  const overMap = toasts.filter((t) => places.current.get(t.id) !== "sheet");
+  const overMap = toasts.filter((t) => places.current.get(t.id) === "map");
   const inSheet = slot ? toasts.filter((t) => places.current.get(t.id) === "sheet") : [];
+  const low = toasts.filter((t) => typeof places.current.get(t.id) === "object");
+  const lowAt = low.length > 0 ? (places.current.get(low[0]!.id) as { low: number }).low : null;
   return (
     <>
       {overMap.map((t) => (
         <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
       ))}
+      {props.layer && lowAt !== null
+        ? createPortal(
+            <div style={{ position: "absolute", top: lowAt, left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }}>
+              {low.map((t) => (
+                <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
+              ))}
+            </div>,
+            props.layer,
+          )
+        : null}
       {slot && inSheet.length > 0
         ? createPortal(
             inSheet.map((t) => <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />),

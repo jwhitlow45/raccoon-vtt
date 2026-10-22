@@ -1005,6 +1005,27 @@ export function columnCards(input: { mapWidth: number; sheet: number; safe: Pick
   return { card, shadowLeft: Math.min(SHADOW_ROOM, input.mapWidth - card - rightPad) };
 }
 
+/** A toast's least height, a touch target's: the room it needs under the column's first card. */
+export const TOAST_MIN = 44;
+
+/**
+ * Where a toast that shows now starts on a phone (docs/design-v1-bar-dock.md
+ * 1.3): 8 px under the alerts column's first card, `row ?? top` plus its
+ * height, while the notices span the map over the column and it shows a
+ * card (`cards`), so the toast never covers that card's buttons. Null
+ * keeps it at the top of the notices as before: beside the lane, with no
+ * card, with the cards folded or a summary row standing for them, or with
+ * under 44 px left above the tool's options (`optionsTop`). In the chrome's
+ * own px from the page's top, read once as each toast shows, so a toast
+ * never moves.
+ */
+export function toastTop(input: { spanning: boolean; column: ColumnFacts | null; cards: boolean; optionsTop: number }): number | null {
+  const { column } = input;
+  if (!input.spanning || !input.cards || !column || column.first <= 0) return null;
+  const top = (column.row ?? column.top) + column.first + EDGE;
+  return input.optionsTop - top >= TOAST_MIN ? top : null;
+}
+
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);

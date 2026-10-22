@@ -60,6 +60,8 @@ import {
   askedAlerts,
   barDockSlot,
   closeAlertsOverlay,
+  TOAST_MIN,
+  toastTop,
   readSpot,
   releaseSpot,
   restingBar,
@@ -871,5 +873,25 @@ describe("a card's action that opens a panel (LP13-TR-3)", () => {
     closeAlertsOverlay(scope);
     closeAlertsOverlay(scope);
     assert.equal(dock.getState().alertsClose, 2, "each ask is a new one, so the column hears both");
+  });
+});
+
+describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", () => {
+  const column = { top: 122, content: 260, first: 120 };
+  const phone = { spanning: true, column, cards: true, optionsTop: 700 };
+
+  test("starts 8 px under the first card while the notices span the map", () => {
+    assert.equal(toastTop(phone), 122 + 120 + EDGE);
+    assert.equal(toastTop({ ...phone, column: { ...column, row: 60 } }), 60 + 120 + EDGE, "under a row risen over the bars, from where it stands");
+  });
+
+  test("keeps the top of the notices beside the lane, with no card, with the cards folded or summarized, or with no room left for it", () => {
+    assert.equal(toastTop({ ...phone, spanning: false }), null);
+    assert.equal(toastTop({ ...phone, column: null }), null);
+    assert.equal(toastTop({ ...phone, column: { ...column, first: 0 } }), null);
+    assert.equal(toastTop({ ...phone, cards: false }), null);
+    const top = 122 + 120 + EDGE;
+    assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
+    assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
   });
 });

@@ -505,6 +505,25 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await ops.send({ t: "roll.close", rollIds: [id] });
   });
 
+  test("fu20b-1. at 390 x 844 a toast that shows while a check's card is up starts 8 px under the card, never over it (fu16 item 8)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    await hurtHag();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    await check.waitFor();
+    await dm.waitForTimeout(200);
+    const card = await rectOf(check);
+    // Undo says what it took back in a toast.
+    await dm.getByRole("button", { name: "Undo", exact: true }).tap();
+    const toast = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+    await toast.waitFor();
+    const t = await rectOf(toast);
+    assert.ok(!intersects(t, card), `the toast covers the check: ${JSON.stringify({ t, card })}`);
+    assert.ok(Math.abs(t.top - (card.bottom + 8)) < 1.5, `the toast starts at ${t.top}, not 8 px under the card's foot at ${card.bottom}`);
+    assert.ok(Math.abs((await rectOf(check)).top - card.top) < 0.5, "the toast moved the column");
+    await shots.take(dm, "dmphone-fu20b-toast-under-card");
+    await dm.getByRole("button", { name: "Redo", exact: true }).tap();
+  });
+
   test("9. the column stays below a lasting notice as the turn band comes and goes, which moves the notice (LPD-DMPHONE-9)", async () => {
     await setUp({ width: 390, height: 844, scale: 1 });
     // Framing a starting view from a phone shows the "Starting view" bar under the top bar, a notice that lasts.
