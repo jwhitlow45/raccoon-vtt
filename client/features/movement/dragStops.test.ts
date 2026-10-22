@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { ClientOp } from "#shared/protocol.ts";
+import type { ClientOp, Op } from "#shared/protocol.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
+import { token } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { DropPlan } from "./drop.ts";
 import { RouteWork, type Frames, type RouteJob } from "./routeWork.ts";
 import { dragStops, type DragDeps } from "./stageHooks.ts";
-import { line, thorn, world } from "./testing.ts";
+import { routeSlot } from "./store.ts";
+import { line, onTurn, recordedCost, thorn, world } from "./testing.ts";
 
 /**
  * The drag's stops as the board drives them (stageHooks.ts), under Node:
@@ -65,8 +67,9 @@ function board(view: RoomState) {
     };
     work.run(filler);
   };
-  return { frames, work, sent, stops, spend };
+  return { frames, work, sent, stops, spend, scope: deps.scope as RoomScope };
 }
+
 
 const node = (t: Token, dx = 0, dy = 0) => ({ x: () => t.x + dx, y: () => t.y + dy, position: () => {} });
 
@@ -149,6 +152,36 @@ describe("the drag's stops", () => {
         assert.ok(b.sent.length <= presses + lands.length, `seed ${seed}: ${b.sent.length} ops for ${presses} presses and ${lands.length} drops`);
       }
     }
+  });
+
+  test("a straight drop that lands squeezed reads, while it is dragged, the cost its move records (review ASTRA-18)", () => {
+    const base = world({ heights: { "10,3": 1, "12,4": 10 }, edges: { "10,9,n": { kind: "wall" } } });
+    const chunk = base.buildChunks["s1:0,0"]!;
+    base.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "11,5": "pit", "9,7": "pit", "13,7": "pit", "12,9": "pit" } };
+    base.meta = { ...base.meta, settings: { ...base.meta.settings, diagonal: "five" } };
+    const ogre = token("ogre", { size: "large", x: 10, y: 6, elevation: 0, kind: "pc", ownerIds: ["p1"], disposition: "ally" });
+    base.tokens.ogre = ogre;
+    const view = onTurn(base, "ogre");
+    const mover = view.tokens.ogre!;
+    const b = board(view);
+    b.frames.frame();
+    b.stops.start(mover.id);
+    const finger = { x: () => 10.9, y: () => 3.1, position: () => {} };
+    for (let k = 0; k < 50; k++) {
+      b.stops.frame(finger, mover);
+      b.frames.frame();
+    }
+    const route = b.scope.get(routeSlot).getState().route;
+    assert.ok(route && !route.searching, "the drag has its answer");
+    const ft = b.stops.frameFields(mover.id).ft;
+    let landed: DropPlan | null = null;
+    b.stops.drop(finger, mover, [mover], (plan) => (landed = plan));
+    for (let k = 0; k < 50 && !landed; k++) b.frames.frame();
+    const plan = landed as DropPlan | null;
+    assert.deepEqual([plan?.moves[0]?.x, plan?.moves[0]?.y, plan?.moves[0]?.squeeze], [10.5, 3.5, true], "it lands squeezed");
+    b.stops.send(plan!);
+    const cost = recordedCost(view, b.sent.at(-1) as Op, "ogre");
+    assert.deepEqual([route.read.dragFt, ft], [cost, cost], "the label and the frame read what the move records");
   });
 
   test("a press waiting for its frame sends once, in the next frame, and a new drag first sends it", () => {

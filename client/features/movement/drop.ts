@@ -226,10 +226,17 @@ export function goesStraight(state: BuildState, token: DropToken, target: Point 
   return answer.kind === "none" || (answer.kind === "route" && !routeLanding(state, token, target, answer.route.pieces, feetPerCell));
 }
 
-/** Where a lone drop's plan leaves the token: held at the wall, at its move, or where it stands. */
-export function planLands(plan: DropPlan, token: DropToken): Point {
-  const at = plan.stop?.at ?? plan.moves[0] ?? token;
-  return { x: at.x, y: at.y };
+/** Where a token stands and whether it squeezes there: its landing height and cost read the squeezed footprint where it does. */
+export type Pose = Point & { squeeze?: true };
+
+export function samePose(a: Pose | null, b: Pose | null): boolean {
+  return a === b || (a !== null && b !== null && a.x === b.x && a.y === b.y && a.squeeze === b.squeeze);
+}
+
+/** Where a lone drop's plan leaves the token: at its move, held at the wall or not, or where it stands (review ASTRA-18). */
+export function planLands(plan: DropPlan, token: DropToken): Pose {
+  const at = plan.moves[0] ?? token;
+  return at.squeeze === true ? { x: at.x, y: at.y, squeeze: true } : { x: at.x, y: at.y };
 }
 
 const landings = new WeakMap<readonly RoutePiece[], { key: string; chunks: object; scene: unknown; landing: Landing | null }>();

@@ -4,7 +4,7 @@ import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
-import { routeFeet, routeWalk, spotRect, straightCost, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot } from "#shared/rules/route.ts";
+import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 
 /**
@@ -273,9 +273,12 @@ export function dragReading(input: {
   walk?: DragWalk;
   /** The leg's cost as another device's frame gives it, terrain included, which the corners alone cannot tell: the band and what is left read it. */
   costFt?: number;
+  /** How a plain leg lands: its elevation and whether it squeezes there, which its cost reads as the move records it (route.ts `plainLegCost`). */
+  landing?: { elevation: number; squeeze?: true };
 }): DragRead {
   const { token, encounter, rules, walk } = input;
-  const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: token.elevation };
+  const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: input.landing?.elevation ?? token.elevation };
+  const landed = input.landing ? { ...token, x: end.x, y: end.y, elevation: end.elevation, squeeze: input.landing.squeeze } : null;
   const fighting = encounter ? (encounter.started ?? encounter.activeEntryId !== null) : false;
   const active = fighting && input.activeTokenId === token.id;
   const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, token, rules, role: input.role }) : null;
@@ -285,7 +288,11 @@ export function dragReading(input: {
   const pieces = walk?.route?.pieces.map(([, , extra, swim]) => ({ extra, swim })) ?? [];
   const step = snapStep(token);
   const legCost = (upTo: readonly RoutePoint[]) =>
-    walk?.route ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step }) : straightCost(token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
+    walk?.route
+      ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step })
+      : landed && upTo[upTo.length - 1] === end
+        ? plainLegCost(token, landed, rules, counter)
+        : straightCost(token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
   const leg = legCost(points);
   const legFt = input.costFt ?? leg.cost;
   const out: DragRead = { dragFt: legFt };

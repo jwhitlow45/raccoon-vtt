@@ -1,7 +1,7 @@
 import type { PathStop } from "../model.ts";
 import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
-import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, type PlacedToken } from "./footprint.ts";
+import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footprintGround, standing } from "./heights.ts";
 import { coreBlocked, legStop, squeezeFits, straightClear, type MovingToken } from "./movement.ts";
@@ -243,6 +243,18 @@ export function straightCost(token: PlacedToken, from: SizedSpot, to: SizedSpot,
   const running = { ...counter };
   const moved = straightFeet(token, from, to, rules, running);
   return { moved, cost: moved, diag: rules.diagonal === "fiveTen" ? [running.h - counter.h, running.v - counter.v] : [0, 0] };
+}
+
+/**
+ * What a token's plain straight leg from `before` to `after` takes, as the
+ * reducer records it (reducer/tokens.ts `walkedStop`): its change of
+ * elevation counts, and a leg into or out of a squeeze runs between the two
+ * footprints' middles. The drag's label reads a plain drop by it (review
+ * ASTRA-18).
+ */
+export function plainLegCost(before: PlacedToken & { elevation: number }, after: PlacedToken & { elevation: number }, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+  const from: SizedSpot = { x: before.x, y: before.y, elevation: before.elevation, ...(isSqueezed(before) !== isSqueezed(after) ? { footprint: stopFootprint(before) } : {}) };
+  return straightCost(after, from, { x: after.x, y: after.y, elevation: after.elevation }, rules, counter);
 }
 
 /** A spot a walk passes (6.1, contract 4.3), with where the walk is at it: step `k` of piece `piece`'s `n`. */

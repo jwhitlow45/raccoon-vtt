@@ -9,7 +9,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { dropMode, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { dropMode, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeTarget, samePose, type DropPlan, type DropToken, type Found, type Point, type Pose, type Role, type Stop } from "./drop.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -98,11 +98,11 @@ type Walk = {
   basis: Basis;
   token: Token;
   target: Point | null;
-  held: Point | null;
+  held: Pose | null;
   waiting: boolean;
   node: DragNode | null;
   drawn: DropToken | null;
-  straight: { to: Point; job: RouteJob; pieces: RoutePiece[] | null } | null;
+  straight: { to: Pose; job: RouteJob; pieces: RoutePiece[] | null } | null;
 };
 
 /** What a drag's stops read and write: the room, its actions, the board's UI, the room's scope and the board's route work. */
@@ -144,7 +144,7 @@ export function dragStops(deps: DragDeps): DragStops {
    * across drags (walls.ts sceneWalls), so a frame costs at most one drop's
    * leg tests.
    */
-  let memo: { view: RoomState; token: DropToken; qx: number; qy: number; mode: string; stop: Stop | null; lands: Point } | null = null;
+  let memo: { view: RoomState; token: DropToken; qx: number; qy: number; mode: string; stop: Stop | null; lands: Pose } | null = null;
   const setHold = (next: { tokenId: string; at: Point; blocker: Stop["blocker"] } | null) => {
     if (!sameHold(holds.getState().hold, next)) holds.setState({ hold: next });
   };
@@ -211,15 +211,15 @@ export function dragStops(deps: DragDeps): DragStops {
   };
 
   /** The straight walk to `to` checked for what it walks over, or none wanted (null). */
-  const goStraight = (w: Walk, to: Point | null) => {
-    if (w.straight && to && w.straight.to.x === to.x && w.straight.to.y === to.y) return;
+  const goStraight = (w: Walk, to: Pose | null) => {
+    if (w.straight && to && samePose(w.straight.to, to)) return;
     if (w.straight) work.drop(w.straight.job);
     w.straight = null;
     const world = w.drag.world;
     if (!to || !world) return;
     const check = new LegCheck(world, to, true);
     const straight: NonNullable<Walk["straight"]> = {
-      to: { x: to.x, y: to.y },
+      to,
       pieces: null,
       job: {
         first: true,
@@ -248,8 +248,8 @@ export function dragStops(deps: DragDeps): DragStops {
    */
   const follow = (view: RoomState, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
     const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
-    const holdAt = (at: Point | null) => {
-      if (!w || (w.held?.x === at?.x && w.held?.y === at?.y)) return;
+    const holdAt = (at: Pose | null) => {
+      if (!w || samePose(w.held, at)) return;
       w.held = at;
       publish(w);
     };

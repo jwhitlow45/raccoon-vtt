@@ -1,6 +1,8 @@
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type RoomState, type Token, type WallFeature } from "#shared/model.ts";
+import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { room, scene, token } from "#shared/testutil.ts";
+import { DM, env, P1, room, scene, token } from "#shared/testutil.ts";
 
 /**
  * A room for the movement and door tests: one scene, `s1`, 30 by 30 with no
@@ -39,6 +41,25 @@ export function world(spec: Spec): RoomState {
     buildChunks: chunks,
     tokens: Object.fromEntries((spec.tokens ?? []).map((t) => [t.id, t])),
   });
+}
+
+/** `view` with `tokenId`'s turn under way, so a move records what its leg took (docs/design-v1-movement.md 6.2). */
+export function onTurn(view: RoomState, tokenId: string): RoomState {
+  let state = view;
+  const ops: Op[] = [{ t: "encounter.start", entries: [{ id: "n1", tokenId, value: 20 }] }, { t: "encounter.next" }];
+  for (const [k, op] of ops.entries()) {
+    const r = applyOp(state, op, DM, env(k + 1));
+    if (!r.ok) throw new Error(`${op.t}: ${r.message}`);
+    state = r.state;
+  }
+  return state;
+}
+
+/** What the move `op` records it took on the turn, as the reducer writes it. */
+export function recordedCost(view: RoomState, op: Op, tokenId: string, who = P1): number | undefined {
+  const r = applyOp(view, op, who, env(100));
+  if (!r.ok) throw new Error(`${op.t}: ${r.message}`);
+  return r.state.tokens[tokenId]?.path?.stops.at(-1)?.cost;
 }
 
 /** Edge walls along a grid line: north edges from (from, fixed) to (to, fixed), or west edges from (fixed, from) to (fixed, to). */
