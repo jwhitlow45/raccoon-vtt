@@ -17,6 +17,7 @@ import {
   hash12,
   planSync,
   rollHash,
+  recordFits,
   rollKeys,
   sameRecord,
   syncPatch,
@@ -688,6 +689,15 @@ describe("the review's checks (3.3)", () => {
     assert.deepEqual(afterSync(after, undo.patch, AT), first);
     assert.equal(undoSync(first, sent.patch, undefined), null, "with no at in Apply's answer, Undo is off");
     assert.equal(pcStatsForImport.safeParse(after.stats).success, true);
+  });
+
+  test("a finished record fits only within the route's schema and 6 KiB, so Apply and Use it never send one the server refuses (RS-O-30)", () => {
+    const entry = (i: number) => [i.toString(16).padStart(12, "0"), { k: `w:${i.toString(16).padStart(12, "0")}`, h: "abcdef012345" }] as const;
+    const record = (n: number) => ({ base: {}, rolls: Object.fromEntries(Array.from({ length: n }, (_, i) => entry(i))) });
+    assert.equal(recordFits(record(40)), true);
+    assert.equal(recordFits(record(41)), false, "41 entries");
+    assert.equal(recordFits({ ...record(0), gone: Array.from({ length: 41 }, (_, i) => `s:${i.toString(16).padStart(12, "0")}`) }), false, "41 markers");
+    assert.equal(recordFits({ ...record(40), gone: Array.from({ length: 40 }, (_, i) => `s:${i.toString(16).padStart(12, "0")}`), base: { senses: "x".repeat(80) } }), true, "every bound at once still saves");
   });
 
   test("a second device's later sync of an equal record refuses the first device's Undo, which expects the at its own answer gave (RS-SOL-1)", () => {

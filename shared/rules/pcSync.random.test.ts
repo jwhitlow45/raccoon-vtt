@@ -107,9 +107,10 @@ function randomTruth(r: R, filler: boolean): Truth {
   return { stats, level: 1 + Math.floor(r() * 20), ac: 10 + Math.floor(r() * 8), hpMax: 10 + Math.floor(r() * 60), speeds: chance(r, 0.2) ? { walk: 30, fly: 30 } : { walk: pick(r, [25, 30, 35]) }, ...(chance(r, 0.5) ? { senses: `Darkvision ${pick(r, [60, 120])} ft.` } : {}), name: pick(r, ["Bree", "Bree Tallow"]), number: "12345678" };
 }
 
-/** D&D Beyond moves on: a few fields, a roll changed, one removed, one added. */
-function changeTruth(r: R, t: Truth): Truth {
+/** D&D Beyond moves on: a few fields, a roll changed, one removed, one added. A full one may add a roll first, where the read keeps it. */
+function changeTruth(r: R, t: Truth, full: boolean): Truth {
   let stats = { ...t.stats, rolls: [...t.stats.rolls] };
+  if (full && chance(r, 0.4)) stats.rolls.unshift(randomRoll(r, "t"));
   for (const key of HOT) if (chance(r, 0.15)) stats = withField(stats, key, pick(r, valuesOf(key)));
   if (stats.rolls.length > 0 && chance(r, 0.3)) {
     const i = Math.floor(r() * stats.rolls.length);
@@ -132,7 +133,7 @@ function changeTruth(r: R, t: Truth): Truth {
  * A read of the truth: a part sometimes left out, a kind sometimes read in
  * part and marked so, the reader's 40-roll cut, and new ids every time.
  */
-function readOf(r: R, t: Truth): PcFill {
+function readOf(r: R, t: Truth, unread = 0.12): PcFill {
   const s = t.stats;
   const fill: PcFill = {
     source: "ddb",
@@ -161,7 +162,7 @@ function readOf(r: R, t: Truth): PcFill {
   if (chance(r, 0.06)) delete fill.level;
   let rolls = s.rolls.map((roll) => ({ ...roll, id: newId("read"), ddb: true as const }));
   for (const kind of ["weapon", "spell", "other"] as const) {
-    if (!chance(r, 0.12)) continue;
+    if (!chance(r, unread)) continue;
     fill.read![kind] = false;
     rolls = rolls.filter((roll) => roll.kind !== kind || chance(r, 0.5));
   }
@@ -173,8 +174,13 @@ function readOf(r: R, t: Truth): PcFill {
   return fill;
 }
 
-/** The player changes a few fields, edits, deletes and adds rolls, takes or ends a shape. */
-function edit(r: R, c: Character): Character {
+/**
+ * The player changes a few fields, edits, deletes and adds rolls, takes or
+ * ends a shape. Near 40 rolls, the player may trade a roll for one of their
+ * own named as D&D Beyond's newest, so the block stays full with a deleted
+ * roll's entry kept, and the record's room runs out (RS-O-30).
+ */
+function edit(r: R, c: Character, full: Truth | null): Character {
   const next: Character = { ...c, actor: { ...c.actor } };
   if (next.stats) {
     let stats = { ...next.stats, rolls: [...next.stats.rolls] };
@@ -185,6 +191,11 @@ function edit(r: R, c: Character): Character {
     }
     if (stats.rolls.length > 0 && chance(r, 0.25)) stats.rolls.splice(Math.floor(r() * stats.rolls.length), 1);
     if (stats.rolls.length < MAX_PC_ROLLS && chance(r, 0.2)) stats.rolls.push(randomRoll(r, "own"));
+    const newest = full?.stats.rolls[0];
+    if (newest && stats.rolls.length > 0 && chance(r, 0.4)) {
+      stats.rolls.splice(Math.floor(r() * stats.rolls.length), 1);
+      stats.rolls.push(randomRoll(r, "own", newest));
+    }
     next.stats = stats;
   }
   if (chance(r, 0.1)) next.level = 1 + Math.floor(r() * 20);
@@ -270,6 +281,7 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
   const rd = syncResult(plan, defaultTicks(plan));
   const ra = syncResult(plan, all);
   const entriesBefore = record?.rolls ?? {};
+  if (plan.rolls.unlinked.length > 0) reached.unlinked++;
   const kOfEntry = (res: SyncResult, id: string) => res.record.rolls[hash12(id)]?.k;
   // Each read roll's key and content, as the merge finds them.
   const readKeys = rollKeys(fill.stats.rolls);
@@ -479,9 +491,17 @@ function fieldOfBase(c: Pick<Character, "ddbSync">, key: FieldKey): FieldValue {
 }
 
 /** One random life of Bree: where she starts, then up to six syncs with edits on both sides between them. */
-function life(seed: number): void {
+/** How often a full life's steps reached the record's room, so the test knows the boundary was run. */
+const reached = { unlinked: 0 };
+
+/**
+ * One character's life of syncs and edits. A full one keeps about 40
+ * rolls on both sides, every step changing both and leaving kinds unread
+ * often, so deleted rolls' entries stay and the record runs out of room.
+ */
+function life(seed: number, full = false): void {
   const r = rng(seed);
-  const filler = chance(r, 0.1);
+  const filler = full || chance(r, 0.1);
   let truth = randomTruth(r, filler);
   const start = pick(r, ["none", "typed", "imported"] as const);
   let c: Character = testCharacter("bree", {
@@ -493,12 +513,12 @@ function life(seed: number): void {
   if (start === "typed") c.stats = { ...(structuredClone(EMPTY_PC_STATS) as PcStats), spellAbility: "cha", rolls: [randomRoll(r, "own"), randomRoll(r, "own")] };
   if (start === "imported") c.stats = { ...(structuredClone(EMPTY_PC_STATS) as PcStats), rolls: truth.stats.rolls.slice(0, 5).map((roll) => ({ ...roll, id: newId("old"), ddb: true as const })) };
   let state: RoomState = room({ characters: { bree: c } });
-  const steps = 1 + Math.floor(r() * 6);
+  const steps = full ? 4 + Math.floor(r() * 5) : 1 + Math.floor(r() * 6);
   for (let step = 0; step < steps; step++) {
-    if (step > 0 && chance(r, 0.7)) truth = changeTruth(r, truth);
-    if (step > 0 && chance(r, 0.7)) c = edit(r, c);
+    if (step > 0 && (full || chance(r, 0.7))) truth = changeTruth(r, truth, filler);
+    if (step > 0 && (full || chance(r, 0.7))) c = edit(r, c, filler ? truth : null);
     state = { ...state, characters: { ...state.characters, bree: c } };
-    const fill = readOf(r, truth);
+    const fill = readOf(r, truth, full ? 0.5 : filler ? 0.35 : 0.12);
     const mode = chance(r, 0.2) ? "editor" : "resync";
     c = checkStep(r, state, c, fill, mode, 10 + step * 2);
     state = { ...state, characters: { ...state.characters, bree: c } };
@@ -514,6 +534,19 @@ test("a re-sync's eight invariants hold over many random lives (docs/design-v1-r
       throw new Error(`seed ${seed}: ${(err as Error).message}`, { cause: err });
     }
   }
+});
+
+test("the invariants hold near 40 rolls, where the record runs out of room for the player's own rolls (RS-O-30)", () => {
+  const runs = Number(process.env.SYNC_RUNS ?? 600) / 3;
+  reached.unlinked = 0;
+  for (let seed = 1; seed <= runs; seed++) {
+    try {
+      life(100_000 + seed, true);
+    } catch (err) {
+      throw new Error(`full seed ${seed}: ${(err as Error).message}`, { cause: err });
+    }
+  }
+  assert.ok(reached.unlinked > 0, "some step left an own roll unlinked for want of room");
 });
 
 /** The cap on removed markers over a long life: deletions under incomplete reads keep at most 40, dropping the oldest first. */

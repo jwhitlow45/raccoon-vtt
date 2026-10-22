@@ -5,7 +5,7 @@ import type { Character } from "#shared/model.ts";
 import { expectOf } from "#shared/permissions.ts";
 import type { ExpectPart } from "#shared/protocol.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { defaultTicks, planSync, syncPatch, syncResult, undoSync, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { defaultTicks, planSync, recordFits, syncPatch, syncResult, undoSync, type SyncPlan } from "#shared/rules/pcSync.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -231,7 +231,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
 
   const close = () => send({ t: "close" });
   const blockBytes = result ? serializedBytes(result.stats) : 0;
-  const recordBig = result ? serializedBytes({ ...result.record, at: new Date().toISOString() }) > LIMITS.ddbSyncBytes : false;
+  const recordBig = result ? !recordFits(result.record) : false;
   const tooBig = blockBytes > LIMITS.pcStatsBytes || recordBig;
 
   // Focus (3.6): when an answer changes the state and focus is on the dialog itself or went with a removed control, the new state's first line takes it. A live rebuild that removed the focused row gives it to its section's label.

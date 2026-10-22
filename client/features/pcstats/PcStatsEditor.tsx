@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey } from "#shared/model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
 import { fillSummary, type PcFill } from "#shared/rules/pcFill.ts";
-import { defaultTicks, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { defaultTicks, recordFits, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { pcActorNumbers, pcDerived, pcProficiency, srdOnPass, unknownOnPass, type PcNumber } from "#shared/rules/pcStats.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -47,6 +47,7 @@ import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
 import { parseStatBlockText } from "../monsters/parse.ts";
 import { closePcStats, openPcStatsSlot, openResyncSlot } from "./open.ts";
 import { ResyncDialog } from "./Resync.tsx";
+import { recordTooBigText } from "./resync.ts";
 import { SyncReview } from "./SyncReview.tsx";
 import { partsText, rollReading } from "./reading.ts";
 
@@ -339,11 +340,14 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     const ticks = review.ticks;
     const plan = ticks ? syncPlan(review.fill, flow) : null;
     const result = plan && ticks ? syncResult(plan, ticks) : null;
+    // A record past its schema or 6 KiB would fail the whole Save, so Use it waits until the review leaves it within them (docs/design-v1-resync.md 3.3).
+    const recordBig = result ? !recordFits(result.record) : false;
     const use = () => {
       if (!plan || !result) {
         send({ t: "use" });
         return;
       }
+      if (recordBig) return;
       send({ t: "use", sync: editorSyncUse(result, store.getState().view?.characters[props.characterId] ?? known.current) });
     };
     return (
@@ -358,7 +362,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
           discard ?? (
             <>
               <Button onClick={() => send({ t: "back" })}>Back</Button>
-              <Button variant="primary" onClick={use}>
+              <Button variant="primary" disabled={recordBig} onClick={use}>
                 Use it
               </Button>
             </>
@@ -379,6 +383,11 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         ) : (
           <ReviewStep review={review} onToggle={(key) => send({ t: "toggle", key })} />
         )}
+        {recordBig ? (
+          <Notice tone="danger" role="alert">
+            {recordTooBigText(name.current)}
+          </Notice>
+        ) : null}
       </Dialog>
     );
   }

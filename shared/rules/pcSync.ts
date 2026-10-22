@@ -2,7 +2,8 @@ import { ddbCharacterId } from "../ddb/link.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type DdbBase, type DdbSync, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
 import { expectOf } from "../permissions.ts";
 import { hash128, stableStringify } from "../project.ts";
-import { MAX_PC_ROLLS, type ActorPatch, type CharacterExpect, type CharacterPatch, type DdbSyncPatch, type ExpectPart, type PcStatsPatch } from "../protocol.ts";
+import { LIMITS, serializedBytes } from "../limits.ts";
+import { ddbSyncPatchSchema, MAX_PC_ROLLS, type ActorPatch, type CharacterExpect, type CharacterPatch, type DdbSyncPatch, type ExpectPart, type PcStatsPatch } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "./damage.ts";
 import type { PcFill } from "./pcFill.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcDerived } from "./pcStats.ts";
@@ -950,6 +951,15 @@ function statsPatchOf(before: PcStats, next: PcStats): PcStatsPatch {
   const patch: Record<string, unknown> = {};
   for (const part of STATS_PARTS) if (!same(before[part], next[part])) patch[part] = next[part] ?? null;
   return patch as PcStatsPatch;
+}
+
+/**
+ * Whether a finished record saves (2.1, 3.3): the route's schema, its 40
+ * entries and 40 markers included, and 6 KiB with the `at` the server adds,
+ * which is always 24 characters.
+ */
+export function recordFits(record: DdbSyncPatch): boolean {
+  return ddbSyncPatchSchema.safeParse(record).success && serializedBytes({ ...record, at: "2026-01-01T00:00:00.000Z" }) <= LIMITS.ddbSyncBytes;
 }
 
 /** A record as a patch sends it compared with one stored, `at` aside. */
