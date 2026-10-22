@@ -69,6 +69,13 @@ describe("the side panel's first state on a page", () => {
     assert.equal(firstSidePanel(null, { wide: true, height: 800, stored: null }), false);
   });
 
+  test("a phone's sheet open as the layout turns wide starts it shown, whatever the height or the stored choice (LP11-REG-2)", () => {
+    assert.equal(firstSidePanel(null, { wide: true, height: 430, stored: null, sheet: true }), false, "a large phone turned sideways keeps its panel in view");
+    assert.equal(firstSidePanel(null, { wide: true, height: 430, stored: "hidden", sheet: true }), false);
+    assert.equal(firstSidePanel(null, { wide: true, height: 430, stored: null, sheet: false }), true, "with no sheet open the short screen's default stands");
+    assert.equal(firstSidePanel(true, { wide: true, height: 430, stored: null, sheet: true }), true, "a panel decided before stays as it was");
+  });
+
   test("worked out once: a later resize across 500 px tall leaves it as it was", () => {
     const short = firstSidePanel(null, { wide: true, height: 430, stored: null });
     assert.equal(short, true);

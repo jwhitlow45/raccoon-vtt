@@ -44,13 +44,17 @@ export function writeSidePanel(choice: SidePanelChoice, options: { preview: bool
 
 /**
  * The side panel's first state on a Room page: null until the layout is
- * first wide, then fixed for the page. The stored choice wins. With none, a
- * short layout (under 500 px tall, a large phone held sideways) starts with
- * it hidden, since the map needs the width there. Worked out once, so a
- * resize or a rotation never hides or shows the panel by itself, and a
- * window dragged shorter keeps its panel.
+ * first wide, then fixed for the page. A phone's sheet open as the layout
+ * turns wide (`sheet`) starts it shown, so the panel it held stays in view
+ * beside the map and comes back as a sheet on the turn back, as opening a
+ * panel from anywhere shows a hidden side panel. Otherwise the stored
+ * choice wins. With none, a short layout (under 500 px tall, a large phone
+ * held sideways) starts with it hidden, since the map needs the width
+ * there. Worked out once, so a resize or a rotation never hides or shows
+ * the panel by itself, and a window dragged shorter keeps its panel.
  */
-export function firstSidePanel(decided: boolean | null, input: { wide: boolean; height: number; stored: SidePanelChoice | null }): boolean | null {
+export function firstSidePanel(decided: boolean | null, input: { wide: boolean; height: number; stored: SidePanelChoice | null; sheet?: boolean }): boolean | null {
   if (decided !== null || !input.wide) return decided;
+  if (input.sheet === true) return false;
   return input.stored === "hidden" || (input.stored === null && input.height < SHORT_LANDSCAPE_MAX);
 }

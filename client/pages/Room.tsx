@@ -65,7 +65,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
-import type { Ended, Toast, ToastDie } from "../state/types.ts";
+import { sheetOpen as sheetShows, type Ended, type Toast, type ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
@@ -107,6 +107,14 @@ const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 const PREVIEW_NOTICE_MAX = 520;
 /** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
 const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2 };
+/**
+ * A panel's `close` in the side panel (features/panels.ts PanelProps). A
+ * panel closes its phone's sheet to clear the map, as Add and place does,
+ * and the side panel stands beside the map, so the panel stays open in the
+ * room's state too: a turn below 900 px then opens it as a sheet
+ * (state/types.ts crossWide), as the side panel showed it.
+ */
+const KEEP_SIDE_PANEL = (): void => {};
 
 /**
  * An element's height as drawn, kept up to date. The bars over the map
@@ -349,20 +357,23 @@ function RoomPage() {
   /*
    * The side panel from 900 px up, which can be hidden
    * (docs/design-v1-layout-hierarchy.md 4.1). Its first state on this page
-   * is worked out once, the first time the layout is wide, from this
-   * device's choice or the short screen's default (pages/sidePanel.ts), in
-   * a layout effect so a panel that starts hidden never paints a frame.
+   * is worked out once, the first time the layout is wide, from a phone's
+   * sheet open as it turned, this device's choice or the short screen's
+   * default (pages/sidePanel.ts), in a layout effect so a panel that starts
+   * hidden never paints a frame. It runs before crossWide below, so
+   * `wasWide` still says whether the layout was narrow until now.
    */
   const sideShown = wide && !sidePanelHidden;
   const sideFirst = useRef<boolean | null>(null);
+  const wasWide = useRef(wide);
   useLayoutEffect(() => {
     if (sideFirst.current !== null || !wide) return;
-    const first = firstSidePanel(null, { wide, height, stored: readSidePanel() });
+    const sheet = !wasWide.current && sheetShows(store.getState().local);
+    const first = firstSidePanel(null, { wide, height, stored: readSidePanel(), sheet });
     sideFirst.current = first;
     if (first !== null) ui.hideSidePanel(first);
-  }, [wide, height, ui]);
+  }, [wide, height, ui, store]);
   // Crossing 900 px, a phone's hidden sheet and the side panel hand over to each other (state/types.ts crossWide).
-  const wasWide = useRef(wide);
   useLayoutEffect(() => {
     if (wasWide.current === wide) return;
     wasWide.current = wide;
@@ -1004,7 +1015,7 @@ function RoomPage() {
           onShare={placeShare}
           onHide={hideSidePanel}
           subpages={subpages}
-          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(id)} />}
+          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={KEEP_SIDE_PANEL} onHeader={headerOf(id)} />}
           scrollSubject={(id) => panelSubject(id, selectedId)}
           tabRef={sideTabRef}
           nameRef={belowNameRef}
