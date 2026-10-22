@@ -2541,3 +2541,56 @@ describe("companion stat blocks at the room actor (docs/design-v1-companion-stat
     );
   });
 });
+
+describe("a player's undo of getting on and off (docs/design-v1-attach.md 8.3)", () => {
+  test("Ride, then Undo move on the same turn, and Get off, then its undo, through the room actor's own steps", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const initial = createInitialState({ roomName: "Fake", dm });
+    const sceneId = initial.meta.playerSceneId!;
+    initial.members[player.id] = player;
+    initial.tokens.thorn = testToken("thorn", { sceneId, name: "Thorn", kind: "pc", disposition: "ally", ownerIds: [player.id], x: 4, y: 6, actor: { inline: testActor({ speeds: { walk: 30 } }) } });
+    initial.tokens.horse = testToken("horse", { sceneId, name: "Warhorse", kind: "npc", size: "large", disposition: "ally", ownerIds: [player.id], x: 4, y: 4, actor: { inline: testActor({ speeds: { walk: 60 } }) } });
+    const db = new FakeDb({ state: initial, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const table = connect(actor, dm);
+      const phone = connect(actor, player, "player");
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(table.conn, 1, { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "eh", tokenId: "horse", value: 8 }] });
+      await actor.op(table.conn, 2, { t: "encounter.next" });
+      assert.notEqual(await answerTo(table.sent, 2), "stuck");
+      const thorn = () => actor.committed.state.tokens.thorn!;
+      const mounts = () => actor.committed.state.encounter?.turnStart?.mounts;
+      const ok = async (n: number, op: Op) => {
+        await actor.op(phone.conn, n, op);
+        const ev = await answerTo(phone.sent, n);
+        assert.ok(ev !== "stuck" && !(ev.rejects?.some((r) => r.n === n) ?? false), `${op.t} ${n}: ${JSON.stringify(ev)}`);
+        return ev;
+      };
+      const ride: Op = { t: "token.attach", tokenId: "thorn", to: "horse", kind: "ride", steer: true, x: 4, y: 5, elevation: 0 };
+      await ok(1, ride);
+      assert.deepEqual(mounts(), ["horse"]);
+      // A mistaken Ride is taken back by Undo move, link, seat and the turn's sharing alike.
+      const undone = await ok(2, { t: "undo" });
+      assert.deepEqual(undone.restored, [{ n: 2, what: "putting Thorn on Warhorse" }]);
+      assert.equal(thorn().attached, undefined);
+      assert.deepEqual([thorn().x, thorn().y], [4, 6]);
+      assert.equal(mounts(), undefined);
+      await ok(3, ride);
+      await ok(4, { t: "token.detach", tokenId: "thorn", x: 6, y: 6 });
+      assert.equal(mounts(), undefined);
+      // Undoing the Get off on the same turn puts the ride back, and the mount on the turn's list (the restore's rides).
+      await ok(5, { t: "undo" });
+      assert.deepEqual(thorn().attached, { to: "horse", kind: "ride", steer: true });
+      assert.deepEqual(mounts(), ["horse"]);
+      const restores = db.storedOps.filter((op) => (op as { t: string }).t === "sys.restore") as { rides?: unknown[] }[];
+      assert.ok(restores.some((op) => op.rides !== undefined), "the restore names the ride it puts back");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+});

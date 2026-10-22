@@ -2,6 +2,7 @@
   "defaultSeconds": 60,
   "seconds": {
     "areas": 32,
+    "attach": 12,
     "bardock": 169,
     "bardock-sweep-large": 160,
     "bardock-sweep-small": 164,

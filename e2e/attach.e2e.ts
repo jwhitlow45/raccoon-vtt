@@ -259,6 +259,15 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await shots.take(pat, "attach-got-off");
   });
 
+  test("at-3b. Pat taps Undo move on Thorn's bar: Thorn is back in the saddle, and the horse shares the turn again", async () => {
+    const rider = token(patSocket, run.thorn)!;
+    const thorn = await select(pat, "Thorn", { x: rider.x, y: rider.y });
+    await thorn.getByRole("button", { name: "Undo move", exact: true }).tap();
+    const back = await waitFor("Thorn on the warhorse again", () => (token(patSocket, run.thorn)?.attached?.to === run.horse ? token(patSocket, run.thorn) : null));
+    assert.deepEqual(back.attached, { to: run.horse, kind: "ride", steer: true });
+    await waitFor("the horse on the turn's list", () => (patSocket.state!.encounter!.turnStart?.mounts?.includes(run.horse) ? true : null));
+  });
+
   test("at-4. the DM perches the hidden imp on the cult fanatic from the Attach popover and moves the fanatic: the imp follows, and no frame to Pat or Sam names it", async () => {
     await select(dm, "Imp", { x: 14, y: 3 }, true);
     await bar(dm, "Imp").getByRole("button", { name: "Attach", exact: true }).click();
