@@ -5,8 +5,8 @@ import type { Op } from "../protocol.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, onHolder, walkerFor } from "./attach.ts";
-import { footprintRect, isSqueezed, occupiedRange, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
-import { footing, footprintGround, standing } from "./heights.ts";
+import { footprintRect, footprintSize, isSqueezed, occupiedRange, rangeAt, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
+import { footing, footprintGround, sceneGround, standing } from "./heights.ts";
 import { planMove, type MovedToken } from "./moveLeg.ts";
 import { groundUnder } from "./movement.ts";
 import { onTrace, routeLattice, routeSpots, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
@@ -193,7 +193,13 @@ export type TrapIndex = {
   turns: readonly number[];
 };
 
-type SquareIndex = { w: number; h: number; sum: Int32Array; at: ReadonlyMap<number, readonly number[]> };
+/**
+ * The armed squares (section 9): a summed-area table that counts them in
+ * any rectangle in four reads, and per square the set of its traps, as an
+ * index into `sets` (0 for none), so a footprint over armed squares reads
+ * one number a square and joins the few distinct sets it meets.
+ */
+type SquareIndex = { w: number; h: number; sum: Int32Array; cells: Uint16Array; sets: readonly (readonly number[])[] };
 
 const EMPTY_INDEX: TrapIndex = { traps: [], squares: null, wires: [], doors: new Map(), turns: [] };
 
@@ -269,7 +275,21 @@ function buildIndex(traps: readonly Trap[], bounds: { w: number; h: number }): T
         sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1]! + row;
       }
     }
-    squares = { w, h, sum, at };
+    // Each square's traps as one of the distinct sets, which a scene of 50 traps keeps few.
+    const cells = new Uint16Array(w * h);
+    const sets: (readonly number[])[] = [[]];
+    const ids = new Map<string, number>();
+    for (const [k, list] of at) {
+      const key = list.join(",");
+      let id = ids.get(key);
+      if (id === undefined) {
+        id = sets.length;
+        ids.set(key, id);
+        sets.push(list);
+      }
+      cells[k] = id;
+    }
+    squares = { w, h, sum, cells, sets };
   }
   return { traps, squares, wires, doors, turns };
 }
@@ -285,17 +305,7 @@ function squaresIn(s: SquareIndex, r: CellRange): number {
   return s.sum[y1 * W + x1]! - s.sum[y0 * W + x1]! - s.sum[y1 * W + x0]! + s.sum[y0 * W + x0]!;
 }
 
-/** The traps whose squares a range of cells covers, each once. */
-function trapsIn(s: SquareIndex, r: CellRange): number[] {
-  if (squaresIn(s, r) === 0) return [];
-  const out: number[] = [];
-  for (let y = Math.max(0, r.y0); y < Math.min(s.h, r.y1); y++) {
-    for (let x = Math.max(0, r.x0); x < Math.min(s.w, r.x1); x++) {
-      for (const i of s.at.get(y * s.w + x) ?? []) if (!out.includes(i)) out.push(i);
-    }
-  }
-  return out;
-}
+const NONE: readonly number[] = [];
 
 // ---------------------------------------------------------------------------
 // Progress (5.3, 5.4)
@@ -505,15 +515,37 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
  * is read at the same spot of the same step's walk, so a member on its own
  * step reads its holder there too. A member walking a route of its own
  * takes that walk's elevations as they are.
+ *
+ * What is carried or rides all the way up adds its holders' changes to the
+ * group's walk, in the order `elevationOnStep` adds them, so a walk of 500
+ * reads each spot in a few additions. Only a dragged link reads the ground,
+ * and remembers what it read.
  */
 function elevationRule(walk: Walk, before: RoomState, shared: boolean): (j: number) => number {
-  const memo = new Map<number, number>();
+  const last = walk.spots.length - 1;
+  const own = walk.spots;
+  if (!shared) return (j) => (j === 0 ? walk.token.elevation : j === last ? walk.entry.to.elevation : own[j]!.elevation);
+  const rises: number[] = [];
+  for (let at: Walk = walk; at.holder; at = at.holder) {
+    const kind = at.token.attached?.kind;
+    if (kind === undefined || !onHolder(kind)) {
+      const memo = new Map<number, number>();
+      return (j) => {
+        if (j === 0) return walk.token.elevation;
+        if (j === last) return walk.entry.to.elevation;
+        let hit = memo.get(j);
+        if (hit === undefined) memo.set(j, (hit = elevationOnStep(walk, before, walk.step, j)));
+        return hit;
+      };
+    }
+    rises.unshift(at.token.elevation - at.holder.token.elevation);
+  }
   return (j) => {
     if (j === 0) return walk.token.elevation;
-    if (j === walk.spots.length - 1) return walk.entry.to.elevation;
-    let hit = memo.get(j);
-    if (hit === undefined) memo.set(j, (hit = shared ? elevationOnStep(walk, before, walk.step, j) : walk.spots[j]!.elevation));
-    return hit;
+    if (j === last) return walk.entry.to.elevation;
+    let up = own[j]!.elevation;
+    for (const rise of rises) up = up + rise;
+    return up;
   };
 }
 
@@ -584,18 +616,13 @@ function placedAt(walk: Walk, j: number): Token {
   return out;
 }
 
-/** Whether a creature at spot `j` is on the floor (5.2): on its own ground there, and not carried on another by a link every player sees. */
-function floorAt(walk: Walk, j: number, at: Light, before: RoomState, seen: (id: string) => boolean): boolean {
-  if (walk.carriedOn) return false;
-  if (!walk.holder) {
-    // A named token getting off its holder is carried while it stays inside it, by a link every player sees.
-    const link = walk.token.attached;
-    if (link && onHolder(link.kind) && seen(walk.token.id)) {
-      const holder = holderOf(before.tokens, walk.token) as Token | undefined;
-      if (holder && seen(holder.id) && insideHolder(at, holder)) return false;
-    }
-  }
-  return standing(walk.elevation(j), footprintGround(before.buildChunks, at)) === "ground";
+/** The holder a named token is getting off, which carries it while the token stays inside it, by a link every player sees (5.2). */
+function leaving(walk: Walk, before: RoomState, seen: (id: string) => boolean): Token | null {
+  if (walk.holder) return null;
+  const link = walk.token.attached;
+  if (!link || !onHolder(link.kind) || !seen(walk.token.id)) return null;
+  const holder = holderOf(before.tokens, walk.token) as Token | undefined;
+  return holder && seen(holder.id) ? holder : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +644,59 @@ function centerOf(at: Light): { x: number; y: number } {
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
+/** A trap's flags for one walk: the walk can set it off, it takes only creatures on the floor, it goes off on entering, on leaving. */
+const CAN = 1;
+const FLOOR = 2;
+const ENTER = 4;
+const LEAVE = 8;
+
+/** One square set of the index as a walk reads it: the traps it can set off there on the floor, and off the floor. */
+type SetReading = { floor: readonly number[]; off: readonly number[] };
+
+/** The traps a walk can set off, as flags by trap, and each square set read by them, shared by the walks of a pass with the same flags. */
+type Reading = { flags: Uint8Array; sets: (SetReading | undefined)[] };
+
+/** What the walks of one pass share: their readings and the scene's ground. */
+type PassCache = { readings: Map<string, Reading>; ground: (r: CellRange) => number };
+
+function passCache(before: RoomState, sceneId: string): PassCache {
+  return { readings: new Map(), ground: sceneGround(before.buildChunks, sceneId) };
+}
+
+function readingOf(walk: Walk, index: TrapIndex, before: RoomState, spent: ReadonlySet<number>, cache: PassCache): Reading | null {
+  const traps = index.traps;
+  const flags = new Uint8Array(traps.length);
+  let any = false;
+  for (let i = 0; i < traps.length; i++) {
+    const rig = traps[i]!.rig!;
+    if (spent.has(i) || !setsOff(rig, before, walk.token)) continue;
+    flags[i] = CAN | (rig.floor ? FLOOR : 0) | (rig.on.includes("enter") ? ENTER : 0) | (rig.on.includes("leave") ? LEAVE : 0);
+    any = true;
+  }
+  if (!any) return null;
+  const key = flags.join("");
+  let hit = cache.readings.get(key);
+  if (!hit) cache.readings.set(key, (hit = { flags, sets: [] }));
+  return hit;
+}
+
+function setReading(reading: Reading, squares: SquareIndex, id: number): SetReading {
+  let hit = reading.sets[id];
+  if (!hit) {
+    const floor: number[] = [];
+    const off: number[] = [];
+    for (const i of squares.sets[id]!) {
+      const f = reading.flags[i]!;
+      if (!(f & CAN)) continue;
+      floor.push(i);
+      if (!(f & FLOOR)) off.push(i);
+    }
+    // The same list when the floor changes nothing, which tells a spot it need not read its ground.
+    reading.sets[id] = hit = { floor, off: off.length === floor.length ? floor : off };
+  }
+  return hit;
+}
+
 /**
  * Every event of one walk against the scene's armed traps, in spot order.
  * Squares: a spot on the trap after one off it steps onto it, the reverse
@@ -624,49 +704,118 @@ function centerOf(at: Light): { x: number; y: number } {
  * is a square of the zone and it passes the floor rule there. Wires:
  * crossed between two spots when the segment joining the footprint's
  * centers meets the wire and the first center is not on the wire's line,
- * by the exact orientation test, with the floor rule at the first spot. Only
- * a spot over an armed square reads its cells and its ground.
+ * by the exact orientation test, with the floor rule at the first spot.
+ *
+ * Only a spot over an armed square reads its cells, and its ground only
+ * when a trap there takes creatures on the floor alone. A spot over the
+ * same square set as the one before, on the same footing, yields the same
+ * list, which steps onto and off nothing.
  */
-function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: string) => boolean, spent: ReadonlySet<number>): TrapEvent[] {
+function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: string) => boolean, spent: ReadonlySet<number>, cache: PassCache): TrapEvent[] {
   const out: TrapEvent[] = [];
+  const reading = readingOf(walk, index, before, spent, cache);
+  if (!reading) return out;
+  const { flags } = reading;
   const traps = index.traps;
-  const eligible = traps.map((t, i) => !spent.has(i) && setsOff(t.rig!, before, walk.token));
-  if (!eligible.some((e) => e)) return out;
   const squares = index.squares;
-  const floorCache = new Map<number, boolean>();
-  const floor = (j: number, at: Light) => {
-    let hit = floorCache.get(j);
-    if (hit === undefined) floorCache.set(j, (hit = floorAt(walk, j, at, before, seen)));
-    return hit;
+  const spots = walk.spots;
+  const last = spots.length - 1;
+  const { w, h } = footprintSize(walk.token);
+  const holder = leaving(walk, before, seen);
+  // Only a token squeezed where it stands walks squeezed anywhere between (route.ts onTrace).
+  const rangeOf = (j: number): CellRange => (j === 0 || j === last || (walk.token.squeeze === true && walk.squeezedAt(j)) ? occupiedRange(lightAt(walk, j)) : rangeAt(w, h, spots[j]!.x + walk.ox, spots[j]!.y + walk.oy));
+  const floorAt = (j: number, r: CellRange): boolean => {
+    if (walk.carriedOn) return false;
+    if (holder && insideHolder(lightAt(walk, j), holder)) return false;
+    return standing(walk.elevation(j), cache.ground(r)) === "ground";
   };
-  const onAt = (j: number, at: Light): number[] => {
-    if (!squares) return [];
-    const hit = trapsIn(squares, occupiedRange(at));
-    return hit.length === 0 ? hit : hit.filter((i) => eligible[i] && (!traps[i]!.rig!.floor || floor(j, at)));
+  const marks = new Int32Array(traps.length);
+  let stamp = 0;
+  const onAt = (j: number): readonly number[] => {
+    if (!squares) return NONE;
+    const r = rangeOf(j);
+    const x0 = Math.max(0, r.x0);
+    const y0 = Math.max(0, r.y0);
+    const x1 = Math.min(squares.w, r.x1);
+    const y1 = Math.min(squares.h, r.y1);
+    if (x0 >= x1 || y0 >= y1) return NONE;
+    const W = squares.w + 1;
+    const sum = squares.sum;
+    if (sum[y1 * W + x1]! - sum[y0 * W + x1]! - sum[y1 * W + x0]! + sum[y0 * W + x0]! === 0) return NONE;
+    // The distinct square sets under the footprint: one under a creature of a square or less, a few under a larger one.
+    let first = 0;
+    let more: number[] | null = null;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const id = squares.cells[y * squares.w + x]!;
+        if (id === 0 || id === first) continue;
+        if (first === 0) first = id;
+        else if (!more) more = [id];
+        else if (!more.includes(id)) more.push(id);
+      }
+    }
+    const a = setReading(reading, squares, first);
+    let needs = a.off !== a.floor;
+    if (more && !needs) {
+      for (const id of more) {
+        const b = setReading(reading, squares, id);
+        if (b.off !== b.floor) needs = true;
+      }
+    }
+    const floor = needs && floorAt(j, r);
+    let one = floor ? a.floor : a.off;
+    if (!more) return one;
+    let union: number[] | null = null;
+    for (const id of more) {
+      const b = setReading(reading, squares, id);
+      const list = floor ? b.floor : b.off;
+      if (list.length === 0 || list === one) continue;
+      if (one.length === 0) {
+        one = list;
+        continue;
+      }
+      if (!union) {
+        union = [...one];
+        stamp++;
+        for (const i of one) marks[i] = stamp;
+      }
+      for (const i of list) {
+        if (marks[i] === stamp) continue;
+        marks[i] = stamp;
+        union.push(i);
+      }
+    }
+    return union ?? one;
   };
-  const wires = walk.teleport ? [] : index.wires.filter((w) => eligible[w.i]);
-  let prevAt = lightAt(walk, 0);
-  let prevOn = onAt(0, prevAt);
-  for (let j = 1; j < walk.spots.length; j++) {
-    const at = lightAt(walk, j);
-    const on = onAt(j, at);
-    const progress = walk.spots[j]!.progress;
-    const add = (trap: number, how: TrapHow) => out.push({ trap, how, at: progress, tokenId: walk.token.id, walk });
-    for (const i of on) if (!prevOn.includes(i) && traps[i]!.rig!.on.includes("enter")) add(i, "enter");
-    for (const i of prevOn) if (!on.includes(i) && traps[i]!.rig!.on.includes("leave")) add(i, "leave");
+  const wires = walk.teleport ? [] : index.wires.filter((wire) => flags[wire.i]! & CAN);
+  // Which spot each trap was last on, so a step tells what it entered and left in one pass over both lists.
+  const lastOn = new Int32Array(traps.length).fill(-1);
+  let prevOn = onAt(0);
+  for (const i of prevOn) lastOn[i] = 0;
+  for (let j = 1; j <= last; j++) {
+    const on = onAt(j);
+    if (on === prevOn) {
+      for (const i of on) lastOn[i] = j;
+    } else {
+      const progress = spots[j]!.progress;
+      for (const i of on) {
+        if (lastOn[i] !== j - 1 && flags[i]! & ENTER) out.push({ trap: i, how: "enter", at: progress, tokenId: walk.token.id, walk });
+        lastOn[i] = j;
+      }
+      for (const i of prevOn) if (lastOn[i] !== j && flags[i]! & LEAVE) out.push({ trap: i, how: "leave", at: progress, tokenId: walk.token.id, walk });
+    }
     if (wires.length > 0) {
-      const a = centerOf(prevAt);
-      const b = centerOf(at);
+      const a = centerOf(lightAt(walk, j - 1));
+      const b = centerOf(lightAt(walk, j));
       for (const wire of wires) {
         if (Math.max(a.x, b.x) < wire.x0 || Math.min(a.x, b.x) > wire.x1 || Math.max(a.y, b.y) < wire.y0 || Math.min(a.y, b.y) > wire.y1) continue;
         const { a: wa, b: wb } = (traps[wire.i]!.zone as { wire: { a: [number, number]; b: [number, number] } }).wire;
         if (orient(wa[0], wa[1], wb[0], wb[1], a.x, a.y) === 0) continue;
         if (contact(a.x, a.y, b.x, b.y, wa[0], wa[1], wb[0], wb[1]) === APART) continue;
-        if (traps[wire.i]!.rig!.floor && !floor(j - 1, prevAt)) continue;
-        add(wire.i, "cross");
+        if (flags[wire.i]! & FLOOR && !floorAt(j - 1, rangeOf(j - 1))) continue;
+        out.push({ trap: wire.i, how: "cross", at: spots[j]!.progress, tokenId: walk.token.id, walk });
       }
     }
-    prevAt = at;
     prevOn = on;
   }
   return out;
@@ -722,7 +871,8 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
 
   // The public pass (5.5): only creatures and links seen by all decide what other viewers observe.
   const events: TrapEvent[] = [];
-  for (const walk of walks.all) if (walk.isPublic) events.push(...walkEvents(walk, index, before, seen, spent));
+  const pub = passCache(before, sceneId);
+  for (const walk of walks.all) if (walk.isPublic) events.push(...walkEvents(walk, index, before, seen, spent, pub));
   events.sort(compareEvents);
   const stops = new Map<string, Stop>();
   const after = (e: TrapEvent) => {
@@ -751,7 +901,8 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const cut = stops.size > 0 ? cutOp(op, walks, stops, before, seen) : op;
   const rest = cut === op ? walks : walksOf(cut, before, planMove(cut, before, actor, env).filter(onScene), seen);
   const hidden: TrapEvent[] = [];
-  for (const walk of rest.all) if (!walk.isPublic) hidden.push(...walkEvents(walk, index, before, seen, spent));
+  const priv = passCache(before, sceneId);
+  for (const walk of rest.all) if (!walk.isPublic) hidden.push(...walkEvents(walk, index, before, seen, spent, priv));
   hidden.sort(compareEvents);
   for (let e = 0; e < hidden.length; e++) {
     const event = hidden[e]!;
@@ -830,13 +981,20 @@ function latestAt<T extends { progress: Progress }>(spots: readonly T[], p: Prog
   return found;
 }
 
+/**
+ * The index of the latest spot at or before `p`, the start when none is.
+ * Spots run in progress order, so it halves its way there: a moment reads
+ * every walk of the op, 500 walks of up to 664 spots at 50 springings.
+ */
 function latestIndex(spots: readonly { progress: Progress }[], p: Progress): number {
-  let found = 0;
-  for (let j = 0; j < spots.length; j++) {
-    if (compareProgress(spots[j]!.progress, p) > 0) break;
-    found = j;
+  let lo = 0;
+  let hi = spots.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (compareProgress(spots[mid]!.progress, p) <= 0) lo = mid;
+    else hi = mid - 1;
   }
-  return found;
+  return lo;
 }
 
 /**

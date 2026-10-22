@@ -104,8 +104,12 @@ export function snapStep(token: PlacedToken): number {
 export function footprintRect(token: PlacedToken): Rect {
   if (isSqueezed(token)) return squeezedRect(token);
   const { w, h } = footprintSize(token);
-  const step = Math.min(w, h) < 1 ? 0.5 : 1;
+  const step = sizeStep(w, h);
   return { x: snap(token.x, step), y: snap(token.y, step), w, h };
+}
+
+function sizeStep(w: number, h: number): number {
+  return Math.min(w, h) < 1 ? 0.5 : 1;
 }
 
 // Adding 0 turns the -0 that Math.round gives for small negatives into 0.
@@ -121,13 +125,27 @@ function snap(v: number, step: number): number {
  */
 export function occupiedRange(token: PlacedToken): CellRange {
   const r = footprintRect(token);
-  const x0 = Math.floor(r.x);
-  const y0 = Math.floor(r.y);
+  return rectRange(r.x, r.y, r.w, r.h);
+}
+
+/**
+ * The cells an unsqueezed footprint of `w` by `h` cells (`footprintSize`)
+ * overlaps at x, y: `occupiedRange` without a token to read, for a walk
+ * that asks at every spot (docs/design-v1-traps.md 9).
+ */
+export function rangeAt(w: number, h: number, x: number, y: number): CellRange {
+  const step = sizeStep(w, h);
+  return rectRange(snap(x, step), snap(y, step), w, h);
+}
+
+function rectRange(x: number, y: number, w: number, h: number): CellRange {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
   return {
     x0,
     y0,
-    x1: Math.max(x0 + 1, Math.ceil(r.x + r.w - EDGE_SLACK)),
-    y1: Math.max(y0 + 1, Math.ceil(r.y + r.h - EDGE_SLACK)),
+    x1: Math.max(x0 + 1, Math.ceil(x + w - EDGE_SLACK)),
+    y1: Math.max(y0 + 1, Math.ceil(y + h - EDGE_SLACK)),
   };
 }
 

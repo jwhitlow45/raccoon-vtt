@@ -98,6 +98,12 @@ describe("the footprint a walk has (route.ts onTrace, as an area's sweep reads i
     assert.deepEqual(summary(plan(world([ogre()], [trap("plate", square(5, 5))]), op).springings), [], "squeezed down its first piece, it never reaches column 5");
   });
 
+  test("a walk that starts squeezed is squeezed along its first piece, so it passes a square only its full footprint covers", () => {
+    // Squeezed along row 4 the whole straight leg, it ends full size at 10, 4 to 11, 5, past the plate.
+    assert.deepEqual(plan(world([ogre()], [trap("plate", square(6, 5))]), { t: "token.move", tokenId: "ogre", x: 9.5, y: 3.5 }).springings, []);
+    assert.deepEqual(summary(plan(world([ogre({ squeeze: undefined, x: 4, y: 4 })], [trap("plate", square(6, 5))]), { t: "token.move", tokenId: "ogre", x: 10, y: 4 }).springings), ["plate:enter:public:ogre"], "full size, it steps onto it");
+  });
+
   test("a walk that squeezes only where it ends steps onto the squares it passes with its full footprint", () => {
     const state = world([token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 })], [trap("plate", square(3, 5))]);
     assert.deepEqual(summary(plan(state, { t: "token.move", tokenId: "ogre", x: 6.5, y: 3.5, squeeze: true }).springings), ["plate:enter:public:ogre"]);

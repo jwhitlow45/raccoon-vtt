@@ -132,9 +132,63 @@ export function groundAt(chunks: Chunks, sceneId: SceneId, x: number, y: number)
 
 /** The highest ground over a range of cells. */
 export function rangeGround(chunks: Chunks, sceneId: SceneId, r: CellRange): number {
+  return groundOver(r, (cx, cy) => {
+    const chunk = chunks[`${sceneId}:${cx},${cy}`];
+    return chunk ? chunkHeights(chunk) : null;
+  });
+}
+
+/**
+ * `rangeGround` on one scene for a caller asking at many spots, as a trap
+ * walk does at every spot over an armed square (docs/design-v1-traps.md
+ * 9): it looks each chunk up once, not once a spot.
+ */
+export function sceneGround(chunks: Chunks, sceneId: SceneId): (r: CellRange) => number {
+  const kept = new Map<number, Int16Array | null>();
+  // A walk stays in one chunk for many spots in a row.
+  let lastKey = NaN;
+  let last: Int16Array | null = null;
+  const heightsAt = (cx: number, cy: number): Int16Array | null => {
+    // Unique for any chunk of a scene: one is at most a few hundred cells a side.
+    const key = (cy + 32768) * 65536 + (cx + 32768);
+    if (key === lastKey) return last;
+    let hit = kept.get(key);
+    if (hit === undefined) {
+      const chunk = chunks[`${sceneId}:${cx},${cy}`];
+      kept.set(key, (hit = chunk ? chunkHeights(chunk) : null));
+    }
+    lastKey = key;
+    last = hit;
+    return hit;
+  };
+  return (r) => groundOver(r, heightsAt);
+}
+
+/** The highest ground over a range, read chunk by chunk, a chunk with no heights counting 0. */
+function groundOver(r: CellRange, heightsAt: (cx: number, cy: number) => Int16Array | null): number {
+  if (r.x0 >= r.x1 || r.y0 >= r.y1) return 0;
   let top = -Infinity;
-  for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) top = Math.max(top, groundAt(chunks, sceneId, x, y));
-  return top === -Infinity ? 0 : top;
+  for (let cy = Math.floor(r.y0 / CHUNK_CELLS); cy <= Math.floor((r.y1 - 1) / CHUNK_CELLS); cy++) {
+    for (let cx = Math.floor(r.x0 / CHUNK_CELLS); cx <= Math.floor((r.x1 - 1) / CHUNK_CELLS); cx++) {
+      const heights = heightsAt(cx, cy);
+      if (!heights) {
+        if (top < 0) top = 0;
+        continue;
+      }
+      const x0 = Math.max(r.x0, cx * CHUNK_CELLS);
+      const x1 = Math.min(r.x1, (cx + 1) * CHUNK_CELLS);
+      const y0 = Math.max(r.y0, cy * CHUNK_CELLS);
+      const y1 = Math.min(r.y1, (cy + 1) * CHUNK_CELLS);
+      for (let y = y0; y < y1; y++) {
+        const row = (y - cy * CHUNK_CELLS) * CHUNK_CELLS - cx * CHUNK_CELLS;
+        for (let x = x0; x < x1; x++) {
+          const v = heights[row + x]!;
+          if (v > top) top = v;
+        }
+      }
+    }
+  }
+  return top;
 }
 
 /**
