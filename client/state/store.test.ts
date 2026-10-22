@@ -101,6 +101,27 @@ describe("snapshot and acknowledgment", () => {
     assert.equal(confirmed.tokens, predicted.tokens);
   });
 
+  test("the trap logs stay lists when a second snapshot, as a DM's scene switch or a reconnect sends, brings their lines again", () => {
+    const line = (id: string, type: "trap" | "trapSeen") => ({
+      id,
+      at: "2026-10-22T12:00:00.000Z",
+      kind: "event" as const,
+      data: type === "trap" ? { type, trapId: "t1", sceneId: "s1", name: "Hidden Pit", how: "enter" as const, by: ["g1"], hits: 1, did: [] } : { type, by: ["g1"], message: "The floor gives way!" },
+    });
+    const s = setup(room({ tokens: { g1: token("g1") }, trapLog: [line("4:900000", "trap")], trapSeen: [line("4:0", "trapSeen")] }));
+    s.connect();
+    const first = s.state().view!;
+    // Off the wire, so every line is a new object equal to the one the view keeps.
+    s.room.applySnapshot(JSON.parse(JSON.stringify(s.server.hello({ resumeFrom: s.room.prepareHello().resumeFrom, sceneId: "s1" }))));
+    // Then a trap goes off: one new line in each log.
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [{ key: "trapLog:9:900000", value: line("9:900000", "trap") }, { key: "trapSeen:9:0", value: line("9:0", "trapSeen") }] });
+    const view = s.state().view!;
+    assert.ok(Array.isArray(view.trapLog), "the DM's trap log is still a list");
+    assert.ok(Array.isArray(view.trapSeen), "the players' trap lines are still a list");
+    assert.deepEqual(view.trapLog.map((e) => e.id), ["4:900000", "9:900000"]);
+    assert.equal(view.trapLog[0], first.trapLog[0], "an equal line keeps its identity");
+  });
+
   test("a refusal snaps the view back in the same update, with a toast unless it was a race", () => {
     const s = setup(room({ tokens: { g1: token("g1", { x: 3, y: 3 }) } }), P1);
     s.connect();
