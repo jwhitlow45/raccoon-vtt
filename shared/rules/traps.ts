@@ -206,11 +206,14 @@ export function armedTraps(traps: Readonly<Record<string, Trap>>, sceneId: strin
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+const NO_TRAPS: Readonly<Record<string, Trap>> = Object.freeze({});
+
 /** A room with its traps (RoomState.traps). */
 export type TrapRoom = RoomState & { traps: Readonly<Record<string, Trap>> };
 
 export function trapIndex(state: Pick<TrapRoom, "traps" | "scenes">, sceneId: string): TrapIndex {
-  const traps = state.traps;
+  // A room from before traps, as old tests and fixtures hold, has none.
+  const traps = state.traps ?? NO_TRAPS;
   const cached = indexes.get(traps)?.get(sceneId);
   if (cached) return cached;
   const armed = armedTraps(traps, sceneId);

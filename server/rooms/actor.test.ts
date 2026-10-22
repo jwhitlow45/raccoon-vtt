@@ -19,7 +19,7 @@ import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
-import type { Actor, Member, RoomState } from "#shared/model.ts";
+import type { Actor, Member, RoomState, Trap } from "#shared/model.ts";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -30,7 +30,7 @@ import { Connection } from "./connection.ts";
 import { roomExport, type RoomExport } from "./exportRoom.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, roomLevelBytes } from "./sizeGuard.ts";
+import { checkWholeScenes, measuredStateBytes, roomLevelBytes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 
 /**
@@ -2636,5 +2636,138 @@ describe("a player's undo of getting on and off (docs/design-v1-attach.md 8.3)",
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
     }
+  });
+});
+
+describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
+  const plate = (sceneId: string, over: Partial<Trap["rig"]> = {}, x = 4): Trap => ({
+    id: "plate",
+    rev: 0,
+    sceneId,
+    name: "Plate",
+    zone: { cells: [{ x, y: 2, w: 1, h: 1 }] },
+    state: "armed",
+    found: false,
+    rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, message: "Click.", ...over },
+  });
+
+  /** A DM and Thorn's player at one table, each op answered with its refusal or null. */
+  async function withTable(
+    state: RoomState,
+    dm: Member,
+    pc: Member,
+    run: (actor: RoomActor, dmSend: (op: Op, group?: string) => Promise<{ code: string; message: string } | null>, pcSend: (op: Op, group?: string) => Promise<{ code: string; message: string } | null>) => Promise<void>,
+    options: Partial<ActorDeps["options"]> = {},
+  ): Promise<void> {
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const base = deps(db);
+    const actor = await RoomActor.load({ ...base, options: { ...base.options, ...options } });
+    assert.ok(actor);
+    try {
+      const sender = async (who: Member, role: "dm" | "player", client: string) => {
+        const c = connect(actor, who, role);
+        await actor.hello(c.conn, { clientId: client, resumeFrom: 1 });
+        let n = 0;
+        return async (op: Op, group?: string) => {
+          n++;
+          await actor.op(c.conn, n, op, group);
+          const answer = await answerTo(c.sent, n);
+          assert.ok(answer !== "stuck");
+          const refusal = answer.rejects?.find((r) => r.n === n);
+          return refusal ? { code: refusal.code, message: refusal.message } : null;
+        };
+      };
+      await run(actor, await sender(dm, "dm", "c1"), await sender(pc, "player", "c2"));
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  }
+
+  function table(over: Partial<Trap["rig"]> = {}): { state: RoomState; dm: Member; pc: Member; sceneId: string } {
+    const dm = member("DM", "dm");
+    const pc = member("Thorn's player", "player");
+    const state = createInitialState({ roomName: "Traps", dm });
+    state.members[pc.id] = pc;
+    const sceneId = state.meta.playerSceneId!;
+    state.tokens.thorn = testToken("thorn", { sceneId, kind: "pc", name: "Thorn", disposition: "ally", x: 1, y: 2, ownerIds: [pc.id] });
+    state.tokens.imp = testToken("imp", { sceneId, kind: "npc", name: "Imp", x: 1, y: 3, ownerIds: [pc.id], visibility: "dm" });
+    state.tokens.gob = testToken("gob", { sceneId, name: "Goblin", x: 1, y: 2 + 2 });
+    state.traps = { plate: plate(sceneId, over) };
+    return { state, dm, pc, sceneId };
+  }
+
+  test("a player's undo of a move a trap stopped is refused and dropped, and the DM's takes it back", async () => {
+    const { state, dm, pc } = table();
+    await withTable(state, dm, pc, async (actor, dmSend, pcSend) => {
+      assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 8, y: 2 }), null);
+      assert.equal(actor.committed.state.tokens.thorn!.x, 4, "stopped on the plate");
+      assert.deepEqual(await pcSend({ t: "undo" }), { code: "invalid", message: "could not undo moving Thorn: something happened on the way. Ask the DM" });
+      assert.deepEqual(await pcSend({ t: "undo" }), { code: "invalid", message: "nothing to undo" }, "the step was dropped");
+      assert.equal(actor.committed.state.tokens.thorn!.x, 4);
+      assert.equal(await dmSend({ t: "token.move", tokenId: "gob", x: 8, y: 4 }), null);
+      assert.equal(await dmSend({ t: "undo" }), null);
+      assert.equal(actor.committed.state.tokens.gob!.x, 1);
+    });
+  });
+
+  test("one trapped op marks its whole gesture, so the merged step's undo is refused too", async () => {
+    const { state, dm, pc } = table();
+    await withTable(state, dm, pc, async (actor, _dmSend, pcSend) => {
+      assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 2, y: 2 }, "drag-1"), null);
+      assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 8, y: 2 }, "drag-1"), null);
+      assert.equal(actor.committed.state.tokens.thorn!.x, 4);
+      assert.equal((await pcSend({ t: "undo" }))?.message, "could not undo moving Thorn: something happened on the way. Ask the DM");
+    });
+  });
+
+  test("after a silent trap, or one only the player's hidden imp set off, the player's undo moves the token back", async () => {
+    const silent = table({ stops: false, message: undefined });
+    await withTable(silent.state, silent.dm, silent.pc, async (actor, _dmSend, pcSend) => {
+      assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 8, y: 2 }), null);
+      assert.equal(actor.committed.state.traps.plate!.state, "sprung");
+      assert.equal(await pcSend({ t: "undo" }), null);
+      assert.equal(actor.committed.state.tokens.thorn!.x, 1);
+      assert.equal(actor.committed.state.traps.plate!.state, "sprung", "the trap's writes stay");
+    });
+    const hidden = table();
+    hidden.state.traps.plate = { ...hidden.state.traps.plate!, zone: { cells: [{ x: 4, y: 3, w: 1, h: 1 }] } };
+    await withTable(hidden.state, hidden.dm, hidden.pc, async (actor, _dmSend, pcSend) => {
+      assert.equal(await pcSend({ t: "token.moveMany", moves: [{ tokenId: "imp", x: 8, y: 3 }] }), null);
+      assert.equal(actor.committed.state.tokens.imp!.x, 8);
+      assert.equal(actor.committed.state.traps.plate!.rig!.due?.[0]?.hidden, true);
+      assert.equal(await pcSend({ t: "undo" }), null);
+      assert.equal(actor.committed.state.tokens.imp!.x, 1);
+    });
+  });
+
+  test("rooms just under the size limit answer the same whether a silent trap goes off or not", async () => {
+    const answers: string[][] = [];
+    for (const armed of [true, false]) {
+      const { state, dm, pc } = table({ stops: false, message: undefined, damage: [{ formula: "1d6", type: "fire" }] });
+      if (!armed) state.traps.plate = { ...state.traps.plate!, state: "disarmed" };
+      const stateLimit = measuredStateBytes(state) + exploredReserve(state) + 600;
+      const out: string[] = [];
+      await withTable(
+        state,
+        dm,
+        pc,
+        async (actor, dmSend, pcSend) => {
+          assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 8, y: 2 }), null);
+          assert.equal(actor.committed.state.traps.plate!.state, armed ? "sprung" : "disarmed");
+          for (let extra = 0; extra < 12; extra++) {
+            const room0 = actor.committed.state;
+            const spare = stateLimit - measuredStateBytes(room0) - exploredReserve(room0);
+            const had = room0.tokens.gob!.notes?.length ?? 0;
+            const sent = await dmSend({ t: "token.update", tokenId: "gob", patch: { notes: "n".repeat(Math.max(0, had + spare - 30 + 4 * extra)) } });
+            out.push(sent ? `${sent.code}: ${sent.message}` : "ok");
+          }
+        },
+        { sizeLimits: { stateLimit } },
+      );
+      answers.push(out);
+    }
+    assert.deepEqual(answers[0], answers[1]);
+    assert.ok(answers[0]!.includes("ok") && answers[0]!.some((a) => a.startsWith("quota")), answers[0]!.join(", "));
   });
 });

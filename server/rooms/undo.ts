@@ -104,6 +104,12 @@ export type UndoEntry = {
   routes?: Record<string, KeptRoute[]>;
   routed?: true;
   /**
+   * A trap's public springing stopped one of the step's tokens or told its
+   * players (docs/design-v1-traps.md 6.5): a player's undo of it is refused
+   * and the step dropped. One trapped op marks a whole merged gesture.
+   */
+  trapped?: true;
+  /**
    * The controlled rides a player's step ended or made, each with its
    * turn's seq (docs/design-v1-attach.md 8.3). Its undo and its redo carry
    * them, so a ride put back on the same turn shares the turn again.
@@ -170,7 +176,7 @@ export class UndoStacks {
    * It keeps where its last op left each token, and names its last op as its
    * origin.
    */
-  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[]): void {
+  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false): void {
     const s = this.#stacks(memberId);
     s.redo = [];
     if (inverse.length > MAX_RESTORE_ENTRIES) {
@@ -195,6 +201,7 @@ export class UndoStacks {
         if (!teleport) delete top.teleport;
         withWalk(top, walk);
         withRides(top, rides);
+        if (trapped) top.trapped = true;
         return;
       }
     }
@@ -207,6 +214,7 @@ export class UndoStacks {
       if (walk.routed) entry.routed = true;
     }
     withRides(entry, rides);
+    if (trapped) entry.trapped = true;
     s.undo.push(withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin));
     if (s.undo.length > UNDO_DEPTH) s.undo.splice(0, s.undo.length - UNDO_DEPTH);
   }
@@ -580,6 +588,8 @@ function putBack(current: Token, before: Token, exists: (tokenId: string) => boo
 
 /** The refusal of a move's or a resize's undo. Like CHANGED_SINCE, it does not say who. */
 export const MOVED_SINCE = "it was moved or resized since";
+/** Why a player's undo of a step a trap stopped or told them about is refused (docs/design-v1-traps.md 6.5). */
+export const TRAPPED_ON_THE_WAY = "something happened on the way. Ask the DM";
 
 /** The refusal of an undo meant for a step that is no longer the newest, undone or covered by another device's change. */
 export const NOT_NEWEST = "could not undo that move: it is no longer your newest change";

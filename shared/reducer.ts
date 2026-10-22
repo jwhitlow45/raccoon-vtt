@@ -13,7 +13,7 @@ import {
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches } from "./migrate.ts";
+import { attaches, trapsGoOff } from "./migrate.ts";
 import {
   encounterAdd,
   encounterEnd,
@@ -54,7 +54,8 @@ import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { actorOutcome } from "./reducer/outcome.ts";
 import { castAsk, castClose } from "./reducer/casts.ts";
-import { trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
+import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
+import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
@@ -109,6 +110,16 @@ export type Applied = {
   log: LogEntry[];
   /** The absolute restore that undoes the op, or null when nothing undoable changed. */
   inverse: RestoreEntry[] | null;
+  /**
+   * A trap's public springing stopped a token the op moved or told its
+   * players (docs/design-v1-traps.md 6.5), so a player's undo of the step is
+   * refused.
+   */
+  trapped?: true;
+  /** When the trap step wrote anything: the op applied without it, which the server's limits measure (6.7). */
+  withoutTraps?: () => ApplyResult;
+  /** The keys only the trap step wrote, which a player's undo of the move leaves as they are (6.5). */
+  trapWrote?: ReadonlySet<EntityKey>;
 };
 
 export type Refusal = { ok: false; code: RefusalCode; message: string };
@@ -123,17 +134,32 @@ export type ApplyResult = Applied | Refusal;
  */
 export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResult {
   const tx = new Tx(state, actor, env);
+  let traps: TrapWrites | null = null;
+  let trapWrote: Set<EntityKey> | undefined;
+  let plain: ApplyResult | undefined;
   try {
+    // The trap step plans from the room before the op (docs/design-v1-traps.md 13.2). Ops stored before traps met none.
+    const plan = trapsGoOff(env.opVersion) && env.withoutTraps !== true ? planBefore(op, state, actor, env) : null;
+    if (plan && plan.op !== op) {
+      // A stop rewrote the landing. The op still passes or fails exactly as it would without its trap step (6.7).
+      plain = applyOp(state, op, actor, { ...env, withoutTraps: true });
+      if (!plain.ok) return plain;
+    }
+    const moved = plan?.op ?? op;
     // Areas that hit a creature again remind the table around the op itself (reducer/areaTriggers.ts).
     if (op.t === "encounter.next" && !pressChangesNothing(state, actor, op, env)) remindTurnEnd(tx);
-    dispatch(tx, op);
+    dispatch(tx, moved);
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
       linkPass(tx);
       settleMounts(tx);
     }
     endSaves(tx);
-    remindAfter(tx, state, op);
+    const dispatched = plan ? new Set(tx.touched()) : null;
+    if (plan) traps = trapStep(tx, op, state, plan);
+    if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
+    if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
+    remindAfter(tx, state, moved);
     tx.finish();
   } catch (err) {
     if (err instanceof Refuse) return { ok: false, code: err.code, message: err.message };
@@ -153,6 +179,9 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
       if (inverse === undefined) inverse = tx.inverse();
       return inverse;
     },
+    ...(traps?.trapped ? { trapped: true as const } : {}),
+    ...(trapWrote && trapWrote.size > 0 ? { trapWrote } : {}),
+    ...(traps?.wrote || plain ? { withoutTraps: () => (plain ??= applyOp(state, op, actor, { ...env, withoutTraps: true })) } : {}),
   };
 }
 
@@ -302,6 +331,8 @@ function dispatch(tx: Tx, op: Op): void {
       return trapUpdate(tx, op);
     case "trap.delete":
       return trapDelete(tx, op);
+    case "trap.spring":
+      return trapSpring(tx, op);
     case "trap.act":
       return trapAct(tx, op);
     case "trap.settle":

@@ -478,6 +478,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "trap.create":
     case "trap.update":
     case "trap.delete":
+    case "trap.spring":
     case "trap.act":
     case "trap.settle":
       return FORBIDDEN;

@@ -139,7 +139,11 @@ export function trapAct(tx: Tx, op: OpOf<"trap.act">): void {
   const due = dueOf(trap, op.due);
   if (!trap || !trap.rig || !due || due.acted) throw invalid(DONE_MEANWHILE);
   runActions(tx, trap);
-  playersLine(tx, trap, due.by);
+  // Who every player sees now, as the DM's reveal shows them.
+  playersLine(tx, trap, due.by.filter((id) => {
+    const token = tx.state.tokens[id];
+    return token !== undefined && seenByNonOwners(tx.state, token, tx.env);
+  }));
   const now = tx.state.traps[trap.id]!;
   const rig = now.rig!;
   const next: Trap = { ...now, rig: { ...rig, due: (rig.due ?? []).map((d) => (d.id === due.id ? { ...d, acted: true as const } : d)) } };
@@ -149,9 +153,14 @@ export function trapAct(tx: Tx, op: OpOf<"trap.act">): void {
 
 /** Dismiss, and Mark sprung (6.2): the occurrence leaves, and the trap is sprung with `sprung`. Refused when it is not waiting. */
 export function trapSettle(tx: Tx, op: OpOf<"trap.settle">): void {
-  const trap = tx.state.traps[op.trapId];
-  if (!dueOf(trap, op.due)) throw invalid(SETTLED_MEANWHILE);
-  writeSettled(tx, trap!, op.due, op.sprung === true);
+  settleTrap(tx, op.trapId, op.due, op.sprung === true);
+}
+
+/** Settles a waiting occurrence, refused when it is not waiting: a second DM device's Apply or Dismiss, or a resend. */
+export function settleTrap(tx: Tx, trapId: string, dueId: string, sprung = false): void {
+  const trap = tx.state.traps[trapId];
+  if (!dueOf(trap, dueId)) throw invalid(SETTLED_MEANWHILE);
+  writeSettled(tx, trap!, dueId, sprung);
 }
 
 /** The trap with an occurrence settled: gone from its list, the trap sprung when asked. */
@@ -241,16 +250,12 @@ function cutLine(data: Extract<LogEvent, { type: "trap" | "trapSeen" }>, tx: Tx)
 
 /**
  * The players' line (6.3), when the trap has one: every player and table
- * display receives it, so `by` names only creatures every player sees now,
- * which each viewer gets cut to those they see.
+ * display receives it, so `shown` names only creatures every player saw
+ * when it went off, which each viewer gets cut to those they see.
  */
-export function playersLine(tx: Tx, trap: Trap, by: readonly string[]): boolean {
+export function playersLine(tx: Tx, trap: Trap, shown: readonly string[]): boolean {
   const message = trap.rig?.message;
   if (!message) return false;
-  const shown = by.filter((id) => {
-    const token = tx.state.tokens[id];
-    return token !== undefined && seenByNonOwners(tx.state, token, tx.env);
-  });
   const { list, more } = plainList(shown, LIMITS.trapBy);
   const data: Extract<LogEvent, { type: "trapSeen" }> = { type: "trapSeen", by: list, ...(more > 0 ? { more } : {}), message, ...(trap.rig?.sound ? { sound: trap.rig.sound } : {}) };
   tx.addTrapLine("trapSeen", cutLine(data, tx), LIMITS.trapSeenLines);
@@ -301,6 +306,23 @@ export function addDue(tx: Tx, trapId: string, due: TrapDue): void {
     if (all.length <= LIMITS.trapDuePerRoom) return;
     all.sort((a, b) => compareIds(a.due.id, b.due.id));
     const oldest = all[0]!;
+    writeSettled(tx, oldest.trap, oldest.due.id, false);
+  }
+}
+
+/**
+ * The room's cap after a restore (6.1, 6.5): an undone Apply or Dismiss
+ * brings its occurrence back, which may make the room's eleventh. The
+ * room's oldest that the restore did not bring back then goes, as an
+ * eleventh springing drops it, so what the undo brought back stays.
+ */
+export function capRestoredDues(tx: Tx, before: Readonly<Record<string, Trap>> | undefined): void {
+  const had = new Set(Object.values(before ?? {}).flatMap((t) => (t.rig?.due ?? []).map((d) => d.id)));
+  for (;;) {
+    const all = Object.values(tx.state.traps ?? {}).flatMap((t) => (t.rig?.due ?? []).map((d) => ({ trap: t, due: d })));
+    if (all.length <= LIMITS.trapDuePerRoom) return;
+    const older = all.filter((x) => had.has(x.due.id)).sort((a, b) => compareIds(a.due.id, b.due.id));
+    const oldest = older[0] ?? all.sort((a, b) => compareIds(a.due.id, b.due.id))[0]!;
     writeSettled(tx, oldest.trap, oldest.due.id, false);
   }
 }

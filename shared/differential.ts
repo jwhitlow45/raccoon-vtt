@@ -132,8 +132,13 @@ export type Step = { who: Viewer; op: Op | ((view: RoomState, state: RoomState) 
 /** A pair of rooms differing only in what players cannot see, and the steps both go through (attached tokens, docs/design-v1-attach.md 8.0). */
 export type OpPair = Omit<Pair, "drags"> & { steps: readonly Step[] };
 
-/** How a step is checked and applied: by default as the server does, permissions then the reducer. */
-export type Applier = (state: RoomState, op: Op, who: Viewer, seq: number) => { ok: true; state: RoomState } | { ok: false; code: string; message: string };
+/**
+ * How a step is checked and applied: by default as the server does,
+ * permissions then the reducer. `mark` is what the server keeps beside the
+ * room, such as whether a player's undo step is trapped
+ * (docs/design-v1-traps.md 6.5), which must be the same in both rooms too.
+ */
+export type Applier = (state: RoomState, op: Op, who: Viewer, seq: number) => { ok: true; state: RoomState; mark?: string } | { ok: false; code: string; message: string };
 
 const deps = { canUseAsset: () => true };
 
@@ -141,7 +146,7 @@ export const serverApply: Applier = (state, op, who, seq) => {
   const decision = canApply(op, who, state, deps);
   if (!decision.ok) return decision;
   const r = applyOp(state, op, who, env(seq));
-  return r.ok ? { ok: true, state: r.state } : r;
+  return r.ok ? { ok: true, state: r.state, ...(r.trapped ? { mark: "trapped" } : {}) } : r;
 };
 
 /**
@@ -176,6 +181,7 @@ export function checkOps(pair: OpPair, applier: Applier = serverApply, firstSeq 
     const rb = applier(b, ob, step.who, firstSeq + i);
     assert.deepEqual(ra.ok ? "ok" : `${ra.code}: ${ra.message}`, rb.ok ? "ok" : `${rb.code}: ${rb.message}`, `${where}: the answer differs`);
     if (ra.ok && rb.ok) {
+      assert.equal(ra.mark, rb.mark, `${where}: what the server keeps of the step differs`);
       a = ra.state;
       b = rb.state;
     }

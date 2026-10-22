@@ -160,6 +160,7 @@ export function reads(op: Op, state: RoomState): Reads {
         }
       }
       if (op.cast !== undefined) r.push({ key: keys.cast(op.cast) });
+      if (op.trap !== undefined) r.push({ key: keys.trap(op.trap.trapId) });
       return of(r);
     }
     case "actor.deathSave":
@@ -351,6 +352,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "trap.settle":
       return of([{ key: keys.trap(op.trapId) }]);
     // Its players' line is numbered by the server, as a roll's is.
+    case "trap.spring":
     case "trap.act":
       return NEVER;
     // The targets' creatures, which must be played by a player and, for a token, stand on the player scene.

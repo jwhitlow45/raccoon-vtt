@@ -553,3 +553,138 @@ describe("the carried-object reveal (docs/design-v1-attach.md 8.0)", () => {
     checkOps({ name: "the reveal's answers", a, b, steps });
   });
 });
+
+/*
+ * Traps' generators (docs/design-v1-traps.md 7): pairs of rooms that differ
+ * only in hidden state, on attach's table, with unfound traps players never
+ * receive. What a trap does that players observe (stops, found marks,
+ * players' lines, refusals) must read only creatures and links seen by all,
+ * so every player whose copy was the same before sees the same answers,
+ * frames and copies, the players' trap lines among them. In the DM's own
+ * ops the pairs may differ only by a hidden springing's actions, the third
+ * listed reveal, so those pairs leave the build out of the comparison.
+ */
+
+type TrapRigOver = Partial<NonNullable<import("./model.ts").Trap["rig"]>>;
+
+function trapOn(s: RoomState, id: string, zone: import("./model.ts").TrapZone, over: TrapRigOver = {}, extra: Partial<import("./model.ts").Trap> = {}): void {
+  s.traps[id] = {
+    id,
+    rev: 0,
+    sceneId: "s1",
+    name: id,
+    zone,
+    state: "armed",
+    found: false,
+    rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, message: "Click.", damage: [{ formula: "1d6", type: "fire" }], ...over },
+    ...extra,
+  };
+}
+
+const cells = (x: number, y: number, w = 1, h = 1) => ({ cells: [{ x, y, w, h }] });
+/** A plate on Thorn's row, which stops him in both rooms. */
+const plateOnRow = (s: RoomState) => trapOn(s, "plate", cells(9, 6));
+
+function trapPair(name: string, setup: (s: RoomState) => void, hidden: (s: RoomState) => void, steps: readonly Step[], unshown?: OpPair["unshown"]): OpPair {
+  return attachPair(name, setup, hidden, steps, unshown);
+}
+
+const thornAcross: Step = { who: P1, op: { t: "token.move", tokenId: "thorn", x: 13, y: 6 }, note: "Thorn across" };
+const thornBack: Step = { who: P1, op: { t: "token.move", tokenId: "thorn", x: 4, y: 6 }, note: "Thorn back" };
+const lurker = (x: number, y: number, extra: Partial<Token> = {}) => (s: RoomState) => {
+  s.tokens.lurker = token("lurker", { name: "Lurker", x, y, visibility: "dm", ...extra });
+};
+
+const TRAP_PAIRS: OpPair[] = [
+  trapPair(
+    "a hidden creature dragged in Thorn's group crosses a trap only it reaches",
+    (s) => {
+      plateOnRow(s);
+      trapOn(s, "snare", cells(7, 7), { stops: false, message: "Snap." });
+    },
+    // Dragged just below Thorn, so the snare on its row is the shade's alone.
+    (s) => hiddenOn(s, "shade", "thorn", "drag", { x: 4, y: 7 }),
+    [thornAcross, thornBack, thornAcross],
+  ),
+  trapPair(
+    "a hidden rider on Thorn's warhorse as it crosses a trap that catches riders",
+    (s) => trapOn(s, "net", cells(8, 4, 2, 2), { floor: false, hits: "zone" }),
+    (s) => hiddenOn(s, "shade", "horse", "ride"),
+    [moveHorse(12, 4), moveHorse(4, 4)],
+  ),
+  trapPair(
+    "the mover's own familiar, hidden from the other players, walks over a trap the other room lacks",
+    (s) => {
+      plateOnRow(s);
+      s.tokens.imp = token("imp", { name: "Imp", kind: "npc", size: "tiny", ownerIds: ["p1"], visibility: "dm", x: 4, y: 8 });
+    },
+    (s) => trapOn(s, "glyph", cells(8, 8), { message: "A glyph flares." }),
+    [{ who: P1, op: { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 13, y: 6 }, { tokenId: "imp", x: 12, y: 8 }] }, note: "both across" }],
+  ),
+  trapPair(
+    "a hidden creature already on a trap Thorn also enters is in its hits in one room only",
+    (s) => trapOn(s, "pit", cells(9, 5, 2, 3), { hits: "zone" }),
+    (s) => lurker(10, 7)(s),
+    [thornAcross],
+  ),
+  trapPair(
+    "a hidden creature whose turn Thorn's End Turn starts stands on a plate in one room",
+    (s) => {
+      trapOn(s, "statue", cells(10, 2), { on: ["turnStart"], stops: false });
+      lurker(2, 2)(s);
+      // Revealed on its turn it would stand where every player sees it, which is no hidden difference.
+      s.meta.settings.revealHiddenOnTurn = false;
+    },
+    (s) => (s.tokens.lurker = { ...s.tokens.lurker!, x: 10 }),
+    [
+      { who: DM, op: { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "el", tokenId: "lurker", value: 12, hidden: true }, { id: "ec", tokenId: "cora", value: 8 }] }, note: "start" },
+      { who: DM, op: { t: "encounter.next" }, note: "Thorn's turn" },
+      endTurn,
+      { who: DM, op: { t: "encounter.next" }, note: "Cora's turn" },
+    ],
+  ),
+  trapPair(
+    "a hidden lurker reaches the plate first in the DM's group move, beside the goblin",
+    (s) => {
+      trapOn(s, "plate", cells(10, 6, 1, 3));
+      lurker(2, 8)(s);
+    },
+    (s) => (s.tokens.lurker = { ...s.tokens.lurker!, x: 9 }),
+    [{ who: DM, op: { t: "token.moveMany", moves: [{ tokenId: "gob", x: 13, y: 6 }, { tokenId: "lurker", x: 13, y: 8 }] }, note: "both across" }, thornAcross],
+  ),
+  trapPair(
+    "party vision and a hidden condition on Thorn",
+    (s) => trapOn(s, "plate", cells(9, 6), { who: "party" }),
+    (s) => {
+      s.tokens.thorn = { ...s.tokens.thorn!, partyVision: true, actor: { inline: actor({ effects: [effect("x", { key: "poisoned", hiddenFromPlayers: true })] }) } };
+    },
+    [thornAcross],
+  ),
+  trapPair(
+    "the DM's own fields of a trap: occurrences, who noticed it, both logs and a hidden springing before",
+    plateOnRow,
+    (s) => {
+      const t = s.traps.plate!;
+      const due = [{ id: "2:0", at: "2026-10-12T20:00:00.000Z", how: "enter" as const, by: ["gob"], hits: ["gob"], hidden: true as const }];
+      s.traps.plate = { ...t, rig: { ...t.rig!, noticedBy: "cora", due } };
+      s.trapLog = [{ id: "2:0", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "trap", trapId: "plate", name: "plate", how: "enter", by: ["gob"], hits: 1, did: [], hidden: true } }];
+    },
+    [thornAcross, thornBack],
+  ),
+  trapPair(
+    "a hidden goblin the DM walks over a plate that locks a door, in one room only",
+    (s) => {
+      const chunk = s.buildChunks[chunkKey("s1", 0, 0)]!;
+      s.buildChunks[chunkKey("s1", 0, 0)] = { ...chunk, edges: { ...chunk.edges, "3,12,n": { kind: "door", state: "closed", secret: false, discovered: false } } };
+      trapOn(s, "plate", cells(6, 12), { actions: [{ door: { edge: "3,12,n" }, state: "locked" }], message: "Click." });
+      lurker(2, 13)(s);
+    },
+    (s) => (s.tokens.lurker = { ...s.tokens.lurker!, y: 12 }),
+    [{ who: DM, op: { t: "token.move", tokenId: "lurker", x: 10, y: 12 }, note: "the DM's hidden drag" }, thornAcross],
+    ["buildChunks", "scenes"],
+  ),
+];
+
+describe("public determinism: traps' generators (docs/design-v1-traps.md 7)", () => {
+  for (const p of TRAP_PAIRS) test(p.name, () => void checkOps(p));
+});

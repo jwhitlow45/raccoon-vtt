@@ -1557,6 +1557,8 @@ export const clientOps = [
      * joins it here under a refine that refuses both.
      */
     cast: id.optional(),
+    /** The trap occurrence this outcome settles, in the same op (docs/design-v1-traps.md 6.2). */
+    trap: z.strictObject({ trapId: id, due: trapDue }).optional(),
     targets: z
       .array(
         z.strictObject({
@@ -1569,7 +1571,9 @@ export const clientOps = [
       )
       .min(1)
       .max(LIMITS.outcomeTargets),
-  }).refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG }),
+  })
+    .refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG })
+    .refine((o) => o.cast === undefined || o.trap === undefined, { message: "an outcome settles one thing" }),
   op("actor.damageMany", {
     hits: z.array(z.strictObject({ target: actorTarget, amount: z.number().int().min(1).max(100_000) })).min(1).max(MAX_ENTRIES_PER_OP),
   }),
@@ -1709,6 +1713,8 @@ export const clientOps = [
   /** Only the fields that changed, so two DM devices editing different fields never undo each other. */
   op("trap.update", { trapId: id, patch: trapPatch }),
   op("trap.delete", { trapId: id }),
+  /** Set it off by hand, for the creatures named, whatever its state and wherever it is (6.2). */
+  op("trap.spring", { trapId: id, tokenIds: z.array(id).max(LIMITS.trapSpringTokens).refine((ids) => new Set(ids).size === ids.length, { message: "a creature is listed twice" }) }),
   /** Do its effects, for a private springing in a player's op that left them waiting. */
   op("trap.act", { trapId: id, due: trapDue }),
   /** Dismiss an occurrence, `sprung` marking the trap sprung (Mark sprung). */

@@ -2,6 +2,7 @@ import type { OpOf } from "../protocol.ts";
 import { actorHp, effectAdd, effectRemove } from "./actors.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import { closeCast } from "./casts.ts";
+import { settleTrap } from "./traps.ts";
 import { Refuse, invalid, type Tx } from "./tx.ts";
 
 /** The refusal of a Legendary Resistance a creature has no use of left. */
@@ -24,6 +25,8 @@ export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
     if (!ask) throw new Refuse("gone", ASK_CLOSED);
     closeCast(tx, ask, "done");
   }
+  // A trap's group save settles its occurrence in the same op, so a trap applies at most once (docs/design-v1-traps.md 6.2).
+  if (op.trap !== undefined) settleTrap(tx, op.trap.trapId, op.trap.due);
   const holders = new Set<string>();
   for (const item of op.targets) {
     const resolved = tx.resolveActor(item.target);

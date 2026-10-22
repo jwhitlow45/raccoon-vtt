@@ -45,7 +45,7 @@ import {
 } from "./persistence.ts";
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
 import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
-import { keptFrom, NOT_NEWEST, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { keptFrom, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 
 /**
@@ -185,7 +185,7 @@ type Batch = {
   seq: number;
 };
 
-type Reduced = { ok: true; inverse: RestoreEntry[] | null } | { ok: false; code: RefusalCode; message: string };
+type Reduced = { ok: true; inverse: RestoreEntry[] | null; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
 
 /** A tagged op past admission (docs/design-v1-dice.md 1.2): whatever becomes of it from here writes its receipt. */
 type Admitted = { memberId: string; player: boolean; tag: string; part: number };
@@ -932,6 +932,11 @@ export class RoomActor {
         this.#refuse(key, wm, n, "invalid", `nothing to ${op.t}`);
         return;
       }
+      // A move a trap stopped, or that showed its player a line, is the DM's to take back (docs/design-v1-traps.md 6.5). The step is dropped, as a failed guard drops it.
+      if (op.t === "undo" && viewer.role === "player" && step.trapped) {
+        this.#refuse(key, wm, n, "invalid", `could not undo ${step.label}: ${TRAPPED_ON_THE_WAY}`);
+        return;
+      }
       restoredFrom = op.t;
       let entries = step.entries;
       let quiet: string[] | undefined;
@@ -1046,17 +1051,19 @@ export class RoomActor {
       // would read as taken back for good. The DM deals it again instead, which the log records.
       if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step);
     } else if (UndoStacks.records(viewer.role, op) && reduced.inverse) {
-      const inverse = reduced.inverse;
       // A player's move or resize takes back only the move or the resize (undo.ts poseRestore). The DM's undo restores whole
-      // values, as for every other op.
-      const poses = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op)) ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), plannedOn(before, op)) : undefined;
+      // values, as for every other op. What a trap wrote on the way stays as it is (docs/design-v1-traps.md 6.5).
+      const pose = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op));
+      const trapWrote = reduced.trapWrote;
+      const inverse = pose && trapWrote ? reduced.inverse.filter((e) => !trapWrote.has(e.key)) : reduced.inverse;
+      const poses = pose ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), plannedOn(before, op)) : undefined;
       // A teleport's step remembers it, so its redo passes the wall again (docs/design-v1-maps-vision.md 4.1).
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       // A player's walk keeps its route for the redo (docs/design-v1-movement.md 7.4), a plain move as its one straight piece.
       const walk: Walk | undefined =
         poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
-      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides);
+      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true);
     }
     this.#scheduleCommit();
   }
@@ -1132,34 +1139,41 @@ export class RoomActor {
     const at = new Date(this.#opts.now()).toISOString();
     const result = applyOp(this.#staged.state, op, viewer, { seq, at });
     if (!result.ok) return result;
-    const sceneIds = scenesOf(op, this.#staged.state, result.state);
+    // The limits read the op as it would apply with no trap step: what a trap writes is reserved or counted ahead, so a
+    // springing never changes whether an op passes (docs/design-v1-traps.md 6.7). The room stored is the op's real result.
+    const measured = result.withoutTraps ? result.withoutTraps() : result;
+    if (!measured.ok) return measured;
+    const sceneIds = scenesOf(op, this.#staged.state, measured.state);
     const before = this.#staged.state;
     // `before` with no scene too, so a show past the room's handout pages says that showing counts them again.
-    const limits: LimitCheck = checkLimits(result.state, sceneIds[0] ?? null, before, viewer.role);
+    const limits: LimitCheck = checkLimits(measured.state, sceneIds[0] ?? null, before, viewer.role);
     if (!limits.ok) return limits;
     for (const sceneId of sceneIds.slice(1)) {
-      const more = checkLimits(result.state, sceneId, before, viewer.role);
+      const more = checkLimits(measured.state, sceneId, before, viewer.role);
       if (!more.ok) return more;
     }
     // The split's counting pass (docs/design-v1-maps-vision.md 2.1), on every scene whose walls the op may have changed. Over a
     // cap it refuses with `quota` before any piece is built. Both it and the sight cap read every pit border as raised, so a
     // pit trap counts its walls from the start and opening one never raises a count (docs/design-v1-traps.md 6.7).
-    const moved = [...new Set([...wallsMoved(this.#staged.state, result.state), ...pitsMoved(this.#staged.state, result.state, trapsTouched(result.touched))])];
+    const moved = [...new Set([...wallsMoved(this.#staged.state, measured.state), ...pitsMoved(this.#staged.state, measured.state, trapsTouched(measured.touched))])];
     for (const sceneId of moved) {
-      const split = splitCheck(withPitsCounted(result.state, sceneId), sceneId);
+      const split = splitCheck(withPitsCounted(measured.state, sceneId), sceneId);
       if (!split.ok) return split;
     }
     // The cap on a vision scene's potential sight pieces (docs/design-v1-maps-vision.md 2.4), on every scene whose walls or
     // vision the op may have changed.
     for (const sceneId of new Set([...sceneIds, ...moved])) {
-      const sight = sightPiecesCheck(withPitsCounted(result.state, sceneId), sceneId, withPitsCounted(this.#staged.state, sceneId));
+      const sight = sightPiecesCheck(withPitsCounted(measured.state, sceneId), sceneId, withPitsCounted(this.#staged.state, sceneId));
       if (!sight.ok) return sight;
     }
     // Every scene the op wrote into, read from what it touched, so no op's growth escapes its scenes' bounds.
-    const grown = [...new Set([...sceneIds, ...touchedScenes(this.#staged.state, result.state, result.touched)])];
-    const size = this.#sizes.check(result.state, grown, growthBound(this.#staged.state, result.state, result.touched), this.#staged.state);
+    const grown = [...new Set([...sceneIds, ...touchedScenes(this.#staged.state, measured.state, measured.touched), ...touchedScenes(this.#staged.state, result.state, result.touched)])];
+    const size = this.#sizes.check(measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched), this.#staged.state);
     // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
     if (!size.ok) return isBlockSave(op) ? { ...size, message: BLOCKS_ROOM_TOO_FULL } : size;
+    // The room stored is the real one, larger only by what a public springing changed, which every viewer sees anyway: the
+    // guard counts that too, so its bounds stay bounds of what is stored.
+    if (measured !== result) this.#sizes.grew(growthBound(measured.state, result.state, [...new Set([...measured.touched, ...result.touched])]), grown);
     this.#staged = { state: result.state, seq };
     const batch = this.#ensureBatch();
     batch.ops.push({ seq, at, actor: viewer, op, log: result.log });
@@ -1172,6 +1186,8 @@ export class RoomActor {
       get inverse() {
         return result.inverse;
       },
+      ...(result.trapped ? { trapped: true as const } : {}),
+      ...(result.trapWrote ? { trapWrote: result.trapWrote } : {}),
     };
   }
 

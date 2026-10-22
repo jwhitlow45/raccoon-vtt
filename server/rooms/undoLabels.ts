@@ -281,6 +281,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return trapUpdatePhrase(op, trapName(before, op.trapId));
     case "trap.delete":
       return `deleting ${before.traps[op.trapId] ? `the trap ${trapName(before, op.trapId)}` : "a trap"}`;
+    case "trap.spring":
+      return `setting off ${trapName(before, op.trapId)}`;
     case "trap.act":
       return `doing what ${trapName(before, op.trapId)} does`;
     case "trap.settle":

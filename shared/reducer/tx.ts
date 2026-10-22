@@ -26,7 +26,17 @@ import { markFinished, markWritable } from "../writable.ts";
  * reducer's own output changed since (shared/migrate.ts). Live ops leave it
  * out and take today's rules.
  */
-export type Env = { seq: number; at: string; opVersion?: number };
+export type Env = {
+  seq: number;
+  at: string;
+  opVersion?: number;
+  /**
+   * The op as it would apply with no trap step (docs/design-v1-traps.md
+   * 6.7): what the server's limits measure, so a trap going off never
+   * changes whether an op passes. Never stored and never replayed.
+   */
+  withoutTraps?: true;
+};
 
 /** Log entries kept in memory. Older ones live in the room_log table. */
 export const MAX_LOG = 200;
