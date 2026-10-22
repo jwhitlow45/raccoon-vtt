@@ -55,6 +55,7 @@ import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rol
 import { actorOutcome } from "./reducer/outcome.ts";
 import { castAsk, castClose } from "./reducer/casts.ts";
 import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
+import { noticeStep } from "./reducer/trapNotice.ts";
 import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
@@ -157,6 +158,8 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     endSaves(tx);
     const dispatched = plan ? new Set(tx.touched()) : null;
     if (plan) traps = trapStep(tx, op, state, plan);
+    // The Passive Perception hint writes only the DM's (docs/design-v1-traps.md 4.6), and is kept out of a player's undo as the trap step's writes are.
+    if (plan && noticeStep(tx, op, state)) traps = { wrote: true, trapped: traps?.trapped ?? false };
     if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
     if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
     remindAfter(tx, state, moved);

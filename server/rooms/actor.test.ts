@@ -2741,6 +2741,19 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
     });
   });
 
+  test("the Passive Perception hint is the DM's alone: the player's undo of the move it came with moves the token back", async () => {
+    const { state, dm, pc } = table({ notice: true, find: [{ ability: "wis", skill: "perception", dc: 5 }] });
+    state.traps.plate = { ...state.traps.plate!, zone: { cells: [{ x: 8, y: 2, w: 1, h: 1 }] } };
+    await withTable(state, dm, pc, async (actor, _dmSend, pcSend) => {
+      assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 6, y: 2 }), null);
+      assert.equal(actor.committed.state.traps.plate!.rig!.noticedBy, "thorn");
+      assert.equal(actor.committed.state.trapLog.at(-1)?.data?.type, "trapNotice");
+      assert.equal(await pcSend({ t: "undo" }), null);
+      assert.equal(actor.committed.state.tokens.thorn!.x, 1);
+      assert.equal(actor.committed.state.traps.plate!.rig!.noticedBy, "thorn", "the hint stays");
+    });
+  });
+
   test("rooms just under the size limit answer the same whether a silent trap goes off or not", async () => {
     const answers: string[][] = [];
     for (const armed of [true, false]) {

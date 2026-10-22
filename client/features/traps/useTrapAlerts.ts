@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { LogEntry } from "#shared/model.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useIsDisplay, useRoomStore, useRoomUi } from "../../state/view.ts";
+import { useIsDisplay, useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
 import { useStartGroupSave } from "../dice/groupSave/start.ts";
 import { playTrapSound } from "../encounter/alerts.ts";
 import { stopNoteSlot } from "../movement/store.ts";
@@ -15,8 +15,9 @@ const NO_LINES: readonly LogEntry[] = [];
  * What a trap going off tells this device (docs/design-v1-traps.md 4.3).
  * The DM gets a toast and the trap's sound for each new line in the DM's
  * trap log, with Save and damage while its springing waits with a save,
- * damage or conditions. A player gets one, with its sound, for each players' line that
- * names a creature they play. Sound plays only where this device has it on.
+ * damage or conditions, and the Passive Perception hint with Mark found. A
+ * player gets one, with its sound, for each players' line that names a
+ * creature they play. Sound plays only where this device has it on.
  * And once the server's answer to a player's move shows a trap stopped it
  * or told its players, the token bar's Undo move and the stopped walk's
  * Teleport here go, since the server would refuse them now.
@@ -27,6 +28,7 @@ const NO_LINES: readonly LogEntry[] = [];
 export function useTrapAlerts(): void {
   const store = useRoomStore();
   const ui = useRoomUi();
+  const actions = useRoomActions();
   const scope = useRoomScope();
   const display = useIsDisplay();
   // In a ref, so a scene switch, which makes a new start, never resubscribes and forgets the moves being watched.
@@ -38,6 +40,8 @@ export function useTrapAlerts(): void {
     const saveAction = (a: TrapAlert) => {
       const trap = a.trapId ? store.getState().view?.traps[a.trapId] : undefined;
       const rig = trap?.rig;
+      // The hint never marks anything found by itself: the DM does, from its toast.
+      if (a.notice) return trap && !trap.found ? { label: "Mark found", run: () => void actions.dispatch({ t: "trap.update", trapId: trap.id, patch: { found: true } }) } : undefined;
       if (!trap || !rig || !rig.due?.some((d) => d.id === a.due) || (!rig.save && !rig.damage && !rig.conditions)) return undefined;
       return {
         label: rig.save || rig.damage ? "Save and damage" : "Apply",
@@ -60,8 +64,10 @@ export function useTrapAlerts(): void {
       const view = now.view;
       const you = now.you;
       if (!view || !you) return;
-      const trapLog = view.trapLog ?? NO_LINES;
-      const trapSeen = view.trapSeen ?? NO_LINES;
+      // The lines the server holds, never a prediction: the DM's own walk replays its trap step here, and its line may come back under another id.
+      const held = now.confirmed ?? view;
+      const trapLog = held.trapLog ?? NO_LINES;
+      const trapSeen = held.trapSeen ?? NO_LINES;
       if (!started) {
         started = true;
         seenLog = newestId(trapLog);
@@ -100,5 +106,5 @@ export function useTrapAlerts(): void {
     };
     update();
     return store.subscribe(update);
-  }, [store, ui, scope, display]);
+  }, [store, ui, actions, scope, display]);
 }

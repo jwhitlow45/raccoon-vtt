@@ -64,6 +64,14 @@ describe("what a trap going off tells each device", () => {
     assert.deepEqual(linesAfter(dmLog, "12:0").map((e) => e.id), ["14:0", "15:1"]);
   });
 
+  test("the Passive Perception hint is a toast of its own, which offers Mark found", () => {
+    const s = world();
+    s.traps.pit = { ...s.traps.pit!, rig: { ...s.traps.pit!.rig!, find: [{ ability: "wis", skill: "perception", dc: 15, what: "the pressure plate" }] } };
+    assert.deepEqual(dmAlerts([line("17:0", { type: "trapNotice", trapId: "pit", tokenId: "thorn", passive: 16, dc: 15 })], s), [
+      { text: "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15).", trapId: "pit", notice: true },
+    ]);
+  });
+
   test("a player hears a line that names a creature they play, and reads the rest in the log", () => {
     assert.deepEqual(playerAlerts(seen, world(), P1), [{ text: "Thorn: The floor gives way!", sound: "crash" }]);
     assert.deepEqual(playerAlerts(seen, world(), { memberId: "p2", role: "player" }), [{ text: "Bree: Click." }]);

@@ -21,18 +21,23 @@ export function newestId(lines: readonly LogEntry[]): string | null {
   return lines[lines.length - 1]?.id ?? null;
 }
 
-export type TrapAlert = { text: string; sound?: TrapSound; trapId?: string; due?: string };
+/** A toast: its words, the sound it plays, and for the DM the trap and springing it names, or the hint (`notice`), which offers Mark found. */
+export type TrapAlert = { text: string; sound?: TrapSound; trapId?: string; due?: string; notice?: true };
 
 /**
  * The DM's toasts (4.3): "Hidden Pit went off: Thorn.", and the trap's
  * sound. One that went off out of the players' sight in a player's op says
  * so. The DM's own Set it off needs none: its card, if any, is already on
- * the desk.
+ * the desk. The Passive Perception hint (4.6) is a toast too.
  */
 export function dmAlerts(lines: readonly LogEntry[], state: RoomState): TrapAlert[] {
   const out: TrapAlert[] = [];
   for (const e of lines) {
     const data = e.data;
+    if (data?.type === "trapNotice") {
+      out.push({ text: describeEvent(data, namesOf(state), true), trapId: data.trapId, notice: true });
+      continue;
+    }
     if (data?.type !== "trap" || data.how === "hand") continue;
     const text = describeEvent(data, namesOf(state), true);
     const sound = state.traps[data.trapId]?.rig?.sound;
