@@ -38,7 +38,9 @@ export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: Mov
   const whole = off.x === end.x && off.y === end.y;
   // The route split at the clear spot: the pieces before the one it lies on, that piece cut there, and the rest from there.
   const [piece, k, n] = clear.progress;
-  if (!route || at <= 0) return { off, prefix: undefined, rest: undefined, whole };
+  if (!route) return { off, prefix: undefined, rest: undefined, whole };
+  // A walk that leaves the ride without ever clearing the mount ends half on it: all of it is the part off.
+  if (at < 0) return { off, prefix: route, rest: undefined, whole };
   const cut = route[piece]!;
   const prefix = k === n ? route.slice(0, piece + 1) : [...route.slice(0, piece), [off.x, off.y, cut[2], cut[3]] as RoutePiece];
   const rest = route.slice(k === n ? piece + 1 : piece);

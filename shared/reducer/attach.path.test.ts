@@ -176,6 +176,20 @@ describe("what getting on and off costs (7.3)", () => {
     assert.equal(bresTurn(free).refused({ t: "token.detach", tokenId: "bree" }), "getting off a mount needs a place beside it");
   });
 
+  test("a walk off a mount that never clears it keeps its route, corners and distance (review AT-O-21)", () => {
+    // Large Bree on a Huge horse: her walk ends half off it, so the ride no longer holds, yet no spot of it is clear.
+    const huge = (s: RoomState) => {
+      s.tokens.horse = { ...s.tokens.horse!, size: "huge" };
+      s.tokens.bree = { ...s.tokens.bree!, size: "large", attached: { to: "horse", kind: "ride" } };
+    };
+    const f = bresTurn(huge).run({ t: "token.move", tokenId: "bree", x: 6, y: 5, route: [[4, 5, 0, 0], [6, 5, 0, 0]] });
+    assert.equal(f.state.tokens.bree!.attached, undefined);
+    assert.deepEqual(
+      f.stops("bree").slice(1).map((s) => [s.x, s.y, s.moved, s.cost, s.via]),
+      [[6, 5, 15, 15, [4, 5]]],
+    );
+  });
+
   test("a ride no player sees costs nothing to leave or take, so the rider's owner reads the same leg with or without a hidden mount (8.0)", () => {
     // Room a: Bree rides a horse no player sees. Room b: she stands there alone. Her owner's copies are the same.
     const hidden = () => bresTurn((s) => (s.tokens.horse = { ...s.tokens.horse!, visibility: "dm" }) && (s.tokens.bree = { ...s.tokens.bree!, attached: { to: "horse", kind: "ride" } }));
