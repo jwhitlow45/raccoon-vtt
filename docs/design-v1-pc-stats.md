@@ -180,6 +180,8 @@ Pasted text and D&D Beyond both produce one shape, `PcFill = { stats, level?, na
 - **Max HP by one rule**, the companion design's (docs/design-v1-companion-stat-blocks.md 5.2): a living character at its maximum stays at its new maximum, and any other keeps its HP, cut to the maximum if higher. A fill never brings a character back or puts one down, and never sets current or temporary HP.
 - **Use it** fills the editor's draft and returns to it. Nothing is sent until Save, so a fill can be looked over, changed or cancelled whole.
 
+Changed by docs/design-v1-resync.md (1.1, 2.5 and 3.3): a D&D Beyond fill is reviewed as a re-sync is. With no sync record, or one of another D&D Beyond character, it still fills, and its review adds "Replaces your changes", each value it would replace with an unticked "Keep mine". With a record of the same character it merges three ways, so a change the player kept stays unless overwritten. Use it then Save sends the record with the block. The reader leaves out every part whose sources are missing, and "AC 16 was worked out from the armor. Check it." moves from Check these to the AC line's help, "Worked out from the armor. Check it." Pasted text keeps this review.
+
 ### 6.2 Pasted text
 
 The "Paste text" step runs `parseStatBlockText` on the text, then `statsFromBlock(block, level)` (`client/features/pcstats/fromBlock.ts`) reads each printed number as **the derivation it matches, else as typed**, by one rule: of the derivations a number could have, take the one nearest it (ties to the lower), and keep the rest as the adjustment.
