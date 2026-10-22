@@ -281,7 +281,14 @@ export type DragWalk = {
 };
 
 /** What a drag reads: the leg's cost, what in it cost extra, the speed its total falls in, and the Half Speed area it would end in. */
-export type DragRead = { dragFt: number; left?: SpeedLeft; extra?: { ft: number; words: string }; halfSpeed?: string };
+export type DragRead = {
+  dragFt: number;
+  left?: SpeedLeft;
+  extra?: { ft: number; words: string };
+  halfSpeed?: string;
+  /** The leg's diagonals by the 5-10-5 count, from which a walking ruler's next leg runs on. */
+  diag: [number, number];
+};
 
 const BAND_ORDER: readonly SpeedLeft["band"][] = ["walk", "dash", "over"];
 
@@ -329,6 +336,8 @@ export function dragReading(input: {
   dismount?: { mount: PlacedToken; halfFt: number };
   /** The map for the dismount's split when no `walk` gives it, as a group drag's reading has none (preview.ts groupReading). */
   build?: Pick<BuildState, "buildChunks">;
+  /** The 5-10-5 count a leg read outside a turn runs on from, as a walking ruler's later legs run on from its earlier ones. */
+  counter?: DiagonalCounter;
 }): DragRead {
   const { token, encounter, rules, walk } = input;
   const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: input.landing?.elevation ?? token.elevation };
@@ -336,7 +345,7 @@ export function dragReading(input: {
   const fighting = encounter ? (encounter.started ?? encounter.activeEntryId !== null) : false;
   const active = fighting && input.activeTokenId === token.id;
   const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, token, rules, role: input.role }) : null;
-  const counter = trail ? trail.diagonals : { h: 0, v: 0 };
+  const counter = trail ? trail.diagonals : (input.counter ?? { h: 0, v: 0 });
   const swimSpeed = (input.speeds?.swim ?? 0) > 0;
   const points: readonly RoutePoint[] = walk?.route?.points ?? [{ x: token.x, y: token.y, elevation: token.elevation }, end];
   const pieces = walk?.route?.pieces.map(([, , extra, swim]) => ({ extra, swim })) ?? [];
@@ -353,7 +362,7 @@ export function dragReading(input: {
   const taken = off ? dismountCost(walk?.build ?? input.build ?? NO_BUILD, token, off.mount, points, walk?.route?.pieces, rules, counter, off.halfFt, swimSpeed) : leg;
   const surcharge = taken.cost - leg.cost;
   const legFt = input.costFt ?? taken.cost;
-  const out: DragRead = { dragFt: legFt };
+  const out: DragRead = { dragFt: legFt, diag: taken.diag };
   const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing) : [];
   if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
   if (fighting && !active) return out;

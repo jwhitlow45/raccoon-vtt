@@ -6,6 +6,7 @@ import { projectState } from "#shared/project.ts";
 import { P1, reveal, template, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
 import { keptDrawing, keptStops, tokenStop, type RulerStop } from "./ruler.ts";
+import { WorkBudget } from "#shared/rules/walk.ts";
 import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
 
 /** The ruler's walking mode (docs/design-v1-movement.md 3.3). */
@@ -82,10 +83,10 @@ describe("the walking ruler", () => {
       return { onDm: [onDm.totalFt, onDm.legs[0]!.none], onPlayer: [onPlayer.totalFt, onPlayer.legs[0]!.none] };
     };
     const stops = [free(2, 5), free(9, 5)];
-    // Only above the wall's end is seen, so the way round it is not.
+    // Only above the wall's end is seen, so the way round it is not, and the walk is held at the wall as a player's drag is.
     const dark = read(fogged(10), stops);
     assert.deepEqual(dark.onDm, dark.onPlayer);
-    assert.deepEqual(dark.onDm, [35, true]);
+    assert.deepEqual(dark.onDm, [15, true]);
     const lit = read(fogged(12), stops);
     assert.deepEqual(lit.onDm, lit.onPlayer);
     assert.deepEqual(lit.onDm, [55, false]);
@@ -94,7 +95,7 @@ describe("the walking ruler", () => {
     monster.tokens.gob = token("gob", { x: 2, y: 5 });
     const onGob = read(monster, [tokenStop(monster.tokens.gob), free(9, 5)]);
     assert.deepEqual(onGob.onDm, onGob.onPlayer);
-    assert.deepEqual(onGob.onDm, [35, true]);
+    assert.deepEqual(onGob.onDm, [15, true]);
     assert.deepEqual(read(fogged(10), stops, true).onDm, [55, false], "the DM's own ruler, before it is shared, reads the DM's map");
   });
 
@@ -179,6 +180,17 @@ describe("the walking ruler", () => {
     assert.equal(m.searching, false, `still searching after ${slices} slices`);
     assert.equal(m.legs.length, 33);
     assert.equal(m.legs[0]!.none, true, "No way through");
+  });
+
+  test("a ruler whose last stop moves keeps every leg before it, planned and simulated once, so a call with no budget left reads them all (review AT-O-33)", () => {
+    const view = room();
+    const stops = [free(2, 5), ...Array.from({ length: 30 }, (_, k) => free(k % 2 === 0 ? 9 : 2, 5 + Math.floor(k / 2)))];
+    const input = { view, sceneId: "s1", viewer: { role: "player" as const }, everything: false };
+    const whole = measureWalk({ ...input, stops })!;
+    assert.equal(whole.searching, false);
+    const moved = measureWalk({ ...input, stops: [...stops.slice(0, -1), free(8, 3)], budget: WorkBudget.none() })!;
+    assert.deepEqual(moved.legs.slice(0, -1), whole.legs.slice(0, -1));
+    assert.equal(moved.legs.at(-1)!.searching, true);
   });
 
   test("past its deadline a slice begins no leg but its first, so a ruler of many legs never builds every leg's world in one frame (review ASTRA-08)", () => {

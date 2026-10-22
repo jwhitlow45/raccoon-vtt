@@ -30,17 +30,19 @@ export function seenIn(view: RoomState, role: Role): SeenByAll {
 
 /**
  * How the label names the holder's extra foot (7.3): "dragging" while one of
- * the creatures that cost it is dragged, else "carrying".
+ * the creatures that cost it is dragged, else "carrying". `seen` is who every
+ * player sees, this copy's by default, a walking ruler's where its legs left
+ * them (walkRuler.ts simulated).
  */
-export function towingWord(view: RoomState, holderId: string, role: Role): "dragging" | "carrying" {
+export function towingWord(view: RoomState, holderId: string, role: Role, seen: SeenByAll = seenIn(view, role)): "dragging" | "carrying" {
   const drags: RoomState["tokens"] = {};
   for (const [id, t] of Object.entries(view.tokens)) if (t && (t.attached === undefined || t.attached.kind === "drag")) drags[id] = t;
-  return dragExtra(drags, holderId, seenIn(view, role)) === 1 ? "dragging" : "carrying";
+  return dragExtra(drags, holderId, seen) === 1 ? "dragging" : "carrying";
 }
 
-/** The creatures a lead token drags beside it as this copy shows them (groups.ts dragWalkers), stopping at the other tokens a drag names. */
-export function walkersFor(view: RoomState, tokenId: string, role: Role, named: ReadonlySet<string> = new Set()): Token[] {
-  return dragWalkers(view.tokens, tokenId, seenIn(view, role), named);
+/** The creatures a lead token drags beside it as this copy shows them (groups.ts dragWalkers), stopping at the other tokens a drag names. `seen` as for towingWord. */
+export function walkersFor(view: RoomState, tokenId: string, role: Role, named: ReadonlySet<string> = new Set(), seen: SeenByAll = seenIn(view, role)): Token[] {
+  return dragWalkers(view.tokens, tokenId, seen, named);
 }
 
 /**

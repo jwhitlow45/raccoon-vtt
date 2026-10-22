@@ -142,13 +142,13 @@ describe("movement since the turn began", () => {
     const entries = [{ id: "e1", tokenId: "t1" }];
     const older: TurnView = { activeEntryId: "e1", turnStart: start, entries };
     const base = { token: walker, to: { x: 7, y: 2 }, encounter: older, activeTokenId: "t1", speeds: { walk: 30 }, rules: five, role: "dm" as const };
-    assert.deepEqual(dragReading(base), { dragFt: 10, left: { kind: "walk", speed: 30, leftFt: 5, band: "walk" } }, "a turn from before paths: 15 ft straight from its start, 10 ft more");
+    assert.deepEqual(dragReading(base), { dragFt: 10, diag: [0, 0], left: { kind: "walk", speed: 30, leftFt: 5, band: "walk" } }, "a turn from before paths: 15 ft straight from its start, 10 ft more");
     assert.equal(dragReading({ ...base, to: { x: 9, y: 2 } }).left!.band, "dash");
     assert.equal(dragReading({ ...base, to: { x: 17, y: 2 } }).left!.band, "over");
-    assert.deepEqual(dragReading({ ...base, activeTokenId: "t2" }), { dragFt: 10 }, "another creature during a fight reads no speed");
-    assert.deepEqual(dragReading({ ...base, speeds: undefined }), { dragFt: 10 }, "a viewer without the speeds");
+    assert.deepEqual(dragReading({ ...base, activeTokenId: "t2" }), { dragFt: 10, diag: [0, 0] }, "another creature during a fight reads no speed");
+    assert.deepEqual(dragReading({ ...base, speeds: undefined }), { dragFt: 10, diag: [0, 0] }, "a viewer without the speeds");
     // Hidden creature's turn for a player: a fight with no active row they see.
-    assert.deepEqual(dragReading({ ...base, encounter: { activeEntryId: null, started: true, entries: [] }, activeTokenId: null }), { dragFt: 10 });
+    assert.deepEqual(dragReading({ ...base, encounter: { activeEntryId: null, started: true, entries: [] }, activeTokenId: null }), { dragFt: 10, diag: [0, 0] });
     for (const encounter of [null, { activeEntryId: null, entries: [] }, { activeEntryId: null, started: false, entries }]) {
       assert.equal(dragReading({ ...base, encounter, activeTokenId: null }).left!.leftFt, 20, "outside a fight, from where the drag began");
     }
@@ -160,12 +160,12 @@ describe("movement since the turn began", () => {
     const along = (stops: PathStop[], at: { x: number; y: number }) => tok({ ...at, path: { turn: 7, stops } });
     const base = { to: { x: 7, y: 2 }, encounter: fight, activeTokenId: "t1", speeds: { walk: 30 }, rules: five, role: "dm" as const };
     const zigzag = along([stop(2, 2), stop(2, 4), stop(5, 2)], { x: 5, y: 2 });
-    assert.deepEqual(dragReading({ ...base, token: zigzag }), { dragFt: 10, left: { kind: "walk", speed: 30, leftFt: 25, band: "dash" } }, "25 ft of path and 10 ft more is 35 ft, into the Dash");
+    assert.deepEqual(dragReading({ ...base, token: zigzag }), { dragFt: 10, diag: [0, 0], left: { kind: "walk", speed: 30, leftFt: 25, band: "dash" } }, "25 ft of path and 10 ft more is 35 ft, into the Dash");
     const shoved = along([stop(2, 2), { ...stop(5, 2), uncounted: true }], { x: 5, y: 2 });
     assert.deepEqual(dragReading({ ...base, token: shoved }).left, { kind: "walk", speed: 30, leftFt: 20, band: "walk" }, "the shove is free");
     assert.equal(dragReading({ ...base, token: tok({ x: 2, y: 2 }) }).left!.leftFt, 5, "not moved yet: the drag alone, from where the turn began");
     const diagonal = along([stop(0, 0), stop(1, 1)], { x: 1, y: 1 });
-    assert.deepEqual(dragReading({ ...base, token: diagonal, to: { x: 2, y: 2 }, rules: fiveTen }), { dragFt: 10, left: { kind: "walk", speed: 30, leftFt: 15, band: "walk" } }, "the drag's diagonal is the turn's second, 10 ft under 5-10-5");
+    assert.deepEqual(dragReading({ ...base, token: diagonal, to: { x: 2, y: 2 }, rules: fiveTen }), { dragFt: 10, diag: [1, 0], left: { kind: "walk", speed: 30, leftFt: 15, band: "walk" } }, "the drag's diagonal is the turn's second, 10 ft under 5-10-5");
     assert.equal(dragReading({ ...base, token: zigzag, encounter: { ...fight, activeEntryId: null, started: false } }).left!.leftFt, 20, "outside a fight a path is not read");
   });
 

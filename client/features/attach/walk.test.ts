@@ -13,7 +13,7 @@ import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
-import { tokenStop } from "../measure/ruler.ts";
+import { tokenStop, type RulerStop } from "../measure/ruler.ts";
 import { measureWalk } from "../measure/walkRuler.ts";
 import { towingWord, walkersFor, walkersOfGroup } from "./walk.ts";
 import { detachOp, getOffPlace } from "./detach.ts";
@@ -628,6 +628,73 @@ describe("every reader of a walk reads its walker from the walk's trace (reviews
     assert.ok(cut);
     assert.deepEqual([cut.at.x, cut.at.y, cut.pieces, cut.blocker], [9.5, 5.5, 0, "wall"]);
     assert.equal(legBlocker(view, lead, cut.at), null);
+  });
+});
+
+describe("a walking ruler's later legs search the room its earlier legs leave (reviews AT-ASTRA-26 and AT-SOL-6)", () => {
+  /** The DM's drags of `id` to each spot in turn, each from where the one before left it: what each label read. */
+  function dragsFrom(state: RoomState, id: string, spots: readonly { x: number; y: number }[]): number[] {
+    let room = state;
+    return spots.map((spot, i) => {
+      const drag = dragOf(room, "dm", id, spot);
+      const r = applyOp(room, drag.op as Op, DM, env(9 + i));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      room = r.state;
+      return drag.preview.read.dragFt;
+    });
+  }
+
+  test("an area on a token the walker carries goes with it, so a later leg pays for it where the leg before left it", () => {
+    // A lamp the PC carries holds a 15 ft area of overgrowth, 4 ft a foot. Each leg starts inside it, where the leg before ended.
+    const state = world({ tokens: [token("pc", { name: "Pc", kind: "pc", x: 3, y: 3 }), token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 3, y: 3, attached: { to: "pc", kind: "carry" } })] });
+    state.templates.pg = template("pg", { shape: "emanation", size: 15, attachedTo: "lamp", includeOrigin: true, slows: { kind: "quarter" } });
+    const spots = [{ x: 8, y: 3 }, { x: 13, y: 3 }];
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: false })!;
+    const drags = dragsFrom(state, "pc", spots);
+    assert.equal(drags[0], drags[1]);
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), drags);
+  });
+
+  test("an area on an object a holder carries goes with the holder, so its later leg pays for the area where it now stands", () => {
+    // A horse carries a lamp with a 10 ft emanation of difficult terrain. It walks east, then north, its first steps north in
+    // the area it carried east, far from where the area started.
+    const state = world({ tokens: [token("horse", { name: "Horse", size: "large", x: 4, y: 10 }), token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 4, y: 10, attached: { to: "horse", kind: "carry" } })] });
+    state.templates.dt = template("dt", { shape: "emanation", size: 10, attachedTo: "lamp", includeOrigin: true, slows: { kind: "difficult" } });
+    const spots = [{ x: 12, y: 10 }, { x: 12, y: 4 }];
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.horse!), ...spots.map((p) => ({ x: p.x + 1, y: p.y + 1 }))], viewer: { role: "dm" }, everything: true })!;
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), dragsFrom(state, "horse", spots));
+  });
+});
+
+describe("a walking ruler counts the extra foot a drag pays for what the walker tows (review AT-O-31)", () => {
+  test("a PC who drags or carries a Medium goblin pays 1 extra foot a foot on its ruler's legs while it tows, as on its drags, on the DM's room and a player's copy", () => {
+    for (const kind of ["drag", "carry", "none"] as const) {
+      for (const who of [DM, P1]) {
+        const state = world({
+          tokens: [
+            token("hero", { name: "Hero", kind: "pc", ownerIds: ["p1"], x: 5, y: 5 }),
+            token("gob", { name: "Gob", kind: "npc", x: kind === "drag" ? 4 : 5, y: 5, ...(kind !== "none" ? { attached: { to: "hero", kind } } : {}) }),
+          ],
+        });
+        const copy = (room: RoomState) => (who.role === "dm" ? room : copyFor(room, who));
+        let room = state;
+        const stops: RulerStop[] = [tokenStop(copy(state).tokens.hero!)];
+        const read: number[] = [];
+        for (const [i, to] of [{ x: 8, y: 5 }, { x: 8, y: 8 }].entries()) {
+          const drag = dragOf(copy(room), who.role, "hero", to);
+          const r = applyOp(room, drag.op as Op, who, env(5 + i));
+          assert.ok(r.ok, r.ok ? "" : r.message);
+          room = r.state;
+          const { x, y } = tokenStop(room.tokens.hero!);
+          stops.push({ x, y });
+          read.push(drag.preview.read.dragFt);
+        }
+        // A Medium goblin carried by a Medium PC comes loose by the link pass once the PC has moved, so only its first leg tows it.
+        assert.deepEqual(read, { drag: [30, 30], carry: [30, 15], none: [15, 15] }[kind], `${kind}, ${who.memberId}'s drags`);
+        const ruler = measureWalk({ view: copy(state), sceneId: "s1", stops, viewer: { role: who.role }, everything: who.role === "dm" })!;
+        assert.deepEqual(ruler.legs.map((leg) => leg.ft), read, `${kind}, ${who.memberId}'s ruler`);
+      }
+    }
   });
 });
 

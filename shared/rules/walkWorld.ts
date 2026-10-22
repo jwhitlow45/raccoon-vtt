@@ -1,5 +1,5 @@
 import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token } from "../model.ts";
-import { isPartyMember, playersSeeGround, projectChunkForPlayer, withheldWhereItStands } from "../project.ts";
+import { inSightOfNonOwners, isPartyMember, playersSeeGround, projectChunkForPlayer, withheldWhereItStands } from "../project.ts";
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
 import { dragExtra, publicMembers } from "./attach.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
@@ -55,6 +55,20 @@ export type WorldOptions = {
    * DM's drag of a monster reads the DM's own map.
    */
   seenGround?: boolean;
+  /**
+   * The tokens a walking ruler's earlier legs moved, on the room it
+   * simulates them in: players see each where it now stands, by the rule
+   * the server judges every player's sight by (project.ts
+   * inSightOfNonOwners), even on a player's copy, which still holds it
+   * there (reviews AT-SOL-5 and AT-SOL-6).
+   */
+  moved?: ReadonlySet<string>;
+  /**
+   * The tokens players did not see where a shared walking ruler starts: no
+   * leg of it sees them, wherever its legs leave them, since a player's
+   * copy never held them (review AT-SOL-6).
+   */
+  unseen?: ReadonlySet<string>;
 };
 
 /**
@@ -129,7 +143,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const rules: DistanceSettings = { feetPerCell: state.meta.settings.feetPerCell, diagonal: state.meta.settings.diagonal };
   const blocks = scene?.blockMovement === true;
   const everything = opts.everything === true && viewer.role === "dm";
-  const shown = shownTokens(state, token, viewer, everything);
+  const shown = shownTokens(state, token, viewer, everything, opts);
   // A player's drag, the DM's of a party member and every shared ruler keep to ground players have seen. The DM's other drags read the DM's own map.
   const publicGround = !everything && (opts.seenGround === true || viewer.role === "player" || isPartyMember(state, token));
   const ground = publicGround && scene && scene.fogEnabled !== false ? playersSeeGround(state, scene.id) : null;
@@ -176,14 +190,15 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
  * route then carries. What moves with it never stands in its way, since it
  * is not there once the holder has gone.
  */
-export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = []): PublicWorld {
+export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = [], opts: WorldOptions = {}): PublicWorld {
+  const shown = shownBy(state, viewer, opts);
   const seen = (t: { id: string }) => {
     const other = state.tokens[t.id];
-    return other !== undefined && publicToken(state, other, viewer);
+    return other !== undefined && shown(other);
   };
   const members = publicMembers(state.tokens, token.id, seen).slice(1);
   const party = members.some((id) => isPartyMember(state, state.tokens[id]!));
-  const world = publicWorld(state, token, viewer, stops, party ? { seenGround: true } : {});
+  const world = publicWorld(state, token, viewer, stops, party ? { ...opts, seenGround: true } : opts);
   const drag = dragExtra(state.tokens, token.id, seen);
   if (drag === 0 && members.length === 0) return world;
   const moving = new Set(members);
@@ -192,9 +207,15 @@ export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: 
 }
 
 /** The tokens on the mover's scene players see, by id. */
-function shownTokens(state: RoomState, token: Token, viewer: WalkViewer, everything = false): Map<string, Token> {
+function shownTokens(state: RoomState, token: Token, viewer: WalkViewer, everything = false, opts: Pick<WorldOptions, "moved" | "unseen"> = {}): Map<string, Token> {
   const onScene = Object.values(state.tokens).filter((t): t is Token => t !== undefined && t.sceneId === token.sceneId);
-  return new Map(onScene.filter((t) => everything || publicToken(state, t, viewer)).map((t) => [t.id, t]));
+  const shown = shownBy(state, viewer, opts);
+  return new Map(onScene.filter((t) => everything || shown(t)).map((t) => [t.id, t]));
+}
+
+/** Whether players see a token, as `publicToken` reads it, a token a walking ruler's earlier legs moved where those legs left it (WorldOptions `moved` and `unseen`). */
+function shownBy(state: RoomState, viewer: WalkViewer, opts: Pick<WorldOptions, "moved" | "unseen">): (t: Token) => boolean {
+  return (t) => !opts.unseen?.has(t.id) && (opts.moved?.has(t.id) ? inSightOfNonOwners(state, t, {}) : publicToken(state, t, viewer));
 }
 
 /**
