@@ -128,3 +128,43 @@ export function offersAfterTrap<T extends { ns: readonly number[] }>(offers: rea
   const at = offers.findIndex((o) => o.ns.includes(n));
   return at < 0 ? offers : offers.slice(at + 1);
 }
+
+/** What the watch reads of the room's store (state/store.ts): the ops still on their way, and the server's answers to those that came back. */
+export type MoveAnswers = { pending: readonly { n: number; op: ClientOp }[]; refused?: readonly number[]; trapped?: readonly number[] };
+
+/**
+ * A player's moves watched until the server answers them (4.3), as
+ * useTrapAlerts runs it on every change of the room's store, kept free of
+ * React so it is tested under Node. It starts from the ops on their way
+ * when the room opened, which it never watches. Once the answer to a
+ * watched move shows a trap met it, the bar's Undo move offers that move's
+ * and every older one's go (`offersAfterTrap`), and the stopped walk's
+ * note for it goes with its Teleport here, unless that teleport is on its
+ * way. A refused move is left alone.
+ */
+export function trapMoveWatch<O extends { ns: readonly number[] }>(
+  start: MoveAnswers,
+  offers: { getState(): { offers: readonly O[] }; setState(patch: { offers: readonly O[] }): void },
+  notes: { getState(): { note: { n: number | null } | null; busy: boolean }; setState(patch: { note: null }): void },
+): (now: MoveAnswers) => void {
+  let lastN = start.pending.reduce((n, p) => Math.max(n, p.n), 0);
+  const watched = new Map<number, Watched>();
+  return (now) => {
+    for (const p of now.pending) {
+      if (p.n <= lastN) continue;
+      lastN = p.n;
+      const w = watchOf(p.op, p.n);
+      if (w) watched.set(p.n, w);
+    }
+    for (const [n, w] of watched) {
+      if (now.pending.some((p) => p.n === n)) continue;
+      watched.delete(n);
+      if ((now.refused ?? []).includes(n) || !metTrap(w, now.trapped)) continue;
+      const was = offers.getState().offers;
+      const kept = offersAfterTrap(was, n);
+      if (kept.length !== was.length) offers.setState({ offers: kept });
+      const s = notes.getState();
+      if (s.note?.n === n && !s.busy) notes.setState({ note: null });
+    }
+  };
+}

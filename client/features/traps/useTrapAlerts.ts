@@ -6,7 +6,7 @@ import { useStartGroupSave } from "../dice/groupSave/start.ts";
 import { playTrapSound } from "../encounter/alerts.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
-import { dmAlerts, linesAfter, metTrap, newestId, offersAfterTrap, playerAlerts, shownAlert, watchOf, type TrapAlert, type Watched } from "./alerts.ts";
+import { dmAlerts, linesAfter, newestId, playerAlerts, shownAlert, trapMoveWatch, type MoveAnswers, type TrapAlert } from "./alerts.ts";
 import { trapStart } from "./TrapSaveStart.tsx";
 
 const NO_LINES: readonly LogEntry[] = [];
@@ -74,11 +74,9 @@ export function useTrapAlerts(): void {
         actions.switchScene(to.sceneId);
       },
     });
-    let started = false;
     let seenLog: string | null = null;
     let seenSeen: string | null = null;
-    let lastN = 0;
-    const watched = new Map<number, Watched>();
+    let moves: ((now: MoveAnswers) => void) | null = null;
     const update = () => {
       const now = store.getState();
       const view = now.view;
@@ -94,11 +92,10 @@ export function useTrapAlerts(): void {
       const held = now.confirmed ?? view;
       const trapLog = held.trapLog ?? NO_LINES;
       const trapSeen = held.trapSeen ?? NO_LINES;
-      if (!started) {
-        started = true;
+      if (!moves) {
         seenLog = newestId(trapLog);
         seenSeen = newestId(trapSeen);
-        lastN = now.pending.reduce((n, p) => Math.max(n, p.n), 0);
+        moves = trapMoveWatch(now, scope.get(lastMoveSlot), scope.get(stopNoteSlot));
         return;
       }
       const freshLog = linesAfter(trapLog, seenLog);
@@ -111,24 +108,7 @@ export function useTrapAlerts(): void {
         ui.notify(a.text, "info", undefined, action);
         if (a.sound) playTrapSound(a.sound);
       }
-      if (you.role !== "player") return;
-      for (const p of now.pending) {
-        if (p.n <= lastN) continue;
-        lastN = p.n;
-        const w = watchOf(p.op, p.n);
-        if (w) watched.set(p.n, w);
-      }
-      for (const [n, w] of watched) {
-        if (now.pending.some((p) => p.n === n)) continue;
-        watched.delete(n);
-        if ((now.refused ?? []).includes(n) || !metTrap(w, now.trapped)) continue;
-        const offers = scope.get(lastMoveSlot);
-        const kept = offersAfterTrap(offers.getState().offers, n);
-        if (kept.length !== offers.getState().offers.length) offers.setState({ offers: kept });
-        const note = scope.get(stopNoteSlot);
-        const s = note.getState();
-        if (s.note?.n === n && !s.busy) note.setState({ note: null });
-      }
+      if (you.role === "player") moves(now);
     };
     update();
     return store.subscribe(update);

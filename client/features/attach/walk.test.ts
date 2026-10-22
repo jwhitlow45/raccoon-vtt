@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState, Token } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { findRoute } from "#shared/rules/walk.ts";
+import { findRoute, WorkBudget } from "#shared/rules/walk.ts";
 import { groupWalkWorld, halvedAt, publicWorld, speedAreas } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
@@ -971,6 +971,40 @@ describe("a walking ruler from a rider of a controlled mount walks the mount, as
       assert.deepEqual(ruler.legs.map((leg) => [leg.from, leg.to]), [[{ x: 3, y: 2 }, { x: 8, y: 2 }], [{ x: 8, y: 2 }, { x: 8, y: 6 }]], `${who.memberId}'s legs drawn from Bree's seat`);
       assert.deepEqual(ruler.size, { w: 1, h: 1 });
     }
+  });
+
+  test("a horse's leg that bends round a wall draws its corners at Bree's seat on the horse, on the DM's room and her player's copy (review HF20-O-2)", () => {
+    for (const who of [DM, P1]) {
+      const state = riding();
+      // A wall east of the horse, from the top of the scene down to row 4, so the horse goes round its south end.
+      state.buildChunks = world({ edges: line("w", 6, 0, 5) }).buildChunks;
+      const copy = who.role === "dm" ? state : copyFor(state, who);
+      const drag = dragOf(copy, who.role, "horse", { x: 7, y: 2 });
+      const op = drag.op as Op & { t: "token.move" };
+      assert.ok(op.route && op.route.length > 1, `${who.memberId}'s drag bends round the wall: ${JSON.stringify(op)}`);
+      const r = applyOp(state, op, who, env(5));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      const { x, y } = tokenStop(r.state.tokens.bree!);
+      const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.bree!), { x, y }], viewer: { role: who.role }, everything: who.role === "dm" })!;
+      // Bree sits one square east of the horse's corner, so each of the horse's corners is drawn one square east of it.
+      const seat = { x: 1, y: 0 };
+      assert.deepEqual(ruler.legs[0]!.corners, op.route.slice(0, -1).map(([cx, cy]) => ({ x: cx + seat.x, y: cy + seat.y })), `${who.memberId}'s corners`);
+      assert.deepEqual([ruler.legs[0]!.from, ruler.legs[0]!.to, ruler.legs[0]!.ft], [{ x: 3, y: 2 }, { x: 8, y: 2 }, drag.preview.read.dragFt]);
+    }
+  });
+
+  test("with the frame's budget spent, a leg still searching is drawn from Bree's place, and so is the one after it (review HF20-O-2)", () => {
+    const state = riding();
+    const stops: RulerStop[] = [tokenStop(state.tokens.bree!), { x: 8.5, y: 2.5 }, { x: 8.5, y: 6.5 }];
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: true, budget: WorkBudget.none() })!;
+    assert.equal(ruler.searching, true);
+    assert.deepEqual(
+      ruler.legs.map((leg) => [leg.from, leg.to, leg.searching]),
+      [
+        [{ x: 3, y: 2 }, { x: 8, y: 2 }, true],
+        [{ x: 8, y: 2 }, { x: 8, y: 6 }, true],
+      ],
+    );
   });
 
   test("a shared ruler from a rider on a mount players do not see walks the rider on every copy, and only the DM's own ruler walks the mount", () => {

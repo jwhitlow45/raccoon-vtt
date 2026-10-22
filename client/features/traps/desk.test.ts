@@ -3,7 +3,11 @@ import { describe, test } from "node:test";
 import type { LogEntry, TrapDue } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, room, token, trap } from "#shared/testutil.ts";
-import { dmAlerts, linesAfter, metTrap, offersAfterTrap, playerAlerts, shownAlert, watchOf } from "./alerts.ts";
+import type { ClientOp } from "#shared/protocol.ts";
+import { RoomScope } from "../../state/scope.ts";
+import { stopNoteSlot } from "../movement/store.ts";
+import { lastMoveSlot } from "../tokens/undoMove.ts";
+import { dmAlerts, linesAfter, metTrap, offersAfterTrap, playerAlerts, shownAlert, trapMoveWatch, watchOf } from "./alerts.ts";
 import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines } from "./desk.ts";
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["thorn"], hits: ["thorn"], ...over });
@@ -121,5 +125,34 @@ describe("what a trap going off tells each device", () => {
     assert.deepEqual(offersAfterTrap(offers, 8), [], "the walk before it is offered no more");
     assert.deepEqual(offersAfterTrap(offers, 6), [{ ns: [8] }], "a move made after it stays on top");
     assert.equal(offersAfterTrap(offers, 9), offers, "an op the bar never offered");
+  });
+
+  test("the alerts hook's watch takes those offers and the trapped walk's note once the server's answer marks the move, on the bar's own stores (review HF20-O-2)", () => {
+    const scope = new RoomScope();
+    const offers = scope.get(lastMoveSlot);
+    const notes = scope.get(stopNoteSlot);
+    const move = (n: number) => ({ n, op: { t: "token.move", tokenId: "thorn", x: n, y: 2 } as ClientOp });
+    const stopped = (n: number, busy = false) => notes.setState({ note: { tokenId: "thorn", sceneId: "s1", blocker: "wall", door: null, ghost: { x: 9, y: 2 }, aim: { x: 9, y: 2 }, at: { x: 8, y: 2 }, n }, busy });
+    offers.setState({ offers: [1, 3, 4].map((n) => ({ tokenIds: ["thorn"], ns: [n] })) });
+    // Op 1 was on its way when the room opened, so the watch never takes its offers, whatever its answer says.
+    const watch = trapMoveWatch({ pending: [move(1)] }, offers, notes);
+    watch({ pending: [move(1), move(3), move(4)] });
+    stopped(3);
+    watch({ pending: [move(3), move(4)], trapped: [1] });
+    assert.equal(offers.getState().offers.length, 3, "a move it never watched");
+    watch({ pending: [move(3)], trapped: [1] });
+    assert.equal(offers.getState().offers.length, 3, "a move no trap met");
+    watch({ pending: [], trapped: [1, 3] });
+    assert.deepEqual(offers.getState().offers.map((o) => o.ns), [[4]], "the trapped move's offer and the older ones go");
+    assert.equal(notes.getState().note, null, "and the stopped walk's note for it, with its Teleport here");
+    // A refused move keeps the offers, and a note whose teleport is on its way stays.
+    offers.setState({ offers: [4, 5, 6].map((n) => ({ tokenIds: ["thorn"], ns: [n] })) });
+    watch({ pending: [move(5), move(6)] });
+    stopped(6, true);
+    watch({ pending: [move(6)], refused: [5], trapped: [5] });
+    assert.deepEqual(offers.getState().offers.map((o) => o.ns), [[4], [5], [6]], "a refused move");
+    watch({ pending: [], refused: [5], trapped: [5, 6] });
+    assert.deepEqual(offers.getState().offers.map((o) => o.ns), []);
+    assert.equal(notes.getState().note?.n, 6, "its teleport on its way");
   });
 });
