@@ -116,3 +116,15 @@ export function watchOf(op: ClientOp, n: number): Watched | null {
 export function metTrap(w: Watched, trapped: readonly number[] | undefined): boolean {
   return trapped?.includes(w.n) ?? false;
 }
+
+/**
+ * The bar's Undo move offers once the server marked move `n` as met by a
+ * trap: that move's offer goes, and every older one with it. The server
+ * keeps the trapped step on its stack, under any newer move, until an undo
+ * of it is refused, so an older offer could only be answered "no longer
+ * your newest change".
+ */
+export function offersAfterTrap<T extends { ns: readonly number[] }>(offers: readonly T[], n: number): readonly T[] {
+  const at = offers.findIndex((o) => o.ns.includes(n));
+  return at < 0 ? offers : offers.slice(at + 1);
+}

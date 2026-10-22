@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { LogEntry, TrapDue } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, room, token, trap } from "#shared/testutil.ts";
-import { dmAlerts, linesAfter, metTrap, playerAlerts, shownAlert, watchOf } from "./alerts.ts";
+import { dmAlerts, linesAfter, metTrap, offersAfterTrap, playerAlerts, shownAlert, watchOf } from "./alerts.ts";
 import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines } from "./desk.ts";
 
 const due = (id: string, over: Partial<TrapDue> = {}): TrapDue => ({ id, at: "2026-10-22T10:00:00.000Z", how: "enter", by: ["thorn"], hits: ["thorn"], ...over });
@@ -114,5 +114,12 @@ describe("what a trap going off tells each device", () => {
     assert.equal(metTrap(w, [6, 7]), true);
     assert.deepEqual(watchOf({ t: "token.update", tokenId: "thorn", patch: { elevation: 5 } }, 8), { n: 8 }, "a landing");
     assert.equal(watchOf({ t: "chat.send", text: "hi" } as never, 9), null);
+  });
+
+  test("a move a trap met takes the bar's offers for it and every older move, since the server's undo now meets the trapped step first", () => {
+    const offers = [{ ns: [3] }, { ns: [5, 6] }, { ns: [8] }];
+    assert.deepEqual(offersAfterTrap(offers, 8), [], "the walk before it is offered no more");
+    assert.deepEqual(offersAfterTrap(offers, 6), [{ ns: [8] }], "a move made after it stays on top");
+    assert.equal(offersAfterTrap(offers, 9), offers, "an op the bar never offered");
   });
 });

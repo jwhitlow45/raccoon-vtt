@@ -6,7 +6,7 @@ import { useStartGroupSave } from "../dice/groupSave/start.ts";
 import { playTrapSound } from "../encounter/alerts.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
-import { dmAlerts, linesAfter, metTrap, newestId, playerAlerts, shownAlert, watchOf, type TrapAlert, type Watched } from "./alerts.ts";
+import { dmAlerts, linesAfter, metTrap, newestId, offersAfterTrap, playerAlerts, shownAlert, watchOf, type TrapAlert, type Watched } from "./alerts.ts";
 import { trapStart } from "./TrapSaveStart.tsx";
 
 const NO_LINES: readonly LogEntry[] = [];
@@ -123,7 +123,7 @@ export function useTrapAlerts(): void {
         watched.delete(n);
         if ((now.refused ?? []).includes(n) || !metTrap(w, now.trapped)) continue;
         const offers = scope.get(lastMoveSlot);
-        const kept = offers.getState().offers.filter((o) => !o.ns.includes(n));
+        const kept = offersAfterTrap(offers.getState().offers, n);
         if (kept.length !== offers.getState().offers.length) offers.setState({ offers: kept });
         const note = scope.get(stopNoteSlot);
         const s = note.getState();
