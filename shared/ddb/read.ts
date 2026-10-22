@@ -3,8 +3,8 @@ import { uuidv7 } from "../ids.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type PcDice, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
-import type { PcFill } from "../rules/pcFill.ts";
-import { cantripTier, pcProficiency, srdOnPass } from "../rules/pcStats.ts";
+import type { PcFill, PcFillStats } from "../rules/pcFill.ts";
+import { cantripTier, srdOnPass } from "../rules/pcStats.ts";
 import { abilityMod } from "../statBlock.ts";
 import { ddbSheetUrl } from "./link.ts";
 
@@ -17,6 +17,12 @@ import { ddbSheetUrl } from "./link.ts";
  * classes, weapons and spells, and never a description, snippet, note or
  * any other text, so no D&D Beyond prose and no HTML enters a room. What it
  * cannot read becomes a warning, and the editor keeps what it had.
+ *
+ * Each output is read only when every source it depends on came with the
+ * right type (docs/design-v1-resync.md 2.5). A source the JSON lacks leaves
+ * its outputs out of the fill, so they stay as they are. Read as empty, a
+ * sheet sent without its inventory would say the character owns no
+ * weapons, and a re-sync would remove them.
  *
  * The paths were checked against a live public character's JSON during the
  * build. D&D Beyond's format is a third party's and can change, so every
@@ -121,25 +127,37 @@ function has(mods: readonly Modifier[], type: string, subType: string): boolean 
   return mods.some((m) => m.type === type && m.subType === subType);
 }
 
-/** The scores: base, the sheet's own bonus, each "<ability>-score" bonus, a "set" that raises one, and an override over all. */
-function scoresOf(data: Obj, mods: readonly Modifier[], warnings: string[]): Record<AbilityKey, number> | null {
-  const byId = (list: unknown) => {
-    const out: Partial<Record<AbilityKey, number>> = {};
-    for (const raw of arr(list, 12)) {
-      const s = obj(raw);
-      const a = abilityOf(s?.id);
-      const v = num(s?.value);
-      if (a && v !== null) out[a] = v;
-    }
-    return out;
-  };
-  const base = byId(data.stats);
-  if (ABILITY_KEYS.some((a) => base[a] === undefined)) return null;
-  const bonus = byId(data.bonusStats);
-  const override = byId(data.overrideStats);
+/** Each ability's value in a list of `{ id, value }`, the shape of the sheet's scores, their bonuses and their overrides. */
+function byAbility(list: unknown): Partial<Record<AbilityKey, number>> {
+  const out: Partial<Record<AbilityKey, number>> = {};
+  for (const raw of arr(list, 12)) {
+    const s = obj(raw);
+    const a = abilityOf(s?.id);
+    const v = num(s?.value);
+    if (a && v !== null) out[a] = v;
+  }
+  return out;
+}
+
+/** The six base scores, or null without one of them, since then the JSON does not read as a character at all. */
+function baseScoresOf(data: Obj): Record<AbilityKey, number> | null {
+  const given = byAbility(data.stats);
   const out = {} as Record<AbilityKey, number>;
   for (const a of ABILITY_KEYS) {
-    let score = base[a]! + (bonus[a] ?? 0) + sumOf(mods, "bonus", `${ABILITY_SLUG[a]}-score`, null);
+    const v = given[a];
+    if (v === undefined) return null;
+    out[a] = v;
+  }
+  return out;
+}
+
+/** The scores: base, the sheet's own bonus, each "<ability>-score" bonus, a "set" that raises one, and an override over all. */
+function scoresOf(base: Record<AbilityKey, number>, data: Obj, mods: readonly Modifier[], warnings: string[]): Record<AbilityKey, number> {
+  const bonus = byAbility(data.bonusStats);
+  const override = byAbility(data.overrideStats);
+  const out = {} as Record<AbilityKey, number>;
+  for (const a of ABILITY_KEYS) {
+    let score = base[a] + (bonus[a] ?? 0) + sumOf(mods, "bonus", `${ABILITY_SLUG[a]}-score`, null);
     for (const m of mods) if (m.type === "set" && m.subType === `${ABILITY_SLUG[a]}-score` && m.value !== null) score = Math.max(score, m.value);
     score = override[a] ?? score;
     out[a] = Math.min(30, Math.max(1, Math.round(score)));
@@ -178,8 +196,8 @@ function classesOf(data: Obj): ClassRead[] {
 /**
  * AC from the armor and shield worn (Appendix B): light armor adds the
  * Dexterity modifier, medium at most +2, heavy none, a shield its own,
- * then every bonus to armor class. Always a line to check, since features
- * such as Unarmored Defense are not read.
+ * then every bonus to armor class. The review's AC line always asks the
+ * player to check it, since features such as Unarmored Defense are not read.
  */
 function acOf(data: Obj, mods: readonly Modifier[], dex: number): number {
   let armor: number | null = null;
@@ -211,11 +229,10 @@ function speedsOf(data: Obj): Actor["speeds"] | null {
   return out;
 }
 
-type Ctx = { scores: Record<AbilityKey, number>; level: number; warnings: string[]; newId: () => string };
+type Ctx = { warnings: string[]; newId: () => string };
 
-function weaponRolls(data: Obj, ctx: Ctx, sneak: string | null): PcRoll[] {
+function weaponRolls(data: Obj, ctx: Ctx, scores: Record<AbilityKey, number>, sneak: string | null): PcRoll[] {
   const out: PcRoll[] = [];
-  const { scores } = ctx;
   for (const raw of arr(data.inventory, MAX.inventory)) {
     const item = obj(raw);
     const def = obj(item?.definition);
@@ -285,7 +302,7 @@ function spellPart(m: Obj, scale: string | null, level: number, spellLevel: numb
   return { part, dice };
 }
 
-function spellRolls(data: Obj, ctx: Ctx, casting: AbilityKey | null): { rolls: PcRoll[]; unhalved: string[] } {
+function spellRolls(data: Obj, ctx: Ctx, characterLevel: number, casting: AbilityKey | null): { rolls: PcRoll[]; unhalved: string[] } {
   const entries: { entry: Obj; granted: boolean }[] = [];
   for (const raw of arr(data.classSpells, MAX.classes)) for (const s of arr(obj(raw)?.spells, MAX.spells)) entries.push({ entry: obj(s) ?? {}, granted: false });
   const groups = obj(data.spells) ?? {};
@@ -311,7 +328,7 @@ function spellRolls(data: Obj, ctx: Ctx, casting: AbilityKey | null): { rolls: P
       const healing = m.type === "bonus" && m.subType === "hit-points";
       const type = m.type === "damage" ? damageType(m.subType) : null;
       if (!healing && !type) continue;
-      const read = spellPart(m, scale, ctx.level, level, ctx, sname);
+      const read = spellPart(m, scale, characterLevel, level, ctx, sname);
       if (!read) continue;
       if (type) typed.push({ type, dice: read.dice });
       parts.push({ ...read.part, type: healing ? "healing" : type! });
@@ -374,41 +391,11 @@ function clampAdjust(n: number): number {
   return Math.max(-20, Math.min(20, Math.round(n)));
 }
 
-/**
- * A D&D Beyond character's JSON, the `{ success, data }` envelope or the
- * bare `data`, as a fill, or null when it does not read as a character.
- * Never throws.
- */
-export function readDdbCharacter(json: unknown, newId: () => string = () => uuidv7()): PcFill | null {
-  try {
-    return read(json, newId);
-  } catch {
-    return null;
-  }
+function savesOf(mods: readonly Modifier[]): PcStats["saves"] {
+  return ABILITY_KEYS.filter((a) => has(mods, "proficiency", `${ABILITY_SLUG[a]}-saving-throws`));
 }
 
-function read(json: unknown, newId: () => string): PcFill | null {
-  const top = obj(json);
-  if (!top) return null;
-  const data = obj(top.data) ?? top;
-  const warnings: string[] = [];
-  const mods = modifiersOf(data);
-  const scores = scoresOf(data, mods, warnings);
-  if (!scores) return null;
-  const scoreMods = {} as Record<AbilityKey, number>;
-  for (const a of ABILITY_KEYS) scoreMods[a] = abilityMod(scores[a]);
-
-  const classes = classesOf(data);
-  let level = classes.reduce((sum, c) => sum + c.level, 0);
-  if (level > 20) {
-    warnings.push(`The classes' levels add up to ${level}, past 20, so the level reads 20.`);
-    level = 20;
-  }
-  level = Math.max(1, level);
-  // The level's proficiency is what every other number derives from, so a sheet without classes says so.
-  if (classes.length === 0) warnings.push(`No class was read, so the level reads 1 and the Proficiency Bonus +${pcProficiency(1)}.`);
-
-  const saves = ABILITY_KEYS.filter((a) => has(mods, "proficiency", `${ABILITY_SLUG[a]}-saving-throws`));
+function skillsOf(mods: readonly Modifier[]): PcStats["skills"] {
   const skills: PcStats["skills"] = {};
   for (const m of mods) {
     if (!SKILL_SET.has(m.subType)) continue;
@@ -416,6 +403,10 @@ function read(json: unknown, newId: () => string): PcFill | null {
     if (m.type === "expertise") skills[s] = "expert";
     else if (m.type === "proficiency" && skills[s] !== "expert") skills[s] = "prof";
   }
+  return skills;
+}
+
+function adjustOf(mods: readonly Modifier[], scoreMods: Record<AbilityKey, number>): PcStats["adjust"] {
   const adjust: PcStats["adjust"] = {};
   const saveAdjust: Partial<Record<AbilityKey, number>> = {};
   for (const a of ABILITY_KEYS) {
@@ -439,7 +430,10 @@ function read(json: unknown, newId: () => string): PcFill | null {
   field("passive", "passive-perception");
   field("spellDc", "spell-save-dc");
   field("spellAttack", "spell-attacks");
+  return adjust;
+}
 
+function defensesOf(mods: readonly Modifier[]): PcStats["defenses"] {
   const defenses: PcStats["defenses"] = {};
   const KIND = { resistance: "resistant", immunity: "immune", vulnerability: "vulnerable" } as const;
   for (const m of mods) {
@@ -447,63 +441,171 @@ function read(json: unknown, newId: () => string): PcFill | null {
     const type = damageType(m.subType);
     if (kind && type) defenses[type] = kind;
   }
+  return defenses;
+}
 
-  const caster = classes.find((c) => c.spellAbility !== null);
-  const spellAbility = caster?.spellAbility ?? null;
+/** The character's level, the classes' sum, from 1 to 20. */
+function levelOf(classes: readonly ClassRead[], warnings: string[]): number {
+  const level = classes.reduce((sum, c) => sum + c.level, 0);
+  if (level <= 20) return Math.max(1, level);
+  warnings.push(`The classes' levels add up to ${level}, past 20, so the level reads 20.`);
+  return 20;
+}
+
+/** Which sources the JSON holds with the type the reader needs (2.5). An empty list counts as sent. */
+type Sent = {
+  modifiers: boolean;
+  /** Whether any item has modifiers, since only the inventory says which items are equipped. */
+  itemModifiers: boolean;
+  inventory: boolean;
+  scoreChanges: boolean;
+  classes: boolean;
+  spellLists: boolean;
+  actions: boolean;
+};
+
+function sentOf(data: Obj, classes: readonly ClassRead[]): Sent {
+  const modifiers = obj(data.modifiers);
+  const item = modifiers?.item;
+  return {
+    modifiers: modifiers !== null,
+    itemModifiers: Array.isArray(item) && item.length > 0,
+    inventory: Array.isArray(data.inventory),
+    scoreChanges: Array.isArray(data.bonusStats) && Array.isArray(data.overrideStats),
+    classes: classes.length > 0,
+    spellLists: Array.isArray(data.classSpells) && obj(data.spells) !== null,
+    actions: obj(data.actions) !== null,
+  };
+}
+
+/** One warning per source the JSON lacks, naming everything left out because of it. */
+function missingWarnings(sent: Sent): string[] {
+  const out: string[] = [];
+  if (!sent.classes) out.push("D&D Beyond did not send the character's classes, so the level, spellcasting, class features, max HP, weapons and spells were not read. They stay as they are.");
+  if (!sent.modifiers) out.push("D&D Beyond did not send the character's bonuses and proficiencies, so the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are.");
+  if (!sent.inventory) {
+    out.push(
+      sent.itemModifiers
+        ? "D&D Beyond did not send the equipment, so its magic items' bonuses could not be counted, and the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are."
+        : "D&D Beyond did not send the equipment, so AC and weapons were not read. They stay as they are.",
+    );
+  }
+  if (!sent.scoreChanges) out.push("D&D Beyond did not send the bonuses and overrides to the ability scores, so the scores, bonuses, AC, max HP and weapons were not read. They stay as they are.");
+  if (!sent.spellLists) out.push("D&D Beyond did not send the character's spell lists, so spells were not read. They stay as they are.");
+  if (!sent.actions) out.push("D&D Beyond did not send the character's actions, so other rolls were not read. They stay as they are.");
+  return out;
+}
+
+/**
+ * The first 40 of the weapons, then the spells, then the other rolls, so
+ * the fill and the sync record stay within a block's 40. A kind is read
+ * whole only when it was read and the cut took none of it. A re-sync
+ * removes linked rolls of a whole kind alone, so a roll it did not see is
+ * never taken for one D&D Beyond removed.
+ */
+function cutRolls(weapon: PcRoll[] | null, spell: PcRoll[] | null, other: PcRoll[] | null): { rolls: PcRoll[]; read: NonNullable<PcFill["read"]>; over: number } {
+  const rolls: PcRoll[] = [];
+  let over = 0;
+  const take = (kind: PcRoll[] | null): boolean => {
+    if (!kind) return false;
+    const room = MAX_PC_ROLLS - rolls.length;
+    rolls.push(...kind.slice(0, room));
+    over += Math.max(0, kind.length - room);
+    return kind.length <= room;
+  };
+  const read = { weapon: take(weapon), spell: take(spell), other: take(other) };
+  return { rolls, read, over };
+}
+
+function cutWarning(over: number, who: string): string {
+  return over === 1
+    ? `D&D Beyond has 1 more roll for ${who} than the ${MAX_PC_ROLLS} that are read, so it was not read. Rolls here that it would change stay as they are.`
+    : `D&D Beyond has ${over} more rolls for ${who} than the ${MAX_PC_ROLLS} that are read, so those were not read. Rolls here that they would change stay as they are.`;
+}
+
+/**
+ * A D&D Beyond character's JSON, the `{ success, data }` envelope or the
+ * bare `data`, as a fill, or null when it does not read as a character.
+ * Never throws.
+ */
+export function readDdbCharacter(json: unknown, newId: () => string = () => uuidv7()): PcFill | null {
+  try {
+    return read(json, newId);
+  } catch {
+    return null;
+  }
+}
+
+function read(json: unknown, newId: () => string): PcFill | null {
+  const top = obj(json);
+  if (!top) return null;
+  const data = obj(top.data) ?? top;
+  const base = baseScoresOf(data);
+  if (!base) return null;
+  const cname = name(data.name, 80);
+  const classes = classesOf(data);
+  const sent = sentOf(data, classes);
+  const warnings = missingWarnings(sent);
+
+  // The modifiers' needs, then the scores' needs (2.5): every output below that reads a modifier or a score is read only when these are.
+  const mods = sent.modifiers && (sent.inventory || !sent.itemModifiers) ? modifiersOf(data) : null;
+  const scores = mods && sent.scoreChanges ? scoresOf(base, data, mods, warnings) : null;
+  const scoreMods = scores ? (Object.fromEntries(ABILITY_KEYS.map((a) => [a, abilityMod(scores[a])])) as Record<AbilityKey, number>) : null;
+  // The level is null exactly when the classes were not read, so each output that needs the classes tests it.
+  const level = sent.classes ? levelOf(classes, warnings) : null;
   const hasFeature = (feature: string) => classes.find((c) => c.features.has(feature.toLowerCase()));
-  const rogue = hasFeature("Sneak Attack");
-  const sneak = rogue ? `${Math.ceil(rogue.level / 2)}d6` : null;
-  const critOn = hasFeature("Superior Critical") ? 18 : hasFeature("Improved Critical") ? 19 : null;
-  const ctx: Ctx = { scores, level, warnings, newId };
 
-  const weapons = weaponRolls(data, ctx, sneak);
-  const spells = spellRolls(data, ctx, spellAbility);
-  const actions = actionRolls(data, ctx);
-  const all = [...weapons, ...spells.rolls, ...actions];
-  if (spells.unhalved.length > 0) {
+  const stats: PcFillStats = { rolls: [] };
+  if (scores) stats.abilities = scores;
+  if (mods) {
+    stats.saves = savesOf(mods);
+    stats.skills = skillsOf(mods);
+    stats.defenses = defensesOf(mods);
+    stats.jack = has(mods, "half-proficiency", "ability-checks");
+    stats.alert = has(mods, "proficiency", "initiative");
+  }
+  if (mods && scoreMods) stats.adjust = adjustOf(mods, scoreMods);
+  const spellAbility = classes.find((c) => c.spellAbility !== null)?.spellAbility ?? null;
+  if (level !== null) {
+    stats.spellAbility = spellAbility;
+    stats.evasion = hasFeature("Evasion") !== undefined;
+    stats.critOn = hasFeature("Superior Critical") ? 18 : hasFeature("Improved Critical") ? 19 : null;
+  }
+
+  const ctx: Ctx = { warnings, newId };
+  const rogue = hasFeature("Sneak Attack");
+  const weapons = sent.inventory && level !== null && scores ? weaponRolls(data, ctx, scores, rogue ? `${Math.ceil(rogue.level / 2)}d6` : null) : null;
+  const spells = sent.spellLists && level !== null ? spellRolls(data, ctx, level, spellAbility) : null;
+  const actions = sent.actions ? actionRolls(data, ctx) : null;
+  const cut = cutRolls(weapons, spells?.rolls ?? null, actions);
+  stats.rolls = cut.rolls;
+  if (spells && spells.unhalved.length > 0) {
     warnings.push(`Whether a pass halves the damage is not known for ${spells.unhalved.slice(0, 8).join(", ")}${spells.unhalved.length > 8 ? " and others" : ""}. A cantrip's pass takes none and another spell's half until you set On a pass.`);
   }
-  if (all.length > MAX_PC_ROLLS) warnings.push(`${all.length - MAX_PC_ROLLS} more ${all.length - MAX_PC_ROLLS === 1 ? "roll was" : "rolls were"} left out. At most ${MAX_PC_ROLLS} rolls fit.`);
+  if (cut.over > 0) warnings.push(cutWarning(cut.over, cname ?? "the character"));
 
   const actor: PcFill["actor"] = {};
-  const ac = acOf(data, mods, scoreMods.dex);
-  actor.ac = ac;
-  warnings.push(`AC ${ac} was worked out from the armor. Check it.`);
+  if (mods && scoreMods && sent.inventory) actor.ac = acOf(data, mods, scoreMods.dex);
   const override = num(data.overrideHitPoints);
   const baseHp = num(data.baseHitPoints);
+  // An override is the whole maximum. Otherwise it reads the Constitution modifier and every per-level bonus once per level.
   if (override !== null && override >= 1) actor.hpMax = Math.min(100_000, Math.round(override));
-  else if (baseHp !== null) {
+  else if (mods && scoreMods && level !== null && baseHp !== null) {
     const hp = baseHp + (num(data.bonusHitPoints) ?? 0) + (scoreMods.con + sumOf(mods, "bonus", "hit-points-per-level", scoreMods)) * level;
     if (hp >= 1) actor.hpMax = Math.min(100_000, Math.round(hp));
   }
   const speeds = speedsOf(data);
   if (speeds) actor.speeds = speeds;
-  const darkvision = Math.max(0, ...mods.filter((m) => m.type === "set-base" && m.subType === "darkvision" && m.value !== null).map((m) => m.value!));
-  // Darkvision is the one sense read, so without it the card keeps whatever senses it has, never set to none by an import.
-  if (darkvision > 0) actor.senses = `Darkvision ${Math.min(1000, Math.round(darkvision))} ft.`;
+  if (mods) {
+    const darkvision = Math.max(0, ...mods.filter((m) => m.type === "set-base" && m.subType === "darkvision" && m.value !== null).map((m) => m.value!));
+    // Darkvision is the one sense read, so without it the card keeps whatever senses it has, never set to none by an import.
+    if (darkvision > 0) actor.senses = `Darkvision ${Math.min(1000, Math.round(darkvision))} ft.`;
+  }
   const id = num(data.id);
   if (id !== null && Number.isInteger(id) && id > 0 && id < 1e12) actor.sheetUrl = ddbSheetUrl(String(id));
 
-  const fill: PcFill = {
-    source: "ddb",
-    stats: {
-      abilities: scores,
-      saves,
-      skills,
-      adjust,
-      defenses,
-      spellAbility,
-      jack: has(mods, "half-proficiency", "ability-checks"),
-      alert: has(mods, "proficiency", "initiative"),
-      evasion: hasFeature("Evasion") !== undefined,
-      critOn,
-      rolls: all.slice(0, MAX_PC_ROLLS),
-    },
-    level,
-    actor,
-    warnings: warnings.slice(0, 40),
-  };
-  const cname = name(data.name, 80);
+  const fill: PcFill = { source: "ddb", stats, actor, warnings: warnings.slice(0, 40), read: cut.read };
+  if (level !== null) fill.level = level;
   if (cname) fill.name = cname;
   return fill;
 }

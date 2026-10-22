@@ -33,6 +33,13 @@ export type PcFill = {
   actor: { ac?: number; hpMax?: number; speeds?: Actor["speeds"]; senses?: string; sheetUrl?: string };
   /** One line each, for "Check these". */
   warnings: string[];
+  /**
+   * Whether each kind of roll was read whole (docs/design-v1-resync.md
+   * 2.5): its sources were all there and the 40-roll cut took none of it.
+   * A re-sync removes a synced roll only of a kind read whole. Absent reads
+   * as all three, as a pasted-text fill is.
+   */
+  read?: { weapon: boolean; spell: boolean; other: boolean };
 };
 
 /** What a fill does to the block, for the review's line: the parts it replaces and what becomes of the rolls. */

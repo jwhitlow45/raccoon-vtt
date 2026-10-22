@@ -1,6 +1,7 @@
 import type { Actor, Character } from "#shared/model.ts";
 import type { ActorPatch, CharacterPatch } from "#shared/protocol.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
+import { hpForMax } from "#shared/rules/pcSync.ts";
 import { speedText } from "../tokens/companionBlocks.ts";
 
 /**
@@ -71,10 +72,8 @@ export function alsoSet(fill: PcFill, lines: readonly AlsoLine[]): AlsoSet {
 
 /**
  * The fields a Save sends beside the block (6.1), against the character as
- * it is at Save. Max HP by the companion design's rule (its 5.2): a living
- * character at its maximum stays at its new maximum, and any other keeps
- * its HP, cut to the maximum if higher, so a fill never brings a character
- * back or puts one down and never sets current or temporary HP itself.
+ * it is at Save. Max HP by the companion design's rule, as a re-sync sets
+ * it (shared/rules/pcSync.ts hpForMax).
  */
 export function alsoPatch(also: AlsoSet, character: Pick<Character, "actor">): Pick<CharacterPatch, "name" | "level" | "actor"> {
   const out: Pick<CharacterPatch, "name" | "level" | "actor"> = {};
@@ -85,10 +84,7 @@ export function alsoPatch(also: AlsoSet, character: Pick<Character, "actor">): P
   if (also.speeds !== undefined) actor.speeds = also.speeds;
   if (also.senses !== undefined) actor.senses = also.senses;
   if (also.sheetUrl !== undefined) actor.sheetUrl = also.sheetUrl;
-  if (also.hpMax !== undefined && also.hpMax !== character.actor.hp.max) {
-    const full = character.actor.life === "alive" && character.actor.hp.cur === character.actor.hp.max;
-    actor.hp = full ? { max: also.hpMax, cur: also.hpMax } : { max: also.hpMax };
-  }
+  if (also.hpMax !== undefined && also.hpMax !== character.actor.hp.max) actor.hp = hpForMax(character.actor, also.hpMax);
   if (Object.keys(actor).length > 0) out.actor = actor;
   return out;
 }

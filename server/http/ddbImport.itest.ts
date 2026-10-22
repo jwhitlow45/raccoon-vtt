@@ -82,11 +82,13 @@ describe("POST /api/rooms/:id/ddb-import", () => {
     service.intercept({ path: PATH("12345678"), method: "GET", headers: { accept: "application/json", "accept-encoding": "identity" } }).reply(200, character());
     const res = await post("https://www.dndbeyond.com/characters/12345678/share?x=https://evil.example");
     assert.equal(res.statusCode, 200);
-    const { fill } = res.json() as { fill: { name: string; level: number; stats: { saves: string[] }; actor: { sheetUrl: string } } };
+    const { fill } = res.json() as { fill: { name: string; level: number; stats: { saves: string[] }; actor: { sheetUrl: string }; read: unknown } };
     assert.equal(fill.name, "Wren Ashdown");
     assert.equal(fill.level, 5);
     assert.deepEqual(fill.stats.saves, ["dex"]);
     assert.equal(fill.actor.sheetUrl, "https://www.dndbeyond.com/characters/12345678");
+    // The read marks reach the device, since a re-sync removes a linked roll only of a kind read whole. This character sends no spell lists or actions.
+    assert.deepEqual(fill.read, { weapon: true, spell: false, other: false });
     assert.equal(res.headers["cache-control"], "no-store");
   });
 
