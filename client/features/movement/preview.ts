@@ -1,6 +1,6 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { footprintSize, tokenHeightFt } from "#shared/rules/footprint.ts";
-import type { RoutePoint } from "#shared/rules/route.ts";
+import type { RoutePiece, RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
@@ -48,15 +48,20 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
  * past 64 pieces is drawn and read to where it is cut, and its frames carry
  * no more corners than that, and one the drop would not take is drawn
  * straight. So reading it walks at most 300 squares. With no route, a walk
- * held at the wall (`held`) is drawn and read to the wall.
+ * held at the wall (`held`) is drawn and read to the wall. A straight walk
+ * reads what it walks over as the drop counts it (drop.ts planWalk): by
+ * `straight`, its own route to where it lands, once that is checked.
  */
-export function walkPreview(input: { view: RoomState; token: Token; target: Point; answer: RouteAnswer; held: Point | null; world: PublicWorld | null; role: Role }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: { view: RoomState; token: Token; target: Point; answer: RouteAnswer; held: Point | null; world: PublicWorld | null; role: Role; straight?: { to: Point; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
-  const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, view.meta.settings.feetPerCell) : null;
-  const pieces = walk?.pieces;
+  const fpc = view.meta.settings.feetPerCell;
+  const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;
   const to = walk ? walk.at : (input.held ?? input.target);
-  const points = walk
-    ? walk.points
+  const own = !walk && input.straight && input.straight.to.x === to.x && input.straight.to.y === to.y ? routeLanding(view, token, to, input.straight.pieces, fpc) : null;
+  const along = walk ?? (own && !own.cut ? own : null);
+  const pieces = along?.pieces;
+  const points = along
+    ? along.points
     : [
         { x: token.x, y: token.y, elevation: token.elevation },
         { x: to.x, y: to.y, elevation: landedElevation(view.buildChunks, token, to) },

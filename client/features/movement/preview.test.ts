@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoutePiece } from "#shared/rules/route.ts";
+import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { planWalk } from "./drop.ts";
 import { frameFields, walkPreview } from "./preview.ts";
 import { line, thorn, world } from "./testing.ts";
@@ -42,6 +43,24 @@ describe("the picture of a drag's walk", () => {
     const move = planWalk(view, token, target, "walk", route(near), 5).moves[0]!;
     assert.deepEqual(short.corners, move.route!.slice(0, -1).map(([x, y]) => ({ x, y })));
     assert.deepEqual(short.to, { x: move.x, y: move.y });
+  });
+
+  test("a straight walk reads what it walks over as the drop counts it, once its own route is checked (review ASTRA-15)", () => {
+    const view = world({ edges: line("w", 6, 0, 30) });
+    const chunk = view.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
+    view.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "4,5": "rubble" } };
+    const token = thorn({ x: 2, y: 5 });
+    const held = { x: 5, y: 5 };
+    const none = { kind: "none" as const, capped: false };
+    // Held at the wall over a square of rubble: 15 ft straight, 20 ft walked, and the drop sends the walk.
+    const seen = publicWorld(view, token, { role: "player" });
+    const plain = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player" });
+    assert.equal(plain.read.dragFt, 15, "before its route is checked");
+    const pieces: RoutePiece[] = [[3, 5, 0, 0], [4, 5, 1, 0], [5, 5, 0, 0]];
+    const walked = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player", straight: { to: held, pieces } });
+    assert.deepEqual([walked.to, walked.read.dragFt], [held, 20]);
+    const drop = planWalk(view, token, { x: 9, y: 5 }, "walk", none, 5, () => ({ kind: "route", route: { pieces } }));
+    assert.deepEqual([drop.moves[0]!.x, drop.moves[0]!.route, drop.stop?.searched], [5, pieces, true]);
   });
 
   test("a walk held at a wall is drawn and read to the wall, not through it", () => {

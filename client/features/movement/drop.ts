@@ -5,7 +5,7 @@ import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts"
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
-import { openLeg, stepRoute, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
+import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 
 /**
@@ -211,23 +211,38 @@ export function routeLanding(state: BuildState, token: DropToken, target: Point 
 }
 
 /**
- * What an arrow key's press finds (design 14.17, review MV-O-12): one
- * square, never searched round a wall. A press the leg test stops, or one
- * the straight leg already walks exactly (`openLeg`: open ground, no extra
- * cost, an even rise), is the straight drop, stopped at the wall as
- * before. Any other goes as a route along the straight step, its pieces
- * built by the very code a search's route is (walk.ts `stepRoute`): at the
- * creature's own lattice spacing, split where the cost or the rise per
- * step changes. So whatever it walks over, rubble, water or a rise a Tiny
- * creature climbs in half squares, counts as a route counts it (reviews
- * ASTRA-10 and ASTRA-13).
+ * What a straight leg finds (design 14.17, review MV-O-12), an arrow key's
+ * press of one square most of all: never searched round a wall. A leg the
+ * leg test stops, or one the straight leg already walks exactly (open
+ * ground, no extra cost, an even rise), is the straight drop, stopped at
+ * the wall as before. Any other goes as a route along the straight leg,
+ * its pieces built by the very code a search's route is (walk.ts
+ * `LegCheck`): at the creature's own lattice spacing, split where the cost
+ * or the rise per step changes. So whatever it walks over, rubble, water,
+ * a rise a Tiny creature climbs in half squares, or the space of a
+ * creature it may end in, counts as a route counts it (reviews ASTRA-10,
+ * ASTRA-13 and ASTRA-15). `charge` counts its steps against the frame's
+ * budget.
  */
-export function keyStep(world: WalkWorld, target: Point): Found {
-  const { token, build } = world.input;
-  if (openLeg(world, target)) return { kind: "open" };
-  if (world.tester && legStop(build, token, { x: target.x, y: target.y, elevation: token.elevation }) !== null) return { kind: "open" };
-  const route = stepRoute(world, target);
-  return route ? { kind: "route", route: { pieces: route.pieces } } : { kind: "open" };
+export function keyStep(world: WalkWorld, target: Point, charge: (units?: number) => void = () => {}): Found {
+  const check = new LegCheck(world, target, true);
+  // One straight leg, checked whole: a step that cannot stop partway, charged to the frame's budget.
+  check.run((units) => {
+    charge(units);
+    return false;
+  });
+  if (check.open || check.stopped || !check.route) return { kind: "open" };
+  return { kind: "route", route: { pieces: check.route.pieces } };
+}
+
+/**
+ * An arrow key's press as the drop it makes (design 14.17): one square,
+ * never searched, what it walks over counted (`keyStep`), and held at a
+ * wall as a drop is.
+ */
+export function planPress(state: BuildState, world: WalkWorld | null, token: DropToken, at: Point, mode: Exclude<DropMode, "teleport">, feetPerCell: number, charge?: (units?: number) => void): DropPlan {
+  const found = world ? keyStep(world, routeTarget(state, token, at), charge) : { kind: "open" as const };
+  return planWalk(state, token, at, mode, found, feetPerCell, world ? (to) => keyStep(world, to, charge) : undefined);
 }
 
 /** The note when a walk turned too often for one move and landed partway. */
@@ -241,8 +256,16 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * search past its cap, or a scene not yet loaded fall back to today's
  * straight drop: a player's walk held at the wall with the note's new
  * words, the DM's drop straight through.
+ *
+ * That straight drop still counts what it walks over (`account`, the
+ * straight leg's own route, `keyStep`): a walk held at a wall, or a drop
+ * whose search gave up, pays for the rubble on its way as a route does,
+ * since what a walk costs never hangs on whether a search could find its
+ * way (review ASTRA-15). Past 64 pieces, or where the leg test stops the
+ * straight leg, as the DM's drop through a wall, it goes as the straight
+ * leg alone.
  */
-export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number): DropPlan {
+export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
   const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
   if (walk) {
     const move = landed(state.buildChunks, token, { ...walk.at, squeeze: walk.at.squeeze === true });
@@ -251,6 +274,13 @@ export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: 
   }
   const plan = planOne(state, token, raw, mode);
   if (found.kind === "none" && plan.stop) plan.stop = { ...plan.stop, searched: true, ...(found.capped ? { capped: true as const } : {}) };
+  const straight = plan.moves.length === 1 && account ? plan.moves[0]! : null;
+  if (straight && !straight.route) {
+    const at = { x: straight.x, y: straight.y, ...(straight.squeeze ? { squeeze: true } : {}) };
+    const own = account!(at);
+    const kept = own.kind === "route" ? routeLanding(state, token, at, own.route.pieces, feetPerCell) : null;
+    if (kept && !kept.cut) plan.moves = [{ ...straight, route: kept.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) }];
+  }
   return plan;
 }
 

@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
 import { MAX_MOVES } from "#shared/protocol.ts";
-import type { DiagonalRule, RoomState, TerrainId, Token } from "#shared/model.ts";
+import type { DiagonalRule, EdgeFeature, RoomState, TerrainId, Token } from "#shared/model.ts";
 import { snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { routeFeet, routePoints, straightCost, type RoutePiece } from "#shared/rules/route.ts";
+import { routeFeet, routePoints, routeWalk, straightCost, type RoutePiece } from "#shared/rules/route.ts";
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { P1, token } from "#shared/testutil.ts";
-import { dropMode, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planOne, planWalk, routeTarget, stopText, type Found } from "./drop.ts";
+import { dropMode, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planOne, planPress, planWalk, routeTarget, stopText, type Found } from "./drop.ts";
 import { CLOSED, line, raised, thorn, world } from "./testing.ts";
 
 function mulberry32(seed: number): () => number {
@@ -279,65 +279,85 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     assert.equal(feet.cost, 7.5, "2.5 ft, then 5 ft for the half square of rubble");
   });
 
-  test("an arrow key's step costs what the route along it does, lattice step by lattice step (review ASTRA-13)", () => {
+  test("an arrow key's press costs what the route along it does, lattice step by lattice step, by creatures, pits, walls and unseen ground (reviews ASTRA-13 and ASTRA-15)", () => {
     const rand = mulberry32(13);
-    const terrains: (TerrainId | null)[] = [null, null, null, "rubble", "water", "difficult"];
+    const terrains: (TerrainId | null)[] = [null, null, null, null, "rubble", "water", "difficult", "pit"];
     const rises = [0, 0, 0, 1, 3, 5, 10];
     const dirs = [-1, 0, 1].flatMap((x) => [-1, 0, 1].map((y) => ({ x, y }))).filter((d) => d.x !== 0 || d.y !== 0);
-    /** What a press costs, as the drop sends it: its route's feet, or the straight leg's. */
-    const pressFeet = (view: RoomState, mover: Token, to: { x: number; y: number }, found: Found, rules: { feetPerCell: number; diagonal: DiagonalRule }) => {
-      const landing = landedElevation(view.buildChunks, mover, to);
-      if (found.kind !== "route") return straightCost(mover, mover, { ...to, elevation: landing }, rules, { h: 0, v: 0 }).cost;
-      const { pieces } = found.route;
-      return routeFeet(routePoints(view.buildChunks, mover, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(mover) }).cost;
+    type Rules = { feetPerCell: number; diagonal: DiagonalRule };
+    type Case = { view: RoomState; mover: Token; to: { x: number; y: number }; rules: Rules; seen: number };
+    /** The world a press walks in: the public one, seen only left of `seen`. */
+    const worldOf = (c: Case) => {
+      const input = publicWorld({ ...c.view, meta: { ...c.view.meta, settings: { ...c.view.meta.settings, ...c.rules } } }, c.mover, { role: "dm" }).input;
+      return new WalkWorld({ ...input, seen: c.seen < 30 ? (x: number) => x < c.seen : null });
     };
-    // The case review ASTRA-13 found: a Tiny creature a square on, half a square up onto ground 10 ft higher and half a square across it, which the straight leg counted as 10 ft.
-    const cases: { view: RoomState; mover: Token; to: { x: number; y: number }; rules: { feetPerCell: number; diagonal: DiagonalRule } }[] = [];
-    const cliff = world({ blockMovement: false, heights: { "1,0": 10 } });
-    cases.push({ view: cliff, mover: token("sprite", { size: "tiny", x: 0.5, y: 0, elevation: 0 }), to: { x: 1.5, y: 0 }, rules: { feetPerCell: 5, diagonal: "five" } });
-    for (let n = 0; n < 400; n++) {
+    /** What a move costs as the reducer counts it: its route's feet, or the straight leg's. */
+    const moveFeet = (c: Case, at: { x: number; y: number }, pieces: readonly RoutePiece[] | undefined) => {
+      const landing = landedElevation(c.view.buildChunks, c.mover, at);
+      if (!pieces) return straightCost(c.mover, c.mover, { ...at, elevation: landing }, c.rules, { h: 0, v: 0 }).cost;
+      return routeFeet(routePoints(c.view.buildChunks, c.mover, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), c.rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(c.mover) }).cost;
+    };
+    const cases: Case[] = [];
+    // Review ASTRA-13: a Tiny creature a square on, half a square up onto ground 10 ft higher and half a square across it, which the straight leg counted as 10 ft.
+    cases.push({ view: world({ blockMovement: false, heights: { "1,0": 10 } }), mover: token("sprite", { size: "tiny", x: 0.5, y: 0, elevation: 0 }), to: { x: 1.5, y: 0 }, rules: { feetPerCell: 5, diagonal: "five" }, seen: 30 });
+    // Review ASTRA-15: a Large ally a square on into the space of a Medium enemy, which it may end in: both half steps pay its space, 10 ft, not 5.
+    const ally = token("ogre", { size: "large", x: 0, y: 0, disposition: "ally" });
+    cases.push({ view: world({ tokens: [ally, token("goblin", { x: 2, y: 0, disposition: "hostile" })] }), mover: ally, to: { x: 1, y: 0 }, rules: { feetPerCell: 5, diagonal: "five" }, seen: 30 });
+    for (let n = 0; n < 600; n++) {
       const heights: Record<string, number> = {};
       const cells: Record<string, TerrainId> = {};
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
+      const edges: Record<string, EdgeFeature> = {};
+      for (let y = 0; y < 10; y++) {
+        for (let x = 0; x < 10; x++) {
           const rise = rises[Math.floor(rand() * rises.length)]!;
           if (rise > 0) heights[`${x},${y}`] = rise;
           const t = terrains[Math.floor(rand() * terrains.length)];
           if (t) cells[`${x},${y}`] = t;
+          if (rand() < 0.05) edges[`${x},${y},${rand() < 0.5 ? "w" : "n"}`] = { kind: "wall" };
         }
       }
-      const view = world({ blockMovement: false, heights });
-      const chunk = view.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
-      view.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, ...cells } };
       const size = (["tiny", "medium", "large"] as const)[Math.floor(rand() * 3)]!;
       const step = size === "medium" ? 1 : 0.5;
-      const at = { x: 2 + Math.floor(rand() * 6) * step, y: 2 + Math.floor(rand() * 6) * step };
-      const placed = token("mover", { size, ...at });
+      const at = { x: 3 + Math.floor(rand() * 6) * step, y: 3 + Math.floor(rand() * 6) * step };
+      const others = Array.from({ length: Math.floor(rand() * 3) }, (_, k) => token(`other${k}`, { size: (["tiny", "medium", "large"] as const)[Math.floor(rand() * 3)]!, x: 2 + Math.floor(rand() * 7), y: 2 + Math.floor(rand() * 7), disposition: rand() < 0.5 ? "hostile" : "ally" }));
+      const view = world({ blockMovement: rand() < 0.5, heights, edges, tokens: others });
+      const chunk = view.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
+      view.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, ...cells } };
+      const placed = token("mover", { size, ...at, disposition: "ally" });
       const mover = { ...placed, elevation: footprintGround(view.buildChunks, placed) };
+      view.tokens.mover = mover;
       const d = dirs[Math.floor(rand() * dirs.length)]!;
       const len = (size === "tiny" ? 0.5 : 1) * (1 + Math.floor(rand() * 2));
       const diagonal = (["five", "fiveTen", "euclid"] as const)[Math.floor(rand() * 3)]!;
-      cases.push({ view, mover, to: { x: at.x + d.x * len, y: at.y + d.y * len }, rules: { feetPerCell: 5, diagonal } });
+      // Half the scenes seen only part of the way across, where unseen ground reads as plain.
+      const seen = rand() < 0.5 ? 30 : 3 + Math.floor(rand() * 7);
+      cases.push({ view, mover, to: { x: at.x + d.x * len, y: at.y + d.y * len }, rules: { feetPerCell: 5, diagonal }, seen });
     }
-    for (const [n, { view, mover, to, rules }] of cases.entries()) {
-      const walkWorld = new WalkWorld(publicWorld({ ...view, meta: { ...view.meta, settings: { ...view.meta.settings, ...rules } } }, mover, { role: "dm" }).input);
-      const found = keyStep(walkWorld, to);
-      // The route along the step, one piece a lattice step, each with what that step pays.
-      const L = walkWorld.L;
-      const k = Math.round(Math.max(Math.abs(to.x - mover.x), Math.abs(to.y - mover.y)) / L);
-      const each: RoutePiece[] = [];
-      let p = { x: mover.x, y: mover.y };
-      for (let i = 1; i <= k; i++) {
-        const q = { x: mover.x + ((to.x - mover.x) * i) / k, y: mover.y + ((to.y - mover.y) * i) / k };
-        const node = walkWorld.nodeAt(q);
-        const { extra, swim } = walkWorld.extraOf(p.x, p.y, q.x, q.y, walkWorld.elevationAt(node), node);
-        each.push([q.x, q.y, extra, swim]);
-        p = q;
-      }
-      const label = `case ${n}: ${mover.size} from ${mover.x},${mover.y} to ${to.x},${to.y} under ${rules.diagonal}`;
-      assert.equal(pressFeet(view, mover, to, found, rules), pressFeet(view, mover, to, { kind: "route", route: { pieces: each } }, rules), label);
-      if (n === 0) assert.deepEqual([found.kind, pressFeet(view, mover, to, found, rules)], ["route", 12.5], label);
+    let walked = 0;
+    for (const [n, c] of cases.entries()) {
+      const w = worldOf(c);
+      const plan = planPress(c.view, w, c.mover, c.to, "walk", 5);
+      const move = plan.moves[0];
+      if (!move || move.squeeze) continue;
+      // Off the eight directions a piece runs straight between the snapped spots it passes, so no sum of its steps measures it.
+      const dx = Math.abs(move.x - c.mover.x);
+      const dy = Math.abs(move.y - c.mover.y);
+      if (dx > 1e-9 && dy > 1e-9 && Math.abs(dx - dy) > 1e-9) continue;
+      walked++;
+      // The route along the leg the move walks, one piece a step as the reducer steps it (route.ts routeWalk), each with what that step pays.
+      const spots = routeWalk([{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }], c.mover, c.view);
+      const each: RoutePiece[] = spots.slice(1).map((q, i) => {
+        const p = spots[i]!;
+        const node = w.nodeAt(q);
+        const { extra, swim } = w.extraOf(p.x, p.y, q.x, q.y, node >= 0 ? w.elevationAt(node) : q.elevation, node);
+        return [q.x, q.y, extra, swim];
+      });
+      const label = `case ${n}: ${c.mover.size} from ${c.mover.x},${c.mover.y} to ${move.x},${move.y} of ${c.to.x},${c.to.y} under ${c.rules.diagonal}, seen x < ${c.seen}${plan.stop ? ", held" : ""}`;
+      assert.equal(moveFeet(c, move, move.route), moveFeet(c, move, each), label);
+      if (n === 0) assert.equal(moveFeet(c, move, move.route), 12.5, label);
+      if (n === 1) assert.deepEqual([move.route?.length, moveFeet(c, move, move.route)], [1, 10], label);
     }
+    assert.ok(walked > 300, `${walked} presses walked`);
   });
 
   test("a walk cut inside a 5 ft corridor lands squeezed, at a piece end where the squeeze is a real one", () => {
