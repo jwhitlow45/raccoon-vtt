@@ -62,6 +62,22 @@ export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, to
   return before === "ground" ? there : Math.max(token.elevation, there);
 }
 
+/**
+ * The elevation a token lands at when it leaves its holder
+ * (docs/design-v1-attach.md 4.3): judged from the holder, not from the
+ * ground under its seat, which differs where the holder straddles two
+ * heights. Off a holder on the ground it lands on the ground there, off a
+ * flier it keeps its height or rises to the ground, and off a holder
+ * inside the ground it keeps its elevation, as landedElevation judges a
+ * token of its own.
+ */
+export function landedOffHolder(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, holder: LandingToken, at: Point): number {
+  const holderStands = standing(holder.elevation, footprintGround(chunks, { ...holder, squeeze: undefined }));
+  if (holderStands === "inside") return token.elevation;
+  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: undefined });
+  return holderStands === "ground" ? there : Math.max(token.elevation, there);
+}
+
 /** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
 export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"] };
 

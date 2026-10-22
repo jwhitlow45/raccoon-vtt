@@ -66,8 +66,13 @@ describe("a new seat on a holder over uneven ground (docs/design-v1-attach.md 4.
     const seated = onSeats(state, plan.moves);
     assert.deepEqual(seated, [{ tokenId: "kobold", x: 4, y: 4 }], "at the holder's 10 ft, its own height");
     assert.equal(answer(seated), true);
-    // Off its holder, a drop lands on the ground as any drop does.
+    // Off its holder, a drop lands on the ground as a Get off does, judged from the horse on the ground.
     const off = planOne(state, state.tokens.kobold!, { x: 9, y: 9 }, "free").moves;
-    assert.deepEqual(onSeats(state, off), off);
+    assert.deepEqual(onSeats(state, off), [{ tokenId: "kobold", x: 9, y: 9, elevation: 0 }]);
+    // Kept on the low half's seat, a drag off it by the drop's own rule would stay at 10 ft over 0 ft ground.
+    const low = world({ blockMovement: false, heights: raised(5, 4, 6, 6, 10), tokens: [horse, { ...kobold, x: 4, y: 4 }] });
+    const offLow = planOne(low, low.tokens.kobold!, { x: 2, y: 4 }, "free").moves;
+    assert.equal(offLow[0]?.elevation, undefined, "the drop alone keeps it at 10 ft, flying");
+    assert.deepEqual(onSeats(low, offLow), [{ tokenId: "kobold", x: 2, y: 4, elevation: 0 }]);
   });
 });

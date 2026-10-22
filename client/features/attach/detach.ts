@@ -4,7 +4,7 @@ import { carriedGroup, getOffSpot, holderOf, isCreature, overlaps } from "#share
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
-import { landedElevation, walkersStop } from "../movement/drop.ts";
+import { landedOffHolder, walkersStop } from "../movement/drop.ts";
 import { detachAllowed, offersAttach, type AttachViewer, type RightsView } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
 
@@ -65,9 +65,9 @@ export function holderAction(token: Token): { words: string; choice: "letGo" | "
  * player on a scene whose walls stop moves, with a clear leg from the seat
  * for it and for each creature it drags, which follows that leg (4.2).
  * The server checks the same place but for the creatures, whose check would
- * tell a player where a hidden one stands. It lands as any walk lands: on
- * the ground there, or at its height when it flies. Null when there is no
- * such spot.
+ * tell a player where a hidden one stands. It lands as a walk off its
+ * holder lands (drop.ts landedOffHolder): on the ground there off a holder
+ * on the ground, at its height off a flier. Null when there is no such spot.
  */
 export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Token): { x: number; y: number; elevation: number } | null {
   const holder = holderOf(view.tokens, carried) as Token | undefined;
@@ -81,7 +81,7 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
   const walkers = walls ? walkersFor(view, carried.id, "player") : [];
   const seat = { x: carried.x, y: carried.y, elevation: carried.elevation };
   const spot = getOffSpot(view.meta.settings, scene.bounds, carried, holder, (at) => {
-    const elevation = landedElevation(view.buildChunks, carried, at);
+    const elevation = landedOffHolder(view.buildChunks, carried, holder, at);
     const placed: Token = { ...carried, x: at.x, y: at.y, elevation };
     delete placed.squeeze;
     const { lo, hi } = verticalExtentFt(placed, fpc);
@@ -93,7 +93,7 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
     const to = { x: at.x, y: at.y, elevation };
     return legStop(view, carried, to) === null && walkersStop(view, carried, [seat, to], walkers) === null;
   });
-  return spot ? { x: spot.x, y: spot.y, elevation: landedElevation(view.buildChunks, carried, spot) } : null;
+  return spot ? { x: spot.x, y: spot.y, elevation: landedOffHolder(view.buildChunks, carried, holder, spot) } : null;
 }
 
 /** The op: Get off with its place, Put down and Let go where it stands. */

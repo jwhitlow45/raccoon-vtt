@@ -1,7 +1,7 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { dragExtra, holderOf, linkHolds, onHolder, type SeenByAll } from "#shared/rules/attach.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
-import type { DropToken, Landed } from "../movement/drop.ts";
+import { landedOffHolder, type DropToken, type Landed } from "../movement/drop.ts";
 import { dragWalkers } from "./groups.ts";
 
 /**
@@ -41,21 +41,24 @@ export function walkersFor(view: RoomState, tokenId: string, role: Role, named: 
 }
 
 /**
- * A drop's moves with each token that stays on its holder seated at the
- * holder's elevation (docs/design-v1-attach.md 4.1), not at the ground
- * under its new seat, which differs where the holder straddles two
- * heights. That is the height the server takes for a new seat, so a player
- * who may only re-seat a token is never refused for the ground under it.
+ * A drop's moves with each token that sits on its holder landed by the
+ * holder (docs/design-v1-attach.md 4.1 and 4.3), not by the ground under
+ * its seat, which differs where the holder straddles two heights. One that
+ * stays on it is seated at the holder's elevation, the height the server
+ * takes for a new seat, so a player who may only re-seat a token is never
+ * refused for the ground under it. One dragged off it lands as a Get off
+ * does (drop.ts landedOffHolder), never in midair over low ground.
  */
-export function onSeats(view: Pick<RoomState, "tokens" | "meta">, moves: readonly Landed[]): Landed[] {
+export function onSeats(view: Pick<RoomState, "tokens" | "meta" | "buildChunks">, moves: readonly Landed[]): Landed[] {
   return moves.map((move) => {
     const token = view.tokens[move.tokenId];
     const link = token?.attached;
     const holder = token ? (holderOf(view.tokens, token) as Token | undefined) : undefined;
     if (!token || !link || !holder || !onHolder(link.kind)) return move;
-    if (!linkHolds(view.meta.settings, link.kind, { ...token, x: move.x, y: move.y, elevation: holder.elevation }, holder)) return move;
     const { elevation: _ground, ...rest } = move;
-    return holder.elevation === token.elevation ? rest : { ...rest, elevation: holder.elevation };
+    const stays = linkHolds(view.meta.settings, link.kind, { ...token, x: move.x, y: move.y, elevation: holder.elevation }, holder);
+    const elevation = stays ? holder.elevation : landedOffHolder(view.buildChunks, token, holder, move);
+    return elevation === token.elevation ? rest : { ...rest, elevation };
   });
 }
 

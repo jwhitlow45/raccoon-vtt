@@ -4,7 +4,7 @@ import type { RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { DM, P1, room, scene, token } from "#shared/testutil.ts";
-import { line, world } from "../movement/testing.ts";
+import { line, raised, world } from "../movement/testing.ts";
 import { barSlots, DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction } from "./detach.ts";
 
 const dm = { role: "dm" as const, memberId: DM.memberId };
@@ -78,6 +78,16 @@ describe("getting off and letting go", () => {
     assert.deepEqual(barSlots(state, dm, horse), ["attach"]);
     // A player who may neither undo the goblin's link nor move it gets nothing.
     assert.deepEqual(barSlots(state, p1, goblin), []);
+  });
+
+  test("a rider gets off a mount that straddles a step onto the ground there, judged from the mount, never in midair", () => {
+    // The warhorse stands at 10 ft on its raised half (x 5 and up), Bree on its low half, over 0 ft ground.
+    const tall = { ...horse, x: 4, y: 4, elevation: 10 };
+    const seated = { ...rider, x: 4, y: 4, elevation: 10 };
+    const state = world({ blockMovement: false, heights: raised(5, 0, 6, 20, 10), tokens: [tall, seated] });
+    const place = getOffPlace(state, p1, state.tokens.bree!)!;
+    const ground = place.x >= 5 && place.x < 6 ? 10 : 0;
+    assert.equal(place.elevation, ground, JSON.stringify(place));
   });
 
   test("the ops: Get off with its place, the others where it stands", () => {
