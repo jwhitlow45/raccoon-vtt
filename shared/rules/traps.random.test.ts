@@ -20,7 +20,9 @@ import { planTrapMove, type TrapRoom } from "./traps.ts";
  * caught a walker in. A walker a stopping trap caught stepping onto it on a
  * leg along a row or a column stands on the trap where its group stops, at the first spot at or after
  * the trap went off where it may stand, its half steps too (review
- * LP13-TR-2).
+ * LP13-TR-2). A pit that opens takes a lone walker that fits in it to the
+ * bottom from its first square wholly over it, and leaves one that never
+ * covers it whole at the rim (review FU20A-OP-2).
  */
 
 const SEEDS = 400;
@@ -120,6 +122,28 @@ function standsOnTrap(state: RoomState, op: Op, planned: Op, trap: Trap, by: rea
   });
 }
 
+/**
+ * Where a lone walker a pit stopped on a straight leg along a row or a
+ * column should land (review FU20A-OP-2): at its first whole square of the
+ * leg wholly over the opening when it has one ("fell"), else anywhere
+ * partly off it ("rim"). Null for any other move.
+ */
+function pitLanding(state: RoomState, op: Op, trap: Trap): { fell: { x: number; y: number } | null } | null {
+  const rig = trap.rig;
+  if (op.t !== "token.move" || op.route || !rig?.pit || !("cells" in trap.zone) || trap.zone.cells.length !== 1) return null;
+  const named = state.tokens[op.tokenId]!;
+  if ((op.x !== named.x && op.y !== named.y) || named.x % 1 !== 0 || named.y % 1 !== 0 || named.elevation !== 0) return null;
+  const c = trap.zone.cells[0]!;
+  const dx = Math.sign(op.x - named.x);
+  const dy = Math.sign(op.y - named.y);
+  const steps = Math.abs(op.x - named.x) + Math.abs(op.y - named.y);
+  for (let k = 1; k <= steps; k++) {
+    const r = footprintRect({ ...named, x: named.x + k * dx, y: named.y + k * dy, squeeze: undefined });
+    if (r.x >= c.x && r.y >= c.y && r.x + r.w <= c.x + c.w && r.y + r.h <= c.y + c.h) return { fell: { x: named.x + k * dx, y: named.y + k * dy } };
+  }
+  return { fell: null };
+}
+
 test("planMove equals describeMove on random group moves across traps, for the op the reducer moved", () => {
   let applied = 0;
   let rewritten = 0;
@@ -157,4 +181,45 @@ test("planMove equals describeMove on random group moves across traps, for the o
   }
   assert.ok(applied > SEEDS * 4, `${applied} ops applied`);
   assert.ok(rewritten > 50 && onTrap > 10 && halfSteps > 8, JSON.stringify({ rewritten, onTrap, halfSteps }));
+});
+
+test("a pit that opens takes a walker that fits in it down from its first square wholly over it, and leaves one that never covers it whole at the rim (review FU20A-OP-2)", () => {
+  let fell = 0;
+  let rim = 0;
+  let riders = 0;
+  for (let seed = 1; seed <= 500; seed++) {
+    const r = rng(seed);
+    const state = room();
+    const size = pick(r, ["tiny", "medium", "large", "huge"] as const);
+    const w = int(r, 1, 3);
+    const h = int(r, 1, 3);
+    const c = { x: int(r, 6, 9), y: int(r, 6, 9), w, h };
+    state.traps.pit = { id: "pit", rev: 0, sceneId: "s1", name: "Pit", zone: { cells: [c] }, state: "armed", found: false, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, pit: { floor: -10 } } };
+    // Along a row or a column across the pit, from a whole square before it to one past it.
+    const across = chance(r, 0.5);
+    const at = across ? { x: 1, y: c.y + int(r, -1, h - 1) } : { x: c.x + int(r, -1, w - 1), y: 1 };
+    state.tokens.mover = token("mover", { name: "Mover", size, x: at.x, y: at.y });
+    const rides = (size === "large" || size === "huge") && chance(r, 0.7);
+    if (rides) state.tokens.bree = token("bree", { name: "Bree", kind: "pc", x: at.x + 1, y: at.y, attached: { to: "mover", kind: "ride" } });
+    const op: Op = { t: "token.move", tokenId: "mover", ...(across ? { x: 15, y: at.y } : { x: at.x, y: 15 }) };
+    const expected = pitLanding(state, op, state.traps.pit);
+    const res = applyOp(state, op, DM, env(10));
+    assert.ok(res.ok && expected);
+    const after = res.state.tokens.mover!;
+    const where = `seed ${seed}: a ${size} from ${at.x},${at.y} across ${JSON.stringify(c)}, at ${after.x},${after.y} ${after.elevation} ft`;
+    // Only a walker that met the opening is stopped by it.
+    if (after.x === 15 || after.y === 15) continue;
+    if (expected.fell) {
+      assert.deepEqual([after.x, after.y, after.elevation], [expected.fell.x, expected.fell.y, -10], where);
+      fell++;
+      if (rides) {
+        assert.equal(res.state.tokens.bree!.elevation, -10, `${where}: the rider falls with it`);
+        riders++;
+      }
+    } else {
+      assert.equal(after.elevation, 0, `${where}: at the rim`);
+      rim++;
+    }
+  }
+  assert.ok(fell > 140 && rim > 180 && riders > 14, JSON.stringify({ fell, rim, riders }));
 });

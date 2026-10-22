@@ -55,15 +55,38 @@ describe("a pit opens", () => {
     assert.equal(res.state.tokens.thorn!.attached?.to, "horse");
   });
 
-  test("a Large creature that sets the pit off half a square onto its lid stops a whole square on, on the pit, as it opens (review LP13-TR-2)", () => {
+  test("a creature that fits in the opening stops at its first spot wholly over it, so it falls with what it carries (review FU20A-OP-2)", () => {
     const s = world();
     delete s.tokens.thorn;
+    // The ogre steps by half squares, as a creature that squeezes does: it sets the pit off at x 2.5, half on the lid.
     s.tokens.ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 });
     const res = run(s, { t: "token.move", tokenId: "ogre", x: 9, y: 4 });
-    assert.equal(res.state.tokens.ogre!.x, 3, "not at 2, beside the lid");
+    assert.deepEqual([res.state.tokens.ogre!.x, res.state.tokens.ogre!.elevation], [4, -10], "wholly over the opening, at its floor");
     assert.deepEqual(cells(res.state), [-10, -10, -10, -10]);
     const line = res.state.trapLog.at(-1)!.data;
     assert.ok(line?.type === "trap" && line.by.includes("ogre"));
+  });
+
+  test("a warhorse that fits in it falls with its rider, and a Medium creature as before", () => {
+    const s = world();
+    s.tokens.horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 0, y: 4 });
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 1, y: 4, attached: { to: "horse", kind: "ride" } };
+    const res = run(s, { t: "token.move", tokenId: "horse", x: 9, y: 4 });
+    assert.deepEqual([res.state.tokens.horse!.x, res.state.tokens.horse!.elevation], [4, -10]);
+    assert.deepEqual([res.state.tokens.thorn!.elevation, res.state.tokens.thorn!.attached?.to], [-10, "horse"], "the rider rides down with it");
+    const medium = run(world(), { t: "token.move", tokenId: "thorn", x: 9, y: 4 }, P1).state;
+    assert.deepEqual([medium.tokens.thorn!.x, medium.tokens.thorn!.elevation], [4, -10]);
+  });
+
+  test("a creature too big for the opening stops at the first spot it may stand, and stays at the rim", () => {
+    const s = world();
+    delete s.tokens.thorn;
+    s.tokens.giant = token("giant", { name: "Giant", size: "huge", x: 0, y: 4 });
+    const res = run(s, { t: "token.move", tokenId: "giant", x: 9, y: 4 });
+    const giant = res.state.tokens.giant!;
+    assert.equal(giant.x, 2, "the first whole square after it set the pit off, its east column over the opening");
+    assert.equal(giant.elevation, 0, "at the rim, on the ground beside the opening");
+    assert.deepEqual(cells(res.state), [-10, -10, -10, -10]);
   });
 
   test("the same move stored at version 16 replays to where it stopped then, beside the lid, and at version 17 by today's rule", () => {
@@ -74,7 +97,7 @@ describe("a pit opens", () => {
     const old = run(s, op, DM, 16).state;
     assert.deepEqual([old.tokens.ogre!.x, old.tokens.ogre!.elevation], [2, 0]);
     const now = run(s, op, DM, 17).state;
-    assert.deepEqual([now.tokens.ogre!.x, now.tokens.ogre!.elevation], [3, 0]);
+    assert.deepEqual([now.tokens.ogre!.x, now.tokens.ogre!.elevation], [4, -10]);
   });
 
   test("a dragged creature left 10 ft above its fallen holder comes loose in the second link pass", () => {

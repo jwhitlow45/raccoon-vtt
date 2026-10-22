@@ -1017,10 +1017,11 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
     spent.add(event.trap);
     const trap = index.traps[event.trap]!;
     if (trap.rig!.stops) {
+      const pit = forward ? opening(trap, before) : null;
       for (const hit of together) {
         const group = hit.walk.group;
         if (!hit.walk.walker || stops.has(group.named) || !cuts(op, walks, group)) continue;
-        const s = forward ? stopAt(walks, group, event.at, before, seen) : stopBefore(walks, group, event.at, before, seen);
+        const s = forward ? stopAt(walks, group, event.at, before, seen, pit ? { walk: hit.walk, over: pit } : null) : stopBefore(walks, group, event.at, before, seen);
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
         stops.set(group.named, { until: forward ? s : event.at, s });
@@ -1128,25 +1129,52 @@ function picker(events: ReadonlyMap<number, readonly TrapEvent[]>, spent: Readon
  * every walker of the group stands on a spot with `stand`, movement's rule
  * that it may stop there, each walker on its own offset route at the
  * group's step. So a walker that sets a trap off on a spot it may not stop
- * at, a Large creature's half step onto a pit's lid, goes on to the next it
- * may stop at, on the trap, and the pit opens under it (review LP13-TR-2).
- * With no such spot before the walk's end, the group walks to its end,
- * which is no stop.
+ * at, a Large creature's half step onto a stopping trap, goes on to the
+ * next it may stop at (review LP13-TR-2). With no such spot before the
+ * walk's end, the group walks to its end, which is no stop.
+ *
+ * A pit that opens (`pit`) first asks for the first such progress where
+ * the walker that set it off lies wholly over the opening, so a creature
+ * that fits in it falls to the bottom with what it carries (review
+ * FU20A-OP-2). One too big for the opening, or whose walk never covers it
+ * whole, stops at the first spot it may stand, and stays at the rim.
  */
-function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen: (id: string) => boolean): Progress {
+function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen: (id: string) => boolean, pit: { walk: Walk; over: (spot: RouteSpot, walk: Walk) => boolean } | null): Progress {
   const stands = walks.all.filter((w) => w.group === group && w.walker).map((w) => standSpots(walks, w, before, seen));
   const end = endOf(group);
-  // One walker, as most groups are: its own spots on from the event, each asked whether it stands only as the search reaches it.
-  if (stands.length === 1) {
-    const one = stands[0]!;
-    for (let i = firstIndex(one.walk, t); i < one.walk.length; i++) if (one.spot(i).stand) return one.walk[i]!.progress;
-    return end;
-  }
-  const candidates: Progress[] = [];
-  for (const one of stands) for (const w of one.walk) if (compareProgress(w.progress, t) >= 0) candidates.push(w.progress);
-  candidates.sort(compareProgress);
-  for (const s of candidates) if (stands.every((one) => standsAt(one, s))) return s;
-  return end;
+  const trigger = pit ? standSpots(walks, pit.walk, before, seen) : null;
+  const overAt = (p: Progress) => trigger === null || (trigger.walk.length > 0 && pit!.over(trigger.spot(latestIndex(trigger.walk, p)), pit!.walk));
+  const first = (fits: (p: Progress) => boolean): Progress | null => {
+    // One walker, as most groups are: its own spots on from the event, each asked whether it stands only as the search reaches it.
+    if (stands.length === 1) {
+      const one = stands[0]!;
+      for (let i = firstIndex(one.walk, t); i < one.walk.length; i++) if (one.spot(i).stand && fits(one.walk[i]!.progress)) return one.walk[i]!.progress;
+      return null;
+    }
+    const candidates: Progress[] = [];
+    for (const one of stands) for (const w of one.walk) if (compareProgress(w.progress, t) >= 0) candidates.push(w.progress);
+    candidates.sort(compareProgress);
+    for (const s of candidates) if (stands.every((one) => standsAt(one, s)) && fits(s)) return s;
+    return null;
+  };
+  return (trigger ? first(overAt) : null) ?? first(() => true) ?? end;
+}
+
+/**
+ * The squares a stopping trap's pit opens on (5.7), when it opens: a pit on
+ * squares not yet at its floor. A spot lies over it when every square its
+ * footprint covers, squeezed where it squeezes, is one of them.
+ */
+function opening(trap: Trap, before: RoomState): ((spot: RouteSpot, walk: Walk) => boolean) | null {
+  const pit = trap.rig?.pit;
+  if (!pit || !("cells" in trap.zone) || pitOpen(before.buildChunks, trap.sceneId, trap.zone.cells, pit)) return null;
+  const squares = new Set<string>();
+  for (const r of trap.zone.cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) squares.add(`${x},${y}`);
+  return (spot, walk) => {
+    const r = footprintRect({ ...walk.token, x: spot.x, y: spot.y, squeeze: spot.squeezed ? true : undefined });
+    for (let y = Math.floor(r.y + 1e-9); y < Math.ceil(r.y + r.h - 1e-9); y++) for (let x = Math.floor(r.x + 1e-9); x < Math.ceil(r.x + r.w - 1e-9); x++) if (!squares.has(`${x},${y}`)) return false;
+    return true;
+  };
 }
 
 /**
