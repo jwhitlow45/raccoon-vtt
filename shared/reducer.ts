@@ -14,6 +14,7 @@ import {
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
 import { attaches, trapsGoOff } from "./migrate.ts";
+import { projectState, stableStringify } from "./project.ts";
 import {
   encounterAdd,
   encounterEnd,
@@ -112,12 +113,11 @@ export type Applied = {
   /** The absolute restore that undoes the op, or null when nothing undoable changed. */
   inverse: RestoreEntry[] | null;
   /**
-   * A trap's public springing stopped a token the op moved or told its
-   * players (docs/design-v1-traps.md 6.5), so a player's undo of the step is
-   * refused.
+   * The trap step changed what the op's player sees (docs/design-v1-traps.md
+   * 6.5), so that player's undo of the step is refused.
    */
   trapped?: true;
-  /** When the trap step wrote anything: the op applied without it, which the server's limits measure (6.7). */
+  /** When the trap step wrote anything: the op applied without it, which the server's limits measure (6.7) and a player's undo mark compares with (6.5). */
   withoutTraps?: () => ApplyResult;
   /** The keys only the trap step wrote, which a player's undo of the move leaves as they are (6.5). */
   trapWrote?: ReadonlySet<EntityKey>;
@@ -164,7 +164,7 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
       settleMounts(tx);
     }
     // The Passive Perception hint, where the walk ended up, writes only the DM's (4.6), and is kept out of a player's undo as the trap step's writes are.
-    if (plan && noticeStep(tx, op, state)) traps = { ...traps, wrote: true, trapped: traps?.trapped ?? false };
+    if (plan && noticeStep(tx, op, state)) traps = { ...traps, wrote: true };
     if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
     if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
     remindAfter(tx, state, moved);
@@ -177,6 +177,9 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
   // server's undo stack reads it. The client replays its pending ops on every
   // update and never does, so it is worked out on first read.
   let inverse: RestoreEntry[] | null | undefined;
+  // Only a player's undo is refused for what a trap did, and only a trap step that wrote something can have changed what they see.
+  if (traps?.wrote && actor.role === "player") plain ??= applyOp(state, op, actor, { ...env, withoutTraps: true });
+  const trapped = traps?.wrote === true && actor.role === "player" && (!plain?.ok || playerSeesChange(tx.state, plain.state, actor));
   return {
     ok: true,
     state: tx.state,
@@ -187,10 +190,23 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
       if (inverse === undefined) inverse = tx.inverse();
       return inverse;
     },
-    ...(traps?.trapped ? { trapped: true as const } : {}),
+    ...(trapped ? { trapped: true as const } : {}),
     ...(trapWrote && trapWrote.size > 0 ? { trapWrote } : {}),
     ...(traps?.wrote || plain ? { withoutTraps: () => (plain ??= applyOp(state, op, actor, { ...env, withoutTraps: true })) } : {}),
   };
+}
+
+/**
+ * Whether the trap step changed what the op's player sees (docs/design-v1-traps.md
+ * 6.5): their whole projection of the room after the op against the op without
+ * its trap step, as the server would send each, sight, lights and pits
+ * included. A trap action that changed nothing, or changed only what fog,
+ * darkness or the DM's side keeps from them, leaves the two alike, so the
+ * mark never tells a player that a trap they cannot see went off.
+ */
+function playerSeesChange(withTraps: RoomState, plain: RoomState, viewer: Viewer): boolean {
+  const opts = { sceneId: null };
+  return stableStringify(projectState(withTraps, viewer, opts)) !== stableStringify(projectState(plain, viewer, opts));
 }
 
 function dispatch(tx: Tx, op: Op): void {

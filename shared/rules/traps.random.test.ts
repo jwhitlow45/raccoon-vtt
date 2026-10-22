@@ -111,7 +111,7 @@ test("planMove equals describeMove on random group moves across traps, for the o
       const planned = planTrapMove(op, state as TrapRoom, who, {});
       if (planned.op !== op) {
         rewritten++;
-        assert.ok(planned.springings.some((s) => s.stopped), `seed ${seed} step ${n}: ${op.t} rewritten with no stop`);
+        assert.ok(planned.springings.some((s) => s.pass === "public" && s.trap.rig?.stops === true), `seed ${seed} step ${n}: ${op.t} rewritten with no stopping trap`);
       }
       const plan = planMove(planned.op, state, who, {});
       const described = describeMove(planned.op, state, res.state, who, {});

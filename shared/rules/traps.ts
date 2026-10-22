@@ -958,8 +958,6 @@ export type Springing = {
   seen: ReadonlySet<string>;
   /** Of `by`, those a player plays, whom players always see. */
   party: ReadonlySet<string>;
-  /** It stopped its walkers' group (5.5). */
-  stopped: boolean;
 };
 
 /** What the trap step found in a move: what went off, in order, and the op with its stopped landings (13.2 step 1). */
@@ -1001,7 +999,6 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
     const together = sameMoment(events.get(event.trap)!, event, after);
     spent.add(event.trap);
     const trap = index.traps[event.trap]!;
-    let stopped = false;
     if (trap.rig!.stops) {
       for (const hit of together) {
         const group = hit.walk.group;
@@ -1010,10 +1007,9 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
         stops.set(group.named, { t: event.at, s });
-        stopped = true;
       }
     }
-    springings.push(springingIn(trap, event.how, "public", together, momentAt(before, walks.byId, event.at, stops), env, stopped));
+    springings.push(springingIn(trap, event.how, "public", together, momentAt(before, walks.byId, event.at, stops), env));
   }
 
   // The private pass (5.5): every other creature, on the walks the public pass left, each on its own step. It never stops.
@@ -1028,7 +1024,7 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   for (let event = nextPrivate(); event !== null; event = nextPrivate()) {
     const together = sameMoment(hidden.get(event.trap)!, event, never);
     spent.add(event.trap);
-    springings.push(springingIn(index.traps[event.trap]!, event.how, "private", together, momentAt(before, rest.byId, event.at, new Map()), env, false));
+    springings.push(springingIn(index.traps[event.trap]!, event.how, "private", together, momentAt(before, rest.byId, event.at, new Map()), env));
   }
   return { springings, op: cut };
 }
@@ -1282,7 +1278,7 @@ function cutRoute(route: readonly RoutePiece[], progress: Progress, at: { x: num
  * the creature where it stands, never the other tokens (project.ts
  * withheldFromPlayers), so the moment places each one alone.
  */
-function springingIn(trap: Trap, how: TrapHow, pass: "public" | "private", together: readonly TrapEvent[], m: Moment, env: { opVersion?: number }, stopped: boolean): Springing {
+function springingIn(trap: Trap, how: TrapHow, pass: "public" | "private", together: readonly TrapEvent[], m: Moment, env: { opVersion?: number }): Springing {
   const by = [...new Set(together.map((t) => t.tokenId))].sort(cmp);
   const sightRoom = m.before.scenes[trap.sceneId]?.vision?.on === true ? roomAt(m) : m.before;
   const seen = new Set<string>();
@@ -1293,7 +1289,7 @@ function springingIn(trap: Trap, how: TrapHow, pass: "public" | "private", toget
     if (seenByNonOwners(sightRoom, token, env)) seen.add(id);
     if (playersToken(m.before, token)) party.add(id);
   }
-  return { trap, how, pass, by, hits: hitsIn(trap, m, by), perceived: pass === "public" && seen.size > 0, seen, party, stopped };
+  return { trap, how, pass, by, hits: hitsIn(trap, m, by), perceived: pass === "public" && seen.size > 0, seen, party };
 }
 
 /** `trapHits` at a walk's moment: on squares, each creature of the op read from its spot, never placed whole. */
@@ -1339,7 +1335,7 @@ function onRects(r: CellRange, rects: readonly CellRect[], box: CellRange): bool
 }
 
 /** A springing's record, frozen at its moment (5.6). */
-function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", together: readonly TrapEvent[] | readonly string[], moment: RoomState, env: { opVersion?: number }, stopped: boolean): Springing {
+function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", together: readonly TrapEvent[] | readonly string[], moment: RoomState, env: { opVersion?: number }): Springing {
   const ids = together.map((t) => (typeof t === "string" ? t : t.tokenId));
   const by = [...new Set(ids)].sort(cmp);
   const seen = new Set<string>();
@@ -1350,7 +1346,7 @@ function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", toget
     if (seenByNonOwners(moment, token, env)) seen.add(id);
     if (playersToken(moment, token)) party.add(id);
   }
-  return { trap, how, pass, by, hits: trapHits(trap, moment, by), perceived: pass === "public" && seen.size > 0, seen, party, stopped };
+  return { trap, how, pass, by, hits: trapHits(trap, moment, by), perceived: pass === "public" && seen.size > 0, seen, party };
 }
 
 /**
@@ -1429,7 +1425,7 @@ export function planTurn(room: TrapRoom, tokenId: string, how: "turnStart" | "tu
   for (const i of index.turns) {
     const trap = index.traps[i]!;
     if (spent.has(trap.id) || !trap.rig!.on.includes(how) || !setsOff(trap.rig!, room, token) || !standsOn(room, trap, token, seen)) continue;
-    out.push(springingAt(trap, how, seen(token.id) ? "public" : "private", [token.id], room, env, false));
+    out.push(springingAt(trap, how, seen(token.id) ? "public" : "private", [token.id], room, env));
   }
   return out;
 }
@@ -1453,7 +1449,7 @@ export function planDoor(before: RoomState, room: TrapRoom, sceneId: string, doo
     const trap = index.traps[i]!;
     if (!setsOff(trap.rig!, before, token)) continue;
     if (trap.rig!.floor && !onFloor(before, token, carriedSeen(before, token, seen))) continue;
-    out.push(springingAt(trap, "open", seen(token.id) ? "public" : "private", [token.id], room, env, false));
+    out.push(springingAt(trap, "open", seen(token.id) ? "public" : "private", [token.id], room, env));
   }
   return out;
 }
@@ -1464,5 +1460,5 @@ export function planHand(room: TrapRoom, trap: Trap, tokenIds: readonly string[]
     const t = room.tokens[id];
     return t?.sceneId === trap.sceneId && trapCreature(room, t);
   });
-  return { ...springingAt(trap, "hand", "public", by, room, env, false), perceived: true };
+  return { ...springingAt(trap, "hand", "public", by, room, env), perceived: true };
 }

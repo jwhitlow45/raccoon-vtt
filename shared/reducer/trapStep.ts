@@ -4,7 +4,7 @@ import type { RoomState, Trap, TrapDoorRef, TrapDue, Viewer } from "../model.ts"
 import type { Op, OpOf } from "../protocol.ts";
 import { planDoor, planHand, planTrapMove, planTurn, walkOp, type Springing, type TrapRoom } from "../rules/traps.ts";
 import { pressChangesNothing } from "./encounter.ts";
-import { addDue, dmLine, orderedBy, PIT_ACTION, plainList, playersLine, runActions, type Did } from "./traps.ts";
+import { addDue, dmLine, orderedBy, PIT_ACTION, plainList, playersLine, runActions } from "./traps.ts";
 import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 
 /*
@@ -18,11 +18,11 @@ import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 export type TrapPlan = { op: Op; before: Springing[] };
 
 /**
- * What the trap step wrote: whether a public springing stopped a token or
- * told its players, which marks a player's undo step (6.5), and whether a
- * pit opened, after which attach's link pass runs again (13.2).
+ * What the trap step wrote: whether it wrote anything, after which the
+ * reducer asks whether it changed what the op's player sees (6.5), and
+ * whether a pit opened, after which attach's link pass runs again (13.2).
  */
-export type TrapWrites = { wrote: boolean; trapped: boolean; pit?: true };
+export type TrapWrites = { wrote: boolean; pit?: true };
 
 /**
  * Before dispatch (13.2 step 1): a walk's both passes, which may rewrite
@@ -56,7 +56,7 @@ export function planBefore(op: Op, before: RoomState, actor: Viewer, env: Env): 
  */
 export function trapStep(tx: Tx, op: Op, before: RoomState, plan: TrapPlan): TrapWrites {
   const env = tx.env;
-  const out: TrapWrites = { wrote: false, trapped: false };
+  const out: TrapWrites = { wrote: false };
   const started = turnStarted(tx, op);
   let rest: Springing[] = [];
   if (started !== null) {
@@ -85,7 +85,7 @@ export function trapSpring(tx: Tx, op: OpOf<"trap.spring">): void {
   const trap = tx.state.traps[op.trapId];
   if (!trap) throw gone("trap");
   const tokenIds = op.tokenIds.filter((id) => tx.state.tokens[id]?.sceneId === trap.sceneId);
-  const out: TrapWrites = { wrote: false, trapped: false };
+  const out: TrapWrites = { wrote: false };
   write(tx, planHand(tx.state as TrapRoom, trap, tokenIds, tx.env), out);
   if (!tx.state.encounter) rearmNow(tx, trap.id);
 }
@@ -173,21 +173,6 @@ function write(tx: Tx, s: Springing, out: TrapWrites): void {
   if (found) next.found = true;
   tx.write(keys.trap(trap.id), next);
   const line = dmLine(tx, next, { how: s.how, by: by.list, more: by.more, hits: s.hits.length, did, seen: s.seen, hidden: false });
-  const told = perceived && playersLine(tx, next, by.list.filter((id) => s.seen.has(id)));
+  if (perceived) playersLine(tx, next, by.list.filter((id) => s.seen.has(id)));
   if (rig.save || rig.damage || rig.conditions) addDue(tx, trap.id, occurrence(line.id, { ...(perceived ? { perceived: true as const } : {}), acted: true }));
-  if (s.pass === "public" && blocksUndo({ stopped: s.stopped, told, found, did })) out.trapped = true;
-}
-
-/**
- * Whether a public springing changed what the op's player sees (6.5): a
- * move it cut short of where it asked, a players' line, the trap marked
- * found, or an action that did something, a door, a light, a reveal or a
- * pit. Only such a step refuses the player's Undo move, and the ack tells
- * the player's device so (`ev.trapped`), so the bar offers Undo move just
- * when the server takes it. A silent trap nobody found that stops a token
- * where it was going changes none of these: the token goes back, and what
- * the trap wrote stays with the DM.
- */
-export function blocksUndo(change: { stopped: boolean; told: boolean; found: boolean; did: readonly Did[] }): boolean {
-  return change.stopped || change.told || change.found || change.did.some((d) => d.ok);
 }

@@ -272,7 +272,6 @@ describe("steps and passes (5.3)", () => {
     ]);
     const p = plan(state, op);
     assert.deepEqual(summary(p.springings), ["pit:enter:public:thorn"]);
-    assert.equal(p.springings[0]!.stopped, true);
     assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y] : null, [3, 5]);
   });
 

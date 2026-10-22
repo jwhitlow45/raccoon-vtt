@@ -4,7 +4,7 @@ import { chunkKey } from "../keys.ts";
 import type { BuildChunk, LogEvent, RoomState, Token, Trap, TrapDue, TrapRig, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
-import { DM, P1, actor, env, room, token } from "../testutil.ts";
+import { DM, P1, actor, env, reveal, room, token } from "../testutil.ts";
 import { DONE_MEANWHILE, SETTLED_MEANWHILE } from "./traps.ts";
 
 /**
@@ -72,6 +72,47 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.deepEqual(r.state.trapSeen, []);
     assert.equal(r.state.trapLog.length, 1);
     assert.equal(r.trapped, undefined);
+  });
+
+  test("a silent trap's actions mark the step only where they change what the player sees, sight included", () => {
+    const quiet = { stops: false, message: undefined, foundOnSpring: false };
+    const lamp = (on: boolean, x = 35, y = 25) => (s: RoomState) => void (s.lights.lamp = { id: "lamp", rev: 0, sceneId: "s1", x, y, bright: 20, dim: 20, on, walls: true });
+    const goblin = (over: Partial<Token> = {}) => (s: RoomState) => void (s.tokens.gob = token("gob", { name: "Goblin", x: 30, y: 20, ...over }));
+    const show = { actions: [{ show: { tokenId: "gob" } }] };
+    const cases: [string, Partial<TrapRig>, (s: RoomState) => void, boolean][] = [
+      ["no action", {}, () => {}, false],
+      ["a light far off goes on, which players see only through the party's sight", { actions: [{ light: "lamp", on: true }] }, lamp(false), false],
+      ["a light already on is lit", { actions: [{ light: "lamp", on: true }] }, lamp(true), false],
+      ["a light already out is put out", { actions: [{ light: "lamp", on: false }] }, lamp(false), false],
+      ["a creature everyone sees is shown", show, goblin(), false],
+      [
+        "a hidden creature under fog is shown",
+        show,
+        (s) => {
+          goblin({ visibility: "dm" })(s);
+          s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: true };
+          reveal(s, "s1", { x: 0, y: 0, w: 20, h: 12 });
+        },
+        false,
+      ],
+      ["a closed door is locked, which players still see closed", { actions: [{ door: { edge: "9,5,w" }, state: "locked" }] }, (s) => void (s.buildChunks[chunkKey("s1", 0, 0)] = doorChunk()), false],
+      ["a hidden creature in plain view is shown", show, goblin({ visibility: "dm" }), true],
+      ["a closed door is opened", { actions: [{ door: { edge: "9,5,w" }, state: "open" }] }, (s) => void (s.buildChunks[chunkKey("s1", 0, 0)] = doorChunk()), true],
+      [
+        "a light beside the party goes on in the dark",
+        { actions: [{ light: "lamp", on: true }] },
+        (s) => {
+          lamp(false, 4, 5)(s);
+          s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: true, vision: { on: true, light: "dark" } };
+        },
+        true,
+      ],
+    ];
+    for (const [name, over, tweak, marked] of cases) {
+      const r = applied(world([thorn()], [trap("alarm", square(3, 5), { ...quiet, ...over })], tweak), { t: "token.move", tokenId: "thorn", x: 6, y: 5 }, P1);
+      assert.equal(r.state.traps.alarm!.state, "sprung", name);
+      assert.equal(r.trapped, marked ? true : undefined, name);
+    }
   });
 
   test("a silent stopping trap where the move was going anyway is no stop: the walk to it, a Get off onto it and a landing on it leave Undo move as it is", () => {

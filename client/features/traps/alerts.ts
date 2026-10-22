@@ -109,8 +109,8 @@ export function watchOf(op: ClientOp, n: number): Watched | null {
 /**
  * Whether a trap met the move in a way the player sees (4.3): the server's
  * ack marks the op (`ev.trapped`) by the same rule its undo refuses by
- * (shared/reducer/trapStep.ts blocksUndo). Then the server refuses to take
- * it back, so the bar stops offering Undo move and Teleport here.
+ * (shared/reducer.ts playerSeesChange). Then the server refuses to take it
+ * back, so the bar stops offering Undo move and Teleport here.
  */
 export function metTrap(w: Watched, trapped: readonly number[] | undefined): boolean {
   return trapped?.includes(w.n) ?? false;

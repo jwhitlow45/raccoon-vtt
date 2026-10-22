@@ -701,6 +701,44 @@ const TRAP_PAIRS: OpPair[] = [
   ),
 ];
 
+/**
+ * A silent trap nobody found on Thorn's row, in one room only, whose action
+ * changes nothing players see: it aims at what is already so, at a light,
+ * which players see only through the party's sight, at a creature fog
+ * still hides, or locks a door players see closed either way. His step's
+ * Undo move must stay the same in both rooms (6.5).
+ */
+function unseenActionPair(what: string, setup: (s: RoomState) => void, actions: NonNullable<TrapRigOver["actions"]>): OpPair {
+  return trapPair(`a silent trap only one room has ${what}: Thorn's step keeps its Undo move in both`, setup, (s) => trapOn(s, "alarm", cells(10, 6), { stops: false, message: undefined, foundOnSpring: false, actions }), [thornAcross, thornBack]);
+}
+
+const lampAt = (x: number, y: number, on: boolean) => (s: RoomState) => void (s.lights.lamp = { id: "lamp", rev: 0, sceneId: "s1", x, y, bright: 20, dim: 20, on, walls: true });
+
+const UNSEEN_ACTION_PAIRS: OpPair[] = [
+  unseenActionPair("puts out a light already out", lampAt(20, 20, false), [{ light: "lamp", on: false }]),
+  unseenActionPair("lights a light already lit", lampAt(20, 20, true), [{ light: "lamp", on: true }]),
+  unseenActionPair("lights a light far off", lampAt(35, 25, false), [{ light: "lamp", on: true }]),
+  unseenActionPair("shows a creature everyone sees", () => {}, [{ show: { tokenId: "gob" } }]),
+  unseenActionPair(
+    "shows a hidden creature fog still covers",
+    (s) => {
+      s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: true };
+      reveal(s, "s1", { x: 0, y: 0, w: 40, h: 14 });
+      lurker(25, 20)(s);
+    },
+    [{ show: { tokenId: "lurker" } }],
+  ),
+  unseenActionPair(
+    "locks a door players see closed either way",
+    (s) => {
+      const chunk = s.buildChunks[chunkKey("s1", 0, 0)]!;
+      s.buildChunks[chunkKey("s1", 0, 0)] = { ...chunk, edges: { ...chunk.edges, "3,12,n": { kind: "door", state: "closed", secret: false, discovered: false } } };
+    },
+    [{ door: { edge: "3,12,n" }, state: "locked" }],
+  ),
+];
+
 describe("public determinism: traps' generators (docs/design-v1-traps.md 7)", () => {
+  for (const p of UNSEEN_ACTION_PAIRS) test(p.name, () => void checkOps(p));
   for (const p of TRAP_PAIRS) test(p.name, () => void checkOps(p));
 });
