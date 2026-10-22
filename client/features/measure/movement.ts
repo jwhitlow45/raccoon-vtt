@@ -318,6 +318,13 @@ const NO_BUILD: Pick<BuildState, "buildChunks"> = { buildChunks: {} };
 export function dragReading(input: {
   /** The creature as its walk reads it (rules/attach.ts walkerFor). */
   token: MovingToken & Walker;
+  /**
+   * The creature where it stands, when its walk starts elsewhere: on the
+   * ground under its seat, off a holder (movement/drop.ts walkStart). The
+   * turn's trail reads it here, so the drop from the seat to that ground
+   * never counts as a leg the turn already took.
+   */
+  standing?: MovingToken;
   /** The drop point. */
   to: Point;
   encounter: TurnView | null | undefined;
@@ -347,7 +354,7 @@ export function dragReading(input: {
   const landed = input.landing ? { ...token, x: end.x, y: end.y, elevation: end.elevation, squeeze: input.landing.squeeze } : null;
   const fighting = encounter ? (encounter.started ?? encounter.activeEntryId !== null) : false;
   const active = fighting && input.activeTokenId === token.id;
-  const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, token, rules, role: input.role }) : null;
+  const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, token: input.standing ?? token, rules, role: input.role }) : null;
   const counter = trail ? trail.diagonals : (input.counter ?? { h: 0, v: 0 });
   const swimSpeed = (input.speeds?.swim ?? 0) > 0;
   const points: readonly RoutePoint[] = walk?.route?.points ?? [{ x: token.x, y: token.y, elevation: token.elevation }, end];

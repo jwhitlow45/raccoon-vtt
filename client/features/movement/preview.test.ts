@@ -152,4 +152,13 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     // She walks off as a walker on the ground (rules/attach.ts walkerFor): half her Speed to step down clear of the horse, then 10 ft.
     assert.equal(stored, 25);
   });
+
+  test("off the low half of a horse straddling a step, the band counts the turn from her seat, never the drop to the ground her walk starts on (review LP15-FU-2)", () => {
+    const state = dropView(riding("five", undefined, true), "dm");
+    const bree = state.tokens.bree!;
+    const preview = walkPreview({ view: state, token: bree, target: { x: 1, y: 4 }, answer: { kind: "open" }, held: null, world: publicWorld(state, ownWalk(bree), { role: "dm" }), role: "dm" });
+    assert.equal(preview.read.dragFt, 25);
+    // Nothing used before the drag on her turn, so 25 of her 30 ft leaves 5, within her Speed.
+    assert.deepEqual([preview.read.left?.band, preview.read.left?.leftFt], ["walk", 5]);
+  });
 });

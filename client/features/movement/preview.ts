@@ -52,6 +52,7 @@ export function groupReading(view: DropView, token: Token, to: Point, role: Role
   const dismount = dismountOf(view, token, { x: to.x, y: to.y, elevation: landing.elevation }, role);
   return dragReading({
     token: walkStart(view, walkerOf(view, token, to)),
+    standing: token,
     to,
     landing,
     encounter: view.encounter,
@@ -160,6 +161,7 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
   const trace = routeWalkers(view.buildChunks, walking, pieces ?? [[to.x, to.y, 0, 0]], end.elevation);
   const read = dragReading({
     token: start,
+    standing: token,
     to,
     encounter,
     activeTokenId,
