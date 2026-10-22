@@ -354,4 +354,43 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     assert.ok((token(samSocket, run.bree)?.y ?? 0) >= 10, "Bree went into the closet without the goblin");
     assert.equal(token(samSocket, run.goblin)?.attached?.to, run.bree, "the goblin was left behind");
   });
+
+  test("lp15-at-2. the DM taps a Ride row at the foot of an Attach pop-up longer than its box: the question and its Ride scroll into view, clear of \"Scroll for more\" (review LP15-FU-5)", async () => {
+    const scout = randomUUID();
+    await ops.send(tokenOp(scout, { kind: "npc", name: "Scout", x: 1, y: 1, disposition: "ally", actor: { inline: actor() } }));
+    // Mules all round her, near and farther away, so the DM's list outgrows the pop-up.
+    for (const [i, [x, y]] of [[2, 0], [2, 2], [0, 2], [4, 0], [4, 2], [6, 0], [6, 2], [0, 4]].entries()) {
+      await ops.send(tokenOp(randomUUID(), { kind: "npc", name: `Mule ${i + 1}`, size: "large", x, y, disposition: "ally", actor: { inline: actor() } }));
+    }
+    await waitFor("the scout on the DM's map", () => token(dmSocket, scout));
+    await dm.keyboard.press("Escape");
+    const b = await select(dm, "Scout", { x: 1, y: 1 });
+    await b.getByRole("button", { name: "Attach", exact: true }).click();
+    const popover = dm.getByRole("dialog", { name: "Attach" });
+    await popover.waitFor();
+    const more = popover.getByText("Scroll for more");
+    await more.waitFor();
+    const box = (await popover.boundingBox())!;
+    // The lowest Ride row whose top shows above the fade at the foot.
+    const rides = popover.getByRole("button", { name: /^Ride / });
+    let pick = -1;
+    for (let i = 0; i < (await rides.count()); i++) {
+      const r = await rides.nth(i).boundingBox();
+      if (r && r.y + 8 < box.y + box.height - 48) pick = i;
+    }
+    assert.ok(pick >= 0, "no Ride row shows");
+    await rides.nth(pick).click();
+    const ride = popover.getByRole("button", { name: "Ride", exact: true });
+    await ride.waitFor();
+    await dm.waitForTimeout(300);
+    await shots.take(dm, "attach-lp15-ride-in-view");
+    const r = (await ride.boundingBox())!;
+    const now = (await popover.boundingBox())!;
+    assert.ok(r.y >= now.y && r.y + r.height <= now.y + now.height, `Ride (${r.y} to ${r.y + r.height}) is cut by the pop-up (${now.y} to ${now.y + now.height})`);
+    if (await more.isVisible()) {
+      const fade = (await more.boundingBox())!;
+      assert.ok(r.y + r.height <= fade.y + 1, `Ride (foot ${r.y + r.height}) sits under "Scroll for more" (top ${fade.y})`);
+    }
+    await dm.keyboard.press("Escape");
+  });
 });

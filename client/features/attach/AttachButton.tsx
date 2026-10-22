@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { useDelayed } from "../../components/Loading.tsx";
@@ -106,6 +106,15 @@ function AttachList(props: { token: Token; onDone(): void }) {
   const [pending, setPending] = useState<string | null>(null);
   const busy = useDelayed(pending !== null);
   const listRef = useRef<HTMLDivElement>(null);
+  /*
+   * A pop-up keeps the size it opened with (components/Popover.tsx), so a
+   * Ride row near its foot opens its question and its Ride past the box,
+   * under "Scroll for more". They scroll into view as the row opens.
+   */
+  const askRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (riding !== null) askRef.current?.scrollIntoView({ block: "nearest" });
+  }, [riding]);
   const done = useRef(props.onDone);
   done.current = props.onDone;
   // A list that unmounts with an answer still on its way hears nothing more of it. A fresh one on each mount, as React may mount it twice.
@@ -186,7 +195,8 @@ function AttachList(props: { token: Token; onDone(): void }) {
           <span style={{ flex: "1 1 auto", minWidth: 0, overflowWrap: "anywhere" }}>{row.text}</span>
         </button>
         {open ? (
-          <div style={{ display: "grid", gap: theme.space(1), paddingLeft: theme.space(2) }}>
+          // The margin keeps Ride clear of the fade that says "Scroll for more" where more rows follow.
+          <div ref={askRef} style={{ display: "grid", gap: theme.space(1), paddingLeft: theme.space(2), scrollMarginBottom: theme.space(12) }}>
             <Segmented<"controlled" | "independent">
               label={`How ${holderName(row)} moves`}
               value={steer}
