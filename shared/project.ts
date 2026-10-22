@@ -961,12 +961,13 @@ const playerTraps = new WeakMap<Trap, ProjectedTrap>();
 /**
  * A players' trap line (docs/design-v1-traps.md 6.3): every player and
  * table display gets it, with `by` cut to the creatures this viewer sees
- * now. The DM's trap log is the DM's alone.
+ * now, and none behind a pause, as roll and turn lines. The DM's trap log
+ * is the DM's alone.
  */
 function projectTrapSeenCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
   if (ctx.viewer.role === "dm") return entry;
   const data = entry.data;
-  if (data?.type !== "trapSeen") return null;
+  if (ctx.paused || data?.type !== "trapSeen") return null;
   const by = data.by.filter((id) => tokenVisibleById(ctx, id));
   return by.length === data.by.length ? entry : { ...entry, data: { ...data, by } };
 }

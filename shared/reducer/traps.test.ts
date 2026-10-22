@@ -418,6 +418,10 @@ describe("what players get of a trap (6.4)", () => {
     assert.deepEqual(playerView(state, DISPLAY).trapSeen, [seen]);
     assert.deepEqual(projectState(state, DM, { sceneId: "s1" }).trapSeen, state.trapSeen);
     assert.deepEqual(playerView(state).log, [], "no trap line in the shared log");
+    const paused = { ...state, meta: { ...state.meta, view: { ...state.meta.view, blackout: true } } };
+    assert.deepEqual([playerView(paused).trapSeen, playerView(paused, DISPLAY).trapSeen], [[], []], "none behind a blackout");
+    assert.equal(projectEntity(keys.trapSeen("5:0"), paused, P1, { sceneId: "s1" }), null);
+    assert.deepEqual(projectState(paused, DM, { sceneId: "s1" }).trapSeen, state.trapSeen);
   });
 });
 

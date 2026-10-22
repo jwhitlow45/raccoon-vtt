@@ -228,7 +228,7 @@ Players send no trap op. Every string is bounded by zod (6.1). The import schema
 
 ### 6.4 Projection
 
-- A DM gets every trap on its scene and both rings.
+- A DM gets every trap on its scene and both rings. A player and a table display get the players' lines, but none behind a blackout, as roll and turn lines.
 - A player gets a trap only when it is `found`, on the player scene, outside a blackout, and not under full fog by the labels' rule over its cells (a wire's cells, a door's two cells). A door zone is withheld while its door is a secret door not found. Fields: `id`, `sceneId`, `name`, `zone`, and `disarmed: true` when it is, with `rev` 0. So springing, re-arming, uses and rig edits send players nothing. Disarming or re-arming a found trap shows, as the party's own doing.
 - **Perceived.** A public springing is perceived when any creature that set it off is seen by players who do not own it at the moment (`seenByNonOwners`), judged over the whole set before anything is cut. A creature seen by all and owned by a player is a party member, which is always shown, so a public springing is perceived by every player or by none, and its line reaches every player. Only a perceived springing marks a trap found (`foundOnSpring`). `trap.act` and `trap.spring` mark the trap found when it has `foundOnSpring`, as the DM's reveal, since every player sees their line and actions. The Alarm preset has it off.
 - **Fan-out** (design 7.3): a touched trap's key, the rings by viewer, and traps join `tileDependents` with labels and pins.
