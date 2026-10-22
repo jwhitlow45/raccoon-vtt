@@ -307,11 +307,17 @@ function rawStep(r: () => number, state: RoomState, apart: ReadonlySet<string>):
   return { who, op: { t: "token.detach", tokenId: c.id, ...(place ? { x: place.x, y: place.y } : {}) } };
 }
 
-/** What a lone drag's frames carry to the other devices (stageHooks.ts frameFields): where the token is held, the route's corners and its cost. */
-type Frame = { to: { x: number; y: number }; corners: unknown; ft: number };
+/**
+ * What a lone drag shows: the fields its frames carry to the other devices
+ * (stageHooks.ts frameFields), where the board holds the token, and on a
+ * player's board the whole picture, its line, its label and its words. The
+ * DM's own picture reads what only the DM sees, so only what it sends is
+ * compared.
+ */
+type Frame = { sent: Drag["frame"]; to: { x: number; y: number }; picture?: Drag["preview"] };
 
-function frameOf(drag: Drag): Frame {
-  return { to: drag.preview.to, corners: drag.preview.corners, ft: drag.preview.read.dragFt };
+function frameOf(drag: Drag, who: Viewer): Frame {
+  return { sent: drag.frame, to: drag.preview.to, ...(who.role === "player" ? { picture: drag.preview } : {}) };
 }
 
 /** What each room's device builds for the same gesture, from the actor's copy of each: null where it sends nothing. */
@@ -352,7 +358,7 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
     const raw = { x: nearBy(r, lead.x, far), y: nearBy(r, lead.y, far) };
     const drags = copies.map((copy) => (copy.tokens[lead.id] ? dragOf(copy, who.role, lead.id, raw) : null));
     const [da, db] = drags;
-    return { who, built: { what: "drag", a: (da?.op as Op | null | undefined) ?? null, b: (db?.op as Op | null | undefined) ?? null, ...(da && db ? { frames: [frameOf(da), frameOf(db)] } : {}) } };
+    return { who, built: { what: "drag", a: (da?.op as Op | null | undefined) ?? null, b: (db?.op as Op | null | undefined) ?? null, ...(da && db ? { frames: [frameOf(da, who), frameOf(db, who)] } : {}) } };
   }
   if (n < 0.58) {
     const first = dragLead(copies[0].tokens, pick(r, tokens));
@@ -907,7 +913,7 @@ function run(seed: number, steps = 70): Seen {
       else if (chance(r, 0.5)) {
         // Half the time as the board drags it, its route searched round the walls.
         const drags = [a.state, b.state].map((s) => dragOf(copyOf(s, who), "player", root.id, to));
-        builtShared(who, { what: "drag", a: (drags[0]!.op as Op | null) ?? null, b: (drags[1]!.op as Op | null) ?? null, frames: [frameOf(drags[0]!), frameOf(drags[1]!)] });
+        builtShared(who, { what: "drag", a: (drags[0]!.op as Op | null) ?? null, b: (drags[1]!.op as Op | null) ?? null, frames: [frameOf(drags[0]!, who), frameOf(drags[1]!, who)] });
       } else shared({ who, op: { t: "token.move", tokenId: root.id, ...to } });
       const rooted = b.state.tokens[root.id];
       const group = new Set([...carriedGroup(b.state.tokens, root.id), ...carriedGroup(b.state.tokens, (rooted && holderOf(b.state.tokens, rooted)?.id) ?? root.id)]);
