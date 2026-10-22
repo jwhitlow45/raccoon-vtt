@@ -76,6 +76,35 @@ describe("ride, perch and carry (6)", () => {
     assert.equal(answer(walled, drag), "ok");
   });
 
+  test("a rider gets off before anything else holds it, so getting off is charged, while the DM re-seats it directly", () => {
+    const riding = table((s) => {
+      s.tokens.bree = { ...s.tokens.bree!, x: 5, y: 4, attached: { to: "horse", kind: "ride" } };
+      s.tokens.pony = token("pony", { name: "Pony", kind: "npc", size: "large", x: 6, y: 2, ownerIds: ["p1"] });
+    });
+    const onPony: Op = { t: "token.attach", tokenId: "bree", to: "pony", kind: "ride", x: 6, y: 3, elevation: 0 };
+    assert.equal(answer(riding, onPony), "forbidden: Bree gets off Warhorse first");
+    assert.equal(answer(riding, onPony, DM), "ok");
+    // The same ride again, as Controlled toggles, replaces nothing.
+    assert.equal(answer(riding, { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 4, elevation: 0 }), "ok");
+    // A rider on a mount the player cannot see answers as one on nothing.
+    const hidden = table((s) => {
+      s.tokens.ogre = { ...s.tokens.ogre!, x: 5, y: 3, visibility: "dm" };
+      s.tokens.bree = { ...s.tokens.bree!, x: 5, y: 3, attached: { to: "ogre", kind: "ride" } };
+    });
+    const loose = table((s) => (s.tokens.bree = { ...s.tokens.bree!, x: 5, y: 3 }));
+    const ontoHorse: Op = { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 4, elevation: 0 };
+    assert.equal(answer(hidden, ontoHorse), answer(loose, ontoHorse));
+  });
+
+  test("a creature carried by a creature is a grappled one, as the list offers it, even for its own player", () => {
+    const own = table((s) => (s.tokens.gob = { ...s.tokens.gob!, size: "small", x: 7, y: 4, ownerIds: ["p1"] }));
+    const carry: Op = { t: "token.attach", tokenId: "gob", to: "bree", kind: "carry", x: 6, y: 4, elevation: 0 };
+    assert.equal(answer(own, carry), "forbidden: Goblin 2 is not marked Grappled");
+    assert.equal(answer(table((s) => (s.tokens.gob = grappled({ ...s.tokens.gob!, size: "small", x: 7, y: 4, ownerIds: ["p1"] }))), carry), "ok");
+    // A drag of one's own creature needs no mark.
+    assert.equal(answer(own, { t: "token.attach", tokenId: "gob", to: "bree", kind: "drag", x: 7, y: 4, elevation: 0 }), "ok");
+  });
+
   test("a ride in a fight waits for the rider's own turn", () => {
     const fight = (active: string) =>
       table((s) => {

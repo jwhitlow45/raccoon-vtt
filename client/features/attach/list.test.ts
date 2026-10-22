@@ -55,6 +55,14 @@ describe("the Attach list", () => {
     assert.ok(!fromThorn.includes("Carry Pip"));
   });
 
+  test("a player's list never offers to take a rider off its mount, which gets off first, while the DM's does", () => {
+    const state = table([token("pony", { name: "Pony", kind: "npc", size: "large", x: 3, y: 3 })]);
+    state.tokens.kobold = { ...state.tokens.kobold!, attached: { to: "pony", kind: "ride" } };
+    const kobold = (rows: { text: string }[]) => rows.filter((r) => r.text.endsWith("Kobold")).map((r) => r.text);
+    assert.deepEqual(kobold(attachRows(asPlayer(state), p1, "thorn")), []);
+    assert.deepEqual(kobold(attachRows(state, dm, "thorn")), ["Carry Kobold", "Drag Kobold"]);
+  });
+
   test("a token already carried offers only what it would hold, so a rider changes mounts through Get off", () => {
     const state = table([token("pony", { name: "Pony", kind: "npc", size: "large", x: 3, y: 4 })]);
     state.tokens.thorn = { ...state.tokens.thorn!, x: 6, y: 5, attached: { to: "horse", kind: "ride" } };

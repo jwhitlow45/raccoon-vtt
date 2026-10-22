@@ -1257,10 +1257,11 @@ function ownTurnOr(c: Check, tokenId: string): Decision {
 /**
  * A player's attach (docs/design-v1-attach.md 6), on two tokens their copy
  * holds. A ride, a perch or a carry onto a holder needs the right to move
- * both and the two within reach as they stand. A drag, or a creature
- * carried by a creature, needs the right to move the holder, the two within
- * reach, and the right to move the creature too or a Grappled mark players
- * see on it. On a scene whose walls stop moves, every attach but a drag
+ * both and the two within reach as they stand. A drag needs the right to
+ * move the holder, the two within reach, and the right to move the
+ * creature too or a Grappled mark players see on it, and a creature
+ * carried by a creature always needs that mark. A rider gets off before
+ * anything else holds it. On a scene whose walls stop moves, every attach but a drag
  * steps onto its seat by the leg test, and what the stepping token drags
  * follows that step by the walls test of a group move. A ride during a
  * fight waits for the rider's own turn. The
@@ -1274,12 +1275,17 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
   const settings = c.state.meta.settings;
   // The seat is at the holder's elevation, as the reducer puts it (4.1).
   const seat = { x: op.x, y: op.y, elevation: holder.elevation };
+  // A rider gets off first, which costs what getting off costs (7.3). Only the same ride again, as Controlled toggles, replaces it.
+  const mount = carried.attached?.kind === "ride" ? c.visibleToken(carried.attached.to) : undefined;
+  if (mount && !(op.kind === "ride" && op.to === mount.id)) return refuse("forbidden", `${shownName(carried)} gets off ${shownName(mount)} first`);
   const grapple = op.kind === "drag" || (op.kind === "carry" && isCreature(carried) && isCreature(holder));
   if (grapple) {
     const may = moveCheck(c, holder.id);
     if (!may.ok) return may;
     if (!withinReach(settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far to ${op.kind === "drag" ? "drag" : "carry"}`);
-    if (!moveCheck(c, carried.id).ok && !grappledShown(c, carried)) return refuse("forbidden", `${shownName(carried)} is not marked Grappled`);
+    // A creature carried by a creature is a grappled one, as the list offers it (4.1). A drag also takes a creature the player may move.
+    const marked = grappledShown(c, carried);
+    if (op.kind === "carry" ? !marked : !moveCheck(c, carried.id).ok && !marked) return refuse("forbidden", `${shownName(carried)} is not marked Grappled`);
     // A creature carried by a creature steps onto its seat, which meets the walls as every attach but a drag does (4.1).
     if (op.kind !== "drag") {
       const walls = legCheck(c, carried.id, seat, false);

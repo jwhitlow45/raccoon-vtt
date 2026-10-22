@@ -131,14 +131,22 @@ export function grapples(kind: AttachKind, carried: Token, holder: Token): boole
  *
  * - Ride, Perch, or Carry of an object or onto one: both tokens, within
  *   reach, and a Ride in a fight only on the rider's own turn.
- * - Drag, or Carry of a creature by a creature: the holder, within reach,
- *   and the creature too unless it is Grappled as players see it, which is
- *   the DM's consent.
+ * - Drag: the holder, within reach, and the creature too unless it is
+ *   Grappled as players see it, which is the DM's consent.
+ * - Carry of a creature by a creature: the holder, within reach, and the
+ *   creature Grappled as players see it, whoever's it is.
+ * - A rider gets off first: nothing else may hold it, only the same ride
+ *   again, as Controlled toggles.
  */
 export function attachAllowed(view: RightsView, viewer: AttachViewer, kind: AttachKind, carried: Token, holder: Token): boolean {
   if (viewer.role === "dm") return true;
   if (!withinReach(view.meta.settings, carried, holder)) return false;
-  if (grapples(kind, carried, holder)) return movesToken(view, viewer, holder) && (movesToken(view, viewer, carried) || grappledPublicly(view, carried));
+  const mount = carried.attached?.kind === "ride" ? holderOf(view.tokens, carried) : undefined;
+  if (mount && !(kind === "ride" && mount.id === holder.id)) return false;
+  if (grapples(kind, carried, holder)) {
+    if (!movesToken(view, viewer, holder)) return false;
+    return kind === "carry" ? grappledPublicly(view, carried) : movesToken(view, viewer, carried) || grappledPublicly(view, carried);
+  }
   if (!movesToken(view, viewer, carried) || !movesToken(view, viewer, holder)) return false;
   return kind !== "ride" || !notRidersTurn(view, carried.id);
 }
