@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { LogEntry, TrapDue } from "#shared/model.ts";
+import { projectState } from "#shared/project.ts";
 import { DM, P1, room, token, trap } from "#shared/testutil.ts";
 import { dmAlerts, linesAfter, metTrap, playerAlerts, shownAlert, watchOf } from "./alerts.ts";
 import { deskTraps, didLines, foldedWithTraps, hiddenLine, lineOf, whoLines } from "./desk.ts";
@@ -98,6 +99,12 @@ describe("what a trap going off tells each device", () => {
     assert.deepEqual(playerAlerts(seen, world(), P1), [{ text: "Thorn: The floor gives way!", sound: "crash" }]);
     assert.deepEqual(playerAlerts(seen, world(), { memberId: "p2", role: "player" }), [{ text: "Bree: Click." }]);
     assert.deepEqual(playerAlerts(seen, world(), DM).length, 0, "the DM owns no party creature here");
+  });
+
+  test("a player's own copy of the room, which names no owners of another player's creature, toasts only their own line", () => {
+    const mine = projectState(world(), P1, { sceneId: "s1" }) as unknown as ReturnType<typeof world>;
+    assert.equal(mine.tokens.bree?.ownerIds, undefined, "the copy holds no owners of Bree");
+    assert.deepEqual(playerAlerts([...seen].reverse(), mine, P1), [{ text: "Thorn: The floor gives way!", sound: "crash" }]);
   });
 
   test("a move met a trap when the server's ack marks it, the rule its undo refuses by, and a non-move is never watched", () => {

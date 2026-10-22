@@ -1,8 +1,8 @@
 import type { LogEntry, RoomState, TrapSound, Viewer } from "#shared/model.ts";
 import { compareLogIds } from "#shared/keys.ts";
 import { describeEvent, type LogNames } from "#shared/logText.ts";
-import { ownsToken } from "#shared/project.ts";
 import { isPoseOp, type ClientOp } from "#shared/protocol.ts";
+import { ownsToken } from "../tokens/access.ts";
 
 /*
  * What a trap going off tells each device (docs/design-v1-traps.md 4.3),
@@ -85,9 +85,10 @@ export function playerAlerts(lines: readonly LogEntry[], state: RoomState, viewe
   for (const e of lines) {
     const data = e.data;
     if (data?.type !== "trapSeen") continue;
+    // A player's copy holds `ownerIds` only on what they own, so this reads ownership as the client does.
     const plays = data.by.some((id) => {
       const token = state.tokens[id];
-      return token !== undefined && ownsToken(state, viewer, token);
+      return token !== undefined && ownsToken(state, viewer.memberId, token);
     });
     if (!plays) continue;
     out.push({ text: describeEvent(data, namesOf(state)), ...(data.sound ? { sound: data.sound } : {}) });
