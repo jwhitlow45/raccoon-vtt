@@ -58,13 +58,36 @@ export function useSideSheetRoom(): number | undefined {
   return sideSheetRoom(layout, chrome);
 }
 
-/** foldsUnderSheet for this Room now, in the chrome's own pixels (features/device/layout.ts). */
+/**
+ * foldsUnderSheet for this Room now, in the chrome's own pixels
+ * (features/device/layout.ts), or a map pane's bottom sheet showing
+ * (useFoldUnderPane). The token bar keeps to the panel sheets' rule alone,
+ * and no dock stands on a pane's edge: the alerts come back as it closes.
+ */
 export function useUnderSheet(): boolean {
   const { width, height } = useLayoutSize();
   const open = useRoomView((s) => sheetOpen(s.local));
-  const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
+  const dock = useScoped(dockSlot);
+  const full = useStore(dock, (s) => s.sheetFull);
+  const pane = useStore(dock, (s) => s.paneSheets > 0);
   const sideRoom = useSideSheetRoom();
-  return foldsUnderSheet({ width, height, sheetOpen: open, full, sideRoom });
+  return pane || foldsUnderSheet({ width, height, sheetOpen: open, full, sideRoom });
+}
+
+/**
+ * Folds the alerts column while a map pane (a label's, pin's, light's or
+ * trap's, features/builder/labelEdit.ts panePlacement) shows as a bottom
+ * sheet, `on`: the sheet spans the map's width and may rise to the top
+ * bars, where the column's cards would cover its header and Close. In any
+ * orientation, since the pane is a bottom sheet only under 600 px wide.
+ */
+export function useFoldUnderPane(on: boolean): void {
+  const store = useScoped(dockSlot);
+  useLayoutEffect(() => {
+    if (!on) return;
+    store.setState((s) => ({ paneSheets: s.paneSheets + 1 }));
+    return () => store.setState((s) => ({ paneSheets: s.paneSheets - 1 }));
+  }, [store, on]);
 }
 
 /** The dock's row height, and the gap kept above it under the top bars. */
@@ -188,12 +211,14 @@ type DockState = {
    * once the panel it opens covers the screen (features/tokens/statBlockOpen.ts).
    */
   sheetFullMode: boolean;
+  /** How many map panes show as a bottom sheet now (useFoldUnderPane), which fold the alerts column as a panel sheet does. */
+  paneSheets: number;
 };
 
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0 })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

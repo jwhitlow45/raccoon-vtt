@@ -11,6 +11,7 @@ import { useBackClose } from "../../lib/backClose.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
+import { useFoldUnderPane } from "../../pages/fold.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { lightCaption, lightSlot } from "../builder/lightTap.ts";
@@ -85,6 +86,8 @@ export default function LightPane(props: { light: Light; camera: Camera; viewpor
   // As a bottom sheet it swipes down to close, as its close does. Each choice is sent as it is made and its name on blur, so the focus rule alone holds it (docs/design-v1-sheet-swipe.md 4.6).
   const sheet = place.kind === "sheet";
   useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: light.id, clip: "foot" });
+  // The alerts column folds under it, as under a panel sheet, so its header and Close stay in reach (pages/fold.ts).
+  useFoldUnderPane(sheet);
 
   return (
     <div ref={paneRef} role="dialog" aria-label="Edit light" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>

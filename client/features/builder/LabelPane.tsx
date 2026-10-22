@@ -12,6 +12,7 @@ import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "..
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
+import { useFoldUnderPane } from "../../pages/fold.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { requestPan } from "../encounter/pan.ts";
@@ -87,6 +88,8 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
   const sheet = place.kind === "sheet";
   const drafts = useDraftRegistry();
   useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: label.id, clip: "foot", drafts });
+  // The alerts column folds under it, as under a panel sheet, so its header and Close stay in reach (pages/fold.ts).
+  useFoldUnderPane(sheet);
 
   return (
     <div

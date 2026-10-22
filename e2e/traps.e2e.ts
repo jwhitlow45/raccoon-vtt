@@ -357,4 +357,25 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-fu20b-save-in-reach");
   });
 
+  test("fu20b-2. on a DM phone held upright the waiting trap cards fold under the trap's pane, whose header and Close are whole in reach, and come back as it closes (LP13-TR-6)", async () => {
+    await dm.setViewportSize(PHONE);
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    const cards = dm.getByRole("group", { name: "Hidden Pit went off" });
+    await cards.first().waitFor();
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 5 });
+    await pane(dm).waitFor();
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    assert.equal(await cards.first().isVisible(), false, "a card draws over the pane");
+    assert.ok(await wholeInReach(pane(dm).getByRole("button", { name: "Close", exact: true })), "the pane's Close is out of reach");
+    await shots.take(dm, "traps-fu20b-pane-over-folded-cards");
+    await pane(dm).getByRole("button", { name: "Close", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await cards.first().waitFor();
+    await pickTool(dm, "Select");
+    for (const due of trap(dmSocket)?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: run.trapId, due: due.id });
+    await waitFor("the springings settled", () => (trap(dmSocket)?.rig?.due === undefined ? true : null));
+  });
 });

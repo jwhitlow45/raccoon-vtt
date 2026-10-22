@@ -19,6 +19,7 @@ import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { displayName } from "../../lib/scene.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
+import { useFoldUnderPane } from "../../pages/fold.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { aimTrapArea } from "../areas/AreaTool.tsx";
@@ -124,6 +125,8 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
   // As a bottom sheet it swipes down to close. Each choice is sent as it is made and text when its field is left, so the focus rule alone holds it.
   const sheet = place.kind === "sheet";
   useSheetSwipe(paneRef, { enabled: sheet && !hidden, onClose: () => closeRef.current(), item: trap.id, clip: "foot" });
+  // The alerts column folds under it, as under a panel sheet, so its header and Close stay in reach (pages/fold.ts).
+  useFoldUnderPane(sheet && !hidden);
 
   return (
     <div

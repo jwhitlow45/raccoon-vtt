@@ -570,6 +570,8 @@ function RoomPage() {
   // ------------------------------------------------ the dock (pages/fold.ts)
   const dockStore = scope.get(dockSlot);
   const hasBar = useStore(dockStore, (s) => s.bar !== null);
+  // A map pane's bottom sheet folds the alerts column too, with no dock on its edge (fold.ts useFoldUnderPane), so what arrives under it is still read out.
+  const underPane = useStore(dockStore, (s) => s.paneSheets > 0);
   const summary = useDockSummary();
   const safe = useSafeAreas();
   /*
@@ -1022,7 +1024,7 @@ function RoomPage() {
           onTabsDrawn={placeFocus}
         />
       ) : null}
-      <FoldStatus folded={folded || columnSummary} />
+      <FoldStatus folded={folded || underPane || columnSummary} />
       <HandoutPopup />
       <ShortcutSheetHost role={role} />
       <RoomPasteHost />
