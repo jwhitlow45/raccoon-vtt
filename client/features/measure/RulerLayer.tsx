@@ -15,8 +15,7 @@ import { dropView, type DropView, type Role } from "../movement/drop.ts";
 import { groupReading } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
-import { ownWalk } from "#shared/rules/movement.ts";
-import { dragLabel, dragReading, remoteWalk, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
+import { dragLabel, remoteReading, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
 import { Pill, pillGeometry } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { useWalkMeasure } from "./useWalkMeasure.ts";
@@ -89,8 +88,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
     return (token, to, walk) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.
       const speeds: Speeds | undefined = "inline" in token.actor ? token.actor.inline.speeds : characters?.[token.actor.ref]?.actor.speeds;
-      // Another device's drag reads what its frames carry, its corners and its cost, never a walk of its own, so the token is read as itself.
-      return dragReading({ token: ownWalk(token), to, encounter, activeTokenId, speeds, rules, role, ...(walk ? { walk: remoteWalk(token, to, walk.corners) } : {}), ...(walk?.costFt !== undefined ? { costFt: walk.costFt } : {}) });
+      return remoteReading({ token, to, encounter, activeTokenId, speeds, rules, role }, walk);
     };
   }, [encounter, activeTokenId, characters, rules, role]);
   if (!settings) return <Group ref={groupRef} listening={false} />;

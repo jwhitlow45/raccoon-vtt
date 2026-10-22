@@ -10,7 +10,12 @@ import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
 import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkerOf, walkersStop, type Found } from "./drop.ts";
-import { dragReading } from "../measure/movement.ts";
+import { dragReading, remoteReading } from "../measure/movement.ts";
+import { footprintSize } from "#shared/rules/footprint.ts";
+import { snapPosition } from "../../lib/scene.ts";
+import { actor } from "#shared/testutil.ts";
+import { copyFor } from "../attach/testing.ts";
+import { groupDragOf } from "./dragTesting.ts";
 import { frameFields, groupLanding, groupReading, walkPreview } from "./preview.ts";
 import { CLOSED, line, onTurn, raised, recordedCost, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
@@ -176,7 +181,7 @@ describe("a group drag", () => {
       for (let k = 0; k < 30; k++) heights[`${Math.floor(rand() * 16)},${Math.floor(rand() * 16)}`] = [1, 3, 5, 10][Math.floor(rand() * 4)]!;
       const base = world({ blockMovement: rand() < 0.5, heights });
       const size = (["tiny", "medium", "large"] as const)[Math.floor(rand() * 3)]!;
-      const placed = token("lead", { size, x: 3 + Math.floor(rand() * 8), y: 3 + Math.floor(rand() * 8), kind: "pc", ownerIds: ["p1"], disposition: "ally" });
+      const placed = token("lead", { size, x: 3 + Math.floor(rand() * 8), y: 3 + Math.floor(rand() * 8), kind: "pc", ownerIds: ["p1"], disposition: "ally", actor: { inline: actor({ speeds: { walk: 30 } }) } });
       base.tokens.lead = { ...placed, elevation: footprintGround(base.buildChunks, placed) };
       base.tokens.mate = token("mate", { x: 1, y: 1, kind: "pc", ownerIds: ["p1"], disposition: "ally" });
       const diagonal = (["five", "fiveTen", "euclid"] as const)[Math.floor(rand() * 3)]!;
@@ -193,6 +198,10 @@ describe("a group drag", () => {
       const to = { x: lead.x + dx, y: lead.y + dy };
       const read = dragReading({ token: walkerOf(seenRoom(view), lead), to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
       assert.equal(read.dragFt, cost, `case ${n}: ${size} by ${dx},${dy} under ${diagonal}`);
+      // The DM's device reads the frames the drag sends of it, which carry the leg's cost, so it reads the height the move lands at, its band too (review MV-O-29).
+      const sent = groupDragOf(copyFor(view, P1), "player", ["lead", "mate"], to);
+      const remote = remoteReading({ token: lead, to: snapPosition(to.x, to.y, footprintSize(lead)), encounter: view.encounter, activeTokenId: "lead", speeds: { walk: 30 }, rules: { feetPerCell: 5, diagonal }, role: "dm" }, { corners: [], ...(sent.frame.ft !== undefined ? { costFt: sent.frame.ft } : {}) });
+      assert.deepEqual([remote.dragFt, remote.left], [cost, sent.label.left], `case ${n}: another device's read of ${size} by ${dx},${dy} under ${diagonal}`);
     }
     assert.ok(climbed > 10, `${climbed} landed at another height`);
   });

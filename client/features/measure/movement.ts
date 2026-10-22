@@ -393,6 +393,22 @@ export function dragReading(input: {
   return out;
 }
 
+/**
+ * Another device's drag as this one reads it (RulerLayer.tsx
+ * RemoteDragMeasure): the token as itself, through the corners its frames
+ * carry, at the cost they carry to the DM and the token's owners
+ * (`costFt`). That cost holds what the corners cannot tell, as the height
+ * a group's dragged token lands at, which the sender's label read
+ * (stageHooks.ts groupFields), so this device reads it too (review
+ * MV-O-29). Never a walk of its own.
+ */
+export function remoteReading(
+  input: Omit<Parameters<typeof dragReading>[0], "token" | "walk" | "costFt"> & { token: MovingToken },
+  walk?: { corners: readonly Point[]; costFt?: number },
+): DragRead {
+  return dragReading({ ...input, token: ownWalk(input.token), ...(walk ? { walk: remoteWalk(input.token, input.to, walk.corners) } : {}), ...(walk?.costFt !== undefined ? { costFt: walk.costFt } : {}) });
+}
+
 /** The walk another device's frame draws, for its band: straight pieces through its corners with nothing extra, as players read a leg from its geometry. Its cost comes with the frame (`costFt`). */
 export function remoteWalk(token: MovingToken, to: Point, corners: readonly Point[]): DragWalk {
   const all = [...corners, to];
