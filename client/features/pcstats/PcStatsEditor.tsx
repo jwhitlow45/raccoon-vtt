@@ -40,7 +40,7 @@ import {
   type TotalKey,
 } from "./draft.ts";
 import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } from "./fill.ts";
-import { editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
+import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
 import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
 import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
@@ -336,6 +336,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   if (flow.step === "review" && flow.review) {
     const review = flow.review;
     const ticks = review.ticks;
+    const saved = store.getState().view?.characters[props.characterId] ?? known.current;
     const plan = ticks ? syncPlan(review.fill, flow) : null;
     const result = plan && ticks ? syncResult(plan, ticks) : null;
     // A record past its schema or 6 KiB would fail the whole Save, so Use it waits until the review leaves it within them (docs/design-v1-resync.md 3.3).
@@ -346,7 +347,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         return;
       }
       if (recordBig) return;
-      send({ t: "use", sync: editorSyncUse(result, store.getState().view?.characters[props.characterId] ?? known.current) });
+      send({ t: "use", sync: editorSyncUse(result, saved) });
     };
     return (
       <Dialog
@@ -375,7 +376,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
             onTick={(id) => send({ t: "tick", id })}
             onBulk={(next) => send({ t: "ticks", ticks: next })}
             name={name.current}
-            character={plan.input.character as Character}
+            character={saved ? editorHelpCharacter(plan, saved) : plan.input.character}
             nothingNew={leavesAsIs(plan, result)}
             labelId={(section) => `${reviewId}-${section}`}
           />

@@ -64,6 +64,16 @@ export function editorSyncPlan(
   return planSync({ mode: "editor", stats: block, level: state.draft.level, character: pendingCharacter(saved, state.also, state.record), fill });
 }
 
+/**
+ * The character a review's Also set help reads: the saved one's HP, which
+ * Save works the new maximum from (fill.ts alsoPatch), under the name Save
+ * leaves. The pending character's HP would already hold an earlier fill's
+ * maximum, and could read as full when the saved HP is not.
+ */
+export function editorHelpCharacter(plan: SyncPlan, saved: Pick<Character, "actor">): Pick<Character, "name" | "actor"> {
+  return { name: plan.input.character.name, actor: saved.actor };
+}
+
 /** A review's Use it, with its record compared with the saved one (`SyncUse`). */
 export function editorSyncUse(result: SyncResult, saved: Pick<Character, "ddbSync"> | undefined): SyncUse {
   const record = saved && sameRecord(result.record, saved.ddbSync) ? null : result.record;

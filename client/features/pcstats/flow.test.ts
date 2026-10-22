@@ -6,7 +6,9 @@ import { afterSync, defaultTicks, planSync, sameRecord, syncPatch, syncResult, t
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor } from "#shared/testutil.ts";
 import { openDraft } from "./draft.ts";
-import { editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { alsoPatch } from "./fill.ts";
+import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { alsoLine } from "./resync.ts";
 
 /** The editor's steps and Save (docs/design-v1-pc-stats.md 7.2). */
 
@@ -43,6 +45,36 @@ describe("the editor's flow", () => {
     const back = again.items.find((i) => i.type === "roll");
     assert.deepEqual([back?.section, back?.type === "roll" && back.case], ["kept", "deleted"], "listed with Add it back");
     assert.deepEqual(syncResult(again, defaultTicks(again)).stats.rolls, [], "and left out unless ticked");
+  });
+
+  test("after an earlier fill set a lower maximum, a later one's HP help reads the saved HP, as Save works it out (RSBUILD-ASTRA-06)", () => {
+    const AT = "2026-10-20T19:00:00.000Z";
+    const read = (hpMax: number): PcFill => ({ source: "ddb", stats: { rolls: [] }, level: 5, name: "Bree", actor: { ac: 15, hpMax }, warnings: [], read: { weapon: true, spell: true, other: true } });
+    const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ ac: 15, hp: { cur: 35, max: 38, temp: 0 } }) };
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read(38) });
+    const saved = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
+    assert.deepEqual(saved.actor.hp, { cur: 35, max: 38, temp: 0 });
+    const opened = openDraft(saved);
+    let state = openFlow(opened.draft);
+    const fill = (f: PcFill) => {
+      state = run(state, { t: "open", step: "ddb" }).state;
+      const plan = editorSyncPlan(f, state, opened, saved);
+      const ticks = defaultTicks(plan);
+      state = run(state, { t: "read", fill: f, lines: [], ticks }).state;
+      return plan;
+    };
+    const use = (plan: ReturnType<typeof fill>) => (state = run(state, { t: "use", sync: editorSyncUse(syncResult(plan, defaultTicks(plan)), saved) }).state);
+    use(fill(read(35)));
+    assert.equal(state.also.hpMax, 35);
+    const plan = fill(read(45));
+    const line = plan.also.find((a) => a.key === "hpMax")!;
+    assert.equal(alsoLine(line, plan.input.character, "ddb").help, "Bree is unhurt and stays at full HP: 45 of 45.", "the pending character reads as full");
+    assert.equal(alsoLine(line, editorHelpCharacter(plan, saved), "ddb").help, "Bree keeps 35 HP, now out of 45.");
+    use(plan);
+    // Save works the HP from the saved character and the maximum the fills left: 35 of 45, as the help says.
+    const hp = alsoPatch(state.also, saved).actor?.hp;
+    assert.deepEqual(hp, { max: 45 });
+    assert.deepEqual(afterSync(saved, { actor: { hp: hp! } }, AT).actor.hp, { cur: 35, max: 45, temp: 0 });
   });
 
   test("several D&D Beyond fills before Save: each is reviewed against what the last one took, and its record replaces the last one (RSBUILD-ASTRA-02)", () => {
