@@ -13,7 +13,7 @@ import { ChoiceRows, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChi
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
-import { BAND_NAMES, newTrapInput, rectBetween, START_ALARM, START_BLANK, startChoices, startKind, trapAt, wireBetween, wireEnd, withRect, type ZoneKind } from "./rules.ts";
+import { BAND_NAMES, newTrapInput, rectBetween, START_ALARM, START_BLANK, startChoices, startKind, tapRect, trapAt, wireBetween, wireEnd, withRect, type ZoneKind } from "./rules.ts";
 import { trapSlot, type TrapDraft, type TrapPicking } from "./store.ts";
 
 /**
@@ -30,7 +30,7 @@ function sceneTraps(ctx: ToolContext): Trap[] {
 }
 
 const ZONE_HINTS: Record<ZoneKind, string> = {
-  squares: "Drag across the squares of a new trap, or tap one square.",
+  squares: "Drag across the squares of a new trap, or tap to place it at its own size.",
   wire: "Drag from one end of the trip wire to the other.",
   door: "Tap a door to trap it.",
 };
@@ -39,10 +39,14 @@ function trapName(ctx: ToolContext, id: string): string {
   return ctx.getState().view?.traps[id]?.name ?? "the trap";
 }
 
-/** The zone a finished gesture drew, or null with the reason told. */
-function drawnZone(ctx: ToolContext, kind: ZoneKind, p: ToolPointer, draft: TrapDraft | null, moved: boolean, startWorld: { x: number; y: number }): TrapZone | null {
+/** The zone a finished gesture drew, or null with the reason told. A tap places a new trap's squares at its start's size, and adds one square to a trap's own. */
+function drawnZone(ctx: ToolContext, kind: ZoneKind, p: ToolPointer, draft: TrapDraft | null, moved: boolean, startWorld: { x: number; y: number }, fresh = false): TrapZone | null {
   const bounds = ctx.scene.bounds;
-  if (kind === "squares") return { cells: [draft && "rect" in draft ? draft.rect : rectBetween(startWorld, startWorld, bounds)] };
+  if (kind === "squares") {
+    if (draft && "rect" in draft) return { cells: [draft.rect] };
+    const { start, band } = ctx.scope.get(trapSlot).store.getState();
+    return { cells: [fresh ? tapRect(startWorld, start, band, bounds) : rectBetween(startWorld, startWorld, bounds)] };
+  }
   if (kind === "wire") {
     if (draft && "wire" in draft) return { wire: draft.wire };
     ctx.ui.notify(moved ? "A trip wire is at least half a square long." : ZONE_HINTS.wire, "info");
@@ -190,7 +194,7 @@ function onUp(p: ToolPointer, ctx: ToolContext): void {
     slot.store.setState({ paneId: null });
     return;
   }
-  const zone = drawnZone(ctx, st.kind, p, draft, g.moved, g.world);
+  const zone = drawnZone(ctx, st.kind, p, draft, g.moved, g.world, true);
   if (zone) create(ctx, zone);
 }
 

@@ -67,6 +67,18 @@ export function rectBetween(a: Point, b: Point, bounds: Bounds): CellRect {
   return { x: bx < ax ? ax - w + 1 : ax, y: by < ay ? ay - h + 1 : ay, w, h };
 }
 
+/**
+ * The squares a tap places (4.1): the start's own size when it is a
+ * preset on squares (a Hidden Pit's 2 x 2), else one square, its corner on
+ * the tapped square and kept inside the scene.
+ */
+export function tapRect(at: Point, start: string, band: LevelBand, bounds: Bounds): CellRect {
+  const zone = trapPreset(start, band)?.zone;
+  const w = Math.min(zone?.kind === "squares" ? zone.w : 1, bounds.w);
+  const h = Math.min(zone?.kind === "squares" ? zone.h : 1, bounds.h);
+  return { x: clamp(Math.floor(at.x), 0, bounds.w - w), y: clamp(Math.floor(at.y), 0, bounds.h - h), w, h };
+}
+
 /** Whether a point is a wire's end: a cell corner or an edge midpoint, never a cell's center. */
 function wireSpot(x: number, y: number): boolean {
   return Number.isInteger(x * 2) && Number.isInteger(y * 2) && (Number.isInteger(x) || Number.isInteger(y));

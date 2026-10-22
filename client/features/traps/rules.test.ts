@@ -22,6 +22,7 @@ import {
   searchFill,
   START_ALARM,
   START_BLANK,
+  tapRect,
   tokensOn,
   trapAt,
   triggerSummary,
@@ -51,6 +52,13 @@ describe("drawing a trap's zone (docs/design-v1-traps.md 4.1)", () => {
     assert.deepEqual(rectBetween({ x: 28.5, y: 1 }, { x: 40, y: -3 }, BOUNDS), { x: 28, y: 0, w: 2, h: 2 }, "kept on the scene");
     assert.deepEqual(rectBetween({ x: 25.5, y: 0.5 }, { x: 0, y: 0.5 }, BOUNDS), { x: 6, y: 0, w: LIMITS.trapRectSide, h: 1 }, "20 cells from the start");
     assert.deepEqual(rectBetween({ x: 3.3, y: 3.3 }, { x: 3.3, y: 3.3 }, BOUNDS), { x: 3, y: 3, w: 1, h: 1 }, "a tap is one square");
+  });
+
+  test("a tap places a new trap at its preset's size, and one square from Blank, kept on the scene", () => {
+    assert.deepEqual(tapRect({ x: 3.3, y: 3.3 }, "hidden-pit", "1-4", BOUNDS), { x: 3, y: 3, w: 2, h: 2 }, "the SRD's 2 x 2 pit");
+    assert.deepEqual(tapRect({ x: 3.3, y: 3.3 }, "collapsing-roof", "1-4", BOUNDS), { x: 3, y: 3, w: 1, h: 1 });
+    assert.deepEqual(tapRect({ x: 3.3, y: 3.3 }, START_BLANK, "1-4", BOUNDS), { x: 3, y: 3, w: 1, h: 1 });
+    assert.deepEqual(tapRect({ x: 29.5, y: 29.5 }, "hidden-pit", "1-4", BOUNDS), { x: 28, y: 28, w: 2, h: 2 }, "at the scene's corner");
   });
 
   test("a wire's ends land on cell corners and edge midpoints, never a cell's center", () => {

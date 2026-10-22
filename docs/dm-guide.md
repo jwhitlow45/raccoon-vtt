@@ -849,7 +849,7 @@ The tool's options choose what your next trap starts from:
 - **Party level** picks the SRD's column for an example trap (levels 1–4, 5–10, 11–16 or 17–20), which sets its save DC, its damage and the depth of its pit.
 - **Zone** chooses the trap's shape: **Squares**, a **Trip wire** or a **Door**. An example trap picks its own, and you can change it.
 
-Then draw it on the map. For squares, drag across them, or tap a single square. For a trip wire, drag from one end to the other: the ends snap to square corners and the middles of square edges, and a wire is at most 20 squares long. For a door, tap the door. The new trap's pane opens at once.
+Then draw it on the map. For squares, drag across them, or tap to place the trap at its own size: a Hidden Pit or Spiked Pit covers 2 by 2 squares from the one you tap, and Blank or Alarm a single square. For a trip wire, drag from one end to the other: the ends snap to square corners and the middles of square edges, and a wire is at most 20 squares long. For a door, tap the door. The new trap's pane opens at once.
 
 ### The trap pane
 
