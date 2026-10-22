@@ -325,7 +325,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   });
 
   test("tr-6. the pane on a phone at 375 x 667 at 130%: its header and Done in reach", async () => {
-    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.setViewportSize(SMALL);
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
     await waitFor("the DM's snapshot again", () => trap(dmSocket));
@@ -377,7 +377,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-fu20b-save-in-reach");
   });
 
-  test("fu20b-r1-2. on a small phone at 130% the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading, and closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
+  test("fu20b-r1-2. on a 320 x 568 phone at 130%, where an opened card leaves the column too short for it, the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading, and closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
     await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
