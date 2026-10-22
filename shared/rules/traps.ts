@@ -922,8 +922,8 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
 /**
  * What the trap step reads of a move, token by token: which pass it walks
  * in, whether it is a walker, its step, and the spots it passes, the start
- * first. The DM's drag label reads which traps a drag crosses from these,
- * and the tests read the steps.
+ * first, for the tests. The drag label reads which traps a drag crosses on
+ * its own (client/features/traps/rules.ts crossedTraps).
  */
 export function trapWalks(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }): { tokenId: string; isPublic: boolean; walker: boolean; step: number; spots: { x: number; y: number; progress: Progress }[] }[] {
   const sceneId = liveTrapScene(before);
