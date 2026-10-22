@@ -330,7 +330,10 @@ export function publicMembers(tokens: Tokens, tokenId: string, seen: SeenByAll, 
  * A group's check set (8.0): its public members and the tokens the op
  * names, with the links between them. Refusals, limits, loops, the seat
  * and get-off checks and the walls test read only these, since every
- * viewer misses an op that is refused.
+ * viewer misses an op that is refused. Traps' limits and refusals take it
+ * as this list (docs/design-v1-traps.md). Attach's own checks take the
+ * same set as a test over the link graph: the reducer's and the Attach
+ * list's `inGraph`, the named tokens and every token all players see.
  */
 export function checkSet(tokens: Tokens, tokenId: string, named: ReadonlySet<string>, seen: SeenByAll): string[] {
   const inSet = (t: Linked) => seen(t) || named.has(t.id);
