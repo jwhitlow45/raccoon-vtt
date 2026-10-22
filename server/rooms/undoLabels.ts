@@ -93,6 +93,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       if (op.kind === "carry") return `letting ${token(op.to)} carry ${token(op.tokenId)}`;
       return `putting ${token(op.tokenId)} on ${token(op.to)}`;
     case "token.detach": {
+      // The whole link: a player's detach is taken only of a link to a holder they see (shared/permissions.ts detachCheck),
+      // and the holder is named as their copy names it, so the label never tells them of one hidden from them.
       const link = before.tokens[op.tokenId]?.attached;
       if (op.x !== undefined) return link ? `taking ${token(op.tokenId)} off ${token(link.to)}` : `moving ${token(op.tokenId)}`;
       return before.tokens[op.tokenId]?.kind === "object" && link?.kind !== "drag" ? `putting down ${token(op.tokenId)}` : `letting go of ${token(op.tokenId)}`;

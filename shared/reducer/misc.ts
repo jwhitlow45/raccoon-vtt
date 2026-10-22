@@ -234,6 +234,14 @@ export const PARENT_GONE = "what it belongs to was deleted since";
  * keeps them, paused (removeEntries and unbindDurations), so a restore that
  * takes a token away leaves them just as a delete would. A token that no
  * initiative row names has no running duration left to strand.
+ *
+ * A player's undo and redo of a move pass these checks too, since every
+ * restore the server builds sets `deps`, and never trip them on a link
+ * (docs/design-v1-attach.md 8.0 and 8.3). Such a restore writes only poses
+ * and takes no token away, so the scans for work that depends on it never
+ * run, and it puts a link back only to a holder that still exists
+ * (server/rooms/undo.ts putBack) or keeps the one the token has now. So a
+ * hidden holder, there or deleted since, never changes its answer.
  */
 function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey, unknown>, removed: ParsedKey[]): void {
   const s = tx.state;

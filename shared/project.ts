@@ -1796,6 +1796,8 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     if (token && "ref" in token.actor) add(keys.character(token.actor.ref));
   }
   // A carried token's link reaches a player while they see its holder (linkShown), so the holder's change re-projects it.
+  // Hidden links count here too, but only to choose what to project again: each copy is still projected by its own rule,
+  // and only what changed in it is sent (docs/design-v1-attach.md 8.0).
   for (const token of Object.values(state.tokens)) if (token.attached && tokenIds.has(token.attached.to)) add(keys.token(token.id));
   // So does a mount sharing the turn, in the turn's start.
   if (state.encounter?.turnStart?.mounts?.some((id) => tokenIds.has(id))) {
