@@ -262,7 +262,7 @@ Players send no trap op. Every string is bounded by zod (6.1). The import schema
 
 - Deleting a scene deletes its traps. A deleted token, light or stamp leaves the actions that name it, which then skip. A door trap whose door is removed never goes off by itself.
 - `scene.duplicate` copies traps with the map, as it copies pins (`shared/reducer/duplicate.ts:64`), each id by `derivedId` (`:173`) through `fresh`: lights and stamps map to their copies' ids, tokens to theirs when creatures are copied and are dropped otherwise, doors stay, since free walls keep their ids. Occurrences and `noticedBy` are dropped.
-- Export and import carry `traps` and both rings and remap their ids as for pins, lights, stamps and tokens (design 16.4). Old line and occurrence ids are numbered in the old room's order, so the newest occurrence stays the newest. A room with more than 10 occurrences waiting is refused, as other caps are.
+- Export and import carry `traps` and both rings and remap their ids as for pins, lights, stamps and tokens (design 16.4). Old line and occurrence ids are numbered in the old room's order, so the newest occurrence stays the newest, and as a live room counts them: the players' lines one after another after the room log's, and the DM's lines and the occurrences that name them from 900000, so no id players get skips a line only the DM holds. A room with more than 10 occurrences waiting is refused, as other caps are.
 
 ## 7. Hidden stays hidden: public determinism
 

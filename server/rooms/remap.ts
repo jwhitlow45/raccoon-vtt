@@ -1,6 +1,7 @@
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
+import { DM_LINE_BASE } from "#shared/reducer/tx.ts";
 import type {
   AreaTemplate,
   Character,
@@ -583,8 +584,9 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
  * chunks do. A trap's waiting occurrences and both trap logs come along,
  * named after the new ids, every list keeping only plain ids that came
  * through and counting the rest, as the reducer stores them (6.1). Lines
- * are numbered after the room log's, in the old room's order, so no two
- * imported lines share an id and the newest occurrence stays the newest.
+ * are numbered in the old room's order, the players' after the room log's
+ * and the DM's from DM_LINE_BASE, so no two imported lines share an id and
+ * the newest occurrence stays the newest.
  */
 function remapTraps(
   state: RoomState,
@@ -593,13 +595,18 @@ function remapTraps(
 ): void {
   const { scenes, tokens, stampIds, lightIds, newId } = ids;
   const trapIds = new Map<string, string>();
-  // Every old line id an occurrence or a trap log holds, numbered in the old room's order, so the newest stays the newest.
-  const lineIds = new Map<string, string>();
-  const oldIds = new Set<string>();
-  for (const trap of Object.values(state.traps ?? {})) if (scenes.has(trap.sceneId)) for (const d of trap.rig?.due ?? []) oldIds.add(d.id);
-  for (const line of [...(state.trapLog ?? []), ...(state.trapSeen ?? [])]) oldIds.add(line.id);
-  for (const [i, id] of [...oldIds].sort(compareLogIds).entries()) lineIds.set(id, `0:${out.log.length + i}`);
-  const lineId = (id: string) => lineIds.get(id)!;
+  // Each ring is numbered in the old room's order, so the newest stays the newest. The DM's lines and the occurrences
+  // that name them count on their own from DM_LINE_BASE, as the reducer writes them (6.3): numbered with the players'
+  // lines, each one only the DM holds would leave a gap in the ids players get.
+  const dmLineIds = new Map<string, string>();
+  const dmIds = new Set<string>();
+  for (const trap of Object.values(state.traps ?? {})) if (scenes.has(trap.sceneId)) for (const d of trap.rig?.due ?? []) dmIds.add(d.id);
+  for (const line of state.trapLog ?? []) dmIds.add(line.id);
+  for (const [i, id] of [...dmIds].sort(compareLogIds).entries()) dmLineIds.set(id, `0:${DM_LINE_BASE + i}`);
+  const lineId = (id: string) => dmLineIds.get(id)!;
+  const seenLineIds = new Map<string, string>();
+  const seenKept = (state.trapSeen ?? []).filter((line) => line.data?.type === "trapSeen");
+  for (const [i, id] of seenKept.map((line) => line.id).sort(compareLogIds).entries()) seenLineIds.set(id, `0:${out.log.length + i}`);
   const kept = (list: readonly string[], more = 0): { list: string[]; more: number } => {
     const mapped = list.filter((id) => tokens.has(id)).map((id) => tokens.of(id));
     const plain = mapped.filter(isPlainId);
@@ -658,6 +665,6 @@ function remapTraps(
     if (data?.type !== "trapSeen") continue;
     const by = kept(data.by, data.more ?? 0);
     const { more: _more, ...rest } = data;
-    out.trapSeen.push({ ...line, id: lineId(line.id), data: { ...rest, by: by.list, ...(by.more > 0 ? { more: by.more } : {}) } });
+    out.trapSeen.push({ ...line, id: seenLineIds.get(line.id)!, data: { ...rest, by: by.list, ...(by.more > 0 ? { more: by.more } : {}) } });
   }
 }

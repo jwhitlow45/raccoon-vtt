@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds } from "#shared/keys.ts";
+import { DM_LINE_BASE } from "#shared/reducer/tx.ts";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
@@ -389,7 +390,7 @@ describe("remapState, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
 
-  test("old line ids are numbered in the old room's order, whichever trap holds them, so the newest occurrence stays the newest", () => {
+  test("old line ids are numbered in the old room's order, whichever trap holds them, so the newest occurrence stays the newest, and each ring counts on its own", () => {
     const state = room();
     const due = (id: string) => ({ id, at: AT, how: "enter" as const, by: [], hits: [] });
     // The trap listed first holds the newer occurrence.
@@ -400,7 +401,10 @@ describe("remapState, wave 5 (docs/design-v1-dm-tools.md 2.5)", () => {
     const all = Object.values(out.traps).flatMap((t) => (t.rig?.due ?? []).map((d) => ({ name: t.name, id: d.id })));
     const sorted = [...all].sort((x, y) => compareLogIds(x.id, y.id)).map((d) => d.name);
     assert.deepEqual(sorted, ["b", "b", "a"], "4:0, then 10:900000, then 12:0");
-    assert.ok(compareLogIds(all.find((d) => d.name === "a")!.id, out.trapSeen[0]!.id) < 0, "12:0 before 12:1");
+    // The players' line counts after the log and the DM's from DM_LINE_BASE, as a live room numbers them, so 12:1 comes before 12:0 now.
+    assert.equal(out.trapSeen[0]!.id, `0:${out.log.length}`, "12:1 is the players' first line");
+    assert.equal(all.find((d) => d.name === "a")!.id, `0:${DM_LINE_BASE + 2}`, "12:0 is the DM's third");
+    assert.ok(compareLogIds(out.trapSeen[0]!.id, all.find((d) => d.name === "a")!.id) < 0);
   });
 });
 
@@ -641,6 +645,26 @@ describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
     assert.equal(due.id, line.id, "the occurrence still names its line");
     assert.deepEqual(line.data, { type: "trap", trapId: copy.id, sceneId, name: "Hidden Pit", how: "enter", by: [thorn.id], more: 1, hits: 1, did: [], seen: [0] });
     assert.deepEqual(out.trapSeen[0]!.data, { type: "trapSeen", by: [thorn.id], message: "Click." });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("the players' trap lines are numbered one after another, and the DM's lines and occurrences on their own, so no id players get counts a line only the DM holds", () => {
+    const state = room();
+    state.tokens.thorn = token("thorn", { name: "Thorn", kind: "pc" });
+    const t = trap("plate");
+    t.rig = { ...t.rig!, due: [{ id: "9:900000", at: AT, how: "enter", by: ["thorn"], hits: ["thorn"], hidden: true }] };
+    state.traps.plate = t;
+    const dmLine = (id: string, hidden = false) => ({ id, at: AT, kind: "event" as const, data: { type: "trap" as const, trapId: "plate", sceneId: "s1", name: "Plate", how: "enter" as const, by: ["thorn"], hits: 1, did: [], ...(hidden ? { hidden: true as const } : {}) } });
+    const seenLine = (id: string) => ({ id, at: AT, kind: "event" as const, data: { type: "trapSeen" as const, by: ["thorn"], message: "Click." } });
+    // A springing players saw, a hidden one only the DM holds, then another they saw.
+    state.trapLog = [dmLine("7:900000"), dmLine("9:900000", true), dmLine("11:900000")];
+    state.trapSeen = [seenLine("7:0"), seenLine("11:0")];
+    const out = remapState(state, { assets: new Map() });
+    const n = out.log.length;
+    assert.deepEqual(out.trapSeen.map((e) => e.id), [`0:${n}`, `0:${n + 1}`], "no gap where the hidden springing was");
+    assert.deepEqual(out.trapLog.map((e) => e.id), ["0:900000", "0:900001", "0:900002"]);
+    assert.equal(Object.values(out.traps)[0]!.rig!.due![0]!.id, "0:900001", "the occurrence still names its line");
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
