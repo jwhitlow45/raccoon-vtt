@@ -541,8 +541,10 @@ describe("the server takes a walk that comes back over a cart only when no piece
  * behind, among walls right across the scene with doors one to three
  * squares wide in them, and short walls about (review LP12-AT-2). Now and
  * then one of the creatures is one players cannot see, which tows unseen.
+ * With `relief`, raised blocks 5 or 10 ft high stand about, and a creature
+ * may be held up off its ground (review FU20A-ASTRA-3).
  */
-function towCase(r: () => number): { state: RoomState; who: Viewer; towed: string[] } {
+function towCase(r: () => number, relief = false): { state: RoomState; who: Viewer; towed: string[] } {
   const edges: Record<string, EdgeFeature> = {};
   for (let i = int(r, 1, 3); i > 0; i--) {
     const at = int(r, 4, 24);
@@ -578,7 +580,22 @@ function towCase(r: () => number): { state: RoomState; who: Viewer; towed: strin
     tokens.push(grappled(id, { name: `Goblin ${i}`, x: hx + ox, y: hy + oy, attached: { to: "kira", kind: "drag" }, ...(i === 2 && chance(r, 0.4) ? { visibility: "dm" as const } : {}) }));
     towed.push(id);
   }
-  let state = world({ edges, tokens });
+  const heights: Record<string, number> = {};
+  if (relief) {
+    // Blocks clear of where they all start, so each starts on the ground or held up over it.
+    const starts = new Set(tokens.flatMap((t) => footprintCells(t)));
+    for (let i = int(r, 3, 8); i > 0; i--) {
+      const feet = pick(r, [5, 10]);
+      const across = chance(r, 0.5);
+      const long = int(r, 1, 8);
+      const wide = int(r, 1, 2);
+      const bx = hx + int(r, -6, 6);
+      const by = hy + int(r, -6, 6);
+      for (let y = by; y < by + (across ? wide : long); y++) for (let x = bx; x < bx + (across ? long : wide); x++) if (x >= 0 && y >= 0 && x < 30 && y < 30 && !starts.has(`${x},${y}`)) heights[`${x},${y}`] = feet;
+    }
+    for (const [k, t] of tokens.entries()) if (k > 0 && chance(r, 0.5)) tokens[k] = { ...t, elevation: pick(r, [5, 10]) };
+  }
+  let state = world({ edges, tokens, heights });
   // True distance too, whose routes are pulled taut past corners.
   state.meta.settings = { ...state.meta.settings, diagonal: pick(r, ["five", "fiveTen", "euclid"] as const) };
   for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "kira", value: 20 }] }, { t: "encounter.next" }] as Op[]).entries()) {
@@ -587,6 +604,14 @@ function towCase(r: () => number): { state: RoomState; who: Viewer; towed: strin
     state = out.state;
   }
   return { state, who: chance(r, 0.85) ? P1 : DM, towed };
+}
+
+/** A token's squares by cell key. */
+function footprintCells(t: Token): string[] {
+  const r = footprintRect(t);
+  const out: string[] = [];
+  for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) out.push(`${x},${y}`);
+  return out;
 }
 
 describe("a holder's route search walks the creatures it drags beside it with it (review LP12-AT-2)", () => {
@@ -645,6 +670,39 @@ describe("a holder's route search walks the creatures it drags beside it with it
     }
     // A run that never reroutes a tow, names one left behind or finds no way at all tests nothing.
     assert.ok(opens > 50 && routes > 300 && rerouted > 80 && named > 20 && noneAlone > 15 && hiddenTows > 20, JSON.stringify({ opens, routes, rerouted, named, noneAlone, hiddenTows }));
+  });
+
+  test("random tows over raised ground, a creature now and then held up off its ground: each step is tested as the move puts it, on its own ground, so the server takes every drag sent (review FU20A-ASTRA-3)", () => {
+    let sent = 0;
+    let aloft = 0;
+    let routes = 0;
+    for (let seed = 1; seed <= 600; seed++) {
+      const r = rng(seed);
+      const c = towCase(r, true);
+      const kira = c.state.tokens.kira!;
+      const raw = { x: Math.max(0, Math.min(27, kira.x + int(r, -8, 8))), y: Math.max(0, Math.min(27, kira.y + int(r, -8, 8))) };
+      const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
+      const drag = dragOf(copy, c.who.role, "kira", raw);
+      // With no way found the drop goes as the straight leg, cut where a walker meets a wall or a ledge (drop.ts walkersStop).
+      if (!drag.op || drag.answer.kind === "none") continue;
+      const where = `seed ${seed} (${c.who.memberId} drags kira to ${raw.x},${raw.y})`;
+      const op = drag.op as Op;
+      const allowed = canApply(op, c.who, c.state, { canUseAsset: () => true });
+      assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message} for ${JSON.stringify(op)}`);
+      const applied = applyOp(c.state, op, c.who, env(10));
+      assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
+      assert.deepEqual(drag.preview.to, { x: applied.state.tokens.kira!.x, y: applied.state.tokens.kira!.y }, `${where}: the picture showed another spot`);
+      sent++;
+      if (c.towed.some((id) => c.state.tokens[id]!.elevation > 0)) aloft++;
+      if (drag.answer.kind !== "route") continue;
+      // The way found is one they all follow as the move puts them, so the drop is never cut where one of them meets a ledge.
+      const view = dropView(copy, c.who.role);
+      const cut = walkersCut(view, view.tokens.kira!, routeTarget(view, view.tokens.kira!, raw), drag.answer.route, c.who.role);
+      assert.equal(cut, null, `${where}: the route ${JSON.stringify(drag.answer.route.pieces)} leaves a creature behind`);
+      routes++;
+    }
+    // A run that never sends a drag of a creature held up, or round raised ground, tests nothing.
+    assert.ok(sent > 300 && aloft > 160 && routes > 220, JSON.stringify({ sent, aloft, routes }));
   });
 });
 

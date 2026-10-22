@@ -152,6 +152,31 @@ describe("a holder's route search walks the creature it drags beside it with it 
     assert.deepEqual(clears, [[false, true], [false, true]]);
   });
 
+  test("a goblin held 5 ft up beside him walks on its own ground behind his walk, so the drag takes him round raised ground it cannot climb, and the server takes it (review FU20A-ASTRA-3)", () => {
+    const grappledGoblin = goblin({ x: 5, y: 4, elevation: 5, size: "small", actor: { inline: actor({ effects: [effect("g1", { key: "grappled" })] }) } });
+    const state = onTurn(world({ heights: { "5,8": 5, "5,9": 5 }, tokens: [thorn({ x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }), grappledGoblin] }), "thorn");
+    const drag = dragOf(copyFor(state, P1), "player", "thorn", { x: 4, y: 11 });
+    assert.equal(drag.answer.kind, "route");
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, drag.plan.stop], [4, 11, null]);
+    assert.ok(canApply(op, P1, state, { canUseAsset: () => true }).ok, JSON.stringify(op));
+    const r = applyOp(state, op, P1, env(20));
+    assert.ok(r.ok);
+    assert.deepEqual([r.state.tokens.goblin!.x, r.state.tokens.goblin!.y, r.state.tokens.goblin!.elevation], [5, 11, 0]);
+  });
+
+  test("a goblin held 10 ft up over a 5 ft block beside him comes down to its ground at its first step, which the block's edge stops as the server's leg test reads it, so the note names it (review FU20A-ASTRA-3)", () => {
+    const grappledGoblin = goblin({ x: 5, y: 4, elevation: 10, size: "small", actor: { inline: actor({ effects: [effect("g1", { key: "grappled" })] }) } });
+    const state = onTurn(world({ heights: { "5,4": 5 }, tokens: [thorn({ x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }), grappledGoblin] }), "thorn");
+    const drag = dragOf(copyFor(state, P1), "player", "thorn", { x: 4, y: 11 });
+    assert.equal(drag.answer.kind, "none");
+    assert.equal(stopText(drag.plan.stop!), "Goblin can't follow through there.");
+    // Held where he stands, so nothing is sent, and the server refuses the straight walk there.
+    assert.deepEqual([drag.op, drag.hold?.at, drag.hold?.noWay], [null, { x: 4, y: 4 }, true]);
+    const straight = canApply({ t: "token.move", tokenId: "thorn", x: 4, y: 11 }, P1, state, { canUseAsset: () => true });
+    assert.deepEqual(straight.ok ? null : straight.message, LEDGE_IN_THE_WAY);
+  });
+
   test("a goblin straight behind him follows him through the 5 ft door, and alone he walks round the wall as before", () => {
     const behind = towing(false, { x: 5, y: 3 }, { x: 5, y: 4 });
     const drag = dragOf(copyFor(behind, P1), "player", "thorn", { x: 5, y: 11 });
