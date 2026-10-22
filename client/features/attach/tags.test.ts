@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { canApply } from "#shared/permissions.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { Encounter, RoomState, Token } from "#shared/model.ts";
 import { character, DM, entry, P1, P2, room, token } from "#shared/testutil.ts";
@@ -139,6 +140,8 @@ describe("the rider's Controlled or Independent", () => {
     assert.equal(steerChoice(state, dm, t(state, "owl")), null, "a perch has no control");
     assert.deepEqual(steerOp(t(state, "bree"), "horse", false), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 5, elevation: 0 });
     assert.deepEqual(steerOp(t(state, "bree"), "horse", true), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 5, elevation: 0 });
+    // The op is one the server takes from the player it is offered to.
+    for (const controlled of [false, true]) assert.equal(canApply(steerOp(t(mine, "bree"), "horse", controlled), P1, state, { canUseAsset: () => true }).ok, true);
   });
 
   test("a player loses it on the DM's horse, and in a fight off the rider's turn", () => {

@@ -67,7 +67,8 @@ export function holderAction(token: Token): { words: string; choice: "letGo" | "
  * The server checks the same place but for the creatures, whose check would
  * tell a player where a hidden one stands. It lands as a walk off its
  * holder lands (drop.ts landedOffHolder): on the ground there off a holder
- * on the ground, at its height off a flier. Null when there is no such spot.
+ * on the ground, at its height off a flier, and its reach is measured from
+ * there, as the server measures it. Null when there is no such spot.
  */
 export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Token): { x: number; y: number; elevation: number } | null {
   const holder = holderOf(view.tokens, carried) as Token | undefined;
@@ -80,8 +81,9 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
   const walls = viewer.role === "player" && scene.blockMovement === true;
   const walkers = walls ? walkersFor(view, carried.id, "player") : [];
   const seat = { x: carried.x, y: carried.y, elevation: carried.elevation };
+  const landing = (at: { x: number; y: number }) => landedOffHolder(view.buildChunks, carried, holder, at);
   const spot = getOffSpot(view.meta.settings, scene.bounds, carried, holder, (at) => {
-    const elevation = landedOffHolder(view.buildChunks, carried, holder, at);
+    const elevation = landing(at);
     const placed: Token = { ...carried, x: at.x, y: at.y, elevation };
     delete placed.squeeze;
     const { lo, hi } = verticalExtentFt(placed, fpc);
@@ -92,8 +94,8 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
     if (!walls) return true;
     const to = { x: at.x, y: at.y, elevation };
     return legStop(view, carried, to) === null && walkersStop(view, carried, [seat, to], walkers) === null;
-  });
-  return spot ? { x: spot.x, y: spot.y, elevation: landedOffHolder(view.buildChunks, carried, holder, spot) } : null;
+  }, landing);
+  return spot ? { x: spot.x, y: spot.y, elevation: landing(spot) } : null;
 }
 
 /** The op: Get off with its place, Put down and Let go where it stands. */

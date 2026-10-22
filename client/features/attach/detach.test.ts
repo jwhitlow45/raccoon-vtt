@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
-import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
-import { DM, P1, room, scene, token } from "#shared/testutil.ts";
+import { clientOpSchema, type ClientOp, type Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { DM, P1, env, room, scene, token } from "#shared/testutil.ts";
 import { line, raised, world } from "../movement/testing.ts";
 import { barSlots, DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction } from "./detach.ts";
 
@@ -19,6 +20,13 @@ const horse = token("horse", { name: "Warhorse", size: "large", x: 5, y: 5 });
 const rider = token("bree", { name: "Bree", ownerIds: ["p1"], x: 5, y: 5, attached: { to: "horse", kind: "ride" } });
 const torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 6, y: 6, attached: { to: "horse", kind: "carry" } });
 const goblin = token("goblin", { name: "Goblin", number: 2, x: 7, y: 5, attached: { to: "horse", kind: "drag" } });
+
+/** The Get off op built from the spot getOffPlace found, and whether the server takes it from that viewer and stores it. */
+function takes(state: RoomState, viewer: typeof dm | typeof p1, place: { x: number; y: number; elevation: number } | null): boolean {
+  const op = detachOp("bree", place);
+  const who = viewer.role === "dm" ? DM : P1;
+  return canApply(op, who, state, { canUseAsset: () => true }).ok && applyOp(state, op as Op, who, env(1)).ok;
+}
 
 describe("getting off and letting go", () => {
   test("a creature gets off, an object is put down, a dragged creature is let go, and without its holder in the copy nothing", () => {
@@ -46,6 +54,7 @@ describe("getting off and letting go", () => {
     // What the rider carries gets off with it, so it never blocks the spot.
     const own = withTokens([horse, rider, { ...torch, x: 7, y: 6, attached: { to: "bree", kind: "carry" } }]);
     assert.deepEqual(getOffPlace(own, dm, rider), { x: 7, y: 6, elevation: 0 });
+    for (const s of [state, blocked, own]) for (const viewer of [dm, p1]) assert.equal(takes(s, viewer, getOffPlace(s, viewer, s.tokens.bree!)), true);
   });
 
   test("a player's spot has a clear leg from the seat where walls stop moves, and with no room there is none", () => {
@@ -53,6 +62,8 @@ describe("getting off and letting go", () => {
     const spot = getOffPlace(walled, p1, rider)!;
     assert.ok(spot.x < 7, "the east side is behind the wall");
     assert.deepEqual(getOffPlace(walled, dm, rider), { x: 7, y: 6, elevation: 0 }, "the DM's get off is placed, never walked");
+    assert.equal(takes(walled, p1, spot), true);
+    assert.equal(takes(walled, dm, getOffPlace(walled, dm, rider)), true);
     const boxed = withTokens([{ ...horse, x: 0, y: 0 }, { ...rider, x: 0, y: 0 }], room({ scenes: { s1: scene("s1", { bounds: { w: 2, h: 2 } }) } }));
     assert.equal(getOffPlace(boxed, dm, boxed.tokens.bree!), null);
   });
@@ -88,6 +99,8 @@ describe("getting off and letting go", () => {
     const place = getOffPlace(state, p1, state.tokens.bree!)!;
     const ground = place.x >= 5 && place.x < 6 ? 10 : 0;
     assert.equal(place.elevation, ground, JSON.stringify(place));
+    // Its reach is measured from where it lands: on the low ground 10 ft below the horse, a spot beside it is out of a 5 ft reach (review AT-ASTRA-14).
+    for (const viewer of [dm, p1]) assert.equal(takes(state, viewer, getOffPlace(state, viewer, state.tokens.bree!)), true, viewer.role);
   });
 
   test("the ops: Get off with its place, the others where it stands", () => {

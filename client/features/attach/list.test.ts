@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "#shared/model.ts";
+import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { actor, DM, effect, entry, P1, room, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
@@ -153,6 +154,12 @@ describe("the Attach list", () => {
     assert.equal(asksControl(carry), false);
     assert.equal("steer" in attachOp(carry, true), false);
     for (const row of rows) assert.ok(clientOpSchema.safeParse(attachOp(row, true)).success, row.text);
+    // Each row's op is one the server takes from whoever it was offered to, the DM's and a player's from their own copy.
+    const takes = (who: typeof DM, op: ReturnType<typeof attachOp>) => canApply(op, who, table(), { canUseAsset: () => true });
+    for (const row of rows) assert.equal(takes(DM, attachOp(row, true)).ok, true, row.text);
+    const mine = attachRows(asPlayer(table()), p1, "thorn");
+    assert.ok(mine.length > 0);
+    for (const row of mine) for (const steer of [false, true]) assert.equal(takes(P1, attachOp(row, steer)).ok, true, row.text);
     const fight = { encounter: { rev: 1 } as RoomState["encounter"] };
     assert.equal(waitsForServer(p1, fight, ride, true), true);
     assert.equal(waitsForServer(p1, fight, ride, false), false);

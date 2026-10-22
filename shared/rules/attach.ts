@@ -207,9 +207,18 @@ export function landsAt(chunks: Parameters<typeof footprintGround>[0], token: Pl
  * The first place a creature may get off at (4.3): ring by ring around the
  * holder in the order new companions are spread (the east of the middle
  * first, then clockwise), each spot `getOffFits` takes and `accept`, the
- * device's own checks of creatures and walls, takes too. Null when none.
+ * device's own checks of creatures and walls, takes too. `landing` is the
+ * height it would land at each spot, which reach is measured from, as the
+ * server measures the op's: its own when not given. Null when none.
  */
-export function getOffSpot(settings: DistanceSettings, bounds: { w: number; h: number }, carried: FootprintToken, holder: FootprintToken, accept: (spot: Point) => boolean = () => true): Point | null {
+export function getOffSpot(
+  settings: DistanceSettings,
+  bounds: { w: number; h: number },
+  carried: FootprintToken,
+  holder: FootprintToken,
+  accept: (spot: Point) => boolean = () => true,
+  landing?: (spot: Point) => number,
+): Point | null {
   const size = footprintSize(carried);
   const step = snapStep(carried);
   const box = fullRect(holder);
@@ -219,7 +228,7 @@ export function getOffSpot(settings: DistanceSettings, bounds: { w: number; h: n
   const rings = Math.ceil((Math.max(box.w, box.h) / 2 + Math.max(size.w, size.h) / 2 + reachCells + 1) / step);
   for (let ring = 1; ring <= rings; ring++) {
     for (const spot of ringSpots(center, ring, step)) {
-      if (getOffFits(settings, bounds, carried, holder, spot) && accept(spot)) return spot;
+      if (getOffFits(settings, bounds, carried, holder, landing ? { ...spot, elevation: landing(spot) } : spot) && accept(spot)) return spot;
     }
   }
   return null;
