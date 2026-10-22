@@ -282,6 +282,8 @@ A scene can hold up to 100 lights, 500 stamps and 500 labels, and it can be at m
 
 Players can open and close unlocked doors themselves, as long as their token can reach the door: within 5 ft, with a clear line to it. They tap the door, or press **Open door** in their token's action bar. A locked door answers "It's locked."
 
+Who opens a door matters when a trap is set on it. A door opened from a token's action bar is opened by that token. When you tap a door, the token you had selected opens it, so to have the goblin open it, select the goblin and then tap the door. With nothing selected, you open it from afar and set off no trap. A player's tap opens it with their selected token when it can reach the door, or else with their nearest token that can.
+
 Here is what blocks what:
 
 - Walls, and closed or locked doors, block movement, sight and areas.

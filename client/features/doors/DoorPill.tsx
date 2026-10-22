@@ -11,7 +11,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { cardPlace } from "../movement/anchor.ts";
 import { ownsToken } from "../tokens/access.ts";
-import { doorActions, doorName, doorOpener, seenDoor, type DoorOnMap } from "./doors.ts";
+import { doorActions, doorName, pillOpener, seenDoor, type DoorOnMap } from "./doors.ts";
 import { doorPillSlot } from "./store.ts";
 
 const EMPTY_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
@@ -44,20 +44,20 @@ export function DoorPillHost(props: { scene: Scene; tool: string; camera: Camera
     if (pill && !open) slot.setState({ pill: null });
   }, [pill, open, slot]);
   if (!open || !door || dragging) return null;
-  return <Pill door={door} scene={props.scene} role={role} camera={props.camera} viewport={props.viewport} insets={props.insets} />;
+  return <Pill door={door} selected={pill?.selected} scene={props.scene} role={role} camera={props.camera} viewport={props.viewport} insets={props.insets} />;
 }
 
-function Pill(props: { door: DoorOnMap; scene: Scene; role: "dm" | "player"; camera: Camera; viewport: Size; insets: Insets }) {
+function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Scene; role: "dm" | "player"; camera: Camera; viewport: Size; insets: Insets }) {
   const { door, scene, role } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
   const store = useRoomStore();
-  // A player's tap opens the door with their own nearest token that reaches it (docs/design-v1-traps.md 5.3).
+  // Who opens it, whose door traps it sets off (docs/design-v1-traps.md 5.3).
   const opener = (): string | undefined => {
     const s = store.getState();
     const view = s.view;
-    if (role === "dm" || !view) return undefined;
-    return doorOpener(view, s.you?.memberId, door, scene.id, (t) => ownsToken(view, s.you?.memberId, t))?.id;
+    if (!view) return undefined;
+    return pillOpener(view, s.you, door, scene.id, props.selected, (t) => ownsToken(view, s.you?.memberId, t));
   };
   const choices = doorActions(scene.id, door, role);
   const width = Math.min(role === "dm" ? 300 : 160, props.viewport.width - 16);

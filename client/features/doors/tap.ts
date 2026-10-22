@@ -18,7 +18,7 @@ export const DOOR_SLOP_PX = 22;
  * (docs/design-v1-heights-readout.md section 2), and one thing floats over
  * the map at a time.
  */
-export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point): boolean {
+export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point, selected: string | null = null): boolean {
   const pill = ctx.scope.get(doorPillSlot);
   const view = ctx.getState().view;
   const fogged = ctx.role === "player" && ctx.scene.fogEnabled !== false;
@@ -27,7 +27,8 @@ export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" |
       ? doorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, at: world, slop: DOOR_SLOP_PX / ctx.camera().scale, fog: fogged ? view.fogTiles : null })
       : null;
   if (hit) {
-    pill.setState({ pill: { sceneId: ctx.scene.id, ref: hit.ref } });
+    // The token selected when the door was tapped is who opens it (docs/design-v1-traps.md 5.3), though the tap let it go.
+    pill.setState({ pill: { sceneId: ctx.scene.id, ref: hit.ref, ...(selected !== null ? { selected } : {}) } });
     return true;
   }
   if (!pill.getState().pill) return false;

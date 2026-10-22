@@ -213,6 +213,7 @@ The Builder tool is the DM's. Its modes:
 - The DM's moves are never stopped.
 - With the Select tool, a tap on a door offers the DM Open or Close and Lock or Unlock, and Mark found or Hide on a secret door.
 - Players open and close unlocked doors that their own token can reach, with a tap on the door or "Open door" in the token's action bar. A locked door answers "It's locked."
+- The creature that opens a door, which sets off a trap on it: the token whose action bar opened it, else for a tap the token selected when the door was tapped (any on the scene for the DM, the player's own that reaches it for a player), else the player's nearest own token that reaches it. The DM with nothing selected opens it from afar and sets off nothing.
 - Walls block areas of effect. Walls, closed doors and pillars block sight.
 
 ## Fog and vision

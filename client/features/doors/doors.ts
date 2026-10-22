@@ -199,6 +199,21 @@ export function doorOpener(state: RoomState, memberId: string | undefined, d: Pi
   return best?.token ?? null;
 }
 
+/**
+ * Who opens a door from its pill (docs/design-v1-traps.md 5.3): the token
+ * selected when the door was tapped, any on the scene for the DM and the
+ * player's own that reaches the door for a player, else for a player
+ * their nearest own token that reaches it (`doorOpener`). The DM with none
+ * selected opens it from afar, setting off no trap.
+ */
+export function pillOpener(state: RoomState, you: { memberId: string; role: "dm" | "player" } | null, d: Pick<DoorOnMap, "ref" | "chunk" | "mid">, sceneId: string, selected: string | undefined, owns: (token: Token) => boolean): string | undefined {
+  if (!you) return undefined;
+  const chosen = selected !== undefined ? state.tokens[selected] : undefined;
+  if (chosen && chosen.sceneId === sceneId && (you.role === "dm" || (owns(chosen) && reachesDoor(state, chosen, d.ref, d.chunk)))) return chosen.id;
+  if (you.role === "dm") return undefined;
+  return doorOpener(state, you.memberId, d, sceneId, owns)?.id;
+}
+
 /** One button of a door's pill: its label and the op it sends. */
 export type DoorAction = { label: string; op: OpOf<"door.set"> };
 

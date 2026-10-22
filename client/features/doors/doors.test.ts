@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { EdgeFeature, FogTile, FreeWall } from "#shared/model.ts";
+import type { EdgeFeature, FogTile, FreeWall, Token } from "#shared/model.ts";
+import { token } from "#shared/testutil.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { encodeTileFrom } from "../../lib/fogTiles.ts";
 import { planOne, stopText } from "../movement/drop.ts";
 import { CLOSED, line, OPEN, thorn, world } from "../movement/testing.ts";
-import { doorActions, doorName, doorsInReach, doorsNear, doorUnder, findDoor, noteDoor, seenDoor, segmentDistance } from "./doors.ts";
+import { doorActions, doorName, doorsInReach, doorsNear, doorUnder, findDoor, noteDoor, pillOpener, seenDoor, segmentDistance } from "./doors.ts";
 
 const FREE_DOOR: FreeWall = { id: "abcdefghijkl", a: [12, 2], b: [13, 3], f: { kind: "door", state: "closed", secret: false, discovered: false } };
 
@@ -124,6 +125,37 @@ describe("the doors a token reaches (decided 2026-10-14)", () => {
 
   test("a free door from the cells on either side of its middle", () => {
     assert.deepEqual(doorsInReach(hall(), thorn({ x: 12, y: 3 }), null).map((d) => d.ref), [{ cx: 0, cy: 0, id: "abcdefghijkl" }]);
+  });
+});
+
+describe("who opens a door from its pill (docs/design-v1-traps.md 5.3)", () => {
+  const door = findDoor(hall().buildChunks, "s1", { edge: "6,5,w" })!;
+  const room = () => {
+    const state = hall();
+    state.tokens.thorn = thorn({ x: 5, y: 5 });
+    state.tokens.imp = token("imp", { name: "Imp", size: "tiny", ownerIds: ["p1"], x: 5, y: 6 });
+    state.tokens.gob = token("gob", { name: "Goblin", x: 7, y: 5 });
+    return state;
+  };
+  const p1 = { memberId: "p1", role: "player" as const };
+  const dm = { memberId: "dm1", role: "dm" as const };
+  const owns = (t: Token) => t.ownerIds.includes("p1");
+
+  test("the token selected when the door was tapped, the player's own that reaches it", () => {
+    assert.equal(pillOpener(room(), p1, door, "s1", "imp", owns), "imp", "the familiar, though Thorn is nearer");
+    assert.equal(pillOpener(room(), p1, door, "s1", "gob", owns), "thorn", "not theirs: the nearest of their own");
+    const far = room();
+    far.tokens.imp = { ...far.tokens.imp!, x: 1, y: 1 };
+    assert.equal(pillOpener(far, p1, door, "s1", "imp", owns), "thorn", "out of reach: the nearest of their own");
+    assert.equal(pillOpener(room(), p1, door, "s1", undefined, owns), "thorn");
+  });
+
+  test("the DM opens it with any selected token on the scene, else from afar with none", () => {
+    assert.equal(pillOpener(room(), dm, door, "s1", "gob", owns), "gob");
+    const away = room();
+    away.tokens.gob = { ...away.tokens.gob!, sceneId: "s2" };
+    assert.equal(pillOpener(away, dm, door, "s1", "gob", owns), undefined);
+    assert.equal(pillOpener(room(), dm, door, "s1", undefined, owns), undefined);
   });
 });
 

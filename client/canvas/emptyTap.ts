@@ -28,9 +28,11 @@ import { worldToScreen, type Point } from "../lib/camera.ts";
  */
 export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boolean, deselect: () => void): void {
   if (held) return;
+  // Who a door's pill opens it with, read before the tap lets the token go.
+  const selected = ctx.getState().local.selectedId;
   deselect();
   putAway(ctx, world, { readout: false });
-  if (tapMapLabel(ctx, tool, world) || tapDoor(ctx, tool, world)) {
+  if (tapMapLabel(ctx, tool, world) || tapDoor(ctx, tool, world, selected)) {
     closeReadout(ctx.scope.get(readoutSlot));
     return;
   }
