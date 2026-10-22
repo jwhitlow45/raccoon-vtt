@@ -170,8 +170,8 @@ describe("what getting on and off costs (7.3)", () => {
         [7, 6, 15, 15, [7, 4]],
       ],
     );
-    // A teleport off it uses no movement: one leg that does not count, with no dismount in it.
-    const teleported = bresTurn(free).run({ t: "token.move", tokenId: "bree", x: 9, y: 4, teleport: "Misty Step" }).stops("bree");
+    // "Teleport here" off it uses no movement: one leg that does not count, with no dismount in it.
+    const teleported = bresTurn(free).run({ t: "token.move", tokenId: "bree", x: 9, y: 4, teleport: "wall" }).stops("bree");
     assert.deepEqual([teleported.length, last(teleported).uncounted, last(teleported).cost], [2, true, 25]);
     assert.equal(bresTurn(free).refused({ t: "token.detach", tokenId: "bree" }), "getting off a mount needs a place beside it");
   });
