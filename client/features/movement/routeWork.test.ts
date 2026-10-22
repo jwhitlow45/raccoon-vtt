@@ -56,9 +56,9 @@ describe("the board's route work (routeWork.ts)", () => {
       work.add(b);
       assert.equal(work.run(drag), true, "the drag's work runs at once while the frame has budget");
     });
-    // The drag took 50 of the frame's 100, a took the rest, and b waited.
+    // The drag's event took 50 of the budget before the callback, then the callback renewed it: a took all of that, and b waited.
     assert.deepEqual(log, ["drag", "a"]);
-    assert.equal(a.left, 250);
+    assert.equal(a.left, 200);
     assert.equal(b.left, 300);
     log.length = 0;
     clock.frame();
@@ -71,21 +71,40 @@ describe("the board's route work (routeWork.ts)", () => {
     assert.ok(frames.every((u) => u <= 100), `frames ${frames.join(", ")}`);
   });
 
-  test("an event before the frame's turn opens the frame's budget, and the turn takes it over", () => {
+  test("events at any offsets before one animation callback share one budget: only the callback renews it (review ASTRA-14)", () => {
     const clock = new Clock();
     const frames: number[] = [];
     const work = new RouteWork(clock, () => new WorkBudget({ limit: 100 }), (units) => frames.push(units));
     const log: string[] = [];
-    const slow = chunked(1000, 10, log, "slow");
-    clock.frame(() => work.add(slow));
     clock.frame();
-    // An event of the third frame spends 60 of its budget, and its turn has 40 left, not a fresh 100.
+    // Three events 0, 6 and 13 ms into the frame, then 20 ms later, and no callback between them.
+    const start = clock.t;
+    for (const offset of [0, 6, 13, 33]) {
+      clock.t = start + offset;
+      work.run(chunked(60, 10, log, `event ${offset}`));
+    }
+    assert.equal(work.budget().units, 100, "all four share the frame's 100 units");
+    for (let k = 0; k < 10 && work.waiting; k++) clock.frame();
+    assert.ok(frames.every((u) => u <= 100), `frames ${frames.join(", ")}`);
+  });
+
+  test("a job dropped during a turn, by another job's work, never runs in it", () => {
+    const clock = new Clock();
+    const work = new RouteWork(clock, () => new WorkBudget({ limit: 1000 }));
+    const log: string[] = [];
+    const late = chunked(10, 10, log, "late");
+    const dropper: RouteJob = {
+      run: () => {
+        log.push("dropper");
+        work.drop(late);
+        return true;
+      },
+    };
     clock.frame(() => {
-      assert.equal(work.run(chunked(60, 10, log, "event")), true);
+      work.add(dropper);
+      work.add(late);
     });
-    work.drop(slow);
-    clock.frame();
-    assert.deepEqual(frames.slice(0, 3), [100, 100, 100]);
+    assert.deepEqual(log, ["dropper"]);
   });
 
   test("a budget's time counts from the outermost run's begin to its end, however runs nest (review ASTRA-17)", () => {

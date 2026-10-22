@@ -228,7 +228,7 @@ describe("the drag's search as a state machine (12)", () => {
     const board = work(frames, 10_000);
     const drag = new RouteDrag(() => input, board);
     assert.deepEqual(drag.aim({ x: 9, y: 5 }), { kind: "open" });
-    assert.equal(frames.queue.size, 0);
+    assert.equal(board.waiting, false, "no work waits for a frame");
     const none = new RouteDrag(() => null, board);
     assert.deepEqual(none.aim({ x: 9, y: 5 }), { kind: "open" });
   });

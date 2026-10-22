@@ -16,7 +16,8 @@ import { world } from "./testing.ts";
  * on adversarial scenes (docs/design-v1-movement.md 5.2, reviews ASTRA-08,
  * ASTRA-14, MV-O-22 and MV-O-23): a drag's aims and its drop, every
  * ruler's render and its turns, and an arrow key's press. Each frame has
- * a budget of LIMIT units, counted, not timed, and no frame may do more
+ * a budget of LIMIT units, counted, not timed, from one animation callback
+ * to the next, whatever events fall between them, and no frame may do more
  * than that, past it by at most one step that cannot stop partway: a
  * world's build with its search, or one straight leg checked whole.
  */
@@ -48,10 +49,10 @@ class Board implements Frames {
     this.t += 0.5;
     for (const run of this.queue.splice(0)) run();
   }
-  /** Every frame's units, the last one's too. */
+  /** Every frame's units, counted from one animation callback to the next, the last one's too. */
   all(): number[] {
-    this.t += 16;
     this.work.budget();
+    this.frame();
     return this.units;
   }
 }
