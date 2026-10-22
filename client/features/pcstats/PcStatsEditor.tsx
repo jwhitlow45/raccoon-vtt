@@ -150,12 +150,17 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     };
   }, []);
   const roomId = useRoomView((s) => s.roomId);
-  // The character as last seen, so a D&D Beyond review still reads against it once the character left the view.
+  // The character as last seen while it was this viewer's, so a D&D Beyond review still reads against it once the character left the view or was given to another player, whose copy lacks the parts a sync reads.
   const known = useRef(character);
-  if (character) known.current = character;
+  if (character && yours) known.current = character;
+  const reviewed = (): Character | undefined => {
+    const now = store.getState();
+    const live = now.view?.characters[props.characterId];
+    return live && editsPcStats(now.you, live) ? live : known.current;
+  };
   /** A D&D Beyond read reviewed as a re-sync is (docs/design-v1-resync.md 1.1), against the editor's state as it is now (flow.ts). */
   const syncPlan = (fill: PcFill, state: FlowState): SyncPlan | null => {
-    const who = store.getState().view?.characters[props.characterId] ?? known.current;
+    const who = reviewed();
     return who ? editorSyncPlan(fill, state, opened, who) : null;
   };
   const startGet = (id: number) => {
@@ -336,7 +341,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   if (flow.step === "review" && flow.review) {
     const review = flow.review;
     const ticks = review.ticks;
-    const saved = store.getState().view?.characters[props.characterId] ?? known.current;
+    const saved = reviewed();
     const plan = ticks ? syncPlan(review.fill, flow) : null;
     const result = plan && ticks ? syncResult(plan, ticks) : null;
     // A record past its schema or 6 KiB would fail the whole Save, so Use it waits until the review leaves it within them (docs/design-v1-resync.md 3.3).
