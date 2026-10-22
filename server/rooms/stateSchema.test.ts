@@ -146,6 +146,22 @@ describe("roomStateSchema", () => {
     assert.equal(withLevel(4.5), false);
   });
 
+  test("a character's sync record may be at most a day past the import's time, since a sync's time comes from a server (RS-SOL-2)", () => {
+    const state = JSON.parse(JSON.stringify(randomState(rng(3))));
+    const first = Object.keys(state.characters)[0]!;
+    const withAt = (at: string) => {
+      const s = JSON.parse(JSON.stringify(state));
+      s.characters[first].stats = { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] };
+      s.characters[first].ddbSync = { at, base: { level: 5 }, rolls: {} };
+      return parseRoomState(s).ok;
+    };
+    const DAY = 24 * 60 * 60 * 1000;
+    assert.equal(withAt("2026-10-20T19:00:00.000Z"), true);
+    assert.equal(withAt(new Date(Date.now() + DAY - 60_000).toISOString()), true, "within a day of a fast clock");
+    assert.equal(withAt(new Date(Date.now() + DAY + 60_000).toISOString()), false);
+    assert.equal(withAt("9999-12-31T23:59:59.999Z"), false, "the schema's last millisecond is the future");
+  });
+
   test("an Exhaustion level from before the 1 to 6 rule is brought within it, and any other effect keeps its 0 to 99", () => {
     const state = JSON.parse(JSON.stringify(randomState(rng(3))));
     const first = Object.keys(state.characters)[0]!;

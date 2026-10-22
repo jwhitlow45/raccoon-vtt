@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHARACTER_CHANGED } from "./limits.ts";
 import type { Character, PcStats, RoomState, Viewer } from "./model.ts";
-import { canApply, expectHash, expectOf } from "./permissions.ts";
+import { canApply, expectHash, expectOf, SYNC_STAMP_FULL } from "./permissions.ts";
 import { projectCharacter } from "./project.ts";
-import { EXPECT_PARTS, onPlayerUndoStack, type CharacterExpect, type CharacterPatch, type DdbSyncPatch, type Op, type PcStatsPatch } from "./protocol.ts";
+import { ddbSyncPatchSchema, EXPECT_PARTS, onPlayerUndoStack, type CharacterExpect, type CharacterPatch, type DdbSyncPatch, type Op, type PcStatsPatch } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { EMPTY_PC_STATS } from "./rules/pcStats.ts";
 import { AT, DM, P1, P2, actor, character, effect, env, room } from "./testutil.ts";
@@ -177,6 +177,27 @@ describe("a re-sync's permissions (docs/design-v1-resync.md 4)", () => {
     for (const part of ["stats.spellAbility", "stats.critOn", "ddbSync"] as const) assert.notEqual(expectHash(unsynced, part), expectHash(bare, part), part);
     assert.equal(expectHash(unsynced, "stats.spellAbility"), expectHash(unsynced, "stats.critOn"), "a block's absent parts hash alike");
     assert.equal(expectHash(unsynced, "level"), expectHash(bare, "level"), "the parts beside the block do not ask for one");
+  });
+
+  test("a sync write is refused when the record it replaces is at the schema's last millisecond, so no stored state fails to parse (RS-SOL-2)", () => {
+    const at = (when: string) => {
+      const state = synced();
+      state.characters.bree!.ddbSync = { ...RECORD, at: when };
+      return state;
+    };
+    const last = at("9999-12-31T23:59:59.999Z");
+    assert.equal(decide(sync({ ddbSync: RECORD }), P1, last), `invalid: ${SYNC_STAMP_FULL}`);
+    assert.equal(decide(sync({ ddbSync: RECORD }), DM, last), `invalid: ${SYNC_STAMP_FULL}`, "the DM's too");
+    assert.equal(decide(sync({ ddbSync: { ...RECORD, at: AT } }), P1, last), "ok", "a record with its own at, as Undo sends, is stamped by no one");
+    assert.equal(decide(sync({ ddbSync: null }), P1, last), "ok", "nor is a removal");
+    assert.equal(decide(sync({ level: 6 }), P1, last), "ok");
+    // One millisecond earlier, the write is taken and stores the last millisecond, which still parses.
+    const nearly = at("9999-12-31T23:59:59.998Z");
+    assert.equal(decide(sync({ ddbSync: RECORD }), P1, nearly), "ok");
+    const r = applyOp(nearly, sync({ ddbSync: RECORD }), P1, env(2));
+    assert.ok(r.ok);
+    assert.equal(r.state.characters.bree!.ddbSync!.at, "9999-12-31T23:59:59.999Z");
+    assert.equal(ddbSyncPatchSchema.safeParse(r.state.characters.bree!.ddbSync).success, true);
   });
 
   test("a block deleted by the DM between a player's review and Apply refuses the Apply, which would put a default block back (RSBUILD-ASTRA-03)", () => {

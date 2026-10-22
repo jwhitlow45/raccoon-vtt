@@ -2,7 +2,7 @@ import { keys } from "../keys.ts";
 import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
-import { MAX_RULER_STOPS, type ActorPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
+import { MAX_RULER_STOPS, syncStamp, type ActorPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
@@ -744,19 +744,6 @@ function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, bl
   const stored: DdbSync = { ...record, at: record.at ?? syncStamp(at, next.ddbSync?.at) };
   if (serializedBytes(stored) > LIMITS.ddbSyncBytes) throw new Refuse("quota", `${next.name}'s sync record would be too large to save.`);
   next.ddbSync = stored;
-}
-
-/**
- * The op's time, or 1 ms past the record it replaces when that is as late.
- * A re-sync's Undo expects the record Apply wrote, `at` and all, so two
- * equal records written in the same millisecond must not share one, or
- * Undo would take back the later write too (3.4). Replay gives the same
- * stamp, since the op's time and the record before are both stored.
- */
-function syncStamp(at: string, before: string | undefined): string {
-  if (before === undefined) return at;
-  const after = Date.parse(before) + 1;
-  return Date.parse(at) >= after ? at : new Date(after).toISOString();
 }
 
 /**

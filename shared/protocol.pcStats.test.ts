@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { ABILITY_KEYS, SKILL_KEYS, type PcDice, type PcRoll, type PcStats } from "./model.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
-import { clientOpSchema, ddbSyncForImport, EXPECT_PARTS, MAX_PC_DICE_PARTS, MAX_PC_ROLLS, pcFillSchema, type DdbSyncPatch } from "./protocol.ts";
+import { clientOpSchema, ddbSyncForImport, EXPECT_PARTS, syncStamp, syncStampFits, MAX_PC_DICE_PARTS, MAX_PC_ROLLS, pcFillSchema, type DdbSyncPatch } from "./protocol.ts";
 import { EMPTY_PC_STATS } from "./rules/pcStats.ts";
 import { actor, AT } from "./testutil.ts";
 
@@ -145,6 +145,17 @@ describe("a re-sync's schema", () => {
     assert.ok(ddbSyncForImport.safeParse({ ...RECORD, at: AT }).success);
     assert.equal(ddbSyncForImport.safeParse(RECORD).success, false);
     assert.equal(ddbSyncForImport.safeParse({ ...RECORD, at: AT, rolls: entries(MAX_PC_ROLLS + 1) }).success, false);
+    assert.equal(ddbSyncForImport.safeParse({ ...RECORD, at: "9999-12-31T23:59:59.999Z" }).success, false, "a record from the future (RS-SOL-2)");
+  });
+
+  test("a stamp past a record parses up to the schema's last millisecond, and none fits past it (RS-SOL-2)", () => {
+    assert.equal(syncStampFits(undefined), true);
+    assert.equal(syncStampFits(AT), true);
+    assert.equal(syncStampFits("9999-12-31T23:59:59.998Z"), true);
+    assert.equal(syncStamp(AT, "9999-12-31T23:59:59.998Z"), "9999-12-31T23:59:59.999Z");
+    assert.equal(syncStampFits("9999-12-31T23:59:59.999Z"), false);
+    assert.equal(syncStamp(AT, "9999-12-31T23:59:59.999Z"), "+010000-01-01T00:00:00.000Z", "which the schema refuses");
+    assert.equal(ok(sync({ ...RECORD, at: "+010000-01-01T00:00:00.000Z" })), false);
   });
 
   test("entry keys and h are 12 lower-case hex digits, and k and each gone marker a kind's letter, a colon and one", () => {

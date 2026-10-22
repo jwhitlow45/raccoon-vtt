@@ -737,6 +737,32 @@ const ddbSyncFields = {
   gone: z.array(syncKey).max(MAX_PC_ROLLS).optional(),
 };
 const ddbSync = z.strictObject(ddbSyncFields).refine((s) => serializedBytes(s) <= LIMITS.ddbSyncBytes, withinDdbSyncBytes);
+
+/**
+ * The `at` the reducer writes on a record sent without one: the op's time,
+ * or 1 ms past the record it replaces when that is as late. A re-sync's
+ * Undo expects the record Apply wrote, `at` and all, so two equal records
+ * written in the same millisecond must not share one, or Undo would take
+ * back the later write too (docs/design-v1-resync.md 3.4). Replay gives the
+ * same stamp, since the op's time and the record before are both stored.
+ */
+export function syncStamp(at: string, before: string | undefined): string {
+  if (before === undefined) return at;
+  const after = Date.parse(before) + 1;
+  return Date.parse(at) >= after ? at : new Date(after).toISOString();
+}
+
+/**
+ * Whether a stamp past the record a sync replaces still parses as a
+ * record's `at`. The op's own time always does, so only a record already
+ * at the schema's last millisecond leaves no room (RS-SOL-2).
+ */
+export function syncStampFits(before: string | undefined): boolean {
+  return before === undefined || ddbSyncFields.at.safeParse(new Date(Date.parse(before) + 1).toISOString()).success;
+}
+
+/** How far past the import's time a record's `at` may be: a sync's time comes from a server, never from the future, and a day covers any clock. */
+const SYNC_AHEAD_MS = 24 * 60 * 60 * 1000;
 /** As a patch sends it: the server writes `at` when it is left out, which a sync always does. */
 const ddbSyncPatch = z.strictObject({ ...ddbSyncFields, at: ddbSyncFields.at.optional() }).refine((s) => serializedBytes(s) <= LIMITS.ddbSyncBytes, withinDdbSyncBytes);
 
@@ -2155,7 +2181,7 @@ export const pcStatsPatchSchema = pcStatsPatch;
 /** A fill as the D&D Beyond route answers it (docs/design-v1-pc-stats.md 6.3). */
 export const pcFillSchema = pcFill;
 /** A character's sync record as stored, so the stored-state schema checks imported ones by the same bounds. */
-export const ddbSyncForImport = ddbSync;
+export const ddbSyncForImport = ddbSync.refine((s) => Date.parse(s.at) <= Date.now() + SYNC_AHEAD_MS, { message: "a sync record's time is at most a day past the import's" });
 /** A sync record as a patch sends it, for the re-sync to check what it would send. */
 export const ddbSyncPatchSchema = ddbSyncPatch;
 /** Who may move any token, so the stored-state schema checks imports the same way. */

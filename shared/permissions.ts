@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
-import { MAX_ROUTE_REACH, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
+import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
@@ -184,7 +184,9 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   const squeezed = squeezeFits(op, check);
   if (!squeezed.ok) return squeezed;
   const routed = routeFits(op, check);
-  return routed.ok ? expectFits(op, check) : routed;
+  if (!routed.ok) return routed;
+  const stamped = stampFits(op, check);
+  return stamped.ok ? expectFits(op, check) : stamped;
 }
 
 /**
@@ -261,6 +263,21 @@ function expectFits(op: Op, c: Check): Decision {
     if (hash !== undefined && expectHash(character, part) !== hash) return refuse("invalid", CHARACTER_CHANGED);
   }
   return OK;
+}
+
+/** A sync write's refusal when the record it replaces leaves its stamp no room (`stampFits`). */
+export const SYNC_STAMP_FULL = "this character's sync record cannot take a later time";
+
+/**
+ * A sync write the reducer would stamp (docs/design-v1-resync.md 4), for
+ * every role: refused when the stamp past the record it replaces would not
+ * parse, so no stored state ever fails the schema. Only a record at the
+ * schema's last millisecond, which no clock makes, gets here.
+ */
+function stampFits(op: Op, c: Check): Decision {
+  if (op.t !== "character.update" || !op.patch.ddbSync || op.patch.ddbSync.at !== undefined || op.patch.stats === null) return OK;
+  const before = c.state.characters[op.characterId]?.ddbSync?.at;
+  return syncStampFits(before) ? OK : refuse("invalid", SYNC_STAMP_FULL);
 }
 
 /** The refusals of a route whose shape no walk has (docs/design-v1-movement.md 7.1), whoever sends it. */
