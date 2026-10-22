@@ -98,8 +98,8 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   }
   if (walkers) to = walkers.at;
   // Landed as the drop lands it, by its holder while it sits on one, so the band reads the leg the op sends.
-  // And walked as the search and the server walk it: on the ground off a holder that stands on it (drop.ts walkerOf).
-  const walking = walkerOf(view, token, to);
+  // And walked as the search and the server walk it (drop.ts walkerOf): as its rider until clear of a holder every player sees that stands on the ground, then on the ground.
+  const walking = walkerOf(view, token);
   const points = pieces
     ? walkers
       ? routePoints(view.buildChunks, walking, pieces, dropLanding(view, token, to))

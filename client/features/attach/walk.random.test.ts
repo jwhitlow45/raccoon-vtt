@@ -6,9 +6,10 @@ import { inSightOfNonOwners } from "#shared/project.ts";
 import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
+import { legBlocker } from "#shared/rules/movement.ts";
 import { routePoints, routeReach, routeStop, type RoutePiece } from "#shared/rules/route.ts";
 import { DM, P1, actor, chance, effect, env, int, pick, rng, token } from "#shared/testutil.ts";
-import { dragOf } from "../movement/dragTesting.ts";
+import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { dropLanding, dropView, walkerOf } from "../movement/drop.ts";
 import { world } from "../movement/testing.ts";
 import { copyFor } from "./testing.ts";
@@ -71,6 +72,8 @@ function randomCase(r: () => number): Case {
     tokens.push(bree, grappled("kobold", { x: right ? hx - 1 : hx + 2, y: bree.y, attached: { to: "bree", kind: "drag" } }));
   }
   tokens.push(token("gob", { name: "Goblin", x: 25, y: 25 }));
+  // A token of the player's far off, on its own ground, to drag in a group with the mover.
+  tokens.push(token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], x: 25, y: 2, elevation: right ? 10 : 0 }));
   let state = world({ blockMovement: chance(r, 0.75), edges, heights, tokens });
   state.meta.settings = { ...state.meta.settings, diagonal: pick(r, ["five", "fiveTen"] as const) };
   for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: mover, value: 20 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
@@ -79,6 +82,16 @@ function randomCase(r: () => number): Case {
     state = out.state;
   }
   return { state, mover, who: chance(r, 0.8) ? P1 : DM };
+}
+
+const seenAll = (state: RoomState) => (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
+
+/** The server's own test of a plain leg (permissions.ts legCheck), walked off a holder every player sees on the ground (rules/attach.ts walkerFor). */
+function plainLegStop(state: RoomState, tokenId: string, to: { x: number; y: number; elevation?: number }): string | null {
+  const token = state.tokens[tokenId]!;
+  const end = { x: to.x, y: to.y, elevation: to.elevation ?? token.elevation };
+  if (state.scenes[token.sceneId]!.blockMovement !== true || (end.x === token.x && end.y === token.y)) return null;
+  return legBlocker(state, walkerFor(state, token, seenAll(state)), end);
 }
 
 /** Whether a move's route is the one the search found, piece for piece. */
@@ -109,16 +122,18 @@ describe("a drag of an attached token plans the walk the server takes and stores
       const route = op.t === "token.move" ? op.route : undefined;
       if (blocks && route && op.t === "token.move") {
         // The route as the server walks it, off a holder every player sees on the ground (rules/attach.ts walkerFor).
-        const walker = walkerFor(c.state, mover, op, (t) => c.state.tokens[t.id] !== undefined && inSightOfNonOwners(c.state, c.state.tokens[t.id]!, {}));
+        const walker = walkerFor(c.state, mover, seenAll(c.state));
         assert.equal(routeStop(c.state, walker, route, op.elevation ?? mover.elevation), null, `${where}: the route check refuses ${JSON.stringify(op)}`);
       }
+      // And a player's plain leg as the server's own leg test walks it, not only as canApply judges it. The DM's drop goes through.
+      if (c.who.role === "player" && !route && op.t === "token.move") assert.equal(plainLegStop(c.state, c.mover, op), null, `${where}: the leg test stops ${JSON.stringify(op)}`);
       const found = drag.answer.kind === "route" ? drag.answer.route.pieces : null;
       if (blocks && found && found.length <= MAX_ROUTE_PIECES && !drag.plan.stop && !sameRoute(route, found)) {
         // The drop went another way than the search found: only since the check refuses that route, judged on the mover's copy as the drop judges it.
         const view = dropView(copy, c.who.role);
         const end = found[found.length - 1]!;
         const at = { x: end[0], y: end[1] };
-        const walking = walkerOf(view, view.tokens[c.mover]!, at);
+        const walking = walkerOf(view, view.tokens[c.mover]!);
         const landing = dropLanding(view, view.tokens[c.mover]!, at);
         const refused = routeStop(view, walking, found, landing) !== null || routeReach(routePoints(view.buildChunks, walking, found, landing), view.meta.settings.feetPerCell) > MAX_ROUTE_REACH;
         assert.ok(refused, `${where}: the drop left a route the check takes, ${JSON.stringify(found)} for ${JSON.stringify(op)}`);
@@ -138,6 +153,34 @@ describe("a drag of an attached token plans the walk the server takes and stores
       if (mover.attached && !after.attached) off++;
     }
     // A run that never walks off a mount, along a route or held at a wall tests nothing.
-    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 30, JSON.stringify({ moved, routed, off, held, refusedRoutes }));
+    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10, JSON.stringify({ moved, routed, off, held, refusedRoutes }));
+  });
+
+  test("random group drags of the same with a token of the player's far off: each leg is one the server's leg test takes", () => {
+    let groups = 0;
+    let legs = 0;
+    let heldBack = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const r = rng(seed);
+      const c = randomCase(r);
+      const mover = c.state.tokens[c.mover]!;
+      const raw = { x: Math.max(0, Math.min(28, mover.x + int(r, -5, 5))), y: Math.max(0, Math.min(28, mover.y + int(r, -5, 5))) };
+      const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
+      const drag = groupDragOf(copy, c.who.role, [c.mover, "mate"], raw);
+      const where = `seed ${seed} (${c.who.memberId} drags ${c.mover} and mate to ${raw.x},${raw.y})`;
+      heldBack += drag.plan.held.length;
+      if (!drag.op) continue;
+      const op = drag.op as Op;
+      const allowed = canApply(op, c.who, c.state, { canUseAsset: () => true });
+      assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message} for ${JSON.stringify(op)}`);
+      const moves = op.t === "token.moveMany" ? op.moves : op.t === "token.move" ? [op] : [];
+      if (c.who.role === "player") for (const m of moves) assert.equal(plainLegStop(c.state, m.tokenId, m), null, `${where}: the leg test stops ${JSON.stringify(m)}`);
+      const applied = applyOp(c.state, op, c.who, env(10));
+      assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
+      for (const m of moves) assert.deepEqual([applied.state.tokens[m.tokenId]!.x, applied.state.tokens[m.tokenId]!.y], [m.x, m.y], `${where}: ${m.tokenId} landed elsewhere`);
+      groups++;
+      legs += moves.length;
+    }
+    assert.ok(groups > 200 && heldBack > 30, JSON.stringify({ groups, legs, heldBack }));
   });
 });

@@ -45,7 +45,8 @@ class Hand implements Frames {
 /** Frames enough for any search here to settle: each frame's budget is far past what one drag's search spends. */
 const FRAMES = 200;
 
-export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point): Drag {
+/** The board's drag stops on one viewer's copy, with frames by hand and the ops they send kept. */
+function board(copy: RoomState, role: Role) {
   const frames = new Hand();
   const work = new RouteWork(frames, () => new WorkBudget({ limit: 1e9 }));
   const sent: ClientOp[] = [];
@@ -58,6 +59,11 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
     role,
     work,
   });
+  return { frames, work, sent, scope, stops };
+}
+
+export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point): Drag {
+  const { frames, work, sent, scope, stops } = board(copy, role);
   const token = copy.tokens[tokenId]!;
   const finger = { x: () => raw.x, y: () => raw.y, position: () => {} };
   frames.frame();
@@ -90,4 +96,22 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
     plan,
     op: sent[0] ?? null,
   };
+}
+
+/** A group drag as the board takes it, for tests: the lead dropped at `raw`, the others by the same offset, and what the drop sends. */
+export type GroupDrag = { plan: DropPlan; op: ClientOp | null };
+
+export function groupDragOf(copy: RoomState, role: Role, tokenIds: readonly string[], raw: Point): GroupDrag {
+  const { frames, sent, stops } = board(copy, role);
+  const group = tokenIds.map((id) => copy.tokens[id]!);
+  const finger = { x: () => raw.x, y: () => raw.y, position: () => {} };
+  frames.frame();
+  stops.start(group[0]!.id);
+  let plan: DropPlan | null = null;
+  stops.drop(finger, group[0]!, group, (landed) => (plan = landed));
+  for (let k = 0; k < FRAMES && !plan; k++) frames.frame();
+  if (!plan) throw new Error("the group's drop never landed");
+  stops.send(plan);
+  stops.end();
+  return { plan, op: sent[0] ?? null };
 }

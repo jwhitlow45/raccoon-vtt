@@ -208,7 +208,7 @@ function routeFits(op: Op, c: Check): Decision {
     if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
     prev = { x, y };
   }
-  const points = routePoints(c.state.buildChunks, walkerFor(c.state, token, op, seenAllIn(c)), op.route, op.elevation ?? token.elevation);
+  const points = routePoints(c.state.buildChunks, walkerFor(c.state, token, seenAllIn(c)), op.route, op.elevation ?? token.elevation);
   return routeReach(points, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
@@ -1562,7 +1562,8 @@ function legCheck(c: Check, tokenId: string, to: Pick<Token, "x" | "y"> & { elev
   if (teleport) return insideScene(scene, token, end) ? OK : refuse("forbidden", TELEPORT_OFF_MAP);
   // A token rising or sinking where it stands crosses no edge.
   if (scene.blockMovement !== true || (end.x === token.x && end.y === token.y)) return OK;
-  const blocker = movementRules.legBlocker(c.state, token, end);
+  // Off a holder on the ground it walks as its rider until clear of it, then on the ground, as its route and the drag's own check do (rules/attach.ts walkerFor).
+  const blocker = movementRules.legBlocker(c.state, walkerFor(c.state, token, seenAllIn(c)), end);
   if (blocker === null) return OK;
   return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
 }
@@ -1581,8 +1582,8 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   const token = c.state.tokens[tokenId];
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene || scene.blockMovement !== true) return OK;
-  // Off a holder on the ground it walks on the ground, as the drag searched it (rules/attach.ts walkerFor).
-  let at: Token & { footing?: "ground" } = walkerFor(c.state, token, to, seenAllIn(c));
+  // Off a holder on the ground it walks as its rider until clear of it, then on the ground, as the drag searched it (rules/attach.ts walkerFor).
+  let at: Token & { footing?: "ground" } = walkerFor(c.state, token, seenAllIn(c));
   for (const [n, route] of routes.entries()) {
     const last = n === routes.length - 1;
     const end = route[route.length - 1];

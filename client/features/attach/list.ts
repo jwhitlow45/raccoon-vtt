@@ -5,7 +5,7 @@ import { sizeCategory } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
-import { walkersStop } from "../movement/drop.ts";
+import { dropView, walkerOf, walkersStop } from "../movement/drop.ts";
 import { attachAllowed, grappledSeen, type AttachViewer } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
 
@@ -141,9 +141,11 @@ function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice,
  */
 function stepStopped(view: RoomState, carried: Token, at: AttachRow["at"]): boolean {
   if (view.scenes[carried.sceneId]?.blockMovement !== true || (at.x === carried.x && at.y === carried.y)) return false;
-  if (legStop(view, carried, at) !== null) return true;
+  // Walked as the server's check walks it (drop.ts walkerOf): as its rider until clear of a holder every player sees that stands on the ground, then on the ground.
+  const walking = walkerOf(dropView(view, "player"), carried);
+  if (legStop(view, walking, at) !== null) return true;
   const from = { x: carried.x, y: carried.y, elevation: carried.elevation };
-  return walkersStop(view, carried, [from, at], walkersFor(view, carried.id, "player")) !== null;
+  return walkersStop(view, walking, [from, at], walkersFor(view, carried.id, "player")) !== null;
 }
 
 function seenByAll(view: RoomState, tokenId: string): boolean {

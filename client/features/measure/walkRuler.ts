@@ -2,6 +2,7 @@ import type { Actor, RoomState, Token } from "#shared/model.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
+import { offKey } from "#shared/rules/movement.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
@@ -111,7 +112,7 @@ function keptFor(view: RoomState, sceneId: string): Kept {
 }
 
 function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter): string {
-  return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${(walker as { footing?: string }).footing ?? ""},${counter.h},${counter.v},${everything}`;
+  return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${(walker as { footing?: string }).footing ?? ""},${offKey(walker)},${counter.h},${counter.v},${everything}`;
 }
 
 /**
@@ -234,7 +235,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
       continue;
     }
     if (answer.kind === "route") {
-      const points = routePoints(view.buildChunks, walkerOf(seen, walker, target), answer.pieces, landing);
+      const points = routePoints(view.buildChunks, walkerOf(seen, walker), answer.pieces, landing);
       taken = routeFeet(points, answer.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
       corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
       pieces.push(...answer.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));

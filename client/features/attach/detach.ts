@@ -4,7 +4,7 @@ import { carriedGroup, getOffSpot, holderOf, isCreature, overlaps } from "#share
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
-import { landedOffHolder, walkersStop } from "../movement/drop.ts";
+import { dropView, landedOffHolder, walkerOf, walkersStop } from "../movement/drop.ts";
 import { detachAllowed, offersAttach, type AttachViewer, type RightsView } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
 
@@ -81,6 +81,7 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
   const walls = viewer.role === "player" && scene.blockMovement === true;
   const walkers = walls ? walkersFor(view, carried.id, "player") : [];
   const seat = { x: carried.x, y: carried.y, elevation: carried.elevation };
+  const seen = dropView(view, viewer.role);
   const landing = (at: { x: number; y: number }) => landedOffHolder(view.buildChunks, carried, holder, at);
   const spot = getOffSpot(view.meta.settings, scene.bounds, carried, holder, (at) => {
     const elevation = landing(at);
@@ -93,7 +94,9 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
     }
     if (!walls) return true;
     const to = { x: at.x, y: at.y, elevation };
-    return legStop(view, carried, to) === null && walkersStop(view, carried, [seat, to], walkers) === null;
+    // Walked off as the server's check walks it (drop.ts walkerOf): as its rider until clear of the holder, then on the ground.
+    const walking = walkerOf(seen, carried);
+    return legStop(view, walking, to) === null && walkersStop(view, walking, [seat, to], walkers) === null;
   }, landing);
   return spot ? { x: spot.x, y: spot.y, elevation: landing(spot) } : null;
 }

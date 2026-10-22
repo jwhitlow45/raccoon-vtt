@@ -16,7 +16,7 @@ import { cutForWalkers, dropMode, dropView, planGroup, planOne, planPress, rebas
  */
 export function worldFor(view: RoomState, token: Token, role: Role): PublicWorld {
   const stops = pathNow(view.encounter, token, role)?.stops ?? [];
-  return groupWalkWorld(view, walkerFor(view, token, undefined, dropView(view, role).seen), { role }, stops);
+  return groupWalkWorld(view, walkerFor(view, token, dropView(view, role).seen), { role }, stops);
 }
 
 /**

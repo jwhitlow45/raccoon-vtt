@@ -59,7 +59,7 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
       const token = before.tokens[op.tokenId];
       if (!token) return [];
       const to: Pose = { sceneId: token.sceneId, x: op.x, y: op.y, elevation: op.elevation ?? token.elevation };
-      if (op.route && walksRoutes(env.opVersion)) return [{ token, to, how: "walk", route: routePoints(before.buildChunks, walkerFor(before, token, to, seenIn(before, env)), op.route, to.elevation) }];
+      if (op.route && walksRoutes(env.opVersion)) return [{ token, to, how: "walk", route: routePoints(before.buildChunks, walkerFor(before, token, seenIn(before, env)), op.route, to.elevation) }];
       return [straight(token, to, op.teleport !== undefined ? "teleport" : "walk")];
     }
     case "token.moveMany":
@@ -167,8 +167,8 @@ function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedTo
   }
   const chunks = before.buildChunks;
   const holderToken = before.tokens[holder.tokenId];
-  // A holder walking off its own mount walks on the ground (attach.ts walkerFor), and so does what it drags.
-  const grounded = holderToken !== undefined && footing(chunks, { ...walkerFor(before, holderToken, holder.to, seen), x: holder.from.x, y: holder.from.y, elevation: holder.from.elevation, squeeze: undefined }) === "ground";
+  // A holder walking off its own mount walks on the ground once clear of it (attach.ts walkerFor), and so does what it drags.
+  const grounded = holderToken !== undefined && footing(chunks, { ...walkerFor(before, holderToken, seen), x: holder.from.x, y: holder.from.y, elevation: holder.from.elevation, squeeze: undefined }) === "ground";
   // Its own ground behind a walker, else the holder's change of elevation, never below the ground there.
   const elevationAt = (x: number, y: number, holderElevation: number): number => {
     const ground = footprintGround(chunks, { ...member, x, y, squeeze: undefined });

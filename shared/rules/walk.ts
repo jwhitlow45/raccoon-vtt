@@ -4,7 +4,7 @@ import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { legStop, stepTester, type MovingToken, type StepTester } from "./movement.ts";
+import { legStop, offKey, stepTester, type MovingToken, type StepTester } from "./movement.ts";
 import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
@@ -285,7 +285,7 @@ export class WalkWorld {
     this.#pinch = new Uint8Array(this.squeezes ? nodes : 0);
     this.#ground = new Float64Array(this.mode === "ground" ? nodes : 0).fill(NaN);
     this.#walls = this.tester
-      ? stepCache(this.tester.walls, `${this.w},${this.h},${this.mode === "flying" ? token.elevation : this.mode},${L},${x0},${y0},${this.nx},${this.ny}`, nodes * 8)
+      ? stepCache(this.tester.walls, `${this.w},${this.h},${this.mode === "flying" ? token.elevation : this.mode},${offKey(token)},${L},${x0},${y0},${this.nx},${this.ny}`, nodes * 8)
       : null;
     this.flags = cellFlags(input, this.W, this.H, this.mode === "ground");
     // Creatures by the cells their footprints overlap, for the few a step's footprint can meet.

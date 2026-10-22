@@ -7,13 +7,16 @@ import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { dropView, moveOpsOf, planOne, routeLanding, type Landed } from "../movement/drop.ts";
+import { dropView, moveOpsOf, planGroup, planOne, routeLanding, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, token } from "#shared/testutil.ts";
 import { dragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
-import { towingWord, walkersFor } from "./walk.ts";
+import { towingWord, walkersFor, walkersOfGroup } from "./walk.ts";
+import { detachOp, getOffPlace } from "./detach.ts";
+import { LEDGE_IN_THE_WAY, legBlocker } from "#shared/rules/movement.ts";
+import { walkerFor } from "#shared/rules/attach.ts";
 
 const goblin = (over: Partial<Token> = {}) => token("goblin", { name: "Goblin", x: 3, y: 5, attached: { to: "thorn", kind: "drag" }, ...over });
 
@@ -155,5 +158,102 @@ describe("a walk off a holder on the ground, searched, checked and stored on the
       });
       assert.deepEqual(after[0], after[1], JSON.stringify(raw));
     }
+  });
+});
+
+describe("every check of a walk off a holder on the ground walks it as its rider until clear of the holder, then on the ground (reviews AT-ASTRA-13 and AT-O-25)", () => {
+  /**
+   * P1's Bree on the west half of a warhorse at 10 ft, in a 10 ft deep trench two squares wide (x 3 and 4) that runs the
+   * scene's height, the horse's east half on the high ground at x 5. Her own turn, with a grappled goblin she may drag
+   * and a companion of hers on the high ground.
+   */
+  function trench(extra: Token[] = []): RoomState {
+    const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, elevation: 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+    const bree = token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], x: 4, y: 4, elevation: 10, attached: { to: "horse", kind: "ride" }, actor: { inline: actor({ speeds: { walk: 30 } }) } });
+    let state = world({ heights: { ...raised(0, 0, 3, 30, 10), ...raised(5, 0, 30, 30, 10) }, tokens: [horse, bree, ...extra] });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    return state;
+  }
+
+  test("a drag out of the trench finds no way, is held at the ledge on the trench's floor, and the server refuses the plain leg over it", () => {
+    const state = trench();
+    const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 1, y: 4 });
+    assert.equal(drag.answer.kind, "none");
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, drag.plan.stop?.blocker], [3, 4, "ledge"]);
+    assert.equal(canApply(op, P1, state, { canUseAsset: () => true }).ok, true);
+    const r = applyOp(state, op, P1, env(9));
+    assert.ok(r.ok);
+    assert.deepEqual([r.state.tokens.bree!.x, r.state.tokens.bree!.elevation, drag.preview.to], [3, 0, { x: 3, y: 4 }]);
+    const over = canApply({ t: "token.move", tokenId: "bree", x: 1, y: 4 }, P1, state, { canUseAsset: () => true });
+    assert.deepEqual(over.ok ? null : over.message, LEDGE_IN_THE_WAY);
+  });
+
+  test("a group with the rider dragging a creature beside her sends only legs the server takes, and holds back the rest", () => {
+    const goblin = token("goblin", { name: "Goblin", size: "small", x: 3, y: 4, attached: { to: "bree", kind: "drag" }, actor: { inline: actor({ effects: [effect("g1", { key: "grappled" })] }) } });
+    const state = trench([goblin, token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], x: 8, y: 8, elevation: 10 })]);
+    let held = 0;
+    for (const [dx, dy] of [[0, 3], [0, -3], [-2, 0], [2, 0], [-3, 0], [1, 3]] as const) {
+      const view = dropView(copyFor(state, P1), "player");
+      const plan = planGroup(view, [view.tokens.bree!, view.tokens.mate!], dx, dy, "walk", walkersOfGroup(view, [view.tokens.bree!, view.tokens.mate!], "player"));
+      held += plan.held.length;
+      for (const op of moveOpsOf(plan.moves)) {
+        const answer = canApply(op, P1, state, { canUseAsset: () => true });
+        assert.ok(answer.ok, `${dx},${dy}: ${answer.ok ? "" : answer.message} for ${JSON.stringify(op)}`);
+      }
+      // Each leg as the server's own leg test walks it, the rider's on the ground.
+      for (const m of plan.moves) {
+        const end = { x: m.x, y: m.y, elevation: m.elevation ?? state.tokens[m.tokenId]!.elevation };
+        assert.equal(legBlocker(state, walkerFor(state, state.tokens[m.tokenId]!, () => true), end), null, `${dx},${dy}: ${JSON.stringify(m)}`);
+      }
+    }
+    assert.ok(held >= 3, `${held} held`);
+  });
+
+  test("a drag east crosses the step under the horse, as its rider, onto the high ground, and routes round a wall from there", () => {
+    for (const walled of [false, true]) {
+      const state = trench();
+      if (walled) state.buildChunks = world({ heights: { ...raised(0, 0, 3, 30, 10), ...raised(5, 0, 30, 30, 10) }, edges: line("w", 8, 0, 6) }).buildChunks;
+      const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 10, y: 4 });
+      const op = drag.op as Op & { t: "token.move" };
+      assert.deepEqual([op.x, op.y, drag.plan.stop], [10, 4, null], walled ? "round the wall" : "straight");
+      if (walled) assert.ok((op.route?.length ?? 0) > 1, JSON.stringify(op));
+      assert.equal(canApply(op, P1, state, { canUseAsset: () => true }).ok, true, JSON.stringify(op));
+      const r = applyOp(state, op, P1, env(9));
+      assert.ok(r.ok);
+      assert.deepEqual([drag.preview.to, r.state.tokens.bree!.elevation], [{ x: 10, y: 4 }, 10]);
+      assert.equal(drag.preview.read.dragFt, r.state.tokens.bree!.path!.stops.slice(1).reduce((sum, st) => sum + (st.cost ?? 0), 0));
+    }
+  });
+
+  test("off a 10 ft horse she climbs no 20 ft ground: the step onto the first square clear of it is judged from her height", () => {
+    const state = trench();
+    // The ground beyond the horse's east half rises to 20 ft.
+    state.buildChunks = world({ heights: { ...raised(0, 0, 3, 30, 10), ...raised(5, 0, 6, 30, 10), ...raised(6, 0, 30, 30, 20) } }).buildChunks;
+    const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 10, y: 4 });
+    const op = drag.op as (Op & { t: "token.move" }) | null;
+    assert.ok(!op || op.x < 6, JSON.stringify(op));
+    assert.equal(drag.plan.stop?.blocker, "ledge");
+    const over = canApply({ t: "token.move", tokenId: "bree", x: 7, y: 4, elevation: 20 }, P1, state, { canUseAsset: () => true });
+    assert.deepEqual(over.ok ? null : over.message, LEDGE_IN_THE_WAY);
+  });
+
+  test("Get off finds a spot the server takes: up the step under the horse, as the trench's floor is past her reach", () => {
+    const state = trench();
+    const copy = copyFor(state, P1);
+    const up = getOffPlace(copy, { role: "player", memberId: "p1" }, copy.tokens.bree!);
+    assert.deepEqual(up, { x: 6, y: 5, elevation: 10 });
+    assert.equal(canApply(detachOp("bree", up), P1, state, { canUseAsset: () => true }).ok, true);
+    // On level ground, the spot found is one the server takes.
+    const level = trench();
+    level.buildChunks = world({}).buildChunks;
+    level.tokens = { ...level.tokens, horse: { ...level.tokens.horse!, elevation: 0 }, bree: { ...level.tokens.bree!, elevation: 0 } };
+    const place = getOffPlace(copyFor(level, P1), { role: "player", memberId: "p1" }, copyFor(level, P1).tokens.bree!);
+    assert.ok(place);
+    assert.equal(canApply(detachOp("bree", place), P1, level, { canUseAsset: () => true }).ok, true, JSON.stringify(place));
   });
 });
