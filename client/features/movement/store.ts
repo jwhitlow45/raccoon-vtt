@@ -9,15 +9,17 @@ import type { StopNote } from "./teleport.ts";
  * A lone token's drag held at a wall or a ledge (docs/design-v1-maps-vision.md
  * 4.1): the spot the preview stays on and what is in the way. The canvas
  * writes it only when it changes, never on every pointer frame, and the
- * movement layer draws the red outline and the label from it.
+ * movement layer draws the red outline and the label from it. `noWay`
+ * marks a drag that found no way a creature it drags beside it can follow
+ * (drop.ts holdLabel, docs/design-v1-attach.md 4.2).
  */
-export type Hold = { tokenId: string; at: Point; blocker: Blocker };
+export type Hold = { tokenId: string; at: Point; blocker: Blocker; noWay?: true };
 
 export const holdSlot = scopeSlot(() => createStore<{ hold: Hold | null }>(() => ({ hold: null })));
 
 export function sameHold(a: Hold | null, b: Hold | null): boolean {
   if (a === null || b === null) return a === b;
-  return a.tokenId === b.tokenId && a.at.x === b.at.x && a.at.y === b.at.y && a.blocker === b.blocker;
+  return a.tokenId === b.tokenId && a.at.x === b.at.x && a.at.y === b.at.y && a.blocker === b.blocker && a.noWay === b.noWay;
 }
 
 /**

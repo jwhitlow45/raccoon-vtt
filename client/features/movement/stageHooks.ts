@@ -12,14 +12,14 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
-import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute } from "./store.ts";
+import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute, type Hold as StoredHold } from "./store.ts";
 
 /** Where a drag's preview is held, and what holds it. */
 type Hold = { at: Point; blocker: Stop["blocker"] };
@@ -173,7 +173,7 @@ export function dragStops(deps: DragDeps): DragStops {
     walkMemo = { view, token, target: { x: target.x, y: target.y }, route, stop };
     return stop;
   };
-  const setHold = (next: { tokenId: string; at: Point; blocker: Stop["blocker"] } | null) => {
+  const setHold = (next: StoredHold | null) => {
     if (!sameHold(holds.getState().hold, next)) holds.setState({ hold: next });
   };
   const setRoute = (next: DragRoute | null) => {
@@ -310,7 +310,9 @@ export function dragStops(deps: DragDeps): DragStops {
     const stop: Hold | null = cut ?? memo.stop;
     if (stop) node.position(stop.at);
     holdAt(memo.lands, cut);
-    setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
+    // No way the creatures it drags can follow: the hold says so, and the drop's note names the one left behind (drop.ts namedFollower).
+    const noWay = answer.kind === "none" && answer.follower !== undefined;
+    setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker, ...(noWay ? { noWay: true as const } : {}) } : null);
   };
 
   /** The preview again for the drag's answer now: held where its walk holds, and drawn. */
@@ -443,7 +445,8 @@ export function dragStops(deps: DragDeps): DragStops {
                 }
               : undefined;
             const nowMode = dropMode(role, now.scenes[token.sceneId]);
-            land(cutForWalkers(now, token, planWalk(now, token, at, nowMode, found(answer), now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode));
+            const searched = found(answer);
+            land(namedFollower(now, cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode), searched));
           });
         });
         // Still searching: the drop waits at the ghost, which says so.

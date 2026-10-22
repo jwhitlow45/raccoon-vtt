@@ -11,7 +11,7 @@ import { groupReading } from "./preview.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import { RouteWork, type Frames } from "./routeWork.ts";
 import { dragStops, type DragDeps, type DragStops } from "./stageHooks.ts";
-import { routeSlot, type DragRoute } from "./store.ts";
+import { holdSlot, routeSlot, type DragRoute, type Hold } from "./store.ts";
 
 /**
  * A lone drag as the board takes it, for tests: the board's own drag
@@ -25,6 +25,8 @@ import { routeSlot, type DragRoute } from "./store.ts";
 export type Drag = {
   readonly answer: Exclude<RouteAnswer, { kind: "searching" }>;
   preview: DragRoute;
+  /** Where the board held the preview before the drop, and what it said there. */
+  hold: Hold | null;
   frame: ReturnType<DragStops["frameFields"]>;
   plan: DropPlan;
   op: ClientOp | null;
@@ -81,6 +83,7 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
   }
   if (!preview || preview.searching) throw new Error(`the drag of ${tokenId} never settled`);
   const frame = stops.frameFields(tokenId);
+  const hold = scope.get(holdSlot).getState().hold;
   let plan: DropPlan | null = null;
   stops.drop(finger, token, [token], (landed) => (plan = landed));
   for (let k = 0; k < FRAMES && !plan; k++) frames.frame();
@@ -96,6 +99,7 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
       return (answer = found === null ? { kind: "open" } : found === "none" ? { kind: "none", capped: false } : { kind: "route", route: found });
     },
     preview,
+    hold,
     frame,
     plan,
     op: sent[0] ?? null,

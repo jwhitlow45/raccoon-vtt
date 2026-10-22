@@ -13,7 +13,10 @@ import type { Point, Rect } from "#shared/rules/geom.ts";
 import { routeFeet, routePoints, routeReach, routeStop, straightCost, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { DM, P1, actor, chance, effect, env, int, pick, reveal, rng, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
-import { dropLanding, dropView, walkerOf } from "../movement/drop.ts";
+import { dropLanding, dropView, routeTarget, walkerOf } from "../movement/drop.ts";
+import { worldFor } from "../movement/press.ts";
+import { findRoute } from "#shared/rules/walk.ts";
+import { walkersCut, walkersFor } from "./walk.ts";
 import { world } from "../movement/testing.ts";
 import { tokenStop, type RulerStop } from "../measure/ruler.ts";
 import { measureWalk } from "../measure/walkRuler.ts";
@@ -526,5 +529,117 @@ describe("the server takes a walk that comes back over a cart only when no piece
       taken++;
     }
     assert.ok(taken > 30 && refused > 30, JSON.stringify({ taken, refused }));
+  });
+});
+
+/**
+ * A holder towing one or two creatures beside it, on its side, ahead or
+ * behind, among walls right across the scene with doors one to three
+ * squares wide in them, and short walls about (review LP12-AT-2). Now and
+ * then one of the creatures is one players cannot see, which tows unseen.
+ */
+function towCase(r: () => number): { state: RoomState; who: Viewer; towed: string[] } {
+  const edges: Record<string, EdgeFeature> = {};
+  for (let i = int(r, 1, 3); i > 0; i--) {
+    const at = int(r, 4, 24);
+    const across = chance(r, 0.5);
+    const gaps = new Set<number>();
+    for (let g = int(r, 1, 3); g > 0; g--) {
+      const from = int(r, 1, 26);
+      for (let w = int(r, 1, 3); w > 0; w--) gaps.add(from + w - 1);
+    }
+    for (let v = 0; v < 30; v++) if (!gaps.has(v)) edges[across ? `${v},${at},n` : `${at},${v},w`] = { kind: "wall" };
+  }
+  for (let i = int(r, 0, 3); i > 0; i--) {
+    const at = int(r, 4, 24);
+    const from = int(r, 4, 22);
+    for (let v = from; v < from + int(r, 1, 4); v++) edges[chance(r, 0.5) ? `${at},${v},w` : `${v},${at},n`] = { kind: "wall" };
+  }
+  const size = pick(r, ["medium", "medium", "large"] as const);
+  const side = size === "large" ? 2 : 1;
+  const hx = int(r, 6, 20);
+  const hy = int(r, 6, 20);
+  const holder = token("kira", { name: "Kira", kind: "pc", size, ownerIds: ["p1"], x: hx, y: hy, actor: { inline: actor({ speeds: { walk: 30 } }) } });
+  const tokens: Token[] = [holder];
+  const towed: string[] = [];
+  // Places beside the holder's footprint: west, east, north, south, and the corners.
+  const spots = [[-1, 0], [side, 0], [0, -1], [0, side], [-1, -1], [side, side], [-1, side], [side, -1]] as const;
+  const used = new Set<number>();
+  for (let i = chance(r, 0.25) ? 2 : 1; i > 0; i--) {
+    let k = int(r, 0, spots.length - 1);
+    while (used.has(k)) k = (k + 1) % spots.length;
+    used.add(k);
+    const [ox, oy] = spots[k]!;
+    const id = `gob${i}`;
+    tokens.push(grappled(id, { name: `Goblin ${i}`, x: hx + ox, y: hy + oy, attached: { to: "kira", kind: "drag" }, ...(i === 2 && chance(r, 0.4) ? { visibility: "dm" as const } : {}) }));
+    towed.push(id);
+  }
+  let state = world({ edges, tokens });
+  // True distance too, whose routes are pulled taut past corners.
+  state.meta.settings = { ...state.meta.settings, diagonal: pick(r, ["five", "fiveTen", "euclid"] as const) };
+  for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "kira", value: 20 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+    const out = applyOp(state, op, DM, env(i + 1));
+    assert.ok(out.ok);
+    state = out.state;
+  }
+  return { state, who: chance(r, 0.85) ? P1 : DM, towed };
+}
+
+describe("a holder's route search walks the creatures it drags beside it with it (review LP12-AT-2)", () => {
+  test("random tows through doors: a route found is one every creature it drags follows, and with none the note names one exactly when the holder alone has a way", () => {
+    let opens = 0;
+    let routes = 0;
+    let rerouted = 0;
+    let named = 0;
+    let noneAlone = 0;
+    let hiddenTows = 0;
+    for (let seed = 1; seed <= 800; seed++) {
+      const r = rng(seed);
+      const c = towCase(r);
+      const kira = c.state.tokens.kira!;
+      const raw = { x: Math.max(0, Math.min(27, kira.x + int(r, -8, 8))), y: Math.max(0, Math.min(27, kira.y + int(r, -8, 8))) };
+      const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
+      const drag = dragOf(copy, c.who.role, "kira", raw);
+      const where = `seed ${seed} (${c.who.memberId} drags kira to ${raw.x},${raw.y})`;
+      if (drag.op) {
+        const op = drag.op as Op;
+        const allowed = canApply(op, c.who, c.state, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message} for ${JSON.stringify(op)}`);
+        const applied = applyOp(c.state, op, c.who, env(10));
+        assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
+        assert.deepEqual(drag.preview.to, { x: applied.state.tokens.kira!.x, y: applied.state.tokens.kira!.y }, `${where}: the picture showed another spot`);
+        if (c.state.tokens.gob2?.visibility === "dm") hiddenTows++;
+      }
+      if (c.who.role !== "player") continue;
+      const view = dropView(copy, "player");
+      const walkers = walkersFor(view, "kira", "player");
+      const target = routeTarget(view, view.tokens.kira!, raw);
+      const input = worldFor(view, view.tokens.kira!, "player").input;
+      const { towed: _towed, ...own } = input;
+      const alone = findRoute(own, target);
+      const aloneCut = alone && alone !== "none" ? walkersCut(view, view.tokens.kira!, target, alone, "player") : null;
+      if (drag.answer.kind === "open") {
+        // Open ground for the holder is open only where they all walk the straight leg with it.
+        assert.equal(walkersCut(view, view.tokens.kira!, target, null, "player"), null, `${where}: the straight leg leaves a creature behind`);
+        opens++;
+      } else if (drag.answer.kind === "route") {
+        // The way found is one they all follow, so the drop is never cut where one of them meets a wall.
+        assert.equal(walkersCut(view, view.tokens.kira!, target, drag.answer.route, "player"), null, `${where}: the route ${JSON.stringify(drag.answer.route.pieces)} leaves a creature behind`);
+        routes++;
+        if (aloneCut) rerouted++;
+      } else if (drag.answer.kind === "none") {
+        const follower = drag.plan.stop?.follower;
+        if (alone === "none") {
+          assert.equal(follower, undefined, `${where}: no way for the holder alone, yet the note names ${follower}`);
+          noneAlone++;
+        } else if (drag.plan.stop) {
+          assert.ok(walkers.some((w) => w.name === follower), `${where}: the holder alone has a way, and the note names ${follower}`);
+          assert.equal(drag.hold?.noWay, true, `${where}: the hold reads no way through`);
+          named++;
+        }
+      }
+    }
+    // A run that never reroutes a tow, names one left behind or finds no way at all tests nothing.
+    assert.ok(opens > 50 && routes > 300 && rerouted > 80 && named > 20 && noneAlone > 15 && hiddenTows > 20, JSON.stringify({ opens, routes, rerouted, named, noneAlone, hiddenTows }));
   });
 });

@@ -36,7 +36,7 @@ export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
           <TokenGhost token={ghosted} x={note.ghost.x} y={note.ghost.y} scale={props.scale} color={theme.color.danger} />
         </Group>
       ) : null}
-      {hold && held && held.sceneId === props.scene.id ? <HoldMark token={held} at={hold.at} scale={props.scale} text={holdLabel(hold.blocker)} /> : null}
+      {hold && held && held.sceneId === props.scene.id ? <HoldMark token={held} at={hold.at} scale={props.scale} text={holdLabel(hold.blocker, hold.noWay === true)} /> : null}
     </>
   );
 });

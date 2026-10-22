@@ -7,6 +7,7 @@ import { footprintRect, sizeCategory, sizeSteps, verticalExtentFt } from "./foot
 import { INCAPACITATING_KEYS } from "./hp.ts";
 import { publicCounters } from "./path.ts";
 import type { Walker } from "./movement.ts";
+import { followerTrace } from "./route.ts";
 import type { WalkArea, WalkCreature, WalkInput } from "./walk.ts";
 import { sceneWalls } from "./walls.ts";
 
@@ -190,7 +191,9 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
  * is a party member, the mover included. While it drags or carries a
  * creature every foot costs one more (dragExtra), which every piece of its
  * route then carries. What moves with it never stands in its way, since it
- * is not there once the holder has gone.
+ * is not there once the holder has gone. The creatures among them it drags
+ * beside it walk each step with it (WalkInput `towed`), so its route is one
+ * they all fit through (4.2, review LP12-AT-2).
  */
 export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = [], opts: WorldOptions = {}): PublicWorld {
   const shown = shownBy(state, viewer, opts);
@@ -205,7 +208,16 @@ export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: 
   if (drag === 0 && members.length === 0) return world;
   const moving = new Set(members);
   const keep = world.spaces.map((space) => !moving.has(space.id));
-  return { ...world, input: { ...world.input, drag, creatures: world.input.creatures.filter((_, i) => keep[i]) }, spaces: world.spaces.filter((_, i) => keep[i]) };
+  // Each as itself, never squeezed, as its holder's walk takes it along (moveLeg.ts follow).
+  const towed = members.flatMap((id) => {
+    const member = state.tokens[id]!;
+    return member.attached?.kind === "drag" ? followerTrace(member, [member]) : [];
+  });
+  return {
+    ...world,
+    input: { ...world.input, drag, creatures: world.input.creatures.filter((_, i) => keep[i]), ...(towed.length > 0 ? { towed } : {}) },
+    spaces: world.spaces.filter((_, i) => keep[i]),
+  };
 }
 
 /** The tokens on the mover's scene players see, by id. */

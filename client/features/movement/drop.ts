@@ -8,7 +8,7 @@ import { groundUnder, landing, legStop, ownWalk, previewSqueezed, squeezeFits, w
 import { followerTrace, routeLattice, routePoints, routeReach, routeStop, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
-import { snapPosition } from "../../lib/scene.ts";
+import { displayName, snapPosition } from "../../lib/scene.ts";
 
 /**
  * Where a dropped token lands when walls, doors and ledges stop players'
@@ -185,6 +185,8 @@ export type Stop = {
   searched?: true;
   /** The search gave up past its cap (5.2). */
   capped?: true;
+  /** The creature the walker drags beside it that cannot follow where the walker alone would go, by the name players see (docs/design-v1-attach.md 4.2). */
+  follower?: string;
 };
 
 export type DropPlan = {
@@ -256,7 +258,7 @@ export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exc
 }
 
 /** What a lone drag's route search answered for the drop's spot (routeDrag.ts): the straight leg, a route, or no route. */
-export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces"> } | { kind: "none"; capped: boolean };
+export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "pieces"> } | { kind: "none"; capped: boolean; follower?: string };
 
 /**
  * The spot a lone drop's route aims at (docs/design-v1-movement.md 3.1):
@@ -583,7 +585,8 @@ export function walkersStop(state: BuildState, lead: DropToken & Walker, points:
  * (docs/design-v1-attach.md 4.2), only for a player's walk where walls
  * stop moves: the plan's lone move ends at walkersStop's spot, its route
  * kept up to there, and the walk is stopped there as a lone walk is at a
- * wall, with the note that says so.
+ * wall, with the note that says so: a search that found no way says so
+ * still.
  */
 export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, walkers: readonly DropToken[], mode: Exclude<DropMode, "teleport">): DropPlan {
   const move = plan.moves.find((m) => m.tokenId === lead.id);
@@ -594,7 +597,8 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
   const stop = walkersStop(state, walking, points, walkers);
   if (!stop) return plan;
   const others = plan.moves.filter((m) => m !== move);
-  const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y } };
+  const searched = plan.stop?.searched ? { searched: true as const, ...(plan.stop.capped ? { capped: true as const } : {}) } : {};
+  const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y }, ...searched };
   if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted };
   const cut = landed(state, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
   if (move.route) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
@@ -615,17 +619,33 @@ export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
   return ops;
 }
 
-/** What the map says while a drag is held at a wall or a ledge. */
-export function holdLabel(blocker: Blocker): string {
+/**
+ * A walk's stop once its search found no way because a creature the
+ * walker drags beside it cannot follow (Found `follower`): held where the
+ * straight walk is, at the walker's own wall or where that creature meets
+ * one, and naming it (docs/design-v1-attach.md 4.2, review LP12-AT-2).
+ */
+export function namedFollower(state: DropView, plan: DropPlan, found: Found): DropPlan {
+  if (found.kind !== "none" || found.follower === undefined || !plan.stop) return plan;
+  const follower = state.tokens[found.follower];
+  return { ...plan, stop: { ...plan.stop, searched: true, follower: follower ? displayName(follower) : "A creature you drag" } };
+}
+
+/** What the map says while a drag is held at a wall or a ledge, or where a creature it drags finds no way through with it. */
+export function holdLabel(blocker: Blocker, noWay = false): string {
+  if (noWay) return "No way through";
   return blocker === "wall" ? "Wall in the way" : "Ledge in the way";
 }
 
 /**
  * The note after a stopped drop: what stopped it, and how to go on. A walk
  * whose search found no way says so (docs/design-v1-movement.md 3.1),
- * after "Too far to work out a way around" when the search gave up.
+ * after "Too far to work out a way around" when the search gave up, and
+ * names the creature it drags that cannot follow when that is why
+ * (docs/design-v1-attach.md 4.2).
  */
-export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped">): string {
+export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped" | "follower">): string {
+  if (stop.follower !== undefined) return `${stop.follower} can't follow through there.`;
   const far = stop.capped ? "Too far to work out a way around. " : "";
   if (stop.door) return `${far}A door is in the way. Tap it to open.`;
   if (!stop.searched) return stop.blocker === "ledge" ? "Ledge in the way. Take the stairs." : "Stopped at a wall. Drop at the corner first, then go on.";

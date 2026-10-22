@@ -148,7 +148,7 @@ The Builder tool is the DM's. Its modes:
 - The tracker tags a rider's row "Riding Warhorse", and a controlled mount's "Controlled by Bree: moves and acts on Bree's turn (Dash, Disengage or Dodge)".
 - Dragging or carrying a creature every player sees costs 1 extra foot per foot, as difficult terrain does, unless it is Tiny or two sizes smaller than its holder.
 - When Prone or Unconscious lands on a rider or on its mount, the DM's device says "Bree may fall off Warhorse: DC 10 Dexterity save.", with "Ask for the save" for a player's rider. Nothing falls off by itself.
-- On a scene where walls stop moves, a player's group stops where its holder, or a creature it drags that every player sees, meets a wall.
+- On a scene where walls stop moves, a holder's drag finds a way that fits every creature it drags beside it that every player sees, so a grappled goblin walking beside it comes through a 10 ft gap with it. With no such way the drag reads "No way through", the group stops where its holder, or one of those creatures, meets a wall, and the note names the one that cannot follow when the holder alone could go ("Goblin can't follow through there.").
 - Hidden stays hidden: a hidden imp on a villain's shoulder never reaches players, and no stop, cost, refusal or undo depends on a token or link they cannot see. A visible torch held by an invisible creature floats along with it, as at the table.
 - A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a group moves at most 20 tokens.
 

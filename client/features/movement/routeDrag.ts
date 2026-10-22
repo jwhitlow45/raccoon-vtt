@@ -17,8 +17,13 @@ import type { RouteJob, RouteWork } from "./routeWork.ts";
  * then, and no search state outlives the drag.
  */
 
-/** What the search says of the spot aimed at: the straight leg is the route, a route, no route, or still searching since a time. */
-export type RouteAnswer = { kind: "open" } | { kind: "route"; route: WalkRoute } | { kind: "none"; capped: boolean } | { kind: "searching"; since: number };
+/**
+ * What the search says of the spot aimed at: the straight leg is the route,
+ * a route, no route, or still searching since a time. With no route, a
+ * creature the walker drags beside it that cannot follow where the walker
+ * alone would go is `follower` (docs/design-v1-attach.md 4.2).
+ */
+export type RouteAnswer = { kind: "open" } | { kind: "route"; route: WalkRoute } | { kind: "none"; capped: boolean; follower?: string } | { kind: "searching"; since: number };
 
 export type Settled = Exclude<RouteAnswer, { kind: "searching" }>;
 
@@ -28,6 +33,8 @@ export class RouteDrag {
   readonly #changed: () => void;
   #world: WalkWorld | null = null;
   #search: WalkSearch | null = null;
+  /** The walker's search without the creatures it drags, asked only once theirs finds no way, to say whether they are what keeps it from one. */
+  #alone: WalkSearch | null = null;
   #built = false;
   #target: Point | null = null;
   #check: LegCheck | null = null;
@@ -69,7 +76,7 @@ export class RouteDrag {
 
   /** Whether it holds any search state: a world, a search, work waiting or a drop waiting. */
   get holding(): boolean {
-    return this.#world !== null || this.#search !== null || this.#queued || this.#landing !== null;
+    return this.#world !== null || this.#search !== null || this.#alone !== null || this.#queued || this.#landing !== null;
   }
 
   /** The finger is over a new spot, the spot the drop would land on. Once the finger is up and a drop waits, it aims nowhere else. */
@@ -87,6 +94,7 @@ export class RouteDrag {
     if (this.#over) return;
     this.#world = null;
     this.#search = null;
+    this.#alone = null;
     this.#built = false;
     this.#check = null;
     if (this.#target) this.#solve();
@@ -157,7 +165,32 @@ export class RouteDrag {
     if (result === "paused") return false;
     const route = result === "settled" ? this.#search.traceTo(to, budget) : null;
     if (route === "paused") return false;
-    return this.#answered(route ? { kind: "route", route } : { kind: "none", capped: result === "capped" });
+    if (route) return this.#answered({ kind: "route", route });
+    if (result !== "unreachable" || !world.tows) return this.#answered({ kind: "none", capped: result === "capped" });
+    const follower = this.#follower(world, to, budget);
+    if (follower === "paused") return false;
+    return this.#answered({ kind: "none", capped: false, ...(follower ? { follower } : {}) });
+  }
+
+  /**
+   * Which creature the walker drags beside it cannot follow, once their
+   * search finds no way to `to`: the first one the walker's own way there
+   * leaves behind, or null when the walker has no way there either. The
+   * walker's own search shares the drag's budget as the first one does.
+   */
+  #follower(world: WalkWorld, to: Point, budget: WorkBudget): string | null | "paused" {
+    if (!this.#alone) {
+      if (budget.spent) return "paused";
+      const { towed: _towed, ...input } = world.input;
+      const alone = new WalkWorld(input);
+      budget.charge(worldUnits(alone) + Math.ceil((alone.nx * alone.ny) / 400));
+      this.#alone = new WalkSearch(alone);
+    }
+    const result = this.#alone.settle(to, budget);
+    if (result === "paused") return "paused";
+    const route = result === "settled" ? this.#alone.traceTo(to, budget) : null;
+    if (route === "paused") return "paused";
+    return route ? (world.cannotFollow(route.points) ?? world.input.towed![0]!.id) : null;
   }
 
   /** The spot is answered: a drop waiting for it lands with it, and the drag is over. */
@@ -196,6 +229,7 @@ export class RouteDrag {
     this.#landing = null;
     this.#world = null;
     this.#search = null;
+    this.#alone = null;
     this.#check = null;
   }
 }

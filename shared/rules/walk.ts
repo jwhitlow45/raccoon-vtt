@@ -63,6 +63,13 @@ export type WalkInput = {
   counter: DiagonalCounter;
   /** attach's dragging foot, every step: 0 or 1. */
   drag?: 0 | 1;
+  /**
+   * The creatures the mover drags beside it that every player sees, each as
+   * it stands (route.ts followerTrace). Each takes every step with it, offset
+   * by its place, so a route is one the whole group fits through
+   * (docs/design-v1-attach.md 4.2, review LP12-AT-2).
+   */
+  towed?: readonly (Walker & { id: string })[];
 };
 
 /** What a found route is: its pieces as the op carries them, the walk's points with their ground, and what the search paid. */
@@ -269,6 +276,10 @@ export class WalkWorld {
   #stamp = 0;
   /** Per node, whether the footprint there is on the holder the walk leaves: 0 not yet known, 1 on it, 2 clear. */
   readonly #on: Uint8Array;
+  /** The creatures the walker drags beside it (WalkInput `towed`), each with its place beside the walker and its own step test. */
+  readonly #towed: readonly { walker: Walker & { id: string }; dx: number; dy: number; tester: StepTester }[];
+  /** Whether all of them take a step, by lattice node and direction: 0 not yet known, 1 they do, 2 one of them does not. */
+  readonly #towedSteps: Uint8Array;
 
   /** `pre` is the world before the walk clears its holder, whose ground and creatures a `post` world shares. */
   constructor(input: WalkInput, pre?: WalkWorld) {
@@ -312,6 +323,12 @@ export class WalkWorld {
       : null;
     const layered = !pre && this.tester !== null && crossesInnerLedges(build, token);
     this.#on = new Uint8Array(layered ? nodes : 0);
+    // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
+    this.#towed = pre ? pre.#towed : this.tester ? (input.towed ?? []).flatMap((t) => {
+      const tester = stepTester(build, t);
+      return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, tester }] : [];
+    }) : [];
+    this.#towedSteps = pre ? pre.#towedSteps : new Uint8Array(this.#towed.length > 0 ? nodes * 8 : 0);
     if (pre) {
       this.flags = pre.flags;
       this.#byCell = pre.#byCell;
@@ -384,19 +401,67 @@ export class WalkWorld {
 
   /**
    * Whether the step from node `a` in direction `d` is clear of walls and
-   * ledges, cached across drags. A step from where the walk starts is its
-   * first, by the walker as it starts (`#first`), squeezed if it stands so.
+   * ledges, for the walker, cached across drags, and for every creature it
+   * drags beside it. A step from where the walk starts is its first, by the
+   * walker as it starts (`#first`), squeezed if it stands so.
    */
   wallsClear(a: number, d: number, b: number): boolean {
     const cache = this.#walls;
     if (!cache || !this.tester) return true;
-    if (a === this.startNode && this.#first) return this.#first.clear(this.xOf(a), this.yOf(a), this.xOf(b), this.yOf(b));
+    if (a === this.startNode && this.#first) return this.#first.clear(this.xOf(a), this.yOf(a), this.xOf(b), this.yOf(b)) && this.#towedStep(a, d, b);
     const k = a * 8 + d;
-    const known = cache[k]!;
+    let known = cache[k]!;
+    if (known === 0) cache[k] = known = this.tester.clear(this.xOf(a), this.yOf(a), this.xOf(b), this.yOf(b)) ? 1 : 2;
+    return known === 1 && this.#towedStep(a, d, b);
+  }
+
+  /** Whether every creature the walker drags beside it takes the step with it, kept for this world alone, since the step cache serves other drags. */
+  #towedStep(a: number, d: number, b: number): boolean {
+    if (this.#towed.length === 0) return true;
+    const k = a * 8 + d;
+    const known = this.#towedSteps[k]!;
     if (known !== 0) return known === 1;
-    const ok = this.tester.clear(this.xOf(a), this.yOf(a), this.xOf(b), this.yOf(b));
-    cache[k] = ok ? 1 : 2;
+    const ok = this.towedClear(this.xOf(a), this.yOf(a), this.xOf(b), this.yOf(b));
+    this.#towedSteps[k] = ok ? 1 : 2;
     return ok;
+  }
+
+  /** Whether every creature the walker drags beside it follows the walker's straight sweep between two stored positions, offset by its place, by its own step test. */
+  towedClear(ax: number, ay: number, bx: number, by: number): boolean {
+    for (const t of this.#towed) if (!t.tester.clear(ax + t.dx, ay + t.dy, bx + t.dx, by + t.dy)) return false;
+    return true;
+  }
+
+  /**
+   * Whether every creature the walker drags beside it walks the straight leg
+   * to `to` with it, by the leg test the server runs on each
+   * (permissions.ts draggedWalls): from where it stands to its place beside
+   * `to`, on its own ground behind a walk on the ground (drop.ts followersOf).
+   */
+  towedFollow(to: Point): boolean {
+    const chunks = this.input.build.buildChunks;
+    for (const t of this.#towed) {
+      const x = to.x + t.dx;
+      const y = to.y + t.dy;
+      const ground = groundUnder(chunks, t.walker, { x, y });
+      if (legStop(this.input.build, t.walker, { x, y, elevation: this.mode === "ground" ? ground : Math.max(t.walker.elevation, ground) }) !== null) return false;
+    }
+    return true;
+  }
+
+  /** The first creature the walker drags beside it that a walk along `points` leaves behind, piece by piece, or null when all of them follow it. */
+  cannotFollow(points: readonly Point[]): string | null {
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1]!;
+      const b = points[i]!;
+      for (const t of this.#towed) if (!t.tester.clear(a.x + t.dx, a.y + t.dy, b.x + t.dx, b.y + t.dy)) return t.walker.id;
+    }
+    return null;
+  }
+
+  /** Whether the walker drags a creature beside it that a step can leave behind. */
+  get tows(): boolean {
+    return this.#towed.length > 0;
   }
 
   /** Whether the footprint at a stored position lies on ground the search may read: every square under it seen, under the squeezed footprint where it squeezes. */
@@ -1351,7 +1416,7 @@ export class PieceBuilder {
 
 /** Whether the straight leg from A to B is a piece: clear of walls, on seen ground, and every lattice step along it paying `extra`. `steps` is how many lattice steps it looked at. */
 function straightHolds(world: WalkWorld, a: RoutePoint, b: RoutePoint, extra: number, swim: number): { holds: boolean; steps: number } {
-  if (world.tester && !world.tester.clear(a.x, a.y, b.x, b.y)) return { holds: false, steps: 1 };
+  if (world.tester && (!world.tester.clear(a.x, a.y, b.x, b.y) || !world.towedClear(a.x, a.y, b.x, b.y))) return { holds: false, steps: 1 };
   const L = world.L;
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L - EPS));
   let px = a.x;
@@ -1381,7 +1446,8 @@ function straightHolds(world: WalkWorld, a: RoutePoint, b: RoutePoint, extra: nu
  * frame's budget can stop it between any two (review ASTRA-08), and says
  * two things:
  * - `open`: the straight leg is the route and needs no search (5.2, "Open
- *   ground first"). The leg test allows it, and no spot along it costs
+ *   ground first"). The leg test allows it, for the walker and for every
+ *   creature it drags beside it (WalkInput `towed`), and no spot along it costs
  *   extra or stops a walk short. The ground rises or falls evenly all the
  *   way, as one piece of the search would, since the straight leg counts
  *   only the change of height between its ends while a walk counts each
@@ -1474,6 +1540,9 @@ export class LegCheck {
       }
       if (world.tester && legStop(build, token, { x: to.x, y: to.y, elevation: token.elevation }) !== null) {
         this.stopped = true;
+        this.#open = false;
+      } else if (world.tows && !world.towedFollow(to)) {
+        // The walker's own leg is clear, but a creature it drags beside it is left behind: a search finds a way they all fit, or none.
         this.#open = false;
       }
       this.#phase = "steps";

@@ -7,7 +7,7 @@ import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, halvedAt, publicWorld, speedAreas } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, walkersStop, type Landed } from "../movement/drop.ts";
+import { dropView, holdLabel, moveOpsOf, planGroup, planOne, planWalk, routeLanding, stopText, walkersStop, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, reveal, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
@@ -74,12 +74,74 @@ describe("a holder's walk", () => {
       const stored = after.path!.stops.slice(1).reduce((sum, s) => sum + (s.cost ?? 0), 0);
       assert.deepEqual([drag.preview.to, after.x, after.y], [{ x: 5, y: 5 }, 5, 5]);
       assert.deepEqual([drag.preview.read.dragFt, drag.frame.ft], [stored, stored], rubble ? "over rubble" : "on open ground");
+      // Thorn has no way either, so the note says there is none rather than naming the goblin.
+      assert.equal(stopText(drag.plan.stop!), "Stopped at a wall. There is no way around it that you have seen.");
     }
   });
 
   test("the walkers are the dragged creatures players see", () => {
     const state = world({ edges: line("w", 6, 0, 5), tokens: [thorn({ x: 2, y: 5 }), goblin(), token("ghost", { x: 1, y: 5, visibility: "dm", attached: { to: "thorn", kind: "drag" } })] });
     assert.deepEqual(walkersFor(state, "thorn", "dm").map((t) => t.id), ["goblin"]);
+  });
+});
+
+describe("a holder's route search walks the creature it drags beside it with it (review LP12-AT-2)", () => {
+  /**
+   * Thorn (P1's, on his turn) drags a grappled goblin standing east of him, a wall along row 8 between them and the spot
+   * below. `gaps` are the columns open in the wall: a 5 ft door at x 5, and maybe a 10 ft gap at x 12 and 13.
+   */
+  function towing(wide: boolean, goblinAt: { x: number; y: number } = { x: 5, y: 4 }, thornAt: { x: number; y: number } = { x: 4, y: 4 }): RoomState {
+    const gaps = wide ? [5, 12, 13] : [5];
+    const edges: Record<string, EdgeFeature> = {};
+    for (let x = 0; x < 30; x++) if (!gaps.includes(x)) edges[`${x},8,n`] = { kind: "wall" };
+    const grappledGoblin = goblin({ ...goblinAt, size: "small", actor: { inline: actor({ effects: [effect("g1", { key: "grappled" })] }) } });
+    return onTurn(world({ edges, tokens: [thorn({ ...thornAt, actor: { inline: actor({ speeds: { walk: 60 } }) } }), grappledGoblin] }), "thorn");
+  }
+
+  test("past a 5 ft door the goblin cannot follow beside him, the drag finds the 10 ft gap they both fit through, and the server takes it", () => {
+    const state = towing(true);
+    const drag = dragOf(copyFor(state, P1), "player", "thorn", { x: 4, y: 11 });
+    assert.equal(drag.answer.kind, "route");
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, drag.plan.stop, drag.hold], [4, 11, null, null]);
+    assert.ok(op.route?.some(([x]) => x >= 12), `through the wide gap: ${JSON.stringify(op.route)}`);
+    assert.ok(canApply(op, P1, state, { canUseAsset: () => true }).ok, JSON.stringify(op));
+    const r = applyOp(state, op, P1, env(20));
+    assert.ok(r.ok);
+    assert.deepEqual([r.state.tokens.thorn!.x, r.state.tokens.thorn!.y, r.state.tokens.goblin!.x, r.state.tokens.goblin!.y], [4, 11, 5, 11]);
+    const stored = r.state.tokens.thorn!.path!.stops.slice(1).reduce((sum, st) => sum + (st.cost ?? 0), 0);
+    assert.deepEqual([drag.preview.read.dragFt, drag.frame.ft], [stored, stored]);
+    // A walking ruler reads the drag it stands for, the same way round.
+    const copy = copyFor(state, P1);
+    const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.thorn!), { x: 4.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
+    assert.deepEqual(ruler.legs.map((leg) => [leg.ft, leg.none]), [[stored, false]]);
+  });
+
+  test("with only the 5 ft door, the drag reads No way through and the note names the goblin, held where it meets the wall", () => {
+    const state = towing(false, { x: 6, y: 4 }, { x: 5, y: 4 });
+    const drag = dragOf(copyFor(state, P1), "player", "thorn", { x: 5, y: 11 });
+    assert.equal(drag.answer.kind, "none");
+    assert.ok(drag.hold);
+    assert.equal(holdLabel(drag.hold.blocker, drag.hold.noWay === true), "No way through");
+    assert.equal(stopText(drag.plan.stop!), "Goblin can't follow through there.");
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, drag.preview.to], [5, 7, { x: 5, y: 7 }]);
+    assert.ok(canApply(op, P1, state, { canUseAsset: () => true }).ok, JSON.stringify(op));
+    // The ruler reads the leg as no way through too.
+    const copy = copyFor(state, P1);
+    const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.thorn!), { x: 5.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
+    assert.deepEqual(ruler.legs.map((leg) => leg.none), [true]);
+  });
+
+  test("a goblin straight behind him follows him through the 5 ft door, and alone he walks round the wall as before", () => {
+    const behind = towing(false, { x: 5, y: 3 }, { x: 5, y: 4 });
+    const drag = dragOf(copyFor(behind, P1), "player", "thorn", { x: 5, y: 11 });
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, drag.plan.stop], [5, 11, null]);
+    const alone = towing(false, { x: 6, y: 4 }, { x: 5, y: 4 });
+    delete alone.tokens.goblin;
+    const walk = dragOf(copyFor(alone, P1), "player", "thorn", { x: 5, y: 11 });
+    assert.deepEqual([(walk.op as Op & { t: "token.move" }).y, walk.plan.stop], [11, null]);
   });
 });
 
