@@ -53,6 +53,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Spirit Guardians and a summoned companion](#spirit-guardians-and-a-summoned-companion)
   - [The party travels between scenes](#the-party-travels-between-scenes)
   - [A secret door and a reveal](#a-secret-door-and-a-reveal)
+  - [A pit at the crypt's door](#a-pit-at-the-crypts-door)
 - Reference
   - [Shortcuts](#shortcuts)
 
@@ -122,11 +123,13 @@ None of these is needed to run a good session. Each one is there for when you wa
 - **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
 - **Areas.** Areas earn their place the first time someone casts Fireball, but you can leave reminders, height and the group save until you need them.
 - **Traps.** A hidden monster or a line in your notes can stand in for a trap at your first session. The Trap tool earns its place once you want a pressure plate that goes off by itself when a token walks onto it.
+- **Attach.** Until someone rides into battle, you can move a horse and its rider one after the other. Attaching them saves the second drag, and the app then runs the mount's turn by the mounted combat rules.
+- **The walking ruler and difficult ground.** Dragging a token already walks it around walls and counts the rubble you painted. Mark more difficult ground, or measure a walk before anyone moves, when your maps call for it.
 - **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.** Each is worth learning, and each is easy to pick up once the basics feel familiar.
 
 # Making maps
 
-This part covers everything you do to get a map ready before the players see it: scenes, the starter art that comes with the app, the grid, the map builder, walls, heights, light and fog. Read it while you prepare a session, and come back to a section when you want a map to do something new.
+This part covers everything you do to get a map ready before the players see it: scenes, the starter art that comes with the app, the grid, the map builder, walls, heights, difficult ground, light and fog. Read it while you prepare a session, and come back to a section when you want a map to do something new. Traps are part of preparing a map too, but they matter most once they go off, so they have their own section under [Running fights](#traps).
 
 ## Scenes
 
@@ -159,7 +162,7 @@ Below the scene list (**All scenes**) and **New scene**, the panel shows the set
 - **Map phases**: other images of the same map. See [Map phases, imports and exports](#map-phases-imports-and-exports).
 - **Vision**: **Party vision** and **Light**. See [Light and party vision](#light-and-party-vision).
 - **Grid**: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid** and **Or count the squares**.
-- **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped.
+- **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped. See [When walls stop a move](#when-walls-stop-a-move).
 - **Map builder**: **Open the builder**, **Clear the build** and **Automatic walls**.
 - At the end, **Export as image** and **Delete scene**.
 
@@ -291,7 +294,7 @@ Here is what blocks what:
 - Pillars block movement and sight, but not areas.
 - A secret door that hasn't been found is a wall to players, even when it stands open.
 
-When it comes to movement, a dragged token walks around walls on its own: drop it on the far side of a wall, and it takes the way through the nearest open door, as the creature would. Walls stop only the players' tokens, never yours, and only while the scene's **Walls and ledges block players' moves** setting is on. A player's drag stops at the wall only when there is no way around that the party has seen ("Stopped at a wall. There is no way around it that you have seen."), and the player can then choose **Teleport here** for Misty Step and the like. You get a notice and a log line when they do. A secret door the party hasn't found is a wall to every walk, yours included, so to walk a monster through a secret passage, drop it at the door first and then go on.
+Walls and doors shape movement as well. Drop a token on the far side of a wall, and it walks around through the nearest open door, as the creature would. On a scene where walls stop players' moves, a player's token can't pass through a wall at all. [When walls stop a move](#when-walls-stop-a-move) explains what happens then, and what a player can do about it.
 
 ## Heights and stairs
 
@@ -315,7 +318,7 @@ You can paint heights over a map image too, so the cliff drawn in the art can be
 
 ## Difficult ground
 
-Some ground is slow going: rubble, thick undergrowth, a slope of loose scree, the furniture of a crowded tavern. In the rules every foot of movement through difficult terrain costs 1 extra foot, so a square of it costs 10 ft to enter instead of 5 ft. The app counts this for you whenever a token is dragged.
+Some ground is slow going: rubble, thick undergrowth, a slope of loose scree, the furniture of a crowded tavern. In the rules every foot of movement through difficult terrain costs 1 extra foot, so a square of it costs 10 ft to enter instead of 5 ft. The app counts this for you whenever a token is dragged or moved with the arrow keys, and the walking ruler counts it too (see [Measuring and movement](#measuring-and-movement)).
 
 The **Difficult** and **Rubble** terrains from the Brush are difficult terrain. For anything else, pick **Difficult ground** in the builder and **Mark** squares with the brush (1, 2 or 3 squares) or a dragged **Area**. A mark goes over whatever is there, floor or map art, without changing it, and draws as a thin ochre hatch that lets the map show through. **Clear** takes marks off, and Erase takes them along with everything else. Players see the marks with the rest of the map.
 
@@ -325,8 +328,11 @@ A few other things cost extra too, and the app counts them the same way:
 - **Another creature's space** is difficult terrain, unless the creature is an ally or Tiny. On a scene where walls stop moves, a walk never passes through a creature it couldn't pass in the rules (one that isn't Incapacitated and is less than two sizes apart), but it can end there, and the label warns that it would. Where walls don't stop moves, nothing stops a walk, and such a space is just difficult terrain.
 - **A Prone creature** crawls, so every foot costs 1 extra.
 - **Areas** marked to slow movement, such as Web or Plant Growth (see [Areas that slow movement](#areas-that-slow-movement)).
+- **Dragging or carrying a creature** costs 1 extra foot per foot, unless the creature is Tiny or at least two sizes smaller than the one hauling it (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)).
 
-Difficult terrain isn't cumulative: a square is difficult or it isn't. Plant Growth's 4 ft per foot replaces it rather than adding to it.
+Difficult terrain isn't cumulative: a square is difficult or it isn't. Plant Growth's 4 ft per foot replaces it rather than adding to it. The other costs do add up, though, so a creature dragging a goblin through rubble pays 3 feet for every foot.
+
+Whenever one of these makes a walk cost more, the label on the drag says what it was, such as "+10 ft for difficult terrain" or "+15 ft for dragging", so nobody has to wonder why a short walk used so much of a turn.
 
 ## Light and party vision
 
@@ -391,7 +397,7 @@ Press **Create scene** to make it, and keep the page open until the walls have b
 
 # Running fights
 
-This part covers what you use once the dice come out: monsters and encounters, tokens and their HP, Initiative, rolls, areas of effect and movement. Read the sections for the tools you plan to use before a session, and keep the guide open during play for the details.
+This part covers what you use once the dice come out: monsters and encounters, tokens and their HP, Initiative, rolls, areas of effect, movement, mounts and dragging, and traps. Read the sections for the tools you plan to use before a session, and keep the guide open during play for the details.
 
 ## Monsters
 
@@ -444,14 +450,15 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar opens under the token. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
-![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
+![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll and Attach, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
 The action bar holds, from top to bottom:
 
 - The token's AC, HP, Speed (after the footprints) and **PP** (Passive Perception), as the Token panel shows them, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
 - **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel.
 - **Elevation**, with **−5** and **+5** (or Page Down and Page Up).
-- **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel) and **Light**.
+- **Doesn't count**, on a line of its own once the creature whose turn it is has moved (see [Measuring and movement](#measuring-and-movement)). Players also get **Undo move** there, and **Open door** or **Close door** when their token stands by a door.
+- **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel), **Light** and **Attach** (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)).
 - **Size**, whose **−** and **+** step the creature one size smaller or larger, for Enlarge, Wild Shape or a polymorph.
 - **Locked** (a padlock: once it is on, nobody can drag the token, you included), **Duplicate** (two pages and a plus) and **Delete** (a trash can, which asks "Sure?" before it deletes anything).
 
@@ -784,54 +791,118 @@ Some moments in a fight need an answer from you, and the app shows them as cards
 
 ## Measuring and movement
 
-**The Ruler** (`R`): drag to measure, and tap to add waypoints along the way. It shows the total and each leg ("35 ft (15 ft + 20 ft)"). Double-tap, or press **Keep**, to leave a ruler on the map, and remove kept rulers from the **Kept rulers** list. Your ruler is private until you turn on **Shared**, and Shared turns itself off each time you pick the Ruler again, so measuring to a hidden monster never gives it away. Players' rulers show to everyone, in each player's color. A point on raised ground stands on that ground, so the distance counts the height.
+Most movement in a session is simply dragging tokens, and the app does the counting as you drag: how far the creature walks, what the ground costs it, and how much of its Speed is left. The Ruler measures without moving anything, either in a straight line for range or along the way a creature would actually walk.
 
-**Moving a token** measures as you drag: the path is green within the creature's Speed, yellow within a Dash, and red beyond that. A flier above the ground is measured against its Fly Speed. During a fight, only the creature whose turn it is gets the colors, and the app tracks its path through the turn.
+### Moving a token
 
-The token walks the cheapest way to where you drop it. When a wall, a closed door or a ledge is in the way, or when going around a patch of rubble costs less than wading through it, the line bends along the way the creature would walk, with a dot at each corner. The label at its end reads what the walk costs, and under that what cost extra: "+10 ft for difficult terrain". If the walk would end in another creature's space, the label says so in amber, since a creature can't willingly end its move there. On a big map a long walk can take a moment to work out, and the label then reads "Finding the way…". A drop made meanwhile waits a moment and then lands.
+Drag a token and drop it where the creature goes. As you drag, the app draws the way it would walk and colors it by the creature's Speed: green within its Speed, yellow within a Dash, and red beyond that. A creature above the ground is measured against its Fly Speed. Outside a fight every drag gets the colors. During a fight only the creature whose turn it is gets them, since that is the move the table is counting.
 
-A drop says where, not how. If a player wants their character to wade through the rubble rather than go around it, they drop it in the rubble first and then go on from there. Dragging several tokens at once moves them in straight lines.
+The token walks the cheapest way to where you drop it. When a wall, a closed door or a ledge is in the way, the line bends along the way the creature would walk, through an open door or up the stairs, with a dot at each corner. The same happens when going around a patch of rubble costs less than wading through it. The label at the end of the line reads what the walk costs, and under that, what cost extra.
 
-![Thorn dragged down the corridor: a yellow path and "35 ft · 15 ft left with Dash".](dm-guide/movement.webp)
+![Mara dragged from the crypt's hall into the corridor: the yellow line bends at the corridor's mouth, and the label reads "45 ft · 15 ft left with Dash" with "+10 ft for difficult terrain" under it, for the two hatched squares of difficult ground.](dm-guide/movement.webp)
 
-Here is how the turn's path works, and how to correct it:
+In the picture, Mara is dragged from the hall to the far end of the corridor. A straight line would cut through the wall, so the walk bends at the corridor's mouth instead, and the two hatched squares of difficult ground in the corridor add 10 ft. With her 30 ft Speed, the 45 ft walk needs a Dash, so the line is yellow. [Difficult ground](#difficult-ground) lists everything that costs extra.
+
+The label tells you a few more things:
+
+- If the walk would end in another creature's space, the label says so in amber, since a creature can't willingly end its move there. Nothing stops the drop, so the ruling is yours.
+- If the walk crosses a trap the players have found, the label warns them, such as "Crosses Hidden Pit". Your own drags warn you about every armed trap.
+- On a big map, a long walk can take a moment to work out, and the label reads "Finding the way…" meanwhile. A drop made while it searches waits a moment and then lands, so a token never jumps somewhere you didn't expect.
+
+**A drop says where, not how.** The app always takes the cheapest way. If a player wants their character to wade through the rubble rather than go around it, they drop it in the rubble first and then go on from there. Each drop is its own leg, so splitting a move this way costs nothing extra.
+
+**Arrow keys and groups.** The arrow keys move the selected token one square at a time. They never walk around a wall, but they still count what they cross, so a step into rubble costs 10 ft. When you drag several tokens at once, they move in straight lines without looking for a way around, so drag the creature whose turn it is on its own when its movement matters.
+
+### When walls stop a move
+
+Each scene has a setting, **Walls and ledges block players' moves**, under **Movement** in its settings, and it is on for every new scene. While it is on, a player's token can't pass through walls, closed doors, windows, pillars or ledges. It walks around them instead, and stops only when there is no way around that the party has seen. The token then holds at the last spot it could reach, and a note says why: "Stopped at a wall. There is no way around it that you have seen.", "Ledge in the way. No stairs you have seen lead there.", or, when the player can see a door in the way, "A door is in the way. Tap it to open."
+
+From that note the player can press **Teleport here** to land where they dropped, for Misty Step and the like. A teleport doesn't count against the creature's Speed, and you get a notice and a log line whenever someone uses it.
+
+A player's walk only ever uses ground the party has seen, so a route never leads a character through the dark to somewhere nobody knows about. Your own moves are never stopped: a monster you drop on the far side of a wall walks around it if there is a way, and goes straight through if there isn't. The one exception is a secret door the party hasn't found. It is a wall to every walk, yours included, so that the way a monster moves never gives the door away. To walk a monster through a secret passage, drop it at the door first and then go on.
+
+### Speed and the turn's path
+
+During a fight, the app keeps track of where the creature whose turn it is has gone:
 
 - Each drop adds a leg to the turn's path, which is drawn on the map with a ring where the turn began and bends where the walk went around something. "Moved 20 ft" totals the whole path, which helps the table judge Opportunity Attacks. The app doesn't detect those for you.
-- When difficult terrain made the turn cost more than its distance, you and the creature's players read both: "Moved 15 ft, used 20 ft", and what is left of its Speed counts what it used. Other players see only "Moved".
-- Inside Spirit Guardians, or any area set to Half Speed that affects it, a creature's Speed is halved, rounded down, so a 25 ft Speed is 12 ft. The label says "Half Speed in Spirit Guardians" while the drag would end inside, and the colors count the halved Speed at each step. Leaving the area gives the full Speed back, less what was used.
+- When difficult terrain made the turn cost more than its distance, you and the creature's players read both, "Moved 15 ft, used 20 ft", and what is left of its Speed counts what it used. Other players see only "Moved".
+- Inside Spirit Guardians, or any area set to Half Speed that affects it, a creature's Speed is halved, rounded down, so a 25 ft Speed becomes 12 ft. The label says "Half Speed in Spirit Guardians" while the drag would end inside, and the colors count the halved Speed at each step. Leaving the area gives the full Speed back, less what was used.
 - **Doesn't count**, in the action bar, leaves the last leg out of the total, for a shove or a teleport.
-- Players get **Undo move** for their own newest move. Your own moves are undone with Undo in the top bar. A move a trap cut short, or one whose trap showed its player anything, is the one a player can't undo (see [Traps](#traps)).
+- Players get **Undo move** for their own newest move. Your own moves are undone with **Undo** in the top bar. A player can't undo a move that a trap cut short or that showed them something, since the trap has already happened (see [Traps](#traps)).
 
-**The walking ruler.** The Ruler's **Measure** chip chooses **Straight** or **Walking**, and your device remembers the choice. On a narrow phone the chip shows them as **Line** and **Walk**. Walking measures how far the creature the ruler starts on would walk to each point, or a Medium creature when you start on empty ground: around walls, through open doors, up stairs and counting difficult terrain, just as a drag would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any, and a leg with no way through draws straight in red. A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know.
+### The Ruler
+
+**The Ruler** (`R`): drag to measure, and tap to add waypoints along the way. It shows the total and each leg ("35 ft (15 ft + 20 ft)"). Double-tap, or press **Keep**, to leave a ruler on the map, and remove kept rulers from the **Kept rulers** list. Your ruler is private until you turn on **Shared**, and Shared turns itself off each time you pick the Ruler again, so measuring to a hidden monster never gives it away. Players' rulers show to everyone, in each player's color. A point on raised ground stands on that ground, so the distance counts the height.
+
+**The walking ruler.** A straight line is the right measure for a spell's range, but not for how far a creature has to walk to get somewhere. For that, pick **Walking** instead of **Straight** in the Ruler's options. Your device remembers the choice. On a narrow phone the two fold into one button that reads **Line** or **Walk**, and a tap on it offers both. A walking ruler measures how far the creature it starts on would walk to each point, or a Medium creature when you start on empty ground. It goes around walls, through open doors and up stairs, and counts difficult terrain, just as dragging the creature there would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any. A leg with no way through draws in red and reads "No way through". On your own ruler it runs straight through the wall, as your own drop would, while a player's ruler, or one you share, stops at the wall, as a player's drag would. Started on the rider of a controlled mount, it measures the mount's walk, since that is how the rider moves.
+
+![The walking ruler from Ivo in the hall to the far side of the crypt chamber: the line bends round the hall's wall, runs down the corridor and through the chamber's door, and reads "Walking 85 ft" with "+10 ft for difficult terrain" under it, and Straight and Walking sit in the Ruler's options.](dm-guide/walking-ruler.webp)
+
+A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there, and it reads no Swim Speed or crawling, since a ruler has no turn. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know, which makes it the one for planning a monster's route.
 
 Distances between tokens are measured from edge to edge and include height. The room's **Diagonal moves** setting decides how diagonals count. The default, every square 5 ft, is the 2024 rule.
 
 ## Mounts, familiars and dragging
 
-Some tokens should go wherever another one goes: a knight on her warhorse, a familiar on a wizard's shoulder, a torch in a fighter's hand, travelers riding in a cart, or a goblin hauled along by the fighter who grappled it. **Attach** links two tokens so that one moves with the other.
+Some tokens should go wherever another one goes: a knight on her warhorse, a familiar on a wizard's shoulder, a torch in a fighter's hand, travelers riding in a cart, or a goblin hauled along by the fighter who grappled it. **Attach** links two tokens so that one moves with the other, and the app then follows the rules that go with each kind of link: what it costs to get on a mount, when a mount takes its turn, and how much slower a creature moves while it drags another.
 
-**Attaching.** Select the token that gets on, or the one that will carry or drag, and press **Attach** in its action bar. The list shows every token within 5 feet that it can ride, carry or drag, nearest first, each as a sentence that says what will happen:
+### Attaching
+
+Select the token that gets on, or the one that will carry or drag, and press **Attach** in its action bar. On a computer the list opens as a pop-up beside the button, and on a phone it slides up from the bottom. It shows every token within 5 feet that the selected one can ride, carry or drag, nearest first, each as a sentence that says what will happen:
 
 - **Ride Warhorse** puts a creature on a mount at least one size larger than itself.
-- **Perch on Bree** puts a Tiny creature on another creature, the way a familiar sits on a shoulder.
+- **Perch on Bree** puts a Tiny creature on another creature, the way a familiar sits on a shoulder. A perch is not a mount, so it costs no movement and never shares a turn.
 - **Carry Torch** puts an object on the selected token, and **Get on Cart** puts the selected creature on an object. **Carry Kobold** lets a creature carry a smaller one that it has grappled.
 - **Drag Goblin 2** pulls a creature along beside the one dragging it.
 
-Your list reaches further than your players' do: tokens up to 30 feet away appear under **Farther away**, so you can seat your NPCs on their mounts while you set up a scene. A player can drag a creature only when they could move it anyway, or once you have marked it Grappled. When nothing is in reach, the list says so.
-
 **Controlled or independent.** Ride asks one more question. A controlled mount, such as a horse trained for battle, moves on its rider's turn as the rider directs it. An independent mount keeps its own turn and goes where it pleases, with its rider along for the ride. Controlled is the default, and you can change it later in the rider's Token panel.
 
-**Moving together.** Drag the holder, and everything it carries comes along: the warhorse takes its rider, the cart its passengers, the fighter her torch. A token on a holder rises and falls with it, so a rider stays in the saddle of a flying mount. A dragged creature walks beside its holder on its own ground, and comes loose if it ends up out of reach. Dragging the rider of a controlled mount moves the mount, since that is how the rider steers. Drag any other carried token on its own to take it off: drop the torch somewhere else and it has been thrown, or pull the grappled goblin away and it is free. A press in the middle of a holder always takes the holder, so a fighter loaded with a lamp, an owl and a chest still drags as one on a phone. To pick up one of the small things she carries, press it nearer her edge. A carried token dropped back on its holder just takes a new seat there. On a map where walls stop movement, a player's drag of a holder looks for a way wide enough for the creatures it drags beside it, so a fighter towing a goblin at her side takes the double door rather than the narrow one. Where there is none, the group stops where the holder, or a creature it drags, would meet a wall, and the note says which creature can't follow.
+![Thorn in the saddle of Warhorse 1, and Mara's Attach list open beside her action bar: Ride Warhorse 2 and Drag Warhorse 2 within 5 feet, and Ride Warhorse 1 under Farther away.](dm-guide/attach.webp)
 
-**Getting off.** A carried token's action bar shows **Get off** for a creature, **Put down** for an object and **Let go** for a dragged creature. A carried creature keeps **Attach** beside it, so a rider can still pick up a torch or drag a grappled foe, though its list offers only Carry and Drag. To switch mounts, get off first, which costs what getting off always costs. Get off finds a free spot beside the mount. The holder's bar lists what it carries ("Carrying Bree, Torch"), and a tap there selects any of them, which helps when a rider hides its mount or a familiar is too small to tap. Players can take back a mistaken Ride, Get off, Put down or Let go with **Undo move**, like any move.
+Your list reaches further than your players' lists do: tokens up to 30 feet away appear under **Farther away**, so you can seat your NPCs on their mounts while you set up a scene. A player can drag a creature only when they could move it anyway, or once you have marked it Grappled, and their list tells them so when it is empty. Attach never adds or removes a condition itself, so mark Grappled when the grapple lands, and take it off again when the creature breaks free.
 
-**Mounted combat.** The app follows the mounted combat rules. On the rider's turn, getting on or off a mount costs half the rider's Speed, and players can mount only on their own turn. When a creature mounts a controlled mount, the mount's Initiative changes to match its rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill sits on the mount with the rider's own movement under it ("Bree: 15 ft"), and the mount gets its Reaction back when its rider's turn starts. Its own row stays in the tracker, dimmed, so effects that count its turns still tick there, but it has no movement of its own that round. If the mount had already taken its turn this round, the tracker passes over its row until the next round. The tracker tags the rider's row "Riding Warhorse" and the mount's row "Controlled by Bree". When the mount's own row is the one acting as a rider mounts it, its row stays put, and its options offer **Move after Bree** for once its turn is over.
+### Moving together
+
+Drag the holder, and everything it carries comes along: the warhorse takes its rider, the cart its passengers, the fighter her torch, and anything those carry in turn. A token on a holder rises and falls with it, so a rider stays in the saddle of a flying mount. A dragged creature walks beside its holder on its own ground, tied to it by a thin dashed line, and comes loose if it ends up out of reach.
+
+Dragging the rider of a controlled mount moves the mount, since that is how the rider steers. Any other carried token can be dragged on its own to take it off: drop the torch somewhere else and it has been thrown, or pull the grappled goblin away and it is free. A carried token dropped back on its holder just takes a new seat there. A creature dragged off a holder walks from the ground beside it, as if it had stepped down first, so an independent mount's rider who slides off, or a passenger climbing out of a cart, is measured and priced from the ground rather than from the saddle.
+
+On a phone, a press in the middle of a holder always takes the holder, so a fighter loaded with a lamp, an owl and a chest still drags as one. To pick up one of the small things she carries, press it nearer her edge.
+
+**Walls.** On a map where walls stop players' moves, a holder's drag looks for a way wide enough for every creature it drags beside it, so a fighter towing a goblin at her side takes the double door rather than the narrow one. Where there is no such way, the drag reads "No way through", the group stops where the holder, or a creature it drags, would meet a wall, and the note names the one that can't follow ("Goblin can't follow through there."). Riders and carried things need no room of their own, since they travel on the holder.
+
+A teleport leaves a dragged creature behind, since nothing walks beside a creature that blinks across the room. Moving a token to another scene takes everything it carries along with it.
+
+### Getting off and letting go
+
+A carried token's action bar shows **Get off** for a creature, **Put down** for an object and **Let go** for a dragged creature. Get off puts the creature on a free spot beside its holder, and when there is none, the button is greyed out with "No room to get off." under it. Put down and Let go leave the token where it stands.
+
+The holder's bar lists what it carries, such as "Carrying Bree, Torch", with **Let go** or **Put down** beside each one, and the carried token's bar names its holder, such as "On Warhorse". A tap on a name there selects that token, which helps when a rider hides its mount or a familiar is too small to tap. A carried creature keeps **Attach** too, so a rider can still pick up a torch or drag a grappled foe, though its list offers only Carry and Drag. To switch mounts, get off first. Players can take back a mistaken Ride, Get off, Put down or Let go with **Undo move**, like any move.
+
+### Mounted combat
+
+The app follows the 2024 rules for mounted combat, and takes care of the bookkeeping that makes it awkward at a table.
+
+- **Getting on or off** a mount on the rider's turn costs half the rider's Speed, and players can mount only on their own turn. A rider who slides off by dragging pays the same as one who presses Get off.
+- **A controlled mount takes its rider's Initiative.** When a creature mounts a controlled mount, the mount's Initiative changes to match the rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill counts the mount's path, with the rider's own movement under it ("Mara: 5 ft, used 15 ft"), and the mount gets its Reaction back when its rider's turn starts.
+- **The mount's own row** stays in the tracker, dimmed, so effects that count its turns still tick there, but it has no movement of its own that round. If the mount had already taken its turn this round, the tracker passes over its row until the next round. When the mount's own row is the one acting as a rider mounts it, its row stays put, and its **⋯** offers **Move after Mara** for once its turn is over.
+- **The tracker** tags the rider's row "Riding Warhorse 2" and the mount's row "Controlled by Mara", with the three actions a controlled mount may take: Dash, Disengage or Dodge.
+- **An independent mount** keeps its own place in the order, and carries its rider along on its own turn.
+
+![Mara's turn, just after she mounted Warhorse 2: her row reads "Riding Warhorse 2", the horse's row has moved up to just after hers at her Initiative of 18 and reads "Controlled by Mara", and the pill on the horse's path reads "Moved 20 ft, 40 ft left" with "Mara: 5 ft, used 15 ft" under it.](dm-guide/mounted-turn.webp)
+
+Here is how that plays out in the picture. On her turn, Mara stands beside a warhorse, presses **Attach**, and picks **Ride Warhorse 2** with **Controlled**. Getting on costs half her 30 ft Speed, and the horse's row moves up to just after hers. Now a drag of Mara moves the horse, at the horse's own 60 ft Speed, and the pill on its path counts the horse's movement, with "Mara: 5 ft, used 15 ft" under it for her step into the saddle. When you press **Next** at the end of Mara's turn, the horse's own row comes up dimmed, since its turn this round went to carrying her, so press **Next** again to move on.
 
 If a rider, or the mount under it, is knocked Prone or Unconscious, you get a reminder that the rider may fall off, with the DC 10 Dexterity save and **Ask for the save** for a player's rider. The app never decides this for you, and nothing falls off by itself.
 
-**Dragging costs movement.** Dragging or carrying a creature costs an extra foot for every foot moved, just as difficult terrain does, unless the creature is Tiny or two sizes smaller than the one hauling it.
+### Dragging and carrying creatures
 
-**Secrets stay secret.** A hidden token you attach stays hidden: the imp on the villain's shoulder, the assassin hiding in the cart. Your players never learn it's there, not from how the group moves, what a move costs, or why a move was refused. One thing does show, as it would at a real table: a torch held by an invisible creature floats along wherever the creature goes. A rider you hide never shares its mount's turn either, so the tracker gives nothing away.
+Dragging or carrying a creature costs an extra foot for every foot moved, just as difficult terrain does, unless the creature is Tiny or at least two sizes smaller than the one hauling it. The drag's label says so, such as "+15 ft for dragging", and the cost adds to difficult terrain rather than replacing it, so hauling a goblin through rubble costs 3 feet for every foot.
+
+### Secrets stay secret
+
+A hidden token you attach stays hidden: the imp on the villain's shoulder, the assassin hiding in the cart. Your players never learn it's there, not from how the group moves, what a move costs, or why a move was refused. One thing does show, as it would at a real table: a torch held by an invisible creature floats along wherever the creature goes. A rider you hide never shares its mount's turn either, so the tracker gives nothing away.
 
 A token carries at most 8 others, a chain of carried tokens is at most 3 deep, and a group moves at most 20 tokens.
 
@@ -849,11 +920,13 @@ The tool's options choose what your next trap starts from:
 - **Party level** picks the SRD's column for an example trap (levels 1–4, 5–10, 11–16 or 17–20), which sets its save DC, its damage and the depth of its pit.
 - **Zone** chooses the trap's shape: **Squares**, a **Trip wire** or a **Door**. An example trap picks its own, and you can change it.
 
-Then draw it on the map. For squares, drag across them, or tap to place the trap at its own size: a Hidden Pit or Spiked Pit covers 2 by 2 squares from the one you tap, and Blank or Alarm a single square. For a trip wire, drag from one end to the other: the ends snap to square corners and the middles of square edges, and a wire is at most 20 squares long. For a door, tap the door. The new trap's pane opens at once.
+Then draw it on the map. For squares, drag across them, or tap to place the trap at its own size: a Hidden Pit or Spiked Pit covers 2 by 2 squares from the one you tap, and Blank or Alarm a single square. For a trip wire, drag from one end to the other: the ends snap to square corners and the middles of square edges, and a wire is at most 20 squares long. For a door, tap the door. The new trap's pane opens at once, and its first line says where the trap started, such as "From Hidden Pit, levels 1–4".
+
+An example trap is a good place to start even when you have something else in mind, since it comes with its checks, its save and its damage already filled in. For a pit just inside the crypt chamber's door, as in the picture below, pick **Hidden Pit** at your party's level and tap the first square inside the door. The pit covers the 2 by 2 squares anyone coming in must cross, and all that is left to change is the name and the line your players read, if you want them different.
 
 ### The trap pane
 
-The pane holds everything about the trap, in sections that fold to one line each, so you can read the whole trap at a glance and open only what you want to change. Every change is saved as you make it.
+The pane holds everything about the trap, in sections that fold to one line each, so you can read the whole trap at a glance and open only what you want to change. Every change is saved as you make it. On a computer the pane opens over the map, beside the trap. On a phone it slides up from the bottom, and while it is open the fight's alerts fold into a row on its top edge, so the pane's header and Close stay in reach. Tap that row to close the pane and see the alerts.
 
 1. **Name**: what your players see once they find it.
 2. **Goes off when**: a creature steps onto it, starts or ends its turn on it, or steps off it. **Who** sets it off: party creatures, other creatures or any creature. **Small or larger only** lets the cat walk over the plate, and **Only creatures on the floor** leaves out fliers, burrowers and riders.
@@ -865,7 +938,9 @@ The pane holds everything about the trap, in sections that fold to one line each
 8. **Finding and disarming**: the checks that find it, such as "Wisdom (Perception) DC 15: the pressure plate", whether to hint when a creature's Passive Perception would notice it, and how it is disarmed.
 9. **DM note**: anything you want in front of you when it goes off.
 
-When a section asks for something on the map, such as **Add squares**, the squares a trap hits, or **Add: tap a door, light, creature or stamp**, the pane steps aside and the Trap tool's options say what to tap. Drag across squares or tap one, or tap the door, light, creature or stamp, then press **Done**. Outside that, a tap on the map away from the open trap closes its pane.
+![A Hidden Pit just inside the crypt chamber's door, hatched in red under its name, and its pane: "From Hidden Pit, levels 5–10", then each section folded to one line that sums it up, such as Hits, "The creature that set it off", and Players read, "The floor gives way!"](dm-guide/trap-pane.webp)
+
+While the pane is open, the squares or the area the trap hits are drawn faintly on the map, so you can check that they cover what you meant. When a section asks for something on the map, such as **Add squares**, the squares a trap hits, or **Add: tap a door, light, creature or stamp**, the pane steps aside and the Trap tool's options say what to tap. Drag across squares or tap one, or tap the door, light, creature or stamp, then press **Done**. Outside that, a tap on the map away from the open trap closes its pane.
 
 At the foot of the pane, **Armed** and **Found** show the trap's state, and you can change either by hand. **Ask to search** and **Ask to disarm** send a roll request for the trap's checks to the creatures you have selected, or to the whole party. **Set it off** sets the trap off now, by the creatures you have selected or else by those standing on it, for when a character prods the plate with a pole. **Delete** asks for a second tap.
 
@@ -876,12 +951,16 @@ On your map, an armed trap is hatched in red with its name over it, a sprung one
 
 ### When a trap goes off
 
-A trap goes off when a creature it is set for walks onto it or across its wire, lands on it from the height controls, opens its door, or starts or ends its turn on it. It goes off at most once a move, at the point where a creature first reaches it, so a rogue who dashes across three plates sets off the nearest one first. If the trap stops creatures, the creature stops there, and anything it carries stops with it. Where it can't stand on the spot where it first touched the trap, as a Large creature halfway onto a square can't, it stops on the next spot where it can. Its player sees the token settle to that spot as the server answers. A pit that opens stops a creature that fits in it at the first spot where it stands wholly over the opening, so it falls to the bottom with everything it carries: a Large warhorse falls into a 10 ft pit with its rider. A creature too big for the opening, such as a Huge giant over a 10 ft pit, or one whose walk never covers it whole, stops at the first spot where it can stand and stays at the rim.
+A trap goes off when a creature it is set for walks onto it or across its wire, lands on it from the height controls, opens its door, or starts or ends its turn on it. Each trap goes off at most once a move, at the point where the creature first reaches it, so a rogue who dashes across three plates sets off the nearest one first.
+
+If the trap stops creatures, the creature stops where it set the trap off, and anything it carries stops with it. A creature that can't stand on that exact spot, such as a Large creature halfway onto a square, stops at the next spot along its walk where it can. The player's own screen didn't know the trap was there, so they see the token settle back to that spot as the server answers. A pit decides where a creature stops a little differently, so that it can fall in (see [Pits](#pits)).
 
 You get a toast, such as "Hidden Pit went off: Thorn.", and a card among your alerts that stays until you deal with it. The card says who set the trap off, who it hits, what it did ("Opened the pit.") and anything it could not do, with your note under them.
 
 - **Save and damage** opens the group save on the creatures the trap hits, as they stood when it went off, already filled with its save, DC and damage. Ask for the saves or roll them as usual, then press **Apply**, which also settles the card. If everyone passes and the trap would change nothing, as when the whole party slips out from under a Falling Net, the button reads **Settle: it changes no one**, and pressing it clears the card all the same. A trap with conditions and no save shows **Apply** instead.
 - **Dismiss** sets the card aside without applying anything, for when the dice or the story go another way.
+
+![Thorn at the bottom of the Hidden Pit, 30 ft down, and the DM's card for it: "Hidden Pit went off", Thorn set it off, it hits Thorn, it opened the pit, the trap's note, and Save and damage and Dismiss.](dm-guide/trap-card.webp)
 
 **When you're on another scene.** If you're preparing another scene when a trap goes off on the players' scene, the toast names the scene instead of the creatures, "Hidden Pit went off on Crypt.", and still plays the trap's sound. Press **Show** to go there. Once the scene opens, the toast comes again with the creatures' names and **Save and damage**, and the card waits among your alerts. The Passive Perception hint below works the same way.
 
@@ -901,7 +980,11 @@ To let the players look for traps, open the trap's pane and press **Ask to searc
 
 ### Pits
 
-A trap of squares can open a pit. When it goes off, its squares sink to the pit's floor, and every creature standing on them falls with them, along with whatever it carries. A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does. Once the pit is open, its pane reads "Opened" with the depth of its floor, and its depth can no longer be changed.
+A trap of squares can open a pit, as the Hidden Pit and the Spiked Pit do. When it goes off, its squares sink to the pit's floor, and every creature standing on them falls with them, along with whatever it carries.
+
+A creature falls in only when it stands wholly over the opening, so a pit that stops creatures holds a walker at the first spot along its walk where it fits inside the pit, rather than where it first touched the edge. A Large warhorse walking across a pit 10 feet on a side doesn't stop when its front half reaches the edge. It stops once it stands wholly over the opening, and falls to the bottom with its rider. A creature too big for the opening, such as a Huge giant at that same pit, or one whose walk only clips a corner or ends before it is wholly over, never stands wholly over it. It stops at the first spot where it can stand, and stays at the rim while the pit opens beside it.
+
+A creature being dragged along stays on its own ground, and comes loose if its holder falls out of reach. The pit stays open: it is now ground like any you paint, so walking into and out of it follows the usual rules for heights and ledges. Arming the trap again doesn't close it, but your **Undo** of the move that opened it does. Once the pit is open, its pane reads "Opened" with the depth of its floor, and its depth can no longer be changed.
 
 # Deeper tools
 
@@ -914,7 +997,7 @@ The **Outliner** (DM only) lists everything on the scene you are viewing, along 
 ![The Outliner on the crypt: the chips that show one group, groups that fold, and each row with what players get, such as Out of the party's sight.](dm-guide/outliner.webp)
 
 - Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings**, **Doors** (windows too) and **Traps**. The chips at the top show one group at a time.
-- Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
+- Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. A trap's row reads **Hidden** until the players have found it and **Found** after, with **Armed**, **Sprung** or **Disarmed** under its name. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
 - **Search the scene** filters the list as you type. Every word must match a row's name or the line under it, so `companion` finds every companion and `secret` finds secret doors. The marks themselves aren't searched, so use the chips and scan the marks to find, say, everything under fog.
 - Tap a row to find it on the map. A token is selected, with its action bar open. A label, pin, stamp, light or trap opens in its tool. A drawing, door or window flashes so you can spot it.
 
@@ -956,7 +1039,7 @@ To fill one in, press **Add a stat block** on the character's page or in its tok
 
 **Check what was read** then lists anything to double-check, what comes in, and anything else to set (level, AC, max HP, Speed, senses, sheet link, name), where the AC line reminds you that it was worked out from the armor. When the stat block already holds values of its own, **Replaces your changes** lists each one the import would replace, with **Keep mine** beside it for any you want to keep. **Use it** fills in the editor, and **Save** keeps the result. The D&D Beyond import is best effort, since D&D Beyond can change its format at any time.
 
-**Re-sync from D&D Beyond.** Characters level up between sessions, and their players change their sheets in D&D Beyond. Once a character has a stat block and a D&D Beyond link, **Re-sync from D&D Beyond** sits beside **Edit**, with the date of the last sync under it. It fetches the character again and shows **Check what changes**. The app remembers what the last sync brought in, so it can tell a change made in D&D Beyond from one made here. What changed only in D&D Beyond is listed under **Changes from D&D Beyond** and comes in. What the player changed here, such as a druid who casts with Charisma rather than Wisdom, or a weapon they renamed, is listed under **Your changes, kept** and stays as it is, unless they tick **Overwrite** on it, or press **Overwrite all**. A change made in both places is marked **Also changed in D&D Beyond**. A roll the player deleted stays deleted, with **Add it back** if they want it again. Level, max HP, AC, Speed and senses come in ticked under **Also set**, as they do on an import, and the name is offered unticked. **Apply** makes the changes, and **Undo the re-sync** takes them back, the exact HP included, until the dialog closes. If D&D Beyond sends a character with something missing, the review says what it could not read, and those parts stay as they are.
+When the character changes in D&D Beyond later, such as at a level-up, use [Re-sync from D&D Beyond](#re-sync-from-dd-beyond) rather than a new import, so the changes made here stay.
 
 **Take a shape** turns a character into an SRD creature. A druid's player can set **Druid level** in the picker, beside **Beasts only**, to see just the forms that level allows: nothing above CR 1/4 at levels 2 and 3, CR 1/2 from 4, CR 1 from 8, and no creature with a Fly Speed before 8. The list then runs from the highest CR down. **Any** removes the Druid level filter, which is what Polymorph wants. **Wild Shape** keeps the druid's Intelligence, Wisdom, Charisma and proficiencies, while **Polymorph or another shape** takes all of the creature's numbers. Either way, the token takes the creature's AC and Speeds, the HP stay the character's own, and the app offers the Temporary HP the 2024 rules give. **End the shape** turns the character back.
 
@@ -965,6 +1048,22 @@ To fill one in, press **Add a stat block** on the character's page or in its tok
 ![Take a shape for Wren, a level 5 druid: her six known forms first, with "6 of 6 at Druid level 5" and Change, then Beasts only and Druid level 5, which allows up to CR 1/2 and no Fly Speed. Behind it, the same forms wait as buttons in the Stat block on her page.](dm-guide/known-forms.webp)
 
 **Rests.** The Token panel's **Rest** section has **Short Rest**, where you add the HP the player rolled on their Hit Point Dice, and **Long Rest**, which restores all HP, ends Temporary HP, removes one Exhaustion level and resets Legendary Resistance. **Long Rest for the party**, in Characters, rests everyone at once. Spell slots and class features are tracked on the players' own sheets, not here.
+
+### Re-sync from D&D Beyond
+
+Characters level up between sessions, and players keep their sheets in D&D Beyond up to date. **Re-sync from D&D Beyond** brings those changes into the app without throwing away the changes you or the player made here. It sits beside **Edit** once a character has a stat block and a D&D Beyond link, with the date of the last sync under it, and both you and the character's players can use it. As with the first import, the character must be public in D&D Beyond, or you can paste its JSON when the app asks for it.
+
+The app remembers what the last sync brought in, so it can tell a change made in D&D Beyond from one made here. Press **Re-sync from D&D Beyond**, and after a moment the app shows **Check what changes**:
+
+- **Changes from D&D Beyond** lists what changed only in D&D Beyond, such as a higher Wisdom or a new spell. These come in.
+- **Also set** lists the level, max HP, AC, Speed and senses, ticked, as they are on an import, and the name, unticked. Untick any line you want to leave as it is. The max HP line also says how many HP the character keeps.
+- **Your changes, kept** lists what was changed here since the last sync, such as a druid who casts with Charisma rather than Wisdom, or a weapon the player renamed. Each one stays as it is, with what D&D Beyond says beside it, unless you tick **Overwrite** on it, or press **Overwrite all**. A change made in both places is marked **Also changed in D&D Beyond**, so you can choose between the two. A roll the player deleted stays deleted, with **Add it back** if they want it again.
+
+![Check what changes for Wren after a level-up in D&D Beyond: Wisdom 18, a stronger Shillelagh and Moonbeam come in, Level 6 and Max HP 45 are ticked under Also set while the name is not, and her Charisma spellcasting and AC 15, both changed here, are kept, each with its Overwrite box.](dm-guide/resync.webp)
+
+Press **Apply** to make the changes. The app tells you how many came in and how many of your changes stayed, and **Undo the re-sync** takes it all back, the exact HP included, until you close the dialog.
+
+A few cases work a little differently. A character imported before re-sync existed has no record of its last sync, so the app can't tell whose change is whose. Everything that differs is then listed under **Different from D&D Beyond**, and stays as it is unless you take it. If D&D Beyond sends a character with something missing, the review says what it could not read, and those parts stay as they are. While the character is in Wild Shape or another shape, its AC and Speed are left out of the comparison, so re-sync again after the shape ends to update them. A re-sync can change the maximum HP, but it never brings a character back from death or knocks one out, and it never changes the character's size.
 
 ## Companions
 
@@ -1192,6 +1291,24 @@ The party finds a hidden vault, and you want the reveal to land with a bit of dr
 6. Turn **Black out players' screens** off. The players see the room and the handout together.
 
 ![A player's phone during the blackout: "The DM has paused the game." and the X-card.](dm-guide/reveal-blackout.webp)
+
+## A pit at the crypt's door
+
+The crypt's builders left a pit just inside the chamber's door, and the party is about to find it, one way or another.
+
+**Setting it up**
+
+1. While the players are still on another scene, open the crypt and pick the **Trap** tool. Under **Start from**, pick **Hidden Pit**, and set **Party level** to **Levels 5–10**, which makes it a 30 ft pit that deals 3d6 Bludgeoning damage. Tap the first square inside the chamber's door.
+2. In the trap's pane, open **Finding and disarming**. The SRD finds a hidden pit with an Intelligence (Investigation) check, which a character has to ask for. If you want a watchful character to have a chance of noticing it without searching, add a Wisdom (Perception) check too, such as DC 14 for "the seams in the floor". The app then tells you when someone's Passive Perception would notice it.
+3. Close the pane. The pit waits, hatched in red on your map and nowhere on the players'.
+
+**Running it**
+
+1. **Move players** to the crypt. When Mara ends a walk within 10 feet of the pit, her Passive Perception of 14 meets the DC, and you get a toast: "Mara's Passive Perception (14) would notice the seams in the floor of Hidden Pit (DC 14)." If you tell her, press **Mark found**. The players then see the pit's outline and name, and a drag across it warns "Crosses Hidden Pit". If you'd rather keep quiet, simply let the toast go.
+2. Thorn's player, unwarned, drags him into the chamber. The pit stops him once he stands wholly over it, opens, and drops him 30 ft. You get the toast "Hidden Pit went off: Thorn." and the card among your alerts, and his player reads "The floor gives way!"
+3. On the card, press **Save and damage**. The Hidden Pit has no save, so the group save opens on "No save: everyone takes it" with 3d6 Bludgeoning for Thorn. Roll the damage and press **Apply**, which also settles the card.
+4. Thorn's player can't take the move back with **Undo move**, since the pit has already happened. The app tells them to ask you, so the ruling stays yours.
+5. Getting out is up to the table, and the trap's note reminds you what it takes. The pit is ground 30 ft down now, with no stairs, so Thorn can't walk out of it on a scene where walls and ledges stop players' moves. When his climb succeeds, or a rope comes down, drag him out yourself, since your own moves are never stopped. The pit stays open afterwards, so the next creature through the door had better go around it.
 
 # Reference
 
