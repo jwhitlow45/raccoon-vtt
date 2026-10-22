@@ -65,7 +65,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
-import { sheetOpen as sheetShows, type Ended, type Toast, type ToastDie } from "../state/types.ts";
+import { DEFAULT_TOOL, sheetOpen as sheetShows, type Ended, type Toast, type ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
@@ -107,14 +107,6 @@ const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 const PREVIEW_NOTICE_MAX = 520;
 /** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
 const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2 };
-/**
- * A panel's `close` in the side panel (features/panels.ts PanelProps). A
- * panel closes its phone's sheet to clear the map, as Add and place does,
- * and the side panel stands beside the map, so the panel stays open in the
- * room's state too: a turn below 900 px then opens it as a sheet
- * (state/types.ts crossWide), as the side panel showed it.
- */
-const KEEP_SIDE_PANEL = (): void => {};
 
 /**
  * An element's height as drawn, kept up to date. The bars over the map
@@ -562,6 +554,23 @@ function RoomPage() {
     saveSplit.current?.();
   }, []);
   // The bar's Close, whose bar goes with the bottom panel: focus goes to the chosen tab (9.2).
+  /*
+   * A panel's `close` in the side panel (features/panels.ts PanelProps). A
+   * panel closes its phone's sheet to clear the map, as Add and place does,
+   * and the side panel stands beside the map, so the panel stays open in the
+   * room's state: a turn below 900 px then opens it as a sheet
+   * (state/types.ts crossWide), as the side panel showed it. A place button
+   * picks a tool as it closes (Place a token, Pin to the map), and that
+   * tool's options wait for a tap on the map, so then the panel is kept
+   * tucked away, as a phone's Hide does: the turn keeps the map and the
+   * options in view, and Panels brings the panel back. The tool is read once
+   * the press's handler is done, since some pick it after they close.
+   */
+  const closeSidePanel = useCallback(() => {
+    queueMicrotask(() => {
+      if (store.getState().local.tool !== DEFAULT_TOOL) ui.hideSheet(true);
+    });
+  }, [store, ui]);
   const closeBelow = useCallback(() => {
     focusNext.current = { kind: "panel" };
     ui.splitPanels(false);
@@ -1031,7 +1040,7 @@ function RoomPage() {
           onShare={placeShare}
           onHide={hideSidePanel}
           subpages={subpages}
-          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={KEEP_SIDE_PANEL} onHeader={headerOf(id)} />}
+          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={closeSidePanel} onHeader={headerOf(id)} />}
           scrollSubject={(id) => panelSubject(id, selectedId)}
           tabRef={sideTabRef}
           nameRef={belowNameRef}
