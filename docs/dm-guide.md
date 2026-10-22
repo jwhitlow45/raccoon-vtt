@@ -876,7 +876,7 @@ On your map, an armed trap is hatched in red with its name over it, a sprung one
 
 ### When a trap goes off
 
-A trap goes off when a creature it is set for walks onto it or across its wire, lands on it from the height controls, opens its door, or starts or ends its turn on it. It goes off at most once a move, at the point where a creature first reaches it, so a rogue who dashes across three plates sets off the nearest one first. If the trap stops creatures, the creature stops there, and anything it carries stops with it. Its player sees the token settle back to that spot as the server answers. A pit then opens under it, and the creature falls to the bottom.
+A trap goes off when a creature it is set for walks onto it or across its wire, lands on it from the height controls, opens its door, or starts or ends its turn on it. It goes off at most once a move, at the point where a creature first reaches it, so a rogue who dashes across three plates sets off the nearest one first. If the trap stops creatures, the creature stops there, and anything it carries stops with it. Where it can't stand on the spot where it first touched the trap, as a Large creature halfway onto a square can't, it stops on the next spot where it can, still on the trap. Its player sees the token settle back to that spot as the server answers. A pit then opens under it, and the creature falls to the bottom.
 
 You get a toast, such as "Hidden Pit went off: Thorn.", and a card among your alerts that stays until you deal with it. The card says who set the trap off, who it hits, what it did ("Opened the pit.") and anything it could not do, with your note under them.
 

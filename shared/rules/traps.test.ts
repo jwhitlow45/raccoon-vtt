@@ -324,15 +324,42 @@ describe("stops (5.5)", () => {
     return { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: [{ id: "wallwallwall", a: [1.25, 1.25], b: [1.75, 1.25], f: { kind: "wall" } }] };
   }
 
-  test("a snapped spot that clips a wall the leg passed is no stand, so an earlier spot is taken", () => {
+  test("a snapped spot that clips a wall the leg passed is no stand, so a later spot is taken, here the walk's end, which is no stop", () => {
     const gob = token("gob", { x: 0, y: 0 });
     const state = world([gob], [trap("snare", square(1, 1), { stops: true })], (s) => {
       s.scenes.s1 = { ...s.scenes.s1!, blockMovement: true, autoWalls: "off" };
       s.buildChunks[chunkKey("s1", 0, 0)] = walled();
     });
-    const p = plan(state, { t: "token.move", tokenId: "gob", x: 2, y: 1 });
+    const op: Op = { t: "token.move", tokenId: "gob", x: 2, y: 1 };
+    const p = plan(state, op);
     assert.deepEqual(summary(p.springings), ["snare:enter:public:gob"]);
-    assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y] : null, [0, 0]);
+    assert.equal(p.op, op);
+  });
+
+  test("a Large creature's half step onto a stopping trap goes on to its next whole square, on the trap (review LP13-TR-2)", () => {
+    // The ogre steps by half squares, as a creature that squeezes does, and first meets the plate's column at x 2.5.
+    const ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 });
+    const state = world([ogre], [trap("pit", square(4, 4, 2, 2), { stops: true })]);
+    const p = plan(state, { t: "token.move", tokenId: "ogre", x: 9, y: 4 });
+    assert.deepEqual(summary(p.springings), ["pit:enter:public:ogre"]);
+    assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y] : null, [3, 4], "not at 2, beside the lid");
+  });
+
+  test("a group with a Tiny member every player sees, on its half steps, stops on the trap too (review LP13-TR-2)", () => {
+    const owl = token("owl", { name: "Owl", size: "tiny", x: 0, y: 5, attached: { to: "thorn", kind: "perch" } });
+    const state = world([thorn(), owl], [trap("plate", square(3, 5), { stops: true })]);
+    const p = plan(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 });
+    assert.deepEqual(summary(p.springings), ["plate:enter:public:thorn"]);
+    assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y] : null, [3, 5], "not at 2, beside the plate");
+  });
+
+  test("a group that walks on to its stop still meets what lies between, and nothing past it", () => {
+    // Thorn sets the plate off at x 2.5 and walks on to x 3, where the owl on Thorn's shoulder first covers the glyph's square.
+    const owl = token("owl", { name: "Owl", size: "tiny", x: 0, y: 5, attached: { to: "thorn", kind: "perch" } });
+    const glyph = (id: string, x: number) => trap(id, square(x, 5), { who: "others", floor: false });
+    const state = world([thorn(), owl], [trap("plate", square(3, 5), { stops: true }), glyph("glyph", 3), glyph("past", 4)]);
+    const p = plan(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 });
+    assert.deepEqual(summary(p.springings), ["plate:enter:public:thorn", "glyph:enter:public:owl"]);
   });
 
   test("a taut route is cut at its stop, a piece's extra kept", () => {
@@ -343,7 +370,7 @@ describe("stops (5.5)", () => {
     assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y, p.op.route] : null, [3, 5, [[2, 4, 0, 0], [3, 5, 1, 0]]]);
   });
 
-  test("a taut route's snapped spot that clips a wall is no stand, so the stop goes back to the last piece's end", () => {
+  test("a taut route's snapped spot that clips a wall is no stand, so the stop goes on to the next it may stop at", () => {
     const gob = token("gob", { x: 0, y: 4 });
     const state = world([gob], [trap("snare", square(3, 5), { stops: true })], (s) => {
       s.scenes.s1 = { ...s.scenes.s1!, blockMovement: true, autoWalls: "off" };
@@ -351,17 +378,17 @@ describe("stops (5.5)", () => {
     });
     const p = plan(state, { t: "token.move", tokenId: "gob", x: 6, y: 6, route: [[2, 4, 0, 0], [6, 6, 1, 0]] });
     assert.deepEqual(summary(p.springings), ["snare:enter:public:gob"]);
-    assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y, p.op.route] : null, [2, 4, [[2, 4, 0, 0]]]);
+    assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y, p.op.route] : null, [4, 5, [[2, 4, 0, 0], [4, 5, 1, 0]]]);
   });
 
-  test("where a group starts is a stand, even touching a wall", () => {
+  test("with no spot it may stop at past the trap, the walk goes on to its end, so a stop never refuses the op", () => {
     const gob = token("gob", { x: 1, y: 0 });
     const state = world([gob], [trap("snare", square(1, 1), { stops: true })], (s) => {
       s.scenes.s1 = { ...s.scenes.s1!, blockMovement: true, autoWalls: "off" };
       s.buildChunks[chunkKey("s1", 0, 0)] = walled();
     });
-    const p = plan(state, { t: "token.move", tokenId: "gob", x: 1, y: 2 });
-    assert.deepEqual(p.op.t === "token.move" ? [p.op.x, p.op.y] : null, [1, 0]);
+    const op: Op = { t: "token.move", tokenId: "gob", x: 1, y: 2 };
+    assert.equal(plan(state, op).op, op);
   });
 
   test("a stop squeezed in a corridor lands on the ground under its squeezed footprint, not the raised ground its full one would cover", () => {

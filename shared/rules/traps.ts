@@ -970,7 +970,8 @@ export type Springing = {
 /** What the trap step found in a move: what went off, in order, and the op with its stopped landings (13.2 step 1). */
 export type MovePlan = { springings: Springing[]; op: Op };
 
-type Stop = { t: Progress; s: Progress };
+/** Where a stopped group stops, as progress along its walk. */
+type Stop = { s: Progress };
 
 /**
  * The trap step's plan of a move (13.2 step 1): both passes, their events,
@@ -996,9 +997,10 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const pub = passCache(before, sceneId);
   const events = byTrap(walks.all.filter((w) => w.isPublic), (walk) => walkEvents(walk, index, before, seen, spent, pub));
   const stops = new Map<string, Stop>();
+  // A stopped group walks on to its stop, so what it meets up to there counts, and nothing after.
   const after = (e: TrapEvent) => {
     const stop = stops.get(e.walk.group.named);
-    return stop !== undefined && compareProgress(e.at, stop.t) > 0;
+    return stop !== undefined && compareProgress(e.at, stop.s) > 0;
   };
   const nextPublic = picker(events, spent, (e) => !after(e), () => stops.size);
   for (let event = nextPublic(); event !== null; event = nextPublic()) {
@@ -1013,7 +1015,7 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
         const s = stopAt(walks, group, event.at, before, seen);
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
-        stops.set(group.named, { t: event.at, s });
+        stops.set(group.named, { s });
       }
     }
     springings.push(springingIn(trap, event.how, "public", together, momentAt(before, walks.byId, event.at, stops), env));
@@ -1114,25 +1116,36 @@ function picker(events: ReadonlyMap<number, readonly TrapEvent[]>, spent: Readon
 }
 
 /**
- * Where a group stops (5.5): the latest progress at or before `t` where
+ * Where a group stops (5.5): the first progress at or after `t` where
  * every walker of the group stands on a spot with `stand`, movement's rule
  * that it may stop there, each walker on its own offset route at the
- * group's step. Progress 0, where the group stood, is a stand by
- * definition, so a stop never refuses the op.
+ * group's step. So a walker that sets a trap off on a spot it may not stop
+ * at, a Large creature's half step onto a pit's lid, goes on to the next it
+ * may stop at, on the trap, and the pit opens under it (review LP13-TR-2).
+ * With no such spot before the walk's end, the group walks to its end,
+ * which is no stop.
  */
 function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen: (id: string) => boolean): Progress {
   const stands = walks.all.filter((w) => w.group === group && w.walker).map((w) => standSpots(walks, w, before, seen));
-  // One walker, as most groups are: its own spots back from the event, each asked whether it stands only as the search reaches it.
+  const end = endOf(group);
+  // One walker, as most groups are: its own spots on from the event, each asked whether it stands only as the search reaches it.
   if (stands.length === 1) {
     const one = stands[0]!;
-    for (let i = latestIndex(one.walk, t); i > 0; i--) if (compareProgress(one.walk[i]!.progress, t) <= 0 && one.spot(i).stand) return one.walk[i]!.progress;
-    return START;
+    for (let i = firstIndex(one.walk, t); i < one.walk.length; i++) if (one.spot(i).stand) return one.walk[i]!.progress;
+    return end;
   }
-  const candidates: Progress[] = [START];
-  for (const one of stands) for (const w of one.walk) if (compareProgress(w.progress, t) <= 0) candidates.push(w.progress);
-  candidates.sort((a, b) => compareProgress(b, a));
+  const candidates: Progress[] = [];
+  for (const one of stands) for (const w of one.walk) if (compareProgress(w.progress, t) >= 0) candidates.push(w.progress);
+  candidates.sort(compareProgress);
   for (const s of candidates) if (stands.every((one) => standsAt(one, s))) return s;
-  return START;
+  return end;
+}
+
+/** The index of the first spot at or after `p`, past the last when none is. */
+function firstIndex(spots: readonly { progress: Progress }[], p: Progress): number {
+  if (spots.length === 0) return 0;
+  const i = latestIndex(spots, p);
+  return compareProgress(spots[i]!.progress, p) < 0 ? i + 1 : i;
 }
 
 /** Whether a walk's latest spot at or before `p` is one it may stop at, or it has none there. */
@@ -1210,7 +1223,7 @@ function momentAt(before: RoomState, walks: ReadonlyMap<string, Walk>, p: Progre
 /** The spot a walk is on at the moment. */
 function spotIn(m: Moment, walk: Walk): number {
   const stop = m.stops.get(walk.group.named);
-  return latestIndex(walk.spots, stop && compareProgress(m.p, stop.t) > 0 ? stop.s : m.p);
+  return latestIndex(walk.spots, stop && compareProgress(m.p, stop.s) > 0 ? stop.s : m.p);
 }
 
 function tokenAt(m: Moment, id: string): Token | undefined {

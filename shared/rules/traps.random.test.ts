@@ -4,6 +4,8 @@ import type { RoomState, Token, Trap, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { DM, P1, chance, env, int, pick, rng, room, token } from "../testutil.ts";
+import { carriedGroup } from "./attach.ts";
+import { footprintRect } from "./footprint.ts";
 import { describeMove, planMove } from "./moveLeg.ts";
 import { planTrapMove, type TrapRoom } from "./traps.ts";
 
@@ -15,7 +17,10 @@ import { planTrapMove, type TrapRoom } from "./traps.ts";
  * stop creatures or not. For every op the reducer applies, the plan of the
  * op it moved (the stop step's rewrite, or the op itself) equals what the
  * reducer did, and the stop step rewrites only an op that a stopping trap
- * caught a walker in.
+ * caught a walker in. A walker a stopping trap caught stepping onto it on a
+ * leg along a row or a column stands on the trap where its group stops, at the first spot at or after
+ * the trap went off where it may stand, its half steps too (review
+ * LP13-TR-2).
  */
 
 const SEEDS = 400;
@@ -71,7 +76,8 @@ function nextOp(r: () => number, state: RoomState): { op: Op; who: Viewer } {
   const x = near(r, t.x);
   const y = near(r, t.y);
   const n = r();
-  if (n < 0.45) return { who, op: { t: "token.move", tokenId: id, x, y } };
+  // Now and then along its row or its column, where a walker a trap stops stands on it (review LP13-TR-2).
+  if (n < 0.45) return { who, op: { t: "token.move", tokenId: id, ...(chance(r, 0.6) ? (chance(r, 0.5) ? { x, y: t.y } : { x: t.x, y }) : { x, y }) } };
   if (n < 0.6 && who.role === "dm") {
     // Two straight pieces through a corner, on whole cells.
     const cx = near(r, t.x, 3);
@@ -97,9 +103,28 @@ function isDeepEqual(a: unknown, b: unknown): boolean {
   }
 }
 
+/**
+ * Whether a creature of the stopped move stands on the trap that stopped it,
+ * where the move now lands it, by its offset from the named token. Asked
+ * only of a leg along a row or a column, as a leg that crosses a trap's
+ * corner on the slant may leave it between two spots it may stand at.
+ */
+function standsOnTrap(state: RoomState, op: Op, planned: Op, trap: Trap, by: readonly string[]): boolean | null {
+  if (op.t !== "token.move" || planned.t !== "token.move" || op.route || !("cells" in trap.zone)) return null;
+  const named = state.tokens[op.tokenId]!;
+  if (op.x !== named.x && op.y !== named.y) return null;
+  return by.some((id) => {
+    const t = state.tokens[id]!;
+    const r = footprintRect({ ...t, x: planned.x + t.x - named.x, y: planned.y + t.y - named.y, squeeze: undefined });
+    return (trap.zone as { cells: { x: number; y: number; w: number; h: number }[] }).cells.some((c) => r.x < c.x + c.w && c.x < r.x + r.w && r.y < c.y + c.h && c.y < r.y + r.h);
+  });
+}
+
 test("planMove equals describeMove on random group moves across traps, for the op the reducer moved", () => {
   let applied = 0;
   let rewritten = 0;
+  let onTrap = 0;
+  let halfSteps = 0;
   for (let seed = 1; seed <= SEEDS; seed++) {
     const r = rng(seed);
     let state = world(r);
@@ -112,6 +137,15 @@ test("planMove equals describeMove on random group moves across traps, for the o
       if (planned.op !== op) {
         rewritten++;
         assert.ok(planned.springings.some((s) => s.pass === "public" && s.trap.rig?.stops === true), `seed ${seed} step ${n}: ${op.t} rewritten with no stopping trap`);
+        // The springing that stopped it: the first a walker of its group set off, the named token or a creature it drags.
+        const walkers = op.t === "token.move" ? [op.tokenId, ...carriedGroup(state.tokens, op.tokenId).filter((id) => state.tokens[id]!.attached?.kind === "drag")] : [];
+        const stopper = planned.springings.find((s) => s.pass === "public" && s.trap.rig?.stops === true && s.by.some((id) => walkers.includes(id)));
+        const on = stopper?.how === "enter" ? standsOnTrap(state, op, planned.op, stopper.trap, stopper.by.filter((id) => walkers.includes(id))) : null;
+        if (on !== null) {
+          assert.ok(on, `seed ${seed} step ${n}: ${JSON.stringify(op)} stopped at ${JSON.stringify(planned.op)}, off ${stopper!.trap.id} ${JSON.stringify(stopper!.trap.zone)}`);
+          onTrap++;
+          if (planned.op.t === "token.move" && (planned.op.x % 1 !== 0 || stopper!.by.some((id) => state.tokens[id]!.size === "large") || carriedGroup(state.tokens, op.t === "token.move" ? op.tokenId : "").some((id) => state.tokens[id]!.size === "tiny"))) halfSteps++;
+        }
       }
       const plan = planMove(planned.op, state, who, {});
       const described = describeMove(planned.op, state, res.state, who, {});
@@ -122,5 +156,5 @@ test("planMove equals describeMove on random group moves across traps, for the o
     }
   }
   assert.ok(applied > SEEDS * 4, `${applied} ops applied`);
-  assert.ok(rewritten > 50, `${rewritten} stopped`);
+  assert.ok(rewritten > 50 && onTrap > 10 && halfSteps > 8, JSON.stringify({ rewritten, onTrap, halfSteps }));
 });

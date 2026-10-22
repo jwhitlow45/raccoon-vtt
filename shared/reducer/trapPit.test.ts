@@ -47,12 +47,23 @@ describe("a pit opens", () => {
     const s = world();
     s.tokens.horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 1, y: 4 });
     s.tokens.thorn = { ...s.tokens.thorn!, x: 1, y: 4, elevation: 0, attached: { to: "horse", kind: "ride" } };
-    // A Large walk sets it off half a square in and stops on its last whole square, beside the lid, so the horse lands on it instead.
+    // A Large walk sets it off half a square in and stops a whole square on, half on the lid, so the horse lands wholly on it instead.
     const res = run(s, { t: "token.move", tokenId: "horse", x: 4, y: 4, teleport: "wall" });
     assert.equal(res.state.tokens.horse!.x, 4);
     assert.equal(res.state.tokens.horse!.elevation, -10);
     assert.equal(res.state.tokens.thorn!.elevation, -10, "the rider rides down with it");
     assert.equal(res.state.tokens.thorn!.attached?.to, "horse");
+  });
+
+  test("a Large creature that sets the pit off half a square onto its lid stops a whole square on, on the pit, as it opens (review LP13-TR-2)", () => {
+    const s = world();
+    delete s.tokens.thorn;
+    s.tokens.ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 });
+    const res = run(s, { t: "token.move", tokenId: "ogre", x: 9, y: 4 });
+    assert.equal(res.state.tokens.ogre!.x, 3, "not at 2, beside the lid");
+    assert.deepEqual(cells(res.state), [-10, -10, -10, -10]);
+    const line = res.state.trapLog.at(-1)!.data;
+    assert.ok(line?.type === "trap" && line.by.includes("ogre"));
   });
 
   test("a dragged creature left 10 ft above its fallen holder comes loose in the second link pass", () => {
