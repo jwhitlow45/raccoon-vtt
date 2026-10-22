@@ -257,13 +257,14 @@ function playersChunks(state: RoomState, sceneId: string): Record<string, BuildC
 }
 
 /**
- * The Half Speed area that holds the mover standing at `at`, by the area
- * rules' creature test in three dimensions (4.2), or null. However many
- * hold it, its Speed is halved once.
+ * The Half Speed area that holds the mover as it stands, or as a spot of
+ * its walk places it with the footprint its trace has there (route.ts
+ * placedOnTrace), by the area rules' creature test in three dimensions
+ * (4.2), or null. However many hold it, its Speed is halved once.
  */
-export function halvedAt(areas: SpeedAreas, token: Token, at: { x: number; y: number; elevation: number }): AreaTemplate | null {
+export function halvedAt(areas: SpeedAreas, placed: Token): AreaTemplate | null {
   if (areas.halfSpeed.length === 0) return null;
-  const placed = { ...token, x: at.x, y: at.y, elevation: at.elevation, squeeze: undefined } as AreaToken;
-  const ctx: AreaContext = { ...areas.areaCtx, tokens: { ...areas.areaCtx.tokens, [token.id]: placed } };
-  return areas.halfSpeed.find((t) => creaturesInArea(t, [placed], ctx).length > 0) ?? null;
+  const at = placed as AreaToken;
+  const ctx: AreaContext = { ...areas.areaCtx, tokens: { ...areas.areaCtx.tokens, [placed.id]: at } };
+  return areas.halfSpeed.find((t) => creaturesInArea(t, [at], ctx).length > 0) ?? null;
 }

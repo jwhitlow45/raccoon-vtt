@@ -6,7 +6,7 @@ import { MAX_RULER_STOPS, type ActorPatch, type Op, type OpOf, type TokenPatch }
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
-import { routeFeet, routePoints, routeWalk, squeezedOnWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
+import { onTrace, routeFeet, routePoints, routeWalk, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
@@ -314,7 +314,7 @@ export function carriedAlong(tx: Tx, op: Op): Carried[] {
 /** Writes the tokens a move took along, each with a carried leg on its path when it is the turn's creature, and its areas sent along to another scene. */
 export function placeCarried(tx: Tx, carried: readonly Carried[], judged: Judged): void {
   for (const { token, next, plan } of carried) {
-    tx.write(keys.token(token.id), withPath(tx, token, next, judged, true, undefined, plan.route));
+    tx.write(keys.token(token.id), withPath(tx, token, next, judged, true, undefined, plan));
     if (next.sceneId !== token.sceneId) areasFollow(tx, token.id, next.sceneId);
   }
 }
@@ -484,7 +484,7 @@ export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judg
  * footprint now unless it holds its own. Ops stored before version 6 did
  * neither (`resizeStop`), and replay as they were.
  */
-export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[], carried?: readonly RoutePoint[], cost?: number): Token {
+export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, uncounted = false, route?: readonly RoutePiece[], carried?: Pick<MovedToken, "route" | "trace">, cost?: number): Token {
   if (after.sceneId !== before.sceneId) return withoutPath(after);
   const from = footprintSize(before);
   const to = footprintSize(after);
@@ -570,38 +570,42 @@ export function sharesTurn(state: RoomState, mountId: string, turn: TurnStart): 
  * are `via`, and `routeSeen` marks a leg players who do not own the token
  * saw at every spot, before and after the move (7.2).
  */
-function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined, carried?: readonly RoutePoint[]): PathStop {
+function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined, carried?: Pick<MovedToken, "route" | "trace">): PathStop {
   const rules = tx.state.meta.settings;
   const from = path.stops[path.stops.length - 1]!;
   const counter = pathCounters(after, path.stops, rules);
+  const walker = walkerFor(tx.state, before, seenNow(tx));
   let taken: LegCost;
-  let walk: RoutePoint[];
+  // The walk's trace (route.ts WalkTrace): its own, its route's or the straight leg's, or its holder's taking it along.
+  let trace: WalkTrace;
   if (carried) {
     // Carried, its feet are its holder's walk offset by its place, and it took nothing off its own speed: no cost, no corners (M13).
-    walk = [...carried];
-    taken = routeFeet(walk, walk.slice(1).map(() => ({ extra: 0, swim: 0 as const })), rules, counter, { swimSpeed: false, step: snapStep(before) });
+    trace = carried.trace;
+    taken = routeFeet(carried.route, carried.route.slice(1).map(() => ({ extra: 0, swim: 0 as const })), rules, counter, { swimSpeed: false, step: snapStep(before) });
   } else if (route) {
-    walk = routePoints(tx.state.buildChunks, walkerFor(tx.state, before, seenNow(tx)), route, after.elevation);
+    trace = routeWalkers(tx.state.buildChunks, walker, route, after.elevation);
     const swimSpeed = (speedsOf(tx.state, before)?.swim ?? 0) > 0;
-    taken = routeFeet(walk, route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
+    taken = routeFeet(pointsOf(trace), route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
   } else {
-    walk = [
-      { x: before.x, y: before.y, elevation: before.elevation },
-      { x: after.x, y: after.y, elevation: after.elevation },
-    ];
+    trace = routeWalkers(tx.state.buildChunks, walker, [[after.x, after.y, 0, 0]], after.elevation);
     taken = straightCost(after, from, stop, rules, counter);
   }
+  const walk = carried ? [...carried.route] : pointsOf(trace);
   const out: PathStop = carried ? { ...stop, moved: taken.moved } : { ...stop, moved: taken.moved, cost: taken.cost };
   if (taken.diag[0] !== 0 || taken.diag[1] !== 0) out.diag = taken.diag;
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
-  const walker = walkerFor(tx.state, before, seenNow(tx));
-  // Squeezed where it ends as it will be, and before that as its walk carries it, on its first piece only where it starts
-  // squeezed (route.ts squeezedOnWalk). Ops before version 14 read it squeezed only where it starts.
-  const squeezedAt = (piece: number, i: number, count: number): boolean =>
-    i === count - 1 ? isSqueezed(after) : attaches(tx.env.opVersion) ? squeezedOnWalk(tx.state.buildChunks, piece, walker, after) : i === 0 && isSqueezed(before);
-  const spots = routeWalk(walk, walker, judged.before).map((p, i, all) => ({ ...p, squeezed: squeezedAt(p.progress[0], i, all.length) }));
+  // Each spot with the footprint the walk's trace has there, squeezed where it ends as it will be (route.ts onTrace). Ops
+  // before version 14 read the full footprint between its ends, squeezed only where it starts.
+  const traced = attaches(tx.env.opVersion);
+  const squeezedAt = ([piece, k, n]: readonly [number, number, number], i: number, count: number): boolean =>
+    traced ? isSqueezed(onTrace(trace, piece, k === n && n > 0, after)) : i === count - 1 ? isSqueezed(after) : i === 0 && isSqueezed(before);
+  const spots = routeWalk(walk, walker, judged.before, undefined, traced ? trace : undefined).map((p, i, all) => ({ ...p, squeezed: squeezedAt(p.progress, i, all.length) }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;
+}
+
+function pointsOf(trace: WalkTrace): RoutePoint[] {
+  return trace.map(({ x, y, elevation }) => ({ x, y, elevation }));
 }
 
 /** The speeds the token's actor holds: its own, or its character's. */

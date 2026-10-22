@@ -450,10 +450,15 @@ export function walkFrom<T extends Walker>(chunks: Chunks, token: T): T & Walkin
  * routes, carries its walker from leg to leg by this.
  */
 export function walkOn<T extends Walking>(chunks: Chunks, token: T, to: Point, landing?: number): T {
-  const elevation = landing ?? (token.grounded ? footprintGround(chunks, { ...token, x: to.x, y: to.y, squeeze: undefined }) : token.elevation);
-  const next: T = { ...token, x: to.x, y: to.y, elevation };
+  const next: T = { ...token, x: to.x, y: to.y };
   delete next.squeeze;
+  next.elevation = landing ?? (token.grounded ? groundUnder(chunks, next, to) : token.elevation);
   return !next.offHolder || onOffHolder(token, to) ? next : pastHolder(next);
+}
+
+/** The ground under a walker's footprint as its walk has it there, squeezed or not, standing at `at`. */
+export function groundUnder(chunks: Chunks, walker: MovingToken, at: Point): number {
+  return footprintGround(chunks, { ...walker, x: at.x, y: at.y });
 }
 
 /** The walker standing with `footing` where a leg of its walk starts (walkStates). */
@@ -635,7 +640,6 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
     }
     hit = true;
   };
-  const squeezer: Walker = { ...token, squeeze: undefined };
   return {
     walls,
     clear(ax, ay, bx, by) {
@@ -651,7 +655,7 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
       return !hit;
     },
     pinched(x, y) {
-      return squeezedThere(state, { ...squeezer, x: token.x, y: token.y }, { x, y }, false);
+      return squeezedThere(state, token, { x, y }, false);
     },
   };
 }

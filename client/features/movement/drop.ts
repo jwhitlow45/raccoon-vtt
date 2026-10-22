@@ -3,9 +3,9 @@ import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorR
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
-import { footing, footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkFrom, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
-import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { footing, footprintGround } from "#shared/rules/heights.ts";
+import { groundUnder, landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { followerTrace, routeLattice, routePoints, routeReach, routeStop, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { snapPosition } from "../../lib/scene.ts";
@@ -68,7 +68,7 @@ export function dropMode(role: Role, scene: Pick<Scene, "blockMovement"> | undef
  * AT-ASTRA-20).
  */
 export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, at: Point & { squeeze?: boolean }, holder?: LandingToken): number {
-  const before = holder ? standing(holder.elevation, footprintGround(chunks, { ...holder, squeeze: undefined })) : footing(chunks, token);
+  const before = footing(chunks, holder ?? token);
   if (before === "inside") return token.elevation;
   const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: at.squeeze === true ? true : undefined });
   return before === "ground" ? there : Math.max(token.elevation, there);
@@ -488,7 +488,8 @@ export function planGroup(state: DropState, tokens: readonly DropToken[], dx: nu
     const from = { x: token.x, y: token.y, elevation: token.elevation };
     // Its leg and what it drags beside it, walked as the server walks them (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
     const walking = walkerOf(state, token);
-    const stopped = mode === "walk" ? (legStop(state, walking, { x: to.x, y: to.y, elevation }) ?? walkerStop(state, walking, walkersOf(token), from, { x: to.x, y: to.y, elevation })) : null;
+    const end = { x: to.x, y: to.y, elevation };
+    const stopped = mode === "walk" ? (legStop(state, walking, end) ?? followersOf(state, walking, [from, end], walkersOf(token)).stop(1, end)) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
     else moves.push(landed(state, token, { ...to, squeeze: false }));
   }
@@ -496,31 +497,37 @@ export function planGroup(state: DropState, tokens: readonly DropToken[], dx: nu
 }
 
 /**
- * Where a dragged creature walks while its holder walks from `a` to `b`
- * (docs/design-v1-attach.md 5.1): offset by its place, on its own ground
- * behind a holder on the ground, else by the holder's change of height,
- * never below the ground, as the reducer moves it (shared/rules/moveLeg.ts).
+ * The walks of the creatures a holder drags beside it along the holder's
+ * walk `points` (docs/design-v1-attach.md 5.1), as the reducer moves them
+ * (shared/rules/moveLeg.ts): each from where it stands, offset by its
+ * place, on its own ground behind a holder whose walk is on the ground,
+ * else by the holder's change of height, never below the ground, and
+ * walked by its own rule (route.ts followerTrace). `stop` is the first of
+ * them whose leg from the holder's piece `i`'s start a wall or a ledge
+ * stops, with the holder at `to` on that piece.
  */
-function walkerAt(state: BuildState, lead: DropToken, walker: DropToken, p: RoutePoint): RoutePoint {
-  const x = p.x + walker.x - lead.x;
-  const y = p.y + walker.y - lead.y;
-  const ground = footprintGround(state.buildChunks, { ...walker, x, y, squeeze: undefined });
-  const grounded = footing(state.buildChunks, { ...lead, squeeze: undefined }) === "ground";
-  return { x, y, elevation: grounded ? ground : Math.max(walker.elevation + p.elevation - lead.elevation, ground) };
-}
-
-/**
- * The first of the walkers whose leg beside the holder's from `a` to `b` a
- * wall or a ledge stops, with what stopped it. A creature a holder drags
- * beside it walks as itself, since a drag is no seat (`ownWalk`).
- */
-function walkerStop(state: BuildState, lead: DropToken, walkers: readonly DropToken[], a: RoutePoint, b: RoutePoint): { blocker: Blocker } | null {
-  for (const w of walkers) {
-    const from = walkerAt(state, lead, w, a);
-    const stop = legStop(state, ownWalk({ ...w, x: from.x, y: from.y, elevation: from.elevation, squeeze: undefined }), walkerAt(state, lead, w, b));
-    if (stop) return stop;
-  }
-  return null;
+function followersOf(state: BuildState, lead: Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { stop: (i: number, to: RoutePoint) => { blocker: Blocker } | null } {
+  // As the holder's walk stands where it starts (route.ts WalkTrace).
+  const grounded = footing(state.buildChunks, walkFrom(state.buildChunks, lead)) === "ground";
+  const follows = walkers.map((w) => {
+    const self = followerTrace(w, [w])[0]!;
+    const spot = (p: RoutePoint): RoutePoint => {
+      const x = p.x + w.x - lead.x;
+      const y = p.y + w.y - lead.y;
+      const ground = groundUnder(state.buildChunks, self, { x, y });
+      return { x, y, elevation: grounded ? ground : Math.max(w.elevation + p.elevation - lead.elevation, ground) };
+    };
+    return { spot, trace: followerTrace(w, [{ x: w.x, y: w.y, elevation: w.elevation }, ...points.slice(1).map(spot)]) };
+  });
+  return {
+    stop: (i, to) => {
+      for (const f of follows) {
+        const stop = legStop(state, f.trace[i - 1]!, f.spot(to));
+        if (stop) return stop;
+      }
+      return null;
+    },
+  };
 }
 
 /** Where a holder's walk is cut so the creatures it drags can follow: the spot, and how many of its pieces it keeps whole before it. */
@@ -554,20 +561,21 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
 export function walkersStop(state: BuildState, lead: DropToken & Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
   if (walkers.length === 0) return null;
   const L = routeLattice(lead);
-  // The holder's walk as it goes on (movement.ts walkOn): the leg test of each piece counts from its walker where it starts.
-  let at = walkFrom(state.buildChunks, lead);
+  // The holder's walk (route.ts WalkTrace): the leg test of each piece counts from its walker where it starts.
+  const trace = walkTrace(state.buildChunks, lead, points);
+  const followers = followersOf(state, lead, points, walkers);
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
-    if (i > 1) at = walkOn(state.buildChunks, at, a, a.elevation);
-    const stopped = walkerStop(state, lead, walkers, a, b);
+    const at = trace[i - 1]!;
+    const stopped = followers.stop(i, b);
     if (!stopped) continue;
     const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
     const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
     for (let k = n - 1; k >= 1; k--) {
       const c = { x: a.x + along(b.x - a.x, k), y: a.y + along(b.y - a.y, k), elevation: 0 };
       c.elevation = landedElevation(state.buildChunks, at, c);
-      if (legStop(state, at, c) === null && walkerStop(state, lead, walkers, a, c) === null) return { at: c, pieces: i - 1, blocker: stopped.blocker };
+      if (legStop(state, at, c) === null && followers.stop(i, c) === null) return { at: c, pieces: i - 1, blocker: stopped.blocker };
     }
     return { at: a, pieces: i - 1, blocker: stopped.blocker };
   }

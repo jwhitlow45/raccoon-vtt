@@ -4,9 +4,9 @@ import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { carriedGroup, moveGroups, onHolder, publicMembers, walkerFor } from "./attach.ts";
-import { footing, footprintGround } from "./heights.ts";
-import { landing, ownWalk } from "./movement.ts";
-import { routePoints, type RoutePoint } from "./route.ts";
+import { footing } from "./heights.ts";
+import { groundUnder, landing } from "./movement.ts";
+import { followerTrace, routeWalkers, type RoutePoint, type WalkTrace } from "./route.ts";
 
 /**
  * One description of a move (contract section 1, docs/design-v1-attach.md
@@ -35,6 +35,8 @@ export type MovedToken = {
   to: Pose;
   /** The footprint's top-left corner from `from` to `to`, both included: two points for a straight leg. */
   route: RoutePoint[];
+  /** The walk's trace along `route` (route.ts WalkTrace): its walker at each point, by its own walk or as its holder takes it along. */
+  trace: WalkTrace;
   how: MoveHow;
   /** The direct holder, for a token that moved only because its holder did. */
   carriedBy?: string;
@@ -49,17 +51,22 @@ function poseOf(token: Token): Pose {
 }
 
 /** A named token's own move: where the op puts it, along which walk, and how. */
-type Named = { token: Token; to: Pose; route: RoutePoint[]; how: MoveHow };
+type Named = { token: Token; to: Pose; route: RoutePoint[]; trace: WalkTrace; how: MoveHow };
 
 /** The tokens the op names and moves, with where it puts each. Ops that move nothing give none. */
 function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
-  const straight = (token: Token, to: Pose, how: MoveHow): Named => ({ token, to, how, route: [poseOf(token), to].map(({ x, y, elevation }) => ({ x, y, elevation })) });
+  // Its walk off a holder on the ground as every walk of it reads it (attach.ts walkerFor), a straight leg its one piece.
+  const walked = (token: Token, to: Pose, how: MoveHow, pieces: readonly (readonly [number, number, number, 0 | 1])[] = [[to.x, to.y, 0, 0]]): Named => {
+    const trace = routeWalkers(before.buildChunks, walkerFor(before, token, seenIn(before, env)), pieces, to.elevation);
+    return { token, to, how, trace, route: trace.map(({ x, y, elevation }) => ({ x, y, elevation })) };
+  };
+  const straight = (token: Token, to: Pose, how: MoveHow): Named => walked(token, to, how);
   switch (op.t) {
     case "token.move": {
       const token = before.tokens[op.tokenId];
       if (!token) return [];
       const to: Pose = { sceneId: token.sceneId, x: op.x, y: op.y, elevation: op.elevation ?? token.elevation };
-      if (op.route && walksRoutes(env.opVersion)) return [{ token, to, how: "walk", route: routePoints(before.buildChunks, walkerFor(before, token, seenIn(before, env)), op.route, to.elevation) }];
+      if (op.route && walksRoutes(env.opVersion)) return [walked(token, to, "walk", op.route)];
       return [straight(token, to, op.teleport !== undefined ? "teleport" : "walk")];
     }
     case "token.moveMany":
@@ -128,7 +135,7 @@ export function planMove(op: Op, before: RoomState, actor: Viewer, env: Versione
   if (op.t === "token.attach") names.add(op.to);
   const groups = attaches(env.opVersion) ? moveGroups(before.tokens, [...names]) : new Map<string, string[]>();
   for (const n of named) {
-    out.push({ tokenId: n.token.id, from: poseOf(n.token), to: n.to, route: n.route, how: n.how, pass: seen(n.token) ? "public" : "private" });
+    out.push({ tokenId: n.token.id, from: poseOf(n.token), to: n.to, route: n.route, trace: n.trace, how: n.how, pass: seen(n.token) ? "public" : "private" });
     const members = groups.get(n.token.id) ?? [];
     if (members.length <= 1) continue;
     const shown = new Set(publicMembers(before.tokens, n.token.id, seen, names));
@@ -137,7 +144,7 @@ export function planMove(op: Op, before: RoomState, actor: Viewer, env: Versione
       const member = before.tokens[id]!;
       const holderMove = walked.get(member.attached!.to);
       if (!holderMove) continue;
-      const moved = follow(before, actor, member, holderMove, shown.has(id) && shown.has(holderMove.tokenId), seen);
+      const moved = follow(before, actor, member, holderMove, shown.has(id) && shown.has(holderMove.tokenId));
       if (!moved) continue;
       walked.set(id, moved);
       if (!samePose(moved.from, moved.to)) out.push(moved);
@@ -151,7 +158,7 @@ function samePose(a: Pose, b: Pose): boolean {
 }
 
 /** How a carried token follows its holder's actual walk, or null when it stays (a dragged creature a teleport leaves). */
-function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedToken, isPublic: boolean, seen: (t: { id: string }) => boolean): MovedToken | null {
+function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedToken, isPublic: boolean): MovedToken | null {
   const kind = member.attached!.kind;
   const from = poseOf(member);
   const pass = isPublic ? "public" : "private";
@@ -163,22 +170,24 @@ function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedTo
     const oz = member.elevation - holder.from.elevation;
     const route = holder.route.map((p) => ({ x: p.x + ox, y: p.y + oy, elevation: p.elevation + oz }));
     const last = route[route.length - 1]!;
-    return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, how: holder.how, carriedBy: holder.tokenId, pass };
+    return { tokenId: member.id, from, to: { sceneId: holder.to.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass };
   }
   const chunks = before.buildChunks;
-  const holderToken = before.tokens[holder.tokenId];
-  // A holder walking off its own mount walks on the ground once clear of it (attach.ts walkerFor), and so does what it drags.
-  const grounded = holderToken !== undefined && footing(chunks, { ...walkerFor(before, holderToken, seen), x: holder.from.x, y: holder.from.y, elevation: holder.from.elevation, squeeze: undefined }) === "ground";
-  // Its own ground behind a walker, else the holder's change of elevation, never below the ground there.
+  // A holder walking off its own mount walks on the ground once clear of it (attach.ts walkerFor), and so does what it drags:
+  // as the holder's walk stands where it starts (route.ts WalkTrace).
+  const grounded = footing(chunks, holder.trace[0]!) === "ground";
+  // Its own ground behind a walker, under its own footprint as it walks (route.ts followerTrace), else the holder's change of
+  // elevation, never below the ground there.
+  const self = followerTrace(member, [from])[0]!;
   const elevationAt = (x: number, y: number, holderElevation: number): number => {
-    const ground = footprintGround(chunks, { ...member, x, y, squeeze: undefined });
+    const ground = groundUnder(chunks, self, { x, y });
     return grounded ? ground : Math.max(member.elevation + (holderElevation - holder.from.elevation), ground);
   };
   let route: RoutePoint[] = [{ x: member.x, y: member.y, elevation: member.elevation }];
   for (const p of holder.route.slice(1)) route.push({ x: p.x + ox, y: p.y + oy, elevation: elevationAt(p.x + ox, p.y + oy, p.elevation) });
   if (!isPublic && actor.role !== "dm" && holder.how === "walk") route = stoppedAtWalls(before, member, route, holder.route, elevationAt);
   const last = route[route.length - 1]!;
-  return { tokenId: member.id, from, to: { sceneId: member.sceneId, ...last }, route, how: holder.how, carriedBy: holder.tokenId, pass };
+  return { tokenId: member.id, from, to: { sceneId: member.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass };
 }
 
 /**
@@ -190,12 +199,12 @@ function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedTo
 function stoppedAtWalls(before: RoomState, member: Token, route: RoutePoint[], holderRoute: readonly RoutePoint[], elevationAt: (x: number, y: number, holderElevation: number) => number): RoutePoint[] {
   const scene = before.scenes[member.sceneId];
   if (scene?.blockMovement !== true) return route;
+  // A creature a holder drags beside it walks as itself, since a drag is no seat (route.ts followerTrace).
+  const trace = followerTrace(member, route);
   for (let i = 1; i < route.length; i++) {
     const a = route[i - 1]!;
     const b = route[i]!;
-    // A creature a holder drags beside it walks as itself, since a drag is no seat.
-    const at = ownWalk<Token>({ ...member, x: a.x, y: a.y, elevation: a.elevation });
-    delete at.squeeze;
+    const at = trace[i - 1]!;
     if (movementRules.legBlocker(before, at, b) === null) continue;
     const stop = landing(before, at, b, "walk");
     const kept = route.slice(0, i);

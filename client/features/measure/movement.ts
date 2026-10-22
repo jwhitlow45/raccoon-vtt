@@ -270,8 +270,8 @@ export type DragWalk = {
   route: { points: readonly RoutePoint[]; pieces: readonly RoutePiece[] } | null;
   /** The map, for the ground under each spot of the walk. */
   build: Pick<BuildState, "buildChunks">;
-  /** The name of the Half Speed area the creature would stand in at a spot, or null (4.2). */
-  halved(at: RoutePoint): string | null;
+  /** The name of the Half Speed area the creature would stand in at a spot of the walk's piece `piece` (0 the first), at its end where `end`, or null (4.2). */
+  halved(at: RoutePoint, piece: number, end: boolean): string | null;
   /** Crawling: the creature is Prone as players see it. */
   prone: boolean;
   /** The holder's extra foot for a creature it drags or carries (docs/design-v1-attach.md 7.3), named by how it moves it. */
@@ -356,7 +356,7 @@ export function dragReading(input: {
   if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
   if (fighting && !active) return out;
   const before = trail?.usedFt ?? 0;
-  const endHalved = walk ? walk.halved(points[points.length - 1]!) : null;
+  const endHalved = walk ? walk.halved(points[points.length - 1]!, points.length - 2, true) : null;
   if (endHalved) out.halfSpeed = endHalved;
   const atEnd = speedsLeft(endHalved ? halvedSpeeds(input.speeds) : input.speeds, token.elevation, before + legFt)[0];
   if (!atEnd) return out;
@@ -396,7 +396,8 @@ function lastHalvedSpot(points: readonly RoutePoint[], token: MovingToken & Walk
   for (let i = spots.length - 2; i > 0; i--) {
     const s = spots[i]!;
     const at = { x: s.x, y: s.y, elevation: s.elevation };
-    if (walk.halved(at)) return { piece: s.progress[0], at };
+    const [piece, k, n] = s.progress;
+    if (walk.halved(at, piece, k === n && n > 0)) return { piece, at };
   }
   return null;
 }

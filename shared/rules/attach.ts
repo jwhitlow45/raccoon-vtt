@@ -4,7 +4,7 @@ import { isWritable } from "../writable.ts";
 import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.ts";
 import { footprintRect, footprintSize, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
-import { footprintGround, standing } from "./heights.ts";
+import { footing, footprintGround } from "./heights.ts";
 import type { Walker } from "./movement.ts";
 
 /**
@@ -221,7 +221,7 @@ export function walkerFor<T extends Walking>(
   // Off no holder, or one some player cannot see or that flies, the token walks as itself.
   if (!link || !onHolder(link.kind)) return token as T & Walker;
   const holder = holderOf(state.tokens, token) as Walking | undefined;
-  if (!holder || !seen(token) || !seen(holder) || standing(holder.elevation, footprintGround(state.buildChunks, { ...holder, squeeze: undefined })) !== "ground") return token as T & Walker;
+  if (!holder || !seen(token) || !seen(holder) || footing(state.buildChunks, holder) !== "ground") return token as T & Walker;
   const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
   return { ...token, footing: "ground", offHolder } as T & Walker;
 }

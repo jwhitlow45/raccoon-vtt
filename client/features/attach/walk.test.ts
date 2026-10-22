@@ -7,7 +7,7 @@ import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, type Landed } from "../movement/drop.ts";
+import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, walkersStop, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, reveal, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
@@ -448,8 +448,10 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     assert.ok(answer.ok, answer.ok ? "" : answer.message);
     const after = applyOp(wet, op, P1, env(10));
     assert.ok(after.ok);
+    // Squeezed down the gap it pays the squeeze on every foot, the water's too on its first 5 ft, and from its first corner on
+    // it stands at the height of the ground under its full footprint (review AT-ASTRA-24): 30 ft, then 20 ft.
     const stops = after.state.tokens.ogre!.path!.stops;
-    assert.deepEqual([drag.preview.read.dragFt, stops[stops.length - 1]!.cost], [35, 35]);
+    assert.deepEqual([op.route, drag.preview.read.dragFt, stops[stops.length - 1]!.cost], [[[9.5, 14.5, 2, 1], [9.5, 16.5, 1, 0]], 50, 50]);
   });
 
   test("a walk that squeezes only where it ends is reminded of an area it passes with its full footprint (review AT-SOL-2)", () => {
@@ -508,6 +510,17 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     assert.equal(ruler.legs[1]!.ft, 5);
   });
 
+  test("after the squeezed drop into the gap, a drag east finds a way the server takes: the search reads it full size at the ground's height past its start (review AT-ASTRA-24)", () => {
+    const state = gap();
+    const r = applyOp(state, dragOf(copyFor(state, P1), "player", "ogre", { x: 9.2, y: 13.3 }).op as Op, P1, env(9));
+    assert.ok(r.ok);
+    const drag = dragOf(copyFor(r.state, P1), "player", "ogre", { x: 16, y: 13.5 });
+    const op = drag.op as Op & { t: "token.move" };
+    assert.ok(op && (op.x !== 9.5 || op.y !== 13.5), `held where it stands: ${JSON.stringify(drag.op)}`);
+    const answer = canApply(op, P1, r.state, { canUseAsset: () => true });
+    assert.ok(answer.ok, answer.ok ? "" : answer.message);
+  });
+
   test("a walk past 64 pieces cut where it squeezes in the gap sends a squeezed drop the server takes", () => {
     const state = gap();
     // Down into the gap, then back and forth in it, past 64 pieces.
@@ -525,5 +538,59 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     const r = applyOp(state, op, P1, env(9));
     assert.ok(r.ok);
     assert.equal(r.state.tokens.ogre!.squeeze, true);
+  });
+});
+
+describe("every reader of a walk reads its walker from the walk's trace (reviews AT-SOL-4, AT-ASTRA-23 and AT-O-29)", () => {
+  /** A 5 ft corridor between walls along x = 10 and x = 11, on the PC's turn of a fight. */
+  function corridor(tokens: Token[], edges: Record<string, EdgeFeature> = {}, heights: Record<string, number> = {}): RoomState {
+    let state = world({ edges: { ...line("w", 10, 0, 30), ...line("w", 11, 0, 30), ...edges }, heights, tokens: [token("pc", { name: "Pc", kind: "pc", x: 20, y: 20 }), ...tokens] });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "pc", value: 20 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    return state;
+  }
+
+  const entered = (r: ReturnType<typeof applyOp>) => (r.ok ? r.log.flatMap((e) => (e.data?.type === "area" ? [[e.data.tokenId, e.data.trigger]] : [])) : null);
+
+  test("a creature that starts squeezed is full size from its walk's first corner, so an area it touches only there reminds it (AT-SOL-4)", () => {
+    // Squeezed in the corridor on its first piece, a Large brute stands full size at the corner, its east column past the
+    // corridor's east wall, where a 5 ft sphere just reaches it. Before the corner and after it, it is clear of the sphere.
+    const state = corridor([token("brute", { name: "Brute", size: "large", x: 9.5, y: 12.5, squeeze: true })]);
+    state.templates.orb = template("orb", { shape: "sphere", size: 5, origin: { x: 11.8, y: 10.9, z: 0 }, triggers: ["enter"] });
+    const op: Op = { t: "token.move", tokenId: "brute", x: 9.5, y: 4.5, squeeze: true, route: [[9.5, 8.5, 0, 0], [9.5, 4.5, 0, 0]] };
+    assert.equal(canApply(op, DM, state, { canUseAsset: () => true }).ok, true);
+    assert.deepEqual(entered(applyOp(state, op, DM, env(9))), [["brute", "enter"]]);
+  });
+
+  test("a creature a holder drags walks full size from where it starts, squeezed or not, so it passes an area with its full footprint (AT-ASTRA-23, AT-O-29)", () => {
+    // A Large brute in the corridor, dragged north by a PC, passes a 5 ft sphere east of the corridor's east wall with its full
+    // footprint midway, never where it starts or ends.
+    for (const squeezed of [false, true]) {
+      const state = corridor([token("pc2", { name: "Pc2", kind: "pc", x: 10, y: 8 }), token("brute", { name: "Brute", size: "large", x: 9.5, y: 10.5, ...(squeezed ? { squeeze: true as const } : {}), attached: { to: "pc2", kind: "drag" } })]);
+      state.templates.orb = template("orb", { shape: "sphere", size: 5, origin: { x: 12.2, y: 9.5, z: 0 }, triggers: ["enter"] });
+      for (const routed of [false, true]) {
+        const op: Op = { t: "token.move", tokenId: "pc2", x: 10, y: 4, ...(routed ? { route: [[10, 6, 0, 0], [10, 4, 0, 0]] } : {}) };
+        const r = applyOp(state, op, DM, env(9));
+        assert.deepEqual(entered(r), [["brute", "enter"]], `squeezed ${squeezed}, routed ${routed}`);
+        assert.equal(r.ok && r.state.tokens.brute!.squeeze, undefined, `squeezed ${squeezed}, routed ${routed}`);
+      }
+    }
+  });
+
+  test("a squeezed holder's walk is cut where a creature it drags is stopped, its own leg there judged squeezed as its first piece is", () => {
+    // A Large brute squeezed in the corridor drags a goblin in the open west of it, whose lane a wall crosses at y = 8. Its full
+    // footprint where it starts reaches a 10 ft block east of the corridor, so full size it would stand inside the ground,
+    // where no ledge stops it. Squeezed it stands on the ground, so the step up 1 ft across the corridor at y = 7 stops it,
+    // and its walk is cut short of that ledge, before the goblin's wall.
+    const state = corridor([token("brute", { name: "Brute", size: "large", x: 9.5, y: 4.5, squeeze: true }), token("gob", { name: "Goblin", x: 8, y: 4.5 })], line("n", 8, 8, 9), { ...raised(11, 4, 12, 7, 10), ...raised(10, 7, 11, 30, 1) });
+    const view = dropView(state, "dm");
+    const lead = ownWalk(view.tokens.brute!);
+    const cut = walkersStop(view, lead, [{ x: 9.5, y: 4.5, elevation: 0 }, { x: 9.5, y: 10.5, elevation: 0 }], [view.tokens.gob!]);
+    assert.ok(cut);
+    assert.deepEqual([cut.at.x, cut.at.y, cut.pieces, cut.blocker], [9.5, 5.5, 0, "wall"]);
+    assert.equal(legBlocker(view, lead, cut.at), null);
   });
 });

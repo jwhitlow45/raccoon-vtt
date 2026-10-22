@@ -102,10 +102,22 @@ describe("Speed changes (4.2)", () => {
       templates: { sg: template("sg", { shape: "emanation", size: 15, attachedTo: "cleric", casterId: "cleric", includeOrigin: false, ownerId: "p1", slows: { kind: "halfSpeed", foes: true } }) },
     });
     const areas = speedAreas(state, state.tokens.gob!, { role: "dm" });
-    assert.equal(halvedAt(areas, state.tokens.gob!, { x: 2, y: 10, elevation: 0 }), null);
-    assert.equal(halvedAt(areas, state.tokens.gob!, { x: 8, y: 10, elevation: 0 })?.id, "sg");
-    assert.equal(halvedAt(areas, state.tokens.gob!, { x: 8, y: 10, elevation: 40 }), null, "in three dimensions");
+    const gob = state.tokens.gob!;
+    assert.equal(halvedAt(areas, { ...gob, x: 2, y: 10, elevation: 0 }), null);
+    assert.equal(halvedAt(areas, { ...gob, x: 8, y: 10, elevation: 0 })?.id, "sg");
+    assert.equal(halvedAt(areas, { ...gob, x: 8, y: 10, elevation: 40 }), null, "in three dimensions");
     assert.equal(speedAreas(state, state.tokens.cleric!, { role: "dm" }).halfSpeed.length, 0);
+  });
+
+  test("a creature is in a Half Speed area by the footprint it has there, squeezed where it squeezes", () => {
+    // A Large ogre whose full footprint just reaches the cleric's 15 ft emanation, and whose squeezed one does not.
+    const state = room({
+      tokens: { cleric: token("cleric", { kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 10, y: 10 }), ogre: token("ogre", { size: "large", x: 5.5, y: 10 }) },
+      templates: { sg: template("sg", { shape: "emanation", size: 15, attachedTo: "cleric", casterId: "cleric", includeOrigin: false, ownerId: "p1", slows: { kind: "halfSpeed", foes: true } }) },
+    });
+    const areas = speedAreas(state, state.tokens.ogre!, { role: "dm" });
+    assert.equal(halvedAt(areas, state.tokens.ogre!)?.id, "sg");
+    assert.equal(halvedAt(areas, { ...state.tokens.ogre!, squeeze: true }), null);
   });
 });
 

@@ -1,7 +1,7 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { holderOf, linkHolds } from "#shared/rules/attach.ts";
 import { footprintSize, tokenHeightFt, type PlacedToken } from "#shared/rules/footprint.ts";
-import { routePoints, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { placedOnTrace, routePoints, routeWalkers, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
@@ -139,6 +139,11 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   // A controlled mount sharing its rider's turn reads its own path and speeds (docs/design-v1-attach.md 7.2).
   const activeTokenId = turnMoverId(view) ?? null;
   const dismount = dismountOf(view, token, points[points.length - 1]!, role);
+  const end = points[points.length - 1]!;
+  const { squeeze: _squeeze, ...standing } = token;
+  const landed: Token = { ...standing, x: to.x, y: to.y, elevation: end.elevation, ...(to.squeeze === true ? { squeeze: true as const } : {}) };
+  const traced = () => routeWalkers(view.buildChunks, walking, pieces ?? [[to.x, to.y, 0, 0]], end.elevation);
+  let trace: ReturnType<typeof traced> | undefined;
   const read = dragReading({
     token: walking,
     to,
@@ -155,8 +160,9 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
           walk: {
             route: pieces ? { points, pieces } : null,
             build: view,
-            halved: (at: RoutePoint) => {
-              const area = halvedAt(world, token, at);
+            // Each spot with the footprint the walk's trace has there, squeezed where it lands as the drop lands it (route.ts onTrace).
+            halved: (at: RoutePoint, piece: number, end: boolean) => {
+              const area = halvedAt(world, placedOnTrace((trace ??= traced()), piece, end, landed, at));
               return area ? areaTitle(area) : null;
             },
             prone: world.input.prone,

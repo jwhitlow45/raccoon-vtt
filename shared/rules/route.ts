@@ -4,7 +4,7 @@ import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { coreBlocked, legStop, squeezeFits, straightClear, walkEnd, walkFrom, walkOn, type MovingToken, type Walker, type Walking } from "./movement.ts";
+import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnd, walkFrom, walkOn, type MovingToken, type Walker, type Walking } from "./movement.ts";
 
 /**
  * A move's route, what it costs and the spots it passes
@@ -50,21 +50,66 @@ export function onRouteLattice(from: Point, p: Point): boolean {
 }
 
 /**
- * The walk a route describes, its walker where the token starts and at each
- * piece's end, the last at the landing's elevation, each step by the walk's
- * one rule (movement.ts `walkOn`, 6.1): a token on the ground at the start
- * takes the ground under its full footprint at each stop, any other keeps
- * its elevation, and a squeeze it starts in lasts for its first piece only.
+ * A walk's trace (review AT-ASTRA-23): its walker at each point of its
+ * route, the start first. Whatever reads a walk between its ends reads its
+ * walker from here, never a token of its own: on a piece, the walker where
+ * the piece starts, at a piece's end the walker there, and at the walk's
+ * end the token as the move leaves it (`onTrace`). A token's own walk takes
+ * each step by the walk's one rule (movement.ts `walkOn`), a creature its
+ * holder takes along by its own (`followerTrace`).
  */
-export function routeWalkers<T extends Walker>(chunks: BuildState["buildChunks"], token: T, route: readonly RoutePiece[], landing: number): (T & Walking)[] {
+export type WalkTrace = readonly Walker[];
+
+/**
+ * The trace of the walk a route describes (6.1): where the token starts,
+ * then each piece's end, at the height the walk takes there (`walkOn`: a
+ * token on the ground at the start takes the ground under its full
+ * footprint, any other keeps its elevation), and the last at `landing`
+ * where the walk ends, else at the walk's own height there too. A squeeze
+ * it starts in lasts for its first piece only.
+ */
+export function routeWalkers<T extends Walker>(chunks: BuildState["buildChunks"], token: T, route: readonly RoutePiece[], landing?: number): (T & Walking)[] {
   let at = walkFrom(chunks, token);
   const walkers = [at];
   for (const [i, [x, y]] of route.entries()) walkers.push((at = walkOn(chunks, at, { x, y }, i === route.length - 1 ? landing : undefined)));
   return walkers;
 }
 
+/** The trace of a walk along `points`, the start first, each at the height it gives, by the walk's one step (`walkOn`). */
+export function walkTrace<T extends Walker>(chunks: BuildState["buildChunks"], token: T, points: readonly RoutePoint[]): (T & Walking)[] {
+  let at = walkFrom(chunks, token);
+  const walkers = [at];
+  for (const p of points.slice(1)) walkers.push((at = walkOn(chunks, at, p, p.elevation)));
+  return walkers;
+}
+
+/**
+ * The trace of a creature its holder takes along (5.1): at each point its
+ * holder's walk gives it, as itself, since a drag is no seat and a seat no
+ * walk, and never squeezed, whatever it stood in.
+ */
+export function followerTrace<T extends MovingToken>(member: T, points: readonly RoutePoint[]): (T & Walker)[] {
+  return points.map(({ x, y, elevation }) => {
+    const at: T = { ...member, x, y, elevation };
+    delete at.squeeze;
+    return ownWalk(at);
+  });
+}
+
+/** The walker whose footprint a spot of a walk has (`WalkTrace`): on piece `piece`, at its end where `end`, and `after` where the walk ends. */
+export function onTrace<T extends PlacedToken>(trace: WalkTrace, piece: number, end: boolean, after: T): PlacedToken | T {
+  const i = end ? piece + 1 : piece;
+  return i >= trace.length - 1 ? after : trace[i]!;
+}
+
+/** The token as a spot of its walk places it: `after` there, with the footprint the walk has there (`onTrace`). */
+export function placedOnTrace<T extends PlacedToken & { elevation: number }>(trace: WalkTrace, piece: number, end: boolean, after: T, spot: RoutePoint): T {
+  const { squeeze: _squeeze, ...rest } = after;
+  return { ...rest, x: spot.x, y: spot.y, elevation: spot.elevation, ...(isSqueezed(onTrace(trace, piece, end, after)) ? { squeeze: true as const } : {}) } as T;
+}
+
 /** The points of a route's walk (`routeWalkers`): where the token starts, then each piece's end with its elevation. */
-export function routePoints(chunks: BuildState["buildChunks"], token: Walker, route: readonly RoutePiece[], landing: number): RoutePoint[] {
+export function routePoints(chunks: BuildState["buildChunks"], token: Walker, route: readonly RoutePiece[], landing?: number): RoutePoint[] {
   return routeWalkers(chunks, token, route, landing).map(({ x, y, elevation }) => ({ x, y, elevation }));
 }
 
@@ -272,30 +317,6 @@ function latticePiece(dx: number, dy: number, step: number): boolean {
   return Math.abs(dx) < SLACK || Math.abs(dy) < SLACK || Math.abs(Math.abs(dx) - Math.abs(dy)) < SLACK;
 }
 
-/** Where a spot lies on a walk: on its piece `n` (0 the first, its start included), or where it ends. */
-export type WalkPlace = number | "end";
-
-/**
- * Whether a walk has its token squeezed at a spot (4.1): where it ends as
- * the move leaves it (`after`), and elsewhere as its walk carries it from
- * where it stood (`before`, movement.ts `walkOn`), so squeezed on its first
- * piece only, where it starts squeezed. A path's visibility and the areas
- * a walk enters both read a walk's footprint by this one rule (reviews
- * AT-SOL-2 and AT-ASTRA-22).
- */
-export function squeezedOnWalk(chunks: BuildState["buildChunks"], place: WalkPlace, before: Walker, after: PlacedToken): boolean {
-  if (place === "end") return isSqueezed(after);
-  let at = walkFrom(chunks, before);
-  for (let piece = 0; piece < place && at.squeeze; piece++) at = walkOn(chunks, at, at);
-  return isSqueezed(at);
-}
-
-/** The token at a spot of its walk: as the move leaves it, with the footprint the walk has there (squeezedOnWalk). */
-export function standingOnWalk<T extends PlacedToken & { elevation: number }>(chunks: BuildState["buildChunks"], before: Walker, after: T, spot: RoutePoint, place: WalkPlace): T {
-  const { squeeze: _squeeze, ...rest } = after;
-  return { ...rest, x: spot.x, y: spot.y, elevation: spot.elevation, ...(squeezedOnWalk(chunks, place, before, after) ? { squeeze: true as const } : {}) } as T;
-}
-
 /** A spot of a walk without what standing there needs: where the footprint is, how high, and how far along. */
 export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
 
@@ -305,13 +326,18 @@ export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
  * the lattice for an eight-direction piece and snapped as a stopped walk's
  * spots are (movement.ts `lastClearSpot`) for any other, a repeat dropped.
  * A walker's spots take the ground under them, any other token's rise and
- * fall evenly between its pieces' ends.
+ * fall evenly between its pieces' ends. With its `trace`, the ground under
+ * a spot is under the footprint the walk has there (`WalkTrace`), else
+ * under the full one, as ops before version 14 replay it.
  */
-export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pick<BuildState, "buildChunks">, step?: number): WalkSpot[] {
+export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pick<BuildState, "buildChunks">, step?: number, trace?: WalkTrace): WalkSpot[] {
   const first = route[0];
   if (!first) return [];
   const lattice = step ?? routeLattice(token);
-  const grounded = footing(build.buildChunks, token) === "ground";
+  const start = walkFrom(build.buildChunks, token);
+  const grounded = start.grounded;
+  // Before version 14 every spot read the ground under the full footprint: the walker past its start, standing where it starts.
+  const full = trace ? null : walkOn(build.buildChunks, start, start);
   const stepsOf = (a: RoutePoint, b: RoutePoint) => Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / lattice - SLACK));
   const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, route.length > 1 ? stepsOf(first, route[1]!) : 0] }];
   const snap = (v: number) => Math.round(v / lattice) * lattice + 0;
@@ -328,7 +354,7 @@ export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pi
       const y = end ? b.y : exact ? a.y + (dy * k) / n : a.y + snap((dy * k) / n);
       const prev = spots[spots.length - 1]!;
       if (!end && x === prev.x && y === prev.y) continue;
-      const elevation = end ? b.elevation : grounded ? footprintGround(build.buildChunks, { ...token, x, y, squeeze: undefined }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
+      const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, full ?? trace![i - 1]!, { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
       spots.push({ x, y, elevation, progress: [i - 1, k, n] });
     }
   }
@@ -349,7 +375,9 @@ export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pi
  * squeezes, as the op does.
  */
 export function routeSpots(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}): RouteSpot[] {
-  const walk = routeWalk(route, token, build, step);
+  // The walker where each piece starts, as the walk carries it (`WalkTrace`): ledges, the squeeze and the leg test count from here.
+  const trace = walkTrace(build.buildChunks, token, route);
+  const walk = routeWalk(route, token, build, step, trace);
   if (walk.length === 0) return [];
   const lattice = step ?? routeLattice(token);
   const grid = snapStep(token);
@@ -357,8 +385,7 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
   const squeezes = canSqueeze(token);
   const spots: RouteSpot[] = [{ ...walk[0]!, squeezed: isSqueezed(token), stand: true }];
   let piece = -1;
-  // The walker where each piece starts, as the walk carries it (movement.ts walkOn): ledges, the squeeze and the leg test count from here.
-  let at: Walking = walkFrom(build.buildChunks, token);
+  let at: Walker = trace[0]!;
   let exact = false;
   let sweep: boolean | undefined;
   for (let s = 1; s < walk.length; s++) {
@@ -368,7 +395,7 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
     const b = route[i + 1]!;
     if (i !== piece) {
       piece = i;
-      if (i > 0) at = walkOn(build.buildChunks, at, a, a.elevation);
+      at = trace[i]!;
       exact = latticePiece(b.x - a.x, b.y - a.y, lattice);
       sweep = undefined;
     }

@@ -3,8 +3,8 @@ import type { BuildState } from "../ruleHooks.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
-import { footing, footprintGround } from "./heights.ts";
-import { crossesInnerLedges, legStop, offKey, onOffHolder, pastHolder, stepTester, type MovingToken, type StepTester, type Walker } from "./movement.ts";
+import { footing } from "./heights.ts";
+import { crossesInnerLedges, groundUnder, legStop, offKey, onOffHolder, pastHolder, stepTester, walkFrom, walkOn, type MovingToken, type StepTester, type Walker } from "./movement.ts";
 import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
@@ -257,6 +257,10 @@ export class WalkWorld {
   readonly height: number;
   readonly flags: Uint8Array;
   readonly #ground: Float64Array;
+  /** The walker past the walk's start (movement.ts walkOn), which every step of the search but the first reads. */
+  readonly #stepped: Walker;
+  /** The first steps' tester, for a walk that starts squeezed: by the walker as it starts. */
+  readonly #first: StepTester | null;
   readonly #byCell: Int32Array;
   readonly #cellItems: Int32Array;
   readonly #walls: Uint8Array | null;
@@ -278,7 +282,10 @@ export class WalkWorld {
     this.w = fp.w;
     this.h = fp.h;
     this.L = routeLattice(token);
-    this.mode = footing(chunks, token);
+    // Every step the search takes but the walk's first starts past a stop, so it reads the walker there, as the walk's one step
+    // leaves it (movement.ts walkOn): squeezed no more, at the walk's height there, on the ground for a walk that starts on it.
+    this.#stepped = walkOn(chunks, walkFrom(chunks, token), token);
+    this.mode = footing(chunks, this.#stepped);
     this.height = heightFt(token, input.rules.feetPerCell);
     const L = this.L;
     // The lattice from where the token stands: x = token.x + (i - i0) * L, inside the scene.
@@ -289,7 +296,9 @@ export class WalkWorld {
     this.nx = Math.max(0, Math.floor((this.W - this.w - x0) / L + EPS) + 1);
     this.ny = Math.max(0, Math.floor((this.H - this.h - y0) / L + EPS) + 1);
     const blocks = scene?.blockMovement === true;
-    this.tester = blocks ? stepTester(build, { ...token, squeeze: undefined }) : null;
+    this.tester = blocks ? stepTester(build, this.#stepped) : null;
+    const start = walkFrom(chunks, token);
+    this.#first = blocks && start.squeeze ? stepTester(build, start) : null;
     this.squeezes = canSqueeze(token) && this.tester !== null;
     const squeezed = squeezedSize(token);
     this.#ox = (this.w - squeezed.w) / 2;
@@ -299,7 +308,7 @@ export class WalkWorld {
     this.#ground = pre ? pre.#ground : new Float64Array(this.mode === "ground" ? nodes : 0).fill(NaN);
     // Keyed by the holder a walk has not yet cleared, so the walk before and after it never share an answer (movement.ts offKey).
     this.#walls = this.tester
-      ? stepCache(this.tester.walls, `${this.w},${this.h},${this.mode === "flying" ? token.elevation : this.mode},${offKey(token)},${L},${x0},${y0},${this.nx},${this.ny}`, nodes * 8)
+      ? stepCache(this.tester.walls, `${this.w},${this.h},${this.mode === "flying" ? this.#stepped.elevation : this.mode},${offKey(this.#stepped)},${L},${x0},${y0},${this.nx},${this.ny}`, nodes * 8)
       : null;
     const layered = !pre && this.tester !== null && crossesInnerLedges(build, token);
     this.#on = new Uint8Array(layered ? nodes : 0);
@@ -367,16 +376,21 @@ export class WalkWorld {
     if (this.mode !== "ground") return this.input.token.elevation;
     let g = this.#ground[n]!;
     if (Number.isNaN(g)) {
-      g = footprintGround(this.input.build.buildChunks, { ...this.input.token, x: this.xOf(n), y: this.yOf(n), squeeze: undefined });
+      g = groundUnder(this.input.build.buildChunks, this.#stepped, { x: this.xOf(n), y: this.yOf(n) });
       this.#ground[n] = g;
     }
     return g;
   }
 
-  /** Whether the step from node `a` in direction `d` is clear of walls and ledges, cached across drags. */
+  /**
+   * Whether the step from node `a` in direction `d` is clear of walls and
+   * ledges, cached across drags. A step from where the walk starts is its
+   * first, by the walker as it starts (`#first`), squeezed if it stands so.
+   */
   wallsClear(a: number, d: number, b: number): boolean {
     const cache = this.#walls;
     if (!cache || !this.tester) return true;
+    if (a === this.startNode && this.#first) return this.#first.clear(this.xOf(a), this.yOf(a), this.xOf(b), this.yOf(b));
     const k = a * 8 + d;
     const known = cache[k]!;
     if (known !== 0) return known === 1;

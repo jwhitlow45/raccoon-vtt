@@ -11,7 +11,7 @@ import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walke
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
-import { footing, footprintGround, groundAt } from "./rules/heights.ts";
+import { groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from "./rules/movement.ts";
 import { onRouteLattice, routeBlocker, routePoints, routeReach, routeWalkers, type RoutePiece } from "./rules/route.ts";
@@ -1233,11 +1233,8 @@ function draggedWalls(c: Check, op: Op): Decision {
     const member = c.state.tokens[moved.tokenId];
     if (moved.carriedBy === undefined || moved.pass !== "public" || !member || member.attached?.kind !== "drag") continue;
     for (let i = 1; i < moved.route.length; i++) {
-      const a = moved.route[i - 1]!;
-      const from: Token = { ...member, x: a.x, y: a.y, elevation: a.elevation };
-      delete from.squeeze;
-      // A creature a holder drags beside it walks as itself, since a drag is no seat.
-      const blocker = movementRules.legBlocker(c.state, ownWalk(from), moved.route[i]!);
+      // A creature a holder drags beside it walks as itself, since a drag is no seat: as the move's trace has it (route.ts followerTrace).
+      const blocker = movementRules.legBlocker(c.state, moved.trace[i - 1]!, moved.route[i]!);
       if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
     }
   }
@@ -1594,8 +1591,9 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   for (const [n, route] of routes.entries()) {
     const last = n === routes.length - 1;
     const end = route[route.length - 1];
+    // A route that ends where the step does lands at its height. Any other ends at the walk's own height there (movement.ts walkOn).
     const landing = last && end && end[0] === to.x && end[1] === to.y ? (to.elevation ?? at.elevation) : undefined;
-    const walkers = routeWalkers(c.state.buildChunks, at, route, landing ?? groundOrHeight(c.state, at, end));
+    const walkers = routeWalkers(c.state.buildChunks, at, route, landing);
     // Each piece from where it starts, squeezed only where the walk starts: the client checks its routes by this same rule before it sends them.
     const blocker = routeBlocker(c.state, at, route, walkers[walkers.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
     if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
@@ -1605,12 +1603,6 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   if (at.x === to.x && at.y === to.y) return OK;
   const blocker = movementRules.legBlocker(c.state, at, { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation });
   return blocker === null ? OK : refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
-}
-
-/** Where a kept route of a merged step ended, by the walk's rule: a walker on the ground there, any other token at its height. */
-function groundOrHeight(state: RoomState, token: Token, end: RoutePiece | undefined): number {
-  if (!end || footing(state.buildChunks, token) !== "ground") return token.elevation;
-  return footprintGround(state.buildChunks, { ...token, x: end[0], y: end[1], squeeze: undefined });
 }
 
 function insideScene(scene: Scene, token: Token, at: Point): boolean {

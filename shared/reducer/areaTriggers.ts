@@ -5,8 +5,7 @@ import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
-import { pieceReach, routePoints, standingOnWalk, type RoutePoint, type WalkPlace } from "../rules/route.ts";
-import { ownWalk } from "../rules/movement.ts";
+import { pieceReach, placedOnTrace, routePoints, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
 
@@ -267,25 +266,27 @@ function alongWalk(after: RoomState, walk: Walked): RoomState[] {
  * visible token is sampled: piece by piece at the straight leg's density for
  * a routed walk, and for straight legs by the longest named one. A carried
  * token stopped short of its holder's walk waits at its stop. Each token
- * stands with the footprint its walk has at each point, as its path's
- * visibility reads it (route.ts squeezedOnWalk).
+ * stands with the footprint its walk's trace has at each point, as its
+ * path's visibility reads it (route.ts onTrace): its own walk's, or the
+ * one its holder takes it along by.
  */
-function alongGroups(before: RoomState, after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
+function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
   const { named, all } = moved.walks;
-  const at = (walk: MovedToken, piece: number, f: number): [RoutePoint, WalkPlace] => {
+  // The spot at progress `f` along piece `piece` (1 the first) of a walk, with which of its trace's walkers stands there.
+  const at = (walk: MovedToken, piece: number, f: number): { spot: RoutePoint; piece: number; end: boolean } => {
     const points = walk.route;
-    if (!routed) return [lerpPoint(points[0]!, points[points.length - 1]!, f), 0];
-    if (piece >= points.length) return [points[points.length - 1]!, "end"];
-    return [lerpPoint(points[piece - 1]!, points[piece]!, f), piece - 1];
+    if (!routed) return { spot: lerpPoint(points[0]!, points[points.length - 1]!, f), piece: 0, end: f >= 1 };
+    if (piece >= points.length) return { spot: points[points.length - 1]!, piece: points.length - 2, end: true };
+    return { spot: lerpPoint(points[piece - 1]!, points[piece]!, f), piece: piece - 1, end: f >= 1 };
   };
   const place = (piece: number, f: number): RoomState => {
     const placed = { ...after.tokens };
     for (const walk of all) {
       const token = after.tokens[walk.tokenId];
       if (!token || walk.from.sceneId !== walk.to.sceneId) continue;
-      const [spot, where] = at(walk, piece, f);
-      placed[token.id] = standingOnWalk(after.buildChunks, ownWalk(before.tokens[token.id] ?? token), token, spot, where);
+      const p = at(walk, piece, f);
+      placed[token.id] = placedOnTrace(walk.trace, p.piece, p.end, token, p.spot);
     }
     return { ...after, tokens: placed };
   };
@@ -319,10 +320,11 @@ function lerpPoint(a: RoutePoint, b: RoutePoint, f: number): RoutePoint {
 /**
  * The room at each point along the op's leg after it began, ending with
  * `after` itself. From op version 14 each token stands there with the
- * footprint its walk has on its one leg (route.ts squeezedOnWalk). Older
- * ops replay with the footprint the move left.
+ * footprint its walk's trace has on its leg (route.ts onTrace). Older ops,
+ * which describe no walks, replay with the footprint the move left.
  */
-function alongLeg(before: RoomState, after: RoomState, moved: { tokens: Set<string>; templateId: string | null }, walkFootprint: boolean): RoomState[] {
+function alongLeg(before: RoomState, after: RoomState, moved: Moved): RoomState[] {
+  const traces = new Map((moved.walks?.all ?? []).map((w) => [w.tokenId, w.trace]));
   const fpc = after.meta.settings.feetPerCell;
   let reach = 0;
   const tokens: [Token, Token][] = [];
@@ -347,7 +349,8 @@ function alongLeg(before: RoomState, after: RoomState, moved: { tokens: Set<stri
     const placed = { ...after.tokens };
     for (const [from, to] of tokens) {
       const spot = lerpPoint(from, to, f);
-      placed[to.id] = walkFootprint ? standingOnWalk(after.buildChunks, ownWalk(from), to, spot, 0) : { ...to, ...spot };
+      const trace = traces.get(to.id);
+      placed[to.id] = trace ? placedOnTrace(trace, 0, false, to, spot) : { ...to, ...spot };
     }
     let templates = after.templates;
     if (areaLeg) {
@@ -404,7 +407,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
-    const leg = outside.length > 0 ? (swept ??= grouped ? alongGroups(before, after, grouped, routed) : walk ? alongWalk(after, walk) : alongLeg(before, after, moved, attaches(tx.env.opVersion))) : [];
+    const leg = outside.length > 0 ? (swept ??= grouped ? alongGroups(after, grouped, routed) : walk ? alongWalk(after, walk) : alongLeg(before, after, moved)) : [];
     for (const at of leg) {
       const area = at.templates[template.id];
       if (!area) continue;

@@ -78,7 +78,7 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const halved = useRoomView((s) => {
     // Only a viewer who knows the speeds reads them, and a Half Speed area halves them where the creature stands.
     if (!s.view || !token || !speeds || !templates || !Object.values(templates).some((t) => t?.slows?.kind === "halfSpeed")) return false;
-    return halvedAt(speedAreas(s.view, token, { role }), token, token) !== null;
+    return halvedAt(speedAreas(s.view, token, { role }), token) !== null;
   });
   const scale = props.scale;
   const marker = useMemo(() => {
