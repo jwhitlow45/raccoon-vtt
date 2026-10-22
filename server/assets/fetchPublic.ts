@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { request, type Dispatcher } from "undici";
+import { untilAborted } from "./egress.ts";
 import { AssetError } from "./errors.ts";
 import { sniffImage } from "./process.ts";
 import { receiveToFile, type Received } from "./upload.ts";
@@ -79,7 +80,7 @@ export async function fetchPublicImage(rawUrl: string, opts: FetchOptions): Prom
   for (let hop = 0; ; hop++) {
     let res: Dispatcher.ResponseData;
     try {
-      res = await request(url, {
+      const pending = request(url, {
         dispatcher: opts.dispatcher,
         method: "GET",
         headers: {
@@ -91,6 +92,7 @@ export async function fetchPublicImage(rawUrl: string, opts: FetchOptions): Prom
         headersTimeout: timeoutMs,
         bodyTimeout: timeoutMs,
       });
+      res = await untilAborted(pending, signal, discard);
     } catch (err) {
       throw fetchFailed(err);
     }

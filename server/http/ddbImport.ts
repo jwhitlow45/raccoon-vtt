@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { readDdbCharacter } from "#shared/ddb/read.ts";
 import { checkedFill } from "#shared/rules/pcFill.ts";
+import { untilAborted } from "../assets/egress.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { Semaphore } from "../assets/slots.ts";
 import { accessRoutes, HttpError, parseBody, roomParam } from "../auth/http.ts";
@@ -44,35 +45,6 @@ const HOUR = 3600_000;
 const Body = z.strictObject({ link: z.string().min(1).max(300) });
 
 type Fetched = { kind: "body"; status: number; json: unknown; bytes: number } | { kind: "failed" };
-
-/**
- * The pending request, ended by the signal however far it got. undici
- * aborts a request only once it holds a connection, and a proxy that keeps
- * its CONNECT open never gives it one, so the route would wait for as long
- * as the proxy takes to give up, with both slots held and the room's next
- * import refused as busy. A request that answers after the signal is thrown
- * away.
- */
-function untilAborted<T>(pending: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => {
-      pending.then(discard, () => undefined);
-      reject(signal.reason);
-    };
-    if (signal.aborted) onAbort();
-    else signal.addEventListener("abort", onAbort, { once: true });
-    pending.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (err: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(err);
-      },
-    );
-  });
-}
 
 /**
  * One GET of the character's JSON: no cookie or credential, identity

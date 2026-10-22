@@ -75,3 +75,32 @@ export function guardedLookup(resolve: Resolver = dns.lookup as unknown as Resol
 export function guardedAgent(resolve?: Resolver): Agent {
   return new Agent({ connect: { lookup: guardedLookup(resolve) } });
 }
+
+/**
+ * A pending request, ended by its signal however far it got. undici aborts
+ * a request only once it holds a connection, and a proxy that keeps its
+ * CONNECT open never gives it one, so a caller would wait for as long as the
+ * proxy takes to give up, holding whatever slot it took for the fetch. A
+ * request that answers after the signal is thrown away. Every `request()`
+ * through either port goes through this.
+ */
+export function untilAborted<T>(pending: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      pending.then(discard, () => undefined);
+      reject(signal.reason);
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
