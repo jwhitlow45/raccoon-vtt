@@ -897,7 +897,7 @@ Once the players know about a trap, mark it **Found** in its pane, or from the h
 
 To let the players look for traps, open the trap's pane and press **Ask to search**. It asks the selected creatures, or the party, for the trap's find check. **Ask to disarm** does the same with its disarm check. When they succeed, turn off **Armed**, and the trap is disarmed.
 
-**The Passive Perception hint.** When a party creature ends a walk within 10 feet of a trap nobody has found, and its Passive Perception meets the trap's Perception DC, you get a toast: "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15)." with **Mark found**. The app never marks the trap found by itself, so you decide whether to tell the player, and how. It hints once for each trap, until you change the trap's checks.
+**The Passive Perception hint.** When a party creature ends a walk within 10 feet of a trap nobody has found, and its Passive Perception meets the trap's Perception DC, you get a toast: "Thorn's Passive Perception (16) would notice the pressure plate of Poisoned Darts (DC 15)." with **Mark found**. The app never marks the trap found by itself, so you decide whether to tell the player, and how. It hints once for each trap, until you change the trap's checks.
 
 ### Pits
 
