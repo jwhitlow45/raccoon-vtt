@@ -17,6 +17,7 @@ import {
   walksRoutes,
   attaches,
   trapsGoOff,
+  syncsFromDdb,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -870,9 +871,9 @@ describe("attached tokens: op version 14 and snapshot version 18 (docs/design-v1
 });
 
 describe("traps: op version 15 and snapshot version 19 (docs/design-v1-traps.md 6.6)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 15);
-    assert.equal(SNAPSHOT_VERSION, 19);
+  test("came before re-sync's versions", () => {
+    assert.ok(OP_VERSION >= 15);
+    assert.ok(SNAPSHOT_VERSION >= 19);
   });
 
   test("a version 18 room starts with no traps and both trap logs empty, and a version 19 room is kept as it is", () => {
@@ -900,5 +901,36 @@ describe("traps: op version 15 and snapshot version 19 (docs/design-v1-traps.md 
   test("a version 15 op and a version 19 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 15, 14, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 19, 18, snapshotMigrations), /down/);
+  });
+});
+
+describe("re-sync from D&D Beyond: op version 16 and snapshot version 20 (docs/design-v1-resync.md 4)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 16);
+    assert.equal(SNAPSHOT_VERSION, 20);
+  });
+
+  test("both steps are the identity, a room whose character holds a record and an op that writes one included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 19, 20, snapshotMigrations), plain);
+    const synced = room({ characters: { bree: character("bree", { ddbSync: { at: AT, base: { level: 5 }, rolls: {} } }) } });
+    assert.equal(runMigrations(synced, 19, 20, snapshotMigrations), synced);
+    const ops: unknown[] = [
+      { t: "token.move", tokenId: "t1", x: 3, y: 4 },
+      { t: "character.update", characterId: "bree", patch: { stats: null } },
+      { t: "character.update", characterId: "bree", patch: { level: 6, ddbSync: { base: { level: 6 }, rolls: {} } }, expect: { level: "0123456789ab" } },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 15, 16, opMigrations), op);
+  });
+
+  test("only ops stored before version 16 replay without what a sync record writes", () => {
+    assert.equal(syncsFromDdb(15), false);
+    assert.equal(syncsFromDdb(16), true);
+    assert.equal(syncsFromDdb(undefined), true);
+  });
+
+  test("a version 16 op and a version 20 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 16, 15, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 20, 19, snapshotMigrations), /down/);
   });
 });

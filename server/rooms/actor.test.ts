@@ -2587,6 +2587,75 @@ describe("companion stat blocks at the room actor (docs/design-v1-companion-stat
       { sizeLimits: { stateLimit } },
     );
   });
+
+  /*
+   * A re-sync's record rides with the block (docs/design-v1-resync.md 4): a patch naming it with nothing of the block, as
+   * an Apply that changed only the level sends, spends one and is refused in the block's words.
+   */
+  const hex12 = (n: number) => n.toString(16).padStart(12, "0");
+  const resync = (characterId: string, level: number, filled = false): Op => ({
+    t: "character.update",
+    characterId,
+    patch: {
+      level,
+      ddbSync: {
+        from: "123456789",
+        base: { level },
+        rolls: filled ? Object.fromEntries(Array.from({ length: 40 }, (_, i) => [hex12(i), { k: `w:${hex12(i)}`, h: hex12(i + 100) }])) : {},
+        ...(filled ? { gone: Array.from({ length: 40 }, (_, i) => `s:${hex12(i)}`) } : {}),
+      },
+    },
+  });
+
+  test("a player's patch naming only the sync record and the level spends the blocks' budget, its undo too, and a level alone does not", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    await withSockets(state, dm, player, async (actor, { player: p }) => {
+      for (let n = 1; n <= 8; n++) await actor.op(p.conn, n, pcStats({ saves: n % 2 ? ["dex"] : [] }, characterId));
+      await actor.op(p.conn, 9, { t: "character.update", characterId, patch: { level: 4 } });
+      await actor.op(p.conn, 10, resync(characterId, 6));
+      await actor.op(p.conn, 11, { t: "character.update", characterId, patch: { level: 4, ddbSync: null } });
+      await actor.op(p.conn, 12, resync(characterId, 6));
+      for (let n = 1; n <= 11; n++) assert.equal(await answer(p.sent, n), null, `op ${n}`);
+      assert.deepEqual(await answer(p.sent, 12), { code: "quota", message: BLOCK_SAVES_TOO_FAST }, "eight saves, a sync and its undo are ten");
+      assert.equal(actor.committed.state.characters[characterId]!.level, 4);
+      assert.equal(actor.committed.state.characters[characterId]!.ddbSync, undefined);
+    });
+  });
+
+  test("a sync the room's state limit or storage quota refuses reads in the blocks' words", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, characterId } = breeRoom(dm, player);
+    const stateLimit = serializedBytes(state) + 2_500;
+    const big = resync(characterId, 6, true);
+    assert.ok(serializedBytes(big) > 2_500, "the record alone is past the room's room to grow");
+    await withSockets(
+      state,
+      dm,
+      player,
+      async (actor, { player: p }) => {
+        await actor.op(p.conn, 1, big);
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_ROOM_TOO_FULL });
+        await actor.op(p.conn, 2, resync(characterId, 6));
+        assert.equal(await answer(p.sent, 2), null, "a small one fits");
+      },
+      {},
+      { sizeLimits: { stateLimit } },
+    );
+    const full = breeRoom(dm, player);
+    await withSockets(
+      full.state,
+      dm,
+      player,
+      async (actor, { player: p }) => {
+        await actor.op(p.conn, 1, resync(full.characterId, 6));
+        assert.deepEqual(await answer(p.sent, 1), { code: "quota", message: BLOCKS_AT_QUOTA });
+      },
+      { readOnly: true },
+    );
+  });
 });
 
 describe("a player's undo of getting on and off (docs/design-v1-attach.md 8.3)", () => {

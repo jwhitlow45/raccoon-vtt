@@ -917,6 +917,56 @@ export type Character = {
    * have none.
    */
   knownForms?: string[];
+  /**
+   * What the last D&D Beyond sync read (docs/design-v1-resync.md 2.1), so
+   * a re-sync tells a change made here from one made there. Absent until a
+   * sync writes one, in rooms from before it, and once the block is removed.
+   */
+  ddbSync?: DdbSync;
+};
+
+/**
+ * A character's record of its last D&D Beyond sync (docs/design-v1-resync.md
+ * 2.1). Every hash is 12 hex digits of `hash128`, so a roll's id or name in
+ * any script costs the same few bytes, and the record stays small enough to
+ * ride on the character, which every HP change sends whole.
+ */
+export type DdbSync = {
+  /** When the sync was applied: the time of the op that wrote it. */
+  at: string;
+  /** The D&D Beyond character number it read, 1 to 12 digits. */
+  from?: string;
+  /** What D&D Beyond said at that sync, for each field it read. */
+  base: DdbBase;
+  /**
+   * One entry per synced roll in the block, keyed by the hash of the roll's
+   * id. `k` is D&D Beyond's kind (`w`, `s` or `o`), a colon and the hash of
+   * the roll's key, so the roll is found again on a later read, whose ids
+   * are new. `h` is the hash of D&D Beyond's roll as that sync read it,
+   * never the block's. At most 40.
+   */
+  rolls: Record<string, { k: string; h: string }>;
+  /** The `k` of each roll the player removed that D&D Beyond still had, oldest first, at most 40. */
+  gone?: string[];
+};
+
+/** A sync's base: the block's parts as a fill reads them (shared/rules/pcFill.ts), and the fields beside the block it reads. No name. */
+export type DdbBase = {
+  abilities?: PcStats["abilities"];
+  saves?: PcStats["saves"];
+  skills?: PcStats["skills"];
+  adjust?: PcStats["adjust"];
+  defenses?: PcStats["defenses"];
+  spellAbility?: AbilityKey | null;
+  jack?: boolean;
+  alert?: boolean;
+  evasion?: boolean;
+  critOn?: 19 | 18 | null;
+  level?: number;
+  ac?: number;
+  hpMax?: number;
+  speeds?: Actor["speeds"];
+  senses?: string;
 };
 
 /**
@@ -984,7 +1034,11 @@ export type PcRoll = {
   level?: number;
   /** 0 to 4 parts, rolled together. */
   dice: PcDice[];
-  /** Made by a D&D Beyond import. Editing the roll makes it the player's own. */
+  /**
+   * Made by a D&D Beyond import or re-sync. Without a sync record, editing
+   * the roll makes it the player's own. With one, the record decides
+   * (docs/design-v1-resync.md 2.4).
+   */
   ddb?: true;
 };
 

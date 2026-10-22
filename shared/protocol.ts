@@ -698,7 +698,79 @@ const pcFill = z.strictObject({
     sheetUrl: sheetUrl.optional(),
   }),
   warnings: z.array(line(400)).max(50),
+  /** Whether each kind of roll was read whole (docs/design-v1-resync.md 2.5). Absent reads as all three, as a pasted-text fill is. */
+  read: z.strictObject({ weapon: z.boolean(), spell: z.boolean(), other: z.boolean() }).optional(),
 });
+
+/*
+ * A character's record of its last D&D Beyond sync (docs/design-v1-resync.md
+ * 2.1 and 4). The base takes the fill's part bounds. Every string beside
+ * the senses is hex, digits or a time, so a record at every bound is about
+ * 4.8 KB, under the 6 KiB the whole may take.
+ */
+const syncHash = z.string().regex(/^[0-9a-f]{12}$/);
+const syncKey = z.string().regex(/^[wso]:[0-9a-f]{12}$/);
+const withinDdbSyncBytes = { message: `a sync record is at most ${LIMITS.ddbSyncBytes / 1024} KiB` };
+const ddbBase = z.strictObject({
+  abilities: pcParts.abilities.optional(),
+  saves: pcParts.saves.optional(),
+  skills: pcParts.skills.optional(),
+  adjust: pcParts.adjust.optional(),
+  defenses: pcParts.defenses.optional(),
+  spellAbility: pcAbility.nullable().optional(),
+  jack: z.boolean().optional(),
+  alert: z.boolean().optional(),
+  evasion: z.boolean().optional(),
+  critOn: pcCritOn.nullable().optional(),
+  level: characterLevel.optional(),
+  ac: z.number().int().min(0).max(100).optional(),
+  hpMax: z.number().int().min(1).max(100_000).optional(),
+  speeds: speeds.optional(),
+  senses: shortText.optional(),
+});
+const ddbSyncFields = {
+  // The server writes it, always to the millisecond, so its length is fixed and the record's bound holds.
+  at: z.iso.datetime({ precision: 3 }),
+  from: z.string().regex(/^[0-9]{1,12}$/).optional(),
+  base: ddbBase,
+  rolls: z.record(syncHash, z.strictObject({ k: syncKey, h: syncHash })).refine((rolls) => Object.keys(rolls).length <= MAX_PC_ROLLS, { message: `a sync record names at most ${MAX_PC_ROLLS} rolls` }),
+  gone: z.array(syncKey).max(MAX_PC_ROLLS).optional(),
+};
+const ddbSync = z.strictObject(ddbSyncFields).refine((s) => serializedBytes(s) <= LIMITS.ddbSyncBytes, withinDdbSyncBytes);
+/** As a patch sends it: the server writes `at` when it is left out, which a sync always does. */
+const ddbSyncPatch = z.strictObject({ ...ddbSyncFields, at: ddbSyncFields.at.optional() }).refine((s) => serializedBytes(s) <= LIMITS.ddbSyncBytes, withinDdbSyncBytes);
+
+/**
+ * The parts of a character a `character.update` may expect
+ * (docs/design-v1-resync.md 4): each stats part, the level, the name, the
+ * actor's AC, speeds, senses, sheet link, HP and shape, and the sync
+ * record. Each is a part the character's players receive whole, so no
+ * hash covers what a player's copy lacks.
+ */
+export const EXPECT_PARTS = [
+  "stats.abilities",
+  "stats.saves",
+  "stats.skills",
+  "stats.adjust",
+  "stats.defenses",
+  "stats.rolls",
+  "stats.jack",
+  "stats.alert",
+  "stats.spellAbility",
+  "stats.critOn",
+  "stats.evasion",
+  "level",
+  "name",
+  "actor.ac",
+  "actor.speeds",
+  "actor.senses",
+  "actor.sheetUrl",
+  "actor.hp",
+  "actor.shape",
+  "ddbSync",
+] as const;
+export type ExpectPart = (typeof EXPECT_PARTS)[number];
+const characterExpect = z.strictObject(Object.fromEntries(EXPECT_PARTS.map((part) => [part, syncHash.optional()])) as { [P in ExpectPart]: z.ZodOptional<typeof syncHash> });
 
 const characterInput = z.strictObject({
   id,
@@ -722,6 +794,8 @@ const characterPatch = z.strictObject({
   stats: pcStatsPatch.nullable().optional(),
   /** Replaces the list whole. An empty one removes it, so none and absent are one state. */
   knownForms: knownForms.optional(),
+  /** The record of a D&D Beyond sync, whole (docs/design-v1-resync.md 2.1). Null removes it. */
+  ddbSync: ddbSyncPatch.nullable().optional(),
 });
 
 /** A stat block line the DM reads as text, such as the skills or the languages. */
@@ -1614,7 +1688,13 @@ export const clientOps = [
    */
   op("actor.saveDue", { target: actorTarget, effectId: id, due: z.string().regex(/^\d{1,18}:\d{1,6}$/), state: z.enum(["resolved", "dismissed"]) }),
   op("character.create", { character: characterInput }),
-  op("character.update", { characterId: id, patch: characterPatch }),
+  /**
+   * `expect` holds a hash of each part the sender saw before it wrote
+   * (docs/design-v1-resync.md 4): a re-sync's Apply and Undo send it, and
+   * the server refuses the op when any of them changed since. It is checked
+   * where ops arrive, never on replay.
+   */
+  op("character.update", { characterId: id, patch: characterPatch, expect: characterExpect.optional() }),
   op("character.delete", { characterId: id }),
   op("monster.create", { monster: monsterInput }),
   op("monster.update", { monsterId: id, patch: monsterPatch }),
@@ -2009,6 +2089,8 @@ export type CompanionLink = z.infer<typeof companion>;
 export type CharacterInput = z.infer<typeof characterInput>;
 export type CharacterPatch = z.infer<typeof characterPatch>;
 export type PcStatsPatch = z.infer<typeof pcStatsPatch>;
+export type DdbSyncPatch = z.infer<typeof ddbSyncPatch>;
+export type CharacterExpect = z.infer<typeof characterExpect>;
 export type MonsterInput = z.infer<typeof monsterInput>;
 export type MonsterPatch = z.infer<typeof monsterPatch>;
 export type CompanionBlockInput = z.infer<typeof companionBlockInput>;
@@ -2072,6 +2154,10 @@ export const knownFormsSchema = knownForms;
 export const pcStatsPatchSchema = pcStatsPatch;
 /** A fill as the D&D Beyond route answers it (docs/design-v1-pc-stats.md 6.3). */
 export const pcFillSchema = pcFill;
+/** A character's sync record as stored, so the stored-state schema checks imported ones by the same bounds. */
+export const ddbSyncForImport = ddbSync;
+/** A sync record as a patch sends it, for the re-sync to check what it would send. */
+export const ddbSyncPatchSchema = ddbSyncPatch;
 /** Who may move any token, so the stored-state schema checks imports the same way. */
 export const moveAnyTokenSchema = moveAnyToken;
 /** The text rules above, so the stored-state schema checks imports the same way. */

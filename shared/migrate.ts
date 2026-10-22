@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 19;
-export const OP_VERSION = 15;
+export const SNAPSHOT_VERSION = 20;
+export const OP_VERSION = 16;
 
 export type MigrationStep = {
   from: number;
@@ -143,6 +143,10 @@ export const snapshotMigrations: MigrationStep[] = [
       return { ...state, ...(!("traps" in state) ? { traps: {} } : {}), ...(!("trapLog" in state) ? { trapLog: [] } : {}), ...(!("trapSeen" in state) ? { trapSeen: [] } : {}) };
     },
   },
+  // A character's D&D Beyond sync record (Character.ddbSync, docs/design-v1-resync.md 4) is an optional field whose
+  // absence reads as before, so a v19 room is a v20 room as it is. The number moves so that an older build, whose
+  // strict state schema refuses the field, refuses a v20 snapshot instead of failing on the character.
+  { from: 19, to: 20, apply: (state) => state },
 ];
 
 /**
@@ -468,6 +472,24 @@ export const opMigrations: MigrationStep[] = [
     to: 15,
     apply: (op) => op,
   },
+  {
+    // Re-sync from D&D Beyond (docs/design-v1-resync.md 4): `character.update`
+    // gains `ddbSync` in its patch and `expect` beside it, which an older
+    // build's strict schemas refuse. No op stored before names either, so
+    // the step is the identity. What the reducer writes on its own, a
+    // record's `at` and the record's removal with the block, it writes only
+    // from this version (`syncsFromDdb`). `expect` is checked where ops
+    // arrive, never on replay.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 16, and the shutdown writes version 20 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 15,
+    to: 16,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -779,6 +801,17 @@ export function attaches(opVersion: number | undefined): boolean {
  */
 export function trapsGoOff(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 15);
+}
+
+/**
+ * Whether the reducer writes what a D&D Beyond sync record adds on its own
+ * (docs/design-v1-resync.md 4): the record's `at` from the op's time, and
+ * the record's removal when the block goes. Ops stored before version 16
+ * met no record and replay by that rule. Live ops carry no stored version
+ * and take today's rule.
+ */
+export function syncsFromDdb(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 16);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

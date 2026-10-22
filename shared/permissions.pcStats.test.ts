@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { PcStats, RoomState } from "./model.ts";
-import { canApply } from "./permissions.ts";
-import { onPlayerUndoStack, type Op, type PcStatsPatch } from "./protocol.ts";
+import { CHARACTER_CHANGED } from "./limits.ts";
+import type { Character, PcStats, RoomState, Viewer } from "./model.ts";
+import { canApply, expectHash, expectOf } from "./permissions.ts";
+import { projectCharacter } from "./project.ts";
+import { EXPECT_PARTS, onPlayerUndoStack, type CharacterExpect, type CharacterPatch, type DdbSyncPatch, type Op, type PcStatsPatch } from "./protocol.ts";
+import { applyOp } from "./reducer.ts";
 import { EMPTY_PC_STATS } from "./rules/pcStats.ts";
-import { DM, P1, P2, actor, character, room } from "./testutil.ts";
+import { AT, DM, P1, P2, actor, character, effect, env, room } from "./testutil.ts";
 
 /**
  * Who edits a character's stat block (docs/design-v1-pc-stats.md 4.1): the
@@ -64,5 +67,106 @@ describe("stat block permissions", () => {
     assert.equal(decide(shape("bree", { monsterId: "m1" })), "forbidden: owners cannot change monsterId");
     assert.equal(decide(shape("cy", { srdId: "brown-bear" })), "forbidden: that is not yours");
     assert.equal(decide(shape("cy", { monsterId: "m1" }), DM), "ok");
+  });
+});
+
+/** A sync's record as its patch sends it (docs/design-v1-resync.md 2.1). */
+const RECORD: DdbSyncPatch = { from: "123456789", base: { level: 6, ac: 15 }, rolls: { "0123456789ab": { k: "w:00000000000a", h: "abcdef012345" } } };
+
+/** Bree with a block, a record, a DM's note and a hidden effect, played by p1 and p2, and Cy by p2 alone. */
+function synced(): RoomState {
+  const state = setup();
+  state.characters.bree = character("bree", {
+    name: "Bree",
+    ownerIds: ["p1", "p2"],
+    level: 5,
+    stats: BLOCK,
+    ddbSync: { ...RECORD, at: AT },
+    actor: actor({ ac: 15, hp: { cur: 35, max: 38, temp: 0 }, dmNotes: "owes the thieves' guild", effects: [effect("hex", { hiddenFromPlayers: true })] }),
+  });
+  return state;
+}
+
+/** Bree as a player's own device holds her. */
+function asSeen(state: RoomState, viewer: Viewer): Character {
+  return projectCharacter(state, viewer, state.characters.bree!) as Character;
+}
+
+const sync = (patch: CharacterPatch, expect?: CharacterExpect): Op => ({ t: "character.update", characterId: "bree", patch, ...(expect ? { expect } : {}) });
+
+/** A DM's edit of what no player's copy holds: a note and a hidden effect. */
+function dmSecretly(state: RoomState): RoomState {
+  const noted = applyOp(state, { t: "character.update", characterId: "bree", patch: { actor: { dmNotes: "is the guild's spy" } } }, DM, env(2));
+  assert.ok(noted.ok);
+  const hidden = applyOp(noted.state, { t: "actor.effect.add", target: { characterId: "bree" }, effect: { id: "mark", key: "blessed", hiddenFromPlayers: true } }, DM, env(3));
+  assert.ok(hidden.ok, hidden.ok ? "" : hidden.message);
+  return hidden.state;
+}
+
+describe("a re-sync's permissions (docs/design-v1-resync.md 4)", () => {
+  test("an owner, a co-owner and the DM write the record, alone or with the block, and remove it", () => {
+    assert.equal(decide(sync({ ddbSync: RECORD }), P1, synced()), "ok");
+    assert.equal(decide(sync({ ddbSync: RECORD, stats: { saves: ["wis"] }, level: 6 }), P2, synced()), "ok");
+    assert.equal(decide(sync({ ddbSync: null }), P1, synced()), "ok");
+    assert.equal(decide(sync({ ddbSync: { ...RECORD, at: AT } }), DM, synced()), "ok");
+  });
+
+  test("another player hears that Cy is not theirs before any expect is read, a wrong one included", () => {
+    const wrong: CharacterExpect = { level: "000000000000", ddbSync: "000000000000" };
+    const toCy = (expect?: CharacterExpect): Op => ({ t: "character.update", characterId: "cy", patch: { ddbSync: RECORD }, ...(expect ? { expect } : {}) });
+    assert.equal(decide(toCy(), P1, synced()), "forbidden: that is not yours");
+    assert.equal(decide(toCy(wrong), P1, synced()), "forbidden: that is not yours");
+    assert.equal(decide(toCy(wrong), DM, synced()), `invalid: ${CHARACTER_CHANGED}`, "the DM's own op is checked too");
+  });
+
+  test("an expect that still holds is taken, one that missed is refused in the one message, and none or a part left out is not checked", () => {
+    const state = synced();
+    const parts = ["stats.saves", "level", "actor.ac", "actor.shape", "ddbSync"] as const;
+    const seen = expectOf(asSeen(state, P1), parts);
+    const apply = (expect?: CharacterExpect) => sync({ stats: { saves: ["wis"] }, level: 6, actor: { ac: 16 }, ddbSync: RECORD }, expect);
+    assert.equal(decide(apply(seen), P1, state), "ok");
+    assert.equal(decide(apply(seen), DM, state), "ok");
+    assert.equal(decide(apply(), P1, state), "ok");
+    assert.equal(decide(apply({}), P1, state), "ok");
+    const moved = structuredClone(state);
+    moved.characters.bree!.actor.ac = 17;
+    assert.equal(decide(apply(seen), P1, moved), `invalid: ${CHARACTER_CHANGED}`);
+    assert.equal(decide(apply(seen), DM, moved), `invalid: ${CHARACTER_CHANGED}`);
+    const { "actor.ac": _ac, ...withoutAc } = seen;
+    assert.equal(decide(apply(withoutAc), P1, moved), "ok", "a part left out is not checked");
+    assert.equal(CHARACTER_CHANGED, "This character changed since you looked. Check it again.");
+  });
+
+  test("every part's hash on a player's copy is the server's, so a DM's note or hidden effect never refuses a player's Apply", () => {
+    const before = synced();
+    const seenBefore = expectOf(asSeen(before, P1), EXPECT_PARTS);
+    assert.deepEqual(seenBefore, expectOf(before.characters.bree!, EXPECT_PARTS));
+    const after = dmSecretly(before);
+    assert.notEqual(after.characters.bree!.actor.dmNotes, before.characters.bree!.actor.dmNotes);
+    assert.equal(after.characters.bree!.actor.effects.length, 2);
+    assert.deepEqual(expectOf(asSeen(after, P1), EXPECT_PARTS), seenBefore, "the player's copy hashes as before");
+    assert.deepEqual(expectOf(after.characters.bree!, EXPECT_PARTS), seenBefore, "and so does the server's whole character");
+    assert.equal(decide(sync({ ddbSync: RECORD, level: 6, stats: { saves: ["wis"] } }, seenBefore), P1, after), "ok");
+  });
+
+  test("an absent part hashes as null, HP as its current and maximum alone, and the shape as its SRD id and whether it is Wild Shape", () => {
+    const state = synced();
+    const bree = state.characters.bree!;
+    const bare = character("bare", { name: "Bree" });
+    assert.equal(expectHash(bare, "ddbSync"), expectHash(bare, "stats.saves"), "absent hashes alike in every part");
+    assert.match(expectHash(bree, "ddbSync"), /^[0-9a-f]{12}$/);
+    const temp = structuredClone(bree);
+    temp.actor.hp.temp = 10;
+    assert.equal(expectHash(temp, "actor.hp"), expectHash(bree, "actor.hp"), "temp HP is not in it");
+    const hurt = structuredClone(bree);
+    hurt.actor.hp.cur = 20;
+    assert.notEqual(expectHash(hurt, "actor.hp"), expectHash(bree, "actor.hp"));
+    const bear = structuredClone(bree);
+    bear.actor.srdId = "brown-bear";
+    assert.notEqual(expectHash(bear, "actor.shape"), expectHash(bree, "actor.shape"));
+    const wild = structuredClone(bear);
+    wild.actor.wildShape = true;
+    assert.notEqual(expectHash(wild, "actor.shape"), expectHash(bear, "actor.shape"));
+    assert.equal(expectHash(bear, "actor.ac"), expectHash(bree, "actor.ac"), "a shape alone leaves the AC's hash");
   });
 });

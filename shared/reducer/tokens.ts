@@ -1,8 +1,9 @@
 import { keys } from "../keys.ts";
-import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, walksRoutes } from "../migrate.ts";
-import type { Actor, AreaTemplate, Character, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
+import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
+import type { Actor, AreaTemplate, Character, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
-import { MAX_RULER_STOPS, type ActorPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
+import { MAX_RULER_STOPS, type ActorPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
+import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
@@ -710,6 +711,7 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
     // The patch's own bound holds what it sends. What it keeps from the block may still take the whole past it.
     if (!pcStatsFits(next.stats)) throw new Refuse("quota", pcStatsTooBig(next.name));
   }
+  if (syncsFromDdb(tx.env.opVersion)) syncRecord(next, p.ddbSync, p.stats === null, tx.env.at);
   // Written before the actor patch, which reads whether the character ends the op with a block.
   tx.write(keys.character(character.id), next);
   // Whoever plays the character plays its companions, on every scene (docs/design-v1-combat-flow.md 3.6.4).
@@ -724,6 +726,24 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   const after = tx.character(character.id);
   const derived = withPcActorNumbers(after);
   if (derived !== after) tx.write(keys.character(character.id), derived);
+}
+
+/**
+ * A character's D&D Beyond sync record as a patch leaves it
+ * (docs/design-v1-resync.md 4): stored as sent, with the op's time as `at`
+ * when the patch has none, which a sync's never has. Removing the block
+ * removes the record too, since its base then describes no block. The
+ * record may still name rolls the block no longer holds.
+ */
+function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, blockRemoved: boolean, at: string): void {
+  if (blockRemoved || record === null) {
+    delete next.ddbSync;
+    return;
+  }
+  if (record === undefined) return;
+  const stored: DdbSync = { ...record, at: record.at ?? at };
+  if (serializedBytes(stored) > LIMITS.ddbSyncBytes) throw new Refuse("quota", `${next.name}'s sync record would be too large to save.`);
+  next.ddbSync = stored;
 }
 
 /**

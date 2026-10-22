@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { PcStats } from "#shared/model.ts";
+import type { DdbSync, PcStats } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { AT, actor, character, room } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
@@ -46,5 +46,44 @@ describe("a stat block in room.json", () => {
     assert.deepEqual(bree?.stats, BLOCK);
     assert.equal(bree?.actor.initBonus, 3);
     assert.equal(bree?.actor.passivePerception, 10 + 2 + 3);
+  });
+});
+
+/** A sync record in an exported room (docs/design-v1-resync.md 4): it travels by the op's own bounds, its at required, and the remap leaves it alone. */
+describe("a sync record in room.json", () => {
+  const RECORD: DdbSync = {
+    at: AT,
+    from: "123456789",
+    base: { abilities: BLOCK.abilities, skills: BLOCK.skills, spellAbility: null, level: 5, ac: 15, hpMax: 38, speeds: { walk: 30 }, senses: "Darkvision 60 ft." },
+    rolls: { "0123456789ab": { k: "w:00000000000a", h: "abcdef012345" } },
+    gone: ["s:00000000000b"],
+  };
+  const synced = () => room({ characters: { bree: character("bree", { level: 5, stats: BLOCK, ddbSync: RECORD }), cy: character("cy") } });
+
+  test("a record passes the stored-state schema, one without its at or past its bounds does not", () => {
+    assert.ok(parseRoomState(structuredClone(synced())).ok);
+    const broken: ((r: DdbSync) => void)[] = [
+      (r) => delete (r as Partial<DdbSync>).at,
+      (r) => (r.at = "yesterday"),
+      (r) => (r.from = "12345678901234"),
+      (r) => (r.rolls = { "0123456789AB": { k: "w:00000000000a", h: "abcdef012345" } }),
+      (r) => (r.rolls = { "0123456789ab": { k: "x:00000000000a", h: "abcdef012345" } }),
+      (r) => (r.gone = Array.from({ length: 41 }, () => "w:00000000000a")),
+      (r) => ((r.base as { name?: string }).name = "Bree"),
+      (r) => (r.base.level = 21),
+    ];
+    for (const [i, breakIt] of broken.entries()) {
+      const bad = structuredClone(synced());
+      breakIt(bad.characters.bree!.ddbSync!);
+      assert.equal(parseRoomState(bad).ok, false, `broken record ${i}`);
+    }
+  });
+
+  test("the record travels through the remap as it was, since its keys hash roll ids the remap leaves alone", () => {
+    const out = remapState(synced(), { assets: new Map() });
+    const bree = Object.values(out.characters).find((c) => c.stats !== undefined);
+    assert.deepEqual(bree?.ddbSync, RECORD);
+    assert.deepEqual(bree?.stats?.rolls.map((r) => r.id), ["r1"]);
+    assert.equal(Object.values(out.characters).filter((c) => c.ddbSync !== undefined).length, 1, "the other character gains none");
   });
 });

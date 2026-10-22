@@ -25,6 +25,7 @@ import {
   moveAnyTokenSchema,
   pcStatsForImport,
   knownFormsSchema,
+  ddbSyncForImport,
   fogOpSchema,
   handoutSchemas,
   mapSchemas,
@@ -296,6 +297,8 @@ const character = z.strictObject({
   stats: pcStatsForImport.optional(),
   // Backups from before known forms have none. A hand-made empty list passes here, and the remap stores it as none (docs/design-v1-known-forms.md 3.1).
   knownForms: knownFormsSchema.optional(),
+  // Backups from before re-sync have no record (docs/design-v1-resync.md 4).
+  ddbSync: ddbSyncForImport.optional(),
 });
 
 const areaFeet = z.number().min(5).max(1_000);

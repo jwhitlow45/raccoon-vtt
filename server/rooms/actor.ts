@@ -234,8 +234,9 @@ function isBlockSave(op: Op): boolean {
   return op.t === "companionBlock.create" || op.t === "companionBlock.update" || savesPcStats(op);
 }
 
+/** A sync record rides with the block and is written by the same people, so a patch naming it alone counts too (docs/design-v1-resync.md 4). */
 function writesPcStats(op: Op): boolean {
-  return (op.t === "character.create" && op.character.stats !== undefined) || (op.t === "character.update" && op.patch.stats !== undefined);
+  return (op.t === "character.create" && op.character.stats !== undefined) || (op.t === "character.update" && (op.patch.stats !== undefined || op.patch.ddbSync !== undefined));
 }
 
 /**
@@ -248,7 +249,7 @@ function removesPcStats(op: Op): boolean {
 
 /** A character's block written rather than removed: the size guard's refusal of it reads in the block's words. */
 function savesPcStats(op: Op): boolean {
-  return (op.t === "character.create" && op.character.stats !== undefined) || (op.t === "character.update" && op.patch.stats !== undefined && op.patch.stats !== null);
+  return (op.t === "character.create" && op.character.stats !== undefined) || (op.t === "character.update" && ((op.patch.stats !== undefined && op.patch.stats !== null) || op.patch.ddbSync !== undefined));
 }
 
 const NO_FACTS: Map<string, AssetFact> = new Map();

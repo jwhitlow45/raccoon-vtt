@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { PcDice, PcRoll, PcStats } from "./model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type PcDice, type PcRoll, type PcStats } from "./model.ts";
+import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
-import { clientOpSchema, MAX_PC_DICE_PARTS, MAX_PC_ROLLS } from "./protocol.ts";
+import { clientOpSchema, ddbSyncForImport, EXPECT_PARTS, MAX_PC_DICE_PARTS, MAX_PC_ROLLS, pcFillSchema, type DdbSyncPatch } from "./protocol.ts";
 import { EMPTY_PC_STATS } from "./rules/pcStats.ts";
-import { actor } from "./testutil.ts";
+import { actor, AT } from "./testutil.ts";
 
 /** A character's stat block's bounds (docs/design-v1-pc-stats.md 3.2 and 3.5). */
 
@@ -114,5 +115,112 @@ describe("a stat block's schema", () => {
     const largest = update({ rolls: filler(n) });
     assert.ok(ok(largest));
     assert.ok(serializedBytes({ t: "op", n: 1, op: largest }) * 5 <= 64 * 1024);
+  });
+});
+
+/** A sync record's bounds and a re-sync's `expect` (docs/design-v1-resync.md 4). */
+describe("a re-sync's schema", () => {
+  const hex12 = (n: number) => n.toString(16).padStart(12, "0");
+  const RECORD: DdbSyncPatch = {
+    from: "123456789",
+    base: { abilities: BLOCK.abilities, saves: ["dex"], spellAbility: null, critOn: null, jack: false, level: 5, ac: 15, hpMax: 38, speeds: { walk: 30 }, senses: "Darkvision 60 ft." },
+    rolls: { [hex12(1)]: { k: "w:0123456789ab", h: "abcdef012345" } },
+    gone: ["s:0123456789ab"],
+  };
+  const sync = (ddbSync: unknown, expect?: unknown) => ({ t: "character.update", characterId: "bree", patch: { ddbSync }, ...(expect === undefined ? {} : { expect }) });
+  const entries = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [hex12(i), { k: `o:${hex12(i)}`, h: hex12(i) }]));
+
+  test("a record without at, one with an ISO at, and null pass on update, and create takes none", () => {
+    assert.ok(ok(sync(RECORD)));
+    assert.ok(ok(sync({ base: {}, rolls: {} })));
+    assert.ok(ok(sync({ ...RECORD, at: AT })));
+    assert.ok(ok(sync(null)));
+    assert.equal(ok(sync({ ...RECORD, at: "yesterday" })), false);
+    assert.equal(ok(sync({ ...RECORD, at: "2026-10-12" })), false, "a date alone");
+    assert.equal(ok({ t: "character.create", character: { id: "c", name: "Cora", size: "medium", ownerIds: [], actor: actor(), ddbSync: { ...RECORD, at: AT } } }), false);
+    assert.equal(ok({ t: "character.create", character: { id: "c", name: "Cora", size: "medium", ownerIds: [], actor: actor() }, expect: { level: hex12(1) } }), false);
+  });
+
+  test("the stored record needs its at, and holds every other bound the patch does", () => {
+    assert.ok(ddbSyncForImport.safeParse({ ...RECORD, at: AT }).success);
+    assert.equal(ddbSyncForImport.safeParse(RECORD).success, false);
+    assert.equal(ddbSyncForImport.safeParse({ ...RECORD, at: AT, rolls: entries(MAX_PC_ROLLS + 1) }).success, false);
+  });
+
+  test("entry keys and h are 12 lower-case hex digits, and k and each gone marker a kind's letter, a colon and one", () => {
+    assert.equal(ok(sync({ ...RECORD, rolls: { "0123456789AB": { k: "w:0123456789ab", h: "abcdef012345" } } })), false);
+    assert.equal(ok(sync({ ...RECORD, rolls: { "0123456789a": { k: "w:0123456789ab", h: "abcdef012345" } } })), false);
+    assert.equal(ok(sync({ ...RECORD, rolls: { r1: { k: "w:0123456789ab", h: "abcdef012345" } } })), false, "a roll's id in clear");
+    assert.equal(ok(sync({ ...RECORD, rolls: { [hex12(1)]: { k: "w:0123456789ab", h: "abcdef01234g" } } })), false);
+    for (const k of ["x:0123456789ab", "w:longsword", "w0123456789ab", "W:0123456789ab", "w:0123456789abc", "s:fireball:3"]) {
+      assert.equal(ok(sync({ ...RECORD, rolls: { [hex12(1)]: { k, h: "abcdef012345" } } })), false, `k ${k}`);
+      assert.equal(ok(sync({ ...RECORD, gone: [k] })), false, `gone ${k}`);
+    }
+    for (const k of ["w:0123456789ab", "s:0123456789ab", "o:0123456789ab"]) assert.ok(ok(sync({ ...RECORD, gone: [k] })));
+    assert.equal(ok(sync({ ...RECORD, rolls: { [hex12(1)]: { k: "w:0123456789ab", h: "abcdef012345", name: "Longsword" } } })), false, "an entry holds k and h alone");
+  });
+
+  test("at most 40 entries and 40 gone markers", () => {
+    assert.ok(ok(sync({ ...RECORD, rolls: entries(MAX_PC_ROLLS), gone: Array.from({ length: MAX_PC_ROLLS }, (_, i) => `w:${hex12(i)}`) })));
+    assert.equal(ok(sync({ ...RECORD, rolls: entries(MAX_PC_ROLLS + 1) })), false);
+    assert.equal(ok(sync({ ...RECORD, gone: Array.from({ length: MAX_PC_ROLLS + 1 }, (_, i) => `w:${hex12(i)}`) })), false);
+  });
+
+  test("from is 1 to 12 digits, and the base takes the fill's bounds and no name", () => {
+    for (const from of ["1", "123456789012"]) assert.ok(ok(sync({ ...RECORD, from })));
+    for (const from of ["", "1234567890123", "12a", " 12", "-1"]) assert.equal(ok(sync({ ...RECORD, from })), false, `from ${JSON.stringify(from)}`);
+    assert.equal(ok(sync({ ...RECORD, base: { ...RECORD.base, name: "Bree" } })), false);
+    assert.equal(ok(sync({ ...RECORD, base: { ...RECORD.base, level: 21 } })), false);
+    assert.equal(ok(sync({ ...RECORD, base: { ...RECORD.base, abilities: { ...BLOCK.abilities, str: 31 } } })), false);
+    assert.equal(ok(sync({ ...RECORD, base: { ...RECORD.base, rolls: [] } })), false, "rolls are in the entries, never the base");
+    assert.equal(ok(sync({ ...RECORD, extra: 1 })), false);
+  });
+
+  test("a time is the server's own, to the millisecond, so a record at every bound stays under 6 KiB", () => {
+    assert.equal(ok(sync({ ...RECORD, at: "2026-10-12T20:00:00.1234Z" })), false, "more digits than the server writes");
+    assert.equal(ok(sync({ ...RECORD, at: "2026-10-12T20:00:00Z" })), false, "fewer");
+    const every: DdbSyncPatch = {
+      at: AT,
+      from: "123456789012",
+      base: {
+        ...RECORD.base,
+        saves: ["str", "dex", "con", "int", "wis", "cha"],
+        skills: Object.fromEntries(SKILL_KEYS.map((s) => [s, "expert"])),
+        adjust: { saves: Object.fromEntries(ABILITY_KEYS.map((a) => [a, -20])), skills: Object.fromEntries(SKILL_KEYS.map((s) => [s, -20])), allSaves: -20, allChecks: -20, init: -20, passive: -20, spellDc: -20, spellAttack: -20 },
+        defenses: Object.fromEntries(DAMAGE_TYPES.map((t) => [t, "vulnerable"])),
+        jack: false,
+        alert: false,
+        evasion: false,
+        critOn: 18,
+        level: 20,
+        ac: 100,
+        hpMax: 100_000,
+        speeds: { walk: 1000, fly: 1000, swim: 1000, climb: 1000, burrow: 1000, hover: false },
+        senses: "暗".repeat(80),
+      },
+      rolls: entries(MAX_PC_ROLLS),
+      gone: Array.from({ length: MAX_PC_ROLLS }, (_, i) => `w:${hex12(i)}`),
+    };
+    assert.ok(ok(sync(every)));
+    assert.ok(serializedBytes(every) < LIMITS.ddbSyncBytes, `${serializedBytes(every)} bytes`);
+  });
+
+  test("expect takes a 12-hex hash for each part it names, and no other part", () => {
+    assert.ok(ok(sync(RECORD, {})));
+    assert.ok(ok(sync(RECORD, Object.fromEntries(EXPECT_PARTS.map((part, i) => [part, hex12(i)])))));
+    assert.equal(ok(sync(RECORD, { "actor.notes": hex12(1) })), false, "a part no expect names");
+    assert.equal(ok(sync(RECORD, { "actor.dmNotes": hex12(1) })), false, "a part players lack");
+    assert.equal(ok(sync(RECORD, { stats: hex12(1) })), false, "the whole block");
+    for (const hash of ["0123456789AB", "0123456789a", "0123456789abc", "", null]) assert.equal(ok(sync(RECORD, { level: hash })), false, `hash ${JSON.stringify(hash)}`);
+    assert.ok(ok({ t: "character.update", characterId: "bree", patch: { level: 5 }, expect: { level: hex12(1) } }), "on any character update");
+  });
+
+  test("a fill carries which kinds it read whole, or leaves it out", () => {
+    const fill = { source: "ddb", stats: { rolls: [] }, actor: {}, warnings: [] };
+    assert.ok(pcFillSchema.safeParse(fill).success);
+    assert.ok(pcFillSchema.safeParse({ ...fill, read: { weapon: true, spell: false, other: true } }).success);
+    assert.equal(pcFillSchema.safeParse({ ...fill, read: { weapon: true, spell: false } }).success, false);
+    assert.equal(pcFillSchema.safeParse({ ...fill, read: { weapon: true, spell: false, other: true, feat: true } }).success, false);
+    assert.equal(pcFillSchema.safeParse({ ...fill, read: { weapon: "yes", spell: false, other: true } }).success, false);
   });
 });

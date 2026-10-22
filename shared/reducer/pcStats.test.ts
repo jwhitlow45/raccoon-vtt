@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { Character, PcRoll, PcStats } from "../model.ts";
+import type { Character, DdbSync, PcRoll, PcStats } from "../model.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { clientOpSchema, type CharacterPatch, type Op } from "../protocol.ts";
+import { clientOpSchema, type CharacterPatch, type DdbSyncPatch, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsTooBig } from "../rules/pcStats.ts";
-import { actor, apply, character, DM, env, refused, room, token } from "../testutil.ts";
+import { actor, apply, AT, character, DM, env, refused, room, token } from "../testutil.ts";
 
 /** The reducer's rules for a character's stat block (docs/design-v1-pc-stats.md 3.5). */
 
@@ -112,5 +112,98 @@ describe("a character's stat block in the reducer", () => {
     assert.deepEqual(undone.characters.bree!.stats, before.characters.bree!.stats);
     assert.equal(undone.characters.bree!.actor.initBonus, 3);
     assert.equal(undone.characters.bree!.actor.passivePerception, 15);
+  });
+});
+
+/** A sync's record as its patch sends it, with no `at` (docs/design-v1-resync.md 2.1). */
+const RECORD: DdbSyncPatch = {
+  from: "123456789",
+  base: { abilities: BLOCK.abilities, spellAbility: "cha", level: 5, ac: 15, hpMax: 38 },
+  rolls: { "0123456789ab": { k: "w:00000000000a", h: "abcdef012345" } },
+  gone: ["s:00000000000b"],
+};
+const LATER = "2026-10-20T18:30:00.000Z";
+
+/** Applies the op at the given time, and as an op stored at `opVersion` when one is given. */
+function applyAt(state: ReturnType<typeof withBree>, op: Op, at: string, opVersion?: number) {
+  const r = applyOp(state, op, DM, { ...env(2), at, ...(opVersion === undefined ? {} : { opVersion }) });
+  assert.ok(r.ok, r.ok ? "" : `${r.code}: ${r.message}`);
+  return r;
+}
+
+describe("a character's D&D Beyond sync record in the reducer (docs/design-v1-resync.md 4)", () => {
+  test("a record is stored as sent, with the op's time as its at", () => {
+    const { state } = applyAt(withBree({ stats: BLOCK }), update({ stats: { saves: ["wis"] }, level: 5, ddbSync: RECORD }), LATER);
+    assert.deepEqual(state.characters.bree!.ddbSync, { ...RECORD, at: LATER } satisfies DdbSync);
+    assert.deepEqual(state.characters.bree!.stats!.saves, ["wis"], "the rest of the patch lands beside it");
+  });
+
+  test("an at the patch sends is kept, as the dialog's Undo sends the record before", () => {
+    const before: DdbSyncPatch = { ...RECORD, at: AT };
+    const { state } = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: before }), LATER);
+    assert.equal(state.characters.bree!.ddbSync!.at, AT);
+  });
+
+  test("a new record replaces the old one whole, and a patch that names neither the record nor the block keeps it", () => {
+    let s = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), AT).state;
+    const next: DdbSyncPatch = { base: { level: 6 }, rolls: {} };
+    s = applyAt(s, update({ ddbSync: next }), LATER).state;
+    assert.deepEqual(s.characters.bree!.ddbSync, { ...next, at: LATER });
+    s = applyAt(s, update({ level: 7, actor: { hp: { cur: 3 } }, stats: { jack: true } }), LATER).state;
+    assert.deepEqual(s.characters.bree!.ddbSync, { ...next, at: LATER });
+  });
+
+  test("null drops the record and keeps the block", () => {
+    const s = applyAt(applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), AT).state, update({ ddbSync: null }), LATER).state;
+    assert.equal("ddbSync" in s.characters.bree!, false);
+    assert.deepEqual(s.characters.bree!.stats, BLOCK);
+  });
+
+  test("removing the block drops the record, even one sent beside it, since its base then describes no block", () => {
+    const synced = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), AT).state;
+    const removed = applyAt(synced, update({ stats: null }), LATER).state;
+    assert.equal("ddbSync" in removed.characters.bree!, false);
+    assert.equal("stats" in removed.characters.bree!, false);
+    const both = applyAt(synced, update({ stats: null, ddbSync: RECORD }), LATER).state;
+    assert.equal("ddbSync" in both.characters.bree!, false);
+  });
+
+  test("a record past 6 KiB once its at is written is refused with quota", () => {
+    const s = withBree({ stats: BLOCK });
+    // Entries past the schema's 40 and senses padded to 10 bytes under the bound, so the size alone decides: the patch fits 6 KiB, and the time the reducer writes takes it past.
+    const rolls: DdbSyncPatch["rolls"] = {};
+    for (let n = 0; n < 100; n++) rolls[n.toString(16).padStart(12, "0")] = { k: "w:000000000000", h: "000000000000" };
+    const unpadded: DdbSyncPatch = { ...RECORD, base: { ...RECORD.base, senses: "" }, rolls };
+    const big: DdbSyncPatch = { ...unpadded, base: { ...unpadded.base, senses: "x".repeat(LIMITS.ddbSyncBytes - 10 - serializedBytes(unpadded)) } };
+    assert.equal(serializedBytes(big), LIMITS.ddbSyncBytes - 10);
+    assert.ok(serializedBytes({ ...big, at: AT }) > LIMITS.ddbSyncBytes);
+    const r = applyOp(s, update({ ddbSync: big, level: 9 }), DM, env(2));
+    assert.ok(!r.ok);
+    assert.equal(r.code, "quota");
+    assert.equal(r.message, "Bree's sync record would be too large to save.");
+    const fits = applyAt(s, update({ ddbSync: { ...big, base: { ...big.base, senses: big.base.senses!.slice(40) } } }), AT).state;
+    assert.ok(serializedBytes(fits.characters.bree!.ddbSync) <= LIMITS.ddbSyncBytes, "40 bytes less fits");
+  });
+
+  test("an undo of a sync puts back the character whole, its record or its lack of one included", () => {
+    const before = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), AT).state;
+    const r = applyAt(before, update({ ddbSync: { base: { level: 6 }, rolls: {} }, level: 6 }), LATER);
+    const undone = apply(r.state, { t: "sys.restore", entries: r.inverse!, from: "undo" }, DM, 3);
+    assert.deepEqual(undone.characters.bree!.ddbSync, { ...RECORD, at: AT });
+    const first = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), LATER);
+    const none = apply(first.state, { t: "sys.restore", entries: first.inverse!, from: "undo" }, DM, 3);
+    assert.equal("ddbSync" in none.characters.bree!, false);
+  });
+
+  test("an op stored before version 16 replays as it applied then: it writes no record or at, and removing the block keeps one", () => {
+    const old = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD, level: 6 }), LATER, 15).state;
+    assert.equal("ddbSync" in old.characters.bree!, false);
+    assert.equal(old.characters.bree!.level, 6);
+    const synced = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), AT).state;
+    const removed = applyAt(synced, update({ stats: null }), LATER, 15).state;
+    assert.equal("stats" in removed.characters.bree!, false);
+    assert.deepEqual(removed.characters.bree!.ddbSync, { ...RECORD, at: AT });
+    const today = applyAt(synced, update({ stats: null }), LATER, 16).state;
+    assert.equal("ddbSync" in today.characters.bree!, false, "a version 16 op takes today's rule");
   });
 });

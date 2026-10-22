@@ -1,9 +1,9 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
-import { MAX_ROUTE_REACH, type ActorTarget, type DoorRef, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
-import { inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
-import { LIMITS } from "./limits.ts";
+import { MAX_ROUTE_REACH, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
+import { hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
+import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
@@ -66,7 +66,7 @@ const GONE = refuse("gone", "that is not here");
 /** A token's light is its owners' to set (docs/design-v1-maps-vision.md 4.3.9). `partyVision` stays the DM's. */
 const OWNER_TOKEN_FIELDS = new Set(["image", "altImages", "rotation", "elevation", "name", "publicName", "notes", "rangeRings", "light"]);
 /** A character's stat block and known forms are its players', as its light card is (docs/design-v1-pc-stats.md 4.1, docs/design-v1-known-forms.md 3.2). */
-const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms"]);
+const OWNER_CHARACTER_FIELDS = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms", "ddbSync"]);
 const OWNER_ACTOR_FIELDS = new Set(["hp", "speeds", "ac", "initBonus", "passivePerception", "senses", "notes", "sheetUrl"]);
 /**
  * A character's players take a shape on its own actor (docs/design-v1-pc-stats.md
@@ -182,7 +182,79 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   const levels = levelsFit(op, check);
   if (!levels.ok) return levels;
   const squeezed = squeezeFits(op, check);
-  return squeezed.ok ? routeFits(op, check) : squeezed;
+  if (!squeezed.ok) return squeezed;
+  const routed = routeFits(op, check);
+  return routed.ok ? expectFits(op, check) : routed;
+}
+
+/**
+ * A character as `expect` reads it: the server's, or a player's own copy,
+ * whose actor holds every part `expect` names.
+ */
+export type ExpectSubject = Pick<Character, "stats" | "level" | "name" | "ddbSync"> & {
+  actor: Pick<Actor, "ac" | "speeds" | "senses" | "sheetUrl" | "srdId" | "wildShape"> & { hp?: Pick<Actor["hp"], "cur" | "max"> };
+};
+
+/**
+ * The value of a character's part as `expect` hashes it
+ * (docs/design-v1-resync.md 4), absent as null: HP is the current and
+ * maximum alone, and the shape its SRD id and whether it is Wild Shape.
+ */
+function expectValue(character: ExpectSubject, part: ExpectPart): unknown {
+  const actor = character.actor;
+  switch (part) {
+    case "level":
+      return character.level;
+    case "name":
+      return character.name;
+    case "actor.ac":
+      return actor.ac;
+    case "actor.speeds":
+      return actor.speeds;
+    case "actor.senses":
+      return actor.senses;
+    case "actor.sheetUrl":
+      return actor.sheetUrl;
+    case "actor.hp":
+      return actor.hp ? { cur: actor.hp.cur, max: actor.hp.max } : undefined;
+    case "actor.shape":
+      return { srdId: actor.srdId, wildShape: actor.wildShape };
+    case "ddbSync":
+      return character.ddbSync;
+    default:
+      return character.stats?.[part.slice("stats.".length) as keyof NonNullable<Character["stats"]>];
+  }
+}
+
+/** A part's 12-hex hash, as a re-sync sends it in `expect` and the server checks it. */
+export function expectHash(character: ExpectSubject, part: ExpectPart): string {
+  return hash128(stableStringify(expectValue(character, part) ?? null)).slice(0, 12);
+}
+
+/** The `expect` of each part named, against the character as the sender sees it. */
+export function expectOf(character: ExpectSubject, parts: Iterable<ExpectPart>): CharacterExpect {
+  const out: CharacterExpect = {};
+  for (const part of parts) out[part] = expectHash(character, part);
+  return out;
+}
+
+/**
+ * A `character.update`'s `expect`, for every role (docs/design-v1-resync.md
+ * 4): each part it names still hashes as the sender saw it, on the staged
+ * state. Here, where ops arrive, after the role's checks, so a player who
+ * does not play the character hears that first, and never in the reducer,
+ * so replay never runs it. Every part is one a player's own copy holds
+ * whole, so a DM's change to anything else never refuses a player, and any
+ * mismatch is the one refusal, which tells nothing of what differed.
+ */
+function expectFits(op: Op, c: Check): Decision {
+  if (op.t !== "character.update" || op.expect === undefined) return OK;
+  const character = c.state.characters[op.characterId];
+  if (!character) return OK;
+  for (const [part, hash] of Object.entries(op.expect) as [ExpectPart, string | undefined][]) {
+    if (hash !== undefined && expectHash(character, part) !== hash) return refuse("invalid", CHARACTER_CHANGED);
+  }
+  return OK;
 }
 
 /** The refusals of a route whose shape no walk has (docs/design-v1-movement.md 7.1), whoever sends it. */

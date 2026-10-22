@@ -96,6 +96,12 @@ export const LIMITS = {
    * 50 characters at the cap are 600 KiB of a DM's 3 MiB scene.
    */
   pcStatsBytes: 12 * 1024,
+  /**
+   * A character's record of its last D&D Beyond sync, serialized
+   * (docs/design-v1-resync.md 2.1). It rides on the character beside the
+   * block, and one at every bound is about 4.8 KB.
+   */
+  ddbSyncBytes: 6 * 1024,
   logInMemory: 200,
   logStored: 10_000,
   stateBytes: 8 * 1024 * 1024,
@@ -672,6 +678,13 @@ function checkJournal(state: RoomState): LimitCheck {
 export const BLOCK_SAVES_TOO_FAST = "Too many stat block saves at once. Wait a few seconds, then save again.";
 /** A block save the room's state limit refuses, in place of the size guard's words (section 3.4). */
 export const BLOCKS_ROOM_TOO_FULL = "The room is too full to save this stat block. Ask the DM to free some space, then save again.";
+/**
+ * The refusal of a `character.update` whose `expect` no longer matches the
+ * character (docs/design-v1-resync.md 4): one code and these words whatever
+ * differed, so a refusal tells nothing of what changed. The re-sync knows
+ * it by these words.
+ */
+export const CHARACTER_CHANGED = "This character changed since you looked. Check it again.";
 /** A block save at the room's storage quota, in place of the quota's words (section 3.4). Deleting is still accepted. */
 export const BLOCKS_AT_QUOTA = "The room is at its storage limit, so stat blocks cannot be saved until the DM frees space. Deleting a stat block still works.";
 

@@ -49,8 +49,8 @@ const COMPANION_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...
  */
 const CHARACTER_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...OWNER_ACTOR_FIELDS, "srdId", "wildShape"]);
 
-/** Character fields an owner may patch, the stat block and known forms among them (docs/design-v1-pc-stats.md 4.1, docs/design-v1-known-forms.md 3.2). `actor` is limited further by OWNER_ACTOR_FIELDS. */
-export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms"]);
+/** Character fields an owner may patch, the stat block, known forms and sync record among them (docs/design-v1-pc-stats.md 4.1, docs/design-v1-known-forms.md 3.2, docs/design-v1-resync.md 4). `actor` is limited further by OWNER_ACTOR_FIELDS. */
+export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms", "ddbSync"]);
 
 type View = Pick<RoomState, "characters"> | null | undefined;
 

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "./keys.ts";
-import type { PcStats, RoomState, Viewer } from "./model.ts";
+import type { DdbSync, PcStats, RoomState, Viewer } from "./model.ts";
 import { projectEntity, projectState, type ProjectedCharacter } from "./project.ts";
 import { EMPTY_PC_STATS } from "./rules/pcStats.ts";
-import { DM, P1, P2, character, member, room, token } from "./testutil.ts";
+import { AT, DM, P1, P2, character, member, room, token } from "./testutil.ts";
 
 /**
  * Who receives a character's stat block (docs/design-v1-pc-stats.md 4.2):
@@ -59,5 +59,32 @@ describe("who receives a stat block", () => {
     state.meta.view.blackout = true;
     assert.deepEqual(seen(state, P1)?.stats, BLOCK);
     assert.equal(seen(state, P3) === null || !("stats" in seen(state, P3)!), true);
+  });
+});
+
+/** A sync record with a marker no other field holds, so a search of the whole view finds any copy of it. */
+const RECORD: DdbSync = { at: AT, from: "987654321", base: { level: 5 }, rolls: { "fedcba987654": { k: "w:0123456789ab", h: "abcdef012345" } } };
+
+describe("who receives a character's D&D Beyond sync record (docs/design-v1-resync.md 4)", () => {
+  function synced(): RoomState {
+    const state = setup();
+    state.characters.bree!.ddbSync = RECORD;
+    state.characters.cy = character("cy", { ownerIds: ["p3"] });
+    return state;
+  }
+
+  test("the DM and the character's players and co-owners whole, since the merge runs on their device", () => {
+    for (const viewer of [DM, P1, P2]) assert.deepEqual(seen(synced(), viewer)?.ddbSync, RECORD);
+  });
+
+  test("another player, a player who owns only one of its tokens, and the table display never, anywhere in the view", () => {
+    const state = synced();
+    for (const viewer of [P3, DISPLAY]) {
+      const projected = seen(state, viewer);
+      assert.ok(projected, "the character itself is seen");
+      assert.equal("ddbSync" in projected, false);
+      const whole = JSON.stringify(projectState(state, viewer, { sceneId: state.meta.playerSceneId }));
+      assert.equal(whole.includes("987654321") || whole.includes("fedcba987654"), false, "nowhere in the whole view");
+    }
   });
 });

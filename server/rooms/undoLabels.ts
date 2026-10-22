@@ -137,6 +137,9 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "character.update": {
       // A stat block edit names the block, which the DM's undo puts back with the two numbers it gave the actor.
       const name = before.characters[op.characterId]?.name;
+      // A sync's patch never carries `at`, which the server writes, so a record with one, or none, is the dialog's Undo (docs/design-v1-resync.md 4).
+      if (op.patch.ddbSync === null || op.patch.ddbSync?.at !== undefined) return `undoing ${quoted(name, "a character")}'s re-sync`;
+      if (op.patch.ddbSync !== undefined) return `re-syncing ${quoted(name, "a character")} from D&D Beyond`;
       if (op.patch.stats === null) return `removing ${quoted(name, "a character")}'s stat block`;
       if (op.patch.stats !== undefined) return `changing ${quoted(name, "a character")}'s stat block`;
       if (op.patch.knownForms !== undefined) return `changing ${quoted(name, "a character")}'s known forms`;
