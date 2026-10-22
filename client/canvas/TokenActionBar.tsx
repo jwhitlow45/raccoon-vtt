@@ -59,7 +59,7 @@ import { pathNow } from "../features/measure/movement.ts";
 import { customWords, SIZE_WORDS, stepSize } from "../features/tokens/resize.ts";
 import { useResize } from "../features/tokens/useResize.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../features/tokens/Revive.tsx";
-import { lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
+import { barTokenIds, lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import type { Point, Size } from "../lib/camera.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
@@ -237,10 +237,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   };
 
   const path = pathNow(encounter, token, you?.role ?? "player");
+  const undoIds = barTokenIds(tokens, token);
   const rows = barButtons({
     dm: access.dm,
     owner: access.owner,
-    undoMove: offersUndo(undoOffer, [token.id]),
+    undoMove: offersUndo(undoOffer, undoIds),
     movedThisTurn: path !== null && path.stops.length >= 2,
     // A player's own token: the door button finds the nearest door in reach itself, and shows nothing without one.
     door: true,
@@ -251,7 +252,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const button = (id: BarButtonId): ReactNode => {
     switch (id) {
       case "undoMove":
-        return <UndoMoveButton key={id} tokenIds={[token.id]} />;
+        return <UndoMoveButton key={id} tokenIds={undoIds} />;
       case "countLeg":
         return <CountLegButton key={id} token={token} />;
       case "door":

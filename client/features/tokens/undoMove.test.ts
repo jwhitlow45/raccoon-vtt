@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { PendingOp, RoomView } from "../../state/types.ts";
-import { afterAnswers, afterQueued, followOps, lastMoveSlot, MAX_OFFERS, offered, offersMarkUndo, offersUndo, undoOf, type Offers } from "./undoMove.ts";
+import { token } from "#shared/testutil.ts";
+import { afterAnswers, afterQueued, barTokenIds, followOps, lastMoveSlot, MAX_OFFERS, offered, offersMarkUndo, offersUndo, undoOf, type Offers } from "./undoMove.ts";
 
 const queued = (n: number, op: ClientOp, group?: string): PendingOp => (group === undefined ? { n, op, at: 0 } : { n, op, at: 0, group });
 const move = (tokenId: string): ClientOp => ({ t: "token.move", tokenId, x: 1, y: 1 });
@@ -26,6 +27,22 @@ describe("Undo move in the token bar", () => {
     assert.equal(offersUndo(top, ["c", "b"]), true);
     assert.equal(offersUndo(top, ["c"]), false);
     assert.deepEqual(undoOf(top!), { t: "undo", of: 1 });
+  });
+
+  test("an attach or a detach offers it on the holder's bar too, and a rider's bar offers its mount's move (docs/design-v1-attach.md 8.3)", () => {
+    const carry: ClientOp = { t: "token.attach", tokenId: "kobold", to: "thorn", kind: "carry", x: 5, y: 5, elevation: 0 };
+    assert.equal(offersUndo(offered(after([carry])), ["thorn"]), true);
+    const letGo = afterQueued(NONE, "player", queued(1, { t: "token.detach", tokenId: "kobold" }), (id) => (id === "kobold" ? "thorn" : undefined));
+    assert.equal(offersUndo(offered(letGo), ["thorn"]), true);
+    const tokens = {
+      horse: token("horse", { size: "large", x: 4, y: 4 }),
+      thorn: token("thorn", { x: 4, y: 4, attached: { to: "horse", kind: "ride", steer: true } }),
+      torch: token("torch", { kind: "object", size: "tiny", x: 4, y: 4, attached: { to: "thorn", kind: "carry" } }),
+    };
+    assert.deepEqual(barTokenIds(tokens, tokens.thorn), ["thorn", "horse", "torch"]);
+    // Thorn's drag moved the horse he directs: his own bar offers to take it back.
+    assert.equal(offersUndo(offered(after([move("horse")])), barTokenIds(tokens, tokens.thorn)), true);
+    assert.equal(offersUndo(offered(after([move("horse")])), barTokenIds(tokens, tokens.torch)), true, "up the chain");
   });
 
   test("the newest move is the one offered, and a press names it", () => {

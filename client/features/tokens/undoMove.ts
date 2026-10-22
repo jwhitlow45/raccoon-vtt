@@ -1,5 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
+import type { RoomState, Token } from "#shared/model.ts";
 import { isPoseOp, onPlayerUndoStack, type ClientOp } from "#shared/protocol.ts";
+import { carriedIndex, holderOf } from "#shared/rules/attach.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import type { PendingOp, RoomView } from "../../state/types.ts";
 
@@ -58,8 +60,24 @@ export function offered(s: Offers): Offer | null {
   return s.undoing ? null : (s.offers[s.offers.length - 1] ?? null);
 }
 
+/**
+ * The tokens a pose op's offer names: the tokens it moves, and for an
+ * attach or a detach the holder too (docs/design-v1-attach.md 8.3), so a
+ * Carry, a Drag, a Let go or a Put down sent from the holder's bar offers
+ * Undo move there. `holderBefore` is the holder a token had before the op.
+ */
+function offerTokens(op: ClientOp, holderBefore: (tokenId: string) => string | undefined): string[] {
+  if (op.t === "token.moveMany") return op.moves.map((m) => m.tokenId);
+  if (op.t === "token.attach") return [op.tokenId, op.to];
+  if (op.t === "token.detach") {
+    const holder = holderBefore(op.tokenId);
+    return holder === undefined ? [op.tokenId] : [op.tokenId, holder];
+  }
+  return "tokenId" in op ? [op.tokenId] : [];
+}
+
 /** The offers after this device queued `p`. Only players get them: a DM undoes from the top bar, where every change of theirs is. */
-export function afterQueued(s: Offers, role: "dm" | "player", p: PendingOp): Offers {
+export function afterQueued(s: Offers, role: "dm" | "player", p: PendingOp, holderBefore: (tokenId: string) => string | undefined = () => undefined): Offers {
   const op = p.op;
   if (role !== "player") return NONE;
   const top = offered(s);
@@ -67,7 +85,7 @@ export function afterQueued(s: Offers, role: "dm" | "player", p: PendingOp): Off
   if (op.t === "undo" || op.t === "redo") return NONE;
   if (!onPlayerUndoStack(op)) return s;
   if (!isPoseOp(op)) return NONE;
-  const tokenIds = op.t === "token.moveMany" ? op.moves.map((m) => m.tokenId) : [op.tokenId];
+  const tokenIds = offerTokens(op, holderBefore);
   if (op.t === "token.countLeg") return { ...s, offers: [...s.offers, { tokenIds, ns: [p.n], mark: true as const }].slice(-MAX_OFFERS) };
   const last = s.offers[s.offers.length - 1];
   // The bands of one big gesture are one step on the server too.
@@ -94,6 +112,24 @@ export function afterAnswers(s: Offers, pending: readonly PendingOp[], refused: 
   return { offers: s.offers.filter((o) => newest(o) !== undoing.of), undoing: null };
 }
 
+/**
+ * The tokens a token's bar offers Undo move for (docs/design-v1-attach.md
+ * 8.3): its own, its holders up the chain, since a rider's drag moves the
+ * mount it directs, and what it carries itself, since an attach from its
+ * bar names the carried token.
+ */
+export function barTokenIds(tokens: RoomState["tokens"] | undefined, token: Token): string[] {
+  const out = [token.id];
+  if (!tokens) return out;
+  const seen = new Set(out);
+  for (let up = holderOf(tokens, token); up && !seen.has(up.id); up = holderOf(tokens, up)) {
+    out.push(up.id);
+    seen.add(up.id);
+  }
+  for (const id of carriedIndex(tokens).get(token.id) ?? []) if (!seen.has(id)) out.push(id);
+  return out;
+}
+
 /** Whether a bar for these tokens offers to take this move back. */
 export function offersUndo(offer: Offer | null, tokenIds: readonly string[]): boolean {
   return offer !== null && offer.mark !== true && tokenIds.some((id) => offer.tokenIds.includes(id));
@@ -115,9 +151,11 @@ export function followOps(room: Pick<StoreApi<RoomView>, "getState" | "subscribe
     const was = slot.getState();
     let s: Offers = was;
     let seen = was.seen;
+    // A detached token's holder, as the server held it before this device's pending ops.
+    const holderBefore = (tokenId: string) => view.confirmed?.tokens[tokenId]?.attached?.to;
     for (const p of view.pending) {
       if (p.n <= seen) continue;
-      s = afterQueued(s, view.you?.role ?? "player", p);
+      s = afterQueued(s, view.you?.role ?? "player", p, holderBefore);
       seen = p.n;
     }
     s = afterAnswers(s, view.pending, view.refused ?? []);
