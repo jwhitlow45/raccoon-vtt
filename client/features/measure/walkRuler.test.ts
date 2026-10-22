@@ -98,6 +98,18 @@ describe("the walking ruler", () => {
     assert.deepEqual(read(fogged(10), stops, true).onDm, [55, false], "the DM's own ruler, before it is shared, reads the DM's map");
   });
 
+  test("a player's ruler under true distance into ground the party never explored reads the straight walk, not No way through (review MV-O-21)", () => {
+    const state = world({ blockMovement: false });
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+    state.meta = { ...state.meta, settings: { ...state.meta.settings, diagonal: "euclid" } };
+    reveal(state, "s1", { x: 0, y: 0, w: 12, h: 30 });
+    const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    for (const [end, ft] of [[free(20, 2), 90], [free(20, 20), 127], [free(20, 8), 95]] as const) {
+      const m = measureWalk({ view, sceneId: "s1", stops: [free(2, 2), end], viewer: { role: "player" }, everything: false })!;
+      assert.deepEqual([m.totalFt, m.legs[0]!.none, m.legs[0]!.corners], [ft, false, []], `to ${end.x}, ${end.y}`);
+    }
+  });
+
   test("a walk over a rise and down again counts both climbs", () => {
     // A ridge 10 ft high along x = 5, so there is no way round it.
     const state = world({ blockMovement: false, heights: Object.fromEntries(Array.from({ length: 30 }, (_, y) => [`5,${y}`, 10])) });

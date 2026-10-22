@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature, TerrainId } from "#shared/model.ts";
 import type { Point } from "#shared/rules/geom.ts";
-import { findRoute, type WalkInput } from "#shared/rules/walk.ts";
+import { findRoute, WorkBudget, type WalkInput } from "#shared/rules/walk.ts";
 import { tok, world } from "#shared/rules/testWorld.ts";
 import { rebased } from "./drop.ts";
-import { RouteDrag, type Frames, type Settled } from "./routeDrag.ts";
+import { RouteDrag, type Settled } from "./routeDrag.ts";
+import { RouteWork, type Frames } from "./routeWork.ts";
 
 /**
  * The drag's search as a state machine (docs/design-v1-movement.md 12):
@@ -37,8 +38,8 @@ function mulberry32(seed: number): () => number {
 /**
  * Frames run by hand. A cancelled frame stays in `late`, so a run can fire
  * it anyway, as a frame already under way when the drag ended would. The
- * clock never moves, so every slice is the search's smallest, a few hundred
- * states, and a run sees many slices.
+ * clock never moves, and `work` gives each frame a budget of 16 units, so
+ * a run sees many frames.
  */
 class HandFrames implements Frames {
   queue = new Map<number, () => void>();
@@ -63,6 +64,11 @@ class HandFrames implements Frames {
     this.queue.delete(first.value[0]);
     first.value[1]();
   }
+}
+
+/** The route work a drag runs on, a budget of `limit` units a frame. */
+function work(frames: HandFrames, limit = 16): RouteWork {
+  return new RouteWork(frames, () => new WorkBudget({ limit }));
 }
 
 type Scene = { cells: Record<string, TerrainId>; edges: Record<string, EdgeFeature> };
@@ -101,7 +107,7 @@ function run(seed: number): void {
   let current = inputNow();
   let built: WalkInput = current;
   const frames = new HandFrames();
-  const drag = new RouteDrag(() => (built = current), frames);
+  const drag = new RouteDrag(() => (built = current), work(frames));
   const step = big ? 0.5 : 1;
   const span = (n: number) => Math.floor(rand() * (n - (big ? 2 : 1)) / step) * step;
   const visited: Point[] = [];
@@ -186,7 +192,8 @@ describe("the drag's search as a state machine (12)", () => {
     const state = world({ w: 30, h: 30, edges: walled });
     const input: WalkInput = { build: state, token: tok(state, { x: 2, y: 2 }), rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } };
     const frames = new HandFrames();
-    const drag = new RouteDrag(() => input, frames);
+    const board = work(frames);
+    const drag = new RouteDrag(() => input, board);
     const landed: Settled[] = [];
     drag.drop({ x: 20, y: 2 }, (a) => landed.push(a));
     assert.equal(drag.answer.kind, "searching");
@@ -196,7 +203,7 @@ describe("the drag's search as a state machine (12)", () => {
     assert.equal(landed[0]!.kind, "route");
     assert.equal(drag.holding, false);
 
-    const again = new RouteDrag(() => input, frames);
+    const again = new RouteDrag(() => input, board);
     again.drop({ x: 20, y: 2 }, (a) => landed.push(a));
     again.cancel();
     while (frames.queue.size > 0) frames.runOne();
@@ -205,14 +212,24 @@ describe("the drag's search as a state machine (12)", () => {
     assert.equal(again.holding, false);
   });
 
+  test("a drag under true distance into ground nobody has seen is open ground at once, as a drop straight into the fog is (review MV-O-21)", () => {
+    const state = world({ w: 200, h: 200 });
+    for (const size of ["medium", "large"] as const) {
+      const input: WalkInput = { build: state, token: tok(state, { size, x: 2, y: 2 }), rules: { feetPerCell: 5, diagonal: "euclid" }, seen: (x) => x < 150, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } };
+      const drag = new RouteDrag(() => input, work(new HandFrames(), 100_000));
+      assert.deepEqual(drag.aim({ x: 160, y: 50 }), { kind: "open" }, size);
+    }
+  });
+
   test("open ground needs no search, and no scene reads as the straight leg", () => {
     const state = world({ w: 20, h: 20 });
     const input: WalkInput = { build: state, token: tok(state, { x: 2, y: 2 }), rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } };
     const frames = new HandFrames();
-    const drag = new RouteDrag(() => input, frames);
+    const board = work(frames, 10_000);
+    const drag = new RouteDrag(() => input, board);
     assert.deepEqual(drag.aim({ x: 9, y: 5 }), { kind: "open" });
     assert.equal(frames.queue.size, 0);
-    const none = new RouteDrag(() => null, frames);
+    const none = new RouteDrag(() => null, board);
     assert.deepEqual(none.aim({ x: 9, y: 5 }), { kind: "open" });
   });
 });

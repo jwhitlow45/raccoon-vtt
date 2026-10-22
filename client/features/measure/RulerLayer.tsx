@@ -108,6 +108,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
             key={key}
             stops={r.points}
             walk={{ view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && r.local && !r.shared }}
+            live={r.local}
             scale={props.scale}
             color={colorOf(r.from)}
             owner={markOwner(r, members)}
@@ -162,9 +163,9 @@ function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rul
  * the shared loading delay the label says "Finding the way…", as a drag's
  * does.
  */
-function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean }) {
+function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean; live?: boolean }) {
   const { stops, walk, scale, color } = props;
-  const m = useWalkMeasure({ ...walk, stops });
+  const m = useWalkMeasure({ ...walk, stops }, props.live === true);
   const slow = useDelayed(m?.searching === true);
   if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });

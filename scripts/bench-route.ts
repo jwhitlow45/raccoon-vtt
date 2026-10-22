@@ -18,8 +18,10 @@
  *
  * The gates: a Medium route within a Dash under 5 ms and a whole-scene flood
  * under 150 ms on a development laptop, a Large route within 30 squares
- * under 40 ms, the throttled Dash row under 20 ms, and a sliced walk's
- * longest slice, true distance's included, under 8 ms.
+ * under 40 ms, the throttled Dash row under 20 ms, a sliced walk's
+ * longest slice, true distance's included, under 8 ms, and the board's
+ * longest frame of route work, for a drag's aims, 40 rulers and the two
+ * together, under 8 ms.
  */
 import type { BuildChunk, EdgeFeature, FreeWall, RoomState, Scene, TerrainId } from "../shared/model.ts";
 import { LIMITS } from "../shared/limits.ts";
@@ -319,8 +321,8 @@ const argv = (globalThis as { process?: { argv?: string[] } }).process?.argv;
 if (argv?.[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
   // The walking ruler's and the public world's rows read client code and the test rooms, so only the Node run loads them, never the Chrome bundle.
   const nodeOnly = "./bench-ruler.ts";
-  const { runPublicWorldRow, runRulerRows } = (await import(/* @vite-ignore */ nodeOnly)) as typeof import("./bench-ruler.ts");
-  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runLongTraceRow(), ...runSlicedRows(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows()]));
+  const { runFrameRows, runPublicWorldRow, runRulerRows } = (await import(/* @vite-ignore */ nodeOnly)) as typeof import("./bench-ruler.ts");
+  console.log(formatRouteBench([...runRouteBench(), runTraceRow(), runLongTraceRow(), ...runSlicedRows(), runRouteSeenRow(), runPublicWorldRow(), ...runRulerRows(), ...runFrameRows()]));
   if (argv.includes("--chrome")) {
     console.log("");
     console.log(await runChrome());

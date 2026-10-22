@@ -669,7 +669,7 @@ export function MapStage(props: {
         return;
       }
       const node = { x: () => lead.x + dx, y: () => lead.y + dy, position: () => {} };
-      dragStopsRef.current.send(dragStopsRef.current.plan(node, lead, movable));
+      dragStopsRef.current.press(node, lead, movable);
     };
     slot.zoom = zoomBy;
     slot.nudge = nudge;

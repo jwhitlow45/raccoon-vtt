@@ -1,13 +1,15 @@
 import type { Point } from "#shared/rules/geom.ts";
-import { openLeg, WalkSearch, WalkWorld, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
+import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
+import type { RouteJob, RouteWork } from "./routeWork.ts";
 
 /**
  * A lone token drag's route search (docs/design-v1-movement.md 5.2), as a
  * small state machine kept free of React and Konva so it is tested under
- * plain Node: the finger aims at spots, the search runs in slices of at
- * most SLICE_MS a frame until the spot aimed at is settled, and a drop
- * lands once it is. One search serves every spot of the drag, since its
- * start is fixed.
+ * plain Node: the finger aims at spots, and the drag's work, its world's
+ * build, the open-ground check and then the search, runs through the
+ * board's route work (routeWork.ts) on the frame's shared budget until the
+ * spot aimed at is answered. A drop lands once it is. One search serves
+ * every spot of the drag, since its start is fixed.
  *
  * Its promises, which routeDrag.test.ts checks over random runs: a drop
  * lands at most once, nothing lands after a cancel, the route a drop lands
@@ -15,29 +17,25 @@ import { openLeg, WalkSearch, WalkWorld, type WalkInput, type WalkRoute } from "
  * then, and no search state outlives the drag.
  */
 
-/** The most a frame gives the search (5.2), in milliseconds. */
-export const SLICE_MS = 4;
-
 /** What the search says of the spot aimed at: the straight leg is the route, a route, no route, or still searching since a time. */
 export type RouteAnswer = { kind: "open" } | { kind: "route"; route: WalkRoute } | { kind: "none"; capped: boolean } | { kind: "searching"; since: number };
 
 export type Settled = Exclude<RouteAnswer, { kind: "searching" }>;
 
-/** The clock and the frames a search runs in: `performance.now` and `requestAnimationFrame` in a browser. `deadline` ends a slice, by default SLICE_MS from now, on the board the frame's budget it shares with the walking rulers (frameBudget.ts). */
-export type Frames = { now(): number; request(run: () => void): number; cancel(handle: number): void; deadline?(): number };
-
 export class RouteDrag {
   readonly #input: () => WalkInput | null;
-  readonly #frames: Frames;
+  readonly #work: Pick<RouteWork, "run" | "drop" | "now">;
   readonly #changed: () => void;
   #world: WalkWorld | null = null;
   #search: WalkSearch | null = null;
   #built = false;
   #target: Point | null = null;
+  #check: LegCheck | null = null;
   #answer: RouteAnswer = { kind: "open" };
-  #handle: number | null = null;
   #landing: ((answer: Settled) => void) | null = null;
   #over = false;
+  #queued = false;
+  readonly #job: RouteJob = { first: true, run: (budget) => this.#run(budget) };
 
   /**
    * `input` builds the public world when the search first needs it, and
@@ -45,9 +43,9 @@ export class RouteDrag {
    * not loaded): every spot then reads as the straight leg. `changed` hears
    * every change of the answer.
    */
-  constructor(input: () => WalkInput | null, frames: Frames, changed: () => void = () => {}) {
+  constructor(input: () => WalkInput | null, work: Pick<RouteWork, "run" | "drop" | "now">, changed: () => void = () => {}) {
     this.#input = input;
-    this.#frames = frames;
+    this.#work = work;
     this.#changed = changed;
   }
 
@@ -59,14 +57,19 @@ export class RouteDrag {
     return this.#target;
   }
 
+  /** The world the drag walks in, once built. */
+  get world(): WalkWorld | null {
+    return this.#world;
+  }
+
   /** The drag landed or was cancelled. */
   get over(): boolean {
     return this.#over;
   }
 
-  /** Whether it holds any search state: a world, a search, a frame asked for or a drop waiting. */
+  /** Whether it holds any search state: a world, a search, work waiting or a drop waiting. */
   get holding(): boolean {
-    return this.#world !== null || this.#search !== null || this.#handle !== null || this.#landing !== null;
+    return this.#world !== null || this.#search !== null || this.#queued || this.#landing !== null;
   }
 
   /** The finger is over a new spot, the spot the drop would land on. Once the finger is up and a drop waits, it aims nowhere else. */
@@ -74,6 +77,7 @@ export class RouteDrag {
     if (this.#over || this.#landing) return this.#answer;
     if (this.#target && this.#target.x === to.x && this.#target.y === to.y) return this.#answer;
     this.#target = { x: to.x, y: to.y };
+    this.#check = null;
     this.#solve();
     return this.#answer;
   }
@@ -81,10 +85,10 @@ export class RouteDrag {
   /** The room changed under the drag, its walls, doors, creatures or areas: the world is built again and the spot answered in it. */
   rebuild(): void {
     if (this.#over) return;
-    this.#stopFrames();
     this.#world = null;
     this.#search = null;
     this.#built = false;
+    this.#check = null;
     if (this.#target) this.#solve();
   }
 
@@ -110,78 +114,71 @@ export class RouteDrag {
   }
 
   /**
-   * A drop still waiting lands now, its search run to the end at once: a
-   * new drag or a key press would otherwise throw it away. With nothing
-   * waiting it does nothing.
+   * A drop still waiting lands now, its work run to the end at once: a new
+   * drag or a key press would otherwise throw it away. This is the one
+   * route work that keeps to no frame's budget. With nothing waiting it
+   * does nothing.
    */
   flush(): void {
-    if (this.#over || !this.#landing || !this.#search) return;
-    this.#stopFrames();
-    this.#slice(Infinity);
+    if (this.#over || !this.#landing) return;
+    this.#run(WorkBudget.all());
   }
 
+  /** Asks for the spot aimed at, now if the frame has budget left, else in the frames after, the answer "searching" meanwhile. */
   #solve(): void {
-    const to = this.#target!;
-    const world = this.#worldNow();
-    if (!world || openLeg(world, to)) {
-      this.#stopFrames();
-      this.#set({ kind: "open" });
-      this.#landed();
-      return;
-    }
-    this.#search ??= new WalkSearch(world);
-    this.#slice();
+    this.#queued = true;
+    if (this.#work.run(this.#job)) return;
+    if (this.#answer.kind !== "searching" && !this.#over) this.#set({ kind: "searching", since: this.#work.now() });
   }
 
-  #slice(deadline = this.#frames.deadline?.() ?? this.#frames.now() + SLICE_MS): void {
-    const search = this.#search!;
-    const to = this.#target!;
-    const result = search.settle(to, deadline);
-    // The trace runs in the same slice, so a frame never goes past it (review ASTRA-08).
-    const route = result === "settled" ? search.traceTo(to, deadline) : null;
-    if (result === "paused" || route === "paused") {
-      if (this.#answer.kind !== "searching") this.#set({ kind: "searching", since: this.#frames.now() });
-      this.#schedule();
-      return;
+  /** The drag's work on `budget`: true once the spot aimed at is answered. */
+  #run(budget: WorkBudget): boolean {
+    if (this.#over || !this.#target) {
+      this.#queued = false;
+      return true;
     }
-    this.#stopFrames();
-    this.#set(route ? { kind: "route", route } : { kind: "none", capped: result === "capped" });
-    this.#landed();
+    const to = this.#target;
+    const late = (units = 1) => {
+      budget.charge(units);
+      return budget.spent;
+    };
+    const world = this.#worldNow(budget);
+    if (!world) return this.#answered({ kind: "open" });
+    // The straight leg first: most drags need no search (5.2).
+    this.#check ??= new LegCheck(world, to);
+    if (!this.#check.done && !this.#check.run(late)) return false;
+    if (this.#check.open) return this.#answered({ kind: "open" });
+    if (!this.#search) {
+      if (budget.spent) return false;
+      this.#search = new WalkSearch(world);
+      budget.charge(Math.ceil((world.nx * world.ny) / 400));
+    }
+    const result = this.#search.settle(to, budget);
+    if (result === "paused") return false;
+    const route = result === "settled" ? this.#search.traceTo(to, budget) : null;
+    if (route === "paused") return false;
+    return this.#answered(route ? { kind: "route", route } : { kind: "none", capped: result === "capped" });
   }
 
-  /** A drop waiting for this answer lands with it, and the drag is over. */
-  #landed(): void {
+  /** The spot is answered: a drop waiting for it lands with it, and the drag is over. */
+  #answered(answer: Settled): true {
+    this.#queued = false;
+    this.#set(answer);
     const land = this.#landing;
-    if (!land || this.#answer.kind === "searching") return;
-    const answer = this.#answer;
-    this.#end();
-    land(answer);
+    if (land) {
+      this.#end();
+      land(answer);
+    }
+    return true;
   }
 
-  #schedule(): void {
-    if (this.#handle !== null) return;
-    const handle = this.#frames.request(() => {
-      // A frame cancelled but already under way, or one a later frame replaced, does nothing and leaves the current one asked for.
-      if (this.#handle !== handle) return;
-      this.#handle = null;
-      // A frame that fires after the drag ended, or after a rebuild dropped its search, does nothing.
-      if (this.#over || !this.#search || !this.#target) return;
-      this.#slice();
-    });
-    this.#handle = handle;
-  }
-
-  #stopFrames(): void {
-    if (this.#handle === null) return;
-    this.#frames.cancel(this.#handle);
-    this.#handle = null;
-  }
-
-  #worldNow(): WalkWorld | null {
+  /** The drag's world, built when first needed, its build charged to the budget as one step that cannot stop partway. */
+  #worldNow(budget: WorkBudget): WalkWorld | null {
     if (!this.#built) {
       this.#built = true;
       const input = this.#input();
       this.#world = input ? new WalkWorld(input) : null;
+      if (this.#world) budget.charge(worldUnits(this.#world));
     }
     return this.#world;
   }
@@ -194,9 +191,11 @@ export class RouteDrag {
 
   #end(): void {
     this.#over = true;
-    this.#stopFrames();
+    this.#work.drop(this.#job);
+    this.#queued = false;
     this.#landing = null;
     this.#world = null;
     this.#search = null;
+    this.#check = null;
   }
 }

@@ -203,7 +203,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   const stops = ruler ? allStops(ruler) : [];
   let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
   if (stops.length === 1) info = "Tap or drag to the next point.";
-  const walked = useWalkMeasure(walk && view && tool.activeCtx && stops.length > 1 ? { view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share } : null);
+  const walked = useWalkMeasure(walk && view && tool.activeCtx && stops.length > 1 ? { view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share } : null, true);
   const finding = useDelayed(walked?.searching === true);
   if (walked?.searching) {
     if (finding) info = "Finding the way…";

@@ -3,9 +3,10 @@ import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
-import { openLeg, WalkSearch, WalkWorld } from "#shared/rules/walk.ts";
+import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { landedElevation, routeTarget } from "../movement/drop.ts";
+import type { RouteJob } from "../movement/routeWork.ts";
 import { extraWords, joinWords } from "./movement.ts";
 import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
 
@@ -90,8 +91,8 @@ const MAX_LEGS = 4096;
  */
 type LegAnswer = { kind: "open" } | { kind: "route"; pieces: RoutePiece[] } | { kind: "none" };
 
-/** A ruler's walk so far: each leg's answer by its place, and the search of the leg still searching. */
-type Progress = { answers: LegAnswer[]; on: { key: string; search: WalkSearch } | null };
+/** A ruler's walk so far: each leg's answer by its place, and the search and open-ground check of the leg still searching. */
+type Progress = { answers: LegAnswer[]; on: { leg: string; search: WalkSearch; check: LegCheck } | null };
 
 type Kept = {
   basis: Basis;
@@ -113,39 +114,58 @@ function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter)
   return `${walker.id},${walker.size},${walker.w},${walker.h},${walker.x},${walker.y},${walker.elevation},${walker.squeeze === true},${counter.h},${counter.v},${everything}`;
 }
 
-/** A leg start's search, made when first asked for. Over the cap the one asked for longest ago goes: a ruler still searching holds its own (Progress). */
-function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter, key: string): WalkSearch {
+/**
+ * A leg start's search, made when first asked for, its world's build
+ * charged to the frame's budget as one step that cannot stop partway
+ * (review MV-O-23). Over the cap the one asked for longest ago goes: a
+ * ruler still searching holds its own (Progress).
+ */
+function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter, key: string, budget: WorkBudget): WalkSearch {
   const kept = keptFor(view, walker.sceneId);
   let search = kept.searches.get(key);
   if (search) kept.searches.delete(key);
   else {
     const world = publicWorld(view, walker, viewer, [], { creatures: false, everything, seenGround: !everything });
     search = new WalkSearch(new WalkWorld({ ...world.input, prone: false, counter }));
+    budget.charge(worldUnits(search.world) + Math.ceil((search.world.nx * search.world.ny) / 400));
     if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
   }
   kept.searches.set(key, search);
   return search;
 }
 
-/** A leg's answer, searched within the slice: null while it is still searching, or when the slice is over before it begins. */
-function legAnswer(view: RoomState, walker: Token, input: WalkInput & { deadline?: number }, counter: DiagonalCounter, target: Point, slice: { began: boolean }, progress: Progress): LegAnswer | null {
+/**
+ * A leg's answer, worked on the frame's budget: null while it is still
+ * searching. Once the budget is spent no leg begins, and none gets an
+ * allowance of its own: the frame's work (routeWork.ts) gives the frame's
+ * first work its bit of progress, once a frame (review ASTRA-14).
+ */
+function legAnswer(view: RoomState, walker: Token, input: WalkInput, counter: DiagonalCounter, target: Point, budget: WorkBudget, progress: Progress): LegAnswer | null {
   const kept = keptFor(view, walker.sceneId);
   const key = searchKey(walker, input.everything, counter);
   const legKey = `${key}|${target.x},${target.y}`;
   const known = kept.legs.get(legKey);
   if (known) return known;
-  // Past the deadline no leg begins but the slice's first, so each slice answers one leg at least and a ruler of many legs never builds every leg's world in one frame.
-  if (slice.began && input.deadline !== undefined && performance.now() > input.deadline) return null;
-  slice.began = true;
-  const search = progress.on?.key === key ? progress.on.search : searchFor(view, walker, input.viewer, input.everything, counter, key);
+  if (budget.spent) return null;
+  const own = progress.on?.leg === legKey ? progress.on : null;
+  const search = own ? own.search : searchFor(view, walker, input.viewer, input.everything, counter, key, budget);
+  const check = own ? own.check : new LegCheck(search.world, target);
+  const late = (units = 1) => {
+    budget.charge(units);
+    return budget.spent;
+  };
   let answer: LegAnswer;
-  if (openLeg(search.world, target)) answer = { kind: "open" };
+  // The open-ground check, the search and its trace all share the budget: a ruler's frame never runs past it.
+  if (!check.done && !check.run(late)) {
+    progress.on = { leg: legKey, search, check };
+    return null;
+  }
+  if (check.open) answer = { kind: "open" };
   else {
-    const settled = search.settle(target, input.deadline);
-    // The trace shares the slice: a ruler's frame never runs past it.
-    const traced = settled === "settled" ? search.traceTo(target, input.deadline) : null;
+    const settled = search.settle(target, budget);
+    const traced = settled === "settled" ? search.traceTo(target, budget) : null;
     if (settled === "paused" || traced === "paused") {
-      progress.on = { key, search };
+      progress.on = { leg: legKey, search, check };
       return null;
     }
     answer = traced ? { kind: "route", pieces: traced.pieces } : { kind: "none" };
@@ -161,12 +181,16 @@ export type WalkInput = { view: RoomState; sceneId: string; stops: readonly Rule
 /**
  * The walk a walking ruler measures. `everything` is the DM's own ruler
  * before it is shared, and only then may the search read what players
- * cannot see. With a `deadline` (a `performance.now()` time) a search
- * that runs past it pauses, as a drag's does a frame at a time, and the
- * walk comes back `searching`: asked again, it goes on where it stopped.
+ * cannot see. With a `budget`, the frame's (routeWork.ts), work stops
+ * when it is spent, as a drag's does a frame at a time, and the walk
+ * comes back `searching`: asked again, it goes on where it stopped. A
+ * spent budget reads only what is known. A `deadline` (a
+ * `performance.now()` time) is a budget of the caller's own, for tests and
+ * the bench. With neither, the walk is measured to the end.
  */
-export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasure | null {
+export function measureWalk(input: WalkInput & { deadline?: number; budget?: WorkBudget }): WalkMeasure | null {
   const { view, stops } = input;
+  const budget = input.budget ?? (input.deadline !== undefined ? WorkBudget.until(input.deadline) : WorkBudget.all());
   const room = keptFor(view, input.sceneId);
   const memo = room.walks;
   const memoKey = `${input.sceneId},${input.viewer.role},${input.everything}`;
@@ -187,7 +211,6 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
   let totalFt = 0;
   let extraFt = 0;
   let searching = false;
-  const slice = { began: false };
   for (const [k, drawn] of stops.slice(1).entries()) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
@@ -200,7 +223,7 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walker, input, counter, target, slice, progress));
+    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walker, input, counter, target, budget, progress));
     if (answer) progress.answers[k] = answer;
     if (!answer) {
       searching = true;
@@ -232,6 +255,27 @@ export function measureWalk(input: WalkInput & { deadline?: number }): WalkMeasu
     memo.set(stops, byViewer);
   }
   return walk;
+}
+
+/**
+ * A walk still searching as work for the board's turns (routeWork.ts): each
+ * turn goes on with it on the frame's budget, `more` hears when a turn
+ * answers another leg or the whole walk, and it is done once the walk is.
+ */
+export function walkJob(input: WalkInput, more: () => void): RouteJob {
+  let answered = -1;
+  return {
+    run: (budget) => {
+      const now = measureWalk({ ...input, budget });
+      const done = now?.searching !== true;
+      const count = now ? now.legs.filter((leg) => leg.searching !== true).length : 0;
+      if (done || count !== answered) {
+        answered = count;
+        more();
+      }
+      return done;
+    },
+  };
 }
 
 /** "Walking 40 ft", with what terrain added under it. */
