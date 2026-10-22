@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
-import type { Op } from "#shared/protocol.ts";
+import { inSightOfNonOwners } from "#shared/project.ts";
+import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { walkerFor } from "#shared/rules/attach.ts";
+import { routePoints, routeReach, routeStop, type RoutePiece } from "#shared/rules/route.ts";
 import { DM, P1, actor, chance, effect, env, int, pick, rng, token } from "#shared/testutil.ts";
 import { dragOf } from "../movement/dragTesting.ts";
+import { dropLanding, dropView, walkerOf } from "../movement/drop.ts";
 import { world } from "../movement/testing.ts";
 import { copyFor } from "./testing.ts";
 
@@ -15,9 +19,11 @@ import { copyFor } from "./testing.ts";
  * holder that straddles a step, holders that drag a creature beside them
  * and riders that drag one, among walls and raised ground, under both
  * diagonal rules. Each drag is planned on the mover's own copy as the board
- * plans it, its route from findRoute (dragTesting.ts), and its op must pass
- * the server's check and apply, land where the picture showed it, and store
- * the cost the picture read.
+ * plans it, by the board's own drag stops (dragTesting.ts), and its op must
+ * pass the server's check and the route check the drop runs (route.ts
+ * routeStop), apply, land where the picture showed it, and store the cost
+ * the picture and the frames read. A route the search found that the drop
+ * did not take must be one that check refuses.
  */
 
 type Case = { state: RoomState; mover: string; who: Viewer };
@@ -70,11 +76,17 @@ function randomCase(r: () => number): Case {
   return { state, mover, who: chance(r, 0.8) ? P1 : DM };
 }
 
+/** Whether a move's route is the one the search found, piece for piece. */
+function sameRoute(route: readonly RoutePiece[] | undefined, found: readonly RoutePiece[]): boolean {
+  return route !== undefined && route.length === found.length && route.every((p, i) => p.every((v, k) => v === found[i]![k]));
+}
+
 describe("a drag of an attached token plans the walk the server takes and stores what the picture read (review AT-ASTRA-13)", () => {
   test("random riders, holders and draggers on straddling holders, steps and walls", () => {
     let moved = 0;
     let routed = 0;
     let off = 0;
+    let refusedRoutes = 0;
     for (let seed = 1; seed <= 400; seed++) {
       const r = rng(seed);
       const c = randomCase(r);
@@ -87,6 +99,25 @@ describe("a drag of an attached token plans the walk the server takes and stores
       const op = drag.op as Op;
       const allowed = canApply(op, c.who, c.state, { canUseAsset: () => true });
       assert.ok(allowed.ok, `${where}: ${allowed.ok ? "" : allowed.message} for ${JSON.stringify(op)}`);
+      const blocks = c.state.scenes[mover.sceneId]!.blockMovement === true;
+      const route = op.t === "token.move" ? op.route : undefined;
+      if (blocks && route && op.t === "token.move") {
+        // The route as the server walks it, off a holder every player sees on the ground (rules/attach.ts walkerFor).
+        const walker = walkerFor(c.state, mover, op, (t) => c.state.tokens[t.id] !== undefined && inSightOfNonOwners(c.state, c.state.tokens[t.id]!, {}));
+        assert.equal(routeStop(c.state, walker, route, op.elevation ?? mover.elevation), null, `${where}: the route check refuses ${JSON.stringify(op)}`);
+      }
+      const found = drag.answer.kind === "route" ? drag.answer.route.pieces : null;
+      if (blocks && found && found.length <= MAX_ROUTE_PIECES && !drag.plan.stop && !sameRoute(route, found)) {
+        // The drop went another way than the search found: only since the check refuses that route, judged on the mover's copy as the drop judges it.
+        const view = dropView(copy, c.who.role);
+        const end = found[found.length - 1]!;
+        const at = { x: end[0], y: end[1] };
+        const walking = walkerOf(view, view.tokens[c.mover]!, at);
+        const landing = dropLanding(view, view.tokens[c.mover]!, at);
+        const refused = routeStop(view, walking, found, landing) !== null || routeReach(routePoints(view.buildChunks, walking, found, landing), view.meta.settings.feetPerCell) > MAX_ROUTE_REACH;
+        assert.ok(refused, `${where}: the drop left a route the check takes, ${JSON.stringify(found)} for ${JSON.stringify(op)}`);
+        refusedRoutes++;
+      }
       const applied = applyOp(c.state, op, c.who, env(10));
       assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
       const after = applied.state.tokens[c.mover]!;
@@ -94,11 +125,12 @@ describe("a drag of an attached token plans the walk the server takes and stores
       const before = mover.path?.stops.length ?? 1;
       const stored = (after.path?.stops ?? []).slice(before).reduce((sum, s) => sum + (s.cost ?? 0), 0);
       assert.equal(drag.preview.read.dragFt, stored, `${where}: the band read another cost than the one stored, ${JSON.stringify(op)}`);
+      assert.equal(drag.frame.ft, stored, `${where}: the frames sent another cost than the one stored`);
       moved++;
       if (op.t === "token.move" && op.route) routed++;
       if (mover.attached && !after.attached) off++;
     }
     // A run that never walks off a mount or along a route tests nothing.
-    assert.ok(moved > 200 && routed > 30 && off > 60, JSON.stringify({ moved, routed, off }));
+    assert.ok(moved > 200 && routed > 30 && off > 60, JSON.stringify({ moved, routed, off, refusedRoutes }));
   });
 });
