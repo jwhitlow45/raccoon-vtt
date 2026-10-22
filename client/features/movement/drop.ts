@@ -517,8 +517,10 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
  * (docs/design-v1-attach.md 4.2): the first piece some walker's leg is
  * stopped on is walked back, a lattice step at a time from its end, to
  * the last spot the holder and every walker reach clear, its start when
- * none. Null when all of them walk the whole way. `pieces` counts the
- * pieces kept whole before it.
+ * none. Each spot is snapped to the holder's lattice, as a route's are, so
+ * a cut on a piece along no axis or diagonal is one the server takes.
+ * Null when all of them walk the whole way. `pieces` counts the pieces
+ * kept whole before it.
  */
 export function walkersStop(state: BuildState, lead: DropToken, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
   if (walkers.length === 0) return null;
@@ -530,8 +532,9 @@ export function walkersStop(state: BuildState, lead: DropToken, points: readonly
     if (!stopped) continue;
     const at = { ...lead, x: a.x, y: a.y, elevation: a.elevation, squeeze: undefined };
     const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
+    const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
     for (let k = n - 1; k >= 1; k--) {
-      const c = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n, elevation: 0 };
+      const c = { x: a.x + along(b.x - a.x, k), y: a.y + along(b.y - a.y, k), elevation: 0 };
       c.elevation = landedElevation(state.buildChunks, at, c);
       if (legStop(state, at, c) === null && walkerStop(state, lead, walkers, a, c) === null) return { at: c, pieces: i - 1, blocker: stopped.blocker };
     }

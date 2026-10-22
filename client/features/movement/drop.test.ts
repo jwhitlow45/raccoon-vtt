@@ -598,6 +598,16 @@ describe("a holder that drags a creature beside it (docs/design-v1-attach.md 4.2
     assert.equal(walkersStop(state, holder(), [points[0]!, { x: 5, y: 5, elevation: 0 }], [goblin]), null);
   });
 
+  test("a cut on a piece along no axis or diagonal stands on the holder's lattice, as a route's spots do", () => {
+    // Thorn walks from (2,5) to (7,8), and the goblin he drags at y = 4 meets the wall along x = 6 down to y = 7, which he passes below.
+    const state = world({ edges: line("w", 6, 0, 7) });
+    const points = [
+      { x: 2, y: 5, elevation: 0 },
+      { x: 7, y: 8, elevation: 0 },
+    ];
+    assert.deepEqual(walkersStop(state, holder(), points, [goblin]), { at: { x: 5, y: 7, elevation: 0 }, pieces: 0, blocker: "wall" });
+  });
+
   test("a player's drop is cut there with the note a wall gives, and the DM's goes on", () => {
     const state = walled();
     const plan = { moves: [{ tokenId: "thorn", x: 9, y: 5 }], stop: null, held: [] };
