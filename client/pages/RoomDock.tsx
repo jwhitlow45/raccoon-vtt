@@ -137,15 +137,18 @@ export function DockRow(props: {
  * sheets' rule. `reserve` is the room the pane keeps free above itself
  * under the top bars while the summary shows, so the row never stands
  * over the bars, and the row stands on the pane, never over its header
- * and Close. The row rides the pane's swipe as a panel sheet's dock does
- * (`row` for PaneDockRow's ref, `riders` for useSheetSwipe).
+ * and Close. Where the row and the pane's least height do not both fit
+ * (`fits`, fold.ts paneDockFits), the pane keeps no row, and the alerts
+ * come back as it closes. The row rides the pane's swipe as a panel
+ * sheet's dock does (`row` for PaneDockRow's ref, `riders` for
+ * useSheetSwipe).
  */
-export function usePaneDock(on: boolean): { reserve: number; summary: AlertsSummary | null; row: (el: HTMLDivElement | null) => void; riders: readonly (HTMLElement | null)[] } {
+export function usePaneDock(on: boolean, fits: boolean): { reserve: number; summary: AlertsSummary | null; row: (el: HTMLDivElement | null) => void; riders: readonly (HTMLElement | null)[] } {
   useFoldUnderPane(on);
   const summary = useDockSummary("pane");
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const riders = useMemo(() => [row], [row]);
-  const shows = on && summary !== null;
+  const shows = on && fits && summary !== null;
   return { reserve: shows ? DOCK_PX : 0, summary: shows ? summary : null, row: setRow, riders };
 }
 

@@ -3,8 +3,9 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { barDockSlot, freeArea, WINDOW_FOLD_BELOW, type Chrome } from "../canvas/barDock.ts";
 import { sheetRoom, SHEET_MIN_HEIGHT, type SheetSpace } from "../components/sheetCap.ts";
+import { PANE_MIN_HEIGHT, sheetPaneRoom } from "../features/builder/labelEdit.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
-import type { Size } from "../lib/camera.ts";
+import type { Insets, Size } from "../lib/camera.ts";
 import { revealAndFocus } from "../lib/reveal.ts";
 import { theme } from "../lib/theme.ts";
 import { scopeSlot, useScoped } from "../state/scope.ts";
@@ -74,6 +75,19 @@ export function useUnderSheet(): boolean {
   const pane = useStore(dock, (s) => s.paneSheets > 0);
   const sideRoom = useSideSheetRoom();
   return pane || foldsUnderSheet({ width, height, sheetOpen: open, full, sideRoom });
+}
+
+/**
+ * Whether the alerts' summary row has room on a map pane's bottom sheet
+ * (pages/RoomDock.tsx usePaneDock): the row and the pane at its least
+ * height (features/builder/labelEdit.ts PANE_MIN_HEIGHT) both between the
+ * bars (`insets`), in the panes' layout px. Where they do not, as on a
+ * short screen held sideways or at a large interface size, the row would
+ * reach under the top bars, so the pane keeps none, and the alerts come
+ * back as it closes.
+ */
+export function paneDockFits(input: { viewport: Size; insets: Insets }, dockHeight = DOCK_PX): boolean {
+  return sheetPaneRoom(input) - dockHeight >= PANE_MIN_HEIGHT;
 }
 
 /**

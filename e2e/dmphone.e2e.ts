@@ -817,6 +817,45 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await waitFor("the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] ? true : null));
     await pickTool(dm, "Select");
   });
+
+  test("fu20b-r2-3. at 667 x 375 at 130%, where the row and the pane's least height do not both fit under the top bar, a trap that goes off while its pane is open docks no row there: the pane stays clear of the top bar with its Close in reach, and the alerts come back as it closes (FU20B-ASTRA-4)", async () => {
+    await setUp({ width: 667, height: 375, scale: 1.3 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Loose Stone", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId] ?? null);
+    try {
+      await pickTool(dm, "Trap");
+      const pane = dm.getByRole("dialog", { name: "Edit trap" });
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      assert.equal(await hit(dm, p), "CANVAS", "the trap is under something");
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.getByText("Loose Stone", { exact: true }).first().waitFor();
+      await ops.send({ t: "trap.spring", trapId, tokenIds: [run.hag] });
+      await waitFor("the springing waiting", () => ((dmSocket.state?.traps[trapId]?.rig?.due?.length ?? 0) >= 1 ? true : null));
+      await dm.waitForTimeout(500);
+      assert.equal(await dm.locator("[data-rvtt-pane-dock]").count(), 0, "a row docked on the pane with no room for it");
+      const bars = await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }));
+      const s = await rectOf(pane);
+      assert.ok(s.top >= bars.bottom - 0.5, `the pane (top ${s.top}) runs under the top bar (foot ${bars.bottom})`);
+      const close = pane.getByRole("button", { name: "Close", exact: true });
+      assert.ok(await wholeInReach(close), "the pane's Close is out of reach");
+      await shots.take(dm, "dmphone-fu20b-r2-pane-no-room");
+      await close.tap();
+      await pane.waitFor({ state: "detached" });
+      // The column's own row or its card, whichever the room leaves.
+      await dm.getByRole("button", { name: /Loose Stone went off/ }).or(dm.getByRole("group", { name: "Loose Stone went off" })).first().waitFor();
+      await shots.take(dm, "dmphone-fu20b-r2-pane-no-room-closed");
+    } finally {
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await waitFor("the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] ? true : null));
+      await pickTool(dm, "Select");
+      await setUp({ width: 390, height: 844, scale: 1 });
+    }
+  });
 });
 
 function goblin() {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_CHROME } from "../canvas/barDock.ts";
-import { alertsSummary, dockFits, foldsUnderSheet, sideSheetRoom, type ColumnAlert } from "./fold.ts";
+import { alertsSummary, dockFits, foldsUnderSheet, paneDockFits, sideSheetRoom, type ColumnAlert } from "./fold.ts";
 
 describe("foldsUnderSheet", () => {
   test("a phone in portrait folds while a sheet is open", () => {
@@ -168,5 +168,29 @@ describe("dockFits", () => {
       assert.equal(dockFits({ height: 667 / scale, safeTop: 0, safeBottom: 0, ...fight }), true, `375 x 667 at ${scale}`);
       assert.equal(dockFits({ height: 812 / scale, safeTop: 47, safeBottom: 34, ...fight }), true, `375 x 812 at ${scale}`);
     }
+  });
+});
+
+describe("paneDockFits", () => {
+  // The bars over a phone's map in the panes' layout px, which the interface size scales with the screen's: the top bar, and the toolbar with a tool's options.
+  const insets = { top: 52, right: 0, bottom: 120, left: 0 };
+  const at = (width: number, height: number, scale = 1) => paneDockFits({ viewport: { width: width / scale, height: height / scale }, insets });
+
+  test("an upright phone keeps the row on the pane's edge, at 100% and 130%", () => {
+    assert.equal(at(390, 844), true);
+    assert.equal(at(390, 844, 1.3), true);
+    assert.equal(at(375, 667, 1.3), true);
+  });
+
+  test("a short screen held sideways keeps none, as the row and the pane's least height would reach under the top bar", () => {
+    assert.equal(at(480, 320), false);
+    assert.equal(at(568, 320), false);
+    assert.equal(at(480, 320, 1.3), false);
+  });
+
+  test("the row fits while the pane keeps its 120 px under it, and not a pixel less", () => {
+    // 52 + 8 + 48 + 120 + 8 + 120
+    assert.equal(paneDockFits({ viewport: { width: 390, height: 356 }, insets }), true);
+    assert.equal(paneDockFits({ viewport: { width: 390, height: 355 }, insets }), false);
   });
 });

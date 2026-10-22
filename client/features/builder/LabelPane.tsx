@@ -12,6 +12,7 @@ import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "..
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
+import { paneDockFits } from "../../pages/fold.ts";
 import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions } from "../../state/view.ts";
@@ -73,7 +74,7 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
   const screenBox = labelScreenBox(moving?.id === label.id ? { ...label, x: moving.x, y: moving.y } : label, camera);
   // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars (pages/RoomDock.tsx usePaneDock).
   const sheet = props.viewport.width < SHEET_BELOW_PX;
-  const dock = usePaneDock(sheet);
+  const dock = usePaneDock(sheet, paneDockFits({ viewport: props.viewport, insets: props.insets }));
   const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
   const place = panePlacement({ viewport: props.viewport, insets, box: screenBox, height: height ?? PANE_HEIGHT_UNMEASURED });
 
