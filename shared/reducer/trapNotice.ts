@@ -5,6 +5,7 @@ import { partySightOf, playersSeeGround, playersToken } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { boxDistanceFt, tokenCellBox } from "../rules/distance.ts";
 import { groundAt } from "../rules/heights.ts";
+import { planMove } from "../rules/moveLeg.ts";
 import { isPlainId, trapCreature, walkOp, zoneRanges } from "../rules/traps.ts";
 import type { Tx } from "./tx.ts";
 
@@ -29,7 +30,7 @@ export function noticeStep(tx: Tx, op: Op, before: RoomState): boolean {
   if (!walkOp(op) || (op.t === "token.move" && op.teleport !== undefined)) return false;
   const after = tx.state;
   if (!Object.values(after.traps ?? {}).some((t) => t.rig?.notice && !t.found && t.state === "armed" && t.rig.noticedBy === undefined)) return false;
-  const walkers = movedPartyCreatures(before, after, tx.touched());
+  const walkers = movedPartyCreatures(op, before, tx);
   if (walkers.length === 0) return false;
   let wrote = false;
   const visible = new Map<string, (trap: Trap) => boolean>();
@@ -54,16 +55,18 @@ export function noticeStep(tx: Tx, op: Op, before: RoomState): boolean {
   return wrote;
 }
 
-/** The party creatures this op moved, by id: its walkers, and what they carry, wherever they ended. Only a plain id can be remembered. */
-function movedPartyCreatures(before: RoomState, after: RoomState, touched: readonly string[]): Token[] {
+/**
+ * The party creatures this op walks, by id: its walkers, and what they
+ * carry, as the move's plan has them, wherever they ended. A walk that
+ * comes back to where it started is a walk too. Only a plain id can be
+ * remembered.
+ */
+function movedPartyCreatures(op: Op, before: RoomState, tx: Tx): Token[] {
   const out: Token[] = [];
-  for (const key of touched) {
-    if (!key.startsWith("token:")) continue;
-    const id = key.slice("token:".length);
-    const t = after.tokens[id];
-    const was = before.tokens[id];
-    if (!t || !was || (was.x === t.x && was.y === t.y && was.elevation === t.elevation && was.sceneId === t.sceneId)) continue;
-    if (!isPlainId(id) || !trapCreature(after, t) || !playersToken(after, t)) continue;
+  for (const m of planMove(op, before, tx.actor, tx.env)) {
+    if (m.how !== "walk" || !m.route.some((p) => p.x !== m.from.x || p.y !== m.from.y || p.elevation !== m.from.elevation)) continue;
+    const t = tx.state.tokens[m.tokenId];
+    if (!t || t.sceneId !== m.from.sceneId || !isPlainId(t.id) || !trapCreature(tx.state, t) || !playersToken(tx.state, t)) continue;
     out.push(t);
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
