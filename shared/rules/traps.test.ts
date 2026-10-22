@@ -138,6 +138,37 @@ describe("trip wires", () => {
   test("the cells a wire passes over, which the fog rule reads", () => {
     assert.deepEqual(wireCells({ a: [3, 4], b: [3, 6] }).map((c) => `${c.x},${c.y}`).sort(), ["2,3", "2,4", "2,5", "2,6", "3,3", "3,4", "3,5", "3,6"]);
     assert.deepEqual(zoneRanges({ buildChunks: {} }, "s1", { door: { edge: "4,2,w" } }), [{ x0: 4, y0: 2, x1: 5, y1: 3 }, { x0: 3, y0: 2, x1: 4, y1: 3 }]);
+    assert.ok(wireCells({ a: [0, 0], b: [5.5, 15] }).some((c) => c.x === 4 && c.y === 10), "a cell it cuts a corner of (review TR-ASTRA-04)");
+  });
+
+  test("the cells a wire passes over are exactly the closed squares it meets, for every wire from ends near the origin", () => {
+    // Liang-Barsky on each closed square, its fractions compared by cross-multiplying, in half cells so all on integers.
+    const meets = (a: readonly [number, number], b: readonly [number, number], x: number, y: number): boolean => {
+      const [ax, ay, bx, by] = [a[0] * 2, a[1] * 2, b[0] * 2, b[1] * 2];
+      let lo: [number, number] = [0, 1];
+      let hi: [number, number] = [1, 1];
+      for (const [p, q] of [[ax - bx, ax - 2 * x], [bx - ax, 2 * x + 2 - ax], [ay - by, ay - 2 * y], [by - ay, 2 * y + 2 - ay]] as const) {
+        if (p === 0) {
+          if (q < 0) return false;
+        } else if (p < 0 && q * lo[1] < lo[0] * p) lo = [-q, -p];
+        else if (p > 0 && q * hi[1] < hi[0] * p) hi = [q, p];
+      }
+      return lo[0] * hi[1] <= hi[0] * lo[1];
+    };
+    const onLattice = (x: number, y: number) => Number.isInteger(x) || Number.isInteger(y);
+    let wires = 0;
+    for (let ax = 0; ax <= 4; ax += 0.5) for (let ay = 0; ay <= 4; ay += 0.5) for (let bx = 0; bx <= 12; bx += 0.5) for (let by = 0; by <= 12; by += 0.5) {
+      const a = [ax, ay] as const;
+      const b = [bx, by] as const;
+      const length = Math.hypot(bx - ax, by - ay);
+      if (!onLattice(ax, ay) || !onLattice(bx, by) || length < 0.5 || length > 20) continue;
+      wires++;
+      const want: string[] = [];
+      for (let y = 0; y <= 13; y++) for (let x = 0; x <= 13; x++) if (meets(a, b, x, y)) want.push(`${x},${y}`);
+      const got = wireCells({ a, b }).map((c) => `${c.x},${c.y}`);
+      assert.deepEqual(got.sort(), want.sort(), `${a} to ${b}`);
+    }
+    assert.ok(wires > 30_000, `${wires} wires`);
   });
 });
 

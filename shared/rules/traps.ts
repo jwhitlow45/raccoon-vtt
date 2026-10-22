@@ -88,26 +88,31 @@ export function zoneRanges(state: Pick<RoomState, "buildChunks">, sceneId: strin
 }
 
 /**
- * The cells a wire passes over: those its segment runs through, a point
- * of it on a grid line belonging to the cells on both sides. Sampled every
- * eighth of a cell, which finds every cell of a segment whose ends lie on
- * the half-cell lattice.
+ * The cells a wire passes over: every cell whose closed square its segment
+ * meets, so a point of it on a grid line belongs to the cells on both
+ * sides, and a corner to all four. Exact: a wire's ends lie on the
+ * half-cell lattice, so in half cells every test is on integers. A cell
+ * meets the segment when their boxes overlap and the segment's line does
+ * not leave all four of its corners strictly on one side.
  */
 export function wireCells(wire: { a: readonly [number, number]; b: readonly [number, number] }): { x: number; y: number }[] {
-  const steps = Math.max(1, Math.ceil(wireLength(wire) * 8));
-  const seen = new Map<string, { x: number; y: number }>();
-  const add = (x: number, y: number) => {
-    const key = `${x},${y}`;
-    if (!seen.has(key)) seen.set(key, { x, y });
-  };
-  for (let i = 0; i <= steps; i++) {
-    const px = wire.a[0] + ((wire.b[0] - wire.a[0]) * i) / steps;
-    const py = wire.a[1] + ((wire.b[1] - wire.a[1]) * i) / steps;
-    const xs = Number.isInteger(px) ? [px - 1, px] : [Math.floor(px)];
-    const ys = Number.isInteger(py) ? [py - 1, py] : [Math.floor(py)];
-    for (const x of xs) for (const y of ys) if (x >= 0 && y >= 0) add(x, y);
+  const ax = wire.a[0] * 2;
+  const ay = wire.a[1] * 2;
+  const dx = wire.b[0] * 2 - ax;
+  const dy = wire.b[1] * 2 - ay;
+  const side = (px: number, py: number) => Math.sign(dx * (py - ay) - dy * (px - ax));
+  const out: { x: number; y: number }[] = [];
+  const x0 = Math.max(0, Math.ceil(Math.min(wire.a[0], wire.b[0])) - 1);
+  const y0 = Math.max(0, Math.ceil(Math.min(wire.a[1], wire.b[1])) - 1);
+  const x1 = Math.floor(Math.max(wire.a[0], wire.b[0]));
+  const y1 = Math.floor(Math.max(wire.a[1], wire.b[1]));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const sides = side(2 * x, 2 * y) + side(2 * x + 2, 2 * y) + side(2 * x, 2 * y + 2) + side(2 * x + 2, 2 * y + 2);
+      if (sides !== 4 && sides !== -4) out.push({ x, y });
+    }
   }
-  return [...seen.values()];
+  return out;
 }
 
 /** A door's two cells, one on each side (permissions.ts doorPlace), or none for a free door that is gone. */
