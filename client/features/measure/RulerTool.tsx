@@ -181,9 +181,15 @@ function onCancel(ctx: ToolContext): void {
   else publish(ctx, null);
 }
 
+/**
+ * The Measure chip's choices. Its compact form shows the short words, so a
+ * DM's row with kept rulers keeps Measure and the kept rulers' chip in view
+ * on a 360 px phone: Shared and Clear as their icons, "Line" or "Walk",
+ * Keep and "Kept (12)" take 338 px of the row's 344.
+ */
 const MEASURES = [
-  { value: "straight", label: "Straight" },
-  { value: "walking", label: "Walking" },
+  { value: "straight", label: "Straight", short: "Line" },
+  { value: "walking", label: "Walking", short: "Walk" },
 ] as const;
 
 /**

@@ -1150,10 +1150,12 @@ export function Labelled(props: { label: string; children: ReactNode }) {
 
 /**
  * A segmented choice in a slot (components/Segmented.tsx). Its compact
- * form is a chip showing the chosen option's words, whose popover holds
- * the choice ("Clear fog" with a caret, 6.2). In ⋯ it is a labelled group.
+ * form is a chip showing the chosen option's words, or its `short` words
+ * where it has them, whose popover holds the choice ("Clear fog" with a
+ * caret, 6.2). The chip's name keeps the option's own words. In ⋯ it is a
+ * labelled group.
  */
-export function OptSegmented<T extends string | number>(props: { label: string; value: T | null; options: readonly SegmentedOption<T>[]; onChange(value: NoInfer<T>): void; disabled?: boolean }) {
+export function OptSegmented<T extends string | number>(props: { label: string; value: T | null; options: readonly (SegmentedOption<T> & { short?: string })[]; onChange(value: NoInfer<T>): void; disabled?: boolean }) {
   const place = useSlotPlace();
   const choice = <Segmented label={props.label} value={props.value} options={props.options} onChange={props.onChange} disabled={props.disabled} />;
   if (inPopover(place)) return <Labelled label={props.label}>{choice}</Labelled>;
@@ -1164,7 +1166,7 @@ export function OptSegmented<T extends string | number>(props: { label: string; 
       kind="choice"
       disabled={props.disabled}
       value={String(props.value)}
-      options={props.options.map((o) => ({ key: String(o.value), words: o.label }))}
+      options={props.options.map((o) => ({ key: String(o.value), words: o.short ?? o.label }))}
       valueName={nameOf(props.options.find((o) => o.value === props.value))}
     >
       <PickCloses>{choice}</PickCloses>

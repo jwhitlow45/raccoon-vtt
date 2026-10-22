@@ -197,6 +197,17 @@ describe("the fit (6.3)", () => {
     }
   });
 
+  test("the DM's Ruler with Measure and kept rulers keeps all five at 344, a 360 px phone's row, with Measure's short words (MV-360)", () => {
+    // As Inter draws them in the dev room: Measure's chip 73.2 px with "Line" or "Walk", where "Straight" or "Walking" took 94.2, and "Kept (2)" 94, "Kept (12)" 100.4.
+    const row = (measure: number, kept: number) => [slot("shared", 1, 98, { compact: 44 }), slot("measure", 4, 163.6, { compact: measure }), slot("keep", 2, 60.6), slot("clear", 2, 86, { compact: 44 }), slot("kept", 3, 146, { compact: kept })];
+    for (const kept of [94, 100.4]) {
+      const fit = fitRow({ room: 344, slots: row(73.2, kept), alwaysMore: false, pins: [] });
+      assert.equal(ids(fit), "shared:compact measure:compact keep clear:compact kept:compact", `with the kept chip at ${kept}`);
+      assert.deepEqual(fit.more, []);
+    }
+    assert.notDeepEqual(fitRow({ room: 344, slots: row(94.2, 94), alwaysMore: false, pins: [] }).more, [], "the whole words left the row over");
+  });
+
   test("content always in ⋯ skips the first pass and keeps ⋯", () => {
     const fit = fitRow({ room: 200, slots: [slot("a", 1, 60), slot("b", 2, 60)], alwaysMore: true, pins: [] });
     assert.equal(ids(fit), "a b …");
