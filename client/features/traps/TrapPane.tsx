@@ -5,6 +5,7 @@ import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type Buil
 import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, choiceText, SKILLS } from "#shared/rules/skills.ts";
+import { trapCreature } from "#shared/rules/traps.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -184,9 +185,13 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
 
   // Set it off (4.2): the selected creatures on its scene, else those on it now. Read at the tap, so the pane never redraws as tokens move.
   const setOff = () => {
-    const tokens = room.getState().view?.tokens ?? {};
-    const chosen = selected.filter((id) => tokens[id]?.sceneId === trap.sceneId);
-    const ids = chosen.length > 0 ? chosen : tokensOn(trap, tokens);
+    const view = room.getState().view;
+    if (!view) return;
+    const chosen = selected.filter((id) => {
+      const t = view.tokens[id];
+      return t?.sceneId === trap.sceneId && trapCreature(view, t);
+    });
+    const ids = chosen.length > 0 ? chosen : tokensOn(trap, view);
     actions.dispatch({ t: "trap.spring", trapId: trap.id, tokenIds: ids.slice(0, LIMITS.trapSpringTokens) });
   };
 

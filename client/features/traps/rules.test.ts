@@ -7,7 +7,7 @@ import { clientOpSchema } from "#shared/protocol.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LEVEL_BANDS, TRAP_PRESET_IDS } from "#shared/srd/traps.ts";
-import { DM, env, room, token } from "#shared/testutil.ts";
+import { actor, DM, env, room, token } from "#shared/testutil.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   cleanLine,
@@ -107,9 +107,15 @@ describe("the trap under a tap", () => {
   });
 
   test("Set it off with none selected takes the creatures on its squares, and none for a wire", () => {
-    const tokens = { t1: token("t1", { x: 2, y: 2 }), t2: token("t2", { x: 4, y: 2 }), t3: token("t3", { x: 3, y: 3, sceneId: "s2" }) };
-    assert.deepEqual(tokensOn(traps[0]!, tokens), ["t1"]);
-    assert.deepEqual(tokensOn(traps[2]!, tokens), []);
+    const tokens = {
+      t1: token("t1", { x: 2, y: 2 }),
+      t2: token("t2", { x: 4, y: 2 }),
+      t3: token("t3", { x: 3, y: 3, sceneId: "s2" }),
+      chest: token("chest", { kind: "object", x: 2, y: 2 }),
+      dead: token("dead", { x: 2, y: 2, actor: { inline: actor({ life: "dead" }) } }),
+    };
+    assert.deepEqual(tokensOn(traps[0]!, { tokens, characters: {} }), ["t1"], "never an object or the dead");
+    assert.deepEqual(tokensOn(traps[2]!, { tokens, characters: {} }), []);
   });
 });
 

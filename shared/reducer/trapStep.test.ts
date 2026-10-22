@@ -4,7 +4,7 @@ import { chunkKey } from "../keys.ts";
 import type { BuildChunk, LogEvent, RoomState, Token, Trap, TrapDue, TrapRig, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
-import { DM, P1, env, room, token } from "../testutil.ts";
+import { DM, P1, actor, env, room, token } from "../testutil.ts";
 import { DONE_MEANWHILE, SETTLED_MEANWHILE } from "./traps.ts";
 
 /**
@@ -282,6 +282,15 @@ describe("the DM's Set it off, and settling (6.2)", () => {
     assert.deepEqual(t.rig!.due![0]!.by, ["thorn"]);
     const again = applied(r.state, { t: "trap.spring", trapId: "pit", tokenIds: [] }, DM, 8);
     assert.equal(again.state.traps.pit!.rig!.usesLeft, 0);
+  });
+
+  test("Set it off counts creatures only: an object or a dead creature named is left out of who set it off", () => {
+    const chest = token("chest", { name: "Chest", kind: "object", x: 3, y: 5 });
+    const dead = goblin({ x: 3, y: 5, actor: { inline: actor({ life: "dead" }) } });
+    const state = world([thorn(), chest, dead], [trap("boom", square(3, 5), { message: "Boom." })]);
+    const r = applied(state, { t: "trap.spring", trapId: "boom", tokenIds: ["chest", "gob", "thorn"] });
+    assert.deepEqual((lines(r.state)[0] as Extract<LogEvent, { type: "trap" }>).by, ["thorn"]);
+    assert.deepEqual((seenLines(r.state)[0] as Extract<LogEvent, { type: "trapSeen" }>).by, ["thorn"]);
   });
 
   test("an outcome settles its occurrence in the same op, a second is refused, and its undo brings it back with the HP", () => {

@@ -1,8 +1,9 @@
 import { LIMITS } from "#shared/limits.ts";
-import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
+import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
 import type { TrapInput } from "#shared/protocol.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
+import { trapCreature } from "#shared/rules/traps.ts";
 import { ABILITY_NAMES, choiceText } from "#shared/rules/skills.ts";
 import { damageTypeName } from "#shared/rules/damage.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
@@ -202,13 +203,13 @@ export function pitFloor(ground: number, depth: number): number {
   return Math.max(MIN_HEIGHT_FT, Math.round(ground - depth));
 }
 
-/** The creatures on a trap's squares now, for Set it off with none selected. A wire or a door has none standing on it. */
-export function tokensOn(trap: Pick<Trap, "zone" | "sceneId">, tokens: Readonly<Record<string, Token | undefined>>): string[] {
+/** The creatures on a trap's squares now, for Set it off with none selected: never an object or the dead (6.2). A wire or a door has none standing on it. */
+export function tokensOn(trap: Pick<Trap, "zone" | "sceneId">, view: Pick<RoomState, "characters"> & { tokens: Readonly<Record<string, Token | undefined>> }): string[] {
   const zone = trap.zone;
   if (!("cells" in zone)) return [];
   const out: string[] = [];
-  for (const t of Object.values(tokens)) {
-    if (!t || t.sceneId !== trap.sceneId) continue;
+  for (const t of Object.values(view.tokens)) {
+    if (!t || t.sceneId !== trap.sceneId || !trapCreature(view, t)) continue;
     const f = footprintRect(t);
     if (zone.cells.some((r) => f.x < r.x + r.w && f.x + f.w > r.x && f.y < r.y + r.h && f.y + f.h > r.y)) out.push(t.id);
   }

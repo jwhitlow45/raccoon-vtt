@@ -1190,8 +1190,11 @@ export function planDoor(before: RoomState, room: TrapRoom, sceneId: string, doo
   return out;
 }
 
-/** The DM's Set it off (6.2): whatever its state, for the creatures named, stopping nothing, at the room as it stands. */
+/** The DM's Set it off (6.2): whatever its state, for the creatures named, never an object or the dead, stopping nothing, at the room as it stands. */
 export function planHand(room: TrapRoom, trap: Trap, tokenIds: readonly string[], env: { opVersion?: number }): Springing {
-  const by = tokenIds.filter((id) => room.tokens[id]?.sceneId === trap.sceneId);
+  const by = tokenIds.filter((id) => {
+    const t = room.tokens[id];
+    return t?.sceneId === trap.sceneId && trapCreature(room, t);
+  });
   return { ...springingAt(trap, "hand", "public", by, room, env, false), perceived: true };
 }
