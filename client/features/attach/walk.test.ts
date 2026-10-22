@@ -11,7 +11,7 @@ import { dropView, moveOpsOf, planOne, routeLanding, type Landed } from "../move
 import { DM, P1, actor, effect, env, token } from "#shared/testutil.ts";
 import { dragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
-import { line, raised, thorn, world } from "../movement/testing.ts";
+import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
 import { towingWord, walkersFor } from "./walk.ts";
 
@@ -50,6 +50,26 @@ describe("a holder's walk", () => {
     assert.deepEqual(extraWords([[4, 5, 2, 0]], false, false, "dragging"), ["difficult terrain", "dragging"]);
     assert.deepEqual(extraWords([[4, 5, 1, 0]], false, false), ["difficult terrain"], "without a tow the foot is the ground's");
     assert.deepEqual(extraWords([[4, 5, 2, 0]], true, false, "carrying"), ["crawling", "carrying"]);
+  });
+
+  test("a walk held at its own wall and cut where the creature it drags meets one reads the cost its move stores", () => {
+    // No way round the wall at x = 10, so the walk goes straight and holds at x = 9. The goblin, a row up, meets the wall at x = 6 first.
+    for (const rubble of [false, true]) {
+      const base = world({ edges: { ...line("w", 6, 0, 5), ...line("w", 10, 0, 30) }, tokens: [thorn({ x: 2, y: 5, actor: { inline: actor({ speeds: { walk: 60 } }) } }), goblin({ x: 2, y: 4, size: "small", actor: { inline: actor({ effects: [effect("g1", { key: "grappled" })] }) } })] });
+      if (rubble) {
+        const chunk = base.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
+        base.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "3,5": "rubble", "4,5": "rubble" } };
+      }
+      const state = onTurn(base, "thorn");
+      const drag = dragOf(copyFor(state, P1), "player", "thorn", { x: 12, y: 5 });
+      assert.equal(drag.answer.kind, "none");
+      const r = applyOp(state, drag.op as Op, P1, env(50));
+      assert.ok(r.ok);
+      const after = r.state.tokens.thorn!;
+      const stored = after.path!.stops.slice(1).reduce((sum, s) => sum + (s.cost ?? 0), 0);
+      assert.deepEqual([drag.preview.to, after.x, after.y], [{ x: 5, y: 5 }, 5, 5]);
+      assert.deepEqual([drag.preview.read.dragFt, drag.frame.ft], [stored, stored], rubble ? "over rubble" : "on open ground");
+    }
   });
 
   test("the walkers are the dragged creatures players see", () => {

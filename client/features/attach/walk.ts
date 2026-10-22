@@ -50,7 +50,7 @@ export function walkersFor(view: RoomState, tokenId: string, role: Role, named: 
  * all of them walk the whole way. The route is the one the drop would land,
  * cut past 64 pieces, walked as the drop walks it (drop.ts walkerOf).
  */
-export function walkersCut(view: DropView, token: DropToken, target: Point, route: WalkRoute | null, role: Role): (WalkersCut & { blocker: Blocker }) | null {
+export function walkersCut(view: DropView, token: DropToken, target: Point, route: Pick<WalkRoute, "pieces"> | null, role: Role): (WalkersCut & { blocker: Blocker }) | null {
   const walkers = walkersFor(view, token.id, role);
   if (walkers.length === 0) return null;
   const long = route ? cutRoute(view, token, route.pieces) : null;

@@ -10,7 +10,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeTarget, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -162,8 +162,8 @@ export function dragStops(deps: DragDeps): DragStops {
    * meet a wall. Asked again only for a new spot, a new route or a
    * changed room.
    */
-  let walkMemo: { view: DropView; token: DropToken; target: Point; route: WalkRoute | null; stop: (WalkersCut & Hold) | null } | null = null;
-  const walkersHold = (view: DropView, token: DropToken, target: Point, route: WalkRoute | null): (WalkersCut & Hold) | null => {
+  let walkMemo: { view: DropView; token: DropToken; target: Point; route: Pick<WalkRoute, "pieces"> | null; stop: (WalkersCut & Hold) | null } | null = null;
+  const walkersHold = (view: DropView, token: DropToken, target: Point, route: Pick<WalkRoute, "pieces"> | null): (WalkersCut & Hold) | null => {
     if (walkMemo && walkMemo.view === view && walkMemo.token === token && walkMemo.route === route && walkMemo.target.x === target.x && walkMemo.target.y === target.y) return walkMemo.stop;
     const stop = walkersCut(view, token, target, route, role);
     walkMemo = { view, token, target: { x: target.x, y: target.y }, route, stop };
@@ -256,7 +256,8 @@ export function dragStops(deps: DragDeps): DragStops {
           };
           if (!check.run(late)) return false;
           straight.pieces = check.open || check.stopped || !check.route ? null : check.route.pieces;
-          if (straight.pieces) publish(w);
+          // The hold reads the checked walk too, where a creature the token drags cuts it.
+          if (straight.pieces) refresh(w);
           return true;
         },
       },
@@ -296,13 +297,23 @@ export function dragStops(deps: DragDeps): DragStops {
       const plan = planOne(view, token, raw, mode);
       memo = { view, token, qx, qy, mode, stop: plan.stop, lands: planLands(plan, token) };
     }
-    // Held at its own wall, the walk there may still be cut shorter by a creature it drags.
-    const own = memo.stop;
-    const stop: Hold | null = (own && mode === "walk" ? walkersHold(view, token, own.at, null) : null) ?? own;
-    if (stop) node.position(stop.at);
     if (w) goStraight(w, memo.lands);
-    holdAt(stop && stop !== own ? stop.at : memo.lands);
+    // The drop walks the straight leg to where it lands, along its own route once that is checked and taken (drop.ts
+    // planWalk), and is cut where a creature the token drags would meet a wall (cutForWalkers): the hold reads that walk.
+    const checked = w?.straight?.pieces && samePose(w.straight.to, memo.lands) ? (w.straight as { pieces: RoutePiece[] }) : null;
+    const taken = checked ? routeLanding(view, token, memo.lands, checked.pieces, view.meta.settings.feetPerCell) : null;
+    const cut = mode === "walk" ? walkersHold(view, token, memo.lands, taken && !taken.cut ? checked : null) : null;
+    const stop: Hold | null = cut ?? memo.stop;
+    if (stop) node.position(stop.at);
+    holdAt(memo.lands, cut);
     setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
+  };
+
+  /** The preview again for the drag's answer now: held where its walk holds, and drawn. */
+  const refresh = (w: Walk) => {
+    const now = seenView(store.getState().view);
+    if (walk === w && !w.waiting && now && w.node && w.drawn && w.target) follow(now, w, w.node, w.drawn, w.target);
+    publish(w);
   };
 
   /** The drag's search for this token, begun on its first frame and told when the room changes under it. */
@@ -319,12 +330,8 @@ export function dragStops(deps: DragDeps): DragStops {
           return w.world.input;
         },
         work,
-        () => {
-          // An answer that came in a later frame holds the preview at the wall as one that came at once does.
-          const now = seenView(store.getState().view);
-          if (walk === w && !w.waiting && now && w.node && w.drawn && w.target) follow(now, w, w.node, w.drawn, w.target);
-          publish(w);
-        },
+        // An answer that came in a later frame holds the preview at the wall as one that came at once does.
+        () => refresh(w),
       );
       walk = w;
     } else if (!sameBasis(walk.basis, basis)) {
