@@ -563,6 +563,31 @@ describe("each roll's case (2.4)", () => {
     assert.ok(later.stats.rolls.some((r) => r.name === "Moonbeam"));
   });
 
+  test("a link of the player's own roll waits when the record is full: 40 weapons synced, one deleted, an own spell, then a read of spells with the weapons unread (RSBUILD-ASTRA-01)", () => {
+    const weapons = Array.from({ length: 40 }, (_, i) => longsword({ name: `Blade ${i}` }));
+    const first = synced(fillOf({ ...empty(), rolls: read(weapons) }));
+    assert.equal(Object.keys(first.ddbSync!.rolls).length, 40);
+    const own = shillelagh({ id: "mine" });
+    const edited = { ...first, stats: { ...first.stats!, rolls: [...first.stats!.rolls.slice(1), own] } };
+    const fill = fillOf({ ...empty(), rolls: read([shillelagh(), moonbeam()]) });
+    fill.read = { weapon: false, spell: true, other: true };
+    const p = plan(edited, fill);
+    assert.deepEqual(p.rolls.unlinked.map((r) => r.id), ["mine"], "39 kept entries and the deleted weapon's fill the record");
+    const result = syncResult(p, defaultTicks(p));
+    assert.equal(Object.keys(result.record.rolls).length, 40);
+    assert.equal(ddbSyncPatchSchema.safeParse(result.record).success, true);
+    assert.equal(result.record.rolls[hash12("mine")], undefined, "the own roll stays the player's own");
+    assert.equal(result.stats.rolls.filter((r) => r.name === "Shillelagh").length, 1, "and its read roll never comes in beside it");
+    assert.equal(result.notFit, 1, "Moonbeam waits for room too");
+    assert.equal(syncPatch(edited, result), null, "nothing else changed, so nothing is sent");
+    // Once an entry frees up, the next sync links it.
+    const blade = edited.stats!.rolls.find((r) => r.name === "Blade 1")!;
+    const freed = { ...edited, stats: { ...edited.stats!, rolls: edited.stats!.rolls.filter((r) => r !== blade) }, ddbSync: { ...edited.ddbSync!, rolls: Object.fromEntries(Object.entries(edited.ddbSync!.rolls).filter(([id]) => id !== hash12(blade.id))) } };
+    const later = plan(freed, fill);
+    assert.deepEqual(later.rolls.unlinked, []);
+    assert.ok(syncResult(later, new Set()).record.rolls[hash12("mine")]);
+  });
+
   test("a cut spell list never removes the spell the cut took, though a weapon was added before the cut", () => {
     const spells = Array.from({ length: 40 }, (_, i) => moonbeam({ name: `Spell ${i}` }));
     const first = synced(fillOf({ ...empty(), rolls: read(spells) }));

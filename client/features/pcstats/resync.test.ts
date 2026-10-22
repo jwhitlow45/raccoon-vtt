@@ -25,6 +25,7 @@ import {
   syncedOn,
   syncReadLine,
   groupSummary,
+  unlinkedLine,
   type ReadingBlocks,
 } from "./resync.ts";
 import { ddbCharacterId } from "#shared/ddb/link.ts";
@@ -189,6 +190,13 @@ describe("Check these and the warnings (3.3)", () => {
     assert.equal(goneDroppedLine([{ k: "w:1" }]), "A roll you deleted may come back on a later re-sync. Only 40 deleted rolls are remembered.");
     assert.equal(goneDroppedLine([{ k: "w:1" }, { k: "w:2", name: "Sling" }]), "2 rolls you deleted may come back on a later re-sync. Only 40 deleted rolls are remembered.");
     assert.equal(goneDroppedLine([]), null);
+  });
+
+  test("an own roll the full record could not link: its name, up to three, then a count (RSBUILD-ASTRA-01)", () => {
+    assert.equal(unlinkedLine(["Shillelagh"]), "Shillelagh is in D&D Beyond too, but a sync remembers at most 40 rolls, so it stays your own until there is room.");
+    assert.equal(unlinkedLine(["Shillelagh", "Sling"]), "Shillelagh and Sling are in D&D Beyond too, but a sync remembers at most 40 rolls, so they stay your own until there is room.");
+    assert.equal(unlinkedLine(["A", "B", "C", "D"]), "4 of your own rolls are in D&D Beyond too, but a sync remembers at most 40 rolls, so they stay your own until there is room.");
+    assert.equal(unlinkedLine([]), null);
   });
 
   test("the losses warning", () => {

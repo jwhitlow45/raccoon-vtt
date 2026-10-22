@@ -248,6 +248,15 @@ export function goneDroppedLine(dropped: SyncResult["goneDropped"]): string | nu
   return dropped.length === 1 ? `A roll you deleted ${tail}` : `${dropped.length} rolls you deleted ${tail}`;
 }
 
+/** The player's own rolls D&D Beyond has too that the record had no room to link (2.4): names up to three, then a count. */
+export function unlinkedLine(names: readonly string[]): string | null {
+  if (names.length === 0) return null;
+  const tail = "a sync remembers at most 40 rolls, so";
+  if (names.length === 1) return `${names[0]} is in D&D Beyond too, but ${tail} it stays your own until there is room.`;
+  const who = names.length <= 3 ? listWords(names) : `${names.length} of your own rolls`;
+  return `${who} are in D&D Beyond too, but ${tail} they stay your own until there is room.`;
+}
+
 /** Check these (3.3): the reader's warnings, then the review's own. */
 export function checkLines(plan: SyncPlan, result: SyncResult, name: string): string[] {
   const out = [...plan.input.fill.warnings];
@@ -260,6 +269,8 @@ export function checkLines(plan: SyncPlan, result: SyncResult, name: string): st
   }
   const gone = goneDroppedLine(result.goneDropped);
   if (gone) out.push(gone);
+  const unlinked = unlinkedLine(plan.rolls.unlinked.map((r) => r.name));
+  if (unlinked) out.push(unlinked);
   if (plan.shaped) out.push(`AC and Speed are not compared while ${name} is in ${plan.shaped === "wild" ? "Wild Shape" : "a shape"}. Re-sync after the shape ends to update them.`);
   for (const b of result.besideBonus) {
     const what = "save" in b.on ? `${ABILITY_NAMES[b.on.save]} save` : SKILLS[b.on.skill].name;

@@ -322,7 +322,7 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
       else if (whole(entry.k)) assert.equal(after, undefined, `2: ${roll.name} removed there goes`);
       else assert.deepEqual(after, roll, `3: ${roll.name} of a kind not read whole stays`);
     }
-    if (rd.notFit === 0) {
+    if (rd.notFit === 0 && plan.rolls.unlinked.length === 0) {
       const claimed = new Set([...Object.values(entriesBefore).map((e) => e.k), ...(record.gone ?? [])]);
       const linked = new Set(Object.values(rd.record.rolls).map((e) => e.k));
       for (const k of readByK.keys()) if (!claimed.has(k)) assert.ok(linked.has(k), "2: a roll D&D Beyond added comes in, or links the player's own");
@@ -358,7 +358,7 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
       const ends = key === "senses" ? sensesWords(ra.also.senses!) : key === "speeds" ? { walk: ra.also.speeds!.walk, ...(ra.also.speeds!.fly ? { fly: ra.also.speeds!.fly } : {}) } : ra.also[key];
       assert.deepEqual(ends, theirs, `4: ${key}`);
     }
-    if (ra.notFit === 0) {
+    if (ra.notFit === 0 && plan.rolls.unlinked.length === 0) {
       const linked = new Map(ra.stats.rolls.flatMap((roll) => (kOfEntry(ra, roll.id) ? [[kOfEntry(ra, roll.id)!, roll] as const] : [])));
       for (const [k, h] of readByK) {
         if (process.env.SYNC_DEBUG && (linked.get(k) && rollHash(linked.get(k)!)) !== h) console.log(JSON.stringify({ k, h, got: linked.get(k), block: stats.rolls.map((x) => [x.id, x.name, rollHash(x), entriesBefore[hash12(x.id)]]), reads: fill.stats.rolls.map((x) => [x.id, x.name, rollHash(x)]), items: plan.items.filter((i) => i.type === "roll").map((i) => [i.id, i.type === "roll" && i.case, i.section]), slots: plan.rolls.slots.map((s) => [s.roll.name, s.entry, s.item?.case]), source: plan.source, mode }, null, 0));

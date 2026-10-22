@@ -166,6 +166,8 @@ type RollPlan = {
   orphans: [string, { k: string; h: string }][];
   /** The removed markers that stay, oldest first, before this sync's new ones. */
   gone: string[];
+  /** The player's own rolls D&D Beyond has too, left unlinked since the record had no room for them. */
+  unlinked: PcRoll[];
 };
 
 export type SyncResult = {
@@ -627,6 +629,14 @@ function planRolls(input: SyncInput, source: SyncSource, noBase: SyncSection): R
     gone = [...gone, ...extra.filter((x) => x.case === "deleted" && !gone.includes(x.theirs!.k)).map((x) => x.theirs!.k)];
   }
 
+  /*
+   * The record holds at most 40 entries. Those the sync keeps and the
+   * orphans come first, so linking one of the player's own rolls takes only
+   * the room left, and one that does not fit stays the player's own, its
+   * read roll claimed so it never comes in beside it.
+   */
+  let room = MAX_PC_ROLLS - slots.filter((s) => s.entry).length - orphans.length;
+  const unlinked: PcRoll[] = [];
   // The player's own rolls, in order, meet what is left of the read by key alone, so two of one name pair up in order.
   const ownBy = new Map<string, RollSlot[]>();
   for (const slot of slots) {
@@ -639,6 +649,11 @@ function planRolls(input: SyncInput, source: SyncSource, noBase: SyncSection): R
     const match = ownBy.get(rollKeyText(theirs.roll))?.shift();
     if (match) {
       claimed.add(theirs.k);
+      if (room <= 0) {
+        unlinked.push(match.roll);
+        continue;
+      }
+      room--;
       match.entry = { k: theirs.k, h: theirs.h };
       if (rollHash(match.roll) !== theirs.h) match.item = { type: "roll", id: `roll:${theirs.k}`, group: "Rolls", section: source === "first" ? "changes" : noBase, case: "sameName", mine: match.roll, theirs, conflict: false };
       continue;
@@ -648,7 +663,7 @@ function planRolls(input: SyncInput, source: SyncSource, noBase: SyncSection): R
   // Additions and removed rolls in the read's order, as they would come in.
   const order = new Map(reads.map((r, i) => [r.k, i]));
   extra.sort((a, b) => order.get(a.theirs!.k)! - order.get(b.theirs!.k)!);
-  return { slots, extra, orphans, gone };
+  return { slots, extra, orphans, gone, unlinked };
 }
 
 /** D&D Beyond's roll where the block's was, keeping its id, and what a pass takes while it still has a save (2.4). */
