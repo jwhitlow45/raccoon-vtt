@@ -29,7 +29,7 @@ import { DM, P1, P2, room, token } from "./testutil.ts";
  */
 const fake: MovementRules = {
   legBlocker: (_state, t, to) => ((t.x < 10) !== (to.x < 10) ? "wall" : (t.y < 10) !== (to.y < 10) ? "ledge" : null),
-  squeezeFits: (_state, _t, at) => at.x % 1 === 0.5,
+  squeezeFits: (_state, end) => end.at.x % 1 === 0.5,
   lineClear: (_state, t) => t.name !== "Behind a pillar",
 };
 const real = { ...movementRules };

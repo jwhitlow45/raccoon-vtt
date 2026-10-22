@@ -15,7 +15,7 @@ import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
 import { towingWord, walkersFor, walkersOfGroup } from "./walk.ts";
 import { detachOp, getOffPlace } from "./detach.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreBlocked, legBlocker, ownWalk, walkAlong } from "#shared/rules/movement.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreBlocked, legBlocker, ownWalk, walkEnd } from "#shared/rules/movement.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 
 const goblin = (over: Partial<Token> = {}) => token("goblin", { name: "Goblin", x: 3, y: 5, attached: { to: "thorn", kind: "drag" }, ...over });
@@ -345,12 +345,13 @@ describe("a walk off a holder crosses only the ledges whose whole length lies in
     const ogre = token("ogre", { name: "Ogre", kind: "npc", size: "large", x: 5, y: 4, elevation: 10, attached: { to: "cart", kind: "carry" } });
     const state = world({ heights: raised(6, 4, 8, 8, 10), tokens: [wagon, ogre] });
     const walker = walkerFor(state, state.tokens.ogre!, () => true);
-    assert.equal(coreBlocked(state, walker, { x: 5, y: 4 }), false);
-    const cleared = walkAlong(walker, [
+    assert.equal(coreBlocked(state, walkEnd(walker, { x: 5, y: 4 })), false);
+    // Off the cart to the west and back onto it.
+    const back = [
       { x: 2, y: 4, elevation: 0 },
       { x: 4, y: 4, elevation: 0 },
-    ]);
-    assert.equal(coreBlocked(state, cleared, { x: 5, y: 4 }), true);
+    ];
+    assert.equal(coreBlocked(state, walkEnd(walker, { x: 5, y: 4 }, back)), true);
   });
 
   test("a group drag that is no axis's tests the straight leg, so it never bends round a wall or a ledge beside the horse", () => {

@@ -239,7 +239,7 @@ Set from the SRD preset and in the pane by whoever may edit the area. `foes` wit
 
 ### 6.5 Frames, kept rulers and undo steps
 
-- `dragMove`'s `path` carries the live route's corners (at most 64 under its 200-number cap) and a new `ft` the leg's cost. The server sends `ft` only to the DM and the token's owners, and strips `path` from players' frames on scenes with fog or vision on, as today.
+- `dragMove`'s `path` carries the live route's corners (at most 64 under its 200-number cap), an empty one for a straight walk, and a new `ft` the leg's cost. The server judges the preview's footprint at the end of the walk those corners draw (docs/design-v1-attach.md 8.0). The server sends `ft` only to the DM and the token's owners, and strips `path` from players' frames on scenes with fog or vision on, as today.
 - The `ruler` frame and a kept ruler gain `walk?: true`.
 - An undo step of a routed move keeps the route (`UndoEntry.routes`, by token), and the `sys.restore` it builds for a redo carries it as `routes`, which only permissions read, as `teleport` today (7.4).
 

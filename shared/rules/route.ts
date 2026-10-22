@@ -4,7 +4,7 @@ import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { coreBlocked, legStop, squeezeFits, straightClear, walkOn, type MovingToken, type Walker } from "./movement.ts";
+import { coreBlocked, legStop, squeezeFits, straightClear, walkEnd, walkOn, type MovingToken, type Walker } from "./movement.ts";
 
 /**
  * A move's route, what it costs and the spots it passes
@@ -357,12 +357,13 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
     const end = k === n;
     const last = end && i === route.length - 2;
     const p = { x: w.x, y: w.y };
-    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, at, p);
+    // The spot as the end of the walk up to it, judged from where its piece starts (movement.ts WalkEnd).
+    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, walkEnd(at, p));
     const onGrid = multipleOf(w.x - token.x, grid) && multipleOf(w.y - token.y, grid);
     const sweepClear = () => (sweep ??= !blocks || straightClear(build, at, { x: b.x, y: b.y, elevation: b.elevation }));
     const stand =
       (squeezed || onGrid) &&
-      !coreBlocked(build, at, p) &&
+      !coreBlocked(build, walkEnd(at, p)) &&
       (!blocks || ((exact || end) && sweepClear()) || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
     spots.push({ ...w, squeezed, stand });
   }

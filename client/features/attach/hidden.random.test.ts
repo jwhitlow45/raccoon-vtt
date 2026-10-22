@@ -2,18 +2,19 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { Connection } from "#server/rooms/connection.ts";
 import { buildSnapshot, publishBatch } from "#server/rooms/fanout.ts";
+import { routeEphemeral } from "#server/rooms/ephemeral.ts";
 import type { Pose } from "#server/rooms/undo.ts";
 import { UndoTable } from "#server/rooms/undoTesting.ts";
 import { keys } from "#shared/keys.ts";
 import { CHUNK_CELLS, type AttachKind, type BuildChunk, type EdgeFeature, type RoomState, type Token, type Viewer } from "#shared/model.ts";
 import { canApply, mayMoveToken } from "#shared/permissions.ts";
 import { applyChanges, inSightOfNonOwners, isPartyMember, projectState, type ProjectedState } from "#shared/project.ts";
-import type { Change, Op, ServerMessage } from "#shared/protocol.ts";
+import type { Change, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { carriedGroup, getOffSpot, holderOf, seatSpot } from "#shared/rules/attach.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { stopsForOwners } from "#shared/rules/path.ts";
-import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, rng, room, token } from "#shared/testutil.ts";
+import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, reveal, rng, room, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf, type Drag, type GroupDrag } from "../movement/dragTesting.ts";
 import { turnMoverId } from "./turns.ts";
 import { barSlots, detachChoice, detachOp, getOffPlace } from "./detach.ts";
@@ -1086,6 +1087,172 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
     // And the devices' own steps: player attaches and Get offs the room takes, the DM's ops and frames compared, and turns
     // of a hidden rider on a mount every player sees.
     assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.playerPathCosts > 3 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
+    if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
+  });
+});
+
+/**
+ * The drag-preview generator (review AT-ASTRA-21): a frame a player gets
+ * shows the token only where the move it draws leaves it in their sight.
+ * Each run puts a 4 by 4 cart at 10 ft on a fogged scene whose walls stop
+ * moves, with 10 ft ground under its east half and a wall along its middle
+ * that leave a gap under its west half, and a Large and a Huge creature on
+ * it, P2's now and then. The fog is lifted in a few small patches around
+ * the cart. Then moves by the DM and by P2: walks that leave the cart and
+ * come back over it into the gap, random routes, and board drags. Each
+ * frame its sender would send for the move, with the move's corners and
+ * without any, goes through the server's routing, and P1 must get none
+ * that the move, once made, leaves out of P1's copy.
+ */
+type PreviewSeen = { frames: number; shown: number; withheld: number; reentries: number; squeezed: number };
+
+function previewWorld(r: () => number): { state: RoomState; cart: { x: number; y: number }; astra: boolean } {
+  const cart = { x: int(r, 5, 9), y: int(r, 4, 7) };
+  const heights: Record<string, number> = {};
+  const edges: Record<string, EdgeFeature> = {};
+  // The 10 ft ground under the cart's east half, often on south past it as in review AT-ASTRA-19's gap.
+  const south = chance(r, 0.5) ? int(r, 2, 8) : 0;
+  for (let y = cart.y; y < cart.y + 4 + south; y++) for (let x = cart.x + 2; x < cart.x + (y < cart.y + 4 ? 4 : 6); x++) heights[`${x},${y}`] = 10;
+  for (let y = cart.y + int(r, 1, 2); y < cart.y + 4 + (chance(r, 0.5) ? south : 0); y++) edges[`${cart.x + 1},${y},w`] = { kind: "wall" };
+  const ownerOf = () => (chance(r, 0.3) ? { ownerIds: ["p2"] } : {});
+  const list: Token[] = [
+    token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: cart.x, y: cart.y, elevation: 10 }),
+    token("ogre", { name: "Ogre", kind: "npc", size: "large", x: cart.x, y: cart.y, elevation: 10, ...ownerOf() }),
+    token("giant", { name: "Giant", kind: "npc", size: "huge", x: cart.x + 1, y: cart.y + 1, elevation: 10, ...ownerOf() }),
+  ];
+  const state = room({ tokens: Object.fromEntries(list.map((t) => [t.id, t])), buildChunks: built(edges, heights) });
+  state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off", fogEnabled: true };
+  // Patches of lifted fog around the cart, now and then review AT-ASTRA-21's own: the cart's north west corner and one cell of its east half.
+  const astra = chance(r, 0.3);
+  if (astra) {
+    reveal(state, "s1", { x: cart.x, y: cart.y, w: 2, h: 2 });
+    reveal(state, "s1", { x: cart.x + 2, y: cart.y + 2, w: 1, h: 1 });
+  }
+  for (let i = int(r, 1, 5); i > 0; i--) reveal(state, "s1", { x: int(r, cart.x - 3, cart.x + 6), y: int(r, cart.y - 3, cart.y + 8), w: int(r, 1, 3), h: int(r, 1, 3) });
+  return { state, cart, astra };
+}
+
+/** Each viewer's connection, keeping the frames it is sent. */
+function previewTable(): { conns: Map<string, Connection>; got: Map<string, EphEvent[]> } {
+  const conns = new Map<string, Connection>();
+  const got = new Map<string, EphEvent[]>();
+  for (const who of [DM, P1, P2]) {
+    const inbox: EphEvent[] = [];
+    const socket = {
+      readyState: 1,
+      OPEN: 1,
+      CONNECTING: 0,
+      send: (text: string) => {
+        const msg = JSON.parse(text) as ServerMessage;
+        if (msg.t === "eph") inbox.push(msg.e);
+      },
+      close: () => undefined,
+      terminate: () => undefined,
+    };
+    const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}`, roomId: "PREVIEW0", memberId: who.memberId!, role: who.role }, "203.0.113.5");
+    conn.held = new Map();
+    conn.sceneId = "s1";
+    conns.set(who.memberId!, conn);
+    got.set(who.memberId!, inbox);
+  }
+  return { conns, got };
+}
+
+/** A walk off the cart and back over it into the gap, from where the creature stands: out west, round to the south, and up the gap. */
+function reentry(r: () => number, cart: { x: number; y: number }, from: Token, w: number, astra = false): [number, number, number, 0 | 1][] {
+  const out = cart.x - w - int(r, 0, 1);
+  const below = cart.y + 4 + int(r, 0, 2);
+  // Review AT-ASTRA-21's own end: the gap's middle, in the cart's patch of explored ground.
+  const lane = cart.x + (astra ? 0.5 : pick(r, [0, 0.5, 1]));
+  const end = cart.y + (astra ? 1.5 : pick(r, [0.5, 1, 1.5, 2, 2.5]));
+  const corners: [number, number][] = [[out, from.y], [out, below], [lane, below]];
+  for (let y = below - 1.5; y > end; y -= int(r, 1, 2)) corners.push([lane, y]);
+  corners.push([lane, end]);
+  return corners.map(([x, y]): [number, number, number, 0 | 1] => [x, y, 0, 0]);
+}
+
+function previewRun(seed: number): PreviewSeen {
+  const r = rng(seed * 7919 + 13);
+  const { state: start, cart, astra } = previewWorld(r);
+  let state = start;
+  const seen: PreviewSeen = { frames: 0, shown: 0, withheld: 0, reentries: 0, squeezed: 0 };
+  let seq = 1;
+  for (let step = 0; step < 12; step++) {
+    // With review AT-ASTRA-21's patches the first step is its walk, by the ogre standing loose 10 ft up over the cart's low half.
+    const first = astra && step === 0;
+    const id = first ? "ogre" : pick(r, ["ogre", "giant"] as const);
+    // Back on the cart now and then, so most moves start from it. Else now and then let go in place, so it stands 10 ft up over
+    // the cart's low half and walks off the ground, which the footing where its last leg starts decides (review AT-ASTRA-21).
+    if (first) {
+      // As it stands.
+    } else if (!state.tokens[id]!.attached && chance(r, 0.6)) {
+      const seat = seatSpot(state.tokens[id]!, state.tokens.cart!);
+      const on = seat ? applyOp(state, { t: "token.attach", tokenId: id, to: "cart", kind: "carry", x: seat.x, y: seat.y, elevation: 10 }, DM, env(seq++)) : null;
+      if (on?.ok) state = on.state;
+    } else if (state.tokens[id]!.attached && chance(r, 0.5)) {
+      const off = applyOp(state, { t: "token.detach", tokenId: id }, DM, env(seq++));
+      if (off.ok) state = off.state;
+    }
+    const mover = state.tokens[id]!;
+    const who = !first && mover.ownerIds.includes("p2") && chance(r, 0.6) ? P2 : DM;
+    const w = mover.size === "huge" ? 3 : 2;
+    let op: Op | null = null;
+    const kind = r();
+    if (!first && (kind < 0.45 || who === P2)) {
+      // A board drag, the way the sender's device builds it.
+      const raw = { x: cart.x - 3 + r() * 10, y: cart.y - 3 + r() * 12 };
+      op = (dragOf(deviceCopy(state, who), who.role, id, raw).op as Op | null) ?? null;
+    } else {
+      const route =
+        first || kind < 0.8
+          ? reentry(r, cart, mover, w, first)
+          : Array.from({ length: int(r, 1, 4) }, (): [number, number, number, 0 | 1] => [cart.x - 3 + int(r, 0, 20) / 2, cart.y - 3 + int(r, 0, 24) / 2, 0, 0]);
+      const [x, y] = route[route.length - 1]!;
+      const plain: Op = { t: "token.move", tokenId: id, x, y, route };
+      // Squeezed wherever the server takes the squeeze, as the device asks for one.
+      const squeezed: Op = { ...plain, squeeze: true };
+      op = canApply(squeezed, who, state, deps).ok ? squeezed : plain;
+      if (first || kind < 0.8) seen.reentries++;
+    }
+    if (!op || op.t !== "token.move" || !canApply(op, who, state, deps).ok) continue;
+    if (op.squeeze) seen.squeezed++;
+    const corners = (op.route ?? []).slice(0, -1).flatMap(([x, y]) => [x, y]);
+    const frames: EphEvent[] = [
+      { k: "dragMove", tokenId: id, x: op.x, y: op.y, path: corners },
+      { k: "dragMove", tokenId: id, x: op.x, y: op.y },
+    ];
+    const after = applyOp(state, op, who, env(seq++));
+    assert.ok(after.ok, `seed ${seed}: ${JSON.stringify(op)} ${after.ok ? "" : after.message}`);
+    const shown = projectState(after.state, P1, { sceneId: "s1" }).tokens[id];
+    const there = shown !== undefined && shown.x === op.x && shown.y === op.y;
+    for (const frame of frames) {
+      const { conns, got } = previewTable();
+      routeEphemeral(state, conns.get(who.memberId!)!, "s1", frame, conns.values());
+      const reached = got.get("p1")!.some((e) => e.k === "dragMove");
+      seen.frames++;
+      if (reached) seen.shown++;
+      else seen.withheld++;
+      assert.ok(
+        !reached || there,
+        `seed ${seed} step ${step}: P1 got ${JSON.stringify(frame)} for ${JSON.stringify(op)} by ${who.memberId}, which leaves ${id} out of P1's copy (committed ${JSON.stringify({ x: after.state.tokens[id]!.x, y: after.state.tokens[id]!.y, squeeze: after.state.tokens[id]!.squeeze })})`,
+      );
+    }
+    state = after.state;
+  }
+  return seen;
+}
+
+describe("a drag's preview reaches a player only where its move leaves the token in their sight (review AT-ASTRA-21)", () => {
+  test("Large and Huge creatures walked off a cart and back over it into a gap, under fog lifted in patches around it", () => {
+    const total: PreviewSeen = { frames: 0, shown: 0, withheld: 0, reentries: 0, squeezed: 0 };
+    const [from, to] = (process.env.ATTACH_RANDOM_SEEDS ?? "1-200").split("-").map(Number) as [number, number];
+    for (let seed = from; seed <= to; seed++) {
+      const seen = previewRun(seed);
+      for (const key of Object.keys(total) as (keyof PreviewSeen)[]) total[key] += seen[key];
+    }
+    const summary = JSON.stringify(total);
+    const per = (to - from + 1) / 200;
+    assert.ok(total.frames > 2000 * per && total.shown > 200 * per && total.withheld > 200 * per && total.reentries > 300 * per && total.squeezed > 50 * per, summary);
     if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
   });
 });

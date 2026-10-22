@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footing, footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkAlong, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
@@ -270,19 +270,18 @@ export function cutRoute(state: DropState, token: DropToken, pieces: readonly Ro
   if (pieces.length <= MAX_ROUTE_PIECES) return null;
   const grid = snapStep(token);
   const onGrid = (v: number, from: number) => Math.abs((v - from) / grid - Math.round((v - from) / grid)) < 1e-9;
-  // Squeezed or not as the walk that stands at each piece's end judges it (walkerOf), off the holder for good once a stop before was clear of it (movement.ts walkOn).
-  const standing: Walker[] = [];
-  let walking: Walker = walkerOf(state, token);
-  for (const [x, y] of pieces.slice(0, MAX_ROUTE_PIECES)) standing.push((walking = walkOn(walking, { x, y, elevation: walking.elevation })));
+  // Squeezed or not as the end of the walk up to each piece's end (walkerOf, movement.ts WalkEnd): off the holder for good once a stop before was clear of it.
+  const walking = walkerOf(state, token);
+  const points = routePoints(state.buildChunks, walking, pieces.slice(0, MAX_ROUTE_PIECES), walking.elevation);
   for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
     const [x, y] = pieces[k - 1]!;
     const at = { x, y };
-    const walking = standing[k - 1]!;
-    if (!previewSqueezed(state, walking, at)) {
+    const end = walkEnd(walking, at, points.slice(1, k));
+    if (!previewSqueezed(state, end)) {
       if (onGrid(x, token.x) && onGrid(y, token.y)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: false } };
       continue;
     }
-    if (squeezeFits(state, walking, at)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: true } };
+    if (squeezeFits(state, end)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: true } };
   }
   return null;
 }
@@ -357,8 +356,8 @@ function landingOf(state: DropState, token: DropToken, target: Point & { squeeze
   const kept = passing(state, walking, cut ? cut.pieces : [...pieces], elevation);
   if (!kept) return null;
   const points = routePoints(state.buildChunks, walking, kept, elevation);
-  // A squeeze at the walk's end is judged where its last leg starts, off the holder for good once the walk cleared it, as the server judges it (permissions.ts squeezeFits).
-  if (at.squeeze && !squeezeFits(state, walkAlong(walking, points.slice(1, -1)), at)) return null;
+  // A squeeze at the walk's end is judged as the end of the walk, as the server judges it (permissions.ts squeezeFits).
+  if (at.squeeze && !squeezeFits(state, walkEnd(walking, at, points.slice(1, -1)))) return null;
   return routeReach(points, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
 }
 

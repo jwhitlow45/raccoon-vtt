@@ -145,6 +145,30 @@ describe("rulers", () => {
   });
 });
 
+/**
+ * Build chunks on scene s1 with 10 ft ground over each `[x0, y0, x1, y1)`
+ * rectangle and a wall along x = 10 from y = `wallFrom` to `wallTo`.
+ */
+function ground(raised: readonly [number, number, number, number][], wallFrom: number, wallTo: number): RoomState["buildChunks"] {
+  const chunks: RoomState["buildChunks"] = {};
+  const chunk = (x: number, y: number) => {
+    const cx = Math.floor(x / CHUNK_CELLS);
+    const cy = Math.floor(y / CHUNK_CELLS);
+    return { k: (y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS), chunk: (chunks[`s1:${cx},${cy}`] ??= { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} }) };
+  };
+  const feet = new Map<BuildChunk, number[]>();
+  for (const [x0, y0, x1, y1] of raised)
+    for (let y = y0; y < y1; y++)
+      for (let x = x0; x < x1; x++) {
+        const { k, chunk: c } = chunk(x, y);
+        if (!feet.has(c)) feet.set(c, new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0));
+        feet.get(c)![k] = 10;
+      }
+  for (const [c, f] of feet) c.heights = encodeHeights(f);
+  for (let y = wallFrom; y < wallTo; y++) chunk(10, y).chunk.edges[`10,${y},w`] = { kind: "wall" };
+  return chunks;
+}
+
 describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)", () => {
   /*
    * A dark scene with a corridor one cell wide from x = 5 to 15 between
@@ -228,22 +252,7 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     // stands west of the wall at (7,11).
     const state = room();
     state.scenes.s1 = scene("s1", { vision: { on: true, light: "dark" }, blockMovement: true });
-    const chunks: RoomState["buildChunks"] = {};
-    const chunk = (x: number, y: number) => {
-      const cx = Math.floor(x / CHUNK_CELLS);
-      const cy = Math.floor(y / CHUNK_CELLS);
-      return { k: (y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS), chunk: (chunks[`s1:${cx},${cy}`] ??= { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} }) };
-    };
-    const feet = new Map<BuildChunk, number[]>();
-    for (let y = 6; y < 20; y++)
-      for (let x = 11; x < (y < 10 ? 13 : 15); x++) {
-        const { k, chunk: c } = chunk(x, y);
-        if (!feet.has(c)) feet.set(c, new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0));
-        feet.get(c)![k] = 10;
-      }
-    for (const [c, f] of feet) c.heights = encodeHeights(f);
-    for (let y = 10; y < 20; y++) chunk(10, y).chunk.edges[`10,${y},w`] = { kind: "wall" };
-    state.buildChunks = chunks;
+    state.buildChunks = ground([[11, 6, 13, 10], [11, 10, 15, 20]], 10, 20);
     state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ senses: "darkvision 30 ft" }) });
     state.tokens.pc = token("pc", { kind: "pc", actor: { ref: "c1" }, x: 7, y: 11 });
     state.tokens.cart = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 9, y: 6, elevation: 10 });
@@ -254,6 +263,33 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     assert.deepEqual(t.p1.got, []);
     t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 7, y: 12 });
     assert.deepEqual(t.p1.got, [{ k: "dragMove", tokenId: "ogre", x: 7, y: 12 }], "west of the wall it is in sight");
+  });
+
+  test("a Large passenger's drag that clears its cart and comes back onto it into a gap is judged squeezed, as its walk reaches the gap (review AT-ASTRA-21)", () => {
+    // The cart at (9,6) at 10 ft carries the ogre. Under the cart's east half the ground is 10 ft, and a wall along x = 10
+    // from y = 8 to 10 leaves a 5 ft gap under the cart's west half. Players have explored the cart's north west corner and
+    // the cell (11,8), which the ogre's full footprint in the gap would touch and its squeezed one does not.
+    const state = room();
+    state.scenes.s1 = scene("s1", { fogEnabled: true, blockMovement: true });
+    state.buildChunks = ground([[11, 6, 13, 10]], 8, 10);
+    reveal(state, "s1", { x: 9, y: 6, w: 2, h: 2 });
+    reveal(state, "s1", { x: 11, y: 8, w: 1, h: 1 });
+    state.tokens.cart = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 9, y: 6, elevation: 10 });
+    state.tokens.ogre = token("ogre", { size: "large", x: 9, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" } });
+    const t = table(state);
+    // West off the cart, round and back north into the gap: once clear of the cart, its inner ledge stops it like any other.
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 9.5, y: 7.5, path: [7, 6, 7, 11, 9.5, 11, 9.5, 9.5, 9.5, 8.5] });
+    assert.deepEqual(t.p1.got, []);
+    // A frame with no route to read is judged for each way its last leg may start, and goes out only when none withholds it.
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 9.5, y: 7.5 });
+    assert.deepEqual(t.p1.got, []);
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 9, y: 6, path: [] });
+    assert.deepEqual(t.p1.got, [{ k: "dragMove", tokenId: "ogre", x: 9, y: 6 }], "on the cart's revealed corner it is shown");
+    // Let go 10 ft up over the cart's low half, it walks off the ground, so with no route to read its last leg may start on it.
+    const { attached: _link, ...loose } = state.tokens.ogre!;
+    state.tokens.ogre = loose;
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 9.5, y: 7.5 });
+    assert.deepEqual(t.p1.got.at(-1), { k: "dragCancel", tokenId: "ogre" });
   });
 
   test("a Large creature in the open beside the edge of sight is judged by its full footprint", () => {

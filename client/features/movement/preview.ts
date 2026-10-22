@@ -16,12 +16,16 @@ import type { DragRoute } from "./store.ts";
  * What a drag's frame tells others besides the token (6.5): the route's
  * corners and the leg's cost, and for a walk cut short the spot it lands
  * on, so their line ends where it will, not at the finger (review
- * ASTRA-11). The board's own token still follows the finger.
+ * ASTRA-11). The board's own token still follows the finger. A straight
+ * walk sends an empty `path`, which tells the server it walked no other
+ * way. A frame with no `path` at all may have walked any way, so it is
+ * judged for each way its last leg may start (server/rooms/ephemeral.ts
+ * previewWithheld).
  */
-export function frameFields(route: Pick<DragRoute, "to" | "cut" | "corners" | "read">): { x?: number; y?: number; path?: number[]; ft?: number } {
+export function frameFields(route: Pick<DragRoute, "to" | "cut" | "corners" | "read">): { x?: number; y?: number; path: number[]; ft?: number } {
   return {
     ...(route.cut ? { x: route.to.x, y: route.to.y } : {}),
-    ...(route.corners.length > 0 ? { path: route.corners.flatMap((c) => [c.x, c.y]) } : {}),
+    path: route.corners.flatMap((c) => [c.x, c.y]),
     ft: route.read.dragFt,
   };
 }

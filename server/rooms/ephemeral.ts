@@ -4,7 +4,9 @@ import { mayMoveToken } from "#shared/permissions.ts";
 import { inSightOfNonOwners, ownsToken, projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 import type { EphEvent } from "#shared/protocol.ts";
-import { previewSqueezed } from "#shared/rules/movement.ts";
+import { pastHolder, previewSqueezed, walkEnd, withFooting, type WalkEnd } from "#shared/rules/movement.ts";
+import { footing } from "#shared/rules/heights.ts";
+import { routePoints, type RoutePiece } from "#shared/rules/route.ts";
 import type { Connection, PreviewKind } from "./connection.ts";
 
 /**
@@ -114,13 +116,36 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
  * narrow corridor, and full size otherwise. So a Large creature dragged
  * along a corridor out of sight is not shown by the half of its preview
  * drawn over the corridor's walls.
+ *
+ * The squeeze is judged as the end of the walk the frame draws (movement.ts
+ * WalkEnd, review AT-ASTRA-21): off a holder every player sees by the walk
+ * off it (rules/attach.ts walkerFor), carried through the frame's corners
+ * (`path`), so a walk that cleared its holder and came back over it reads
+ * the step under it on the ground's rule. A drag's start has walked
+ * nowhere. Any other frame without corners may have walked any way, and
+ * where its last leg starts decides which ledges count: the holder's inner
+ * ones until the walk clears it, and the token's footing there, which a
+ * token off the ground may change on the way. So it is judged for each way
+ * its last leg may start, and withheld when any of them withholds it.
  */
-function previewWithheld(state: RoomState, token: Token, x: number, y: number): boolean {
+function previewWithheld(state: RoomState, token: Token, x: number, y: number, path: readonly number[] | undefined): boolean {
   const { squeeze: _squeeze, ...rest } = token;
-  // Squeezed or not as the drag's own preview judges it, off a holder every player sees by the walk off it (rules/attach.ts walkerFor).
   const seen = (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
-  const at: Token = previewSqueezed(state, walkerFor(state, token, seen), { x, y }) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y };
-  return withheldWhereItStands(state, at);
+  const walker = walkerFor(state, token, seen);
+  const at = { x, y };
+  const withheldAs = (end: WalkEnd) => withheldWhereItStands(state, previewSqueezed(state, end) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y });
+  if (path === undefined) {
+    // A walker on the ground stays on it along its route (route.ts routePoints). Any other keeps its height over any ground.
+    const grounded = footing(state.buildChunks, walker) === "ground";
+    const starts = walker.offHolder ? [walker, pastHolder(walker)] : [walker];
+    const ends = starts.flatMap((w) => (grounded ? [w] : (["ground", "flying", "inside"] as const).map((f) => withFooting(w, f))));
+    return ends.some((w) => withheldAs(walkEnd(w, at)));
+  }
+  const corners: RoutePiece[] = [];
+  for (let i = 0; i + 1 < path.length; i += 2) corners.push([path[i]!, path[i + 1]!, 0, 0]);
+  // Each corner at the height the walk takes there (route.ts routePoints), its start and end left out.
+  const between = routePoints(state.buildChunks, walker, [...corners, [x, y, 0, 0]], token.elevation).slice(1, -1);
+  return withheldAs(walkEnd(walker, at, between));
 }
 
 /**
@@ -170,7 +195,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   const withheld = (): boolean => {
     if (previewHidden === undefined) {
       const token = "tokenId" in e ? state.tokens[e.tokenId] : undefined;
-      previewHidden = token !== undefined && "x" in e && "y" in e && previewWithheld(state, token, e.x, e.y);
+      previewHidden = token !== undefined && "x" in e && "y" in e && previewWithheld(state, token, e.x, e.y, e.k === "dragMove" ? e.path : e.k === "dragStart" ? [] : undefined);
     }
     return previewHidden;
   };

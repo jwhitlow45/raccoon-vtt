@@ -5,7 +5,7 @@ import type { BuildState } from "../ruleHooks.ts";
 import { computeCoverage, creaturesInArea, defaultIncludeOrigin, type AreaTemplateInput } from "./aoe.ts";
 import { boxDistanceFt, tokenCellBox } from "./distance.ts";
 import { encodeHeights } from "./heights.ts";
-import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, sweptTouches, type MovingToken } from "./movement.ts";
+import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, sweptTouches, walkEnd, type MovingToken } from "./movement.ts";
 import { sceneWalls } from "./walls.ts";
 
 type Spec = {
@@ -275,22 +275,22 @@ describe("squeezing (decided 2026-10-14, section 4.1)", () => {
   const large = tok(corridor, { size: "large", x: 6, y: 4 });
 
   test("a Large creature in a corridor squeezes half a cell off the grid, its squeezed footprint on the corridor's cells", () => {
-    assert.equal(squeezeFits(corridor, ownWalk(large), { x: 13.5, y: 4.5 }), true);
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(large), { x: 13.5, y: 4.5 })), true);
     // Its snapped spot leaves its core on a corridor wall, and half a cell off on one axis only misses the cell boundaries.
-    assert.equal(coreBlocked(corridor, ownWalk(large), { x: 13, y: 5 }), true);
-    assert.equal(squeezeFits(corridor, ownWalk(large), { x: 13, y: 4.5 }), false);
+    assert.equal(coreBlocked(corridor, walkEnd(ownWalk(large), { x: 13, y: 5 })), true);
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(large), { x: 13, y: 4.5 })), false);
   });
 
   test("a squeeze is refused in the open, flush against a room wall, and for a token with no side of 2 cells", () => {
-    assert.equal(squeezeFits(corridor, ownWalk(large), { x: 4.5, y: 2.5 }), false, "in the room, half a cell off the grid");
-    assert.equal(squeezeFits(corridor, ownWalk(large), { x: 8, y: 1 }), false, "flush against the room's east wall");
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(large), { x: 4.5, y: 2.5 })), false, "in the room, half a cell off the grid");
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(large), { x: 8, y: 1 })), false, "flush against the room's east wall");
     // Flush against a wall half a cell off the grid: its squeezed footprint lies on cell boundaries and its core fits, but the wall runs only along its edge.
     const flush = world({ walls: [free("half", 10.5, 0, 10.5, 8)] });
-    assert.equal(squeezeFits(flush, ownWalk(tok(flush, { size: "large" })), { x: 8.5, y: 3.5 }), false);
+    assert.equal(squeezeFits(flush, walkEnd(ownWalk(tok(flush, { size: "large" })), { x: 8.5, y: 3.5 })), false);
     const grid = world({ edges: line("w", 10, 0, 20) });
-    assert.equal(squeezeFits(grid, ownWalk(tok(grid, { size: "large" })), { x: 8, y: 3 }), false, "flush against it, on the grid");
-    assert.equal(squeezeFits(corridor, ownWalk(tok(corridor, { x: 13, y: 5 })), { x: 13, y: 5 }), false, "a Medium creature");
-    assert.equal(squeezeFits(corridor, ownWalk(tok(corridor, { size: "custom", w: 1.99, h: 1.99 })), { x: 13.5, y: 4.5 }), false);
+    assert.equal(squeezeFits(grid, walkEnd(ownWalk(tok(grid, { size: "large" })), { x: 8, y: 3 })), false, "flush against it, on the grid");
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(tok(corridor, { x: 13, y: 5 })), { x: 13, y: 5 })), false, "a Medium creature");
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(tok(corridor, { size: "custom", w: 1.99, h: 1.99 })), { x: 13.5, y: 4.5 })), false);
   });
 
   test("a drop into the corridor lands on the first half-cell shift where the core fits, the leg is allowed and the squeeze holds", () => {
@@ -303,7 +303,7 @@ describe("squeezing (decided 2026-10-14, section 4.1)", () => {
   test("a squeezed Large creature walks along the corridor and stops inside it", () => {
     const inside = tok(corridor, { size: "large", x: 11.5, y: 4.5, squeeze: true });
     assert.equal(legStop(corridor, ownWalk(inside), go(20.5, 4.5)), null);
-    assert.equal(squeezeFits(corridor, ownWalk(inside), { x: 20.5, y: 4.5 }), true);
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(inside), { x: 20.5, y: 4.5 })), true);
     assert.deepEqual(landing(corridor, ownWalk(inside), go(20.5, 4.5), "walk"), { x: 20.5, y: 4.5, squeeze: true, stopped: null });
     // Back out into the room, where it stands unsqueezed.
     assert.deepEqual(landing(corridor, ownWalk(inside), go(6, 4), "walk"), { x: 6, y: 4, squeeze: false, stopped: null });
@@ -313,17 +313,17 @@ describe("squeezing (decided 2026-10-14, section 4.1)", () => {
     // A gap two cells tall between walls at y = 5 and y = 7.
     const gap = world({ edges: { ...line("n", 5, 0, 20), ...line("n", 7, 0, 20) } });
     const long = tok(gap, { size: "custom", w: 1, h: 3, x: 3, y: 4.5 });
-    assert.equal(squeezeFits(gap, ownWalk(long), { x: 3, y: 4.5 }), true);
+    assert.equal(squeezeFits(gap, walkEnd(ownWalk(long), { x: 3, y: 4.5 })), true);
     assert.equal(legStop(gap, ownWalk(long), go(12, 4.5)), null);
-    assert.equal(squeezeFits(gap, ownWalk(long), { x: 3, y: 4 }), false);
+    assert.equal(squeezeFits(gap, walkEnd(ownWalk(long), { x: 3, y: 4 })), false);
   });
 
   test("a Large creature dragged along a corridor is judged squeezed at any fractional point, and by its full footprint in the open", () => {
-    for (const x of [11.5, 12.13, 14.77, 19.9]) assert.equal(previewSqueezed(corridor, ownWalk(large), { x, y: 4.5 }), true, `${x}`);
-    assert.equal(previewSqueezed(corridor, ownWalk(large), { x: 12.3, y: 4.51 }), true);
-    assert.equal(previewSqueezed(corridor, ownWalk(large), { x: 12.3, y: 4.62 }), false, "its core touches the corridor's south wall");
-    assert.equal(previewSqueezed(corridor, ownWalk(large), { x: 4.3, y: 2.2 }), false);
-    assert.equal(previewSqueezed(corridor, ownWalk(large), { x: 8.9, y: 1.1 }), false, "flush against a wall is no squeeze");
+    for (const x of [11.5, 12.13, 14.77, 19.9]) assert.equal(previewSqueezed(corridor, walkEnd(ownWalk(large), { x, y: 4.5 })), true, `${x}`);
+    assert.equal(previewSqueezed(corridor, walkEnd(ownWalk(large), { x: 12.3, y: 4.51 })), true);
+    assert.equal(previewSqueezed(corridor, walkEnd(ownWalk(large), { x: 12.3, y: 4.62 })), false, "its core touches the corridor's south wall");
+    assert.equal(previewSqueezed(corridor, walkEnd(ownWalk(large), { x: 4.3, y: 2.2 })), false);
+    assert.equal(previewSqueezed(corridor, walkEnd(ownWalk(large), { x: 8.9, y: 1.1 })), false, "flush against a wall is no squeeze");
   });
 
   test("a squeezed Large creature is listed by an area only for the corridor's cells, and measured from there", () => {
@@ -346,26 +346,26 @@ describe("a squeeze needs a real narrow space (the owner's rule after the build,
     for (const s of [world({ edges: line("w", 10, 0, 20) }), world({ walls: [free("diag", 10, 0, 10, 8), free("diag2", 10, 8, 10, 16)] })]) {
       const t = large(s);
       // Half over the wall: the squeezed footprint (9..10) lies on cell boundaries and the core is clear of it, but nothing is on its west side.
-      assert.equal(squeezeFits(s, ownWalk(t), { x: 8.5, y: 3.5 }), false);
-      assert.equal(previewSqueezed(s, ownWalk(t), { x: 8.5, y: 3.5 }), false);
-      assert.equal(previewSqueezed(s, ownWalk(t), { x: 8.47, y: 3.83 }), false);
+      assert.equal(squeezeFits(s, walkEnd(ownWalk(t), { x: 8.5, y: 3.5 })), false);
+      assert.equal(previewSqueezed(s, walkEnd(ownWalk(t), { x: 8.5, y: 3.5 })), false);
+      assert.equal(previewSqueezed(s, walkEnd(ownWalk(t), { x: 8.47, y: 3.83 })), false);
       // A drop with the core on the wall finds no squeezed spot among its shifts, in any mode.
       for (const mode of ["free", "teleport"] as const) assert.deepEqual(landing(s, ownWalk(t), go(9, 4), mode), { x: 9, y: 4, squeeze: false, stopped: null }, mode);
       assert.equal(landing(s, ownWalk(t), go(9, 4), "walk").squeeze, false);
     }
     // A wall across the squeezed footprint's way, with open ground on its far side, is one wall too.
     const across = world({ edges: line("n", 4, 0, 20) });
-    assert.equal(squeezeFits(across, ownWalk(large(across)), { x: 3.5, y: 3.5 }), false);
+    assert.equal(squeezeFits(across, walkEnd(ownWalk(large(across)), { x: 3.5, y: 3.5 })), false);
   });
 
   test("a corridor's outside wall is open ground on one side", () => {
     const corridor = world({ edges: { ...line("n", 5, 10, 25), ...line("n", 6, 10, 25) } });
     const t = large(corridor, { x: 6, y: 2 });
     // North of the corridor, half over its north wall.
-    assert.equal(squeezeFits(corridor, ownWalk(t), { x: 11.5, y: 3.5 }), false);
-    assert.equal(previewSqueezed(corridor, ownWalk(t), { x: 11.5, y: 3.5 }), false);
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(t), { x: 11.5, y: 3.5 })), false);
+    assert.equal(previewSqueezed(corridor, walkEnd(ownWalk(t), { x: 11.5, y: 3.5 })), false);
     // South of it, half over its south wall.
-    assert.equal(squeezeFits(corridor, ownWalk(t), { x: 11.5, y: 5.5 }), false);
+    assert.equal(squeezeFits(corridor, walkEnd(ownWalk(t), { x: 11.5, y: 5.5 })), false);
     // A drop straddling the north wall lands squeezed inside the corridor, never outside it.
     assert.deepEqual(landing(corridor, ownWalk(t), go(12, 4), "teleport"), { x: 11.5, y: 4.5, squeeze: true, stopped: null });
     // The DM's drop needs a leg to the spot, from the corridor's mouth here.
@@ -376,48 +376,48 @@ describe("a squeeze needs a real narrow space (the owner's rule after the build,
 
   test("a real 5 ft corridor takes a Large creature and a 10 ft one a Huge creature, and not the other way", () => {
     const five = world({ edges: { ...line("n", 5, 10, 25), ...line("n", 6, 10, 25) } });
-    assert.equal(squeezeFits(five, ownWalk(large(five)), { x: 13.5, y: 4.5 }), true);
-    assert.equal(previewSqueezed(five, ownWalk(large(five)), { x: 13.77, y: 4.5 }), true);
+    assert.equal(squeezeFits(five, walkEnd(ownWalk(large(five)), { x: 13.5, y: 4.5 })), true);
+    assert.equal(previewSqueezed(five, walkEnd(ownWalk(large(five)), { x: 13.77, y: 4.5 })), true);
     const ten = world({ edges: { ...line("n", 5, 10, 25), ...line("n", 7, 10, 25) } });
     const huge = tok(ten, { size: "huge", x: 3, y: 4.5 });
-    assert.equal(squeezeFits(ten, ownWalk(huge), { x: 13.5, y: 4.5 }), true);
-    assert.equal(squeezeFits(five, ownWalk(tok(five, { size: "huge", x: 3, y: 3 })), { x: 13.5, y: 4 }), false, "a Huge creature's core does not fit 5 ft");
-    assert.equal(squeezeFits(ten, ownWalk(large(ten)), { x: 13.5, y: 5 }), false, "a Large creature in 10 ft has room and is not pinched");
+    assert.equal(squeezeFits(ten, walkEnd(ownWalk(huge), { x: 13.5, y: 4.5 })), true);
+    assert.equal(squeezeFits(five, walkEnd(ownWalk(tok(five, { size: "huge", x: 3, y: 3 })), { x: 13.5, y: 4 })), false, "a Huge creature's core does not fit 5 ft");
+    assert.equal(squeezeFits(ten, walkEnd(ownWalk(large(ten)), { x: 13.5, y: 5 })), false, "a Large creature in 10 ft has room and is not pinched");
     // The squeezed spot under the finger: a drop on the corridor's snapped spots finds it.
     assert.deepEqual(landing(ten, ownWalk(huge), go(13, 5), "free"), { x: 12.5, y: 4.5, squeeze: true, stopped: null });
   });
 
   test("a door frame pinches, in a wall running north and south and in one running east and west", () => {
     const upright = world({ edges: { ...line("w", 10, 0, 5), "10,5,w": open, ...line("w", 10, 6, 20) } });
-    assert.equal(squeezeFits(upright, ownWalk(large(upright)), { x: 8.5, y: 4.5 }), true, "west of the door");
-    assert.equal(squeezeFits(upright, ownWalk(large(upright)), { x: 9.5, y: 4.5 }), true, "east of the door");
-    assert.equal(previewSqueezed(upright, ownWalk(large(upright)), { x: 9, y: 4.5 }), true, "in the doorway");
+    assert.equal(squeezeFits(upright, walkEnd(ownWalk(large(upright)), { x: 8.5, y: 4.5 })), true, "west of the door");
+    assert.equal(squeezeFits(upright, walkEnd(ownWalk(large(upright)), { x: 9.5, y: 4.5 })), true, "east of the door");
+    assert.equal(previewSqueezed(upright, walkEnd(ownWalk(large(upright)), { x: 9, y: 4.5 })), true, "in the doorway");
     const level = world({ edges: { ...line("n", 5, 0, 10), "10,5,n": open, ...line("n", 5, 11, 20) } });
-    assert.equal(squeezeFits(level, ownWalk(large(level)), { x: 9.5, y: 3.5 }), true, "north of the door");
-    assert.equal(squeezeFits(level, ownWalk(large(level)), { x: 9.5, y: 4.5 }), true, "south of the door");
+    assert.equal(squeezeFits(level, walkEnd(ownWalk(large(level)), { x: 9.5, y: 3.5 })), true, "north of the door");
+    assert.equal(squeezeFits(level, walkEnd(ownWalk(large(level)), { x: 9.5, y: 4.5 })), true, "south of the door");
     // A closed door fills the frame: the frame and the door are one wall beside open ground, however the line is cut into segments.
     const shut = world({ edges: { ...line("w", 10, 0, 5), "10,5,w": closed, ...line("w", 10, 6, 20) } });
-    assert.equal(previewSqueezed(shut, ownWalk(large(shut)), { x: 9, y: 4.5 }), false);
-    assert.equal(squeezeFits(shut, ownWalk(large(shut)), { x: 8.5, y: 4.5 }), false);
+    assert.equal(previewSqueezed(shut, walkEnd(ownWalk(large(shut)), { x: 9, y: 4.5 })), false);
+    assert.equal(squeezeFits(shut, walkEnd(ownWalk(large(shut)), { x: 8.5, y: 4.5 })), false);
     const pieces = world({ walls: [free("p1", 10, 0, 10, 5), free("p2", 10, 5, 10, 6), free("p3", 10, 6, 10, 12)] });
-    assert.equal(squeezeFits(pieces, ownWalk(large(pieces)), { x: 8.5, y: 4.5 }), false);
+    assert.equal(squeezeFits(pieces, walkEnd(ownWalk(large(pieces)), { x: 8.5, y: 4.5 })), false);
     // A wall that ends level with the creature leaves one side open.
     const stub = world({ edges: line("w", 10, 0, 5) });
-    assert.equal(squeezeFits(stub, ownWalk(large(stub)), { x: 8.5, y: 4.5 }), false);
+    assert.equal(squeezeFits(stub, walkEnd(ownWalk(large(stub)), { x: 8.5, y: 4.5 })), false);
   });
 
   test("a corridor's dead end and a room's corner", () => {
     const dead = world({ edges: { ...line("n", 5, 10, 25), ...line("n", 6, 10, 25), "10,5,w": { kind: "wall" } } });
-    assert.equal(squeezeFits(dead, ownWalk(large(dead)), { x: 9.5, y: 4.5 }), true, "against the dead end, the corridor's walls still pinch");
+    assert.equal(squeezeFits(dead, walkEnd(ownWalk(large(dead)), { x: 9.5, y: 4.5 })), true, "against the dead end, the corridor's walls still pinch");
     const corner = world({ edges: { ...line("w", 10, 0, 10), ...line("n", 10, 10, 20) } });
-    assert.equal(squeezeFits(corner, ownWalk(large(corner)), { x: 8.5, y: 8.5 }), false);
+    assert.equal(squeezeFits(corner, walkEnd(ownWalk(large(corner)), { x: 8.5, y: 8.5 })), false);
   });
 
   test("ledges pinch a walking creature on a 5 ft raised walkway, and no flier above them", () => {
     const walkway: Spec = { heights: Object.fromEntries(Array.from({ length: 20 }, (_, k) => [`${k},5`, 10])) };
     const s = world(walkway);
-    assert.equal(squeezeFits(s, ownWalk(large(s, { x: 5, y: 4.5, elevation: 10, squeeze: true })), { x: 9.5, y: 4.5 }), true);
-    assert.equal(squeezeFits(s, ownWalk(large(s, { x: 5, y: 1, elevation: 30 })), { x: 9.5, y: 4.5 }), false);
+    assert.equal(squeezeFits(s, walkEnd(ownWalk(large(s, { x: 5, y: 4.5, elevation: 10, squeeze: true })), { x: 9.5, y: 4.5 })), true);
+    assert.equal(squeezeFits(s, walkEnd(ownWalk(large(s, { x: 5, y: 1, elevation: 30 })), { x: 9.5, y: 4.5 })), false);
   });
 });
 
@@ -527,7 +527,7 @@ describe("after a resize (docs/design-v1-token-window.md 8.3 and 8.5)", () => {
   test("a footprint the DM grew over a wall steps off only toward its middle's side", () => {
     const s = world({ edges: line("w", 4, 0, 20) });
     const huge = tok(s, { size: "huge", x: 3, y: 3 });
-    assert.equal(coreBlocked(s, ownWalk(huge), { x: 3, y: 3 }), true, "its core lies over the wall at x 4");
+    assert.equal(coreBlocked(s, walkEnd(ownWalk(huge), { x: 3, y: 3 })), true, "its core lies over the wall at x 4");
     assert.equal(legStop(s, ownWalk(huge), go(4, 3)), null, "its middle at x 4.5 is right of the wall, so it steps off to the right");
     assert.equal(legStop(s, ownWalk(huge), go(2, 3))?.blocker, "wall", "and never crosses to the left");
   });

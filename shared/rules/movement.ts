@@ -3,7 +3,7 @@ import type { DoorRef } from "../protocol.ts";
 import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
 import { canSqueeze, footprintRect, footprintSize, occupiedRange, snapStep, squeezedSize, storedCenter, type PlacedToken } from "./footprint.ts";
 import type { Point } from "./geom.ts";
-import { standing } from "./heights.ts";
+import { standing, type Standing } from "./heights.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient } from "./segments.ts";
 import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
 
@@ -48,7 +48,7 @@ import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
  * drops it at its first spot clear of the holder (`walkOn`), and the walk
  * comes back over the holder on the ground's rule.
  */
-export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: "ground"; offHolder?: OffHolder };
+export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: Standing; offHolder?: OffHolder };
 
 /** The holder a walk off it leaves, where it stands. */
 export type OffHolder = PlacedToken;
@@ -428,6 +428,17 @@ export function walkOn<T extends Walker>(token: T, at: Point & { elevation: numb
   return !next.offHolder || onOffHolder(token, at) ? next : pastHolder(next);
 }
 
+/**
+ * The walker standing with `footing` where its walk's last leg starts, for
+ * a judgment of a walk's end whose route is not known, as a drag preview's
+ * frame without corners (server/rooms/ephemeral.ts): a token off the
+ * ground keeps its height over any ground on the way, so it may reach the
+ * spot from any footing.
+ */
+export function withFooting<T extends Walker>(token: T, footing: Standing): T {
+  return { ...token, footing };
+}
+
 /** The token as a walk that has cleared the holder it walks off reads it: on the ground, off no holder. */
 export function pastHolder<T extends Walker>(token: T): T {
   if (!token.offHolder) return token;
@@ -454,6 +465,32 @@ export function walkAlong<T extends Walker>(token: T, stops: readonly (Point & {
   let at = token;
   for (const stop of stops) at = walkOn(at, stop);
   return at;
+}
+
+declare const ended: unique symbol;
+
+/**
+ * A spot a walk ends at, with its walker as the walk reaches it (review
+ * AT-ASTRA-21): standing where the walk's last leg to the spot starts, its
+ * state carried there from where it stood through every stop between
+ * (`walkOn`). So a walk that cleared its holder and came back over it
+ * judges the spot on the ground's rule, as its last leg does. Every check
+ * of a walk's end takes only this: the squeeze (`squeezeFits`), a drag
+ * preview's footprint (`previewSqueezed`) and the core's fit
+ * (`coreBlocked`). `walkEnd` makes one.
+ */
+export type WalkEnd = { readonly walker: Walker; readonly at: Point; readonly [ended]: true };
+
+/**
+ * The end at `at` of a walk by `token` from where it stands, through
+ * `between`, the walk's stops after its start and before `at`, each at the
+ * height the walk takes there (route.ts routePoints). A straight leg has
+ * none: it leaves a rectangle once, so a spot of it on the holder was
+ * reached before the walk cleared the holder.
+ */
+export function walkEnd(token: Walker, at: Point, between: readonly (Point & { elevation: number })[] = []): WalkEnd {
+  const walker = walkAlong(token, [{ x: token.x, y: token.y, elevation: token.elevation }, ...between]);
+  return { walker, at: { x: at.x, y: at.y } } as WalkEnd;
 }
 
 /**
@@ -656,8 +693,9 @@ function coreTouchesAt(walls: WallSet, token: MovingToken, at: Point, floor: num
   return touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor).length > 0;
 }
 
-/** Whether the token's core, at the stored position `at`, touches the movement set, so no leg may end there. */
-export function coreBlocked(state: BuildState, token: Walker, at: Point): boolean {
+/** Whether the walker's core, at the stored position its walk ends at, touches the movement set, so no leg may end there. */
+export function coreBlocked(state: BuildState, end: WalkEnd): boolean {
+  const { walker: token, at } = end;
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
@@ -740,10 +778,12 @@ function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean
  * shrinks, inside the full footprint, with the squeezed footprint fitting
  * between them), and a core touching no blocker. So the flag marks only a
  * real squeeze: a corridor or a door frame, never open ground beside one
- * wall. `token` is the token as it stands before the move: where it stands
- * then decides which ledges count, as for the move's leg.
+ * wall. The walker stands where the walk's last leg to the spot starts
+ * (`WalkEnd`): where it stands then decides which ledges count, as for
+ * that leg.
  */
-export function squeezeFits(state: BuildState, token: Walker, at: Point): boolean {
+export function squeezeFits(state: BuildState, end: WalkEnd): boolean {
+  const { walker: token, at } = end;
   if (!canSqueeze(token)) return false;
   const c = storedCenter({ ...token, x: at.x, y: at.y });
   const { w, h } = squeezedSize(token);
@@ -757,10 +797,11 @@ export function squeezeFits(state: BuildState, token: Walker, at: Point): boolea
  * the narrow space judged around the squeezed footprint centered there.
  * When it holds, the frame is judged by the squeezed footprint centered on
  * the preview point (`footprintRect({ ...token, x, y, squeeze: true })`),
- * else by the full one.
+ * else by the full one. The walker is the walk's at the preview point
+ * (`WalkEnd`).
  */
-export function previewSqueezed(state: BuildState, token: Walker, at: Point): boolean {
-  return squeezedThere(state, token, at, false);
+export function previewSqueezed(state: BuildState, end: WalkEnd): boolean {
+  return squeezedThere(state, end.walker, end.at, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -798,9 +839,10 @@ export function landing(state: BuildState, token: Walker, to: LegEnd, mode: Drop
   const walls = sceneWalls(scene, state.buildChunks);
   const legTo = (at: Point) => legFrom(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation });
   const floor = ledgeFloor(walls, scene, token, to.elevation);
-  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, token, at), token, at, floor);
+  // A spot is judged as the straight leg's end (WalkEnd).
+  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, walkEnd(token, at).walker, at), token, at, floor);
   const allowed = (at: Point) => mode === "teleport" || legClear(legTo(at));
-  const squeeze = (at: Point) => squeezeFits(state, token, at);
+  const squeeze = (at: Point) => squeezeFits(state, walkEnd(token, at));
   if (mode === "walk" ? allowed(to) : fits(to)) return { x: to.x, y: to.y, squeeze: squeeze(to), stopped: null };
   if (canSqueeze(token) && !fits(to)) {
     for (const [dx, dy] of SHIFTS) {

@@ -13,7 +13,7 @@ import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { footing, footprintGround, groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkAlong, type Walker } from "./rules/movement.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkAlong, walkEnd, type Walker } from "./rules/movement.ts";
 import { onRouteLattice, routeBlocker, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
@@ -269,8 +269,7 @@ function squeezeFits(op: Op, c: Check): Decision {
   if (!token) return OK;
   const walker = walkerFor(c.state, token, seenAllIn(c));
   const points = op.route ? routePoints(c.state.buildChunks, walker, op.route, op.elevation ?? token.elevation) : [];
-  const last = walkAlong(walker, points.slice(1, -1));
-  return movementRules.squeezeFits(c.state, last, { x: op.x, y: op.y }) ? OK : refuse("invalid", NOT_A_SQUEEZE);
+  return movementRules.squeezeFits(c.state, walkEnd(walker, { x: op.x, y: op.y }, points.slice(1, -1))) ? OK : refuse("invalid", NOT_A_SQUEEZE);
 }
 
 const LEVEL_DOES_NOT_FIT = refuse("invalid", `Exhaustion is level 1 to ${EXHAUSTION_MAX_LEVEL}`);
