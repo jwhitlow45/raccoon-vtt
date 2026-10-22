@@ -159,6 +159,8 @@ describe("the drag's stops", () => {
     b.spend();
     b.stops.press(node(hero, 1), hero, [hero]);
     b.frames.frame();
+    assert.equal(b.sent.length, 0, "this frame's turn goes on with its spent budget");
+    b.frames.frame();
     assert.equal(b.sent.length, 1);
     b.spend();
     b.stops.press(node(hero, 1), hero, [hero]);

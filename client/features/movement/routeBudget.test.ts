@@ -16,24 +16,38 @@ import { world } from "./testing.ts";
  * on adversarial scenes (docs/design-v1-movement.md 5.2, reviews ASTRA-08,
  * ASTRA-14, MV-O-22 and MV-O-23): a drag's aims and its drop, every
  * ruler's render and its turns, and an arrow key's press. Each frame has
- * a budget of LIMIT units, counted, not timed, from one animation callback
- * to the next, whatever events fall between them, and no frame may do more
- * than that, past it by at most one step that cannot stop partway: a
- * world's build with its search, or one straight leg checked whole.
+ * a budget of LIMIT units, counted, not timed. A frame is the events since
+ * the last animation callback and the next callback's turn, as a browser
+ * paints them, and its units are every unit charged in it, on whatever
+ * budget. No frame may do more than LIMIT, past it by at most one step
+ * that cannot stop partway: a world's build with its search, or one
+ * straight leg checked whole.
  */
 
 const LIMIT = 4000;
+
+/** A budget that tells the board each unit charged on it. */
+class Counted extends WorkBudget {
+  readonly board: Board;
+  constructor(board: Board) {
+    super({ limit: LIMIT });
+    this.board = board;
+  }
+  charge(units = 1): void {
+    super.charge(units);
+    this.board.charged += units;
+  }
+}
 
 /** Frames by hand, on a clock that moves a frame's length each frame. */
 class Board implements Frames {
   t = 0;
   queue: (() => void)[] = [];
   units: number[] = [];
-  readonly work = new RouteWork(
-    this,
-    () => new WorkBudget({ limit: LIMIT }),
-    (units) => this.units.push(units),
-  );
+  /** Units charged on every budget the board's work opened, so far. */
+  charged = 0;
+  #counted = 0;
+  readonly work = new RouteWork(this, () => new Counted(this));
   now(): number {
     return this.t;
   }
@@ -42,17 +56,17 @@ class Board implements Frames {
     return this.queue.length;
   }
   cancel(): void {}
-  /** One frame: its events, then its turn. */
+  /** One frame: its events, then its turn. Its units are all those charged since the last frame's turn. */
   frame(events: () => void = () => {}): void {
     this.t += 16;
     events();
     this.t += 0.5;
     for (const run of this.queue.splice(0)) run();
+    this.units.push(this.charged - this.#counted);
+    this.#counted = this.charged;
   }
-  /** Every frame's units, counted from one animation callback to the next, the last one's too. */
+  /** Every frame's units. */
   all(): number[] {
-    this.work.budget();
-    this.frame();
     return this.units;
   }
 }

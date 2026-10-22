@@ -19,13 +19,15 @@ export type Frames = { now(): number; request(run: () => void): number; cancel(h
  * 5.2, review ASTRA-14). Every drag's aim, ruler leg, open-ground check
  * and arrow key's press runs through it, on one budget a frame that all of
  * them share: once it is spent nothing else runs until the next frame, and
- * what is left over waits there. Only the frame's own turn, the animation
- * callback, renews the budget, so all the work between two callbacks,
- * every event's and the turn's, shares one, however the events fall
- * (review ASTRA-14). Any work asks for the next callback, so the budget
- * renews even when nothing waits. The frame's turn runs the drag and the
- * presses first, then the rest each in turn, starting each frame past the
- * last that ran, so no ruler waits behind the others for long. Work
+ * what is left over waits there. A frame is what a browser paints at once:
+ * the events since the last animation callback, then the next callback's
+ * turn. The first work of a frame opens its budget, the turn goes on with
+ * it, and the turn's end closes it, so the events and the turn share one,
+ * however the events fall, and a budget a turn left over never passes to
+ * the next frame (review ASTRA-14). Any work asks for the next callback,
+ * so a budget an event opens always closes. The frame's turn runs the drag
+ * and the presses first, then the rest each in turn, starting each frame
+ * past the last that ran, so no ruler waits behind the others for long. Work
  * dropped, because what it was for ended, never runs again, not even
  * later in the turn that dropped it.
  *
@@ -50,8 +52,8 @@ export class RouteWork {
 
   /**
    * `open` makes a frame's budget, by default SLICE_MS of work timed by
-   * `frames.now`. `observe` hears each frame's units as its budget closes,
-   * for tests.
+   * `frames.now`. `observe` hears each frame's units as its turn closes its
+   * budget, for tests.
    */
   constructor(frames: Frames, open?: () => WorkBudget, observe?: (units: number) => void) {
     this.#frames = frames;
@@ -68,7 +70,7 @@ export class RouteWork {
     return this.#jobs.length > 0;
   }
 
-  /** The budget until the next animation callback, which renews it. Asking for it asks for that callback. */
+  /** The frame's budget, until the next animation callback's turn closes it. Asking for it asks for that callback. */
   budget(): WorkBudget {
     this.#budget ??= this.#open();
     this.#ask();
@@ -123,11 +125,10 @@ export class RouteWork {
     if (this.#handle === null) this.#handle = this.#frames.request(() => this.#turn());
   }
 
-  /** The frame's turn, the animation callback: the budget renews, then first work, then the rest in turn, while it lasts. */
+  /** The frame's turn, the animation callback: first work, then the rest in turn, on what is left of the frame's budget, which then closes. */
   #turn(): void {
     this.#handle = null;
-    if (this.#budget) this.#observe?.(this.#budget.units);
-    const budget = (this.#budget = this.#open());
+    const budget = (this.#budget ??= this.#open());
     const firsts = this.#jobs.filter((j) => j.first);
     const rest = this.#jobs.filter((j) => !j.first);
     const start = this.#next ? Math.max(0, rest.indexOf(this.#next)) : 0;
@@ -142,6 +143,8 @@ export class RouteWork {
       if (done) this.drop(job);
       else if (this.#next === job) this.#next = this.#after(job);
     }
-    if (this.#jobs.length > 0 || budget.units > 0) this.#ask();
+    this.#observe?.(budget.units);
+    this.#budget = null;
+    if (this.#jobs.length > 0) this.#ask();
   }
 }

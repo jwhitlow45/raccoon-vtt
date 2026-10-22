@@ -56,9 +56,9 @@ describe("the board's route work (routeWork.ts)", () => {
       work.add(b);
       assert.equal(work.run(drag), true, "the drag's work runs at once while the frame has budget");
     });
-    // The drag's event took 50 of the budget before the callback, then the callback renewed it: a took all of that, and b waited.
+    // The drag's event took 50 of the frame's budget before the callback, and the callback's turn went on with it: a took the other 50, and b waited.
     assert.deepEqual(log, ["drag", "a"]);
-    assert.equal(a.left, 200);
+    assert.equal(a.left, 250);
     assert.equal(b.left, 300);
     log.length = 0;
     clock.frame();
@@ -86,6 +86,46 @@ describe("the board's route work (routeWork.ts)", () => {
     assert.equal(work.budget().units, 100, "all four share the frame's 100 units");
     for (let k = 0; k < 10 && work.waiting; k++) clock.frame();
     assert.ok(frames.every((u) => u <= 100), `frames ${frames.join(", ")}`);
+  });
+
+  test("a frame's events and its callback's turn share one budget, from the first frame on and after a turn that left some over (review ASTRA-14)", () => {
+    const clock = new Clock();
+    const work = new RouteWork(clock, () => new WorkBudget({ limit: 100 }));
+    let units = 0;
+    /** Work of `total` units, ten at a time, counted into the frame it runs in. */
+    const job = (total: number, first = false): RouteJob => {
+      let left = total;
+      return {
+        first,
+        run: (budget) => {
+          while (left > 0) {
+            if (budget.spent) return false;
+            budget.charge(10);
+            units += 10;
+            left -= 10;
+          }
+          return true;
+        },
+      };
+    };
+    const frames: number[] = [];
+    const frame = (events?: () => void) => {
+      units = 0;
+      clock.frame(events);
+      frames.push(units);
+    };
+    // The first frame: an event's work before any callback, then the turn's.
+    frame(() => {
+      work.run(job(60, true));
+      work.add(job(250));
+    });
+    for (let k = 0; k < 20 && work.waiting; k++) frame();
+    // The last turn finished all there was with budget over: a drag's event in the next frame starts that frame's own.
+    frame(() => work.run(job(1000, true)));
+    for (let k = 0; k < 20 && work.waiting; k++) frame();
+    assert.equal(work.waiting, false, "all the work done");
+    assert.ok(frames.every((u) => u <= 100), `frames ${frames.join(", ")}`);
+    assert.equal(frames.reduce((a, b) => a + b, 0), 1310);
   });
 
   test("a job dropped during a turn, by another job's work, never runs in it", () => {
