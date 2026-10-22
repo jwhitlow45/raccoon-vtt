@@ -10,6 +10,7 @@ import { routeWalkers } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
+import { dragLead } from "../attach/groups.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
 import { dragReading, extraWords, joinWords } from "./movement.ts";
@@ -246,6 +247,30 @@ function unseenAtStart(view: RoomState, input: WalkInput): ReadonlySet<string> {
   return unseen;
 }
 
+/**
+ * The token a drag from `token` moves (groups.ts dragLead): the mount of a
+ * rider of a controlled mount, or the holder of a token that covers it, up
+ * the chain. Read by the links this ruler's world holds: every one for the
+ * DM's own ruler, else only those every player sees, so a shared ruler
+ * walks the same creature on every copy.
+ */
+function rulerLead(view: RoomState, input: WalkInput, token: Token): Token {
+  if (!token.attached) return token;
+  let tokens = view.tokens;
+  if (!ownRuler(input)) {
+    const seen = dropView(view, input.viewer.role).seen;
+    if (!seen(token)) return token;
+    tokens = Object.fromEntries(Object.entries(view.tokens).filter(([, t]) => t !== undefined && seen(t)));
+  }
+  return view.tokens[dragLead(tokens, token).id] ?? token;
+}
+
+/** A leg of the lead's walk as the ruler draws it, from the place of the token it starts on. */
+function shiftLeg(leg: WalkLeg, by: Point): WalkLeg {
+  const back = (p: Point) => ({ x: p.x - by.x, y: p.y - by.y });
+  return { ...leg, from: back(leg.from), to: back(leg.to), corners: leg.corners.map(back) };
+}
+
 function rulesOf(view: RoomState): DistanceSettings {
   return { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal };
 }
@@ -275,9 +300,13 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   const progress = byRuler.get(memoKey) ?? { steps: [], on: null };
   byRuler.set(memoKey, progress);
   const first = stops[0];
-  const start = first ? walkerAt(view, input.sceneId, first) : null;
-  if (!start || stops.length < 2) return null;
-  const size = footprintSize(start);
+  const anchor = first ? walkerAt(view, input.sceneId, first) : null;
+  if (!anchor || stops.length < 2) return null;
+  const size = footprintSize(anchor);
+  // A drag from a rider of a controlled mount moves the mount (attach 4.2), so the legs walk the mount, offset by where the
+  // rider sits on it, and are drawn from the rider's place.
+  const start = rulerLead(view, input, anchor);
+  const shift = { x: start.x - anchor.x, y: start.y - anchor.y };
   // The room as the legs so far leave it, each planned as the board plans a drag and applied by the room's own reducer
   // (planStep), so a later leg walks, lands and is seen as the token would after them (reviews AT-SOL-1, AT-SOL-3,
   // AT-ASTRA-25, AT-SOL-5 and AT-ASTRA-26).
@@ -293,7 +322,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
     const stop = on ? tokenStop(on) : drawn;
-    const raw = { x: stop.x - size.w / 2, y: stop.y - size.h / 2 };
+    const raw = { x: stop.x - size.w / 2 + shift.x, y: stop.y - size.h / 2 + shift.y };
     if (waiting) {
       legs.push({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true });
       waiting = raw;
@@ -320,7 +349,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   }
   const searching = waiting !== null;
   const named = ["difficult terrain", "overgrowth", "swimming", "crawling", "dragging", "carrying"].filter((w) => words.has(w));
-  const walk: WalkMeasure = { legs, totalFt, extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null, size, searching };
+  const shown = shift.x === 0 && shift.y === 0 ? legs : legs.map((leg) => shiftLeg(leg, shift));
+  const walk: WalkMeasure = { legs: shown, totalFt, extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null, size, searching };
   if (!searching) {
     const byViewer = memo.get(stops) ?? new Map<string, WalkMeasure>();
     byViewer.set(memoKey, walk);
