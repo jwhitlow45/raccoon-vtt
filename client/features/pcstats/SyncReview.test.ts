@@ -88,6 +88,6 @@ describe("the review's markup", () => {
     assert.match(html, /aria-label="Take these: Ability scores"/);
     assert.match(html, /aria-label="Take these: Spellcasting"/);
     assert.match(html, /aria-expanded="true"/);
-    assert.match(html, /Overwrite with 16/);
+    assert.match(html, /Overwrite with Wisdom 16/);
   });
 });

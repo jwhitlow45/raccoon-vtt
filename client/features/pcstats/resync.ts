@@ -107,9 +107,37 @@ export function sayValue(key: FieldKey, value: FieldValue): string {
   }
 }
 
-/** What Overwrite takes, named by its value where it has one. A flag says whose. */
-function overwriteWords(item: FieldItem): string {
-  return item.key in FLAG_LABELS ? "Overwrite with D&D Beyond’s" : `Overwrite with ${bareValue(item.key, item.theirs)}`;
+/**
+ * What Overwrite takes (3.3): D&D Beyond's value, named with its field where
+ * the value alone would be a bare number, as "Overwrite with level 6". A
+ * flag, and a value D&D Beyond does not have, say whose instead, so a box
+ * never reads "Overwrite with none" or "Overwrite with not proficient".
+ */
+export function overwriteWords(item: Pick<FieldItem, "key" | "theirs">): string {
+  const { key, theirs } = item;
+  if (key in FLAG_LABELS || theirs === undefined || theirs === null || theirs === false || theirs === "") return "Overwrite with D&D Beyond’s";
+  const [part, sub] = key.split(".");
+  const bare = bareValue(key, theirs);
+  switch (part) {
+    case "abilities":
+    case "ac":
+      return `Overwrite with ${sayValue(key, theirs)}`;
+    case "level":
+      return `Overwrite with level ${bare}`;
+    case "hpMax":
+      return `Overwrite with max HP ${bare}`;
+    case "speeds":
+      return `Overwrite with speed ${bare}`;
+    case "critOn":
+      return `Overwrite with critical hits on ${bare}`;
+    case "adjust": {
+      // A save's or skill's bonus starts with its name. The others start with a plain word.
+      const said = sayValue(key, theirs);
+      return `Overwrite with ${sub! in ADJUST_LABELS ? `${said[0]!.toLowerCase()}${said.slice(1)}` : said}`;
+    }
+    default:
+      return `Overwrite with ${bare}`;
+  }
 }
 
 /** The blocks rolls read against: the character's now, and the block as the review would leave it. */

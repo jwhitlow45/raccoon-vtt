@@ -17,6 +17,7 @@ import {
   lateApplyText,
   lateUndoText,
   lossesText,
+  overwriteWords,
   recordTooBigText,
   refusalText,
   replacesLine,
@@ -108,6 +109,18 @@ describe("the review's lines (3.3)", () => {
     });
     const kept = plan(mine, fillOf({ spellAbility: "int" }));
     assert.deepEqual(keptRow(kept.items[0]!, blocks(kept)), { first: "Spellcasting ability: Charisma", theirs: "D&D Beyond says Intelligence.", tick: "Overwrite with Intelligence" });
+  });
+
+  test("Overwrite names a bare number's field, and says D&D Beyond's for a flag or a value D&D Beyond does not have (RS-O-33)", () => {
+    const say = (key: string, theirs: unknown) => overwriteWords({ key, theirs } as Parameters<typeof overwriteWords>[0]);
+    assert.deepEqual(
+      [say("level", 6), say("abilities.wis", 16), say("ac", 16), say("hpMax", 45), say("speeds", { walk: 30 }), say("critOn", 19), say("adjust.init", 2), say("adjust.skills.stealth", 3), say("adjust.saves.dex", 1)],
+      ["Overwrite with level 6", "Overwrite with Wisdom 16", "Overwrite with AC 16", "Overwrite with max HP 45", "Overwrite with speed 30 ft", "Overwrite with critical hits on 19 and 20", "Overwrite with initiative bonus +2", "Overwrite with Stealth bonus +3", "Overwrite with Dexterity save bonus +1"],
+    );
+    assert.deepEqual([say("spellAbility", "wis"), say("saves.wis", true), say("skills.stealth", "expert"), say("defenses.fire", "resistant")], ["Overwrite with Wisdom", "Overwrite with Proficient", "Overwrite with Expertise", "Overwrite with Resistant"]);
+    for (const [key, theirs] of [["spellAbility", null], ["saves.wis", false], ["skills.stealth", null], ["defenses.fire", null], ["level", undefined], ["senses", ""], ["jack", true]] as const) {
+      assert.equal(say(key, theirs), "Overwrite with D&D Beyond’s", key);
+    }
   });
 
   test("a roll kept, removed by the player, and gone from D&D Beyond", () => {

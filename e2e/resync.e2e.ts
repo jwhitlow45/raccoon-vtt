@@ -560,9 +560,9 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.equal(await review.getByRole("button", { name: "Cancel", exact: true }).count(), 0, "Cancel goes");
     assert.equal(await review.getByRole("button", { name: "Apply", exact: true }).count(), 0);
     // A tick makes it Apply, and taking it back makes it Done again.
-    await level.getByRole("checkbox", { name: "Overwrite with 6", exact: true }).check();
+    await level.getByRole("checkbox", { name: "Overwrite with level 6", exact: true }).check();
     await review.getByRole("button", { name: "Apply", exact: true }).waitFor();
-    await level.getByRole("checkbox", { name: "Overwrite with 6", exact: true }).uncheck();
+    await level.getByRole("checkbox", { name: "Overwrite with level 6", exact: true }).uncheck();
     await shots.take(ana, "resync-nothing-new");
     const sent = anaOps.length;
     const before = JSON.stringify(breeIn(anaSocket));
