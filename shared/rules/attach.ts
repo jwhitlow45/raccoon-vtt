@@ -228,13 +228,14 @@ export function walkerFor<T extends Walking>(
 
 /**
  * Whether a token set down at `spot` lands as a walk lands (4.3): on the
- * ground there, or at its own height, as a flier keeps it. A Get off place
- * and a player's move of a dragged creature they may not move take no
- * other height, so neither lifts a token any other way.
+ * ground there, under the footprint it lands with, or at its own height,
+ * as a flier keeps it. A Get off place and a player's move of a dragged
+ * creature they may not move take no other height, so neither lifts a
+ * token any other way.
  */
-export function landsAt(chunks: Parameters<typeof footprintGround>[0], token: PlacedToken & Pick<Token, "sceneId" | "elevation">, spot: Point & { elevation: number }): boolean {
+export function landsAt(chunks: Parameters<typeof footprintGround>[0], token: PlacedToken & Pick<Token, "sceneId" | "elevation">, spot: Point & { elevation: number; squeeze?: boolean }): boolean {
   if (spot.elevation === token.elevation) return true;
-  return spot.elevation === footprintGround(chunks, { ...token, x: spot.x, y: spot.y, squeeze: undefined });
+  return spot.elevation === footprintGround(chunks, { ...token, x: spot.x, y: spot.y, squeeze: spot.squeeze === true ? true : undefined });
 }
 
 /**

@@ -4,7 +4,7 @@ import { carriedGroup, getOffSpot, holderOf, isCreature, overlaps } from "#share
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
-import { dropView, landedOffHolder, walkerOf, walkersStop } from "../movement/drop.ts";
+import { dropView, landedElevation, walkerOf, walkersStop } from "../movement/drop.ts";
 import { detachAllowed, offersAttach, type AttachViewer, type RightsView } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
 
@@ -66,9 +66,10 @@ export function holderAction(token: Token): { words: string; choice: "letGo" | "
  * for it and for each creature it drags, which follows that leg (4.2).
  * The server checks the same place but for the creatures, whose check would
  * tell a player where a hidden one stands. It lands as a walk off its
- * holder lands (drop.ts landedOffHolder): on the ground there off a holder
- * on the ground, at its height off a flier, and its reach is measured from
- * there, as the server measures it. Null when there is no such spot.
+ * holder lands (drop.ts landedElevation off the holder): on the ground
+ * there off a holder on the ground, at its height off a flier, and its
+ * reach is measured from there, as the server measures it. Null when there
+ * is no such spot.
  */
 export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Token): { x: number; y: number; elevation: number } | null {
   const holder = holderOf(view.tokens, carried) as Token | undefined;
@@ -82,7 +83,7 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
   const walkers = walls ? walkersFor(view, carried.id, "player") : [];
   const seat = { x: carried.x, y: carried.y, elevation: carried.elevation };
   const seen = dropView(view, viewer.role);
-  const landing = (at: { x: number; y: number }) => landedOffHolder(view.buildChunks, carried, holder, at);
+  const landing = (at: { x: number; y: number }) => landedElevation(view.buildChunks, carried, at, holder);
   const spot = getOffSpot(view.meta.settings, scene.bounds, carried, holder, (at) => {
     const elevation = landing(at);
     const placed: Token = { ...carried, x: at.x, y: at.y, elevation };

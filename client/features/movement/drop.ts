@@ -55,29 +55,23 @@ export function dropMode(role: Role, scene: Pick<Scene, "blockMovement"> | undef
  * ground"): a token that stood on the ground takes the ground where it
  * lands, a flier keeps its height or rises to the ground there, whichever
  * is higher, and a token inside the ground keeps its elevation, since
- * nothing raises one on its own.
+ * nothing raises one on its own. The ground there is under the footprint
+ * it lands with, the squeezed one where it squeezes.
+ *
+ * One that leaves its holder (`holder`, docs/design-v1-attach.md 4.3) is
+ * judged from the holder, not from the ground under its seat, which
+ * differs where the holder straddles two heights: off a holder on the
+ * ground it lands on the ground there, off a flier it keeps its height or
+ * rises to the ground, and off a holder inside the ground it keeps its
+ * elevation. This is every landing's height, so a squeezed drop off a
+ * holder lands on the ground under its squeezed footprint (review
+ * AT-ASTRA-20).
  */
-export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, at: Point & { squeeze?: boolean }): number {
-  const before = footing(chunks, token);
+export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, at: Point & { squeeze?: boolean }, holder?: LandingToken): number {
+  const before = holder ? standing(holder.elevation, footprintGround(chunks, { ...holder, squeeze: undefined })) : footing(chunks, token);
   if (before === "inside") return token.elevation;
   const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: at.squeeze === true ? true : undefined });
   return before === "ground" ? there : Math.max(token.elevation, there);
-}
-
-/**
- * The elevation a token lands at when it leaves its holder
- * (docs/design-v1-attach.md 4.3): judged from the holder, not from the
- * ground under its seat, which differs where the holder straddles two
- * heights. Off a holder on the ground it lands on the ground there, off a
- * flier it keeps its height or rises to the ground, and off a holder
- * inside the ground it keeps its elevation, as landedElevation judges a
- * token of its own.
- */
-export function landedOffHolder(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, holder: LandingToken, at: Point): number {
-  const holderStands = standing(holder.elevation, footprintGround(chunks, { ...holder, squeeze: undefined }));
-  if (holderStands === "inside") return token.elevation;
-  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: undefined });
-  return holderStands === "ground" ? there : Math.max(token.elevation, there);
 }
 
 /**
@@ -116,14 +110,14 @@ export function dropView(view: RoomState, role: Role): DropView {
  * ground under its seat, which differs where the holder straddles two
  * heights: at the holder's elevation where the link still holds there, the
  * height the server takes for a new seat, else as a Get off lands
- * (landedOffHolder). That reads only a link every player sees, the token and
- * the holder both (`seen`, review AT-O-22): off or on a holder some player
- * cannot see, the DM's drop lands the token as if it had no holder, so the
- * op and every player's copy are the ones of a room without it (8.0). Any
- * other token lands by its own footing (landedElevation). Every drop, its
- * picture on the board and the op it sends read this one landing, so the
- * band reads the leg the server stores and the leg tests judge the height
- * sent.
+ * (landedElevation off the holder). That reads only a link every player
+ * sees, the token and the holder both (`seen`, review AT-O-22): off or on
+ * a holder some player cannot see, the DM's drop lands the token as if it
+ * had no holder, so the op and every player's copy are the ones of a room
+ * without it (8.0). Any other token lands by its own footing
+ * (landedElevation). Every drop, its picture on the board and the op it
+ * sends read this one landing, so the band reads the leg the server stores
+ * and the leg tests judge the height sent.
  */
 export function dropLanding(state: DropState, token: DropToken, at: Point & { squeeze?: boolean }): number {
   const seated = state.tokens?.[token.id];
@@ -131,7 +125,7 @@ export function dropLanding(state: DropState, token: DropToken, at: Point & { sq
   const holder = seated && link && onHolder(link.kind) && state.tokens ? (holderOf(state.tokens, seated) as NonNullable<typeof seated> | undefined) : undefined;
   if (!link || !holder || !state.meta || !state.seen || !state.seen(seated) || !state.seen(holder)) return landedElevation(state.buildChunks, token, at);
   const stays = linkHolds(state.meta.settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder);
-  return stays ? holder.elevation : landedOffHolder(state.buildChunks, token, holder, at);
+  return stays ? holder.elevation : landedElevation(state.buildChunks, token, at, holder);
 }
 
 /**

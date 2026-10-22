@@ -1198,7 +1198,7 @@ function directsMount(c: Check, mount: Token): boolean {
  * creature still within reach. Its whole group rides along whoever owns the
  * rest. A lock stops a token's own drag, whatever the other rights.
  */
-function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> & { elevation?: number }): Decision {
+function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> & { elevation?: number; squeeze?: boolean }): Decision {
   const d = moveCheck(c, tokenId);
   if (d.ok || d.code === "gone") return d;
   const token = c.visibleToken(tokenId)!;
@@ -1210,7 +1210,7 @@ function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> &
   if (!moveCheck(c, holder.id).ok && !directsMount(c, holder as Token)) return d;
   const there = { ...token, x: to.x, y: to.y, elevation: to.elevation ?? token.elevation };
   // A token they may not move keeps its height on its holder, or takes the holder's, and a dragged one lands as a walk lands (4.1, 4.3).
-  const height = onHolder(link.kind) ? there.elevation === token.elevation || there.elevation === (holder as Token).elevation : landsAt(c.state.buildChunks, token, there);
+  const height = onHolder(link.kind) ? there.elevation === token.elevation || there.elevation === (holder as Token).elevation : landsAt(c.state.buildChunks, token, { ...there, squeeze: to.squeeze === true });
   return height && linkHolds(c.state.meta.settings, link.kind, there, holder as Token) ? OK : d;
 }
 

@@ -16,7 +16,7 @@ import { extraWords } from "../measure/movement.ts";
 import { towingWord, walkersFor, walkersOfGroup } from "./walk.ts";
 import { detachOp, getOffPlace } from "./detach.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreBlocked, legBlocker, ownWalk, walkEnd } from "#shared/rules/movement.ts";
-import { walkerFor } from "#shared/rules/attach.ts";
+import { landsAt, walkerFor } from "#shared/rules/attach.ts";
 
 const goblin = (over: Partial<Token> = {}) => token("goblin", { name: "Goblin", x: 3, y: 5, attached: { to: "thorn", kind: "drag" }, ...over });
 
@@ -408,12 +408,26 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
   test("a drag into the gap sends the squeezed drop its route walks to, which the server takes and stores as the label read", () => {
     const state = gap();
     const drag = dragOf(copyFor(state, P1), "player", "ogre", { x: 9.2, y: 13.3 });
-    assert.deepEqual(drag.op, { t: "token.move", tokenId: "ogre", x: 9.5, y: 13.5, squeeze: true, route: [[9.5, 6.5, 0, 0], [9.5, 8, 0, 0], [9.5, 13.5, 1, 0]] });
+    assert.deepEqual(drag.op, { t: "token.move", tokenId: "ogre", x: 9.5, y: 13.5, elevation: 0, squeeze: true, route: [[9.5, 6.5, 0, 0], [9.5, 8, 0, 0], [9.5, 13.5, 1, 0]] });
     assert.equal(canApply(drag.op as Op, P1, state, { canUseAsset: () => true }).ok, true);
     const r = applyOp(state, drag.op as Op, P1, env(9));
     assert.ok(r.ok);
     assert.equal(r.state.tokens.ogre!.squeeze, true);
     assert.equal(drag.preview.read.dragFt, r.state.tokens.ogre!.path!.stops.slice(1).reduce((sum, st) => sum + (st.cost ?? 0), 0));
+  });
+
+  test("the squeezed drop lands on the gap's floor under its squeezed footprint, so the ledge beside it stops the next drag (review AT-ASTRA-20)", () => {
+    const state = gap();
+    const r = applyOp(state, dragOf(copyFor(state, P1), "player", "ogre", { x: 9.2, y: 13.3 }).op as Op, P1, env(9));
+    assert.ok(r.ok);
+    assert.deepEqual([r.state.tokens.ogre!.elevation, r.state.tokens.ogre!.attached], [0, undefined]);
+    const next = dragOf(copyFor(r.state, P1), "player", "ogre", { x: 11.2, y: 13.3 });
+    assert.equal(next.plan.stop?.blocker, "ledge");
+    const over = canApply({ t: "token.move", tokenId: "ogre", x: 11.5, y: 13.5 }, P1, r.state, { canUseAsset: () => true });
+    assert.deepEqual(over.ok ? null : over.message, LEDGE_IN_THE_WAY);
+    // The server's test that a player's set down of a creature lands as a walk lands reads the same squeezed footprint.
+    const ogre = state.tokens.ogre!;
+    assert.deepEqual([landsAt(state.buildChunks, ogre, { x: 9.5, y: 13.5, elevation: 0, squeeze: true }), landsAt(state.buildChunks, ogre, { x: 9.5, y: 13.5, elevation: 0 })], [true, false]);
   });
 
   test("a walk past 64 pieces cut where it squeezes in the gap sends a squeezed drop the server takes", () => {
