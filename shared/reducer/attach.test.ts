@@ -198,6 +198,16 @@ describe("the link pass (5.2)", () => {
     assert.equal(raised.tokens.gob!.attached, undefined);
   });
 
+  test("runs over every link when the room's distance rules change, so no token is dragged from afar", () => {
+    // The goblin is dragged from a square diagonal to the horse: 5 ft by "five", 7 ft by "euclid".
+    const state = stable();
+    state.tokens.gob = { ...state.tokens.gob!, x: 6, y: 6 };
+    const s = run(state, { t: "room.update", settings: { diagonal: "euclid" } });
+    assert.equal(s.tokens.gob!.attached, undefined);
+    assert.equal(s.tokens.bree!.attached?.to, "horse");
+    assert.equal(run(state, { t: "room.update", settings: { diagonal: "fiveTen" } }).tokens.gob!.attached?.to, "horse");
+  });
+
   test("keeps a stored kind when the condition that led to it ends", () => {
     const state = room({
       tokens: {

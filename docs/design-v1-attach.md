@@ -216,7 +216,7 @@ op('token.detach', { tokenId, x: coord.optional(), y: coord.optional(), elevatio
 - **`token.attach`** writes the link, its kind and the seat, and on the rider's turn the seat leg with its cost when it is a ride. A controlled ride during a fight that every player sees sets the mount's row as 7.1 says, and, taken on the rider's turn while every player sees the pair, adds the mount to the turn's `mounts` and sets its `markRound`.
 - **`token.detach`** clears the link, and with a place moves the token there, adding the leg with its cost on the rider's turn. Ending a controlled ride takes the mount off the turn's `mounts`, and changes no row.
 - **`encounter.next`** writes the new turn's `mounts`: each mount the starting creature rides by a controlled ride that every player then sees. For each, it clears the mount row's `reactionUsed` and sets its `markRound` to the round. On a row whose `markRound` is the round it leaves `reactionUsed`, and it passes over a row whose `skipRound` is the round. The fields are left in place after their round, where they no longer match.
-- **The link pass** (5.2) is the last part of dispatch, over the tokens the op wrote and the links that name them, in token id order. A controlled ride it ends leaves the turn's `mounts`, and it changes no row. The move description is taken after it (section 9).
+- **The link pass** (5.2) is the last part of dispatch, over the tokens the op wrote and the links that name them, in token id order, and over every link when the op wrote the room's settings, whose feet per square and diagonal rule decide a drag's reach. A controlled ride it ends leaves the turn's `mounts`, and it changes no row. The move description is taken after it (section 9).
 
 ### 8.3 Undo and redo
 

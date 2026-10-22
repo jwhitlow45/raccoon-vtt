@@ -221,8 +221,9 @@ function seenByAll(tx: Tx, tokenId: string): boolean {
 
 /**
  * The link pass (5.2, "Links must hold"), the last part of every op's
- * dispatch: each link to or from a token the op wrote, in token id order,
- * that no longer holds is dropped, the token loose where it stands. The
+ * dispatch: each link to or from a token the op wrote, or every link when
+ * it wrote the room's settings, in token id order, that no longer holds is
+ * dropped, the token loose where it stands. The
  * holder is gone, the two are on different scenes, what sits on its holder
  * no longer fits it, or a dragged creature is out of reach. One rule
  * covers a deletion, Enlarge ending, a teleport and every move of a
@@ -230,12 +231,17 @@ function seenByAll(tx: Tx, tokenId: string): boolean {
  */
 export function linkPass(tx: Tx): void {
   const touched = new Set<string>();
-  for (const key of tx.touched()) if (key.startsWith("token:")) touched.add(key.slice("token:".length));
-  if (touched.size === 0) return;
+  // The room's distance rules (feet per square, the diagonal rule) decide every drag's reach, so an op that writes them meets every link.
+  let everyLink = false;
+  for (const key of tx.touched()) {
+    if (key.startsWith("token:")) touched.add(key.slice("token:".length));
+    else if (key === keys.meta) everyLink = true;
+  }
+  if (touched.size === 0 && !everyLink) return;
   const candidates: Token[] = [];
   for (const token of Object.values(tx.state.tokens)) {
     const link = token.attached;
-    if (link && (touched.has(token.id) || touched.has(link.to))) candidates.push(token);
+    if (link && (everyLink || touched.has(token.id) || touched.has(link.to))) candidates.push(token);
   }
   const settings = tx.state.meta.settings;
   for (const token of sortedById(candidates)) {
