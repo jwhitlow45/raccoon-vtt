@@ -5,14 +5,16 @@ import type { RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
 import type { OpAnswer } from "../../state/types.ts";
-import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
+import { useRoomScope, type RoomScope } from "../../state/scope.ts";
+import type { RoomUi } from "../../state/store.ts";
+import type { RoomActions } from "../../state/types.ts";
+import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
 import { dropMode, keyStep, planGroup, planOne, planWalk, routeLanding, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
-import type { RouteJob } from "./routeWork.ts";
+import type { RouteJob, RouteWork } from "./routeWork.ts";
 import { sendPlan } from "./send.ts";
 import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute } from "./store.ts";
 
@@ -103,192 +105,222 @@ type Walk = {
   straight: { to: Point; job: RouteJob; pieces: RoutePiece[] | null } | null;
 };
 
+/** What a drag's stops read and write: the room, its actions, the board's UI, the room's scope and the board's route work. */
+export type DragDeps = {
+  store: Pick<RoomViewStore, "getState">;
+  actions: Pick<RoomActions, "dispatch" | "newId">;
+  ui: Pick<RoomUi, "notify" | "showActions">;
+  scope: Pick<RoomScope, "get">;
+  role: Role;
+  work: RouteWork;
+};
+
 export function useDragStops(role: Role): DragStops {
   const store = useRoomStore();
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
-  const stops = useMemo((): DragStops => {
-    const holds = scope.get(holdSlot);
-    const notes = scope.get(stopNoteSlot);
-    const routes = scope.get(routeSlot);
-    /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot. */
-    let raw: ({ tokenId: string } & Point) | null = null;
-    /** The lone drag's search, its world and what the world was built from. */
-    let walk: Walk | null = null;
-    /*
-     * The leg test runs again only when the finger crosses into another
-     * quarter cell, the finest step a drop snaps by (half cells, and the
-     * squeezed spots half a cell off the grid), or the room changed, never on
-     * every pointer frame. The walls are derived once per build and cached
-     * across drags (walls.ts sceneWalls), so a frame costs at most one drop's
-     * leg tests.
-     */
-    let memo: { view: RoomState; token: DropToken; qx: number; qy: number; stop: Stop | null } | null = null;
-    const setHold = (next: { tokenId: string; at: Point; blocker: Stop["blocker"] } | null) => {
-      if (!sameHold(holds.getState().hold, next)) holds.setState({ hold: next });
-    };
-    const setRoute = (next: DragRoute | null) => {
-      if (routes.getState().route !== next) routes.setState({ route: next });
-    };
-    /**
-     * Clears the drag's search and preview. A new drag or a key press first
-     * lands a drop still waiting for its route (`land`), so it is never thrown
-     * away with no move and no word to the others. The board going away
-     * cancels it.
-     */
-    /** Drops and presses waiting for the frame's budget to land, in the order they came. */
-    const landings: RouteJob[] = [];
-    const later = (land: (budget: WorkBudget) => void) => {
-      const job: RouteJob = {
+  const stops = useMemo(() => dragStops({ store, actions, ui, scope, role, work: BOARD_WORK }), [store, actions, ui, scope, role]);
+  // A drop still waiting for its route when the board goes away never lands.
+  useEffect(() => () => stops.end(), [stops]);
+  return stops;
+}
+
+/** The drag's stops, free of React, so dragStops.test.ts drives them under Node. */
+export function dragStops(deps: DragDeps): DragStops {
+  const { store, actions, ui, scope, role, work } = deps;
+  const holds = scope.get(holdSlot);
+  const notes = scope.get(stopNoteSlot);
+  const routes = scope.get(routeSlot);
+  /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot. */
+  let raw: ({ tokenId: string } & Point) | null = null;
+  /** The lone drag's search, its world and what the world was built from. */
+  let walk: Walk | null = null;
+  /*
+   * The leg test runs again only when the finger crosses into another
+   * quarter cell, the finest step a drop snaps by (half cells, and the
+   * squeezed spots half a cell off the grid), or the room changed, never on
+   * every pointer frame. The walls are derived once per build and cached
+   * across drags (walls.ts sceneWalls), so a frame costs at most one drop's
+   * leg tests.
+   */
+  let memo: { view: RoomState; token: DropToken; qx: number; qy: number; stop: Stop | null } | null = null;
+  const setHold = (next: { tokenId: string; at: Point; blocker: Stop["blocker"] } | null) => {
+    if (!sameHold(holds.getState().hold, next)) holds.setState({ hold: next });
+  };
+  const setRoute = (next: DragRoute | null) => {
+    if (routes.getState().route !== next) routes.setState({ route: next });
+  };
+  /**
+   * Clears the drag's search and preview. A new drag or a key press first
+   * lands a drop still waiting for its route (`land`), so it is never thrown
+   * away with no move and no word to the others. The board going away
+   * cancels it.
+   */
+  /**
+   * Drops and presses waiting for the frame's budget to land, in the order
+   * they came. A new drag or a press lands them first. The board ending
+   * drops them: one cancelled never sends or lands, even from a turn
+   * already under way (review ASTRA-16).
+   */
+  const landings: { job: RouteJob; live: boolean }[] = [];
+  const later = (land: (budget: WorkBudget) => void) => {
+    const waiting = {
+      live: true,
+      job: {
         first: true,
-        run: (budget) => {
-          const k = landings.indexOf(job);
+        run: (budget: WorkBudget) => {
+          const k = landings.indexOf(waiting);
           if (k >= 0) landings.splice(k, 1);
-          land(budget);
+          if (waiting.live) {
+            waiting.live = false;
+            land(budget);
+          }
           return true;
         },
-      };
-      landings.push(job);
-      BOARD_WORK.run(job);
+      } as RouteJob,
     };
-    const reset = (land = false) => {
-      if (land && walk?.waiting) walk.drag.flush();
-      // A drop or a press still waiting for its frame lands first too: the flush's one exception to the budget.
-      if (land) {
-        for (const job of landings.splice(0)) {
-          BOARD_WORK.drop(job);
-          job.run(WorkBudget.all());
-        }
-      }
-      raw = null;
-      memo = null;
-      if (walk) goStraight(walk, null);
-      walk?.drag.cancel();
-      walk = null;
-      setHold(null);
-      setRoute(null);
-    };
+    landings.push(waiting);
+    work.run(waiting.job);
+  };
+  const reset = (land = false) => {
+    if (land && walk?.waiting) walk.drag.flush();
+    // A drop or a press still waiting for its frame lands first too, the flush's one exception to the budget, or with no landing wanted it goes.
+    for (const waiting of landings.splice(0)) {
+      work.drop(waiting.job);
+      if (land) waiting.job.run(WorkBudget.all());
+      waiting.live = false;
+    }
+    raw = null;
+    memo = null;
+    if (walk) goStraight(walk, null);
+    walk?.drag.cancel();
+    walk = null;
+    setHold(null);
+    setRoute(null);
+  };
 
-    /** The board's picture of the walk: the line, the label and, while a drop waits, the ghost's words. */
-    const publish = (w: Walk) => {
-      const view = store.getState().view;
-      const target = w.target;
-      if (!view || !target || walk !== w) return;
-      const answer = w.drag.answer;
-      const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
-      setRoute({ tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting });
-    };
+  /** The board's picture of the walk: the line, the label and, while a drop waits, the ghost's words. */
+  const publish = (w: Walk) => {
+    const view = store.getState().view;
+    const target = w.target;
+    if (!view || !target || walk !== w) return;
+    const answer = w.drag.answer;
+    const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
+    setRoute({ tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting });
+  };
 
-    /** The straight walk to `to` checked for what it walks over, or none wanted (null). */
-    const goStraight = (w: Walk, to: Point | null) => {
-      if (w.straight && to && w.straight.to.x === to.x && w.straight.to.y === to.y) return;
-      if (w.straight) BOARD_WORK.drop(w.straight.job);
-      w.straight = null;
-      const world = w.drag.world;
-      if (!to || !world) return;
-      const check = new LegCheck(world, to, true);
-      const straight: NonNullable<Walk["straight"]> = {
-        to: { x: to.x, y: to.y },
-        pieces: null,
-        job: {
-          first: true,
-          run: (budget) => {
-            if (w.straight !== straight) return true;
-            const late = (units = 1) => {
-              budget.charge(units);
-              return budget.spent;
-            };
-            if (!check.run(late)) return false;
-            straight.pieces = check.open || check.stopped || !check.route ? null : check.route.pieces;
-            if (straight.pieces) publish(w);
-            return true;
-          },
+  /** The straight walk to `to` checked for what it walks over, or none wanted (null). */
+  const goStraight = (w: Walk, to: Point | null) => {
+    if (w.straight && to && w.straight.to.x === to.x && w.straight.to.y === to.y) return;
+    if (w.straight) work.drop(w.straight.job);
+    w.straight = null;
+    const world = w.drag.world;
+    if (!to || !world) return;
+    const check = new LegCheck(world, to, true);
+    const straight: NonNullable<Walk["straight"]> = {
+      to: { x: to.x, y: to.y },
+      pieces: null,
+      job: {
+        first: true,
+        run: (budget) => {
+          if (w.straight !== straight) return true;
+          const late = (units = 1) => {
+            budget.charge(units);
+            return budget.spent;
+          };
+          if (!check.run(late)) return false;
+          straight.pieces = check.open || check.stopped || !check.route ? null : check.route.pieces;
+          if (straight.pieces) publish(w);
+          return true;
         },
-      };
-      w.straight = straight;
-      BOARD_WORK.run(straight.job);
-    };
-
-    /**
-     * Where the preview stands for the drag's answer now: a player's walk
-     * with no route, or with one the drop would not take, holds at the last
-     * clear spot before the wall, the line and the label with it.
-     */
-    const follow = (view: RoomState, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
-      const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
-      const holdAt = (at: Point | null) => {
-        if (!w || (w.held?.x === at?.x && w.held?.y === at?.y)) return;
-        w.held = at;
-        publish(w);
-      };
-      // The drop goes straight, and may be held at the wall, with no route, or one it would not take (drop.ts `routeLanding`).
-      const straight = answer.kind === "none" || (answer.kind === "route" && !routeLanding(view, token, target, answer.route.pieces, view.meta.settings.feetPerCell));
-      if (!raw || raw.tokenId !== token.id || dropMode(role, view.scenes[token.sceneId]) !== "walk" || !straight) {
-        holdAt(null);
-        setHold(null);
-        if (w) goStraight(w, straight ? target : null);
-        return;
-      }
-      const qx = Math.floor(raw.x * 4);
-      const qy = Math.floor(raw.y * 4);
-      if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy) {
-        memo = { view, token, qx, qy, stop: planOne(view, token, raw, "walk").stop };
-      }
-      const stop = memo.stop;
-      if (stop) node.position(stop.at);
-      if (w) goStraight(w, stop ? stop.at : target);
-      holdAt(stop ? stop.at : null);
-      setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
-    };
-
-    /** The drag's search for this token, begun on its first frame and told when the room changes under it. */
-    const walkFor = (view: RoomState, dropToken: DropToken): Walk | null => {
-      const token = view.tokens[dropToken.id];
-      if (!token) return null;
-      const basis = basisOf(view, token.sceneId);
-      if (!walk || walk.tokenId !== token.id) {
-        walk?.drag.cancel();
-        const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, waiting: false, node: null, drawn: null, straight: null };
-        w.drag = new RouteDrag(
-          () => {
-            w.world = worldFor(store.getState().view ?? view, w.token, role);
-            return w.world.input;
-          },
-          BOARD_WORK,
-          () => {
-            // An answer that came in a later frame holds the preview at the wall as one that came at once does.
-            const now = store.getState().view;
-            if (walk === w && !w.waiting && now && w.node && w.drawn && w.target) follow(now, w, w.node, w.drawn, w.target);
-            publish(w);
-          },
-        );
-        walk = w;
-      } else if (!sameBasis(walk.basis, basis)) {
-        walk.basis = basis;
-        walk.token = token;
-        goStraight(walk, null);
-        walk.drag.rebuild();
-      }
-      return walk;
-    };
-
-    const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
-      sendPlan(plan, {
-        dispatch: (op, opts) => actions.dispatch(op, onAnswer ? { ...opts, onAnswer: (answer) => onAnswer(op, answer) } : opts),
-        newId: () => actions.newId(),
-        note: (note) => notes.setState({ note, busy: false }),
-        notify: (text) => ui.notify(text),
-        showActions: (open) => ui.showActions(open),
-      });
-
-    return {
-      start(tokenId) {
-        reset(true);
-        const s = notes.getState();
-        if (s.note?.tokenId === tokenId && !s.busy) notes.setState({ note: null });
       },
-      frame(node, token) {
+    };
+    w.straight = straight;
+    work.run(straight.job);
+  };
+
+  /**
+   * Where the preview stands for the drag's answer now: a player's walk
+   * with no route, or with one the drop would not take, holds at the last
+   * clear spot before the wall, the line and the label with it.
+   */
+  const follow = (view: RoomState, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
+    const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
+    const holdAt = (at: Point | null) => {
+      if (!w || (w.held?.x === at?.x && w.held?.y === at?.y)) return;
+      w.held = at;
+      publish(w);
+    };
+    // The drop goes straight, and may be held at the wall, with no route, or one it would not take (drop.ts `routeLanding`).
+    const straight = answer.kind === "none" || (answer.kind === "route" && !routeLanding(view, token, target, answer.route.pieces, view.meta.settings.feetPerCell));
+    if (!raw || raw.tokenId !== token.id || dropMode(role, view.scenes[token.sceneId]) !== "walk" || !straight) {
+      holdAt(null);
+      setHold(null);
+      if (w) goStraight(w, straight ? target : null);
+      return;
+    }
+    const qx = Math.floor(raw.x * 4);
+    const qy = Math.floor(raw.y * 4);
+    if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy) {
+      memo = { view, token, qx, qy, stop: planOne(view, token, raw, "walk").stop };
+    }
+    const stop = memo.stop;
+    if (stop) node.position(stop.at);
+    if (w) goStraight(w, stop ? stop.at : target);
+    holdAt(stop ? stop.at : null);
+    setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
+  };
+
+  /** The drag's search for this token, begun on its first frame and told when the room changes under it. */
+  const walkFor = (view: RoomState, dropToken: DropToken): Walk | null => {
+    const token = view.tokens[dropToken.id];
+    if (!token) return null;
+    const basis = basisOf(view, token.sceneId);
+    if (!walk || walk.tokenId !== token.id) {
+      walk?.drag.cancel();
+      const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, waiting: false, node: null, drawn: null, straight: null };
+      w.drag = new RouteDrag(
+        () => {
+          w.world = worldFor(store.getState().view ?? view, w.token, role);
+          return w.world.input;
+        },
+        work,
+        () => {
+          // An answer that came in a later frame holds the preview at the wall as one that came at once does.
+          const now = store.getState().view;
+          if (walk === w && !w.waiting && now && w.node && w.drawn && w.target) follow(now, w, w.node, w.drawn, w.target);
+          publish(w);
+        },
+      );
+      walk = w;
+    } else if (!sameBasis(walk.basis, basis)) {
+      walk.basis = basis;
+      walk.token = token;
+      goStraight(walk, null);
+      walk.drag.rebuild();
+    }
+    return walk;
+  };
+
+  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
+    sendPlan(plan, {
+      dispatch: (op, opts) => actions.dispatch(op, onAnswer ? { ...opts, onAnswer: (answer) => onAnswer(op, answer) } : opts),
+      newId: () => actions.newId(),
+      note: (note) => notes.setState({ note, busy: false }),
+      notify: (text) => ui.notify(text),
+      showActions: (open) => ui.showActions(open),
+    });
+
+  return {
+    start(tokenId) {
+      reset(true);
+      const s = notes.getState();
+      if (s.note?.tokenId === tokenId && !s.busy) notes.setState({ note: null });
+    },
+    frame(node, token) {
+      // The preview always follows the finger, its time counted against the frame's budget all the same.
+      work.within(() => {
         raw = { tokenId: token.id, x: node.x(), y: node.y() };
         const view = store.getState().view;
         if (!view) {
@@ -306,22 +338,25 @@ export function useDragStops(role: Role): DragStops {
           if (moved) publish(w);
         }
         follow(view, w, node, token, target);
-      },
-      frameFields(tokenId) {
-        const route = routes.getState().route;
-        if (!route || route.tokenId !== tokenId) return {};
-        return routeFrame(route);
-      },
-      press(node, drawn, drawnGroup) {
-        const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
-        // A drop still waiting lands first, and the press steps on from where it put the token.
-        reset(true);
-        later((budget) => {
-          const view = store.getState().view;
-          if (view) send(pressPlan(view, drawn, asked, drawnGroup, role, budget));
-        });
-      },
-      drop(node, token, group, land) {
+      });
+    },
+    frameFields(tokenId) {
+      const route = routes.getState().route;
+      if (!route || route.tokenId !== tokenId) return {};
+      return routeFrame(route);
+    },
+    press(node, drawn, drawnGroup) {
+      const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
+      // A drop still waiting lands first, and the press steps on from where it put the token.
+      reset(true);
+      later((budget) => {
+        const view = store.getState().view;
+        if (view) send(pressPlan(view, drawn, asked, drawnGroup, role, budget));
+      });
+    },
+    drop(node, token, group, land) {
+      // A drop's work, its time counted against the frame's budget, and its landing queued as route work when the budget is spent.
+      work.within(() => {
         const at = raw?.tokenId === token.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
         const view = store.getState().view;
         if (!view) {
@@ -362,12 +397,9 @@ export function useDragStops(role: Role): DragStops {
         });
         // Still searching: the drop waits at the ghost, which says so.
         if (walk === w) publish(w);
-      },
-      send,
-      end: () => reset(),
-    };
-  }, [store, actions, ui, scope, role]);
-  // A drop still waiting for its route when the board goes away never lands.
-  useEffect(() => () => stops.end(), [stops]);
-  return stops;
+      });
+    },
+    send,
+    end: () => reset(),
+  };
 }

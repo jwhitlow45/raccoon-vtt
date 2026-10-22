@@ -11,8 +11,9 @@ import { RouteWork, type Frames } from "./routeWork.ts";
 /**
  * The drag's search as a state machine (docs/design-v1-movement.md 12):
  * random runs of finger moves, often back to a spot visited before while
- * another spot's trace is under way, frames, drops, cancels, wall changes
- * and frames that fire late, against six invariants:
+ * another spot's trace is under way, frames, frames other work has spent
+ * so the drag's work waits queued, drops, cancels, wall changes and frames
+ * that fire late, against six invariants:
  * - a drop lands at most once,
  * - nothing lands after a cancel,
  * - a drop that waits is never lost: a flush (a new drag, a key press)
@@ -107,7 +108,8 @@ function run(seed: number): void {
   let current = inputNow();
   let built: WalkInput = current;
   const frames = new HandFrames();
-  const drag = new RouteDrag(() => (built = current), work(frames));
+  const board = work(frames);
+  const drag = new RouteDrag(() => (built = current), board);
   const step = big ? 0.5 : 1;
   const span = (n: number) => Math.floor(rand() * (n - (big ? 2 : 1)) / step) * step;
   const visited: Point[] = [];
@@ -134,6 +136,9 @@ function run(seed: number): void {
       scene = randomScene(rand, W, H);
       current = inputNow();
       drag.rebuild();
+    } else if (r < 0.85) {
+      // Other work spends what is left of the frame, so the drag's work, or its drop's landing, waits queued for a later frame, and a cancel may meet it there.
+      board.run({ run: (budget) => (budget.charge(16), true) });
     } else if (r < 0.9) {
       for (const late of frames.late.splice(0)) late();
     } else if (r < 0.94) {
