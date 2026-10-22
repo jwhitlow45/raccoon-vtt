@@ -11,8 +11,10 @@ import { canApply, mayMoveToken } from "#shared/permissions.ts";
 import { applyChanges, inSightOfNonOwners, isPartyMember, projectState, type ProjectedState } from "#shared/project.ts";
 import type { Change, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { carriedGroup, getOffSpot, holderOf, seatSpot } from "#shared/rules/attach.ts";
-import { encodeHeights } from "#shared/rules/heights.ts";
+import { carriedGroup, getOffSpot, holderOf, seatSpot, walkerFor } from "#shared/rules/attach.ts";
+import { isSqueezed } from "#shared/rules/footprint.ts";
+import { walkEnd, walkStates, type Walker } from "#shared/rules/movement.ts";
+import { encodeHeights, footing, footprintGround } from "#shared/rules/heights.ts";
 import { stopsForOwners } from "#shared/rules/path.ts";
 import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, reveal, rng, room, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf, type Drag, type GroupDrag } from "../movement/dragTesting.ts";
@@ -1104,7 +1106,9 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
  * without any, goes through the server's routing, and P1 must get none
  * that the move, once made, leaves out of P1's copy.
  */
-type PreviewSeen = { frames: number; shown: number; withheld: number; reentries: number; squeezed: number };
+type PreviewSeen = { frames: number; shown: number; withheld: number; reentries: number; squeezed: number; squeezedStarts: number; closure: number };
+
+const PREVIEW_ZERO: PreviewSeen = { frames: 0, shown: 0, withheld: 0, reentries: 0, squeezed: 0, squeezedStarts: 0, closure: 0 };
 
 function previewWorld(r: () => number): { state: RoomState; cart: { x: number; y: number }; astra: boolean } {
   const cart = { x: int(r, 5, 9), y: int(r, 4, 7) };
@@ -1171,11 +1175,120 @@ function reentry(r: () => number, cart: { x: number; y: number }, from: Token, w
   return corners.map(([x, y]): [number, number, number, 0 | 1] => [x, y, 0, 0]);
 }
 
+/**
+ * One move and the frames its sender would send for it, with the move's
+ * corners and without any, routed by the server: P1 must get none that the
+ * move, once made, leaves out of P1's copy. And the walker the server reads
+ * where the move's last leg starts must be one of the walkers it judges a
+ * frame without corners by (movement.ts walkStates), so a frame that sends
+ * no route is judged at least as the move is.
+ */
+function judgeMove(state: RoomState, op: Op & { t: "token.move" }, who: Viewer, where: string, seen: PreviewSeen, at: ReturnType<typeof env>): RoomState {
+  const id = op.tokenId;
+  const token = state.tokens[id]!;
+  if (op.squeeze) seen.squeezed++;
+  if (token.squeeze) seen.squeezedStarts++;
+  const corners = (op.route ?? []).slice(0, -1).map(([x, y]) => ({ x, y }));
+  const sees = (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
+  const walker = walkerFor(state, token, sees);
+  const key = (w: Walker) => `${isSqueezed(w)},${w.offHolder !== undefined},${footing(state.buildChunks, w)}`;
+  const reached = key(walkEnd(state, walker, op, corners).walker);
+  const states = walkStates(state.buildChunks, walker).map(key);
+  assert.ok(states.includes(reached), `${where}: ${JSON.stringify(op)} reaches ${reached}, which a frame without corners never judges (${states.join(" ")})`);
+  seen.closure++;
+  const frames: EphEvent[] = [
+    { k: "dragMove", tokenId: id, x: op.x, y: op.y, path: corners.flatMap((c) => [c.x, c.y]) },
+    { k: "dragMove", tokenId: id, x: op.x, y: op.y },
+  ];
+  const after = applyOp(state, op, who, at);
+  assert.ok(after.ok, `${where}: ${JSON.stringify(op)} ${after.ok ? "" : after.message}`);
+  const shown = projectState(after.state, P1, { sceneId: "s1" }).tokens[id];
+  const there = shown !== undefined && shown.x === op.x && shown.y === op.y;
+  for (const frame of frames) {
+    const { conns, got } = previewTable();
+    routeEphemeral(state, conns.get(who.memberId!)!, "s1", frame, conns.values());
+    const sent = got.get("p1")!.some((e) => e.k === "dragMove");
+    seen.frames++;
+    if (sent) seen.shown++;
+    else seen.withheld++;
+    assert.ok(
+      !sent || there,
+      `${where}: P1 got ${JSON.stringify(frame)} for ${JSON.stringify(op)} by ${who.memberId}, which leaves ${id} out of P1's copy (committed ${JSON.stringify({ x: after.state.tokens[id]!.x, y: after.state.tokens[id]!.y, squeeze: after.state.tokens[id]!.squeeze })})`,
+    );
+  }
+  return after.state;
+}
+
+/**
+ * Review AT-ASTRA-22's corridor: one cell or two wide between walls, with
+ * 10 ft ground beside it and now and then a 5 ft step along its east side,
+ * so the ground differs under the full footprint and the squeezed one. A
+ * Large or a Huge creature stands squeezed in it, the one it is too narrow
+ * for, under fog lifted in patches. Then the DM walks it up and down the
+ * corridor in pieces, squeezed at the end where the server takes it, now
+ * and then a random route or a board drag. Now and then the run is the
+ * review's own, its first step the review's walk.
+ */
+function corridorRun(seed: number): PreviewSeen {
+  const r = rng(seed * 6007 + 29);
+  const seen: PreviewSeen = { ...PREVIEW_ZERO };
+  const cx = int(r, 6, 10);
+  const top = int(r, 3, 6);
+  const astra = chance(r, 0.3);
+  const wide = astra ? 2 : pick(r, [1, 2] as const);
+  const id = wide === 2 ? "giant" : "ogre";
+  const edges: Record<string, EdgeFeature> = {};
+  const heights: Record<string, number> = {};
+  for (let y = top; y < top + 16; y++) {
+    edges[`${cx},${y},w`] = { kind: "wall" };
+    edges[`${cx + wide},${y},w`] = { kind: "wall" };
+    if (chance(r, 0.9)) for (let x = cx + wide; x < cx + wide + 4; x++) heights[`${x},${y}`] = 10;
+  }
+  if (astra) for (let y = top + 7; y < top + 10; y++) heights[`${cx + 1},${y}`] = 5;
+  else if (chance(r, 0.7)) {
+    const from = top + int(r, 3, 10);
+    for (let y = from; y < from + int(r, 1, 4); y++) heights[`${cx + wide - 1},${y}`] = pick(r, [5, 10]);
+  }
+  const buildChunks = built(edges, heights);
+  const x0 = cx - 0.5;
+  const y0 = astra ? top + 1.5 : top + 1 + int(r, 0, 2) / 2;
+  const squeezed = token(id, { name: id === "giant" ? "Giant" : "Ogre", kind: "npc", size: id === "giant" ? "huge" : "large", x: x0, y: y0, squeeze: true });
+  let state = room({ tokens: { [id]: { ...squeezed, elevation: footprintGround(buildChunks, squeezed) } }, buildChunks });
+  state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true, autoWalls: "off", fogEnabled: true };
+  if (astra) {
+    reveal(state, "s1", { x: cx, y: top + 2, w: 2, h: 2 });
+    reveal(state, "s1", { x: cx + 2, y: top + 8, w: 1, h: 1 });
+  } else for (let i = int(r, 2, 6); i > 0; i--) reveal(state, "s1", { x: int(r, cx - 2, cx + wide + 2), y: int(r, top, top + 14), w: int(r, 1, 3), h: int(r, 1, 3) });
+  let seq = 1;
+  for (let step = 0; step < 10; step++) {
+    const mover = state.tokens[id]!;
+    const kind = r();
+    let op: Op | null = null;
+    if (!(astra && step === 0) && kind < 0.2) op = (dragOf(state, "dm", id, { x: x0 + r() * 2 - 1, y: top + r() * 14 }).op as Op | null) ?? null;
+    else {
+      // Along the corridor in pieces of a cell or two, else now and then out of it at random.
+      const route: [number, number, number, 0 | 1][] = astra && step === 0 ? [[x0, top + 4.5, 0, 0], [x0, top + 6.5, 0, 0]] : [];
+      let y = mover.y;
+      for (let n = astra && step === 0 ? 0 : int(r, 1, 4); n > 0; n--) {
+        y = Math.max(top, Math.min(top + 13, y + pick(r, [-2, -1.5, -1, -0.5, 0.5, 1, 1.5, 2])));
+        route.push(kind < 0.85 ? [x0, y, 0, 0] : [x0 + int(r, -4, 6) / 2, y, 0, 0]);
+      }
+      const [x, yEnd] = route[route.length - 1]!;
+      const plain: Op = { t: "token.move", tokenId: id, x, y: yEnd, route };
+      const asSqueezed: Op = { ...plain, squeeze: true };
+      op = canApply(asSqueezed, DM, state, deps).ok ? asSqueezed : plain;
+    }
+    if (!op || op.t !== "token.move" || !canApply(op, DM, state, deps).ok) continue;
+    state = judgeMove(state, op, DM, `corridor seed ${seed} step ${step}`, seen, env(seq++));
+  }
+  return seen;
+}
+
 function previewRun(seed: number): PreviewSeen {
   const r = rng(seed * 7919 + 13);
   const { state: start, cart, astra } = previewWorld(r);
   let state = start;
-  const seen: PreviewSeen = { frames: 0, shown: 0, withheld: 0, reentries: 0, squeezed: 0 };
+  const seen: PreviewSeen = { ...PREVIEW_ZERO };
   let seq = 1;
   for (let step = 0; step < 12; step++) {
     // With review AT-ASTRA-21's patches the first step is its walk, by the ogre standing loose 10 ft up over the cart's low half.
@@ -1215,44 +1328,30 @@ function previewRun(seed: number): PreviewSeen {
       if (first || kind < 0.8) seen.reentries++;
     }
     if (!op || op.t !== "token.move" || !canApply(op, who, state, deps).ok) continue;
-    if (op.squeeze) seen.squeezed++;
-    const corners = (op.route ?? []).slice(0, -1).flatMap(([x, y]) => [x, y]);
-    const frames: EphEvent[] = [
-      { k: "dragMove", tokenId: id, x: op.x, y: op.y, path: corners },
-      { k: "dragMove", tokenId: id, x: op.x, y: op.y },
-    ];
-    const after = applyOp(state, op, who, env(seq++));
-    assert.ok(after.ok, `seed ${seed}: ${JSON.stringify(op)} ${after.ok ? "" : after.message}`);
-    const shown = projectState(after.state, P1, { sceneId: "s1" }).tokens[id];
-    const there = shown !== undefined && shown.x === op.x && shown.y === op.y;
-    for (const frame of frames) {
-      const { conns, got } = previewTable();
-      routeEphemeral(state, conns.get(who.memberId!)!, "s1", frame, conns.values());
-      const reached = got.get("p1")!.some((e) => e.k === "dragMove");
-      seen.frames++;
-      if (reached) seen.shown++;
-      else seen.withheld++;
-      assert.ok(
-        !reached || there,
-        `seed ${seed} step ${step}: P1 got ${JSON.stringify(frame)} for ${JSON.stringify(op)} by ${who.memberId}, which leaves ${id} out of P1's copy (committed ${JSON.stringify({ x: after.state.tokens[id]!.x, y: after.state.tokens[id]!.y, squeeze: after.state.tokens[id]!.squeeze })})`,
-      );
-    }
-    state = after.state;
+    state = judgeMove(state, op, who, `seed ${seed} step ${step}`, seen, env(seq++));
   }
   return seen;
 }
 
-describe("a drag's preview reaches a player only where its move leaves the token in their sight (review AT-ASTRA-21)", () => {
-  test("Large and Huge creatures walked off a cart and back over it into a gap, under fog lifted in patches around it", () => {
-    const total: PreviewSeen = { frames: 0, shown: 0, withheld: 0, reentries: 0, squeezed: 0 };
+describe("a drag's preview reaches a player only where its move leaves the token in their sight (reviews AT-ASTRA-21 and AT-ASTRA-22)", () => {
+  const sweep = (run: (seed: number) => PreviewSeen): { total: PreviewSeen; per: number } => {
+    const total: PreviewSeen = { ...PREVIEW_ZERO };
     const [from, to] = (process.env.ATTACH_RANDOM_SEEDS ?? "1-200").split("-").map(Number) as [number, number];
     for (let seed = from; seed <= to; seed++) {
-      const seen = previewRun(seed);
+      const seen = run(seed);
       for (const key of Object.keys(total) as (keyof PreviewSeen)[]) total[key] += seen[key];
     }
-    const summary = JSON.stringify(total);
-    const per = (to - from + 1) / 200;
-    assert.ok(total.frames > 2000 * per && total.shown > 200 * per && total.withheld > 200 * per && total.reentries > 300 * per && total.squeezed > 50 * per, summary);
-    if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
+    if (process.env.ATTACH_RANDOM_SEEDS) console.log(JSON.stringify(total));
+    return { total, per: (to - from + 1) / 200 };
+  };
+
+  test("Large and Huge creatures walked off a cart and back over it into a gap, under fog lifted in patches around it", () => {
+    const { total, per } = sweep(previewRun);
+    assert.ok(total.frames > 2000 * per && total.shown > 200 * per && total.withheld > 200 * per && total.reentries > 300 * per && total.squeezed > 50 * per, JSON.stringify(total));
+  });
+
+  test("Large and Huge creatures that start squeezed in a corridor walked along it, with other ground under their full footprint", () => {
+    const { total, per } = sweep(corridorRun);
+    assert.ok(total.frames > 1500 * per && total.shown > 100 * per && total.withheld > 100 * per && total.squeezedStarts > 200 * per && total.squeezed > 100 * per, JSON.stringify(total));
   });
 });

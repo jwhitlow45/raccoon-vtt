@@ -347,13 +347,13 @@ describe("a walk off a holder crosses only the ledges whose whole length lies in
     const ogre = token("ogre", { name: "Ogre", kind: "npc", size: "large", x: 5, y: 4, elevation: 10, attached: { to: "cart", kind: "carry" } });
     const state = world({ heights: raised(6, 4, 8, 8, 10), tokens: [wagon, ogre] });
     const walker = walkerFor(state, state.tokens.ogre!, () => true);
-    assert.equal(coreBlocked(state, walkEnd(walker, { x: 5, y: 4 })), false);
+    assert.equal(coreBlocked(state, walkEnd(state, walker, { x: 5, y: 4 })), false);
     // Off the cart to the west and back onto it.
     const back = [
       { x: 2, y: 4, elevation: 0 },
       { x: 4, y: 4, elevation: 0 },
     ];
-    assert.equal(coreBlocked(state, walkEnd(walker, { x: 5, y: 4 }, back)), true);
+    assert.equal(coreBlocked(state, walkEnd(state, walker, { x: 5, y: 4 }, back)), true);
   });
 
   test("a group drag that is no axis's tests the straight leg, so it never bends round a wall or a ledge beside the horse", () => {
@@ -430,6 +430,26 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     // The server's test that a player's set down of a creature lands as a walk lands reads the same squeezed footprint.
     const ogre = state.tokens.ogre!;
     assert.deepEqual([landsAt(state.buildChunks, ogre, { x: 9.5, y: 13.5, elevation: 0, squeeze: true }), landsAt(state.buildChunks, ogre, { x: 9.5, y: 13.5, elevation: 0 })], [true, false]);
+  });
+
+  test("a walk that starts squeezed is full size from its first corner, so the route down the gap through water is the one it sends (review AT-ASTRA-22)", () => {
+    const state = gap();
+    const r = applyOp(state, dragOf(copyFor(state, P1), "player", "ogre", { x: 9.2, y: 13.3 }).op as Op, P1, env(9));
+    assert.ok(r.ok);
+    // Water in the gap below the ogre, which it walks round or through, squeezed at the start only.
+    const chunks = { ...r.state.buildChunks };
+    const [key, chunk] = Object.entries(chunks).find(([, c]) => c.cx === 0 && c.cy === 0)!;
+    chunks[key] = { ...chunk, rev: chunk.rev + 1, cells: { ...chunk.cells, "10,15": "water" } };
+    const wet = { ...r.state, buildChunks: chunks };
+    const drag = dragOf(copyFor(wet, P1), "player", "ogre", { x: 9.2, y: 16.3 });
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, op.squeeze, op.route !== undefined], [9.5, 16.5, true, true], JSON.stringify(op));
+    const answer = canApply(op, P1, wet, { canUseAsset: () => true });
+    assert.ok(answer.ok, answer.ok ? "" : answer.message);
+    const after = applyOp(wet, op, P1, env(10));
+    assert.ok(after.ok);
+    const stops = after.state.tokens.ogre!.path!.stops;
+    assert.deepEqual([drag.preview.read.dragFt, stops[stops.length - 1]!.cost], [35, 35]);
   });
 
   test("a walk that squeezes only where it ends is reminded of an area it passes with its full footprint (review AT-SOL-2)", () => {

@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type Viewer } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
-import { DM, P1, P2, actor, character, reveal, room, scene, token } from "#shared/testutil.ts";
+import type { EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
+import { canApply } from "#shared/permissions.ts";
+import { projectState } from "#shared/project.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { DM, P1, P2, actor, character, env, reveal, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { routeEphemeral } from "./ephemeral.ts";
 
@@ -146,10 +149,11 @@ describe("rulers", () => {
 });
 
 /**
- * Build chunks on scene s1 with 10 ft ground over each `[x0, y0, x1, y1)`
- * rectangle and a wall along x = 10 from y = `wallFrom` to `wallTo`.
+ * Build chunks on scene s1 with ground over each `[x0, y0, x1, y1)`
+ * rectangle at its height (10 ft unless it says), and a wall along each
+ * `[x, from, to)`, from y = `from` to `to`.
  */
-function ground(raised: readonly [number, number, number, number][], wallFrom: number, wallTo: number): RoomState["buildChunks"] {
+function ground(raised: readonly (readonly [number, number, number, number, number?])[], walls: readonly (readonly [number, number, number])[]): RoomState["buildChunks"] {
   const chunks: RoomState["buildChunks"] = {};
   const chunk = (x: number, y: number) => {
     const cx = Math.floor(x / CHUNK_CELLS);
@@ -157,15 +161,15 @@ function ground(raised: readonly [number, number, number, number][], wallFrom: n
     return { k: (y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS), chunk: (chunks[`s1:${cx},${cy}`] ??= { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} }) };
   };
   const feet = new Map<BuildChunk, number[]>();
-  for (const [x0, y0, x1, y1] of raised)
+  for (const [x0, y0, x1, y1, ft = 10] of raised)
     for (let y = y0; y < y1; y++)
       for (let x = x0; x < x1; x++) {
         const { k, chunk: c } = chunk(x, y);
         if (!feet.has(c)) feet.set(c, new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0));
-        feet.get(c)![k] = 10;
+        feet.get(c)![k] = ft;
       }
   for (const [c, f] of feet) c.heights = encodeHeights(f);
-  for (let y = wallFrom; y < wallTo; y++) chunk(10, y).chunk.edges[`10,${y},w`] = { kind: "wall" };
+  for (const [x, from, to] of walls) for (let y = from; y < to; y++) chunk(x, y).chunk.edges[`${x},${y},w`] = { kind: "wall" };
   return chunks;
 }
 
@@ -252,7 +256,7 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     // stands west of the wall at (7,11).
     const state = room();
     state.scenes.s1 = scene("s1", { vision: { on: true, light: "dark" }, blockMovement: true });
-    state.buildChunks = ground([[11, 6, 13, 10], [11, 10, 15, 20]], 10, 20);
+    state.buildChunks = ground([[11, 6, 13, 10], [11, 10, 15, 20]], [[10, 10, 20]]);
     state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ senses: "darkvision 30 ft" }) });
     state.tokens.pc = token("pc", { kind: "pc", actor: { ref: "c1" }, x: 7, y: 11 });
     state.tokens.cart = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 9, y: 6, elevation: 10 });
@@ -271,7 +275,7 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     // the cell (11,8), which the ogre's full footprint in the gap would touch and its squeezed one does not.
     const state = room();
     state.scenes.s1 = scene("s1", { fogEnabled: true, blockMovement: true });
-    state.buildChunks = ground([[11, 6, 13, 10]], 8, 10);
+    state.buildChunks = ground([[11, 6, 13, 10]], [[10, 8, 10]]);
     reveal(state, "s1", { x: 9, y: 6, w: 2, h: 2 });
     reveal(state, "s1", { x: 11, y: 8, w: 1, h: 1 });
     state.tokens.cart = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 9, y: 6, elevation: 10 });
@@ -290,6 +294,32 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     state.tokens.ogre = loose;
     t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 9.5, y: 7.5 });
     assert.deepEqual(t.p1.got.at(-1), { k: "dragCancel", tokenId: "ogre" });
+  });
+
+  test("a Huge creature squeezed along a corridor walks it full size from its first corner, so no frame shows it where its move does not (review AT-ASTRA-22)", () => {
+    // A corridor 10 ft wide between walls along x = 10 and x = 12, with 10 ft ground east of it and a 5 ft step in its east
+    // half from y = 15. The giant stands squeezed in the corridor at 0 ft. Players have explored the corridor where it stands
+    // and the cell (12,16), which its full footprint at the end touches and its squeezed one would not.
+    const state = room();
+    state.scenes.s1 = scene("s1", { fogEnabled: true, blockMovement: true });
+    state.buildChunks = ground([[12, 8, 16, 22], [11, 15, 12, 18, 5]], [[10, 8, 22], [12, 8, 22]]);
+    reveal(state, "s1", { x: 10, y: 10, w: 2, h: 2 });
+    reveal(state, "s1", { x: 12, y: 16, w: 1, h: 1 });
+    state.tokens.giant = token("giant", { size: "huge", x: 9.5, y: 9.5, elevation: 0, squeeze: true });
+    const route: Op & { t: "token.move" } = { t: "token.move", tokenId: "giant", x: 9.5, y: 14.5, route: [[9.5, 12.5, 0, 0], [9.5, 14.5, 0, 0]] };
+    // Full size from its first corner on, on the ground over the 10 ft beside the corridor, every ledge counts: the step
+    // splits the squeezed footprint at the end, so that is no squeeze, and the move ends full size, in P1's sight.
+    const squeezed = canApply({ ...route, squeeze: true }, DM, state, { canUseAsset: () => true });
+    assert.deepEqual(squeezed.ok ? null : squeezed.code, "invalid");
+    const r = applyOp(state, route, DM, env(1));
+    assert.ok(r.ok);
+    const shown = projectState(r.state, P1, { sceneId: "s1" }).tokens.giant;
+    const t = table(state);
+    for (const frame of [{ path: [9.5, 12.5] }, {}]) {
+      t.send(t.dm.conn, { k: "dragMove", tokenId: "giant", x: 9.5, y: 14.5, ...frame });
+      const got = t.p1.got.at(-1);
+      assert.ok(got?.k !== "dragMove" || (shown?.x === 9.5 && shown.y === 14.5), JSON.stringify(got));
+    }
   });
 
   test("a Large creature in the open beside the edge of sight is judged by its full footprint", () => {

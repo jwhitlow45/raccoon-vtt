@@ -3,8 +3,8 @@ import type { PlacedToken } from "./footprint.ts";
 import { snapStep } from "./footprint.ts";
 import { overlaps } from "./attach.ts";
 import type { BuildState } from "../ruleHooks.ts";
-import { walkOn, type Walker } from "./movement.ts";
-import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
+import { walkFrom, walkOn, type Walker } from "./movement.ts";
+import { routeFeet, routePoints, routeWalk, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
  * Getting off a ride on the rider's own turn (docs/design-v1-attach.md
@@ -75,6 +75,9 @@ export function dismountCost(
   if (split.whole) return { moved: first.moved, cost: halfFt, diag: first.diag };
   running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
   const end = points[points.length - 1]!;
-  const rest = split.rest ? along(walkOn(rider, split.off), split.rest, end.elevation) : straightCost(rider, split.off, end, rules, running);
+  // The rest of the walk goes on from where the walk off the mount left the rider (movement.ts walkOn).
+  const start = walkFrom(build.buildChunks, rider);
+  const off = split.prefix ? routeWalkers(build.buildChunks, rider, split.prefix, split.off.elevation).at(-1)! : walkOn(build.buildChunks, start, split.off, split.off.elevation);
+  const rest = split.rest ? along(off, split.rest, end.elevation) : straightCost(rider, split.off, end, rules, running);
   return { moved: first.moved + rest.moved, cost: halfFt + rest.cost, diag: [first.diag[0] + rest.diag[0], first.diag[1] + rest.diag[1]] };
 }

@@ -4,7 +4,7 @@ import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { coreBlocked, legStop, squeezeFits, straightClear, walkEnd, walkOn, type MovingToken, type Walker } from "./movement.ts";
+import { coreBlocked, legStop, squeezeFits, straightClear, walkEnd, walkFrom, walkOn, type MovingToken, type Walker, type Walking } from "./movement.ts";
 
 /**
  * A move's route, what it costs and the spots it passes
@@ -50,27 +50,27 @@ export function onRouteLattice(from: Point, p: Point): boolean {
 }
 
 /**
- * The walk a route describes: where the token starts, then each piece's end
- * with its elevation by one fixed rule (6.1): a token on the ground at the
- * start takes the ground under its footprint at each spot, any other keeps
- * its elevation, and the last spot takes the landing's elevation. The
- * footprint between the ends is the full one: only where the move ends
- * does a squeeze change it.
+ * The walk a route describes, its walker where the token starts and at each
+ * piece's end, the last at the landing's elevation, each step by the walk's
+ * one rule (movement.ts `walkOn`, 6.1): a token on the ground at the start
+ * takes the ground under its full footprint at each stop, any other keeps
+ * its elevation, and a squeeze it starts in lasts for its first piece only.
  */
+export function routeWalkers<T extends Walker>(chunks: BuildState["buildChunks"], token: T, route: readonly RoutePiece[], landing: number): (T & Walking)[] {
+  let at = walkFrom(chunks, token);
+  const walkers = [at];
+  for (const [i, [x, y]] of route.entries()) walkers.push((at = walkOn(chunks, at, { x, y }, i === route.length - 1 ? landing : undefined)));
+  return walkers;
+}
+
+/** The points of a route's walk (`routeWalkers`): where the token starts, then each piece's end with its elevation. */
 export function routePoints(chunks: BuildState["buildChunks"], token: Walker, route: readonly RoutePiece[], landing: number): RoutePoint[] {
-  const grounded = footing(chunks, token) === "ground";
-  const points: RoutePoint[] = [{ x: token.x, y: token.y, elevation: token.elevation }];
-  for (const [i, [x, y]] of route.entries()) {
-    const elevation = i === route.length - 1 ? landing : grounded ? footprintGround(chunks, { ...token, x, y, squeeze: undefined }) : token.elevation;
-    points.push({ x, y, elevation });
-  }
-  return points;
+  return routeWalkers(chunks, token, route, landing).map(({ x, y, elevation }) => ({ x, y, elevation }));
 }
 
 /**
- * What stops a walked route (6.1): each piece's leg test from where the
- * piece starts, the token squeezed only where the walk starts, since a walk
- * squeezes nowhere between, along the points `routePoints` gives. The
+ * What stops a walked route (6.1): each piece's leg test from its walker
+ * where the piece starts (`routeWalkers`), squeezed only on its first. The
  * server's check of a routed move (permissions.ts `routeCheck`) and the
  * client's, of a route it built before it sends it, are this one rule, so
  * the client never sends a route the server refuses (review MV-O-24).
@@ -83,13 +83,10 @@ export function routeBlocker<T extends Walker>(state: BuildState, token: T, rout
 
 /** `routeBlocker`, with the piece it stops at. */
 export function routeStop<T extends Walker>(state: BuildState, token: T, route: readonly RoutePiece[], landing: number, legBlocker: (state: BuildState, token: T, to: RoutePoint) => Blocker | null = (s, t, to) => legStop(s, t, to)?.blocker ?? null): { piece: number; blocker: Blocker } | null {
-  const points = routePoints(state.buildChunks, token, route, landing);
-  let from: T = token;
-  for (let i = 1; i < points.length; i++) {
-    // Each piece from the token where it starts, off the holder it walks off once a stop is clear of it (movement.ts walkOn).
-    from = walkOn(from, points[i - 1]!);
-    if (i > 1) delete from.squeeze;
-    const blocker = legBlocker(state, from, points[i]!);
+  const walkers = routeWalkers(state.buildChunks, token, route, landing);
+  for (let i = 1; i < walkers.length; i++) {
+    const { x, y, elevation } = walkers[i]!;
+    const blocker = legBlocker(state, walkers[i - 1]!, { x, y, elevation });
     if (blocker !== null) return { piece: i - 1, blocker };
   }
   return null;
@@ -275,24 +272,28 @@ function latticePiece(dx: number, dy: number, step: number): boolean {
   return Math.abs(dx) < SLACK || Math.abs(dy) < SLACK || Math.abs(Math.abs(dx) - Math.abs(dy)) < SLACK;
 }
 
-/** Where a spot lies on a walk: where it starts, where it ends, or between. */
-export type WalkPlace = "start" | "between" | "end";
+/** Where a spot lies on a walk: on its piece `n` (0 the first, its start included), or where it ends. */
+export type WalkPlace = number | "end";
 
 /**
- * Whether a walk has its token squeezed at a spot (4.1): where it starts as
- * the token stood (`before`), where it ends as the move leaves it
- * (`after`), and nowhere between, since the walk reads the full footprint
- * between its ends (routePoints). A path's visibility and the areas a walk
- * enters both read a walk's footprint by this one rule (review AT-SOL-2).
+ * Whether a walk has its token squeezed at a spot (4.1): where it ends as
+ * the move leaves it (`after`), and elsewhere as its walk carries it from
+ * where it stood (`before`, movement.ts `walkOn`), so squeezed on its first
+ * piece only, where it starts squeezed. A path's visibility and the areas
+ * a walk enters both read a walk's footprint by this one rule (reviews
+ * AT-SOL-2 and AT-ASTRA-22).
  */
-export function squeezedOnWalk(place: WalkPlace, before: PlacedToken, after: PlacedToken): boolean {
-  return place === "start" ? isSqueezed(before) : place === "end" ? isSqueezed(after) : false;
+export function squeezedOnWalk(chunks: BuildState["buildChunks"], place: WalkPlace, before: Walker, after: PlacedToken): boolean {
+  if (place === "end") return isSqueezed(after);
+  let at = walkFrom(chunks, before);
+  for (let piece = 0; piece < place && at.squeeze; piece++) at = walkOn(chunks, at, at);
+  return isSqueezed(at);
 }
 
 /** The token at a spot of its walk: as the move leaves it, with the footprint the walk has there (squeezedOnWalk). */
-export function standingOnWalk<T extends PlacedToken & { elevation: number }>(before: PlacedToken, after: T, spot: RoutePoint, place: WalkPlace): T {
+export function standingOnWalk<T extends PlacedToken & { elevation: number }>(chunks: BuildState["buildChunks"], before: Walker, after: T, spot: RoutePoint, place: WalkPlace): T {
   const { squeeze: _squeeze, ...rest } = after;
-  return { ...rest, x: spot.x, y: spot.y, elevation: spot.elevation, ...(squeezedOnWalk(place, before, after) ? { squeeze: true as const } : {}) } as T;
+  return { ...rest, x: spot.x, y: spot.y, elevation: spot.elevation, ...(squeezedOnWalk(chunks, place, before, after) ? { squeeze: true as const } : {}) } as T;
 }
 
 /** A spot of a walk without what standing there needs: where the footprint is, how high, and how far along. */
@@ -356,9 +357,8 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
   const squeezes = canSqueeze(token);
   const spots: RouteSpot[] = [{ ...walk[0]!, squeezed: isSqueezed(token), stand: true }];
   let piece = -1;
-  let at = token;
-  // The token as the walk goes on, off the holder it walks off once a piece's start is clear of it (movement.ts walkOn).
-  let walker = token;
+  // The walker where each piece starts, as the walk carries it (movement.ts walkOn): ledges, the squeeze and the leg test count from here.
+  let at: Walking = walkFrom(build.buildChunks, token);
   let exact = false;
   let sweep: boolean | undefined;
   for (let s = 1; s < walk.length; s++) {
@@ -368,9 +368,7 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
     const b = route[i + 1]!;
     if (i !== piece) {
       piece = i;
-      // The token where this piece starts, squeezed if it was there: ledges and the leg test count from here.
-      walker = walkOn(walker, a);
-      at = { ...walker, squeeze: spots[spots.length - 1]!.squeezed ? true : undefined };
+      if (i > 0) at = walkOn(build.buildChunks, at, a, a.elevation);
       exact = latticePiece(b.x - a.x, b.y - a.y, lattice);
       sweep = undefined;
     }
@@ -378,12 +376,12 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
     const last = end && i === route.length - 2;
     const p = { x: w.x, y: w.y };
     // The spot as the end of the walk up to it, judged from where its piece starts (movement.ts WalkEnd).
-    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, walkEnd(at, p));
+    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, walkEnd(build, at, p));
     const onGrid = multipleOf(w.x - token.x, grid) && multipleOf(w.y - token.y, grid);
     const sweepClear = () => (sweep ??= !blocks || straightClear(build, at, { x: b.x, y: b.y, elevation: b.elevation }));
     const stand =
       (squeezed || onGrid) &&
-      !coreBlocked(build, walkEnd(at, p)) &&
+      !coreBlocked(build, walkEnd(build, at, p)) &&
       (!blocks || ((exact || end) && sweepClear()) || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
     spots.push({ ...w, squeezed, stand });
   }

@@ -13,8 +13,8 @@ import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { footing, footprintGround, groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkAlong, walkEnd, type Walker } from "./rules/movement.ts";
-import { onRouteLattice, routeBlocker, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from "./rules/movement.ts";
+import { onRouteLattice, routeBlocker, routePoints, routeReach, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
@@ -269,7 +269,7 @@ function squeezeFits(op: Op, c: Check): Decision {
   if (!token) return OK;
   const walker = walkerFor(c.state, token, seenAllIn(c));
   const points = op.route ? routePoints(c.state.buildChunks, walker, op.route, op.elevation ?? token.elevation) : [];
-  return movementRules.squeezeFits(c.state, walkEnd(walker, { x: op.x, y: op.y }, points.slice(1, -1))) ? OK : refuse("invalid", NOT_A_SQUEEZE);
+  return movementRules.squeezeFits(c.state, walkEnd(c.state, walker, { x: op.x, y: op.y }, points.slice(1, -1))) ? OK : refuse("invalid", NOT_A_SQUEEZE);
 }
 
 const LEVEL_DOES_NOT_FIT = refuse("invalid", `Exhaustion is level 1 to ${EXHAUSTION_MAX_LEVEL}`);
@@ -1595,13 +1595,12 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
     const last = n === routes.length - 1;
     const end = route[route.length - 1];
     const landing = last && end && end[0] === to.x && end[1] === to.y ? (to.elevation ?? at.elevation) : undefined;
-    const points = routePoints(c.state.buildChunks, at, route, landing ?? groundOrHeight(c.state, at, end));
+    const walkers = routeWalkers(c.state.buildChunks, at, route, landing ?? groundOrHeight(c.state, at, end));
     // Each piece from where it starts, squeezed only where the walk starts: the client checks its routes by this same rule before it sends them.
-    const blocker = routeBlocker(c.state, at, route, points[points.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
+    const blocker = routeBlocker(c.state, at, route, walkers[walkers.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
     if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
-    // The next route goes on from its end, off the holder for good once any stop was clear of it (movement.ts walkOn).
-    at = walkAlong(at, points);
-    delete at.squeeze;
+    // The next route goes on from its end as the walk left it (movement.ts walkOn): off the holder for good once any stop was clear of it, squeezed no more.
+    at = walkers[walkers.length - 1]!;
   }
   if (at.x === to.x && at.y === to.y) return OK;
   const blocker = movementRules.legBlocker(c.state, at, { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation });

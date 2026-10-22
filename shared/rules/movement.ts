@@ -3,7 +3,7 @@ import type { DoorRef } from "../protocol.ts";
 import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
 import { canSqueeze, footprintRect, footprintSize, occupiedRange, snapStep, squeezedSize, storedCenter, type PlacedToken } from "./footprint.ts";
 import type { Point } from "./geom.ts";
-import { standing, type Standing } from "./heights.ts";
+import { footing, footprintGround, standing, type Standing } from "./heights.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient } from "./segments.ts";
 import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
 
@@ -35,9 +35,10 @@ import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
 /**
  * The token fields the movement rule reads. `footing` and `offHolder` are
  * set only on a copy made for a walk off a holder on the ground
- * (rules/attach.ts walkerFor), never on a stored token. Such a walk is on
- * the ground (`footing`), whatever its height, and every ledge stops it,
- * but for one exemption (docs/design-v1-attach.md 4.3, reviews AT-O-26,
+ * (rules/attach.ts walkerFor), or `footing` for a judgment of a walk whose
+ * route is not known (`walkStates`), never on a stored token. A walk off a
+ * holder is on the ground (`footing`), whatever its height, and every
+ * ledge stops it, but for one exemption (docs/design-v1-attach.md 4.3, reviews AT-O-26,
  * AT-ASTRA-16 and AT-ASTRA-17). Until it first stands clear of the holder,
  * no ledge whose whole length lies strictly inside the holder's footprint
  * stops it (walls.ts `withoutLedgesInside`), so it crosses the step under a
@@ -417,26 +418,64 @@ function holderRect(holder: OffHolder): { x: number; y: number; w: number; h: nu
   return footprintRect({ size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) });
 }
 
+declare const stepping: unique symbol;
+
 /**
- * The token standing at `at` as a walk goes on from there: off the holder
- * it walks off for good once it stands clear of it (MovingToken, review
- * AT-ASTRA-16). Every walk of more than one leg, a route's pieces and a
- * redo's routes, carries the token from leg to leg by this.
+ * A walker partway through its walk (review AT-ASTRA-22): the one state a
+ * walk carries from stop to stop, which only `walkFrom` starts and only
+ * `walkOn` takes on, so no part of it goes on in one place and not in
+ * another. A walk is off its holder for good once a stop is clear of it
+ * (`offHolder`, review AT-ASTRA-16), squeezed only on its first leg, and at
+ * each stop at the height it takes there: the ground under its full
+ * footprint for a walk that starts on the ground (`grounded`), else its
+ * own. Its footing at a stop, which decides the ledges that stop its next
+ * leg, follows from those.
  */
-export function walkOn<T extends Walker>(token: T, at: Point & { elevation: number }): T {
-  const next: T = { ...token, x: at.x, y: at.y, elevation: at.elevation };
-  return !next.offHolder || onOffHolder(token, at) ? next : pastHolder(next);
+export type Walking = Walker & { readonly [stepping]: true; readonly grounded: boolean };
+
+type Chunks = BuildState["buildChunks"];
+
+/** The walk of `token` from where it stands: off its holder already where it stands clear of it, squeezed as it stands, and on the ground for the whole walk when it stands on it now. */
+export function walkFrom<T extends Walker>(chunks: Chunks, token: T): T & Walking {
+  const start = { ...token, grounded: footing(chunks, token) === "ground" } as T & Walking;
+  return !start.offHolder || onOffHolder(start, start) ? start : pastHolder(start);
 }
 
 /**
- * The walker standing with `footing` where its walk's last leg starts, for
- * a judgment of a walk's end whose route is not known, as a drag preview's
- * frame without corners (server/rooms/ephemeral.ts): a token off the
- * ground keeps its height over any ground on the way, so it may reach the
- * spot from any footing.
+ * The walk's one step: the walker at its next stop `to`, at the height the
+ * walk takes there (`Walking`), or at `landing` where the walk ends there,
+ * no longer squeezed, since a squeeze it starts in lasts for its first leg
+ * only, and off the holder it walks off for good once it stands clear of
+ * it. Every walk of more than one leg, a route's pieces and a redo's
+ * routes, carries its walker from leg to leg by this.
  */
-export function withFooting<T extends Walker>(token: T, footing: Standing): T {
+export function walkOn<T extends Walking>(chunks: Chunks, token: T, to: Point, landing?: number): T {
+  const elevation = landing ?? (token.grounded ? footprintGround(chunks, { ...token, x: to.x, y: to.y, squeeze: undefined }) : token.elevation);
+  const next: T = { ...token, x: to.x, y: to.y, elevation };
+  delete next.squeeze;
+  return !next.offHolder || onOffHolder(token, to) ? next : pastHolder(next);
+}
+
+/** The walker standing with `footing` where a leg of its walk starts (walkStates). */
+function withFooting<T extends Walker>(token: T, footing: Standing): T {
   return { ...token, footing };
+}
+
+const STANDINGS: readonly Standing[] = ["ground", "flying", "inside"];
+
+/**
+ * Every walker a walk from `token` can have where its last leg starts, for
+ * a judgment of its end whose route is not known, as a drag preview's
+ * frame without corners (server/rooms/ephemeral.ts): where it starts, for a
+ * straight leg, and past any stop as `walkOn` leaves it, on its holder or
+ * past it, and for a walk that keeps its height at any footing, since the
+ * ground under a later stop may be any.
+ */
+export function walkStates(chunks: Chunks, token: Walker): Walker[] {
+  const start = walkFrom(chunks, token);
+  const on = walkOn(chunks, start, start);
+  const past = on.offHolder ? [on, pastHolder(on)] : [on];
+  return [start, ...(start.grounded ? past : past.flatMap((w) => STANDINGS.map((f) => withFooting(w, f))))];
 }
 
 /** The token as a walk that has cleared the holder it walks off reads it: on the ground, off no holder. */
@@ -460,13 +499,6 @@ export function crossesInnerLedges(state: BuildState, token: Walker): boolean {
   return wallsAt(walls, token, token) !== walls;
 }
 
-/** `walkOn` along a walk's stops in turn: the token at the last, off the holder for good once any of them is clear of it. */
-export function walkAlong<T extends Walker>(token: T, stops: readonly (Point & { elevation: number })[]): T {
-  let at = token;
-  for (const stop of stops) at = walkOn(at, stop);
-  return at;
-}
-
 declare const ended: unique symbol;
 
 /**
@@ -474,23 +506,25 @@ declare const ended: unique symbol;
  * AT-ASTRA-21): standing where the walk's last leg to the spot starts, its
  * state carried there from where it stood through every stop between
  * (`walkOn`). So a walk that cleared its holder and came back over it
- * judges the spot on the ground's rule, as its last leg does. Every check
- * of a walk's end takes only this: the squeeze (`squeezeFits`), a drag
- * preview's footprint (`previewSqueezed`) and the core's fit
- * (`coreBlocked`). `walkEnd` makes one.
+ * judges the spot on the ground's rule, as its last leg does, and a walk
+ * that started squeezed judges it full size from its first corner on
+ * (review AT-ASTRA-22). Every check of a walk's end takes only this: the
+ * squeeze (`squeezeFits`), a drag preview's footprint (`previewSqueezed`)
+ * and the core's fit (`coreBlocked`). `walkEnd` makes one.
  */
 export type WalkEnd = { readonly walker: Walker; readonly at: Point; readonly [ended]: true };
 
 /**
- * The end at `at` of a walk by `token` from where it stands, through
- * `between`, the walk's stops after its start and before `at`, each at the
- * height the walk takes there (route.ts routePoints). A straight leg has
- * none: it leaves a rectangle once, so a spot of it on the holder was
- * reached before the walk cleared the holder.
+ * The end at `at` of a walk by `token` from where it stands through
+ * `corners`, the walk's stops after its start and before `at`, each at the
+ * height the walk takes there (`walkOn`). A straight leg has none: it
+ * leaves a rectangle once, so a spot of it on the holder was reached
+ * before the walk cleared the holder.
  */
-export function walkEnd(token: Walker, at: Point, between: readonly (Point & { elevation: number })[] = []): WalkEnd {
-  const walker = walkAlong(token, [{ x: token.x, y: token.y, elevation: token.elevation }, ...between]);
-  return { walker, at: { x: at.x, y: at.y } } as WalkEnd;
+export function walkEnd(build: Pick<BuildState, "buildChunks">, token: Walker, at: Point, corners: readonly Point[] = []): WalkEnd {
+  let walker = walkFrom(build.buildChunks, token);
+  for (const corner of corners) walker = walkOn(build.buildChunks, walker, corner);
+  return { walker, at: { x: at.x, y: at.y } } as unknown as WalkEnd;
 }
 
 /**
@@ -840,9 +874,9 @@ export function landing(state: BuildState, token: Walker, to: LegEnd, mode: Drop
   const legTo = (at: Point) => legFrom(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation });
   const floor = ledgeFloor(walls, scene, token, to.elevation);
   // A spot is judged as the straight leg's end (WalkEnd).
-  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, walkEnd(token, at).walker, at), token, at, floor);
+  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, walkEnd(state, token, at).walker, at), token, at, floor);
   const allowed = (at: Point) => mode === "teleport" || legClear(legTo(at));
-  const squeeze = (at: Point) => squeezeFits(state, walkEnd(token, at));
+  const squeeze = (at: Point) => squeezeFits(state, walkEnd(state, token, at));
   if (mode === "walk" ? allowed(to) : fits(to)) return { x: to.x, y: to.y, squeeze: squeeze(to), stopped: null };
   if (canSqueeze(token) && !fits(to)) {
     for (const [dx, dy] of SHIFTS) {

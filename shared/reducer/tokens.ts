@@ -594,10 +594,12 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   const out: PathStop = carried ? { ...stop, moved: taken.moved } : { ...stop, moved: taken.moved, cost: taken.cost };
   if (taken.diag[0] !== 0 || taken.diag[1] !== 0) out.diag = taken.diag;
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
-  const spots = routeWalk(walk, walkerFor(tx.state, before, seenNow(tx)), judged.before).map((p, i, all) => ({
-    ...p,
-    squeezed: squeezedOnWalk(i === 0 ? "start" : i === all.length - 1 ? "end" : "between", before, after),
-  }));
+  const walker = walkerFor(tx.state, before, seenNow(tx));
+  // Squeezed where it ends as it will be, and before that as its walk carries it, on its first piece only where it starts
+  // squeezed (route.ts squeezedOnWalk). Ops before version 14 read it squeezed only where it starts.
+  const squeezedAt = (piece: number, i: number, count: number): boolean =>
+    i === count - 1 ? isSqueezed(after) : attaches(tx.env.opVersion) ? squeezedOnWalk(tx.state.buildChunks, piece, walker, after) : i === 0 && isSqueezed(before);
+  const spots = routeWalk(walk, walker, judged.before).map((p, i, all) => ({ ...p, squeezed: squeezedAt(p.progress[0], i, all.length) }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;
 }

@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footing, footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkFrom, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
@@ -293,7 +293,7 @@ export function cutRoute(state: DropState, token: DropToken, pieces: readonly Ro
   for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
     const [x, y] = pieces[k - 1]!;
     const at = { x, y };
-    const end = walkEnd(walking, at, points.slice(1, k));
+    const end = walkEnd(state, walking, at, points.slice(1, k));
     if (!previewSqueezed(state, end)) {
       if (onGrid(x, token.x) && onGrid(y, token.y)) return { pieces: pieces.slice(0, k), at: { ...at, squeeze: false } };
       continue;
@@ -374,7 +374,7 @@ function landingOf(state: DropState, token: DropToken, target: Point & { squeeze
   if (!kept) return null;
   const points = routePoints(state.buildChunks, walking, kept, elevation);
   // A squeeze at the walk's end is judged as the end of the walk, as the server judges it (permissions.ts squeezeFits).
-  if (at.squeeze && !squeezeFits(state, walkEnd(walking, at, points.slice(1, -1)))) return null;
+  if (at.squeeze && !squeezeFits(state, walkEnd(state, walking, at, points.slice(1, -1)))) return null;
   return routeReach(points, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
 }
 
@@ -552,15 +552,14 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
 export function walkersStop(state: BuildState, lead: DropToken & Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
   if (walkers.length === 0) return null;
   const L = routeLattice(lead);
-  // The holder's walk as it goes on, off the holder it walks off once a stop is clear of it (movement.ts walkOn).
-  let walking = lead;
+  // The holder's walk as it goes on (movement.ts walkOn): the leg test of each piece counts from its walker where it starts.
+  let at = walkFrom(state.buildChunks, lead);
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
-    walking = walkOn(walking, a);
+    if (i > 1) at = walkOn(state.buildChunks, at, a, a.elevation);
     const stopped = walkerStop(state, lead, walkers, a, b);
     if (!stopped) continue;
-    const at = { ...walking, squeeze: undefined };
     const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
     const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
     for (let k = n - 1; k >= 1; k--) {
