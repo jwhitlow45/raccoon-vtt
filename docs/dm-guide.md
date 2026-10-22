@@ -878,7 +878,7 @@ A trap goes off when a creature it is set for walks onto it or across its wire, 
 
 You get a toast, such as "Hidden Pit went off: Thorn.", and a card among your alerts that stays until you deal with it. The card says who set the trap off, who it hits, what it did ("Opened the pit.") and anything it could not do, with your note under them.
 
-- **Save and damage** opens the group save on the creatures the trap hits, as they stood when it went off, already filled with its save, DC and damage. Ask for the saves or roll them as usual, then press **Apply**, which also settles the card. A trap with conditions and no save shows **Apply** instead.
+- **Save and damage** opens the group save on the creatures the trap hits, as they stood when it went off, already filled with its save, DC and damage. Ask for the saves or roll them as usual, then press **Apply**, which also settles the card. If everyone passes and the trap would change nothing, as when the whole party slips out from under a Falling Net, the button reads **Settle: it changes no one**, and pressing it clears the card all the same. A trap with conditions and no save shows **Apply** instead.
 - **Dismiss** sets the card aside without applying anything, for when the dice or the story go another way.
 
 Your players read the trap's line in their log, "Thorn: The floor gives way!", and Thorn's player also gets it as a toast, with the trap's sound. A request for a save names the trap only "Trap" until the players have found it, so the name in your notes never gives anything away.

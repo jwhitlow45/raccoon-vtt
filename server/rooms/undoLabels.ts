@@ -126,6 +126,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       const targets = op.targets ?? [];
       const first = targets[0];
       const who = targets.length === 1 && first ? target(first.target) : String(targets.length);
+      // A trap's springing that changed no one is only settled (docs/design-v1-traps.md 4.4).
+      if (targets.length === 0 && op.trap) return `settling ${op.label ?? "a trap"}`;
       return op.label ? `applying ${op.label} to ${who}` : `applying a group save to ${who}`;
     }
     case "actor.saveDue":

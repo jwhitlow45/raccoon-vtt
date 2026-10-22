@@ -326,5 +326,6 @@ describe("undo step labels for traps (docs/design-v1-traps.md 6.5)", () => {
     assert.equal(describeOp({ t: "trap.settle", trapId: "pit", due: "3:0" }, s), "dismissing Hidden Pit");
     assert.equal(describeOp({ t: "trap.settle", trapId: "pit", due: "3:0", sprung: true }, s), "marking Hidden Pit sprung");
     assert.equal(describeOp({ t: "trap.delete", trapId: "gone" }, s), "deleting a trap");
+    assert.equal(describeOp({ t: "actor.outcome", plan: "p1", label: "Falling Net", trap: { trapId: "pit", due: "3:0" }, targets: [] }, s), "settling Falling Net");
   });
 });

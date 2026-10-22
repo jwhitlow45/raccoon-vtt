@@ -68,7 +68,7 @@ import {
   type Step,
 } from "./chain.ts";
 import { parseParts } from "./outcome.ts";
-import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, NOTHING_TO_APPLY, openSaveState, pageBound, rowOutcome, rowWords } from "./plan.ts";
+import { amountsOf, applyWaits, applyWords, buildPlan, damageTo, NOTHING_TO_APPLY, openSaveState, pageBound, rowOutcome, rowWords, SETTLE_WORDS } from "./plan.ts";
 import { countWords, creatureCount, d20Of, groupRows, rowBonus, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
@@ -357,7 +357,16 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
 
   const rolledAny = sentAny(page);
-  const doneWords = page.apply === "taken" ? (page.plan ? `Applied to ${page.plan.targets.length}. Undo takes it all back.` : page.cast ? `Closed ${page.cast.who}'s ask for saves.` : null) : null;
+  const doneWords =
+    page.apply === "taken"
+      ? page.plan
+        ? page.plan.targets.length > 0
+          ? `Applied to ${page.plan.targets.length}. Undo takes it all back.`
+          : "Settled: it changed no one. Undo brings its card back."
+        : page.cast
+          ? `Closed ${page.cast.who}'s ask for saves.`
+          : null
+      : null;
 
   // ---- the parts
 
@@ -516,7 +525,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       </div>
     ) : (
       <Button variant="primary" busy={page.apply === "sending"} disabled={blocked !== null || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
-        {waits ?? bound ?? (page.cast && words === NOTHING_TO_APPLY ? "Close the ask" : words)}
+        {waits ?? bound ?? (words !== NOTHING_TO_APPLY ? words : page.cast ? "Close the ask" : page.source.kind === "trap" ? SETTLE_WORDS : words)}
       </Button>
     );
 
@@ -600,7 +609,7 @@ function AppliedToast(props: { page: Page; ui: ReturnType<typeof useRoomUi> }) {
     const conditioned = plan.targets.filter((t) => t.effects && t.effects.length > 0).length;
     const name = page.fill?.name ?? "Group save";
     const parts = [hurt > 0 ? `${hurt} took damage` : null, conditioned > 0 ? `${conditioned} gained ${page.outcome.conditions.map(effectName).join(" and ")}` : null].filter(Boolean);
-    ui.notify(`${name}: ${parts.join(", ") || "applied"}. Undo takes it all back.`, "info");
+    ui.notify(plan.targets.length > 0 ? `${name}: ${parts.join(", ") || "applied"}. Undo takes it all back.` : `${name}: settled, no one hurt. Undo brings its card back.`, "info");
   }, [page, ui]);
   return null;
 }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Trap } from "#shared/model.ts";
+import { opSchema } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { SETTLED_MEANWHILE } from "#shared/reducer/traps.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import { actor, character, customMonster, DM, env, room, token, trap as trapOf } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
-import { mark, newPage, roll, sourceIds, type Page } from "./chain.ts";
+import { apply, mark, newPage, roll, sourceIds, type Page } from "./chain.ts";
 import { trapFill, UNFOUND_TRAP } from "./fills.ts";
 import { buildPlan } from "./plan.ts";
 import { groupRows, type RowBase } from "./rows.ts";
@@ -97,5 +98,26 @@ describe("a trap's group save", () => {
     assert.equal(first.state.tokens.gob!.actor && "inline" in first.state.tokens.gob!.actor ? first.state.tokens.gob!.actor.inline.hp.cur : null, 26);
     const again = applyOp(first.state, { ...plan, plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000c" }, DM, env(31));
     assert.ok(!again.ok && again.message === SETTLED_MEANWHILE);
+  });
+
+  test("when everyone passes against Falling Net, Apply still settles the springing with no creature, and a second device's is refused", () => {
+    const t = presetTrap("falling-net");
+    const { page, rows, dice } = pageFor(t, true);
+    let rolled: Page = { ...page, phase: "rolled", rows };
+    for (const r of rows) rolled = mark(rolled, r.holder, "pass");
+    const plan = buildPlan(rolled, dice, null, { plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000d", newId: () => "0192f0a8-6c1e-7a4b-9c3d-00000000000e" })!;
+    assert.deepEqual([plan.targets, plan.trap], [[], { trapId: t.id, due: "20:0" }]);
+    assert.ok(opSchema.safeParse(plan).success, "the server takes an outcome that only settles a springing");
+    assert.equal(opSchema.safeParse({ ...plan, trap: undefined }).success, false, "one that settles nothing names a creature");
+    const first = applyOp(world(t), plan, DM, env(30));
+    assert.ok(first.ok);
+    assert.equal(first.state.traps[t.id]!.rig!.due, undefined, "the occurrence is settled");
+    const again = applyOp(first.state, { ...plan, plan: "0192f0a8-6c1e-7a4b-9c3d-00000000000f" }, DM, env(31));
+    assert.ok(!again.ok && again.message === SETTLED_MEANWHILE);
+    // The page's open requests close with it, as with any Apply.
+    const asked: Page = { ...rolled, requests: [{ rollId: "r1", holders: ["character:c1"], state: "open" }] };
+    assert.deepEqual(apply(asked, plan).send.map((c) => (c.kind === "op" ? c.op.t : c.kind)), ["roll.close", "outcome"]);
+    const area: Page = { ...rolled, source: { kind: "area", templateId: "a1" } };
+    assert.equal(buildPlan(area, dice, null, { plan: "0192f0a8-6c1e-7a4b-9c3d-000000000010", newId: () => "x" }), null, "any other page that changes nothing has no plan");
   });
 });

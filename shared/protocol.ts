@@ -1569,11 +1569,12 @@ export const clientOps = [
           resist: z.literal(true).optional(),
         }),
       )
-      .min(1)
       .max(LIMITS.outcomeTargets),
   })
     .refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG })
-    .refine((o) => o.cast === undefined || o.trap === undefined, { message: "an outcome settles one thing" }),
+    .refine((o) => o.cast === undefined || o.trap === undefined, { message: "an outcome settles one thing" })
+    // A trap's springing that everyone passed with nothing to take settles with no creature (docs/design-v1-traps.md 4.4).
+    .refine((o) => o.targets.length > 0 || o.trap !== undefined, { message: "an outcome names at least one creature" }),
   op("actor.damageMany", {
     hits: z.array(z.strictObject({ target: actorTarget, amount: z.number().int().min(1).max(100_000) })).min(1).max(MAX_ENTRIES_PER_OP),
   }),

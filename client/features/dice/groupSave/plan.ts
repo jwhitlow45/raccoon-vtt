@@ -184,13 +184,18 @@ export function applyWords(outcomes: readonly RowOutcome[], conditions: readonly
   return parts.length > 0 ? `Apply: ${parts.join(", ")}` : NOTHING_TO_APPLY;
 }
 
-/** Apply's words when nothing would change, which a page holding a player's ask reads as Close the ask. */
+/** Apply's words when nothing would change, which a page holding a player's ask reads as Close the ask, and a trap's as SETTLE_WORDS. */
 export const NOTHING_TO_APPLY = "Nothing to apply";
+
+/** Apply's words on a trap's page where it changes no creature, as when everyone passes against a net: it still settles the springing. */
+export const SETTLE_WORDS = "Settle: it changes no one";
 
 /**
  * The plan (5.5): each creature once, only those still present, never a
  * skipped row, with its amount, its conditions with ids from `newId`, and
- * each Legendary Resistance used. Null when nothing would change.
+ * each Legendary Resistance used. Null when nothing would change, but for
+ * a trap's springing, which still has to be settled: its plan names no
+ * creature (docs/design-v1-traps.md 4.4).
  */
 export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | null, ids: { plan: string; newId: () => string }): OpOf<"actor.outcome"> | null {
   const rows: PlanRow[] = [];
@@ -205,10 +210,10 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     rows.push({ target: row.target, amount: outcome.amount, conditions: outcome.conditions, resist: outcome.resisted });
   }
   const targets = planTargets(rows, ids.newId);
-  if (targets.length === 0) return null;
   // The outcome closes the player's ask it answers in the same op (docs/design-v1-player-save-spell.md 3.3).
   // A trap's springing is settled by the outcome that applies it, in the same op (docs/design-v1-traps.md 4.4).
   const trap = page.source.kind === "trap" && !page.cast ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
+  if (targets.length === 0 && !("trap" in trap)) return null;
   return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), ...trap, targets };
 }
 
