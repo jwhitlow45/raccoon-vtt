@@ -1152,8 +1152,10 @@ export function Labelled(props: { label: string; children: ReactNode }) {
  * A segmented choice in a slot (components/Segmented.tsx). Its compact
  * form is a chip showing the chosen option's words, or its `short` words
  * where it has them, whose popover holds the choice ("Clear fog" with a
- * caret, 6.2). The chip's name keeps the option's own words. In ⋯ it is a
- * labelled group.
+ * caret, 6.2). The chip's name keeps the option's own words and holds the
+ * words it shows, so a voice user who says them finds it (WCAG 2.5.3):
+ * "Measure: Walking" for "Walk", "Measure: Line (Straight)" for "Line". In
+ * ⋯ it is a labelled group.
  */
 export function OptSegmented<T extends string | number>(props: { label: string; value: T | null; options: readonly (SegmentedOption<T> & { short?: string })[]; onChange(value: NoInfer<T>): void; disabled?: boolean }) {
   const place = useSlotPlace();
@@ -1167,11 +1169,19 @@ export function OptSegmented<T extends string | number>(props: { label: string; 
       disabled={props.disabled}
       value={String(props.value)}
       options={props.options.map((o) => ({ key: String(o.value), words: o.short ?? o.label }))}
-      valueName={nameOf(props.options.find((o) => o.value === props.value))}
+      valueName={shortName(props.options.find((o) => o.value === props.value))}
     >
       <PickCloses>{choice}</PickCloses>
     </ValueChip>
   );
+}
+
+/** A compact chip's value as its name says it: the option's own words, with the short words it shows first where they are not part of them. */
+export function shortName(option: (SegmentedOption<string | number> & { short?: string }) | undefined): string | undefined {
+  const name = nameOf(option);
+  const short = option?.short;
+  if (short === undefined || name === undefined || name.toLowerCase().includes(short.toLowerCase())) return name;
+  return `${short} (${name})`;
 }
 
 function nameOf(option: SegmentedOption<string | number> | undefined): string | undefined {

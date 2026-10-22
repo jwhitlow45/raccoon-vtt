@@ -771,8 +771,10 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.equal(await options(dm).locator("[data-rvtt-more]").count(), 0, "⋯ shows");
     const measure = row.locator('[data-rvtt-slot="measure"] button').first();
     // The chip stacks every value's words to keep its width, the others hidden from sight.
-    assert.match((await measure.innerText()).trim(), /^(Line|Walk)$/);
-    assert.match((await measure.getAttribute("aria-label")) ?? "", /^Measure: (Straight|Walking)$/, "its name keeps the choice's own words");
+    const shows = (await measure.innerText()).trim();
+    assert.match(shows, /^(Line|Walk)$/);
+    // Its name holds the words it shows and the choice's own (FU20B-OP-1).
+    assert.equal(await measure.getAttribute("aria-label"), shows === "Line" ? "Measure: Line (Straight)" : "Measure: Walking");
     await shots.take(dm, "lp8-ruler-360-measure");
     await key(dm, "v");
   });

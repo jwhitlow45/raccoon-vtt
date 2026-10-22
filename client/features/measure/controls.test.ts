@@ -8,7 +8,7 @@ const { MeasuringContext } = await import("../../components/measuring.ts");
 const { Segmented } = await import("../../components/Segmented.tsx");
 const { Swatches } = await import("../../components/Swatches.tsx");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { ConfirmButton, StableWords, ValueChip } = await import("./controls.tsx");
+const { ConfirmButton, shortName, StableWords, ValueChip } = await import("./controls.tsx");
 
 /*
  * The options kit's controls (docs/design-v1-tool-options.md 6.2 and 11),
@@ -51,6 +51,15 @@ describe("stable widths (6.2)", () => {
   test("a confirm button outside a slot shows only its words, as in a pane on the map", () => {
     const markup = html(createElement(ConfirmButton, { label: "Delete", confirm: "Tap again to delete", onConfirm: () => {} }));
     assert.doesNotMatch(markup, /Tap again/);
+  });
+});
+
+describe("a compact choice's name (FU20B-OP-1)", () => {
+  test("holds the short words it shows, before the option's own where they are not part of them", () => {
+    assert.equal(shortName({ value: "straight", label: "Straight", short: "Line" }), "Line (Straight)");
+    assert.equal(shortName({ value: "walking", label: "Walking", short: "Walk" }), "Walking", "Walk is part of Walking");
+    assert.equal(shortName({ value: "a", label: "Clear fog" }), "Clear fog", "no short words, the option's own");
+    assert.equal(shortName(undefined), undefined);
   });
 });
 
