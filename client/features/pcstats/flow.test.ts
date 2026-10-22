@@ -24,6 +24,27 @@ function run(state: FlowState, ...events: FlowEvent[]) {
 }
 
 describe("the editor's flow", () => {
+  test("a new block's fill, its roll deleted, then a fill before Save offers Add it back, since the pending record makes the draft a block (RSBUILD-ASTRA-05)", () => {
+    const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ ac: 15 }) };
+    const sling = { id: "read-1", name: "Sling", kind: "weapon" as const, attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d4" }], ddb: true as const };
+    const read = (id: string): PcFill => ({ source: "ddb", stats: { rolls: [{ ...sling, id }] }, level: 5, name: "Bree", actor: { ac: 15 }, warnings: [], read: { weapon: true, spell: true, other: true } });
+    const opened = openDraft(bare);
+    let state = run(openFlow(opened.draft), { t: "open", step: "ddb" }).state;
+    const first = editorSyncPlan(read("read-1"), state, opened, bare);
+    assert.equal(first.source, "first");
+    state = run(state, { t: "read", fill: read("read-1"), lines: [], ticks: defaultTicks(first) }, { t: "use", sync: editorSyncUse(syncResult(first, defaultTicks(first)), bare) }).state;
+    assert.deepEqual(state.draft.stats.rolls.map((r) => r.name), ["Sling"]);
+    assert.ok(state.record);
+    // Deleting the roll leaves the draft as it opened, with the record still pending.
+    state = run(state, { t: "edit", update: (d) => ({ ...d, stats: { ...d.stats, rolls: [] } }) }, { t: "open", step: "ddb" }).state;
+    assert.deepEqual(state.draft, opened.draft);
+    const again = editorSyncPlan(read("read-2"), state, opened, bare);
+    assert.equal(again.source, "same");
+    const back = again.items.find((i) => i.type === "roll");
+    assert.deepEqual([back?.section, back?.type === "roll" && back.case], ["kept", "deleted"], "listed with Add it back");
+    assert.deepEqual(syncResult(again, defaultTicks(again)).stats.rolls, [], "and left out unless ticked");
+  });
+
   test("several D&D Beyond fills before Save: each is reviewed against what the last one took, and its record replaces the last one (RSBUILD-ASTRA-02)", () => {
     const AT = "2026-10-20T19:00:00.000Z";
     const read = (dex: number, ac: number): PcFill => ({ source: "ddb", stats: { abilities: { ...EMPTY_PC_STATS.abilities, dex }, rolls: [] }, level: 5, name: "Bree", actor: { ac }, warnings: [], read: { weapon: true, spell: true, other: true } });

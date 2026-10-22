@@ -49,8 +49,10 @@ export type SyncUse = { stats: PcStats; level: number | undefined; also: AlsoSet
 /**
  * A D&D Beyond read in the editor, planned as a re-sync against the
  * character as Save would leave it: the draft, the fields earlier fills set
- * beside it and their record. With no block yet and nothing typed, a first
- * sync, which takes everything read.
+ * beside it and their record. With no block yet, nothing typed and no
+ * earlier fill's record, a first sync, which takes everything read. A
+ * pending record means the draft is a block even when edited back to how
+ * it opened, so a roll deleted since that fill is offered back, not added.
  */
 export function editorSyncPlan(
   fill: PcFill,
@@ -58,7 +60,7 @@ export function editorSyncPlan(
   opened: { draft: PcDraft; had: boolean },
   saved: Pick<Character, "name" | "actor" | "ddbSync">,
 ): SyncPlan {
-  const block = opened.had || draftDirty(opened.draft, state.draft) ? state.draft.stats : undefined;
+  const block = opened.had || state.record !== null || draftDirty(opened.draft, state.draft) ? state.draft.stats : undefined;
   return planSync({ mode: "editor", stats: block, level: state.draft.level, character: pendingCharacter(saved, state.also, state.record), fill });
 }
 
