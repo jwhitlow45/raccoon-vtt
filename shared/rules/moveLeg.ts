@@ -123,6 +123,9 @@ export function planMove(op: Op, before: RoomState, actor: Viewer, env: Versione
   const seen = seenIn(before, env);
   const out: MovedToken[] = [];
   const names = new Set(named.map((n) => n.token.id));
+  // An attach names its holder too, which stays where it stands (8.0): the step onto the seat takes along nothing at or above
+  // it, even round a loop the new link closes through a link the player's check cannot see.
+  if (op.t === "token.attach") names.add(op.to);
   const groups = attaches(env.opVersion) ? moveGroups(before.tokens, [...names]) : new Map<string, string[]>();
   for (const n of named) {
     out.push({ tokenId: n.token.id, from: poseOf(n.token), to: n.to, route: n.route, how: n.how, pass: seen(n.token) ? "public" : "private" });

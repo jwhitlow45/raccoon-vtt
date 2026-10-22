@@ -4,6 +4,7 @@ import { chunkKey } from "../keys.ts";
 import type { BuildChunk, EdgeFeature, LogEvent, RoomState, Token, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
+import { projectState } from "../project.ts";
 import { encodeHeights } from "../rules/heights.ts";
 import { describeMove, planMove } from "../rules/moveLeg.ts";
 import { DM, P1, actor, effect, env, room, template, token } from "../testutil.ts";
@@ -276,6 +277,32 @@ describe("attaching (8.2)", () => {
     s = run(s, { t: "token.attach", tokenId: "gob", to: "cat", kind: "drag", x: 7, y: 5, elevation: 0 }, DM, 3);
     s = run(s, { t: "token.attach", tokenId: "gob", to: "dog", kind: "drag", x: 7, y: 5, elevation: 0 }, DM, 4);
     assert.equal(s.tokens.gob!.attached?.to, "dog");
+  });
+});
+
+describe("an attach that closes a loop through a hidden link (8.0)", () => {
+  test("moves only the token stepping onto its seat: the holder it names stays, and every player's copy is that of a room without the link", () => {
+    // Thorn rides a steed no player sees. Room a: the steed is dragged by the grappled lizard beside Thorn. Room b: it is not.
+    // P1 has Thorn carry the lizard, so in room a the new link closes a loop the player's check cannot see.
+    const make = (linked: boolean) =>
+      room({
+        tokens: {
+          thorn: token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"], x: 3, y: 6, attached: { to: "steed", kind: "ride", steer: true } }),
+          steed: token("steed", { name: "Phantom steed", kind: "npc", size: "large", x: 3, y: 6, visibility: "dm", ...(linked ? { attached: { to: "lizard", kind: "drag" as const } } : {}) }),
+          lizard: token("lizard", { name: "Lizard", size: "small", x: 3, y: 5, actor: { inline: actor({ effects: [effect("g", { key: "grappled" })] }) } }),
+        },
+      });
+    const op: Op = { t: "token.attach", tokenId: "lizard", to: "thorn", kind: "carry", x: 3, y: 6, elevation: 0 };
+    const a = run(make(true), op, P1);
+    const b = run(make(false), op, P1);
+    for (const s of [a, b]) {
+      assert.deepEqual(place(s.tokens.thorn), [3, 6, 0], "Thorn, the holder the op names, stays where he stands");
+      assert.deepEqual(s.tokens.lizard!.attached, { to: "thorn", kind: "carry" });
+    }
+    // The hidden steed follows the lizard it is dragged by, as any member follows its nearest named ancestor.
+    assert.deepEqual(place(a.tokens.steed), [3, 7, 0]);
+    const seen = (s: RoomState) => projectState(s, P1, { sceneId: "s1" }).tokens;
+    assert.deepEqual(seen(a), seen(b));
   });
 });
 
