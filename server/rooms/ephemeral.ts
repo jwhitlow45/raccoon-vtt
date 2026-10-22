@@ -1,9 +1,10 @@
 import { keys } from "#shared/keys.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
-import { ownsToken, projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
+import { inSightOfNonOwners, ownsToken, projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
+import { walkerFor } from "#shared/rules/attach.ts";
 import type { EphEvent } from "#shared/protocol.ts";
-import { ownWalk, previewSqueezed } from "#shared/rules/movement.ts";
+import { previewSqueezed } from "#shared/rules/movement.ts";
 import type { Connection, PreviewKind } from "./connection.ts";
 
 /**
@@ -116,7 +117,9 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
  */
 function previewWithheld(state: RoomState, token: Token, x: number, y: number): boolean {
   const { squeeze: _squeeze, ...rest } = token;
-  const at: Token = previewSqueezed(state, ownWalk(token), { x, y }) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y };
+  // Squeezed or not as the drag's own preview judges it, off a holder every player sees by the walk off it (rules/attach.ts walkerFor).
+  const seen = (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
+  const at: Token = previewSqueezed(state, walkerFor(state, token, seen), { x, y }) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y };
   return withheldWhereItStands(state, at);
 }
 

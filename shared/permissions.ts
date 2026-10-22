@@ -257,13 +257,20 @@ export const NOT_A_SQUEEZE = "it only squeezes where an opening is too narrow fo
  * included, needs section 4.1's four checks at its end: the flag marks
  * only a real squeeze, since every rule then reads the smaller footprint.
  * Here, where ops arrive, never in the reducer, so a stored squeeze
- * replays whatever the walls became since.
+ * replays whatever the walls became since. It is judged as the walk that
+ * ends there reads it, as the drop that sent it did (review AT-ASTRA-19):
+ * off a holder every player sees, on the ground (rules/attach.ts
+ * walkerFor), where its last leg starts, and off the holder for good once
+ * the walk cleared it (movement.ts walkOn).
  */
 function squeezeFits(op: Op, c: Check): Decision {
   if (op.t !== "token.move" || !op.squeeze) return OK;
   const token = c.state.tokens[op.tokenId];
   if (!token) return OK;
-  return movementRules.squeezeFits(c.state, ownWalk(token), { x: op.x, y: op.y }) ? OK : refuse("invalid", NOT_A_SQUEEZE);
+  const walker = walkerFor(c.state, token, seenAllIn(c));
+  const points = op.route ? routePoints(c.state.buildChunks, walker, op.route, op.elevation ?? token.elevation) : [];
+  const last = walkAlong(walker, points.slice(1, -1));
+  return movementRules.squeezeFits(c.state, last, { x: op.x, y: op.y }) ? OK : refuse("invalid", NOT_A_SQUEEZE);
 }
 
 const LEVEL_DOES_NOT_FIT = refuse("invalid", `Exhaustion is level 1 to ${EXHAUSTION_MAX_LEVEL}`);

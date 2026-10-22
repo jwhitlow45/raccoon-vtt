@@ -7,7 +7,7 @@ import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { dropView, moveOpsOf, planGroup, planOne, routeLanding, type Landed } from "../movement/drop.ts";
+import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
@@ -381,5 +381,56 @@ describe("a walk off a holder crosses only the ledges whose whole length lies in
       const state = onItsTurn(world({ heights: raised(0, 5, 30, 30, 10), tokens: [wagon, bree({ x, attached: { to: "cart", kind: "carry" } }), gob] }), "bree");
       assert.equal(refusal({ t: "token.move", tokenId: "bree", x, y: 7, elevation: 10 }, state), words, `from x ${x}`);
     }
+  });
+});
+
+describe("a squeeze at the end of a walk off a holder is judged as the walk reads it, on the device and the server (review AT-ASTRA-19)", () => {
+  /**
+   * A 4 by 4 cart at (9,6) at 10 ft carrying P1's Large ogre, on its turn. The ground is 10 ft over x 11 to 13 by y 6
+   * to 10 and over x 11 to 15 by y 10 to 20, with a wall along x = 10 from y = 10 down. Below the cart, the 5 ft gap
+   * between the wall and the raised ground is too narrow for the ogre, which squeezes through it on the ground.
+   */
+  function gap(): RoomState {
+    const edges: Record<string, EdgeFeature> = {};
+    for (let y = 10; y < 20; y++) edges[`10,${y},w`] = { kind: "wall" };
+    const wagon = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 9, y: 6, elevation: 10 });
+    const ogre = token("ogre", { name: "Ogre", kind: "pc", size: "large", ownerIds: ["p1"], x: 9, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" }, actor: { inline: actor({ speeds: { walk: 40 } }) } });
+    let state = world({ heights: { ...raised(11, 6, 13, 10, 10), ...raised(11, 10, 15, 20, 10) }, edges, tokens: [wagon, ogre, token("gob", { name: "Goblin", x: 25, y: 25 })] });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "ogre", value: 20 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    return state;
+  }
+
+  test("a drag into the gap sends the squeezed drop its route walks to, which the server takes and stores as the label read", () => {
+    const state = gap();
+    const drag = dragOf(copyFor(state, P1), "player", "ogre", { x: 9.2, y: 13.3 });
+    assert.deepEqual(drag.op, { t: "token.move", tokenId: "ogre", x: 9.5, y: 13.5, squeeze: true, route: [[9.5, 6.5, 0, 0], [9.5, 8, 0, 0], [9.5, 13.5, 1, 0]] });
+    assert.equal(canApply(drag.op as Op, P1, state, { canUseAsset: () => true }).ok, true);
+    const r = applyOp(state, drag.op as Op, P1, env(9));
+    assert.ok(r.ok);
+    assert.equal(r.state.tokens.ogre!.squeeze, true);
+    assert.equal(drag.preview.read.dragFt, r.state.tokens.ogre!.path!.stops.slice(1).reduce((sum, st) => sum + (st.cost ?? 0), 0));
+  });
+
+  test("a walk past 64 pieces cut where it squeezes in the gap sends a squeezed drop the server takes", () => {
+    const state = gap();
+    // Down into the gap, then back and forth in it, past 64 pieces.
+    const pieces: [number, number, number, 0 | 1][] = [
+      [9.5, 6.5, 0, 0],
+      [9.5, 8, 0, 0],
+      ...Array.from({ length: 68 }, (_, i): [number, number, number, 0 | 1] => [9.5, i % 2 === 0 ? 10.5 : 11.5, 1, 0]),
+    ];
+    const plan = planWalk(dropView(copyFor(state, P1), "player"), copyFor(state, P1).tokens.ogre!, { x: 9.2, y: 11.3 }, "walk", { kind: "route", route: { pieces } }, 5);
+    const move = plan.moves[0]!;
+    assert.deepEqual([plan.cut, move.route!.length, move.x, move.y, move.squeeze], [true, 64, 9.5, 11.5, true]);
+    const op = moveOpsOf(plan.moves)[0]!;
+    const answer = canApply(op, P1, state, { canUseAsset: () => true });
+    assert.ok(answer.ok, answer.ok ? "" : answer.message);
+    const r = applyOp(state, op, P1, env(9));
+    assert.ok(r.ok);
+    assert.equal(r.state.tokens.ogre!.squeeze, true);
   });
 });

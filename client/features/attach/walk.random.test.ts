@@ -37,20 +37,21 @@ import { copyFor } from "./testing.ts";
 
 type Layout = "straddle" | "plateau" | "cart" | "beside";
 
-type Case = { state: RoomState; mover: string; who: Viewer; walls: RoomState["buildChunks"]; layout: Layout };
+/** `aim`, on a cart, is a drop point that lands a creature squeezed in its gap, or one it reaches only off the cart and back over it. */
+type Case = { state: RoomState; mover: string; who: Viewer; walls: RoomState["buildChunks"]; layout: Layout; aim?: Point };
 
 function grappled(id: string, over: Partial<Token>): Token {
   return token(id, { name: id, size: "small", actor: { inline: actor({ effects: [effect(`g${id}`, { key: "grappled" })] }) }, ...over });
 }
 
-/** A random case, or one of `only`'s layout, a cart's with its walls. */
-function randomCase(r: () => number, only?: Layout): Case {
+/** A random case, or one of `only`'s layout: a cart's with its walls, or with a gap a Large or Huge creature squeezes through. */
+function randomCase(r: () => number, only?: Layout | "gap"): Case {
   const hx = int(r, 4, 12);
   const hy = int(r, 4, 12);
   const edges: Record<string, EdgeFeature> = {};
   const heights: Record<string, number> = {};
   const picked = pick<Layout>(r, ["straddle", "straddle", "plateau", "cart", "beside"]);
-  const layout = only ?? picked;
+  const layout = only === "gap" ? "cart" : (only ?? picked);
   const right = chance(r, 0.5);
   // The ground's 10 ft step, as far as the scene goes: under the horse's middle, at the horse's own side for a plateau, along a cart's middle.
   const step = layout === "plateau" ? (right ? hx : hx + 2) : layout === "cart" ? hx + 2 : hx + 1;
@@ -74,7 +75,7 @@ function randomCase(r: () => number, only?: Layout): Case {
     if (chance(r, 0.5)) edges[chance(r, 0.5) ? `${side},${along},w` : `${along},${side},n`] = { kind: "wall" };
     else heights[`${side},${along}`] = pick(r, [5, 20]);
   }
-  if (layout === "cart") return cartCase(r, hx, hy, right, edges, heights, only === "cart");
+  if (layout === "cart") return cartCase(r, hx, hy, right, edges, heights, only === "cart" ? "walls" : only === "gap" ? "gap" : null);
   const flies = chance(r, 0.15);
   const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: chance(r, 0.7) ? ["p1"] : [], x: hx, y: hy, elevation: flies ? 20 : 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
   // An independent ride: a drag of a controlled mount's rider moves the mount instead (Stage.tsx), so the board never walks her alone.
@@ -100,22 +101,38 @@ function randomCase(r: () => number, only?: Layout): Case {
 
 /**
  * A 4 by 4 cart at the horse's spot, at 10 ft, along whose middle the step
- * runs, with Bree on its low half. Now and then she sits on its first row
- * and the walls keep her from walking across it or down it on it, so a
- * walk to the rest of it leaves the cart and comes back over it (review
- * AT-ASTRA-16): along the step down to the first row, and under the first
- * row from beside the cart on.
+ * runs, with Bree on its low half: Medium, or now and then Large or Huge,
+ * so she squeezes (review AT-ASTRA-19). Now and then a Medium Bree sits on
+ * its first row and the walls keep her from walking across it or down it
+ * on it, so a walk to the rest of it leaves the cart and comes back over it
+ * (review AT-ASTRA-16): along the step down to the first row, and under
+ * the first row from beside the cart on. Now and then, below the cart, a
+ * wall beside the step leaves a gap on the low ground between them, one
+ * size too narrow for a Large or Huge Bree, which she squeezes through.
+ * `force` asks for the walls or the gap.
  */
-function cartCase(r: () => number, hx: number, hy: number, right: boolean, edges: Record<string, EdgeFeature>, heights: Record<string, number>, walls: boolean): Case {
-  const walled = chance(r, 0.6) || walls;
+function cartCase(r: () => number, hx: number, hy: number, right: boolean, edges: Record<string, EdgeFeature>, heights: Record<string, number>, force: "walls" | "gap" | null): Case {
+  const size = force === "walls" ? "medium" : force === "gap" ? pick(r, ["large", "huge"] as const) : pick(r, ["medium", "medium", "large", "huge"] as const);
+  const side = size === "huge" ? 3 : size === "large" ? 2 : 1;
+  const walled = side === 1 && (force === "walls" || (force === null && chance(r, 0.6)));
   if (walled) {
     for (let y = 0; y <= hy; y++) edges[`${hx + 2},${y},w`] = { kind: "wall" };
     for (let x = right ? hx - 1 : 0; x < (right ? 30 : hx + 5); x++) edges[`${x},${hy + 1},n`] = { kind: "wall" };
   }
+  // The gap's low side starts at `gap`: past the step on the low half's side, as wide as the squeezed footprint.
+  const gap = right ? hx + 2 - Math.max(1, side - 1) : hx + 2;
+  const gapped = force === "gap" || (force === null && chance(r, 0.5));
+  if (gapped) for (let y = hy + 4; y < 30; y++) edges[`${right ? gap : gap + Math.max(1, side - 1)},${y},w`] = { kind: "wall" };
   const wagon = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: hx, y: hy, elevation: 10 });
-  const bree = token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], x: hx + (right ? int(r, 0, 1) : int(r, 2, 3)), y: hy + (walled ? 0 : int(r, 0, 3)), elevation: 10, actor: { inline: actor({ speeds: { walk: 30 } }) }, attached: { to: "cart", kind: "carry" } });
+  // On the low half, or as much of it as she covers.
+  const x = right ? hx + (side === 1 ? int(r, 0, 1) : 0) : hx + 4 - side - (side === 1 ? int(r, 0, 1) : 0);
+  const bree = token("bree", { name: "Bree", kind: "pc", size, ownerIds: ["p1"], x, y: hy + (walled ? 0 : int(r, 0, 4 - side)), elevation: 10, actor: { inline: actor({ speeds: { walk: 30 } }) }, attached: { to: "cart", kind: "carry" } });
   const tokens = [wagon, bree, token("gob", { name: "Goblin", x: 25, y: 25 }), token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], x: 25, y: 2, elevation: right ? 10 : 0 })];
-  return roomOf(r, edges, heights, tokens, "bree", "cart");
+  const c = roomOf(r, edges, heights, tokens, "bree", "cart");
+  // Half a square inside the full footprint that is squeezed into the gap, as a finger off the squares drops it (drop.ts squeezedSpot).
+  if (gapped && side > 1) return { ...c, aim: { x: gap - 1 + 0.2, y: hy + int(r, 5, 10) + 0.3 } };
+  // Or past the wall under her row, on the cart's low half, which she reaches only off the cart and back over it.
+  return force === "walls" ? { ...c, aim: { x, y: hy + int(r, 2, 3) } } : c;
 }
 
 function roomOf(r: () => number, edges: Record<string, EdgeFeature>, heights: Record<string, number>, tokens: Token[], mover: string, layout: Layout): Case {
@@ -177,11 +194,20 @@ function overlaps(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
 }
 
-/** Where a drag goes: up to 5 squares off, or now and then for a rider on a cart, on the cart or just past it, so a walk may leave it and come back over it. */
+/**
+ * Where a drag goes: up to 5 squares off, or now and then for a rider on a
+ * cart, on the cart or just past it, so a walk may leave it and come back
+ * over it, and now and then off the squares, where a creature that
+ * squeezes drops squeezed (drop.ts squeezedSpot).
+ */
 function target(r: () => number, c: Case): Point {
   const mover = c.state.tokens[c.mover]!;
   const wagon = c.state.tokens.cart;
-  if (c.layout === "cart" && wagon && chance(r, 0.6)) return { x: Math.min(28, wagon.x + int(r, -1, 6)), y: Math.min(28, wagon.y + int(r, 1, 5)) };
+  if (c.aim && chance(r, 0.8)) return c.aim;
+  if (c.layout === "cart" && wagon && chance(r, 0.6)) {
+    const off = chance(r, 0.4) ? 0.2 : 0;
+    return { x: Math.min(28, wagon.x + int(r, -1, 6) + off), y: Math.min(28, wagon.y + (chance(r, 0.5) ? int(r, 1, 5) : int(r, 4, 12)) + off) };
+  }
   return { x: Math.max(0, Math.min(28, mover.x + int(r, -5, 5))), y: Math.max(0, Math.min(28, mover.y + int(r, -5, 5))) };
 }
 
@@ -198,10 +224,12 @@ describe("a drag of an attached token plans the walk the server takes and stores
     let farRoutes = 0;
     let held = 0;
     let reentered = 0;
+    let squeezed = 0;
     const walked = { plateau: 0, cart: 0 };
-    for (let seed = 1; seed <= 400; seed++) {
+    // Past the first 400, a rider on a cart with the walls that send her off it and back over it (review AT-ASTRA-16), then a Large or Huge one with a gap to squeeze through (review AT-ASTRA-19).
+    for (let seed = 1; seed <= 550; seed++) {
       const r = rng(seed);
-      const c = randomCase(r);
+      const c = randomCase(r, seed > 475 ? "gap" : seed > 400 ? "cart" : undefined);
       const mover = c.state.tokens[c.mover]!;
       const raw = target(r, c);
       const copy = c.who.role === "dm" ? c.state : copyFor(c.state, c.who);
@@ -253,9 +281,10 @@ describe("a drag of an attached token plans the walk the server takes and stores
       if (drag.answer.kind === "none") held++;
       if (op.t === "token.move" && op.route) routed++;
       if (mover.attached && !after.attached) off++;
+      if (mover.attached && after.squeeze) squeezed++;
     }
-    // A run that never walks off a mount, along a route, held at a wall or back over a cart tests nothing.
-    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10 && reentered > 1 && walked.plateau > 20 && walked.cart > 20, JSON.stringify({ moved, routed, off, held, reentered, farRoutes, walked }));
+    // A run that never walks off a mount, along a route, held at a wall, back over a cart or squeezed off one tests nothing.
+    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10 && reentered > 10 && squeezed > 20 && walked.plateau > 20 && walked.cart > 20, JSON.stringify({ moved, routed, off, held, reentered, squeezed, farRoutes, walked }));
   });
 
   test("random group drags of the same with a token of the player's far off: each leg is one the server's leg test takes, and the label reads what it stores", () => {

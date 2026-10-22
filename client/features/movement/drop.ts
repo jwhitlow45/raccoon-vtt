@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footing, footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkAlong, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
@@ -357,6 +357,8 @@ function landingOf(state: DropState, token: DropToken, target: Point & { squeeze
   const kept = passing(state, walking, cut ? cut.pieces : [...pieces], elevation);
   if (!kept) return null;
   const points = routePoints(state.buildChunks, walking, kept, elevation);
+  // A squeeze at the walk's end is judged where its last leg starts, off the holder for good once the walk cleared it, as the server judges it (permissions.ts squeezeFits).
+  if (at.squeeze && !squeezeFits(state, walkAlong(walking, points.slice(1, -1)), at)) return null;
   return routeReach(points, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
 }
 
