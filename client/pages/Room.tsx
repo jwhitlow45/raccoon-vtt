@@ -553,7 +553,6 @@ function RoomPage() {
     setShare(next);
     saveSplit.current?.();
   }, []);
-  // The bar's Close, whose bar goes with the bottom panel: focus goes to the chosen tab (9.2).
   /*
    * A panel's `close` in the side panel (features/panels.ts PanelProps). A
    * panel closes its phone's sheet to clear the map, as Add and place does,
@@ -571,6 +570,7 @@ function RoomPage() {
       if (store.getState().local.tool !== DEFAULT_TOOL) ui.hideSheet(true);
     });
   }, [store, ui]);
+  // The bar's Close, whose bar goes with the bottom panel: focus goes to the chosen tab (9.2).
   const closeBelow = useCallback(() => {
     focusNext.current = { kind: "panel" };
     ui.splitPanels(false);
