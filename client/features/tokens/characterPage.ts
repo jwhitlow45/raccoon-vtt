@@ -37,9 +37,10 @@ export type CharacterPageState = {
  * (`sending`), so a tablet turned across 900 px opens it again as it was,
  * still busy. An answer touches only the instance that sent it
  * (patchForm). `opened` is the slot's count of outside opens when it
- * opened, so a form or list that mounts after an outside open meets that
- * open as a mounted one would (useLeaveForm, staleList). The stat blocks
- * page is a list and holds nothing typed.
+ * opened, and for a form the last one it met since, so a form or list
+ * that mounts after an outside open meets that open as a mounted one
+ * would, and only once (useLeaveForm, staleList). The stat blocks page is
+ * a list and holds nothing typed.
  */
 export type PanelForm =
   | { kind: "new"; id: string; opened: number; kept?: KeptDraft }
@@ -161,8 +162,12 @@ export type LeaveFor = "back" | "page";
  * leaves for its page. `since` is the count when the form opened
  * (PanelForm), so a form a remount opens again after an outside open, as
  * a panel switched away from and back is, meets that open on its mount.
+ * Once met, the open is written to the form instance `formId`, so a later
+ * remount, such as a turn across 900 px, never meets it again: a form kept
+ * after its question asks only when Back or Cancel is pressed.
  */
-export function useLeaveForm(draft: unknown, changed: boolean, leave: (to: LeaveFor) => void, opened: number, since: number): { asking: boolean; press(): void } {
+export function useLeaveForm(formId: string, draft: unknown, changed: boolean, leave: (to: LeaveFor) => void, opened: number, since: number): { asking: boolean; press(): void } {
+  const store = useScoped(characterPageSlot);
   const now = JSON.stringify(draft);
   const [asked, setAsked] = useState<{ at: string; to: LeaveFor } | null>(null);
   const asking = changed && asked?.at === now;
@@ -174,6 +179,7 @@ export function useLeaveForm(draft: unknown, changed: boolean, leave: (to: Leave
   useEffect(() => {
     if (seen.current === opened) return;
     seen.current = opened;
+    patchForm(store, formId, (form) => ({ ...form, opened }));
     press("page", false);
   });
   return { asking, press: () => press("back", true) };

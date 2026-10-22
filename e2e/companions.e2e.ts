@@ -886,6 +886,41 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     }
   });
 
+  test("fu20b-8. an add form that Companion of Bree asked over, then typed in again, asks nothing more as the tablet turns across 900 px and back (FU16-O-9)", async () => {
+    const cdp = await anaContext.newCDPSession(ana);
+    await setUp(ana, cdp, { width: 1180, height: 820, scale: 1 });
+    const asks = ana.getByRole("button", { name: "Discard changes?" });
+    const name = ana.getByRole("textbox", { name: "Name", exact: true });
+    try {
+      await showCompanion(ana, "Hoot");
+      await ana.locator(`[data-opener="companion:${run.bree.characterId}"]`).click();
+      await name.fill("Moss");
+      // Hoot's panel, then its link to Bree's page: an open from outside the form, which holds typing, so it asks first.
+      await bar(ana, "Hoot").getByRole("button", { name: "Details", exact: true }).click();
+      await tokenPanel(ana).locator("[data-kind-line]").getByRole("button", { name: "Companion of Bree" }).click();
+      await asks.first().waitFor();
+      await name.fill("Mossy");
+      await waitFor("the change takes the question back", async () => ((await asks.count()) === 0 ? true : null));
+      // Turned upright, the form opens again in the Characters sheet, which meets the open it already answered.
+      await ana.setViewportSize({ width: 820, height: 1180 });
+      const sheet = ana.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+      await sheet.getByRole("textbox", { name: "Name", exact: true }).waitFor();
+      await ana.waitForTimeout(400);
+      assert.equal(await asks.count(), 0, "the turn upright asked again");
+      assert.equal(await sheet.getByRole("textbox", { name: "Name", exact: true }).inputValue(), "Mossy");
+      await shots.take(ana, "companions-fu20b-turn-asks-nothing");
+      await ana.setViewportSize({ width: 1180, height: 820 });
+      await ana.getByRole("tablist", { name: "Panels" }).waitFor();
+      await name.waitFor();
+      await ana.waitForTimeout(400);
+      assert.equal(await asks.count(), 0, "the turn back asked again");
+      assert.equal(await name.inputValue(), "Mossy");
+      await discardForm(ana);
+    } finally {
+      await setUp(ana, cdp, { width: 1280, height: 800, scale: 1 });
+    }
+  });
+
   test("8b. a block saved from either picker is the pick: New and Paste, in Attach and in Choose", async () => {
     const save = async (editor: Locator) => {
       await editor.getByRole("button", { name: "Save", exact: true }).click();

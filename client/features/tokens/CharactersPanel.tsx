@@ -387,7 +387,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
   // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
   useUnsavedSince(typed);
   useKeepDraft(props.formId, typed, start);
-  const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened, props.since);
+  const leave = useLeaveForm(props.formId, typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened, props.since);
   usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 
   const create = (placeAfter: boolean) => {
