@@ -329,4 +329,32 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await done.click();
     await pane(dm).waitFor({ state: "detached" });
   });
+
+  test("fu20b-3. on a short laptop screen the trap cards show over the screen, and a card's Save and damage closes them, so the group save it opens in the side panel takes a click (LP13-TR-3)", async () => {
+    await dm.setViewportSize({ width: 1280, height: 320 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Select");
+    for (let i = 0; i < 2; i++) await ops.send({ t: "trap.spring", trapId: run.trapId, tokenIds: [run.thorn] });
+    await waitFor("two springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 2 ? true : null));
+    // The first card does not fit between the top bar and the toolbar, so the column's row stands for the cards, and its tap shows them over the screen.
+    const row = dm.getByRole("button", { name: /went off.*Tap to answer\.$/ });
+    await row.click();
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    await shots.take(dm, "traps-fu20b-alerts-over-the-screen");
+    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().getByRole("button", { name: "Save and damage", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    const page = dm.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.");
+    await page.waitFor();
+    // Nothing is left inert behind the alerts, and the page's Ask takes a click once scrolled to on this short screen.
+    assert.equal(await dm.locator("[inert]").count(), 0, "the page behind the alerts is still inert");
+    const ask = dm.getByRole("button", { name: "Ask 1 player", exact: true });
+    await ask.scrollIntoViewIfNeeded();
+    assert.ok(await wholeInReach(ask), "the group save in the side panel takes no click");
+    await shots.take(dm, "traps-fu20b-save-in-reach");
+  });
+
 });

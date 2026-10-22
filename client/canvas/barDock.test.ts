@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { RoomScope } from "../state/scope.ts";
 import {
   BAR_WIDTH,
   laneChoice,
@@ -57,6 +58,8 @@ import {
   pastBars,
   raisedRow,
   askedAlerts,
+  barDockSlot,
+  closeAlertsOverlay,
   readSpot,
   releaseSpot,
   restingBar,
@@ -855,5 +858,18 @@ describe("a summary row risen over the bars (follow-up to docs/design-v1-bar-doc
     assert.equal(raised.row, 8);
     assert.equal(columnFacts(raised, { top: 122, measured: null, row: 8 }), raised);
     assert.equal(columnFacts(raised, { top: 122, measured: null })!.row, undefined, "back at its place");
+  });
+});
+
+describe("a card's action that opens a panel (LP13-TR-3)", () => {
+  test("asks the alerts over the screen to close, each time, and asks nothing while they are where they are", () => {
+    const scope = new RoomScope();
+    const dock = scope.get(barDockSlot);
+    closeAlertsOverlay(scope);
+    assert.equal(dock.getState().alertsClose, 0, "no alerts over the screen: nothing to close");
+    dock.setState({ alertsOverlay: true });
+    closeAlertsOverlay(scope);
+    closeAlertsOverlay(scope);
+    assert.equal(dock.getState().alertsClose, 2, "each ask is a new one, so the column hears both");
   });
 });

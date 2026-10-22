@@ -683,6 +683,14 @@ function FightAlerts() {
     focusRow.current = true;
   }, []);
   useBackClose(overlay, closeOverlay);
+  // So does a card's action that opens a panel (barDock.ts closeAlertsOverlay), which would otherwise open out of reach behind them.
+  const closeAsks = useStore(dock, (s) => s.alertsClose);
+  const closesHeard = useRef(closeAsks);
+  useLayoutEffect(() => {
+    if (closesHeard.current === closeAsks) return;
+    closesHeard.current = closeAsks;
+    if (overlay) closeOverlay();
+  }, [closeAsks, overlay, closeOverlay]);
   // Modal as a <dialog> is (lib/modalDialog.ts) without becoming one, which would mount its cards afresh and drop a half-typed total: the page behind takes no focus and no tap, and Tab keeps inside.
   useLayoutEffect(() => {
     const box = boxRef.current;

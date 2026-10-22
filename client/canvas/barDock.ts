@@ -2,7 +2,7 @@ import { createStore } from "zustand/vanilla";
 import type { Point, Size } from "../lib/camera.ts";
 import { isFinePointer } from "../lib/device.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
-import { scopeSlot } from "../state/scope.ts";
+import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /*
  * Where the token action bar sits (docs/design-v1-bar-dock.md), as plain
@@ -1053,14 +1053,28 @@ type BarDockState = {
   columnCramped: boolean;
   /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
   alertsOverlay: boolean;
+  /** Asks for the alerts over the screen to close (closeAlertsOverlay), counted so each ask is heard. */
+  alertsClose: number;
   /** A popover of the tool's options is open (pages/Room.tsx ToolOptions). It rises under a roll card at a narrow screen's foot, which folds while it is open. */
   toolPopover: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, alertsClose: 0, toolPopover: false })),
 );
+
+/**
+ * Closes the alerts over the screen, as their Close does, for an action on
+ * a card there that opens a panel, such as a trap's Save and damage or an
+ * ask's Open: the alerts are modal, so the panel would stay out of reach
+ * behind them (features/encounter/InitiativeStrip.tsx FightAlerts). With
+ * the alerts where they are, it asks nothing.
+ */
+export function closeAlertsOverlay(scope: RoomScope): void {
+  const dock = scope.get(barDockSlot);
+  if (dock.getState().alertsOverlay) dock.setState((s) => ({ alertsClose: s.alertsClose + 1 }));
+}
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
