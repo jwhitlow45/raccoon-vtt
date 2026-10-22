@@ -22,6 +22,7 @@ import { turnMoverId } from "./turns.ts";
 import { barSlots, detachChoice, detachOp, getOffPlace } from "./detach.ts";
 import { dragLead } from "./groups.ts";
 import { attachOp, attachRows } from "./list.ts";
+import { replayPending } from "../../state/store.ts";
 
 /**
  * The hidden-state generator (docs/design-v1-attach.md 8.0, the class of
@@ -1416,6 +1417,39 @@ describe("a drag's preview reaches a player only where its move leaves the token
  * reads the cost the move stores. Another player's copy gets no path.
  */
 describe("a player's own creature on a turn the DM hid reads its turn's earlier legs (review AT-HIDDENPATH)", () => {
+  test("a move still waiting for the server keeps the turn's path in its owner's copy, so a second diagonal reads 10 ft as the store does (review FU20A-OP-4)", () => {
+    let state = room({
+      tokens: {
+        dog: token("dog", { name: "Mastiff", kind: "npc", ownerIds: ["p1"], visibility: "dm", x: 10, y: 10, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        thorn: token("thorn", { name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 3, y: 3, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+      },
+    });
+    state.meta.settings = { ...state.meta.settings, diagonal: "fiveTen", revealHiddenOnTurn: false };
+    let seq = 0;
+    const play = (who: Viewer, op: Op) => {
+      const out = applyOp(state, op, who, env(++seq));
+      assert.ok(out.ok, out.ok ? "" : out.message);
+      state = out.state;
+    };
+    play(DM, { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "ed", tokenId: "dog", value: 10, hidden: true }] });
+    play(DM, { t: "encounter.next" });
+    play(DM, { t: "encounter.next" });
+    // A step east the server has taken, then a diagonal still waiting for its answer.
+    play(P1, { t: "token.move", tokenId: "dog", x: 11, y: 10 });
+    const first: Op = { t: "token.move", tokenId: "dog", x: 12, y: 11 };
+    const confirmed = copyOf(state, P1);
+    assert.equal(confirmed.encounter?.activeEntryId, null, "the owner's copy holds no acting row");
+    const predicted = replayPending({ confirmed: confirmed as unknown as ProjectedState, seq, pending: [{ n: 1, op: first, at: 0 }], viewer: P1, sceneId: "s1" }).state;
+    assert.deepEqual(predicted.tokens.dog?.path?.stops.map((st) => [st.x, st.y]), [[10, 10], [11, 10], [12, 11]], "the waiting diagonal joins the turn's path");
+    const drag = dragOf(predicted, "player", "dog", { x: 13, y: 12 });
+    assert.equal(drag.preview.read.dragFt, 10, "the second diagonal");
+    play(P1, first);
+    play(P1, drag.op as Op);
+    assert.deepEqual(state.tokens.dog!.path!.stops.slice(2).map((st) => st.cost), [5, 10], "as the store has them");
+    // Only a player's projection marks a turn started with no acting row, so the server's own state never walks this way.
+    assert.equal(state.encounter?.started, undefined);
+  });
+
   test("random walks and group walks by its owner under 5-10-5, among walls", () => {
     let legs = 0;
     let diagonal = 0;

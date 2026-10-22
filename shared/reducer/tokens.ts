@@ -497,12 +497,15 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   const inPlace = sameSpot(before, after);
   if (!reshaped && inPlace) return after;
   const encounter = tx.state.encounter;
-  const turn = turnUnderWay(encounter);
+  let turn = turnUnderWay(encounter);
   if (!turn) {
     // A player's copy lacks the start of a turn they could not see begin (design 7.3), so their device cannot tell this
     // turn's path from an earlier one's. It leaves the active creature's path for the server's answer.
     const active = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
-    return active?.tokenId === after.id ? after : withoutPath(after);
+    if (active?.tokenId === after.id) return after;
+    const hidden = hiddenTurnOf(encounter, before);
+    if (!hidden) return withoutPath(after);
+    turn = hidden;
   }
   // A controlled mount sharing its rider's turn moves on its own path then (docs/design-v1-attach.md 7.2), from op version 14.
   const mount = turn.tokenId !== after.id && attaches(tx.env.opVersion) && sharesTurn(tx.state, after.id, turn);
@@ -535,6 +538,23 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   if (carried) stop = { ...stop, uncounted: true, carried: true };
   const counts = !resized && !(reshaped && inPlace) && !uncounted;
   return { ...after, path: withStop(path, counts ? stop : { ...stop, uncounted: true }, to, walked) };
+}
+
+/**
+ * The turn a player's copy walks a creature in while a row they cannot see
+ * acts, when the copy holds the creature's path: the projection sends a
+ * path then only for its owners' own creature on its own turn, on a row
+ * the DM hid from them (project.ts projectPathCtx, review AT-HIDDENPATH).
+ * So a move the device predicts before the server answers goes on with
+ * that path, as the store goes on with it, and a second drag or arrow
+ * press reads its legs and their diagonals (review FU20A-OP-4). Only a
+ * player's projection marks a turn started with no acting row
+ * (Encounter `started`), so the server's own state never takes this, and
+ * nothing it stores changes. Null otherwise.
+ */
+function hiddenTurnOf(encounter: RoomState["encounter"], before: Token): (TurnStart & { seq: number }) | null {
+  if (encounter?.started !== true || encounter.activeEntryId !== null || !before.path) return null;
+  return { entryId: "", tokenId: before.id, sceneId: before.sceneId, x: before.x, y: before.y, elevation: before.elevation, seq: before.path.turn };
 }
 
 /** Whether the row marks time this round: its mount shared a rider's turn in it (docs/design-v1-attach.md 7.1). */

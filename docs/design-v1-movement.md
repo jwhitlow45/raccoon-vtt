@@ -263,7 +263,7 @@ On the active creature's turn, `withPath` writes the new stop with `via`, `moved
 
 ### 7.3 Projection
 
-- The DM and owners get every stop whole. Owners get the creature's path on its own turn even where the DM hid its row from them, so its drag's label counts on from the turn's earlier legs as the move stores the leg (review AT-HIDDENPATH).
+- The DM and owners get every stop whole. Owners get the creature's path on its own turn even where the DM hid its row from them, so its drag's label counts on from the turn's earlier legs as the move stores the leg (review AT-HIDDENPATH). A move still waiting for the server's answer goes on with that path in the owner's copy, as the store goes on with it, so a second drag or arrow press before the answer reads the waiting leg and its diagonal too (review FU20A-OP-4). Only a player's copy marks a turn started with no acting row, so this never changes what the server stores.
 - Other players never get `cost` or `diag`. They get a leg's `via` only when they saw both its ends, it is not `joinedUnseen`, and it has `routeSeen`: the leg is **seen whole**. **Published measurements** (contract section 5, L3-SOL-24): they never get `moved`. They read each leg's length from the stops and corners they received, as today, so no value shown to them depends on history they could not see. The 5-10-5 search starts from the public counters (5.5) for the same reason, since a route's bends are shown.
 - Drag frames: `path` to players only on scenes with neither fog nor vision, as today, and `ft` only to the DM and the token's owners. The route a frame carries was chosen in the public world, so its bends are the same whatever the DM hides.
 - The shared differential test holds both channels to it (section 12).
