@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { EdgeFeature, RoomState, Viewer } from "#shared/model.ts";
+import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type Viewer } from "#shared/model.ts";
+import { encodeHeights } from "#shared/rules/heights.ts";
 import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
 import { DM, P1, P2, actor, character, reveal, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
@@ -219,6 +220,40 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     assert.equal(t.p1.got.length, 2);
     t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 11, y: 12 });
     assert.deepEqual(t.p1.got.at(-1), { k: "dragMove", tokenId: "ogre", x: 11, y: 12 });
+  });
+
+  test("a Large passenger dragged off its cart into a gap too narrow for it is judged squeezed, as its walk off the cart reads the gap (review AT-ASTRA-19)", () => {
+    // A 4 by 4 cart at (9,6) at 10 ft carries the ogre. Below it a wall along x = 10 and 10 ft ground from x = 11 leave a
+    // 5 ft gap, a gap only for a walker on the ground on a scene whose walls stop moves. A character with darkvision
+    // stands west of the wall at (7,11).
+    const state = room();
+    state.scenes.s1 = scene("s1", { vision: { on: true, light: "dark" }, blockMovement: true });
+    const chunks: RoomState["buildChunks"] = {};
+    const chunk = (x: number, y: number) => {
+      const cx = Math.floor(x / CHUNK_CELLS);
+      const cy = Math.floor(y / CHUNK_CELLS);
+      return { k: (y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS), chunk: (chunks[`s1:${cx},${cy}`] ??= { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} }) };
+    };
+    const feet = new Map<BuildChunk, number[]>();
+    for (let y = 6; y < 20; y++)
+      for (let x = 11; x < (y < 10 ? 13 : 15); x++) {
+        const { k, chunk: c } = chunk(x, y);
+        if (!feet.has(c)) feet.set(c, new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0));
+        feet.get(c)![k] = 10;
+      }
+    for (const [c, f] of feet) c.heights = encodeHeights(f);
+    for (let y = 10; y < 20; y++) chunk(10, y).chunk.edges[`10,${y},w`] = { kind: "wall" };
+    state.buildChunks = chunks;
+    state.characters.c1 = character("c1", { ownerIds: ["p1"], actor: actor({ senses: "darkvision 30 ft" }) });
+    state.tokens.pc = token("pc", { kind: "pc", actor: { ref: "c1" }, x: 7, y: 11 });
+    state.tokens.cart = token("cart", { name: "Cart", kind: "object", size: "gargantuan", x: 9, y: 6, elevation: 10 });
+    state.tokens.ogre = token("ogre", { size: "large", x: 9, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" } });
+    const t = table(state);
+    // Its full footprint would reach west of the wall, in sight. Squeezed into the gap behind the wall, it is out of it.
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 9.5, y: 13.4 });
+    assert.deepEqual(t.p1.got, []);
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "ogre", x: 7, y: 12 });
+    assert.deepEqual(t.p1.got, [{ k: "dragMove", tokenId: "ogre", x: 7, y: 12 }], "west of the wall it is in sight");
   });
 
   test("a Large creature in the open beside the edge of sight is judged by its full footprint", () => {
