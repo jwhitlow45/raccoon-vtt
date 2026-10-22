@@ -6,9 +6,8 @@ import { MAX_RESTORE_ENTRIES, type ClientOp, type Op, type RestoreEntry } from "
 import { applyOp } from "#shared/reducer.ts";
 import { CHANGED_SINCE } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
-import { canApply } from "#shared/permissions.ts";
+import { canApply, NO_ROOM_TO_GROW_BACK } from "#shared/permissions.ts";
 import { projectEntity } from "#shared/project.ts";
-import { NO_ROOM_TO_GROW } from "#shared/rules/resize.ts";
 import { actor, apply, castAsk, castTable, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
 import { MOVED_SINCE, mergeInverses, poseRestore, posesAfter, UNDO_DEPTH, UndoStacks } from "./undo.ts";
 import { UndoTable } from "./undoTesting.ts";
@@ -566,7 +565,7 @@ describe("a player's resize undo (docs/design-v1-token-window.md 8.7)", () => {
     let state = play(bear(), grow, stacks, 1);
     state = settled(restore(state, stacks, "undo", 2));
     state = apply(state, { t: "build.walls", sceneId: "s1", put: [{ id: "wall00000001", a: [5, 4], b: [5, 6], f: { kind: "wall" } }] }, DM_VIEWER, 3);
-    assert.deepEqual(restore(state, stacks, "redo", 4), { refused: NO_ROOM_TO_GROW });
+    assert.deepEqual(restore(state, stacks, "redo", 4), { refused: NO_ROOM_TO_GROW_BACK }, "in a restore's words");
   });
 
   test("a token given to another player since refuses the undo and the redo, while a move's undo in the same room passes", () => {

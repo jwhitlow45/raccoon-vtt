@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MoveAnyToken, RoomState } from "./model.ts";
-import { canApply, MOVE_PLAYERS_FIRST, movesAnyToken, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, type AssetKind, type PermissionDeps } from "./permissions.ts";
+import { canApply, MOVE_PLAYERS_FIRST, movesAnyToken, NO_ROOM_TO_GROW_BACK, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import { projectState } from "./project.ts";
 import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, RESIZE_KEEPS_PLACE, resizeSpot } from "./rules/resize.ts";
@@ -1156,7 +1156,7 @@ describe("a player's undo or redo of a resize (restorePoseCheck)", () => {
     assert.equal(answer(restore(medium, "bear", { size: "large" }, "redo"), medium), "ok");
     // A new chunk collection, as the reducer writes one: the walls are worked out once per collection.
     medium.buildChunks = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 2, cells: {}, edges: { "5,4,w": { kind: "wall" }, "5,5,w": { kind: "wall" } } } };
-    assert.equal(answer(restore(medium, "bear", { size: "large" }, "redo"), medium), NO_ROOM_TO_GROW, "a wall drawn since through the grown footprint");
+    assert.equal(answer(restore(medium, "bear", { size: "large" }, "redo"), medium), NO_ROOM_TO_GROW_BACK, "a wall drawn since through the grown footprint, in a restore's words");
     assert.equal(answer(restore(medium, "bear", { x: 6 }, "redo"), medium), WALL_IN_THE_WAY_BACK, "a move's redo meets the wall as a move, in a restore's words");
     medium.tokens.bear!.locked = true;
     assert.equal(answer(restore(medium, "bear", { elevation: 20 }), medium), "ok", "an owner's undo in place on a locked token, as before");
