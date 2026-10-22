@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
+import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { actor, DM, effect, entry, P1, room, token } from "#shared/testutil.ts";
+import { actor, DM, effect, entry, env, P1, room, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
 import { copyFor } from "./testing.ts";
 import { asksControl, attachOp, attachRows, emptyWords, MAX_ROWS, waitsForServer } from "./list.ts";
@@ -155,7 +157,12 @@ describe("the Attach list", () => {
     assert.equal("steer" in attachOp(carry, true), false);
     for (const row of rows) assert.ok(clientOpSchema.safeParse(attachOp(row, true)).success, row.text);
     // Each row's op is one the server takes from whoever it was offered to, the DM's and a player's from their own copy.
-    const takes = (who: typeof DM, op: ReturnType<typeof attachOp>) => canApply(op, who, table(), { canUseAsset: () => true });
+    // Through the server's check and then the reducer, which may refuse what the check lets by.
+    const takes = (who: typeof DM, op: ReturnType<typeof attachOp>) => {
+      const allowed = canApply(op, who, table(), { canUseAsset: () => true });
+      const applied = applyOp(table(), op as Op, who, env(1));
+      return { ok: allowed.ok && applied.ok };
+    };
     for (const row of rows) assert.equal(takes(DM, attachOp(row, true)).ok, true, row.text);
     const mine = attachRows(asPlayer(table()), p1, "thorn");
     assert.ok(mine.length > 0);

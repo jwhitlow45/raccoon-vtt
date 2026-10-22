@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
-import type { ClientOp } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
+import type { ClientOp, Op } from "#shared/protocol.ts";
 import type { Encounter, RoomState, Token } from "#shared/model.ts";
-import { character, DM, entry, P1, P2, room, token } from "#shared/testutil.ts";
+import { character, DM, entry, env, P1, P2, room, token } from "#shared/testutil.ts";
 import { carriesTag, linkTag, marksTime, moveAfterRider, panelLinkTags, rowLink, steerChoice, steerOp } from "./tags.ts";
 import { copyFor } from "./testing.ts";
 
@@ -141,7 +142,13 @@ describe("the rider's Controlled or Independent", () => {
     assert.deepEqual(steerOp(t(state, "bree"), "horse", false), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 5, elevation: 0 });
     assert.deepEqual(steerOp(t(state, "bree"), "horse", true), { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 5, elevation: 0 });
     // The op is one the server takes from the player it is offered to.
-    for (const controlled of [false, true]) assert.equal(canApply(steerOp(t(mine, "bree"), "horse", controlled), P1, state, { canUseAsset: () => true }).ok, true);
+    for (const controlled of [false, true]) {
+      const op = steerOp(t(mine, "bree"), "horse", controlled);
+      assert.equal(canApply(op, P1, state, { canUseAsset: () => true }).ok, true);
+      const applied = applyOp(state, op as Op, P1, env(1));
+      assert.ok(applied.ok, applied.ok ? "" : applied.message);
+      assert.equal(applied.state.tokens.bree!.attached?.steer === true, controlled);
+    }
   });
 
   test("a player loses it on the DM's horse, and in a fight off the rider's turn", () => {
