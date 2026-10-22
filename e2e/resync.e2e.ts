@@ -782,7 +782,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await reopen(ana, DESKTOP, 1);
   });
 
-  test("lp14-rs-a. the DM takes Bree from Ana while her re-sync review, then her editor's D&D Beyond review, is open: each keeps its review, says Bree is no longer hers, and the room stays up", async () => {
+  test("lp14-rs-a. the DM takes Bree from Ana while her re-sync review, then her editor's D&D Beyond review, is open: each keeps its review, says Bree is no longer hers, the re-sync review rebuilds when she comes back, and the room stays up", async () => {
     const crashed = ana.getByText("Something went wrong in the room.", { exact: true });
     const playedBy = (ownerIds: string[]) => ops.send({ t: "character.update", characterId: run.bree.characterId, patch: { ownerIds } });
     // A new Speed, so the review has a Speed line, which reads the actor's speeds that another player's copy lacks.
@@ -798,9 +798,14 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await review.getByText("This character was deleted or is no longer yours, so it cannot be re-synced.", { exact: true }).waitFor();
     assert.equal(await crashed.count(), 0, "the room stays up");
     assert.equal(await review.getByRole("button", { name: "Apply", exact: true }).isDisabled(), true, "Apply is off");
+    // Given back while the review is open, Bree is reviewed from her fresh copy again.
+    await playedBy([run.anaId]);
+    await review.getByText("Bree changed on another device. The lists show the latest.", { exact: true }).waitFor();
+    assert.equal(await review.getByText("This character was deleted or is no longer yours, so it cannot be re-synced.", { exact: true }).count(), 0, "the notice goes");
+    assert.equal(await review.getByRole("button", { name: "Apply", exact: true }).isEnabled(), true, "Apply is on again");
+    await review.getByRole("checkbox", { name: "Speed 35 ft, now 30 ft", exact: true }).waitFor();
     await review.getByRole("button", { name: "Cancel", exact: true }).click();
     await review.waitFor({ state: "detached" });
-    await playedBy([run.anaId]);
     await waitFor("Bree's block back in Ana's view", () => breeIn(anaSocket)?.stats ?? null);
 
     const panel = await breeBlock(ana);
