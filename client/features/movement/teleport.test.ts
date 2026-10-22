@@ -4,7 +4,7 @@ import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { ANSWER_LOST, runTeleport, teleportMove, teleportRefusedText, WALK_STILL_COUNTS, type StopNote } from "./teleport.ts";
-import { line, raised, thorn, world } from "./testing.ts";
+import { line, raised, seenRoom, thorn, world } from "./testing.ts";
 
 /**
  * A stand-in for the room store: it queues what the flow sends, lets the
@@ -26,7 +26,7 @@ function harness(state: RoomState) {
       view = { ...view, tokens: { ...view.tokens, [token.id]: token } };
     },
     deps: {
-      view: () => view,
+      view: () => seenRoom(view),
       dispatch(op: ClientOp, opts: { onAnswer(a: OpAnswer): void; quiet?: boolean }) {
         sent.push({ op, answer: opts.onAnswer, quiet: opts.quiet === true });
         return sent.length;
@@ -132,7 +132,7 @@ describe("Teleport here", () => {
 
   test("past a ledge onto raised ground, the teleport lands on it", () => {
     const state = world({ heights: raised(6, 0, 30, 30, 10), tokens: [thorn({ x: 2, y: 5 })] });
-    assert.deepEqual(teleportMove(state, thorn({ x: 2, y: 5 }), { ghost: { x: 9, y: 5 }, aim: { x: 9.1, y: 5.2 }, blocker: "ledge" }), {
+    assert.deepEqual(teleportMove(seenRoom(state), thorn({ x: 2, y: 5 }), { ghost: { x: 9, y: 5 }, aim: { x: 9.1, y: 5.2 }, blocker: "ledge" }), {
       tokenId: "thorn",
       x: 9,
       y: 5,
@@ -145,6 +145,6 @@ describe("Teleport here", () => {
     // A 5 ft corridor from (10, 10) to (11, 20), closed at both ends, behind the room's wall.
     const state = world({ edges: { ...line("n", 10, 0, 30), ...line("n", 20, 10, 11), ...line("w", 10, 10, 20), ...line("w", 11, 10, 20) } });
     const ogre = thorn({ size: "large", x: 9, y: 4 });
-    assert.deepEqual(teleportMove(state, ogre, { ghost: { x: 9, y: 13 }, aim: { x: 9.2, y: 13.4 }, blocker: "wall" }), { tokenId: "thorn", x: 9.5, y: 13.5, squeeze: true, teleport: "wall" });
+    assert.deepEqual(teleportMove(seenRoom(state), ogre, { ghost: { x: 9, y: 13 }, aim: { x: 9.2, y: 13.4 }, blocker: "wall" }), { tokenId: "thorn", x: 9.5, y: 13.5, squeeze: true, teleport: "wall" });
   });
 });

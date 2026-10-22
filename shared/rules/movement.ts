@@ -952,7 +952,7 @@ function legSpots(token: MovingToken, to: Point): Point[] {
  * door's midpoint, meets no movement blocker other than that door: the
  * clear line reaching a door needs (section 4.1). Touching a blocker counts,
  * except a blocker that meets the line only at the door's midpoint itself.
- * Ledges count for a token walking there, as for its moves.
+ * Ledges count as for a move from where it stands, by its own footing.
  */
 export function lineClear(state: BuildState, token: MovingToken, to: Point, door: DoorRef): boolean {
   const scene = state.scenes[token.sceneId];

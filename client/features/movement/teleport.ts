@@ -1,8 +1,7 @@
-import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { landing } from "#shared/rules/movement.ts";
 import type { OpAnswer } from "../../state/types.ts";
-import { dropLanding, landed, squeezedSpot, walkerOf, type DropState, type DropToken, type Landed, type Stop } from "./drop.ts";
+import { dropLanding, landed, squeezedSpot, walkerOf, type DropToken, type DropView, type Landed, type Stop } from "./drop.ts";
 
 /**
  * "Teleport here" (2026-10-14, docs/design-v1-maps-vision.md section
@@ -35,7 +34,7 @@ export function teleportRefusedText(locked: boolean): string {
  * found as its drop would find it (drop.ts `squeezedSpot`), and it writes
  * the ground there like any landing (section 4.2).
  */
-export function teleportMove(state: DropState, token: DropToken, note: Pick<Stop, "ghost" | "aim" | "blocker">): Landed & { teleport: Stop["blocker"] } {
+export function teleportMove(state: DropView, token: DropToken, note: Pick<Stop, "ghost" | "aim" | "blocker">): Landed & { teleport: Stop["blocker"] } {
   const squeezed = squeezedSpot(state, token, note.aim, "teleport");
   const land = squeezed ?? landing(state, walkerOf(state, token), { ...note.ghost, elevation: dropLanding(state, token, note.ghost) }, "teleport");
   return { ...landed(state, token, { x: land.x, y: land.y, squeeze: land.squeeze }), teleport: note.blocker };
@@ -43,7 +42,7 @@ export function teleportMove(state: DropState, token: DropToken, note: Pick<Stop
 
 export type TeleportDeps = {
   /** The room as this device sees it now. */
-  view(): (Pick<RoomState, "scenes" | "buildChunks"> & Pick<DropState, "meta" | "seen"> & { tokens: Readonly<Record<string, (DropToken & Pick<Token, "kind"> & Partial<Pick<Token, "attached" | "locked">>) | undefined>> }) | null;
+  view(): DropView | null;
   dispatch(op: ClientOp, opts: { onAnswer(answer: OpAnswer): void; quiet?: boolean }): number | null;
   notify(text: string, tone: "info" | "error"): void;
   /** The flow is over, whichever way it went: the note goes. */

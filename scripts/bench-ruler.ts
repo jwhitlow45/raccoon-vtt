@@ -1,5 +1,5 @@
 import { measureWalk, walkJob, type WalkInput } from "../client/features/measure/walkRuler.ts";
-import { routeTarget } from "../client/features/movement/drop.ts";
+import { dropView, routeTarget } from "../client/features/movement/drop.ts";
 import { worldFor } from "../client/features/movement/press.ts";
 import { RouteDrag } from "../client/features/movement/routeDrag.ts";
 import { RouteWork, SLICE_MS, type Frames } from "../client/features/movement/routeWork.ts";
@@ -157,9 +157,9 @@ export function runFrameRows(runs = 3): RouteRow[] {
     const work = new RouteWork(board);
     const drag = new RouteDrag(() => worldFor(open, ogre, "dm").input, work);
     const t = performance.now();
-    drag.aim(routeTarget(open, ogre, { x: 198, y: 100 }));
+    drag.aim(routeTarget(dropView(open, "dm"), ogre, { x: 198, y: 100 }));
     const cold = performance.now() - t;
-    for (let f = 0; f < 60; f++) board.frame(() => drag.aim(routeTarget(open, ogre, f % 2 === 0 ? { x: 3 + f / 2, y: 2 } : { x: 198, y: 100 - (f % 7) })));
+    for (let f = 0; f < 60; f++) board.frame(() => drag.aim(routeTarget(dropView(open, "dm"), ogre, f % 2 === 0 ? { x: 3 + f / 2, y: 2 } : { x: 198, y: 100 - (f % 7) })));
     while (work.waiting) board.frame();
     // 40 rulers into a closed room.
     const view = closedRoom();
@@ -175,7 +175,7 @@ export function runFrameRows(runs = 3): RouteRow[] {
     for (let k = 0; k < 10; k++) mixed.add(walkJob({ view: walled, sceneId: "s1", stops: [{ x: 30.5 + k * 2, y: 30.5 }, { x: 191.5, y: 191.5 }], viewer: { role: "player" }, everything: false }, () => {}));
     const mover = walled.tokens.ogre!;
     const around = new RouteDrag(() => worldFor(walled, mover, "dm").input, mixed);
-    for (let f = 0; f < 30; f++) together.frame(() => around.aim(routeTarget(walled, mover, { x: 100 + f, y: 150 })));
+    for (let f = 0; f < 30; f++) together.frame(() => around.aim(routeTarget(dropView(walled, "dm"), mover, { x: 100 + f, y: 150 })));
     while (mixed.waiting) together.frame();
     if (r >= 1) {
       first.push(cold);

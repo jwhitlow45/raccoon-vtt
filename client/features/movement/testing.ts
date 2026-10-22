@@ -2,7 +2,9 @@ import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Roo
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
+import { publicToken } from "#shared/rules/walkWorld.ts";
 import { DM, env, P1, room, scene, token } from "#shared/testutil.ts";
+import type { DropView, Role } from "./drop.ts";
 
 /**
  * A room for the movement and door tests: one scene, `s1`, 30 by 30 with no
@@ -41,6 +43,21 @@ export function world(spec: Spec): RoomState {
     buildChunks: chunks,
     tokens: Object.fromEntries((spec.tokens ?? []).map((t) => [t.id, t])),
   });
+}
+
+/**
+ * The room as a drop reads it, with who every player sees (drop.ts
+ * dropView), made afresh each time: dropView keeps one per room object, so
+ * a test that changes a room in place would read the room as it first was.
+ */
+export function seenRoom(state: RoomState, role: Role = "player"): DropView {
+  return {
+    ...state,
+    seen: (t) => {
+      const token = state.tokens[t.id];
+      return token !== undefined && publicToken(state, token, { role });
+    },
+  };
 }
 
 /** `view` with `tokenId`'s turn under way, so a move records what its leg took (docs/design-v1-movement.md 6.2). */

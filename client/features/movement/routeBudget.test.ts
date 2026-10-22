@@ -9,7 +9,7 @@ import { routeTarget } from "./drop.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type Settled } from "./routeDrag.ts";
 import { RouteWork, type Frames } from "./routeWork.ts";
-import { world } from "./testing.ts";
+import { seenRoom, world } from "./testing.ts";
 
 /**
  * Every public entry point of route work, driven through one board's work
@@ -132,10 +132,10 @@ describe("route work keeps to the frame's budget on every entry point", () => {
     const drag = new RouteDrag(() => worldFor(view, ogre, "dm").input, board.work);
     for (let f = 0; f < 60; f++) {
       const to = f % 2 === 0 ? { x: 3 + f / 2, y: 2 } : { x: 198, y: 100 - (f % 7) };
-      board.frame(() => drag.aim(routeTarget(view, ogre, to)));
+      board.frame(() => drag.aim(routeTarget(seenRoom(view), ogre, to)));
     }
     let landed: Settled | null = null;
-    board.frame(() => drag.drop(routeTarget(view, ogre, { x: 198, y: 100 }), (a) => (landed = a)));
+    board.frame(() => drag.drop(routeTarget(seenRoom(view), ogre, { x: 198, y: 100 }), (a) => (landed = a)));
     for (let f = 0; f < 100 && !landed; f++) board.frame();
     assert.deepEqual(landed, { kind: "open" }, "open ground all the way");
     const step = oneStep(view, ogre);
@@ -177,13 +177,13 @@ describe("route work keeps to the frame's budget on every entry point", () => {
       board.frame(() => {
         kept.render();
         if (f < 100) rulers(board, [drawn(f)], true).render();
-        if (f < 30) drag.aim(routeTarget(view, ogre, { x: 20 + (f % 10), y: 20 + f }));
-        else if (f === 30) drag.drop(routeTarget(view, ogre, { x: 40, y: 40 }), (a) => (landed = a));
+        if (f < 30) drag.aim(routeTarget(seenRoom(view), ogre, { x: 20 + (f % 10), y: 20 + f }));
+        else if (f === 30) drag.drop(routeTarget(seenRoom(view), ogre, { x: 40, y: 40 }), (a) => (landed = a));
         // A press now and then, as a key held down repeats.
         if (f % 25 === 0 && ++made) board.work.run({ first: true, run: (budget) => (pressed.push(pressPlan(view, ogre, { x: ogre.x + 1, y: ogre.y }, [ogre], "dm", budget)), true) });
       });
     }
-    const expected = findRoute(worldFor(view, ogre, "dm").input, routeTarget(view, ogre, { x: 40, y: 40 }));
+    const expected = findRoute(worldFor(view, ogre, "dm").input, routeTarget(seenRoom(view), ogre, { x: 40, y: 40 }));
     assert.ok(landed !== null && expected !== null && expected !== "none");
     assert.deepEqual((landed as Settled & { kind: "route" }).route.pieces, expected.pieces);
     assert.ok(kept.done(), "the kept rulers finished too");

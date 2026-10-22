@@ -5,7 +5,7 @@ import { token } from "#shared/testutil.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { encodeTileFrom } from "../../lib/fogTiles.ts";
 import { planOne, stopText } from "../movement/drop.ts";
-import { CLOSED, line, OPEN, thorn, world } from "../movement/testing.ts";
+import { CLOSED, line, OPEN, seenRoom, thorn, world } from "../movement/testing.ts";
 import { doorActions, doorName, doorsInReach, doorsNear, doorUnder, findDoor, noteDoor, pillOpener, seenDoor, segmentDistance } from "./doors.ts";
 
 const FREE_DOOR: FreeWall = { id: "abcdefghijkl", a: [12, 2], b: [13, 3], f: { kind: "door", state: "closed", secret: false, discovered: false } };
@@ -162,7 +162,7 @@ describe("who opens a door from its pill (docs/design-v1-traps.md 5.3)", () => {
 describe("the note after a walk stopped at a door", () => {
   test("names only a door the player can see, so it never asks for a tap on a door under the fog", () => {
     const state = hall();
-    const stop = planOne(state, thorn({ x: 3, y: 5 }), { x: 9, y: 5 }, "walk").stop!;
+    const stop = planOne(seenRoom(state), thorn({ x: 3, y: 5 }), { x: 9, y: 5 }, "walk").stop!;
     assert.deepEqual(stop.door, { edge: "6,5,w" });
     const text = (fog: Record<string, FogTile> | null) => stopText({ blocker: stop.blocker, door: noteDoor(state.buildChunks, "s1", stop.door, fog) });
     assert.equal(text(null), "A door is in the way. Tap it to open.");

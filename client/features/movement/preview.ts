@@ -110,7 +110,7 @@ export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: 
  * holder's walk held where a creature it drags would meet a wall
  * (`walkers`, docs/design-v1-attach.md 4.2) is drawn and read to there.
  */
-export function walkPreview(input: { view: RoomState; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: { view: DropView; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
   const fpc = view.meta.settings.feetPerCell;
   const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;

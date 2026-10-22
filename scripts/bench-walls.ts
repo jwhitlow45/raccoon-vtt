@@ -24,7 +24,8 @@ import { encodeHeights } from "../shared/rules/heights.ts";
 import { landing, legStop, ownWalk, type MovingToken } from "../shared/rules/movement.ts";
 import { AREAS, SIGHT } from "../shared/rules/segments.ts";
 import { countChunksSplit, sceneWalls, splitCheck } from "../shared/rules/walls.ts";
-import { planOne } from "../client/features/movement/drop.ts";
+import { dropView, planOne } from "../client/features/movement/drop.ts";
+import { room } from "../shared/testutil.ts";
 
 const SIZE = 200;
 const CHUNK = 16;
@@ -429,7 +430,7 @@ export function runMovementBench(runs = 200): MoveRow[] {
     const sceneId = `move-bench-${rows.length}`;
     const chunks = chunksOf(c.build, sceneId);
     const scene = { id: sceneId, rev: 1, bounds: { w: SIZE, h: SIZE }, autoWalls: "all", blockMovement: true } as Scene;
-    const state = { scenes: { [sceneId]: scene }, buildChunks: chunks };
+    const state = dropView(room({ scenes: { [sceneId]: scene }, buildChunks: chunks }), "player");
     const token = ownWalk({ ...c.token, sceneId });
     const dragged = { ...token, id: "bench" };
     const once = () =>

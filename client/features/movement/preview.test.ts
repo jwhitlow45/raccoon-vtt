@@ -8,7 +8,7 @@ import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, actor, env, room, token } from "#shared/testutil.ts";
 import { dropView, moveOpsOf, planWalk } from "./drop.ts";
 import { frameFields, walkPreview } from "./preview.ts";
-import { line, raised, thorn, world } from "./testing.ts";
+import { line, raised, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
 
 /** A lone drag's picture and frames (docs/design-v1-movement.md 3.1, review MV-O-6 and MV-O-9). */
@@ -18,7 +18,7 @@ describe("the picture of a drag's walk", () => {
     const view = world({ blockMovement: false });
     const token = thorn({ x: 0, y: 0 });
     const zigzag = Array.from({ length: 70 }, (_, i): RoutePiece => [i % 2 === 0 ? 1 : 0, i + 1, 0, 0]);
-    const preview = walkPreview({ view, token, target: { x: 1, y: 70 }, answer: { kind: "route", route: { pieces: zigzag, points: [], endsBlocked: false } }, held: null, world: null, role: "player" });
+    const preview = walkPreview({ view: seenRoom(view), token, target: { x: 1, y: 70 }, answer: { kind: "route", route: { pieces: zigzag, points: [], endsBlocked: false } }, held: null, world: null, role: "player" });
     assert.deepEqual(preview.to, { x: zigzag[63]![0], y: zigzag[63]![1] });
     assert.equal(preview.corners.length, 63, "one corner short of the 64 pieces, 126 numbers in a frame");
     // Each piece of the zigzag is one square down and one across: 5 ft under every diagonal 5 ft.
@@ -27,7 +27,7 @@ describe("the picture of a drag's walk", () => {
     assert.equal(preview.cut, true);
     const frame = frameFields(preview);
     assert.deepEqual([frame.x, frame.y, frame.path!.length, frame.ft], [zigzag[63]![0], zigzag[63]![1], 126, 320]);
-    const whole = walkPreview({ view, token, target: { x: 1, y: 5 }, answer: { kind: "route", route: { pieces: zigzag.slice(0, 5), points: [], endsBlocked: false } }, held: null, world: null, role: "player" });
+    const whole = walkPreview({ view: seenRoom(view), token, target: { x: 1, y: 5 }, answer: { kind: "route", route: { pieces: zigzag.slice(0, 5), points: [], endsBlocked: false } }, held: null, world: null, role: "player" });
     assert.deepEqual([whole.cut, frameFields(whole).x], [false, undefined], "a walk not cut leaves the frame at the token");
   });
 
@@ -39,13 +39,13 @@ describe("the picture of a drag's walk", () => {
     const route = (pieces: RoutePiece[]) => ({ kind: "route" as const, route: { pieces, points: [], endsBlocked: false } });
     // Out a hundred squares, across and back: four pieces, 399 squares of reach.
     const far: RoutePiece[] = [[0, 100, 0, 0], [100, 100, 0, 0], [100, 0, 0, 0], [1, 0, 0, 0]];
-    const long = walkPreview({ view, token, target, answer: route(far), held: null, world: null, role: "player" });
+    const long = walkPreview({ view: seenRoom(view), token, target, answer: route(far), held: null, world: null, role: "player" });
     assert.deepEqual([long.to, long.corners, long.read.dragFt], [target, [], 5]);
-    assert.equal(planWalk(view, token, target, "walk", route(far), 5).moves[0]!.route, undefined, "the drop goes straight too");
+    assert.equal(planWalk(seenRoom(view), token, target, "walk", route(far), 5).moves[0]!.route, undefined, "the drop goes straight too");
     // Within reach the picture's corners are the drop's route.
     const near: RoutePiece[] = [[0, 10, 0, 0], [10, 10, 0, 0], [10, 0, 0, 0], [1, 0, 0, 0]];
-    const short = walkPreview({ view, token, target, answer: route(near), held: null, world: null, role: "player" });
-    const move = planWalk(view, token, target, "walk", route(near), 5).moves[0]!;
+    const short = walkPreview({ view: seenRoom(view), token, target, answer: route(near), held: null, world: null, role: "player" });
+    const move = planWalk(seenRoom(view), token, target, "walk", route(near), 5).moves[0]!;
     assert.deepEqual(short.corners, move.route!.slice(0, -1).map(([x, y]) => ({ x, y })));
     assert.deepEqual(short.to, { x: move.x, y: move.y });
   });
@@ -59,12 +59,12 @@ describe("the picture of a drag's walk", () => {
     const none = { kind: "none" as const, capped: false };
     // Held at the wall over a square of rubble: 15 ft straight, 20 ft walked, and the drop sends the walk.
     const seen = publicWorld(view, ownWalk(token), { role: "player" });
-    const plain = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player" });
+    const plain = walkPreview({ view: seenRoom(view), token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player" });
     assert.equal(plain.read.dragFt, 15, "before its route is checked");
     const pieces: RoutePiece[] = [[3, 5, 0, 0], [4, 5, 1, 0], [5, 5, 0, 0]];
-    const walked = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player", straight: { to: held, pieces } });
+    const walked = walkPreview({ view: seenRoom(view), token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player", straight: { to: held, pieces } });
     assert.deepEqual([walked.to, walked.read.dragFt], [held, 20]);
-    const drop = planWalk(view, token, { x: 9, y: 5 }, "walk", none, 5, () => ({ kind: "route", route: { pieces } }));
+    const drop = planWalk(seenRoom(view), token, { x: 9, y: 5 }, "walk", none, 5, () => ({ kind: "route", route: { pieces } }));
     assert.deepEqual([drop.moves[0]!.x, drop.moves[0]!.route, drop.stop?.searched], [5, pieces, true]);
   });
 
@@ -72,9 +72,9 @@ describe("the picture of a drag's walk", () => {
     const view = world({ edges: line("w", 6, 0, 30) });
     const token = thorn({ x: 2, y: 5 });
     const held = { x: 5, y: 5 };
-    const preview = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: { kind: "none", capped: false }, held, world: null, role: "player" });
+    const preview = walkPreview({ view: seenRoom(view), token, target: { x: 9, y: 5 }, answer: { kind: "none", capped: false }, held, world: null, role: "player" });
     assert.deepEqual([preview.to, preview.corners, preview.read.dragFt], [held, [], 15]);
-    const free = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: { kind: "none", capped: false }, held: null, world: null, role: "player" });
+    const free = walkPreview({ view: seenRoom(view), token, target: { x: 9, y: 5 }, answer: { kind: "none", capped: false }, held: null, world: null, role: "player" });
     assert.deepEqual([free.to, free.read.dragFt], [{ x: 9, y: 5 }, 35], "nothing held: the finger's spot");
   });
 });

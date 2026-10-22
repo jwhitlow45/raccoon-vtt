@@ -75,10 +75,12 @@ export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, to
 }
 
 /**
- * What a drop reads beside the build: the tokens, the settings and which
- * tokens every player sees as this device's copy shows them (`seen`), when
- * it has them, so a token on a holder every player sees lands and walks by
- * it (dropLanding, walkerOf). dropView gives all three.
+ * What a drop's landing reads beside the build: the tokens, the settings
+ * and which tokens every player sees as this device's copy shows them
+ * (`seen`), when it has them, so a token on a holder every player sees
+ * lands by it (dropLanding). The walk and the planners read a whole
+ * `DropView`, which always has `seen` (review AT-O-27), so no drop is ever
+ * walked as if no player saw its holder. dropView gives all three.
  */
 export type DropState = BuildState & {
   tokens?: Readonly<Record<string, (DropToken & Pick<Token, "kind"> & Partial<Pick<Token, "attached" | "height">>) | undefined>>;
@@ -142,10 +144,10 @@ function seenSeat(state: DropState, token: DropToken): { holder: DropToken; kept
  * search, the drop, its picture and the server's checks all judge the one
  * walk the op sends.
  */
-export function walkerOf<T extends DropToken>(state: DropState, token: T): T & Walker {
-  const seated = state.tokens?.[token.id];
-  // A token the room does not hold yet, or a view that reads no sight, has no holder to leave.
-  if (!seated || !state.tokens || !state.seen) return ownWalk(token);
+export function walkerOf<T extends DropToken>(state: DropView, token: T): T & Walker {
+  const seated = state.tokens[token.id];
+  // A token the room does not hold yet has no holder to leave.
+  if (!seated) return ownWalk(token);
   const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks }, seated, state.seen);
   // The seated token's walk, at the place this one stands.
   return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder } as T & Walker) : ownWalk(token);
@@ -209,7 +211,7 @@ export function landed(state: DropState, token: DropToken, at: Point & { squeeze
  * the far side. So a squeezed creature dragged along its corridor stays
  * in it, and a nudge leaves it where it is.
  */
-export function squeezedSpot(state: DropState, token: DropToken, raw: Point, mode: DropMode): (Point & { squeeze: true }) | null {
+export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode: DropMode): (Point & { squeeze: true }) | null {
   if (!canSqueeze(token)) return null;
   const size = footprintSize(token);
   const to = snapPosition(raw.x, raw.y, size);
@@ -225,7 +227,7 @@ export function squeezedSpot(state: DropState, token: DropToken, raw: Point, mod
  * walks a player's token up to the last clear spot and lines a squeezing
  * creature up with a narrow opening.
  */
-export function planOne(state: DropState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
+export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
   const squeezed = squeezedSpot(state, token, raw, mode);
   if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
   const to = snapPosition(raw.x, raw.y, footprintSize(token));
@@ -251,7 +253,7 @@ export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "
  * route steps on the lattice from where the token stands, so a token that
  * stands off its grid lands on that lattice, the nearest spot to it.
  */
-export function routeTarget(state: DropState, token: DropToken, raw: Point): Point & { squeeze: boolean } {
+export function routeTarget(state: DropView, token: DropToken, raw: Point): Point & { squeeze: boolean } {
   const placed = planOne(state, token, raw, "free").moves[0];
   const at = placed ? { x: placed.x, y: placed.y, squeeze: placed.squeeze === true } : { x: token.x, y: token.y, squeeze: token.squeeze === true };
   const L = routeLattice(token);
@@ -267,7 +269,7 @@ export function routeTarget(state: DropState, token: DropToken, raw: Point): Poi
  * as `routeSpots` counts a stand. Null when the route needs no cut, or no
  * piece end is such a spot.
  */
-export function cutRoute(state: DropState, token: DropToken, pieces: readonly RoutePiece[]): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
+export function cutRoute(state: DropView, token: DropToken, pieces: readonly RoutePiece[]): { pieces: RoutePiece[]; at: Point & { squeeze: boolean } } | null {
   if (pieces.length <= MAX_ROUTE_PIECES) return null;
   const grid = snapStep(token);
   const onGrid = (v: number, from: number) => Math.abs((v - from) / grid - Math.round((v - from) / grid)) < 1e-9;
@@ -299,7 +301,7 @@ export function cutRoute(state: DropState, token: DropToken, pieces: readonly Ro
  * the server refuses. Kept per route, so a drag's every frame reads it
  * once.
  */
-export function routeLanding(state: DropState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
+export function routeLanding(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
   const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell},${holderKey(state, token)}`;
   const known = landings.get(pieces);
   if (known && known.key === key && known.chunks === state.buildChunks && known.scene === state.scenes[token.sceneId]) return known.landing;
@@ -315,7 +317,7 @@ type Landing = { pieces: RoutePiece[]; at: Point & { squeeze?: boolean }; points
  * search found no route, or one `routeLanding` will not take. The board's
  * picture and the drop read it alike.
  */
-export function goesStraight(state: DropState, token: DropToken, target: Point & { squeeze?: boolean }, answer: Found | { kind: "searching" }, feetPerCell: number): boolean {
+export function goesStraight(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, answer: Found | { kind: "searching" }, feetPerCell: number): boolean {
   return answer.kind === "none" || (answer.kind === "route" && !routeLanding(state, token, target, answer.route.pieces, feetPerCell));
 }
 
@@ -347,7 +349,7 @@ function holderKey(state: DropState, token: DropToken): string {
   return `${link.kind},${holder.id},${holder.size},${holder.w},${holder.h},${holder.x},${holder.y},${holder.elevation}`;
 }
 
-function landingOf(state: DropState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
+function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
   const cut = cutRoute(state, token, pieces);
   if (pieces.length === 0 || (pieces.length > MAX_ROUTE_PIECES && !cut)) return null;
   const at = cut ? cut.at : target;
@@ -405,7 +407,7 @@ export function keyStep(world: WalkWorld, target: Point, charge: (units?: number
  * never searched, what it walks over counted (`keyStep`), and held at a
  * wall as a drop is.
  */
-export function planPress(state: DropState, world: WalkWorld | null, token: DropToken, at: Point, mode: Exclude<DropMode, "teleport">, feetPerCell: number, charge?: (units?: number) => void): DropPlan {
+export function planPress(state: DropView, world: WalkWorld | null, token: DropToken, at: Point, mode: Exclude<DropMode, "teleport">, feetPerCell: number, charge?: (units?: number) => void): DropPlan {
   const found = world ? keyStep(world, routeTarget(state, token, at), charge) : { kind: "open" as const };
   return planWalk(state, token, at, mode, found, feetPerCell, world ? (to) => keyStep(world, to, charge) : undefined);
 }
@@ -430,7 +432,7 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * straight leg, as the DM's drop through a wall, it goes as the straight
  * leg alone.
  */
-export function planWalk(state: DropState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
+export function planWalk(state: DropView, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
   const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
   if (walk) {
     const move = landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true });
@@ -460,7 +462,7 @@ export function planWalk(state: DropState, token: DropToken, raw: Point, mode: E
  * (docs/design-v1-attach.md 4.2), each tested on the token's leg offset by
  * its place: a token one of them could not follow stays where it was.
  */
-export function planGroup(state: DropState, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
+export function planGroup(state: DropView, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
   const moves: Landed[] = [];
   const held: DropPlan["held"] = [];
   for (const token of tokens) {
@@ -571,7 +573,7 @@ export function walkersStop(state: BuildState, lead: DropToken & Walker, points:
  * kept up to there, and the walk is stopped there as a lone walk is at a
  * wall, with the note that says so.
  */
-export function cutForWalkers(state: DropState, lead: DropToken, plan: DropPlan, walkers: readonly DropToken[], mode: Exclude<DropMode, "teleport">): DropPlan {
+export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, walkers: readonly DropToken[], mode: Exclude<DropMode, "teleport">): DropPlan {
   const move = plan.moves.find((m) => m.tokenId === lead.id);
   if (mode !== "walk" || walkers.length === 0 || !move) return plan;
   const landing = move.elevation ?? lead.elevation;
