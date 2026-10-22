@@ -675,15 +675,6 @@ function RoomPage() {
     },
   };
   useDockFocus({ folded, sheetOpen, store: dockStore, registry: scope.get(sheetFocusSlot), showing, showRef, summaryRef });
-  // The summary row on a map pane's edge closed the pane (RoomDock.tsx PaneDockRow): once the alerts unfold, what it named shows, as from the dock.
-  useLayoutEffect(() => {
-    if (underPane) return;
-    const asked = dockStore.getState().paneShow;
-    if (!asked) return;
-    dockStore.setState({ paneShow: null });
-    if (asked.kind === "rolls") rolls?.open();
-    else focusAlert(dockStore.getState().column, asked.first);
-  }, [underPane, dockStore, rolls]);
 
   // ------------------------------------------------ the docked token bar (canvas/barDock.ts)
   // The bars as drawn, in the chrome's own pixels, so the token bar keeps to the part of the map they leave free.

@@ -155,9 +155,11 @@ export function usePaneDock(on: boolean, fits: boolean): { reserve: number; summ
 /**
  * The alerts summary on a map pane's top edge (usePaneDock): `bottom` is
  * where the pane's foot stands, and the row follows the pane's top as the
- * pane grows and shrinks. Its tap closes the pane, and Room shows what it
- * named once the alerts unfold: a roll waiting for this viewer opens, else
- * the alert it names takes focus.
+ * pane grows and shrinks. Its tap closes the pane and asks the alerts
+ * column for what it named (fold.ts DockState.showAsk), which the column
+ * shows once it unfolds, as its own row's tap would: over the tool's
+ * options or the screen where the cards have no room, then a roll waiting
+ * for this viewer opens, else the alert it names takes focus.
  */
 export function PaneDockRow(props: { ref?: Ref<HTMLDivElement>; pane: RefObject<HTMLElement | null>; bottom: number; summary: AlertsSummary; onClose(): void }) {
   const { summary } = props;
@@ -194,7 +196,7 @@ export function PaneDockRow(props: { ref?: Ref<HTMLDivElement>; pane: RefObject<
       <SummaryButton
         summary={summary}
         onClick={() => {
-          store.setState({ paneShow: summary.first.kind === "rolls" && rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first } });
+          store.setState({ showAsk: summary.first.kind === "rolls" && rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first } });
           props.onClose();
         }}
         style={{ ...paneLook, flex: "0 1 auto", minWidth: 0, padding: `0 ${theme.space(3)}px` }}

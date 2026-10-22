@@ -138,6 +138,9 @@ export type RollsLine = { text: string; name: string; waiting: boolean; requests
 
 export type SummaryKind = "rolls" | ColumnAlert["kind"];
 
+/** What a summary's tap asks the alerts column to show (DockState.showAsk). */
+export type ShowAsk = { kind: "rolls" } | { kind: "alert"; first: { kind: SummaryKind; id: string } };
+
 /** What stands over the alerts, which a summary's advice names (alertsSummary). */
 export type SummaryHides = "sheet" | "bar" | "room" | "pane";
 
@@ -236,14 +239,19 @@ type DockState = {
   sheetFullMode: boolean;
   /** How many map panes show as a bottom sheet now (useFoldUnderPane), which fold the alerts column as a panel sheet does. */
   paneSheets: number;
-  /** What the summary row on a pane's edge asked to show as its tap closed the pane, which Room shows once the alerts unfold. */
-  paneShow: { kind: "rolls" } | { kind: "alert"; first: AlertsSummary["first"] } | null;
+  /**
+   * What a summary on a map pane's edge asked to show as its tap closed the
+   * pane (RoomDock.tsx PaneDockRow): a roll waiting for this viewer, or the
+   * alert it named. The alerts column meets it once it unfolds, as its own
+   * row's tap would (features/encounter/InitiativeStrip.tsx FightAlerts).
+   */
+  showAsk: ShowAsk | null;
 };
 
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, paneShow: null })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, showAsk: null })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

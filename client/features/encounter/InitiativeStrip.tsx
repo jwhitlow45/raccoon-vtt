@@ -13,7 +13,7 @@ import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { drawn, focusAlert, usePublishAlerts, useUnderSheet, type AlertsSummary, type ColumnAlert } from "../../pages/fold.ts";
+import { dockSlot, drawn, focusAlert, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useUiScale } from "../device/settings.ts";
@@ -803,8 +803,8 @@ function FightAlerts() {
     return () => observer.disconnect();
   }, []);
 
-  // The summary row's tap hides the bar, and once the cards show again, opens a roll that waits for this viewer or focuses the alert it named, as the dock's does.
-  const [showAfter, setShowAfter] = useState<{ kind: "rolls" } | { kind: "alert"; first: AlertsSummary["first"] } | null>(null);
+  // The summary row's tap hides the bar, and once the cards show again, opens a roll that waits for this viewer or focuses the alert it named, as the dock's does. `barAway: false` leaves the token bar as it was for the roll.
+  const [showAfter, setShowAfter] = useState<(ShowAsk & { barAway?: boolean }) | null>(null);
   useLayoutEffect(() => {
     if (!showAfter || summarized) return;
     // Drawn again once the bar steps aside, the cards may turn out to have no room for one whole card: measured now, they open where they fit before the request is met.
@@ -816,9 +816,31 @@ function FightAlerts() {
       return;
     }
     setShowAfter(null);
-    if (showAfter.kind === "rolls") rolls?.open({ barAway: true });
+    if (showAfter.kind === "rolls") rolls?.open({ barAway: showAfter.barAway ?? true });
     else focusAlert(boxRef.current, showAfter.first);
   });
+  /*
+   * A summary on a map pane's edge (pages/RoomDock.tsx PaneDockRow) closes
+   * the pane and asks for what it named (pages/fold.ts DockState.showAsk).
+   * Once the column unfolds the ask is met as this column's own row's tap:
+   * the token bar steps aside where it holds the row's lane, the cards open
+   * over the tool's options or the screen where they have no room for one
+   * whole card, then the roll opens or the alert takes focus. The bar stays
+   * where the cards show beside it.
+   */
+  const alertsDock = useScoped(dockSlot);
+  const showAsk = useStore(alertsDock, (s) => s.showAsk);
+  useLayoutEffect(() => {
+    if (!showAsk || folded) return;
+    alertsDock.setState({ showAsk: null });
+    const barLane = bar?.lane === "summary";
+    if (barLane) ui.showActions(false);
+    if (forFootCard) {
+      rolls?.open({ barAway: true });
+      return;
+    }
+    setShowAfter({ ...showAsk, barAway: barLane });
+  }, [showAsk, folded, alertsDock, bar, ui, forFootCard, rolls]);
 
   // Where the cards show once asked for (barDock.ts askedAlerts), from the first card's height and the room the bars leave.
   const askedWhere = (first = firstHeight): AskedAlerts =>
@@ -852,7 +874,7 @@ function FightAlerts() {
     if (!showAfter || !forRoom) return;
     if (showAfter.kind === "rolls" && footRolls) {
       setShowAfter(null);
-      rolls?.open({ barAway: true });
+      rolls?.open({ barAway: showAfter.barAway ?? true });
       return;
     }
     setAsked(askedWhere());
