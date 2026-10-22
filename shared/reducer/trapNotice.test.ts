@@ -89,4 +89,15 @@ describe("the Passive Perception hint", () => {
     dark.scenes.s1 = { ...dark.scenes.s1!, fogEnabled: true, vision: { on: true, light: "dark" } };
     assert.equal(notices(walk(dark, 8).state).length, 0, "darkness and no darkvision");
   });
+
+  test("each square of the zone is measured on its own ground, so a raised one beside it never makes the near one far", () => {
+    const raised = (zone: Trap["zone"]) => {
+      const r = applyOp(world(16, { ...plate(), zone }), { t: "build.height", sceneId: "s1", cells: ["11,5"], height: 50 }, DM, env(seq++));
+      assert.ok(r.ok);
+      return r.state;
+    };
+    assert.equal(notices(walk(raised({ cells: [{ x: 10, y: 5, w: 2, h: 1 }] }), 8).state).length, 1, "one rectangle of both squares");
+    assert.equal(notices(walk(raised({ cells: [{ x: 10, y: 5, w: 1, h: 1 }, { x: 11, y: 5, w: 1, h: 1 }] }), 8).state).length, 1, "a rectangle each");
+    assert.equal(notices(walk(raised({ cells: [{ x: 11, y: 5, w: 1, h: 1 }] }), 9).state).length, 0, "the raised square alone is 50 ft up");
+  });
 });

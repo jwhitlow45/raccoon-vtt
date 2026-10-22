@@ -3,8 +3,8 @@ import { LIMITS } from "../limits.ts";
 import type { RoomState, Token, Trap } from "../model.ts";
 import { partySightOf, playersSeeGround, playersToken } from "../project.ts";
 import type { Op } from "../protocol.ts";
-import { boxDistanceFt, tokenCellBox, type CellBox } from "../rules/distance.ts";
-import { rangeGround } from "../rules/heights.ts";
+import { boxDistanceFt, tokenCellBox } from "../rules/distance.ts";
+import { groundAt } from "../rules/heights.ts";
 import { isPlainId, trapCreature, walkOp, zoneRanges } from "../rules/traps.ts";
 import type { Tx } from "./tx.ts";
 
@@ -81,15 +81,24 @@ function passiveOf(state: RoomState, token: Token): number | null {
   return typeof actor?.passivePerception === "number" ? actor.passivePerception : null;
 }
 
-/** Within 10 ft of the zone's nearest square, on its ground, by the room's diagonal rule: the distance between boxes is the nearest squares'. */
+/** Within 10 ft of the zone's nearest square, each square on its own ground, by the room's diagonal rule. */
 function near(state: RoomState, token: Token, trap: Trap): boolean {
   const settings = state.meta.settings;
   const fpc = settings.feetPerCell > 0 ? settings.feetPerCell : 5;
   const from = tokenCellBox(token, fpc);
   for (const r of zoneRanges(state, trap.sceneId, trap.zone)) {
-    const z0 = Math.floor(rangeGround(state.buildChunks, trap.sceneId, r) / fpc);
-    const zone: CellBox = { x0: r.x0, x1: r.x1, y0: r.y0, y1: r.y1, z0, z1: z0 + 1 };
-    if (boxDistanceFt(from, zone, settings) <= NOTICE_FT) return true;
+    // A square farther across than 10 ft from the footprint is too far at any height, so only the near part of a big zone is read.
+    const reach = Math.ceil(NOTICE_FT / fpc);
+    const x0 = Math.max(r.x0, from.x0 - reach);
+    const x1 = Math.min(r.x1, from.x1 + reach);
+    const y0 = Math.max(r.y0, from.y0 - reach);
+    const y1 = Math.min(r.y1, from.y1 + reach);
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const z0 = Math.floor(groundAt(state.buildChunks, trap.sceneId, x, y) / fpc);
+        if (boxDistanceFt(from, { x0: x, x1: x + 1, y0: y, y1: y + 1, z0, z1: z0 + 1 }, settings) <= NOTICE_FT) return true;
+      }
+    }
   }
   return false;
 }
