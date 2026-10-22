@@ -12,7 +12,7 @@ import { footprintSize } from "./rules/footprint.ts";
 import { footprintGround, groundAt, standing } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY } from "./rules/movement.ts";
-import { onRouteLattice, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
+import { onRouteLattice, routeBlocker, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
@@ -1276,15 +1276,9 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
     const end = route[route.length - 1];
     const landing = last && end && end[0] === to.x && end[1] === to.y ? (to.elevation ?? at.elevation) : undefined;
     const points = routePoints(c.state.buildChunks, at, route, landing ?? groundOrHeight(c.state, at, end));
-    for (let i = 1; i < points.length; i++) {
-      const a = points[i - 1]!;
-      const b = points[i]!;
-      const from: Token = { ...at, x: a.x, y: a.y, elevation: a.elevation };
-      // Squeezed only where it starts: a walk squeezes nowhere between.
-      if (i > 1) delete from.squeeze;
-      const blocker = movementRules.legBlocker(c.state, from, b);
-      if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
-    }
+    // Each piece from where it starts, squeezed only where the walk starts: the client checks its routes by this same rule before it sends them.
+    const blocker = routeBlocker(c.state, at, route, points[points.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
+    if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
     const stop = points[points.length - 1]!;
     at = { ...at, x: stop.x, y: stop.y, elevation: stop.elevation };
     delete at.squeeze;

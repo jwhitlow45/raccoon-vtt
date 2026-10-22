@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
-import { routeLattice, routePoints, routeReach, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 
@@ -196,18 +196,83 @@ export function cutRoute(state: BuildState, token: DropToken, pieces: readonly R
 /**
  * The walk a lone drop lands with (3.1, 5.6), the same for the board's
  * picture of a drag and for the drop: the route to `target`, cut after 64
- * pieces where the creature can stand (`cutRoute`). Null when it cannot be
- * cut, or reaches past 300 squares, which the server refuses: the drop then
- * goes as the straight leg. So the picture never draws a walk the drop
- * would not take, and never reads one longer than the server takes.
+ * pieces where the creature can stand (`cutRoute`). On a scene that stops
+ * moves its every piece passes the server's own check (route.ts
+ * `routeStop`, permissions.ts `routeCheck`), a piece that fails split into
+ * its lattice steps where that lets it pass (review MV-O-24). Null when it
+ * cannot be cut, fails that check, or reaches past 300 squares, which the
+ * server refuses: the drop then goes as the straight leg. So the picture
+ * never draws a walk the drop would not take, and the drop never sends one
+ * the server refuses. Kept per route, so a drag's every frame reads it
+ * once.
  */
-export function routeLanding(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): { pieces: RoutePiece[]; at: Point & { squeeze?: boolean }; points: RoutePoint[]; cut: boolean } | null {
+export function routeLanding(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
+  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell}`;
+  const known = landings.get(pieces);
+  if (known && known.key === key && known.chunks === state.buildChunks && known.scene === state.scenes[token.sceneId]) return known.landing;
+  const landing = landingOf(state, token, target, pieces, feetPerCell);
+  landings.set(pieces, { key, chunks: state.buildChunks, scene: state.scenes[token.sceneId], landing });
+  return landing;
+}
+
+type Landing = { pieces: RoutePiece[]; at: Point & { squeeze?: boolean }; points: RoutePoint[]; cut: boolean };
+
+/**
+ * Whether a lone drop with this answer goes as the straight leg: the
+ * search found no route, or one `routeLanding` will not take. The board's
+ * picture and the drop read it alike.
+ */
+export function goesStraight(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, answer: Found | { kind: "searching" }, feetPerCell: number): boolean {
+  return answer.kind === "none" || (answer.kind === "route" && !routeLanding(state, token, target, answer.route.pieces, feetPerCell));
+}
+
+/** Where a lone drop's plan leaves the token: held at the wall, at its move, or where it stands. */
+export function planLands(plan: DropPlan, token: DropToken): Point {
+  const at = plan.stop?.at ?? plan.moves[0] ?? token;
+  return { x: at.x, y: at.y };
+}
+
+const landings = new WeakMap<readonly RoutePiece[], { key: string; chunks: object; scene: unknown; landing: Landing | null }>();
+
+function landingOf(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
   const cut = cutRoute(state, token, pieces);
   if (pieces.length === 0 || (pieces.length > MAX_ROUTE_PIECES && !cut)) return null;
   const at = cut ? cut.at : target;
-  const kept = cut ? cut.pieces : [...pieces];
-  const points = routePoints(state.buildChunks, token, kept, landedElevation(state.buildChunks, token, at));
+  const elevation = landedElevation(state.buildChunks, token, at);
+  const kept = passing(state, token, cut ? cut.pieces : [...pieces], elevation);
+  if (!kept) return null;
+  const points = routePoints(state.buildChunks, token, kept, elevation);
   return routeReach(points, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
+}
+
+/**
+ * The route as the server's check takes it on a scene that stops moves:
+ * as it is, or with each piece that fails split into its lattice steps,
+ * which cost what the piece does, when that lets it pass. Null when
+ * nothing passes within 64 pieces. A piece off the eight directions, as
+ * true distance pulls one taut, has no lattice steps to split into.
+ */
+function passing(state: BuildState, token: DropToken, pieces: RoutePiece[], landing: number): RoutePiece[] | null {
+  if (state.scenes[token.sceneId]?.blockMovement !== true) return pieces;
+  const L = routeLattice(token);
+  const split = new Set<string>();
+  for (let tries = 0; tries <= MAX_ROUTE_PIECES; tries++) {
+    const stop = routeStop(state, token, pieces, landing);
+    if (!stop) return pieces;
+    const k = stop.piece;
+    const [x, y, extra, swim] = pieces[k]!;
+    const [px, py] = k > 0 ? pieces[k - 1]! : [token.x, token.y];
+    const dx = x - px;
+    const dy = y - py;
+    const n = Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / L);
+    const exact = (Math.abs(dx) < 1e-9 || Math.abs(dy) < 1e-9 || Math.abs(Math.abs(dx) - Math.abs(dy)) < 1e-9) && Math.abs(Math.max(Math.abs(dx), Math.abs(dy)) - n * L) < 1e-9;
+    if (!exact || n <= 1 || split.has(`${x},${y}`) || pieces.length + n - 1 > MAX_ROUTE_PIECES) return null;
+    split.add(`${x},${y}`);
+    const steps = Array.from({ length: n }, (_, i): RoutePiece => [i === n - 1 ? x : px + (dx * (i + 1)) / n, i === n - 1 ? y : py + (dy * (i + 1)) / n, extra, swim]);
+    for (const [sx, sy] of steps) split.add(`${sx},${sy}`);
+    pieces = [...pieces.slice(0, k), ...steps, ...pieces.slice(k + 1)];
+  }
+  return null;
 }
 
 /**

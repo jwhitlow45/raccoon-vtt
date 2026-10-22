@@ -9,7 +9,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { dropMode, keyStep, planGroup, planOne, planWalk, routeLanding, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
+import { dropMode, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeTarget, type DropPlan, type DropToken, type Found, type Point, type Role, type Stop } from "./drop.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -144,7 +144,7 @@ export function dragStops(deps: DragDeps): DragStops {
    * across drags (walls.ts sceneWalls), so a frame costs at most one drop's
    * leg tests.
    */
-  let memo: { view: RoomState; token: DropToken; qx: number; qy: number; stop: Stop | null } | null = null;
+  let memo: { view: RoomState; token: DropToken; qx: number; qy: number; mode: string; stop: Stop | null; lands: Point } | null = null;
   const setHold = (next: { tokenId: string; at: Point; blocker: Stop["blocker"] } | null) => {
     if (!sameHold(holds.getState().hold, next)) holds.setState({ hold: next });
   };
@@ -241,9 +241,10 @@ export function dragStops(deps: DragDeps): DragStops {
   };
 
   /**
-   * Where the preview stands for the drag's answer now: a player's walk
-   * with no route, or with one the drop would not take, holds at the last
-   * clear spot before the wall, the line and the label with it.
+   * Where the preview stands for the drag's answer now. A drop with no
+   * route, or with one it would not take, goes as the straight leg, and the
+   * picture ends where that leg lands: held at the last clear spot before
+   * the wall, squeezed, or snapped, the line and the label with it.
    */
   const follow = (view: RoomState, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
     const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
@@ -252,23 +253,24 @@ export function dragStops(deps: DragDeps): DragStops {
       w.held = at;
       publish(w);
     };
-    // The drop goes straight, and may be held at the wall, with no route, or one it would not take (drop.ts `routeLanding`).
-    const straight = answer.kind === "none" || (answer.kind === "route" && !routeLanding(view, token, target, answer.route.pieces, view.meta.settings.feetPerCell));
-    if (!raw || raw.tokenId !== token.id || dropMode(role, view.scenes[token.sceneId]) !== "walk" || !straight) {
+    if (!raw || raw.tokenId !== token.id || !goesStraight(view, token, target, answer, view.meta.settings.feetPerCell)) {
       holdAt(null);
       setHold(null);
-      if (w) goStraight(w, straight ? target : null);
+      if (w) goStraight(w, null);
       return;
     }
+    // The picture ends where planOne lands, not at the spot under the pointer (review MV-O-24).
+    const mode = dropMode(role, view.scenes[token.sceneId]);
     const qx = Math.floor(raw.x * 4);
     const qy = Math.floor(raw.y * 4);
-    if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy) {
-      memo = { view, token, qx, qy, stop: planOne(view, token, raw, "walk").stop };
+    if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy || memo.mode !== mode) {
+      const plan = planOne(view, token, raw, mode);
+      memo = { view, token, qx, qy, mode, stop: plan.stop, lands: planLands(plan, token) };
     }
     const stop = memo.stop;
     if (stop) node.position(stop.at);
-    if (w) goStraight(w, stop ? stop.at : target);
-    holdAt(stop ? stop.at : null);
+    if (w) goStraight(w, memo.lands);
+    holdAt(memo.lands);
     setHold(stop ? { tokenId: token.id, at: stop.at, blocker: stop.blocker } : null);
   };
 

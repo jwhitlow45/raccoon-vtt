@@ -1,5 +1,5 @@
 import type { PathStop } from "../model.ts";
-import type { BuildState } from "../ruleHooks.ts";
+import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
@@ -65,6 +65,33 @@ export function routePoints(chunks: BuildState["buildChunks"], token: MovingToke
     points.push({ x, y, elevation });
   }
   return points;
+}
+
+/**
+ * What stops a walked route (6.1): each piece's leg test from where the
+ * piece starts, the token squeezed only where the walk starts, since a walk
+ * squeezes nowhere between, along the points `routePoints` gives. The
+ * server's check of a routed move (permissions.ts `routeCheck`) and the
+ * client's, of a route it built before it sends it, are this one rule, so
+ * the client never sends a route the server refuses (review MV-O-24).
+ * `legBlocker` is the leg test: the core's hook on the server
+ * (ruleHooks.ts), the rule itself on the client.
+ */
+export function routeBlocker<T extends MovingToken>(state: BuildState, token: T, route: readonly RoutePiece[], landing: number, legBlocker?: (state: BuildState, token: T, to: RoutePoint) => Blocker | null): Blocker | null {
+  return routeStop(state, token, route, landing, legBlocker)?.blocker ?? null;
+}
+
+/** `routeBlocker`, with the piece it stops at. */
+export function routeStop<T extends MovingToken>(state: BuildState, token: T, route: readonly RoutePiece[], landing: number, legBlocker: (state: BuildState, token: T, to: RoutePoint) => Blocker | null = (s, t, to) => legStop(s, t, to)?.blocker ?? null): { piece: number; blocker: Blocker } | null {
+  const points = routePoints(state.buildChunks, token, route, landing);
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const from: T = { ...token, x: a.x, y: a.y, elevation: a.elevation };
+    if (i > 1) delete from.squeeze;
+    const blocker = legBlocker(state, from, points[i]!);
+    if (blocker !== null) return { piece: i - 1, blocker };
+  }
+  return null;
 }
 
 /** A piece's reach as the area sweep measures it (section 10): the most it moves along any axis, its rise in squares. */
