@@ -11,12 +11,18 @@ import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type Rou
  * 7.3), as the reducer stores it and a drag's band reads it, from one
  * accounting: the walk from the seat to its first spot clear of the mount
  * costs half the rider's Speed whatever its length, and the rest of the
- * walk costs what any leg costs, its diagonals running on from the first
- * part's, along the rest of its route when it has one.
+ * walk costs what any leg costs. Both parts keep the route's own pieces,
+ * the first its real distance, corners and diagonals with only its cost
+ * set to the half, so the rest's diagonals run on from the first part's
+ * as along any route.
  */
 
-/** Where a walk off a mount clears it, and the rest of the walk from there: the route's pieces from that spot, or none for a straight rest. */
-export type DismountSplit = { off: RoutePoint; rest: readonly RoutePiece[] | undefined; whole: boolean };
+/**
+ * Where a walk off a mount clears it: the route's pieces up to that spot
+ * (`prefix`) and from it (`rest`), each none for a straight walk. `whole`
+ * is true when the spot is the walk's end, so there is no rest.
+ */
+export type DismountSplit = { off: RoutePoint; prefix: readonly RoutePiece[] | undefined; rest: readonly RoutePiece[] | undefined; whole: boolean };
 
 /**
  * The split of a rider's walk off its mount. `points` are the walk's
@@ -30,10 +36,13 @@ export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: Mov
   const end = points[points.length - 1]!;
   const off = { x: clear.x, y: clear.y, elevation: clear.elevation };
   const whole = off.x === end.x && off.y === end.y;
-  // The rest of the route from the clear spot: the piece it lies on, from there, and the pieces after it.
+  // The route split at the clear spot: the pieces before the one it lies on, that piece cut there, and the rest from there.
   const [piece, k, n] = clear.progress;
-  const rest = route && at > 0 ? route.slice(k === n ? piece + 1 : piece) : undefined;
-  return { off, rest: rest && rest.length > 0 ? rest : undefined, whole };
+  if (!route || at <= 0) return { off, prefix: undefined, rest: undefined, whole };
+  const cut = route[piece]!;
+  const prefix = k === n ? route.slice(0, piece + 1) : [...route.slice(0, piece), [off.x, off.y, cut[2], cut[3]] as RoutePiece];
+  const rest = route.slice(k === n ? piece + 1 : piece);
+  return { off, prefix, rest: rest.length > 0 ? rest : undefined, whole };
 }
 
 /**
@@ -56,19 +65,14 @@ export function dismountCost(
 ): LegCost {
   const split = dismountSplit(build, rider, mount, points, route);
   const seat = points[0]!;
-  const first = straightCost(rider, seat, split.off, rules, counter);
+  const opts = { swimSpeed, step: snapStep(rider) };
+  const along = (from: MovingToken, pieces: readonly RoutePiece[], landing: number) =>
+    routeFeet(routePoints(build.buildChunks, from, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, running, opts);
+  let running = counter;
+  const first = split.prefix ? along(rider, split.prefix, split.off.elevation) : straightCost(rider, seat, split.off, rules, counter);
   if (split.whole) return { moved: first.moved, cost: halfFt, diag: first.diag };
-  const running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
+  running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
   const end = points[points.length - 1]!;
-  const restToken = { ...rider, ...split.off };
-  const rest = split.rest
-    ? routeFeet(
-        routePoints(build.buildChunks, restToken, split.rest, end.elevation),
-        split.rest.map(([, , extra, swim]) => ({ extra, swim })),
-        rules,
-        running,
-        { swimSpeed, step: snapStep(rider) },
-      )
-    : straightCost(rider, split.off, end, rules, running);
+  const rest = split.rest ? along({ ...rider, ...split.off }, split.rest, end.elevation) : straightCost(rider, split.off, end, rules, running);
   return { moved: first.moved + rest.moved, cost: halfFt + rest.cost, diag: [first.diag[0] + rest.diag[0], first.diag[1] + rest.diag[1]] };
 }

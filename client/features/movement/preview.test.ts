@@ -115,6 +115,8 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     assert.deepEqual(both(riding(), { x: 7, y: 6 }, [[7, 4, 0, 0], [7, 6, 0, 0]]), [30, 30]);
     const [shown, stored] = both(riding("fiveTen"), { x: 8, y: 8 });
     assert.equal(shown, stored);
+    // Round a wall by 5-10-5: down, then east clear of the horse, then one diagonal. The part off the horse keeps its route, so it took no diagonal, and the first diagonal after it is 5 ft (review AT-ASTRA-11).
+    assert.deepEqual(both(riding("fiveTen"), { x: 7, y: 6 }, [[4, 5, 0, 0], [6, 5, 0, 0], [7, 6, 0, 0]]), [20, 20]);
     // A drop that keeps her seat is an ordinary leg, and so is one off a mount no player sees (8.0).
     assert.deepEqual(both(riding(), { x: 5, y: 5 }), [5, 5]);
     assert.deepEqual(both(riding("five", true), { x: 8, y: 4 }), [20, 20]);

@@ -446,7 +446,7 @@ export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judg
   // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.
   const split = dismountSplit(tx.state, rider, mount, points, route);
   const off: Token = { ...next, ...split.off };
-  const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, undefined, undefined, cost);
+  const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, split.prefix, undefined, cost);
   return split.whole || sameSpot(off, next) ? first : withPath(tx, first, next, judged, false, split.rest);
 }
 
