@@ -35,6 +35,7 @@ export type JournalPageId = string;
 export type PinId = string;
 export type RollId = string;
 export type CastId = string;
+export type TrapId = string;
 /**
  * A shipped game-icons.net icon (docs/design-v1-dm-tools.md 3.12):
  * `"<author>/<name>"`, such as "lorc/wolf-head". The author is part of the
@@ -1687,6 +1688,131 @@ export type Pin = {
   pageId?: JournalPageId;
   color: string;
   visibility: "all" | "dm";
+};
+
+/**
+ * A trap on a scene (docs/design-v1-traps.md 6.1): a zone, when it goes off
+ * and for whom, what it does, and whether players have found it. The DM
+ * gets every trap on its scene. A player gets only a found one, cut to its
+ * name, zone and whether it is disarmed (shared/project.ts), so no player
+ * device ever holds a rig and none can run a trap.
+ */
+export type Trap = {
+  /** A plain id (`/^[A-Za-z0-9_-]{1,64}$/`), so every list that names it stays within its reserve (6.7). */
+  id: TrapId;
+  rev: number;
+  sceneId: SceneId;
+  /** 1 to 80 characters, by the name rules. Players read it once the trap is found. */
+  name: string;
+  zone: TrapZone;
+  state: TrapState;
+  found: boolean;
+  /** Always stored. A player's projection leaves it out whole. */
+  rig?: TrapRig;
+  /** A player's projection only: the DM disarmed it. Never stored. */
+  disarmed?: true;
+};
+
+export type TrapState = "armed" | "sprung" | "disarmed";
+
+/** A rectangle of whole cells, `w` and `h` 1 to 20. */
+export type CellRect = { x: number; y: number; w: number; h: number };
+
+/** A door as `door.set` names it: a grid edge, or a free door by its chunk and id. */
+export type TrapDoorRef = { edge: string } | { cx: number; cy: number; id: string };
+
+/**
+ * Where a trap lies: squares (1 to 8 rectangles of whole cells, 400 cells
+ * in all), a trip wire between two points on cell corners and edge
+ * midpoints, 0.5 to 20 cells long, or a door.
+ */
+export type TrapZone = { cells: CellRect[] } | { wire: { a: [number, number]; b: [number, number] } } | { door: TrapDoorRef };
+
+/** How a trap went off: stepped onto, stepped off, a turn started or ended on it, a wire crossed, a door opened, or by hand. */
+export type TrapHow = "enter" | "leave" | "turnStart" | "turnEnd" | "cross" | "open" | "hand";
+
+export type TrapSound = "click" | "rumble" | "crash" | "whoosh" | "hiss";
+
+/** An area a trap hits, as the area tool places it, without a caster, an owner or a look. */
+export type TrapArea = Pick<AreaTemplate, "shape" | "size" | "width" | "height" | "origin" | "yaw" | "pitch" | "faceOffset" | "anchor" | "includeOrigin">;
+
+/** A check to find or disarm a trap: "Wisdom (Perception) DC 15: the pressure plate". `what` at most 80 characters. */
+export type TrapCheck = { ability: AbilityKey; skill?: SkillKey; dc: number; what?: string };
+
+/** One thing a trap also does when it goes off (6.1): a door set, a light put out or lit, a hidden creature or stamp shown. */
+export type TrapAction =
+  | { door: TrapDoorRef; state: "open" | "closed" | "locked" }
+  | { light: LightId; on: boolean }
+  | { show: { tokenId: TokenId } | { stampId: StampId } };
+
+/**
+ * What a trap does (6.1), the DM's alone. `noticedBy` and `due` are the
+ * reducer's: no op sets them.
+ */
+export type TrapRig = {
+  /** Squares only, 1 to 4 of them. A wire goes off when crossed and a door when opened. */
+  on: ("enter" | "leave" | "turnStart" | "turnEnd")[];
+  who: "party" | "others" | "any";
+  minSize?: "small";
+  /** Only creatures on the floor: no fliers, burrowers or riders. */
+  floor: boolean;
+  resets: "never" | "nextTurn";
+  /** Stored 0 to 99, absent for no limit. Ops set 1 to 99. */
+  usesLeft?: number;
+  stops: boolean;
+  foundOnSpring: boolean;
+  /** Squares only: the ground its squares take when it opens, in feet, -100 to 199. */
+  pit?: { floor: number };
+  hits: "trigger" | "zone" | { cells: CellRect[] } | { area: TrapArea };
+  save?: { ability: AbilityKey; dc: number; onPass: "half" | "none" };
+  /** 1 to 4, the Dice panel's formulas. */
+  damage?: { formula: string; type: DamageType }[];
+  /** At most 3. */
+  conditions?: ConditionKey[];
+  /** Each creature's own turn. */
+  lasts?: { mode: "turnStart" | "turnEnd" | "rounds"; rounds?: number };
+  /** 1 to 200 characters, a single line: what players read when it goes off. */
+  message?: string;
+  sound?: TrapSound;
+  /** At most 8. */
+  actions: TrapAction[];
+  /** At most 2. */
+  find: TrapCheck[];
+  /** Hint when a creature's Passive Perception would notice it. */
+  notice: boolean;
+  /** The reducer's: the creature the hint named, cleared when `find` changes. */
+  noticedBy?: TokenId;
+  /** How it is disarmed: a line of at most 200 characters, with a check or not. */
+  disarm?: { text?: string; check?: TrapCheck };
+  /** At most 1,000 characters, shown on the card when it goes off. */
+  note?: string;
+  /** The SRD trap it started from, a slug of at most 40 characters. */
+  preset?: string;
+  /** The reducer's: occurrences waiting for the DM, at most 3 a trap and 10 a room, oldest first. */
+  due?: TrapDue[];
+};
+
+/**
+ * One springing waiting for the DM (6.1): who set it off and who it hits,
+ * frozen when it went off, and whether players were told. `id` is its line
+ * in the DM's trap log.
+ */
+export type TrapDue = {
+  id: string;
+  at: string;
+  how: TrapHow;
+  /** Who set it off: at most 10 plain ids, those players own or see first, then by id. */
+  by: TokenId[];
+  more?: number;
+  /** Who it hits: at most 50 plain ids, by id. */
+  hits: TokenId[];
+  hitsMore?: number;
+  /** Its players' line reached every player (6.4). */
+  perceived?: true;
+  /** A private springing in a player's op (5.5): the trap stayed armed and its effects wait for the DM. */
+  hidden?: true;
+  /** Its actions ran (5.7, 6.2). */
+  acted?: true;
 };
 
 /** One page of a handout: a `handout` image and its canonical size, the `full` variant's pixels. */
