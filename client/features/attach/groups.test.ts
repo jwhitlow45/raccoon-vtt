@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { Token } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
 import { groupFollowers } from "../../lib/group.ts";
-import { boxesAround, carriesText, coversHolder, dragLead, dragNamed, drawOrder, drawsInset, dragWalkers, groupLine, groupMembers, holderMiddle, pressLead, reseatText, tethers, type CellBox } from "./groups.ts";
+import { boxesAround, boxesLess, carriesText, coversHolder, dragLead, dragNamed, drawOrder, drawsInset, dragWalkers, groupLine, groupMembers, holderMiddle, holderMiddles, pressBoxes, pressLead, reseatText, tethers, type CellBox } from "./groups.ts";
 
 const byId = (...list: Token[]) => Object.fromEntries(list.map((t) => [t.id, t]));
 const everyone = () => true;
@@ -45,6 +45,42 @@ describe("a press in a holder's middle (docs/design-v1-attach.md 4.4, review LP1
     for (const t of [horse, halfling, goblin]) assert.equal(holderMiddle(tokens, t), null, t.id);
     const far = token("far", { name: "Far", size: "tiny", x: 4, y: 4, attached: { to: "horse", kind: "carry" } });
     assert.equal(holderMiddle(byId(horse, far), far), null, "the middle misses a seat in the horse's corner");
+  });
+
+  test("a press in a holder's middle reaches it through what it carries carrying more, an inset gem in a lamp too, and a knight's lamp over a horse's middle (review FU20A-ASTRA-5)", () => {
+    /** The token a press at a point drags: the topmost one whose hit area takes it, as TokenNode draws them, led as dragLead leads. */
+    const pressAt = (tokens: Record<string, Token>, at: { x: number; y: number }) => {
+      const order = drawOrder(Object.values(tokens), tokens);
+      for (const t of [...order].reverse()) {
+        const w = t.size === "tiny" ? 0.5 : t.size === "large" ? 2 : 1;
+        const x = at.x - t.x;
+        const y = at.y - t.y;
+        if (pressBoxes(w, w, drawsInset(tokens, t), holderMiddles(tokens, t)).some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h)) return dragLead(tokens, t).id;
+      }
+      return null;
+    };
+    const thorn = token("thorn", { name: "Thorn", x: 2, y: 2 });
+    const lamp = token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: 2.5, y: 2, attached: { to: "thorn", kind: "carry" } });
+    const gem = token("gem", { name: "Gem", kind: "object", size: "tiny", x: 2.5, y: 2, attached: { to: "lamp", kind: "carry" } });
+    const tokens = byId(thorn, lamp, gem);
+    assert.equal(drawsInset(tokens, gem), true);
+    assert.deepEqual(holderMiddles(tokens, gem), [{ x: 0, y: 0.25, w: 0.25, h: 0.25 }], "Thorn's middle, the lamp it covers leaving none");
+    assert.equal(pressAt(tokens, { x: 2.65, y: 2.35 }), "thorn", "through the gem and the lamp");
+    assert.equal(pressAt(tokens, { x: 2.85, y: 2.1 }), "lamp", "off the middle the gem moves the lamp it covers");
+    const horse = token("horse", { name: "Warhorse", size: "large", x: 4, y: 4 });
+    const knight = token("knight", { name: "Knight", x: 4, y: 4, attached: { to: "horse", kind: "ride" } });
+    // The knight's torch in the knight's corner by the horse's center, where the knight's middle and the horse's each take a quarter of it.
+    const torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 4.5, y: 4.5, attached: { to: "knight", kind: "carry" } });
+    const mounted = byId(horse, knight, torch);
+    assert.deepEqual(holderMiddles(mounted, torch), [
+      { x: 0, y: 0, w: 0.25, h: 0.25 },
+      { x: 0.25, y: 0.25, w: 0.25, h: 0.25 },
+    ]);
+    assert.equal(pressAt(mounted, { x: 4.9, y: 4.9 }), "horse", "through the torch and the knight");
+    assert.equal(pressAt(mounted, { x: 4.6, y: 4.6 }), "knight", "the knight's own middle");
+    assert.equal(pressAt(mounted, { x: 4.6, y: 4.9 }), "torch", "off both middles the torch is on top");
+    assert.equal(pressBoxes(0.5, 0.5, false, holderMiddles(mounted, torch)).reduce((sum, b) => sum + b.w * b.h, 0), 0.125, "half the torch takes a press");
+    assert.deepEqual(boxesLess({ x: 0, y: 0, w: 1, h: 1 }, [{ x: 2, y: 2, w: 1, h: 1 }]), [{ x: 0, y: 0, w: 1, h: 1 }], "a hole that misses cuts nothing");
   });
 
   test("the part that takes a press is the footprint less the hole, in at most four boxes", () => {

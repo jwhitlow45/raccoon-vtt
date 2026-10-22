@@ -501,7 +501,7 @@ On any device. A token that carries others, such as a rider's mount or a holder 
 
 | Drag | Does | Who |
 | --- | --- | --- |
-| Drag a token that carries others | Move it with what it carries, and what those carry. A press in its middle takes it, even on a small token it carries | everyone, with the Select tool |
+| Drag a token that carries others | Move it with what it carries, and what those carry. A press in its middle takes it, even on a small token it carries or one that token carries | everyone, with the Select tool |
 | Drag the rider of a controlled mount | Move the mount, the rider riding. So does a drag of a rider that covers its whole mount | everyone, with the Select tool |
 | Drag any other carried token | Move it alone, from nearer its holder's edge than its middle. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose | everyone, with the Select tool |
 

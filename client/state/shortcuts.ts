@@ -612,7 +612,7 @@ export const BEHAVIORS: readonly Behavior[] = [
   {
     id: "dragHolder",
     input: "Drag a token that carries others",
-    does: "Move it with what it carries, and what those carry. A press in its middle takes it, even on a small token it carries",
+    does: "Move it with what it carries, and what those carry. A press in its middle takes it, even on a small token it carries or one that token carries",
     roles: EVERYONE,
     when: "with the Select tool",
     device: "pointer",

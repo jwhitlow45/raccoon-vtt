@@ -51,6 +51,41 @@ export function holderMiddle(tokens: Tokens, token: Token): CellBox | null {
   if (!link || link.kind === "drag") return null;
   const holder = holderOf(tokens, token) as Token | undefined;
   if (!holder || coversHolder(token, holder)) return null;
+  return middleIn(holder, token);
+}
+
+/**
+ * Every part of a carried token where a press goes on to a holder under it
+ * (4.4, reviews LP12-AT-3 and FU20A-ASTRA-5): its own holder's middle as
+ * holderMiddle reads it, and the middle of each holder further down that
+ * carries it, its holder's holder and so on, so a press in a Medium
+ * holder's middle reaches the holder through a lamp it carries and a gem
+ * in the lamp. A token that covers its holder draws inset and leaves that
+ * holder no part, since a press on it moves that holder anyway, but the
+ * holders below keep theirs. A dragged creature walks beside its holder
+ * and leaves none. In the token's own cells, as its node draws.
+ */
+export function holderMiddles(tokens: Tokens, token: Token): CellBox[] {
+  const out: CellBox[] = [];
+  const own = holderMiddle(tokens, token);
+  if (own) out.push(own);
+  const seen = new Set<string>([token.id]);
+  let at: Token = token;
+  for (;;) {
+    if (!at.attached || at.attached.kind === "drag") return out;
+    const holder = holderOf(tokens, at) as Token | undefined;
+    if (!holder || seen.has(holder.id)) return out;
+    seen.add(holder.id);
+    if (at !== token) {
+      const box = middleIn(holder, token);
+      if (box) out.push(box);
+    }
+    at = holder;
+  }
+}
+
+/** The holder's middle (holderMiddle) where it lies inside the carried token's footprint, in the token's own cells, or null where it misses it. */
+function middleIn(holder: Token, token: Token): CellBox | null {
   const h = fullRect(holder);
   const t = fullRect(token);
   const mx = Math.min(0.25, h.w / 4);
@@ -61,6 +96,33 @@ export function holderMiddle(tokens: Tokens, token: Token): CellBox | null {
   const y1 = Math.min(t.y + t.h, h.y + h.h / 2 + my);
   if (x1 - x0 < 1e-9 || y1 - y0 < 1e-9) return null;
   return { x: x0 - t.x, y: y0 - t.y, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * Where a carried token takes a press, in its own cells, as its node's hit
+ * area draws it: the part of it that draws, its inset face for one drawn
+ * inset (COVER_INSET about its middle), less the holders' middles under it
+ * (holderMiddles).
+ */
+export function pressBoxes(w: number, h: number, inset: boolean, holes: readonly CellBox[]): CellBox[] {
+  const face = inset ? { x: (w * (1 - COVER_INSET)) / 2, y: (h * (1 - COVER_INSET)) / 2, w: w * COVER_INSET, h: h * COVER_INSET } : { x: 0, y: 0, w, h };
+  return boxesLess(face, holes);
+}
+
+/** A box less the holes in it, each piece cut as boxesAround cuts one. */
+export function boxesLess(box: CellBox, holes: readonly CellBox[]): CellBox[] {
+  let out = [box];
+  for (const hole of holes) {
+    out = out.flatMap((b) => {
+      const x0 = Math.max(b.x, hole.x);
+      const y0 = Math.max(b.y, hole.y);
+      const x1 = Math.min(b.x + b.w, hole.x + hole.w);
+      const y1 = Math.min(b.y + b.h, hole.y + hole.h);
+      if (x1 - x0 < 1e-9 || y1 - y0 < 1e-9) return [b];
+      return boxesAround(b.w, b.h, { x: x0 - b.x, y: y0 - b.y, w: x1 - x0, h: y1 - y0 }).map((p) => ({ ...p, x: p.x + b.x, y: p.y + b.y }));
+    });
+  }
+  return out;
 }
 
 /** A footprint `w` by `h` less a box inside it, as at most four boxes: the strips above and below it, then those beside it. */

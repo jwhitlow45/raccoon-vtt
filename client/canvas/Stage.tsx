@@ -54,7 +54,7 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
-import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddle, pressLead, reseatText, type CellBox } from "../features/attach/groups.ts";
+import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddles, pressLead, reseatText, type CellBox } from "../features/attach/groups.ts";
 import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } from "../features/attach/rights.ts";
 import { cameraInZoomed, chromeZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi } from "../features/device/layout.ts";
 import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "../features/device/settings.ts";
@@ -486,15 +486,16 @@ export function MapStage(props: {
   }, [allTokens, scene.id]);
   const tokensById = useMemo(() => new Map(tokens.map((t) => [t.id, t])), [tokens]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  // Where each carried token leaves a press to its holder (groups.ts holderMiddle), the same box kept while it is the same, so the token's node renders only when it changes.
-  const holesRef = useRef(new Map<string, CellBox>());
+  // Where each carried token leaves a press to a holder under it (groups.ts holderMiddles), the same boxes kept while they are the same, so the token's node renders only when they change.
+  const holesRef = useRef(new Map<string, readonly CellBox[]>());
   const holes = useMemo(() => {
-    const next = new Map<string, CellBox>();
+    const next = new Map<string, readonly CellBox[]>();
+    const same = (a: CellBox, b: CellBox) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
     for (const t of tokens) {
-      const box = holderMiddle(allTokens, t);
-      if (!box) continue;
+      const boxes = holderMiddles(allTokens, t);
+      if (boxes.length === 0) continue;
       const kept = holesRef.current.get(t.id);
-      next.set(t.id, kept && kept.x === box.x && kept.y === box.y && kept.w === box.w && kept.h === box.h ? kept : box);
+      next.set(t.id, kept && kept.length === boxes.length && kept.every((b, i) => same(b, boxes[i]!)) ? kept : boxes);
     }
     holesRef.current = next;
     return next;
@@ -1261,7 +1262,7 @@ export function MapStage(props: {
       active={t.id === activeTokenId}
       draggable={selecting && canDrag(t)}
       inset={drawsInset(allTokens, t)}
-      hole={holes.get(t.id) ?? null}
+      holes={holes.get(t.id) ?? null}
     />
   );
   // Every chip and badge, then every label, then the plates, over all the tokens and the fog (TokenNode.tsx TokenDecor).
