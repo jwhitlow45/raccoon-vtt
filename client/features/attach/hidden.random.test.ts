@@ -595,13 +595,36 @@ function comparedEncounter(encounter: RoomState["encounter"], apart: ReadonlySet
 }
 
 /**
+ * Room `b` with its sight sources apart standing where room `a` has them,
+ * or null when none is apart: a party member or a token with a light, which
+ * on a scene of the party's sight moves what the party sees, so another
+ * token comes into sight in one room alone though nothing hidden about it
+ * differs (review AT-O-36). Its copies are what `a`'s must match.
+ */
+function sightAsIn(b: RoomState, a: RoomState, apart: ReadonlySet<string>): RoomState | null {
+  const moved = [...apart].filter((id) => {
+    const [ta, tb] = [a.tokens[id], b.tokens[id]];
+    return ta !== undefined && tb !== undefined && [ta, tb].some((t) => isPartyMember(b, t) || t.light !== undefined);
+  });
+  if (moved.length === 0) return null;
+  const tokens = { ...b.tokens };
+  for (const id of moved) {
+    const { squeeze: _squeeze, ...rest } = tokens[id]!;
+    const there = a.tokens[id]!;
+    tokens[id] = { ...rest, sceneId: there.sceneId, x: there.x, y: there.y, elevation: there.elevation, ...(there.squeeze ? { squeeze: true as const } : {}) };
+  }
+  return { ...b, tokens };
+}
+
+/**
  * Every player's copies of the two rooms, compared, and the tokens each may
  * drag. A token apart in its place, with something hidden above it in
  * either room, is the reveal and joins `apart`, and so does one in
- * `mayPart`, a step made while it was apart put back. Any other difference,
- * a cost or a path on the same spot included, fails. A token apart that
- * both rooms hold alike again, its links up and every player's copy, is
- * compared again from here.
+ * `mayPart`, a step made while it was apart put back, and so does one that
+ * room b, read with its sight sources apart where room a has them, shows
+ * as room a does. Any other difference, a cost or a path on the same spot
+ * included, fails. A token apart that both rooms hold alike again, its
+ * links up and every player's copy, is compared again from here.
  */
 function compare(a: { before: RoomState; after: RoomState }, b: { before: RoomState; after: RoomState }, marks: Marks, mayPart: ReadonlySet<string>, where: string): number {
   const { apart } = marks;
@@ -620,6 +643,8 @@ function compare(a: { before: RoomState; after: RoomState }, b: { before: RoomSt
     if (!ta || !tb || !POSE.some((f) => ta[f] !== tb[f]) || [P1, P2].some((who) => copyOf(a.after, who).tokens[id] || copyOf(b.after, who).tokens[id])) continue;
     if ([a.before, a.after, b.before, b.after].some((s) => underHidden(s, id))) marks.touched.add(id);
   }
+  let resighted: RoomState | null | undefined;
+  const resight = () => (resighted === undefined ? (resighted = sightAsIn(b.after, a.after, apart)) : resighted);
   for (const who of [P1, P2]) {
     const ca = copyOf(a.after, who);
     const cb = copyOf(b.after, who);
@@ -641,7 +666,8 @@ function compare(a: { before: RoomState; after: RoomState }, b: { before: RoomSt
         const linkOnly = ta !== undefined && tb !== undefined && isSame({ ...ta, attached: undefined }, { ...tb, attached: undefined });
         const holders = [ta, tb].flatMap((t) => (t?.attached ? [t.attached.to] : []));
         const shown = (marks.touched.has(id) && unshown(id)) || (linkOnly && holders.some(unshown) && [id, ...holders].some((x) => marks.touched.has(x)));
-        assert.ok((moved && reveal) || onApart || shown || mayPart.has(id), `${where}: ${who.memberId} sees ${id} differ: ${JSON.stringify(ta)} against ${JSON.stringify(tb)}`);
+        const sighted = resight() !== null && isSame(ta, copyOf(resight()!, who).tokens[id]);
+        assert.ok((moved && reveal) || onApart || shown || sighted || mayPart.has(id), `${where}: ${who.memberId} sees ${id} differ: ${JSON.stringify(ta)} against ${JSON.stringify(tb)}`);
         apart.add(id);
         marks.ever.add(id);
       }
@@ -662,7 +688,9 @@ function compare(a: { before: RoomState; after: RoomState }, b: { before: RoomSt
       const { tokens: _tokens, ...others } = c;
       return { ...others, encounter: comparedEncounter(others.encounter, apart), log: others.log.filter((e) => !logOnApart(e, [a.after, b.after], apart)) };
     };
-    assert.deepEqual(rest(ca), rest(cb), `${where}: ${who.memberId} sees the rest of the rooms differ`);
+    // The party's sight, and what it lets players see, as room b's would be with its sight sources where room a has them.
+    const sighted = resight();
+    assert.deepEqual(rest(ca), rest(sighted ? copyOf(sighted, who) : cb), `${where}: ${who.memberId} sees the rest of the rooms differ`);
   }
   return rejoined;
 }
@@ -706,9 +734,13 @@ function compareFeeds(fa: readonly Feed[], fb: readonly Feed[], a: RoomState, b:
   // The tracker's own change too while a row's or the turn's token is apart: it goes out where that token's row changes.
   const rowApart = [a, b].some((s) => s.encounter !== null && (s.encounter.entries.some((e) => e.tokenId !== undefined && apart.has(e.tokenId)) || (s.encounter.turnStart !== undefined && apart.has(s.encounter.turnStart.tokenId))));
   const lines = new Map([a, b].flatMap((s) => s.log.map((e) => [keys.log(e.id), e] as const)));
+  // While a sight source stands apart, the party's sight is as each room has it: compare reads it against room b's with its
+  // sources where room a has them (sightAsIn), so its changes are not compared here.
+  const sightApart = sightAsIn(b, a, apart) !== null;
   const sent = (f: Feed) =>
     f.changes
       .filter((c) => !(c.key.startsWith("token:") && apart.has(c.key.slice("token:".length))) && !(c.key === keys.encounter && rowApart))
+      .filter((c) => !(sightApart && c.key.startsWith("sight:")))
       .filter((c) => !(c.key.startsWith("log:") && lines.has(c.key) && logOnApart(lines.get(c.key)!, [a, b], apart)))
       .sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
   for (let i = 0; i < fa.length; i++) {
