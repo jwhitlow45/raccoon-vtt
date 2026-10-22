@@ -514,6 +514,9 @@ function FightAlerts() {
   const sheetWidth = !wide && width > height && panelOpen ? Math.min(theme.layout.landscapeSheetWidth, width * 0.6) : 0;
   const zoom = useUiScale();
   const ui = useRoomUi();
+  // Under 600 px a player's waiting roll shows in a card at the screen's foot (rolls/PlayerRolls.tsx). The DM's cards stay in this column at any width, so the row's tap shows the column for them.
+  const player = useRoomView((s) => s.you?.role === "player");
+  const footRolls = player && width < CARD_MIN_WIDTH;
 
   useEffect(() => unlockAudioOnTap(), []);
 
@@ -807,7 +810,7 @@ function FightAlerts() {
     // Drawn again once the bar steps aside, the cards may turn out to have no room for one whole card: measured now, they open where they fit before the request is met.
     const cards = cardsRef.current;
     const first = cards ? firstCardHeight(cards) / zoom : 0;
-    const footRoll = showAfter.kind === "rolls" && width < CARD_MIN_WIDTH;
+    const footRoll = showAfter.kind === "rolls" && footRolls;
     if (!asked && !footRoll && chrome && first > 0 && toOptions < EDGE + first) {
       setAsked(askedWhere(first));
       return;
@@ -847,7 +850,7 @@ function FightAlerts() {
       return;
     }
     if (!showAfter || !forRoom) return;
-    if (showAfter.kind === "rolls" && width < CARD_MIN_WIDTH) {
+    if (showAfter.kind === "rolls" && footRolls) {
       setShowAfter(null);
       rolls?.open({ barAway: true });
       return;
@@ -953,7 +956,7 @@ function FightAlerts() {
           onClick={() => {
             ui.showActions(false);
             // A card at a phone's foot opens at once, since it may stay folded for want of room until asked for, and the column has no room to show it.
-            if (forFootCard || (forRoom && rolls?.waiting && width < CARD_MIN_WIDTH)) {
+            if (forFootCard || (forRoom && rolls?.waiting && footRolls)) {
               rolls?.open({ barAway: true });
               return;
             }

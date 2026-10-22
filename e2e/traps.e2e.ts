@@ -325,7 +325,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   });
 
   test("tr-6. the pane on a phone at 375 x 667 at 130%: its header and Done in reach", async () => {
-    await dm.setViewportSize(SMALL);
+    await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
     await waitFor("the DM's snapshot again", () => trap(dmSocket));
@@ -377,25 +377,26 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-fu20b-save-in-reach");
   });
 
-  test("fu20b-r1-2. on a small phone at 130% the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading; closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
-    await dm.setViewportSize({ width: 480, height: 320 });
+  test("fu20b-r1-2. on a small phone at 130% the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading, and closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
+    await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
     await waitFor("the DM's snapshot again", () => trap(dmSocket));
     await dm.locator(".konvajs-content").first().waitFor();
-    // The Ruler's options leave the column under one whole card, so its row stands for the cards.
     await pickTool(dm, "Ruler");
     await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
-    const alerts = dm.getByRole("dialog", { name: "Alerts" });
-    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).click();
+    // A phone's card starts folded to its first line. Open, it leaves the column above the Ruler's options too short for it, so the column's row stands for the cards, and its tap shows them over the screen.
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
-    await card.waitFor();
-    // A phone's card starts folded to its first line: open, it no longer fits the column and goes over the screen.
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).click();
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
     await alerts.waitFor();
+    const inAlerts = alerts.getByRole("group", { name: "Hidden Pit went off" }).first();
+    const toggleThere = inAlerts.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggleThere.getAttribute("aria-expanded")) !== "true") await toggleThere.click();
     await shots.take(dm, "traps-fu20b-r1-phone-alerts");
-    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().getByRole("button", { name: "Save and damage", exact: true }).click();
+    await inAlerts.getByRole("button", { name: "Save and damage", exact: true }).click();
     await alerts.waitFor({ state: "detached" });
     const dice = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
     await dice.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.").waitFor();
@@ -403,7 +404,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       const f = await focusAt(dm);
       return f.sheet === "Dice" ? f : null;
     }).catch(async () => assert.fail(`focus is not in the Dice sheet: ${JSON.stringify(await focusAt(dm))}`));
-    assert.equal(at.name, "Dice", `focus went to ${JSON.stringify(at)}`);
+    // The sheet's heading, which names the group save the card opened.
+    assert.equal(at.name, "Hidden Pit's save", `focus went to ${JSON.stringify(at)}`);
     await shots.take(dm, "traps-fu20b-r1-phone-dice");
     await dice.getByRole("button", { name: "Close Dice", exact: true }).click();
     await dice.waitFor({ state: "detached" });
