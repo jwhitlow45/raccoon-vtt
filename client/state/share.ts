@@ -83,8 +83,6 @@ export function shareList<T>(prev: readonly T[] | undefined, next: readonly T[])
   return same ? prev : out;
 }
 
-// Every array in the state. shareRecord would turn one whose lines came back equal but new, as a second snapshot's do, into an object.
-const LISTS = new Set<keyof RoomState>(["log", "encounterHistory", "trapLog", "trapSeen"]);
 const SINGLETONS = new Set<keyof RoomState>(["meta", "encounter"]);
 
 export function shareState(prev: RoomState | null, next: RoomState): RoomState {
@@ -96,7 +94,8 @@ export function shareState(prev: RoomState | null, next: RoomState): RoomState {
     const b = next[key] as unknown;
     let v: unknown;
     if (a === b) v = a;
-    else if (LISTS.has(key)) v = shareList(a as unknown[] | undefined, (b ?? []) as unknown[]);
+    // Every array of the state, read off the value rather than a list of keys, so one added later can never come out an object, as shareRecord would make it.
+    else if (Array.isArray(b)) v = shareList(Array.isArray(a) ? (a as unknown[]) : undefined, b as unknown[]);
     else if (SINGLETONS.has(key) || b === null || typeof b !== "object") v = shareValue(a, b);
     else v = shareRecord(a as Record<string, unknown> | undefined, b as Record<string, unknown>);
     out[key] = v;
