@@ -132,6 +132,15 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     assert.deepEqual(both(riding("five", "bree"), { x: 8, y: 4 }), [25, 25]);
   });
 
+  test("behind the DM's blackout, where no player sees the mount, the DM's band reads the leg the store keeps, on flat ground and off a straddling horse (review AT-O-24)", () => {
+    const dark = (state: RoomState): RoomState => ({ ...state, meta: { ...state.meta, view: { ...state.meta.view, blackout: true } } });
+    const [flatShown, flatStored] = both(dark(riding()), { x: 8, y: 4 });
+    assert.equal(flatShown, flatStored);
+    assert.equal(flatStored, 20, "an ordinary leg: the mount every player sees is none behind a blackout");
+    const [stepShown, stepStored] = both(dark(riding("five", undefined, true)), { x: 1, y: 4 });
+    assert.equal(stepShown, stepStored);
+  });
+
   test("off the low half of a horse straddling a step, the band reads the landing the drop sends, judged by the horse (review AT-ASTRA-13)", () => {
     // By her own footing Bree, at 10 ft over 0 ft ground, would fly off at 10 ft. Off a horse on the ground she lands on it.
     const state = riding("fiveTen", undefined, true);

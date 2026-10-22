@@ -56,10 +56,15 @@ export type WorldOptions = {
   seenGround?: boolean;
 };
 
-/** Whether players see a token where it stands, as the projection judges it: not hidden by the DM, and on the DM's state not withheld by fog or sight. */
+/**
+ * Whether players see a token where it stands, as the projection judges it:
+ * not hidden by the DM, and on the DM's state neither behind the DM's
+ * blackout nor withheld by fog or sight, as the server's seen marks judge it
+ * (project.ts inSightOfNonOwners, review AT-O-24).
+ */
 export function publicToken(state: RoomState, token: Token, viewer: WalkViewer): boolean {
   if (token.visibility === "dm") return false;
-  return viewer.role === "player" || !withheldWhereItStands(state, token);
+  return viewer.role === "player" || (state.meta.view?.blackout !== true && !withheldWhereItStands(state, token));
 }
 
 function actorOf(state: RoomState, token: Token) {
