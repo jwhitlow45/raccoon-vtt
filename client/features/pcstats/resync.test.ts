@@ -137,6 +137,18 @@ describe("the review's lines (3.3)", () => {
     assert.deepEqual([row.theirs, row.tick], ["D&D Beyond no longer has it.", "Remove it"]);
   });
 
+  test("a roll renamed here names D&D Beyond's name in its line, since the two read alike otherwise", () => {
+    const first = synced(fillOf({ rolls: [sling({ id: "r1" })] }));
+    const renamed = { ...first, stats: { ...first.stats!, rolls: [{ ...first.stats!.rolls[0]!, name: "Moon Sling" }] } };
+    const p = plan(renamed, fillOf({ rolls: [sling({ id: "r2" })] }));
+    const row = keptRow(p.items.find((i) => i.section === "kept")!, blocks(p));
+    assert.equal(row.first, "Moon Sling, as you changed it: +3 to hit, 1d4 Bludgeoning");
+    assert.equal(row.theirs, "D&D Beyond says Sling: +3 to hit, 1d4 Bludgeoning.");
+    const edited = { ...first, stats: { ...first.stats!, rolls: [{ ...first.stats!.rolls[0]!, attack: { prof: true, bonus: 1 } }] } };
+    const q = plan(edited, fillOf({ rolls: [sling({ id: "r3" })] }));
+    assert.equal(keptRow(q.items.find((i) => i.section === "kept")!, blocks(q)).theirs, "D&D Beyond says +3 to hit, 1d4 Bludgeoning.", "the same name is not said twice");
+  });
+
   test("the editor's Replaces line and a group's summary", () => {
     const typed = bree({ ...empty(), spellAbility: "cha", abilities: { ...empty().abilities, wis: 16, dex: 12, con: 14 } });
     const fill = fillOf({ spellAbility: "wis", abilities: { ...empty().abilities, wis: 18, dex: 14, con: 15 } });
