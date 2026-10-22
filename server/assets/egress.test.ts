@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import net from "node:net";
 import { describe, test } from "node:test";
+import { request } from "undici";
+import { createEgress } from "./egress.ts";
 
 /**
  * The strict port's host list lives in docker/squid.conf, outside any code
@@ -24,5 +27,42 @@ describe("squid's strict port", () => {
     const lines = recipe.trim().split("\n");
     assert.equal(lines.at(-2), "docker compose -f docker-compose.server.yml up -d --build");
     assert.equal(lines.at(-1), "docker compose -f docker-compose.server.yml restart egress");
+  });
+});
+
+describe("a proxy that takes a CONNECT and never answers it", () => {
+  test("a request on either port fails near the limit, the next one reaches the proxy, and close resolves", { timeout: 15_000 }, async () => {
+    let connects = 0;
+    const sockets: net.Socket[] = [];
+    const proxy = net.createServer((socket) => {
+      sockets.push(socket);
+      socket.on("error", () => undefined);
+      socket.on("data", (chunk) => {
+        if (String(chunk).startsWith("CONNECT")) connects++;
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    const { port } = proxy.address() as net.AddressInfo;
+    const uri = `http://127.0.0.1:${port}`;
+    const egress = createEgress({ production: false, EGRESS_PUBLIC_PROXY: uri, EGRESS_STRICT_PROXY: uri }, { connectAnswerMs: 300 });
+    const timedOut = (err: unknown) => (err as { code?: string }).code === "UND_ERR_HEADERS_TIMEOUT";
+    try {
+      const started = Date.now();
+      await Promise.all([
+        assert.rejects(request("https://example.com/a", { dispatcher: egress.public }), timedOut),
+        assert.rejects(request("https://example.com/b", { dispatcher: egress.strict }), timedOut),
+      ]);
+      const took = Date.now() - started;
+      assert.ok(took >= 250 && took < 5_000, `failed after ${took} ms`);
+      assert.equal(connects, 2);
+      // Nothing queues behind the stuck CONNECT: the next request on the same port reaches the proxy.
+      await assert.rejects(request("https://example.com/c", { dispatcher: egress.public }), timedOut);
+      assert.equal(connects, 3);
+      const closed = await Promise.race([egress.close().then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3_000))]);
+      assert.ok(closed, "close resolves");
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
   });
 });
