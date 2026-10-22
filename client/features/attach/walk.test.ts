@@ -6,7 +6,8 @@ import { applyOp } from "#shared/reducer.ts";
 import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
-import { dropView, moveOpsOf, planOne, type Landed } from "../movement/drop.ts";
+import type { RoutePiece } from "#shared/rules/route.ts";
+import { dropView, moveOpsOf, planOne, routeLanding, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, token } from "#shared/testutil.ts";
 import { dragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
@@ -101,6 +102,18 @@ describe("a walk off a holder on the ground, searched, checked and stored on the
     const bree = r.state.tokens.bree!;
     assert.deepEqual([drag.preview.to, bree.elevation], [{ x: bree.x, y: bree.y }, 0]);
     assert.equal(drag.preview.read.dragFt, bree.path!.stops.slice(1).reduce((sum, s) => sum + (s.cost ?? 0), 0));
+  });
+
+  test("a route's landing, kept per route, is worked out again once the holder goes out of every player's sight", () => {
+    const seen = straddle();
+    const hidden: RoomState = { ...seen, tokens: { ...seen.tokens, horse: { ...seen.tokens.horse!, visibility: "dm" } } };
+    // One route for both rooms, which share the build and the scene: only the holder's sight differs.
+    const pieces: RoutePiece[] = [
+      [3, 5, 0, 0],
+      [1, 5, 0, 0],
+    ];
+    const ends = [seen, hidden].map((s) => routeLanding(dropView(s, "dm"), s.tokens.bree!, { x: 1, y: 5 }, pieces, 5)?.points.at(-1)?.elevation);
+    assert.deepEqual(ends, [0, 10], "off a horse every player sees she lands on the ground, off one they cannot as a flier keeps her height");
   });
 
   test("the DM's drag off a holder no player sees lands and walks as a drag with no holder, op for op", () => {
