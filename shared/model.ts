@@ -126,6 +126,16 @@ export type RoomState = {
    * from before them.
    */
   casts: Record<CastId, CastAsk>;
+  /**
+   * Traps (docs/design-v1-traps.md 6.1), scene-scoped as pins are. The DM
+   * gets every trap on its scene, a player only a found one, cut to its name
+   * and zone. Empty in rooms from before them.
+   */
+  traps: Record<TrapId, Trap>;
+  /** DM only: the last 30 DM trap lines (6.3), apart from the shared log so no player's line ever pushes one out. */
+  trapLog: LogEntry[];
+  /** The last 20 players' trap lines (6.3), each one every player and table display receives. */
+  trapSeen: LogEntry[];
 };
 
 export type RoomMeta = {
@@ -1709,8 +1719,6 @@ export type Trap = {
   found: boolean;
   /** Always stored. A player's projection leaves it out whole. */
   rig?: TrapRig;
-  /** A player's projection only: the DM disarmed it. Never stored. */
-  disarmed?: true;
 };
 
 export type TrapState = "armed" | "sprung" | "disarmed";
@@ -2033,7 +2041,26 @@ export type LogEvent =
    * that closes it. It reaches the DM and the players who own its caster
    * now, as the ask does. Its end reads the same whatever the saves did.
    */
-  | { type: "cast"; castId: CastId; tokenId: TokenId; spell: string; slot?: number; end?: CastEnd };
+  | { type: "cast"; castId: CastId; tokenId: TokenId; spell: string; slot?: number; end?: CastEnd }
+  /**
+   * A trap went off (docs/design-v1-traps.md 6.3), in the DM's trap log
+   * only: the trap's name then, how, who set it off (at most 10 plain ids,
+   * the rest counted in `more`), how many it hits, what each of its actions
+   * did (`action` its index, -1 the pit), the indexes in `by` of creatures
+   * players who do not own them could see then, and `hidden` for a private
+   * springing in a player's op, whose effects wait for the DM. Its id is the
+   * occurrence's.
+   */
+  | { type: "trap"; trapId: TrapId; name: string; how: TrapHow; by: TokenId[]; more?: number; hits: number; did: { action: number; ok: boolean }[]; seen?: number[]; hidden?: true }
+  /**
+   * What players read when a trap goes off (6.3), in the players' trap log:
+   * every one reaches every player and every table display. `by` names only
+   * creatures every player saw, and each viewer gets those they see now. No
+   * trap id, name or effects.
+   */
+  | { type: "trapSeen"; by: TokenId[]; more?: number; message: string; sound?: TrapSound }
+  /** The Passive Perception hint (4.6), in the DM's trap log: this creature would notice the trap. */
+  | { type: "trapNotice"; trapId: TrapId; tokenId: TokenId; passive: number; dc: number };
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and

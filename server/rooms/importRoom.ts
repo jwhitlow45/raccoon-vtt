@@ -7,7 +7,7 @@ import type pg from "pg";
 import yauzl from "yauzl";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
-import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes } from "#shared/limits.ts";
+import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE } from "#shared/limits.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { migrateSnapshot } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
@@ -30,7 +30,7 @@ import type { Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
-import { checkWholeScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, measuredStateBytes } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -293,7 +293,7 @@ export function assertWithinLimits(state: RoomState): void {
     const sight = sightPiecesCheck(state, sceneId);
     if (!sight.ok) throw over(sight.message);
   }
-  const bytes = serializedBytes(state);
+  const bytes = measuredStateBytes(state);
   if (bytes > LIMITS.stateBytes) throw over("the room state is over 8 MiB");
   // The player scene's explored layer must be able to grow to its full size (docs/design-v1-maps-vision.md 2.4).
   if (bytes + exploredReserve(state) > LIMITS.stateBytes) throw over(NO_ROOM_TO_EXPLORE);

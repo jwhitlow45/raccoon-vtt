@@ -1,5 +1,6 @@
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, tileKey } from "#shared/keys.ts";
+import { isPlainId } from "#shared/rules/traps.ts";
 import type {
   AreaTemplate,
   Character,
@@ -27,6 +28,10 @@ import type {
   Light,
   MapPhase,
   Pin,
+  Trap,
+  TrapAction,
+  TrapDue,
+  TrapRig,
   Token,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
@@ -206,6 +211,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     companionBlocks: {},
     // Open asks for saves belong to a moment of play too, and the import keeps their lines (docs/design-v1-player-save-spell.md 5.7).
     casts: {},
+    traps: {},
+    trapLog: [],
+    trapSeen: [],
   };
 
   const moveAny = state.meta.settings.playersMoveAny;
@@ -232,6 +240,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     else out.scenes[next.id] = next;
   }
   // New ids for stamps and lights, as for labels. A stamp of an image that did not come through goes with it.
+  const stampIds = new Map<string, string>();
+  const lightIds = new Map<string, string>();
   for (const st of Object.values(state.stamps)) {
     if (!scenes.has(st.sceneId)) continue;
     let art = st.art;
@@ -241,11 +251,13 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       art = { assetId: mapped };
     }
     const next: Stamp = { ...st, id: newId(), sceneId: scenes.of(st.sceneId), art };
+    stampIds.set(st.id, next.id);
     out.stamps[next.id] = next;
   }
   for (const l of Object.values(state.lights)) {
     if (!scenes.has(l.sceneId)) continue;
     const next: Light = { ...l, id: newId(), sceneId: scenes.of(l.sceneId) };
+    lightIds.set(l.id, next.id);
     out.lights[next.id] = next;
   }
   if (state.meta.playerSceneId !== null && scenes.has(state.meta.playerSceneId)) {
@@ -518,6 +530,11 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         };
       case "cast":
         return { ...data, tokenId: tokens.of(data.tokenId) };
+      // Trap lines live in their own logs, remapped below.
+      case "trap":
+      case "trapSeen":
+      case "trapNotice":
+        return null;
     }
   };
   // Log ids are `"<seq>:<index>"`. The new room's ops start at seq 1, so seq 0 can never collide.
@@ -532,6 +549,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     }
     out.log.push(next);
   }
+  remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId });
   // A hand-made or older file is brought within the companion rules (docs/design-v1-combat-flow.md 4.7), a character's
   // initiative and Passive Perception follow its stat block, and a Wild Shape mark stands only beside its creature
   // (docs/design-v1-pc-stats.md 3.5 and 3.6).
@@ -555,4 +573,90 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
   if (!active || !phaseGrid) return rest;
   const next: Scene = { ...rest, phases: kept, phaseId: active.id, phaseGrid, map: active.id === scene.phaseId && scene.map ? scene.map : phaseMap(phaseGrid, active) };
   return active.id === scene.phaseId ? next : withPhaseLight(next, active);
+}
+
+/**
+ * Traps follow their scene (docs/design-v1-traps.md 6.8), each with a new
+ * id, as pins do. What a trap names follows its new id: a light, a stamp
+ * or a creature its actions show, and the creature its hint named, each
+ * dropped when it did not come through. Doors keep their ids, as a scene's
+ * chunks do. A trap's waiting occurrences and both trap logs come along,
+ * named after the new ids, every list keeping only plain ids that came
+ * through and counting the rest, as the reducer stores them (6.1). Lines
+ * are numbered after the room log's, so no two imported lines share an id.
+ */
+function remapTraps(
+  state: RoomState,
+  out: RoomState,
+  ids: { scenes: { has(id: string): boolean; of(id: string): string }; tokens: { has(id: string): boolean; of(id: string): string }; stampIds: ReadonlyMap<string, string>; lightIds: ReadonlyMap<string, string>; newId: () => string },
+): void {
+  const { scenes, tokens, stampIds, lightIds, newId } = ids;
+  const trapIds = new Map<string, string>();
+  const lineIds = new Map<string, string>();
+  let next = out.log.length;
+  const lineId = (old: string) => {
+    let id = lineIds.get(old);
+    if (id === undefined) lineIds.set(old, (id = `0:${next++}`));
+    return id;
+  };
+  const kept = (list: readonly string[], more = 0): { list: string[]; more: number } => {
+    const mapped = list.filter((id) => tokens.has(id)).map((id) => tokens.of(id));
+    const plain = mapped.filter(isPlainId);
+    return { list: plain, more: more + (list.length - plain.length) };
+  };
+  for (const trap of Object.values(state.traps ?? {})) {
+    if (!scenes.has(trap.sceneId)) continue;
+    trapIds.set(trap.id, newId());
+  }
+  for (const trap of Object.values(state.traps ?? {})) {
+    const id = trapIds.get(trap.id);
+    if (!id) continue;
+    const copy: Trap = { ...trap, id, sceneId: scenes.of(trap.sceneId) };
+    if (trap.rig) {
+      const rig: TrapRig = { ...trap.rig };
+      rig.actions = trap.rig.actions.flatMap((a): TrapAction[] => {
+        if ("door" in a) return [a];
+        if ("light" in a) return lightIds.has(a.light) ? [{ ...a, light: lightIds.get(a.light)! }] : [];
+        if ("tokenId" in a.show) return tokens.has(a.show.tokenId) ? [{ show: { tokenId: tokens.of(a.show.tokenId) } }] : [];
+        return stampIds.has(a.show.stampId) ? [{ show: { stampId: stampIds.get(a.show.stampId)! } }] : [];
+      });
+      if (rig.noticedBy !== undefined) {
+        const noticed = tokens.has(rig.noticedBy) ? tokens.of(rig.noticedBy) : undefined;
+        if (noticed !== undefined && isPlainId(noticed)) rig.noticedBy = noticed;
+        else delete rig.noticedBy;
+      }
+      if (rig.due) {
+        rig.due = rig.due.map((d): TrapDue => {
+          const by = kept(d.by, d.more ?? 0);
+          const hits = kept(d.hits, d.hitsMore ?? 0);
+          const { more: _more, hitsMore: _hitsMore, ...rest } = d;
+          return { ...rest, id: lineId(d.id), by: by.list, ...(by.more > 0 ? { more: by.more } : {}), hits: hits.list, ...(hits.more > 0 ? { hitsMore: hits.more } : {}) };
+        });
+        if (rig.due.length === 0) delete rig.due;
+      }
+      copy.rig = rig;
+    }
+    out.traps[id] = copy;
+  }
+  for (const line of state.trapLog ?? []) {
+    const data = line.data;
+    if (!data) continue;
+    if (data.type === "trap") {
+      const by = kept(data.by, data.more ?? 0);
+      const { more: _more, seen: _seen, ...rest } = data;
+      // Which creatures players saw is the old room's history, read by index into the old list.
+      const seen = (data.seen ?? []).map((i) => data.by[i]).filter((old): old is string => old !== undefined && tokens.has(old)).map((old) => by.list.indexOf(tokens.of(old))).filter((i) => i >= 0);
+      out.trapLog.push({ ...line, id: lineId(line.id), data: { ...rest, trapId: trapIds.get(data.trapId) ?? data.trapId, by: by.list, ...(by.more > 0 ? { more: by.more } : {}), ...(seen.length > 0 ? { seen } : {}) } });
+    } else if (data.type === "trapNotice") {
+      if (!tokens.has(data.tokenId) || !isPlainId(tokens.of(data.tokenId))) continue;
+      out.trapLog.push({ ...line, id: lineId(line.id), data: { ...data, trapId: trapIds.get(data.trapId) ?? data.trapId, tokenId: tokens.of(data.tokenId) } });
+    }
+  }
+  for (const line of state.trapSeen ?? []) {
+    const data = line.data;
+    if (data?.type !== "trapSeen") continue;
+    const by = kept(data.by, data.more ?? 0);
+    const { more: _more, ...rest } = data;
+    out.trapSeen.push({ ...line, id: lineId(line.id), data: { ...rest, by: by.list, ...(by.more > 0 ? { more: by.more } : {}) } });
+  }
 }

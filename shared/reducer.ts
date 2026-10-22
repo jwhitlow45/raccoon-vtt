@@ -54,6 +54,7 @@ import { pinPut, pinRemove } from "./reducer/pins.ts";
 import { actorSaveDue, endSaves, rollAnswer, rollAsk, rollChange, rollClose, rollReopen } from "./reducer/rolls.ts";
 import { actorOutcome } from "./reducer/outcome.ts";
 import { castAsk, castClose } from "./reducer/casts.ts";
+import { trapAct, trapCreate, trapDelete, trapSettle, trapUpdate } from "./reducer/traps.ts";
 import { sysDice } from "./reducer/dice.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
@@ -295,6 +296,16 @@ function dispatch(tx: Tx, op: Op): void {
       return buildRough(tx, op);
     case "door.set":
       return doorSet(tx, op);
+    case "trap.create":
+      return trapCreate(tx, op);
+    case "trap.update":
+      return trapUpdate(tx, op);
+    case "trap.delete":
+      return trapDelete(tx, op);
+    case "trap.act":
+      return trapAct(tx, op);
+    case "trap.settle":
+      return trapSettle(tx, op);
     case "encounter.start":
       return encounterStart(tx, op);
     case "encounter.end":

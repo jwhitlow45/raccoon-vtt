@@ -340,6 +340,19 @@ export function reads(op: Op, state: RoomState): Reads {
     }
     case "pin.remove":
       return of([{ key: keys.pin(op.pinId) }]);
+    // A trap names the doors, lights, stamps and tokens of its scene (docs/design-v1-traps.md 6.2), so the DM's view of it reads the scene whole.
+    case "trap.create":
+      return of([{ key: keys.scene(op.trap.sceneId) }], [`scene:${op.trap.sceneId}`]);
+    case "trap.update": {
+      const trap = state.traps[op.trapId];
+      return trap ? of([{ key: keys.trap(op.trapId) }], [`scene:${trap.sceneId}`]) : of([{ key: keys.trap(op.trapId) }]);
+    }
+    case "trap.delete":
+    case "trap.settle":
+      return of([{ key: keys.trap(op.trapId) }]);
+    // Its players' line is numbered by the server, as a roll's is.
+    case "trap.act":
+      return NEVER;
     // The targets' creatures, which must be played by a player and, for a token, stand on the player scene.
     case "roll.ask": {
       const r: Read[] = [{ key: keys.meta }];

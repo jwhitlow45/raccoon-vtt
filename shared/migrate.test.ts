@@ -16,6 +16,7 @@ import {
   reviveToOne,
   walksRoutes,
   attaches,
+  trapsGoOff,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -844,9 +845,9 @@ describe("walking routes: op version 13 and snapshot version 17 (docs/design-v1-
 });
 
 describe("attached tokens: op version 14 and snapshot version 18 (docs/design-v1-attach.md 8.6)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 14);
-    assert.equal(SNAPSHOT_VERSION, 18);
+  test("came before traps' versions", () => {
+    assert.ok(OP_VERSION >= 14);
+    assert.ok(SNAPSHOT_VERSION >= 18);
   });
 
   test("both steps are the identity", () => {
@@ -865,5 +866,39 @@ describe("attached tokens: op version 14 and snapshot version 18 (docs/design-v1
   test("a version 14 op and a version 18 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 14, 13, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 18, 17, snapshotMigrations), /down/);
+  });
+});
+
+describe("traps: op version 15 and snapshot version 19 (docs/design-v1-traps.md 6.6)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 15);
+    assert.equal(SNAPSHOT_VERSION, 19);
+  });
+
+  test("a version 18 room starts with no traps and both trap logs empty, and a version 19 room is kept as it is", () => {
+    const { traps: _traps, trapLog: _log, trapSeen: _seen, ...old } = room();
+    const migrated = runMigrations(old, 18, 19, snapshotMigrations) as RoomState;
+    assert.deepEqual(migrated.traps, {});
+    assert.deepEqual(migrated.trapLog, []);
+    assert.deepEqual(migrated.trapSeen, []);
+    assert.deepEqual(migrated, { ...old, traps: {}, trapLog: [], trapSeen: [] });
+    const state = room();
+    assert.equal(runMigrations(state, 18, 19, snapshotMigrations), state);
+  });
+
+  test("the op step is the identity", () => {
+    const ops: unknown[] = [{ t: "token.move", tokenId: "t1", x: 3, y: 4 }, { t: "door.set", sceneId: "s1", door: { edge: "1,1,n" }, state: "open" }];
+    for (const op of ops) assert.equal(runMigrations(op, 14, 15, opMigrations), op);
+  });
+
+  test("only ops stored before version 15 replay without what traps write", () => {
+    assert.equal(trapsGoOff(14), false);
+    assert.equal(trapsGoOff(15), true);
+    assert.equal(trapsGoOff(undefined), true);
+  });
+
+  test("a version 15 op and a version 19 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 15, 14, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 19, 18, snapshotMigrations), /down/);
   });
 });

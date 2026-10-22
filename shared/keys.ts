@@ -45,7 +45,10 @@ export type ParsedKey =
   | { kind: "handoutDoc"; id: string }
   | { kind: "companionBlock"; id: string }
   | { kind: "cast"; id: string }
+  | { kind: "trap"; id: string }
   | { kind: "log"; id: string }
+  | { kind: "trapLog"; id: string }
+  | { kind: "trapSeen"; id: string }
   | { kind: "chunk"; sceneId: string; cx: number; cy: number }
   | { kind: "fog"; sceneId: string; tx: number; ty: number }
   | { kind: "explored"; sceneId: string; tx: number; ty: number }
@@ -82,7 +85,12 @@ export const keys = {
   companionBlock: (id: string): EntityKey => `companionBlock:${id}`,
   /** A player's open ask for saves (RoomState.casts). */
   cast: (id: string): EntityKey => `cast:${id}`,
+  /** A trap (RoomState.traps). */
+  trap: (id: string): EntityKey => `trap:${id}`,
   log: (id: string): EntityKey => `log:${id}`,
+  /** A line of the DM's trap log, and of the players' (RoomState.trapLog, RoomState.trapSeen). */
+  trapLog: (id: string): EntityKey => `trapLog:${id}`,
+  trapSeen: (id: string): EntityKey => `trapSeen:${id}`,
   chunk: (sceneId: string, cx: number, cy: number): EntityKey => `chunk:${sceneId}:${cx},${cy}`,
   fog: (sceneId: string, tx: number, ty: number): EntityKey => `fog:${sceneId}:${tx},${ty}`,
   /** A tile of the party's explored layer (RoomState.exploredTiles). */
@@ -181,7 +189,10 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "handoutDoc":
     case "companionBlock":
     case "cast":
+    case "trap":
     case "log":
+    case "trapLog":
+    case "trapSeen":
       return { kind, id: rest };
     case "fogDraft":
       return { kind, sceneId: rest };
@@ -246,6 +257,12 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "companionBlocks";
     case "cast":
       return "casts";
+    case "trap":
+      return "traps";
+    case "trapLog":
+      return "trapLog";
+    case "trapSeen":
+      return "trapSeen";
     case "chunk":
       return "buildChunks";
     case "fog":
@@ -307,8 +324,14 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.companionBlocks[parsed.id] ?? null;
     case "cast":
       return state.casts[parsed.id] ?? null;
+    case "trap":
+      return state.traps?.[parsed.id] ?? null;
     case "log":
       return state.log.find((e) => e.id === parsed.id) ?? null;
+    case "trapLog":
+      return (state.trapLog ?? []).find((e) => e.id === parsed.id) ?? null;
+    case "trapSeen":
+      return (state.trapSeen ?? []).find((e) => e.id === parsed.id) ?? null;
     case "chunk":
       return state.buildChunks[chunkKey(parsed.sceneId, parsed.cx, parsed.cy)] ?? null;
     case "fog":
@@ -391,6 +414,12 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, companionBlocks: withEntry(state.companionBlocks, parsed.id, value as RoomState["companionBlocks"][string] | null) };
     case "cast":
       return { ...state, casts: withEntry(state.casts, parsed.id, value as RoomState["casts"][string] | null) };
+    case "trap":
+      return { ...state, traps: withEntry(state.traps, parsed.id, value as RoomState["traps"][string] | null) };
+    case "trapLog":
+      return { ...state, trapLog: withLine(state.trapLog ?? [], parsed.id, value as LogEntry | null) };
+    case "trapSeen":
+      return { ...state, trapSeen: withLine(state.trapSeen ?? [], parsed.id, value as LogEntry | null) };
     case "chunk":
       return {
         ...state,
@@ -413,13 +442,8 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
     }
     case "fogDraft":
       return { ...state, fogDrafts: withEntry(state.fogDrafts, parsed.sceneId, value as FogDraft | null) };
-    case "log": {
-      const without = state.log.filter((e) => e.id !== parsed.id);
-      if (value === null) return { ...state, log: without };
-      const entry = value as LogEntry;
-      const log = [...without, entry].sort((a, b) => compareLogIds(a.id, b.id));
-      return { ...state, log };
-    }
+    case "log":
+      return { ...state, log: withLine(state.log, parsed.id, value as LogEntry | null) };
     case "encounter":
       return { ...state, encounter: (value as Encounter | null) ?? null };
     case "encounterHistory":
@@ -428,6 +452,12 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       if (value === null) throw new Error("the room meta cannot be removed");
       return { ...state, meta: value as RoomMeta };
   }
+}
+
+/** A log of lines with one replaced or removed, kept in id order. */
+function withLine(lines: readonly LogEntry[], id: string, value: LogEntry | null): LogEntry[] {
+  const without = lines.filter((e) => e.id !== id);
+  return value === null ? without : [...without, value].sort((a, b) => compareLogIds(a.id, b.id));
 }
 
 /** Orders `"<seq>:<index>"` log ids numerically, so a replayed entry lands in place. */

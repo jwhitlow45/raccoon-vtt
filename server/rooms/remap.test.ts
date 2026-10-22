@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -589,6 +589,43 @@ describe("attached tokens in an import (docs/design-v1-attach.md 5.2)", () => {
     assert.deepEqual(tokens.find((t) => t.name === "Bree")!.attached, { to: horse.id, kind: "ride", steer: true });
     assert.equal(tokens.find((t) => t.name === "Torch")!.attached, undefined);
     assert.equal(out.encounter!.turnStart!.mounts, undefined);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+});
+
+describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
+  test("traps get new ids and follow their scene, actions follow the lights, stamps and creatures that came through, and occurrences and lines follow their creatures", () => {
+    const state = room();
+    state.tokens.thorn = token("thorn", { name: "Thorn", kind: "pc" });
+    state.lights.brazier = { id: "brazier", rev: 0, sceneId: "s1", x: 2, y: 2, bright: 20, dim: 20, on: true, walls: false, label: "Light-Brazier" };
+    const t = trap("plate");
+    t.rig = {
+      ...t.rig!,
+      actions: [{ light: "brazier", on: false }, { show: { tokenId: "thorn" } }, { show: { tokenId: "nobody" } }, { door: { edge: "5,5,n" }, state: "locked" }],
+      noticedBy: "thorn",
+      due: [{ id: "7:0", at: AT, how: "enter", by: ["thorn", "nobody"], hits: ["thorn"] }],
+    };
+    state.traps.plate = t;
+    state.trapLog = [{ id: "7:0", at: AT, kind: "event", data: { type: "trap", trapId: "plate", name: "Hidden Pit", how: "enter", by: ["thorn", "nobody"], hits: 1, did: [], seen: [0] } }];
+    state.trapSeen = [{ id: "7:1", at: AT, kind: "event", data: { type: "trapSeen", by: ["thorn"], message: "Click." } }];
+    const out = remapState(state, { assets: new Map() });
+    const traps = Object.values(out.traps);
+    assert.equal(traps.length, 1);
+    const copy = traps[0]!;
+    const thorn = Object.values(out.tokens).find((x) => x.name === "Thorn")!;
+    const light = Object.values(out.lights)[0]!;
+    const sceneId = Object.values(out.scenes).find((s) => s.name === "s1")!.id;
+    assert.notEqual(copy.id, "plate");
+    assert.equal(copy.sceneId, sceneId);
+    assert.deepEqual(copy.rig!.actions, [{ light: light.id, on: false }, { show: { tokenId: thorn.id } }, { door: { edge: "5,5,n" }, state: "locked" }]);
+    assert.equal(copy.rig!.noticedBy, thorn.id);
+    const due = copy.rig!.due![0]!;
+    assert.deepEqual([due.by, due.more, due.hits], [[thorn.id], 1, [thorn.id]]);
+    const line = out.trapLog[0]!;
+    assert.equal(due.id, line.id, "the occurrence still names its line");
+    assert.deepEqual(line.data, { type: "trap", trapId: copy.id, name: "Hidden Pit", how: "enter", by: [thorn.id], more: 1, hits: 1, did: [], seen: [0] });
+    assert.deepEqual(out.trapSeen[0]!.data, { type: "trapSeen", by: [thorn.id], message: "Click." });
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });

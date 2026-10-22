@@ -1,4 +1,4 @@
-import { chunkKey, keys, parseKey, readEntity, sightOf, tileKey, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
+import { chunkKey, doorChunk, keys, parseKey, readEntity, sightOf, tileKey, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
 import {
   FOG_SUBCELLS,
   type Actor,
@@ -37,6 +37,7 @@ import {
   type Stamp,
   type Token,
   type TokenPath,
+  type Trap,
   type TurnStart,
   type Viewer,
   type WallFeature,
@@ -54,6 +55,7 @@ import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./r
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { pathThisTurn, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
+import { zoneRanges } from "./rules/traps.ts";
 import { sightRect } from "./rules/vision.ts";
 
 /**
@@ -107,8 +109,17 @@ export type ProjectedTemplate = Omit<AreaTemplate, "casterId"> & { casterId?: st
 export type ProjectedEntry = Omit<InitEntry, "groupKey"> & Partial<Pick<InitEntry, "groupKey">>;
 export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: ProjectedEntry[] };
 
-export type ProjectedState = Omit<RoomState, "tokens" | "characters" | "templates" | "encounter"> & {
+/**
+ * A trap as a player gets it (docs/design-v1-traps.md 6.4): its name and
+ * zone, and `disarmed` once the DM disarms it, with rev 0. Never whether it
+ * is armed or sprung, its rig or its occurrences: the party saw it go off
+ * or it did not.
+ */
+export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "state" | "found">> & { disarmed?: true };
+
+export type ProjectedState = Omit<RoomState, "tokens" | "characters" | "templates" | "encounter" | "traps"> & {
   tokens: Record<string, ProjectedToken>;
+  traps: Record<string, ProjectedTrap>;
   characters: Record<string, ProjectedCharacter>;
   templates: Record<string, ProjectedTemplate>;
   encounter: ProjectedEncounter | null;
@@ -913,6 +924,53 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
   return fogged ? null : stamp;
 }
 
+/**
+ * Traps (docs/design-v1-traps.md 6.4). The DM gets every trap on its scene.
+ * A player gets one only once it is found, on the player scene outside a
+ * blackout, not under full fog over its cells by the labels' rule (a wire's
+ * cells, a door's two cells), and for a door zone only while its door is
+ * not a secret one still hidden: its name, its zone, and whether the DM
+ * disarmed it. So a springing, re-arming, uses and rig edits send players
+ * nothing, and a trap nobody found is in no player's data at all.
+ */
+function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
+  if (trap.sceneId !== ctx.sceneId) return null;
+  if (ctx.viewer.role === "dm") return trap;
+  if (!trap.found) return null;
+  const zone = trap.zone;
+  if ("door" in zone) {
+    const { cx, cy } = doorChunk(zone.door);
+    const chunk = ctx.state.buildChunks[chunkKey(trap.sceneId, cx, cy)];
+    const feature = "edge" in zone.door ? chunk?.edges[zone.door.edge] : chunk?.walls?.find((w) => w.id === (zone.door as { id: string }).id)?.f;
+    if (feature?.kind === "door" && feature.secret && !feature.discovered) return null;
+  }
+  const scene = ctx.state.scenes[trap.sceneId];
+  if (scene?.fogEnabled) {
+    const fogs = anyFogTiles(ctx.state);
+    const fogged = (r: CellRange) => isRangeFullyFogged(fogs, trap.sceneId, r, (x, y) => ctx.fogged(trap.sceneId, x, y));
+    if (zoneRanges(ctx.state, trap.sceneId, zone).every(fogged)) return null;
+  }
+  let out = playerTraps.get(trap);
+  if (!out) playerTraps.set(trap, (out = { id: trap.id, rev: 0, sceneId: trap.sceneId, name: trap.name, zone, ...(trap.state === "disarmed" ? { disarmed: true as const } : {}) }));
+  return out;
+}
+
+/* A player's trap, kept per trap object, which is replaced and never changed, so a re-projection that changes nothing sends nothing. */
+const playerTraps = new WeakMap<Trap, ProjectedTrap>();
+
+/**
+ * A players' trap line (docs/design-v1-traps.md 6.3): every player and
+ * table display gets it, with `by` cut to the creatures this viewer sees
+ * now. The DM's trap log is the DM's alone.
+ */
+function projectTrapSeenCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
+  if (ctx.viewer.role === "dm") return entry;
+  const data = entry.data;
+  if (data?.type !== "trapSeen") return null;
+  const by = data.by.filter((id) => tokenVisibleById(ctx, id));
+  return by.length === data.by.length ? entry : { ...entry, data: { ...data, by } };
+}
+
 /** Lights are the DM's in every wave. Players will only ever see their effect (section 3.6). */
 function projectLightCtx(ctx: Ctx, light: Light): Light | null {
   if (ctx.viewer.role !== "dm") return null;
@@ -1478,6 +1536,11 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     case "cast":
       // As the ask itself (projectCastCtx): its caster's players now, never behind a pause.
       return ctx.paused || !ownsRollCreature(ctx, data) ? null : data;
+    // Trap lines live in their own logs (projectTrapSeenCtx), never in this one.
+    case "trap":
+    case "trapSeen":
+    case "trapNotice":
+      return null;
   }
 }
 
@@ -1598,8 +1661,14 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectCompanionBlockCtx(ctx, value as CompanionBlock) : null;
     case "cast":
       return value ? projectCastCtx(ctx, value as CastAsk) : null;
+    case "trap":
+      return value ? projectTrapCtx(ctx, value as Trap) : null;
     case "log":
       return value ? projectLogEntryCtx(ctx, value as LogEntry) : null;
+    case "trapLog":
+      return value && ctx.viewer.role === "dm" ? value : null;
+    case "trapSeen":
+      return value ? projectTrapSeenCtx(ctx, value as LogEntry) : null;
     case "encounter":
       return projectEncounterCtx(ctx);
     case "encounterHistory":
@@ -1649,6 +1718,9 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     handoutDocs: projectMap(state.handoutDocs, (doc) => projectHandoutDocCtx(ctx, doc)),
     companionBlocks: projectMap(state.companionBlocks, (block) => projectCompanionBlockCtx(ctx, block)),
     casts: projectMap(state.casts, (ask) => projectCastCtx(ctx, ask)),
+    traps: projectMap(state.traps ?? {}, (trap) => projectTrapCtx(ctx, trap)),
+    trapLog: viewer.role === "dm" ? (state.trapLog ?? []) : [],
+    trapSeen: (state.trapSeen ?? []).map((e) => projectTrapSeenCtx(ctx, e)).filter((e): e is LogEntry => e !== null),
     sight: sightTilesCtx(ctx),
   };
 }
@@ -1698,6 +1770,9 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.companionBlocks)) out.push(keys.companionBlock(id));
   for (const id of Object.keys(state.casts ?? {})) out.push(keys.cast(id));
   for (const e of state.log) out.push(keys.log(e.id));
+  for (const id of Object.keys(state.traps ?? {})) out.push(keys.trap(id));
+  for (const e of state.trapLog ?? []) out.push(keys.trapLog(e.id));
+  for (const e of state.trapSeen ?? []) out.push(keys.trapSeen(e.id));
   return out;
 }
 
@@ -1778,6 +1853,19 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     else if (parsed.kind === "journal") pageIds.add(parsed.id);
     else if (parsed.kind === "encounter") encounterTouched = true;
   }
+  // A door trap reaches players only while its door is no secret one still hidden (projectTrapCtx), so its chunk re-projects it.
+  const chunksTouched = touched.flatMap((key) => {
+    const parsed = parseKey(key);
+    return parsed?.kind === "chunk" ? [chunkKey(parsed.sceneId, parsed.cx, parsed.cy)] : [];
+  });
+  if (chunksTouched.length > 0) {
+    const held = new Set(chunksTouched);
+    for (const trap of Object.values(state.traps ?? {})) {
+      if (!("door" in trap.zone)) continue;
+      const { cx, cy } = doorChunk(trap.zone.door);
+      if (held.has(chunkKey(trap.sceneId, cx, cy))) add(keys.trap(trap.id));
+    }
+  }
   // A pin reaches players only while its page is one they may read (projectPinCtx), so a page's access re-projects its pins.
   if (pageIds.size > 0) {
     for (const pin of Object.values(state.pins)) if (pin.pageId !== undefined && pageIds.has(pin.pageId)) add(keys.pin(pin.id));
@@ -1852,6 +1940,10 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     const refsRoll = data.type === "dice" && data.rolls.some((r) => (r.tokenId !== undefined && tokenIds.has(r.tokenId)) || (r.characterId !== undefined && characterIds.has(r.characterId)));
     if (refsToken || refsCharacter || refsHandout || refsEncounter || refsTemplate || refsRoll) add(keys.log(entry.id));
   }
+  // A players' trap line names the creatures every player saw, each viewer getting those they see now (projectTrapSeenCtx).
+  if (tokenIds.size > 0) {
+    for (const entry of state.trapSeen ?? []) if (entry.data?.type === "trapSeen" && entry.data.by.some((id) => tokenIds.has(id))) add(keys.trapSeen(entry.id));
+  }
   return out;
 }
 
@@ -1891,6 +1983,7 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   for (const label of Object.values(state.labels)) if (on(label.sceneId, labelCells(label))) add(keys.label(label.id));
   for (const stamp of Object.values(state.stamps)) if (on(stamp.sceneId, stampCells(stamp))) add(keys.stamp(stamp.id));
   for (const pin of Object.values(state.pins)) if (on(pin.sceneId, pinCells(pin))) add(keys.pin(pin.id));
+  for (const trap of Object.values(state.traps ?? {})) if (zoneRanges(state, trap.sceneId, trap.zone).some((r) => on(trap.sceneId, r))) add(keys.trap(trap.id));
 }
 
 /**

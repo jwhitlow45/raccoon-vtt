@@ -1318,6 +1318,50 @@ describe("an area's damage", () => {
   });
 });
 
+describe("pit traps' walls counted ahead in the limits step (docs/design-v1-traps.md 6.7)", () => {
+  test("a pit trap that would take a vision scene past its sight pieces is refused when made, and one without a pit never counts", async () => {
+    const dm = member("DM", "dm");
+    const state = createInitialState({ roomName: "Pits", dm });
+    const sceneId = state.meta.playerSceneId!;
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 200, h: 200 }, vision: { on: true, light: "bright" } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const { conn, sent } = connect(actor, dm);
+      await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
+      let n = 0;
+      const send = async (op: Op) => {
+        await actor.op(conn, ++n, op);
+        const answer = await answerTo(sent, n);
+        assert.ok(answer !== "stuck");
+        return answer.rejects?.find((r) => r.n === n) ?? null;
+      };
+      const rig = (pit: boolean) => ({ on: ["enter" as const], who: "any" as const, floor: true, resets: "never" as const, stops: true, foundOnSpring: true, hits: "trigger" as const, actions: [], find: [], notice: false, ...(pit ? { pit: { floor: -10 } } : {}) });
+      // Pits of 20 x 20 squares, set apart so each counts its own rim, until the next is refused.
+      let made = 0;
+      let refusal = null;
+      for (let i = 0; i < 49 && refusal === null; i++) {
+        const x = (i % 8) * 24;
+        const y = Math.floor(i / 8) * 24;
+        refusal = await send({ t: "trap.create", trap: { id: `pit${i}`, sceneId, name: "Pit", zone: { cells: [{ x, y, w: 20, h: 20 }] }, rig: rig(true) } });
+        if (refusal === null) made++;
+      }
+      assert.ok(made > 0 && refusal !== null, `${made} made`);
+      assert.equal(refusal.code, "quota");
+      assert.match(refusal.message, /more than vision can handle/);
+      assert.equal(Object.keys(actor.committed.state.traps).length, made);
+      // A plate opens nothing, so it is taken however full the count is.
+      assert.equal(await send({ t: "trap.create", trap: { id: "plate", sceneId, name: "Plate", zone: { cells: [{ x: 0, y: 190, w: 20, h: 5 }] }, rig: rig(false) } }), null);
+      // Taking a pit away is taken too.
+      assert.equal(await send({ t: "trap.update", trapId: "pit0", patch: { rig: { pit: null } } }), null);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+});
+
 describe("the split's caps in the limits step", () => {
   const wall = (id: number, ax: number, ay: number, bx: number, by: number) => ({ id: `w${String(id).padStart(11, "0")}`, a: [ax, ay] as [number, number], b: [bx, by] as [number, number], f: { kind: "wall" as const } });
 

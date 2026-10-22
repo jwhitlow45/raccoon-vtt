@@ -39,12 +39,13 @@ const viewer = (step: Step): Viewer => (step.who === "dm" ? DM : P1);
 /**
  * A state as that build would have written it: without the collections added
  * since, while they are empty. The snapshot migration adds them empty (asks
- * for saves at version 16), and nothing in this history fills them, so the
- * build's bytes are the rest.
+ * for saves at version 16, traps and their logs at 19), and nothing in this
+ * history fills them, so the build's bytes are the rest.
  */
 function asThatBuild(state: RoomState): unknown {
-  const { casts, ...rest } = state;
-  return Object.keys(casts ?? {}).length === 0 ? rest : state;
+  const { casts, traps, trapLog, trapSeen, ...rest } = state;
+  const empty = Object.keys(casts ?? {}).length === 0 && Object.keys(traps ?? {}).length === 0 && (trapLog ?? []).length === 0 && (trapSeen ?? []).length === 0;
+  return empty ? rest : state;
 }
 
 /** The fixture's steps from `from` on, each op migrated from its stored version, at a replay version (none: as live ops). */

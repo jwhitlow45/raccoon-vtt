@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOps } from "#shared/protocol.ts";
-import { actor, apply, character, companionBlock, room, scene, token } from "#shared/testutil.ts";
+import { actor, apply, character, companionBlock, room, scene, token, trap } from "#shared/testutil.ts";
 import { UndoStacks } from "./undo.ts";
 import { addTally, describeOp, describeTally, tallyOf } from "./undoLabels.ts";
 
@@ -85,7 +85,7 @@ describe("undo step labels", () => {
     for (const schema of clientOps) {
       const t = schema.shape.t.value;
       // The smallest op of each type the label can read: fields it does not use stay unset.
-      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, block: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, request: { test: { kind: "save", choices: [{ ability: "dex" }] } }, cast: { spell: "x" } } as never, s);
+      const label = describeOp({ t, sceneId: "s1", tokenId: "g2", target: { tokenId: "g2" }, moves: [], hits: [], patch: {}, change: { kind: "heal", amount: 1 }, effect: { key: "prone" }, token: { name: "x" }, scene: { name: "x" }, character: { name: "x" }, monster: { name: "x" }, block: { name: "x" }, encounter: { name: "x" }, srdId: "goblin-warrior", image: null, template: {}, drawing: {}, handout: { title: "x" }, doc: { title: "x" }, label: null, door: { edge: "0,0,n" }, tokenIds: ["g2"], rollIds: ["r1"], page: { title: "x" }, pin: { id: "p1" }, trap: { name: "x" }, trapId: "tr1", due: "1:0", request: { test: { kind: "save", choices: [{ ability: "dex" }] } }, cast: { spell: "x" } } as never, s);
       assert.ok(label.length > 0 && label.length <= 200, `${t}: ${label}`);
     }
   });
@@ -307,5 +307,24 @@ describe("a known forms undo label (docs/design-v1-known-forms.md 3.4)", () => {
     assert.equal(describeOp({ t: "character.update", characterId: "bree", patch: { knownForms: ["wolf"] } }, s), "changing Bree's known forms");
     assert.equal(describeOp({ t: "character.update", characterId: "bree", patch: { knownForms: [] } }, s), "changing Bree's known forms");
     assert.equal(describeOp({ t: "character.update", characterId: "gone", patch: { knownForms: ["wolf"] } }, s), "changing a character's known forms");
+  });
+});
+
+describe("undo step labels for traps (docs/design-v1-traps.md 6.5)", () => {
+  test("each trap op says what it did, by the trap's name before the op", () => {
+    const s = state();
+    s.traps.pit = trap("pit", { name: "Hidden Pit" });
+    const { id: _id, rev: _rev, state: _state, rig, ...rest } = trap("new", { name: "Poison Darts" });
+    assert.equal(describeOp({ t: "trap.create", trap: { ...rest, id: "new", rig: rig! } }, s), "making the trap Poison Darts");
+    assert.equal(describeOp({ t: "trap.update", trapId: "pit", patch: { state: "armed" } }, s), "arming Hidden Pit");
+    assert.equal(describeOp({ t: "trap.update", trapId: "pit", patch: { state: "disarmed" } }, s), "disarming Hidden Pit");
+    assert.equal(describeOp({ t: "trap.update", trapId: "pit", patch: { found: true } }, s), "marking Hidden Pit found");
+    assert.equal(describeOp({ t: "trap.update", trapId: "pit", patch: { found: false } }, s), "hiding Hidden Pit again");
+    assert.equal(describeOp({ t: "trap.update", trapId: "pit", patch: { name: "Covered Pit" } }, s), "changing Hidden Pit");
+    assert.equal(describeOp({ t: "trap.delete", trapId: "pit" }, s), "deleting the trap Hidden Pit");
+    assert.equal(describeOp({ t: "trap.act", trapId: "pit", due: "3:0" }, s), "doing what Hidden Pit does");
+    assert.equal(describeOp({ t: "trap.settle", trapId: "pit", due: "3:0" }, s), "dismissing Hidden Pit");
+    assert.equal(describeOp({ t: "trap.settle", trapId: "pit", due: "3:0", sprung: true }, s), "marking Hidden Pit sprung");
+    assert.equal(describeOp({ t: "trap.delete", trapId: "gone" }, s), "deleting a trap");
   });
 });

@@ -183,6 +183,22 @@ export function doorsInReach(state: RoomState, token: Token, fog: Fog): DoorOnMa
     .map((p) => p.d);
 }
 
+/**
+ * Who opens a door a player taps (docs/design-v1-traps.md 5.3): their own
+ * token on the scene that reaches it by the server's rule, the nearest
+ * first, then by id. Null when none does, which the pill answers "Too far".
+ */
+export function doorOpener(state: RoomState, memberId: string | undefined, d: Pick<DoorOnMap, "ref" | "chunk" | "mid">, sceneId: string, owns: (token: Token) => boolean): Token | null {
+  let best: { token: Token; dist: number } | null = null;
+  for (const token of Object.values(state.tokens)) {
+    if (!token || token.sceneId !== sceneId || memberId === undefined || !owns(token) || !reachesDoor(state, token, d.ref, d.chunk)) continue;
+    const fp = footprintRect(token);
+    const dist = Math.hypot(d.mid.x - (fp.x + fp.w / 2), d.mid.y - (fp.y + fp.h / 2));
+    if (!best || dist < best.dist || (dist === best.dist && token.id < best.token.id)) best = { token, dist };
+  }
+  return best?.token ?? null;
+}
+
 /** One button of a door's pill: its label and the op it sends. */
 export type DoorAction = { label: string; op: OpOf<"door.set"> };
 
@@ -191,11 +207,13 @@ export type DoorAction = { label: string; op: OpOf<"door.set"> };
  * to the DM also Lock or Unlock, and for a secret door Mark found or Hide.
  * A player sees a locked door as closed, so a player's Open on one is
  * answered "It's locked." by the server, which is how players learn of locks.
+ * An open names `by`, the creature that opens it, whose door traps it sets
+ * off (docs/design-v1-traps.md 5.3): a player's must, and the DM's may.
  */
-export function doorActions(sceneId: string, d: Pick<DoorOnMap, "ref" | "door">, role: "dm" | "player"): DoorAction[] {
+export function doorActions(sceneId: string, d: Pick<DoorOnMap, "ref" | "door">, role: "dm" | "player", by?: string): DoorAction[] {
   const set = (state: Door["state"], found?: boolean): OpOf<"door.set"> => ({ t: "door.set", sceneId, door: d.ref, state, ...(found === undefined ? {} : { found }) });
   const open = d.door.state === "open";
-  const out: DoorAction[] = [{ label: open ? "Close" : "Open", op: set(open ? "closed" : "open") }];
+  const out: DoorAction[] = [{ label: open ? "Close" : "Open", op: open ? set("closed") : { ...set("open"), ...(by !== undefined ? { by } : {}) } }];
   if (role !== "dm") return out;
   out.push(d.door.state === "locked" ? { label: "Unlock", op: set("closed") } : { label: "Lock", op: set("locked") });
   if (d.door.secret) out.push(d.door.discovered ? { label: "Hide", op: set(d.door.state, false) } : { label: "Mark found", op: set(d.door.state, true) });

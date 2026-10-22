@@ -11,7 +11,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { cardPlace } from "../movement/anchor.ts";
 import { ownsToken } from "../tokens/access.ts";
-import { doorActions, doorName, seenDoor, type DoorOnMap } from "./doors.ts";
+import { doorActions, doorName, doorOpener, seenDoor, type DoorOnMap } from "./doors.ts";
 import { doorPillSlot } from "./store.ts";
 
 const EMPTY_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
@@ -52,6 +52,13 @@ function Pill(props: { door: DoorOnMap; scene: Scene; role: "dm" | "player"; cam
   const actions = useRoomActions();
   const ui = useRoomUi();
   const store = useRoomStore();
+  // A player's tap opens the door with their own nearest token that reaches it (docs/design-v1-traps.md 5.3).
+  const opener = (): string | undefined => {
+    const s = store.getState();
+    const view = s.view;
+    if (role === "dm" || !view) return undefined;
+    return doorOpener(view, s.you?.memberId, door, scene.id, (t) => ownsToken(view, s.you?.memberId, t))?.id;
+  };
   const choices = doorActions(scene.id, door, role);
   const width = Math.min(role === "dm" ? 300 : 160, props.viewport.width - 16);
   const anchor = worldToScreen(props.camera, door.mid);
@@ -103,7 +110,8 @@ function Pill(props: { door: DoorOnMap; scene: Scene; role: "dm" | "player"; cam
                 ui.notify(DOOR_TOO_FAR);
                 return;
               }
-              actions.dispatch(choice.op);
+              const by = choice.op.state === "open" ? opener() : undefined;
+              actions.dispatch(by !== undefined ? { ...choice.op, by } : choice.op);
             }}
             style={{ flex: 1, padding: `0 ${theme.space(2)}px`, whiteSpace: "nowrap" }}
           >

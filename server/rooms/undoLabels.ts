@@ -274,6 +274,17 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return before.pins[op.pin.id] ? "changing a pin" : "placing a pin";
     case "pin.remove":
       return "deleting a pin";
+    // Traps (docs/design-v1-traps.md 6.5), by the name the trap had before the op.
+    case "trap.create":
+      return `making the trap ${op.trap.name}`;
+    case "trap.update":
+      return trapUpdatePhrase(op, trapName(before, op.trapId));
+    case "trap.delete":
+      return `deleting ${before.traps[op.trapId] ? `the trap ${trapName(before, op.trapId)}` : "a trap"}`;
+    case "trap.act":
+      return `doing what ${trapName(before, op.trapId)} does`;
+    case "trap.settle":
+      return op.sprung ? `marking ${trapName(before, op.trapId)} sprung` : `dismissing ${trapName(before, op.trapId)}`;
     case "roll.ask":
       return `asking for ${testText(op.request.test)}`;
     case "roll.answer":
@@ -602,4 +613,19 @@ function sizeWords(patch: TokenPatch, token: Token | undefined): string {
   const w = patch.w ?? token?.w ?? 1;
   const h = patch.h ?? token?.h ?? 1;
   return `${w} by ${h} squares`;
+}
+
+function trapName(state: RoomState, trapId: string): string {
+  return state.traps[trapId]?.name ?? "a trap";
+}
+
+/** A trap change by what it changed: the Armed and Found switches have their own words, any other change is a change. */
+function trapUpdatePhrase(op: Extract<ClientOp, { t: "trap.update" }>, name: string): string {
+  const p = op.patch;
+  const only = Object.keys(p).length === 1;
+  if (only && p.state === "armed") return `arming ${name}`;
+  if (only && p.state === "disarmed") return `disarming ${name}`;
+  if (only && p.state === "sprung") return `marking ${name} sprung`;
+  if (only && p.found !== undefined) return p.found ? `marking ${name} found` : `hiding ${name} again`;
+  return `changing ${name}`;
 }

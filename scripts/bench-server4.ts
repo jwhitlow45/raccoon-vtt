@@ -100,6 +100,9 @@ function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
     handoutDocs: {},
     companionBlocks: {},
     casts: {},
+    traps: {},
+    trapLog: [],
+    trapSeen: [],
   };
 }
 

@@ -149,7 +149,7 @@ export class Tx {
       this.order.push(key);
     }
     let next = value;
-    if (next !== null && parsed.kind !== "meta" && parsed.kind !== "encounterHistory" && parsed.kind !== "log") {
+    if (next !== null && parsed.kind !== "meta" && parsed.kind !== "encounterHistory" && !isLine(parsed.kind)) {
       next = { ...(next as object), rev: (revOf(prev) ?? 0) + 1 };
     }
     switch (parsed.kind) {
@@ -163,8 +163,10 @@ export class Tx {
       case "encounterHistory":
         this.state.encounterHistory = (next as RoomState["encounterHistory"]) ?? [];
         break;
-      case "log": {
-        const log = this.collection("log");
+      case "log":
+      case "trapLog":
+      case "trapSeen": {
+        const log = this.collection(parsed.kind);
         const index = log.findIndex((e) => e.id === parsed.id);
         if (next === null) {
           if (index >= 0) log.splice(index, 1);
@@ -209,6 +211,22 @@ export class Tx {
   }
 
   /**
+   * Appends a line to one of the trap logs (docs/design-v1-traps.md 6.3),
+   * numbered from the same envelope as the shared log's, so lines of every
+   * log sort together and a replay never writes one twice. Each log keeps
+   * only its own newest `keep`, so a line one audience cannot see never
+   * pushes out one it could. Trap lines never reach the stored log.
+   */
+  addTrapLine(ring: "trapLog" | "trapSeen", data: LogEvent, keep: number): LogEntry {
+    const line: LogEntry = { id: `${this.env.seq}:${this.logIndex++}`, at: this.env.at, kind: "event", data };
+    const key = ring === "trapLog" ? keys.trapLog : keys.trapSeen;
+    this.write(key(line.id), line);
+    const lines = this.collection(ring);
+    while (lines.length > keep) this.write(key(lines[0]!.id), null);
+    return line;
+  }
+
+  /**
    * Stamps rule events with the actor that produced them and logs each one.
    * An event about a token also records whether players who do not own it
    * could see it now, after this op's own changes (design 7.3).
@@ -236,7 +254,7 @@ export class Tx {
   inverse(): RestoreEntry[] | null {
     const entries: RestoreEntry[] = [];
     for (const key of this.order) {
-      if (key.startsWith("log:") || this.bookkeeping.has(key)) continue;
+      if (key.startsWith("log:") || key.startsWith("trapLog:") || key.startsWith("trapSeen:") || this.bookkeeping.has(key)) continue;
       const after = readEntity(this.state, key);
       const entry: RestoreEntry = { key, value: this.before.get(key) ?? null };
       if (after === null) entry.expectRev = null;
@@ -341,6 +359,11 @@ export function guardHash(key: EntityKey, value: unknown): string {
     delete rest.thumb;
   }
   return hashValue(rest);
+}
+
+/** The kinds that are lines of a log: kept in order, with no rev, and never put back by an undo. */
+function isLine(kind: string): boolean {
+  return kind === "log" || kind === "trapLog" || kind === "trapSeen";
 }
 
 /** Whether a tile's new bits lack any bit it had. An unreadable tile counts as clearing, which only re-projects more. */

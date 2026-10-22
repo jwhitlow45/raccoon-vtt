@@ -1,5 +1,5 @@
 import { keys, tileKey } from "../keys.ts";
-import type { AreaTemplate, Drawing, Effect, Label, Light, Pin, RoomState, Scene, Stamp, Token } from "../model.ts";
+import type { AreaTemplate, Drawing, Effect, Label, Light, Pin, RoomState, Scene, Stamp, Token, Trap, TrapAction } from "../model.ts";
 import { hash128, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { footprintRect } from "../rules/footprint.ts";
@@ -9,8 +9,8 @@ import { invalid, type Env, type Tx } from "./tx.ts";
 /**
  * Duplicate a scene (docs/design-v1-maps-vision.md section 3.2), in one op.
  *
- * The map with its phases, the build, labels, stamps, lights and map pins
- * (wave 5) are always copied. A copied pin keeps its page, so it reaches
+ * The map with its phases, the build, labels, stamps, lights, map pins
+ * (wave 5) and traps are always copied. A copied pin keeps its page, so it reaches
  * exactly whom the original does. Monsters, NPCs and objects, player characters, the fog and the
  * drawings with placed areas come along when the op says so.
  *
@@ -84,6 +84,21 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
       next.actor = { inline: { ...actor, effects: actor.effects.map((e) => pausedOn(e, id)) } };
     }
     tx.write(keys.token(id), next);
+  }
+
+  // Traps come with the map (docs/design-v1-traps.md 6.8), their actions naming the copies. A token left behind is
+  // dropped from them, and a door stays, since free walls keep their ids. What the reducer wrote on a trap stays behind.
+  const ownCopy = new Map<string, string>();
+  for (const stamp of Object.values(s.stamps)) if (stamp.sceneId === original.id) ownCopy.set(`stamp:${stamp.id}`, copyId(stamp.id));
+  for (const light of Object.values(s.lights)) if (light.sceneId === original.id) ownCopy.set(`light:${light.id}`, copyId(light.id));
+  for (const trap of sortedById(Object.values(s.traps ?? {}).filter((t) => t.sceneId === original.id))) {
+    const id = fresh(s.traps, copyId(trap.id));
+    const next: Trap = { ...trap, id, rev: 0, sceneId: to };
+    if (trap.rig) {
+      const { noticedBy: _noticed, due: _due, ...rig } = trap.rig;
+      next.rig = { ...rig, actions: rig.actions.flatMap((a) => copiedAction(a, ownCopy, copied)) };
+    }
+    tx.write(keys.trap(id), next);
   }
 
   if (op.include.fog) {
@@ -176,6 +191,21 @@ export function copyFogEnabled(original: Pick<Scene, "map" | "fogEnabled">, incl
 export function derivedId(sceneId: string, originalId: string): string {
   const h = hash128(JSON.stringify([sceneId, originalId]));
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** A trap's action on the copy: a light or stamp on its copy, a token on its copy or dropped, a door as it is. */
+function copiedAction(action: TrapAction, ownCopy: ReadonlyMap<string, string>, tokens: ReadonlyMap<string, string>): TrapAction[] {
+  if ("door" in action) return [action];
+  if ("light" in action) {
+    const light = ownCopy.get(`light:${action.light}`);
+    return light === undefined ? [] : [{ ...action, light }];
+  }
+  if ("tokenId" in action.show) {
+    const tokenId = tokens.get(action.show.tokenId);
+    return tokenId === undefined ? [] : [{ show: { tokenId } }];
+  }
+  const stampId = ownCopy.get(`stamp:${action.show.stampId}`);
+  return stampId === undefined ? [] : [{ show: { stampId } }];
 }
 
 /** An effect of a copied creature, its duration paused on the copy with what remained. */

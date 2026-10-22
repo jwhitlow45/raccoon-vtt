@@ -93,7 +93,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   for (const entry of op.entries) {
     const parsed = parseKey(entry.key);
     if (!parsed) throw invalid(`unknown entity key ${entry.key}`);
-    if (entry.key.startsWith("log:")) throw invalid("log entries are never restored");
+    if (parsed.kind === "log" || parsed.kind === "trapLog" || parsed.kind === "trapSeen") throw invalid("log entries are never restored");
     const current = tx.read(entry.key);
     before.set(entry.key, current);
     const matches = guardMatches(entry, current) || (oldSrdIdGuards(tx.env.opVersion) && guardMatches(entry, withOldSrdIds(entry.key, current)));
@@ -269,7 +269,8 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
       Object.values(s.fogDrafts).some(named) ||
       Object.values(s.stamps).some(named) ||
       Object.values(s.lights).some(named) ||
-      Object.values(s.pins).some(named)
+      Object.values(s.pins).some(named) ||
+      Object.values(s.traps ?? {}).some(named)
     ) {
       throw invalid(DEPENDED_ON);
     }
@@ -348,6 +349,7 @@ function sceneIdOf(parsed: ParsedKey, value: Record<string, unknown>): string | 
     case "stamp":
     case "light":
     case "pin":
+    case "trap":
       return typeof value.sceneId === "string" ? value.sceneId : undefined;
     case "meta": {
       const id = value.playerSceneId;

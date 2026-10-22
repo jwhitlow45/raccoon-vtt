@@ -5,6 +5,7 @@ import type { FreeWall, RoomState, Token } from "./model.ts";
 import {
   DOOR_DM_ONLY,
   DOOR_LOCKED,
+  CHOOSE_OPENER,
   DOOR_TOO_FAR,
   LEDGE_IN_THE_WAY,
   NOT_A_SQUEEZE,
@@ -151,10 +152,13 @@ describe("doors", () => {
   test("a player opens and closes a door their own token reaches", () => {
     const state = setup();
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 5, y: 6 });
-    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open" }, P1, state), "ok");
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", by: "own" }, P1, state), "ok");
     assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "closed" }, P1, state), "ok");
-    // Another player's token reaches nothing for them.
-    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open" }, P2, state), `forbidden: ${DOOR_TOO_FAR}`);
+    // Another player's token opens nothing for them, and reaches nothing.
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", by: "own" }, P2, state), `invalid: ${CHOOSE_OPENER}`);
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "closed" }, P2, state), `forbidden: ${DOOR_TOO_FAR}`);
+    // An open names who opens it (docs/design-v1-traps.md 5.3).
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open" }, P1, state), `invalid: ${CHOOSE_OPENER}`);
   });
 
   test("reach is 5 ft or one cell, whichever is more, by the room's diagonal rule, from either side, with a clear line to the door", () => {
@@ -164,7 +168,7 @@ describe("doors", () => {
       state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x, y, ...extra });
       return state;
     };
-    const open: Op = { t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open" };
+    const open: Op = { t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", by: "own" };
     for (const feetPerCell of [5, 10]) {
       const label = `${feetPerCell} ft per cell`;
       assert.equal(decide(open, P1, at(5, 5, {}, feetPerCell)), "ok", `${label}: beside the door, south`);
@@ -185,7 +189,7 @@ describe("doors", () => {
       state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 5, y: 5, elevation });
       return state;
     };
-    const open: Op = { t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open" };
+    const open: Op = { t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", by: "own" };
     assert.equal(decide(open, P1, at(30)), `forbidden: ${DOOR_TOO_FAR}`, "30 ft up");
     assert.equal(decide(open, P1, at(5)), "ok", "a hop of 5 ft is within 5 ft");
     assert.equal(decide(open, P1, at(10)), `forbidden: ${DOOR_TOO_FAR}`);
@@ -200,7 +204,7 @@ describe("doors", () => {
   test("a free door's sides are the cells beside its midpoint", () => {
     const state = setup();
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 12, y: 3 });
-    const op: Op = { t: "door.set", sceneId: "s1", door: { cx: 0, cy: 0, id: freeDoor.id }, state: "open" };
+    const op: Op = { t: "door.set", sceneId: "s1", door: { cx: 0, cy: 0, id: freeDoor.id }, state: "open", by: "own" };
     assert.equal(decide(op, P1, state), "ok");
     // The door runs through the middle of row 2, so both its sides are that row's cell.
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 12, y: 1 });
@@ -208,7 +212,7 @@ describe("doors", () => {
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 12, y: 0 });
     assert.equal(decide(op, P1, state), `forbidden: ${DOOR_TOO_FAR}`);
     // On a grid line, each side is its own cell.
-    const onLine: Op = { t: "door.set", sceneId: "s1", door: { cx: 0, cy: 0, id: lineDoor.id }, state: "open" };
+    const onLine: Op = { t: "door.set", sceneId: "s1", door: { cx: 0, cy: 0, id: lineDoor.id }, state: "open", by: "own" };
     for (const [y, answer] of [[2, "ok"], [5, "ok"], [1, `forbidden: ${DOOR_TOO_FAR}`], [6, `forbidden: ${DOOR_TOO_FAR}`]] as const) {
       state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 14, y });
       assert.equal(decide(onLine, P1, state), answer, `from row ${y}`);
@@ -220,16 +224,16 @@ describe("doors", () => {
   test("a locked door says so, players never lock or mark found, and what they cannot see as a door is not there", () => {
     const state = setup();
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 6, y: 6 });
-    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "6,5,w" }, state: "open" }, P1, state), `forbidden: ${DOOR_LOCKED}`);
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "6,5,w" }, state: "open", by: "own" }, P1, state), `forbidden: ${DOOR_LOCKED}`);
     assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "locked" }, P1, state), `forbidden: ${DOOR_DM_ONLY}`);
-    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", found: true }, P1, state), `forbidden: ${DOOR_DM_ONLY}`);
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", found: true, by: "own" }, P1, state), `forbidden: ${DOOR_DM_ONLY}`);
     for (const door of [{ edge: "7,5,w" }, { edge: "8,5,w" }, { edge: "9,5,w" }, { cx: 0, cy: 0, id: "nonenonenone" }]) {
-      assert.equal(decide({ t: "door.set", sceneId: "s1", door, state: "open" }, P1, state), "gone: that is not here", JSON.stringify(door));
+      assert.equal(decide({ t: "door.set", sceneId: "s1", door, state: "open", by: "own" }, P1, state), "gone: that is not here", JSON.stringify(door));
     }
-    assert.equal(decide({ t: "door.set", sceneId: "s2", door: { edge: "5,5,n" }, state: "open" }, P1, state), "gone: that is not here");
+    assert.equal(decide({ t: "door.set", sceneId: "s2", door: { edge: "5,5,n" }, state: "open", by: "own" }, P1, state), "gone: that is not here");
     const dark = setup();
     dark.meta.view.blackout = true;
-    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open" }, P1, dark), "gone: that is not here");
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { edge: "5,5,n" }, state: "open", by: "own" }, P1, dark), "gone: that is not here");
   });
 
   test("a door out of reach answers the same whether it is locked or not, so no request lists the locks", () => {
@@ -239,14 +243,14 @@ describe("doors", () => {
     chunk.walls = [...chunk.walls!, { id: "lockedfreedr", a: [12, 6], b: [13, 6], f: { ...DOOR, state: "locked" } }];
     const doors = [{ edge: "5,5,n" }, { edge: "6,5,w" }, { cx: 0, cy: 0, id: freeDoor.id }, { cx: 0, cy: 0, id: "lockedfreedr" }];
     const answers = (who: typeof P1, s: RoomState) =>
-      doors.flatMap((door) => (["open", "closed"] as const).map((to) => decide({ t: "door.set", sceneId: "s1", door, state: to }, who, s)));
+      doors.flatMap((door) => (["open", "closed"] as const).map((to) => decide({ t: "door.set", sceneId: "s1", door, state: to, ...(to === "open" && who === P1 ? { by: "own" } : {}) }, who, s)));
     // A player with no token on the scene, and one whose token stands far from every door.
-    assert.deepEqual(new Set(answers(P2, state)), new Set([`forbidden: ${DOOR_TOO_FAR}`]));
+    assert.deepEqual(new Set(answers(P2, state)), new Set([`invalid: ${CHOOSE_OPENER}`, `forbidden: ${DOOR_TOO_FAR}`]));
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 30, y: 25 });
     assert.deepEqual(new Set(answers(P1, state)), new Set([`forbidden: ${DOOR_TOO_FAR}`]));
     // Within reach, the lock tells.
     state.tokens.own = token("own", { name: "Familiar", ownerIds: ["p1"], x: 12, y: 6 });
-    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { cx: 0, cy: 0, id: "lockedfreedr" }, state: "open" }, P1, state), `forbidden: ${DOOR_LOCKED}`);
+    assert.equal(decide({ t: "door.set", sceneId: "s1", door: { cx: 0, cy: 0, id: "lockedfreedr" }, state: "open", by: "own" }, P1, state), `forbidden: ${DOOR_LOCKED}`);
   });
 
   test("the DM sets any door to any state, found or not", () => {

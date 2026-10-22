@@ -357,6 +357,44 @@ export const LIMITS = {
   groupTokens: 20,
   /** The mounts sharing one turn (TurnStart.mounts). A chain is 3 deep, so a turn's creature rides at most two. */
   turnMounts: 8,
+
+  // Traps (docs/design-v1-traps.md 6.1 and 6.7).
+
+  /** Traps on one scene, and a trap's own fields serialized: everything but what the reducer writes on it. */
+  trapsPerScene: 50,
+  trapBytes: 9 * 1024,
+  /** A squares zone or a set of hit squares: rectangles of whole cells, each side at most 20, at most 400 cells in all. */
+  trapRects: 8,
+  trapRectSide: 20,
+  trapCells: 400,
+  /** A trip wire's length in cells. */
+  trapWireMin: 0.5,
+  trapWireMax: 20,
+  /** A trap's actions, find checks, damage parts and conditions (the group save's 3 a creature, outcomeEffectsEach). */
+  trapActions: 8,
+  trapFindChecks: 2,
+  trapDamageParts: 4,
+  trapConditions: 3,
+  /** Characters of a trap's players' line, its DM note, its disarm line and a check's `what`. */
+  trapMessageChars: 200,
+  trapNoteChars: 1_000,
+  trapDisarmChars: 200,
+  trapCheckChars: 80,
+  /** Creatures the DM's Set it off names. */
+  trapSpringTokens: 50,
+  /**
+   * Occurrences waiting for the DM: a trap's fourth drops that trap's own
+   * oldest, then a room's eleventh the room's oldest. Each names at most 10
+   * creatures that set it off and 50 it hits.
+   */
+  trapDuePerTrap: 3,
+  trapDuePerRoom: 10,
+  trapBy: 10,
+  trapHits: 50,
+  /** The DM's trap lines and the players', each log keeping its own newest, every line cut to `trapLineBytes` when written. */
+  trapLogLines: 30,
+  trapSeenLines: 20,
+  trapLineBytes: 1_536,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };
@@ -476,6 +514,9 @@ function checkMapLimits(state: RoomState, sceneId: string, before: RoomState | u
   for (const l of Object.values(state.lights)) if (l.sceneId === sceneId) lights++;
   for (const p of Object.values(state.pins)) if (p.sceneId === sceneId) pins++;
   if (pins > LIMITS.pinsPerScene) return sceneFull(`${n(LIMITS.pinsPerScene)} pins`);
+  let traps = 0;
+  for (const t of Object.values(state.traps ?? {})) if (t.sceneId === sceneId) traps++;
+  if (traps > LIMITS.trapsPerScene) return sceneFull(`${n(LIMITS.trapsPerScene)} traps`);
   if (litTokenLightsRefused(state, sceneId, before, by)) return over(`This scene already has ${n(LIMITS.litTokenLightsPerScene)} lit token lights.`);
   for (const c of Object.values(state.buildChunks)) if (c.sceneId === sceneId) walls += c.walls?.length ?? 0;
   if (stamps > LIMITS.stampsPerScene) return sceneFull(`${n(LIMITS.stampsPerScene)} stamps`);

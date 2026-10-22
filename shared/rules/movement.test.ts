@@ -588,8 +588,8 @@ describe("the real rules through the core (permissions, projection)", async () =
 
   test("a door within reach but behind a wall is too far", () => {
     const walls = { edges: { ...line("w", 10, 0, 30), "10,5,w": closed, "9,5,n": { kind: "wall" } as EdgeFeature } };
-    assert.equal(decide(roomWith(walls, { x: 9, y: 5 }), { t: "door.set", sceneId: "s1", door: { edge: "10,5,w" }, state: "open" }), "ok");
-    assert.equal(decide(roomWith(walls, { x: 9, y: 4 }), { t: "door.set", sceneId: "s1", door: { edge: "10,5,w" }, state: "open" }), `forbidden: ${DOOR_TOO_FAR}`);
+    assert.equal(decide(roomWith(walls, { x: 9, y: 5 }), { t: "door.set", sceneId: "s1", door: { edge: "10,5,w" }, state: "open", by: "own" }), "ok");
+    assert.equal(decide(roomWith(walls, { x: 9, y: 4 }), { t: "door.set", sceneId: "s1", door: { edge: "10,5,w" }, state: "open", by: "own" }), `forbidden: ${DOOR_TOO_FAR}`);
   });
 
   test("a player's own projected build stops exactly the moves the server stops, for every secret door and lock state", () => {

@@ -57,5 +57,8 @@ export function createInitialState(input: { roomName: string; dm: Member; now?: 
     handoutDocs: {},
     companionBlocks: {},
     casts: {},
+    traps: {},
+    trapLog: [],
+    trapSeen: [],
   };
 }

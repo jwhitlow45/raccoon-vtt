@@ -1277,6 +1277,156 @@ const manyTokenIds = z
   .max(LIMITS.tokensPerManyOp)
   .refine((list) => new Set(list).size === list.length, { message: "a token is listed twice" });
 
+// Traps (docs/design-v1-traps.md 6.1 and 6.2).
+
+/** A trap's own id, as every id the app makes: so each list the reducer writes stays within its reserve (6.1). */
+const plainId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "not a plain id");
+/** Half of a surrogate pair alone, which JSON escapes to six bytes: trap text refuses it, so it costs at most 3 bytes a unit (6.1). */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const wholeText = { message: "text cannot hold half a character" };
+const whole = (s: string) => !LONE_SURROGATE.test(s);
+const trapName = name.refine(whole, wholeText);
+const trapLine = (max: number) => line(max).min(1).refine(whole, wholeText);
+const trapNote = z.string().max(LIMITS.trapNoteChars).regex(MULTI_LINE, "control characters are not allowed").refine(whole, wholeText);
+const sceneCell = z.number().int().min(0).max(MAX_SCENE_CELLS);
+const cellRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(LIMITS.trapRectSide), h: z.number().int().min(1).max(LIMITS.trapRectSide) });
+/** Cells two rectangles share count once. */
+function rectCells(rects: readonly { x: number; y: number; w: number; h: number }[]): number {
+  const seen = new Set<string>();
+  for (const r of rects) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) seen.add(`${x},${y}`);
+  return seen.size;
+}
+const cellRects = z
+  .array(cellRect)
+  .min(1)
+  .max(LIMITS.trapRects)
+  .refine((rects) => rectCells(rects) <= LIMITS.trapCells, { message: `squares are at most ${LIMITS.trapCells} cells` });
+const halfCell = z
+  .number()
+  .min(0)
+  .max(MAX_SCENE_CELLS)
+  .refine((v) => Number.isInteger(v * 2), { message: "a wire's ends are on cell corners and edge midpoints" });
+const trapWire = z
+  .strictObject({ a: z.tuple([halfCell, halfCell]), b: z.tuple([halfCell, halfCell]) })
+  .refine((w) => {
+    const length = Math.sqrt((w.b[0] - w.a[0]) ** 2 + (w.b[1] - w.a[1]) ** 2);
+    return length >= LIMITS.trapWireMin && length <= LIMITS.trapWireMax;
+  }, { message: `a wire is ${LIMITS.trapWireMin} to ${LIMITS.trapWireMax} cells long` });
+const trapZone = z.union([z.strictObject({ cells: cellRects }), z.strictObject({ wire: trapWire }), z.strictObject({ door: doorRef })]);
+const trapArea = z.strictObject({
+  shape: areaShape,
+  size: areaFeet,
+  width: areaFeet.optional(),
+  height: areaFeet.optional(),
+  origin: z.strictObject({ x: coord, y: coord, z: feet }),
+  yaw: degrees,
+  pitch: pitch.optional(),
+  faceOffset: z.strictObject({ u: z.number().min(-0.5).max(0.5), v: z.number().min(-0.5).max(0.5) }).optional(),
+  anchor: z.enum(["bottom", "top"]).optional(),
+  includeOrigin: z.boolean(),
+});
+const trapCheck = z.strictObject({
+  ability: z.enum(ABILITY_KEYS),
+  skill: z.enum(SKILL_KEYS).optional(),
+  dc: z.number().int().min(LIMITS.rollDcMin).max(LIMITS.rollDcMax),
+  what: trapLine(LIMITS.trapCheckChars).optional(),
+});
+const trapAction = z.union([
+  z.strictObject({ door: doorRef, state: z.enum(["open", "closed", "locked"]) }),
+  z.strictObject({ light: id, on: z.boolean() }),
+  z.strictObject({ show: z.union([z.strictObject({ tokenId: id }), z.strictObject({ stampId: id })]) }),
+]);
+const trapFormula = line(LIMITS.diceFormulaChars).min(1).refine((f) => parseFormula(f).ok, { message: "not a dice formula" });
+export const TRAP_SOUNDS = ["click", "rumble", "crash", "whoosh", "hiss"] as const;
+const trapTriggers = z
+  .array(z.enum(["enter", "leave", "turnStart", "turnEnd"]))
+  .max(4)
+  .refine((list) => new Set(list).size === list.length, { message: "a trigger is listed twice" });
+const trapHitsSchema = z.union([z.enum(["trigger", "zone"]), z.strictObject({ cells: cellRects }), z.strictObject({ area: trapArea })]);
+const trapSave = z.strictObject({ ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(LIMITS.rollDcMin).max(LIMITS.rollDcMax), onPass: z.enum(["half", "none"]) });
+const trapDamage = z.array(z.strictObject({ formula: trapFormula, type: z.enum(DAMAGE_TYPES) })).min(1).max(LIMITS.trapDamageParts);
+const trapConditions = z
+  .array(z.enum(CONDITION_KEYS))
+  .min(1)
+  .max(LIMITS.trapConditions)
+  .refine((list) => new Set(list).size === list.length, { message: "a condition is listed twice" });
+const trapLasts = z
+  .strictObject({ mode: z.enum(["turnStart", "turnEnd", "rounds"]), rounds: z.number().int().min(1).max(1_000).optional() })
+  .refine((l) => (l.mode === "rounds") === (l.rounds !== undefined), { message: "rounds go with a duration in rounds" });
+const trapDisarm = z.strictObject({ text: trapLine(LIMITS.trapDisarmChars).optional(), check: trapCheck.optional() });
+const trapPreset = z.string().max(40).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "not a preset");
+/** Ops set uses 1 to 99. Only the reducer leaves a trap at 0. */
+const trapUses = z.number().int().min(1).max(99);
+const trapPit = z.strictObject({ floor: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT - 1) });
+
+/** What a trap does, as an op sets it: never `noticedBy` or `due`, which only the reducer writes. */
+const trapRigInput = z.strictObject({
+  on: trapTriggers,
+  who: z.enum(["party", "others", "any"]),
+  minSize: z.literal("small").optional(),
+  floor: z.boolean(),
+  resets: z.enum(["never", "nextTurn"]),
+  usesLeft: trapUses.optional(),
+  stops: z.boolean(),
+  foundOnSpring: z.boolean(),
+  pit: trapPit.optional(),
+  hits: trapHitsSchema,
+  save: trapSave.optional(),
+  damage: trapDamage.optional(),
+  conditions: trapConditions.optional(),
+  lasts: trapLasts.optional(),
+  message: trapLine(LIMITS.trapMessageChars).optional(),
+  sound: z.enum(TRAP_SOUNDS).optional(),
+  actions: z.array(trapAction).max(LIMITS.trapActions),
+  find: z.array(trapCheck).max(LIMITS.trapFindChecks),
+  notice: z.boolean(),
+  disarm: trapDisarm.optional(),
+  note: trapNote.optional(),
+  preset: trapPreset.optional(),
+});
+
+/** A rig's changed fields, each replaced whole, null taking an optional one away. */
+const trapRigPatch = z
+  .strictObject({
+    on: trapTriggers.optional(),
+    who: z.enum(["party", "others", "any"]).optional(),
+    minSize: z.literal("small").nullable().optional(),
+    floor: z.boolean().optional(),
+    resets: z.enum(["never", "nextTurn"]).optional(),
+    usesLeft: trapUses.nullable().optional(),
+    stops: z.boolean().optional(),
+    foundOnSpring: z.boolean().optional(),
+    pit: trapPit.nullable().optional(),
+    hits: trapHitsSchema.optional(),
+    save: trapSave.nullable().optional(),
+    damage: trapDamage.nullable().optional(),
+    conditions: trapConditions.nullable().optional(),
+    lasts: trapLasts.nullable().optional(),
+    message: trapLine(LIMITS.trapMessageChars).nullable().optional(),
+    sound: z.enum(TRAP_SOUNDS).nullable().optional(),
+    actions: z.array(trapAction).max(LIMITS.trapActions).optional(),
+    find: z.array(trapCheck).max(LIMITS.trapFindChecks).optional(),
+    notice: z.boolean().optional(),
+    disarm: trapDisarm.nullable().optional(),
+    note: trapNote.nullable().optional(),
+    preset: trapPreset.nullable().optional(),
+  })
+  .refine((p) => Object.keys(p).length > 0, { message: "a rig change changes something" });
+
+/** A new trap: armed, with a plain id, its rig whole. */
+const trapInput = z.strictObject({ id: plainId, sceneId: id, name: trapName, zone: trapZone, found: z.boolean().optional(), rig: trapRigInput });
+const trapPatch = z
+  .strictObject({
+    name: trapName.optional(),
+    zone: trapZone.optional(),
+    state: z.enum(["armed", "sprung", "disarmed"]).optional(),
+    found: z.boolean().optional(),
+    rig: trapRigPatch.optional(),
+  })
+  .refine((p) => Object.keys(p).length > 0, { message: "a trap change changes something" });
+/** An occurrence by its line in the DM's trap log (TrapDue.id). */
+const trapDue = z.string().regex(/^\d{1,18}:\d{1,6}$/);
+
 const op = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) => z.strictObject({ t: z.literal(t), ...shape });
 
 /** Ops a client may send (design 8.1). */
@@ -1547,7 +1697,22 @@ export const clientOps = [
    * marks it found or hidden again. A player may only open or close a door
    * they see and can reach (shared/permissions.ts).
    */
-  op("door.set", { sceneId: id, door: doorRef, state: z.enum(["open", "closed", "locked"]), found: z.boolean().optional() }),
+  /**
+   * `by` names the creature that opens the door (docs/design-v1-traps.md
+   * 5.3): its door traps go off for it. A player's open must name their own
+   * token that reaches the door. A DM's may leave it out, and then sets no
+   * trap off.
+   */
+  op("door.set", { sceneId: id, door: doorRef, state: z.enum(["open", "closed", "locked"]), found: z.boolean().optional(), by: id.optional() }),
+  /** Traps, the DM's alone (docs/design-v1-traps.md 6.2). */
+  op("trap.create", { trap: trapInput }),
+  /** Only the fields that changed, so two DM devices editing different fields never undo each other. */
+  op("trap.update", { trapId: id, patch: trapPatch }),
+  op("trap.delete", { trapId: id }),
+  /** Do its effects, for a private springing in a player's op that left them waiting. */
+  op("trap.act", { trapId: id, due: trapDue }),
+  /** Dismiss an occurrence, `sprung` marking the trap sprung (Mark sprung). */
+  op("trap.settle", { trapId: id, due: trapDue, sprung: z.literal(true).optional() }),
   op("encounter.start", { entries: z.array(entryInput).max(MAX_ENTRIES_PER_OP) }),
   op("encounter.end", {}),
   op("encounter.add", { entries: z.array(entryInput).min(1).max(MAX_ENTRIES_PER_OP) }),
@@ -1861,6 +2026,9 @@ export type JournalBlockInput = z.infer<typeof journalBlockInput>;
 export type PinInput = z.infer<typeof pinInput>;
 export type RollRequestInput = z.infer<typeof rollRequestInput>;
 export type CastInput = z.infer<typeof castInput>;
+export type TrapInput = z.infer<typeof trapInput>;
+export type TrapPatch = z.infer<typeof trapPatch>;
+export type TrapRigPatch = z.infer<typeof trapRigPatch>;
 export type TokenGroupPatch = z.infer<typeof tokenGroupPatch>;
 export type HandoutInput = z.infer<typeof handoutInput>;
 export type HandoutDocInput = z.infer<typeof handoutDocInput>;
@@ -1945,6 +2113,8 @@ export const diceSchemas = { diceResult, critOn, advantageMode };
 export const rollAnswerSchemas = { rollChange };
 /** A player's ask for saves, so the stored-state schema checks imported asks by the same bounds (docs/design-v1-player-save-spell.md 5.7). */
 export const castSchemas = { castInput, castEnd, castRolled };
+/** A trap's fields, so the stored-state schema checks imported traps by the same bounds (docs/design-v1-traps.md 6.2). */
+export const trapSchemas = { plainId, trapName, trapZone, trapRigInput, trapDue, cellRects, trapMessage: trapLine(LIMITS.trapMessageChars) };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design-v1-pdf-handouts.md 3.3). */
 export const handoutSchemas = { handoutPage, handoutPages, handoutTo };
 /** A document as its create op carries it, for the upload job to check its save before it sends it. */

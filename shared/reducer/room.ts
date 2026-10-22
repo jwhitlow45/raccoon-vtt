@@ -194,6 +194,7 @@ export function sceneDelete(tx: Tx, op: OpOf<"scene.delete">): void {
   for (const st of Object.values(s.stamps)) if (st.sceneId === scene.id) tx.remove(keys.stamp(st.id));
   for (const l of Object.values(s.lights)) if (l.sceneId === scene.id) tx.remove(keys.light(l.id));
   for (const p of Object.values(s.pins)) if (p.sceneId === scene.id) tx.remove(keys.pin(p.id));
+  for (const t of Object.values(s.traps ?? {})) if (t.sceneId === scene.id) tx.remove(keys.trap(t.id));
   tx.remove(keys.scene(scene.id));
   // On the server, only a delete stored before canApply refused the players' scene (permissions.ts MOVE_PLAYERS_FIRST) reaches this, and replays as it did.
   // A DM's pending delete, replayed with no canApply over a view where the players have since moved here (client/state/store.ts replayPending), reaches it too until the server refuses it.

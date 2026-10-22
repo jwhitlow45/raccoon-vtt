@@ -22,7 +22,7 @@ import { STATUSES } from "./srd/statuses.ts";
  */
 
 /** The parts of a view that log text reads. A player's projected view and a DM's full view both fit. */
-export type LogNames = Pick<RoomState, "members" | "tokens" | "characters" | "handouts" | "encounter">;
+export type LogNames = Pick<RoomState, "members" | "tokens" | "characters" | "handouts" | "encounter"> & Partial<Pick<RoomState, "traps">>;
 
 const SOMEONE = "Someone";
 const A_CREATURE = "A creature";
@@ -524,7 +524,36 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       return diceLineText(data, names);
     case "cast":
       return castText(data, creatureName(names, data));
+    case "trap": {
+      // The DM's trap log (docs/design-v1-traps.md 6.3): the name the trap had when it went off.
+      const who = creatureList(names, data.by, data.more);
+      const went = data.how === "hand" ? `The DM set off ${data.name}` : `${data.name} went off`;
+      return who ? `${went}: ${who}.` : `${went}.`;
+    }
+    case "trapSeen": {
+      const who = creatureList(names, data.by, data.more);
+      return who ? `${who}: ${data.message}` : data.message;
+    }
+    case "trapNotice": {
+      // "Thorn's Passive Perception (16) would notice the pressure plate of Hidden Pit (DC 15)."
+      const trap = names.traps?.[data.trapId];
+      const what = trap?.rig?.find.find((c) => c.skill === "perception" && c.dc === data.dc)?.what;
+      const it = trap ? (what ? `${what} of ${trap.name}` : trap.name) : "a trap";
+      return `${possessive(creatureName(names, { tokenId: data.tokenId }))} Passive Perception (${data.passive}) would notice ${it} (DC ${data.dc}).`;
+    }
   }
+}
+
+/** Creatures as a trap line names them: "Thorn", "Thorn and Bree", "Thorn, Bree and 2 more". Empty for none. */
+function creatureList(names: LogNames, ids: readonly string[], more = 0): string {
+  const parts = ids.map((id) => creatureName(names, { tokenId: id }));
+  if (more > 0) parts.push(`${more} more`);
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+function possessive(name: string): string {
+  return name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 
 /** A player's ask for saves and its end (docs/design-v1-player-save-spell.md 5.2): "Thorn asks for saves: Fireball, level 4." */

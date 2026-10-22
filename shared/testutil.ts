@@ -32,6 +32,11 @@ import {
   type TerrainId,
   type Token,
   type TokenPath,
+  type Trap,
+  type TrapAction,
+  type TrapDoorRef,
+  type TrapDue,
+  type TrapZone,
   type Viewer,
   type WallFeature,
 } from "./model.ts";
@@ -330,6 +335,9 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     handoutDocs: {},
     companionBlocks: {},
     casts: {},
+    traps: {},
+    trapLog: [],
+    trapSeen: [],
     ...overrides,
   };
 }
@@ -678,7 +686,121 @@ export function randomState(r: () => number): RoomState {
   addCompanionBlocks(state);
   addOrderReveal(r, state);
   addCasts(r, state);
+  addTraps(r, state);
   return state;
+}
+
+/** A trap with every rig field the projection and limits read, at its smallest. */
+export function trap(id: string, overrides: Partial<Trap> = {}): Trap {
+  return {
+    id,
+    rev: 0,
+    sceneId: "s1",
+    name: "Hidden Pit",
+    zone: { cells: [{ x: 4, y: 4, w: 2, h: 2 }] },
+    state: "armed",
+    found: false,
+    rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false },
+    ...overrides,
+  };
+}
+
+/**
+ * Traps (docs/design-v1-traps.md 6.1): on either scene, squares, wires and
+ * doors (secret ones among them), found or not, armed, sprung or disarmed,
+ * with actions naming lights, stamps and tokens (some gone), occurrences
+ * naming creatures seen or hidden, and both trap logs with their lines.
+ */
+function addTraps(r: () => number, state: RoomState): void {
+  const tokenIds = [...Object.keys(state.tokens), "missing-token"];
+  const doorsOf = (sceneId: string): TrapDoorRef[] => {
+    const out: TrapDoorRef[] = [];
+    for (const chunk of Object.values(state.buildChunks)) {
+      if (chunk.sceneId !== sceneId) continue;
+      for (const [edge, f] of Object.entries(chunk.edges)) if (f.kind === "door") out.push({ edge });
+      for (const w of chunk.walls ?? []) if (w.f.kind === "door") out.push({ cx: chunk.cx, cy: chunk.cy, id: w.id });
+    }
+    return out.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+  };
+  const count = int(r, 0, 4);
+  for (let i = 0; i < count; i++) {
+    const id = `trap${i}`;
+    const sceneId = pick(r, ["s1", "s1", "s2"]);
+    const doors = doorsOf(sceneId);
+    const kind = int(r, 0, 3);
+    let zone: TrapZone;
+    if (kind === 2 && doors.length > 0) zone = { door: pick(r, doors) };
+    else if (kind === 1) {
+      const ax = int(r, 0, 18);
+      const ay = int(r, 0, 18);
+      zone = { wire: { a: [ax, ay], b: [ax + int(r, 1, 3), ay + pick(r, [0, 0, 0.5, 1])] } };
+    } else zone = { cells: Array.from({ length: int(r, 1, 2) }, () => ({ x: int(r, 0, 16), y: int(r, 0, 16), w: int(r, 1, 3), h: int(r, 1, 3) })) };
+    const actions: TrapAction[] = [];
+    for (let a = 0; a < int(r, 0, 3); a++) {
+      const lights = Object.values(state.lights).filter((l) => l.sceneId === sceneId);
+      const stamps = Object.values(state.stamps).filter((st) => st.sceneId === sceneId);
+      switch (int(r, 0, 3)) {
+        case 0:
+          if (doors.length > 0) actions.push({ door: pick(r, doors), state: pick(r, ["open", "closed", "locked"] as const) });
+          break;
+        case 1:
+          actions.push({ light: lights.length > 0 && chance(r, 0.8) ? pick(r, lights).id : "missing-light", on: chance(r, 0.5) });
+          break;
+        case 2:
+          actions.push({ show: { tokenId: pick(r, tokenIds) } });
+          break;
+        default:
+          actions.push({ show: { stampId: stamps.length > 0 && chance(r, 0.8) ? pick(r, stamps).id : "missing-stamp" } });
+      }
+    }
+    const due: TrapDue[] = [];
+    for (let d = 0; d < int(r, 0, 2); d++) {
+      const occurrence: TrapDue = { id: `${50 + i}:${d}`, at: AT, how: pick(r, ["enter", "leave", "cross", "open", "hand"] as const), by: [pick(r, tokenIds)], hits: [...new Set([pick(r, tokenIds), pick(r, tokenIds)])].sort() };
+      if (chance(r, 0.5)) occurrence.perceived = true;
+      else if (chance(r, 0.5)) occurrence.hidden = true;
+      if (chance(r, 0.3)) occurrence.acted = true;
+      if (chance(r, 0.2)) occurrence.more = 2;
+      due.push(occurrence);
+    }
+    const t = trap(id, {
+      rev: int(r, 0, 4),
+      sceneId,
+      name: pick(r, ["Hidden Pit", "Poison Darts", "Collapsing Roof"]),
+      zone,
+      state: pick(r, ["armed", "armed", "sprung", "disarmed"] as const),
+      found: chance(r, 0.4),
+    });
+    const rig = t.rig!;
+    if ("cells" in zone) {
+      rig.on = pick(r, [["enter"], ["enter", "turnStart"], ["leave"]] as const).slice();
+      if (chance(r, 0.3)) rig.pit = { floor: -10 };
+      rig.hits = pick(r, ["trigger", "zone"] as const);
+    } else rig.on = [];
+    rig.who = pick(r, ["party", "others", "any"] as const);
+    rig.actions = actions;
+    if (chance(r, 0.5)) rig.message = "A click underfoot.";
+    if (chance(r, 0.4)) rig.sound = pick(r, ["click", "rumble", "crash"] as const);
+    if (chance(r, 0.5)) rig.usesLeft = int(r, 0, 3);
+    if (chance(r, 0.4)) rig.save = { ability: "dex", dc: 15, onPass: "half" };
+    if (chance(r, 0.4)) rig.damage = [{ formula: "2d10", type: "bludgeoning" }];
+    if (chance(r, 0.4)) rig.find = [{ ability: "wis", skill: "perception", dc: 15, what: "the lid" }];
+    if (chance(r, 0.3)) rig.noticedBy = pick(r, tokenIds);
+    if (due.length > 0) rig.due = due;
+    state.traps[id] = t;
+  }
+  // The DM's lines, and the players' lines naming creatures seen or hidden.
+  const traps = Object.keys(state.traps);
+  for (let i = 0; i < int(r, 0, 3); i++) {
+    const trapId = traps.length > 0 ? pick(r, traps) : "gone-trap";
+    const data: LogEvent = chance(r, 0.7)
+      ? { type: "trap", trapId, name: "Hidden Pit", how: pick(r, ["enter", "hand"] as const), by: [pick(r, tokenIds)], hits: int(r, 0, 3), did: [], ...(chance(r, 0.5) ? { seen: [0] } : {}) }
+      : { type: "trapNotice", trapId, tokenId: pick(r, tokenIds), passive: 16, dc: 15 };
+    state.trapLog.push({ id: `60:${i}`, at: AT, kind: "event", data });
+  }
+  for (let i = 0; i < int(r, 0, 3); i++) {
+    const by = [...new Set(Array.from({ length: int(r, 0, 3) }, () => pick(r, tokenIds)))];
+    state.trapSeen.push({ id: `61:${i}`, at: AT, kind: "event", data: { type: "trapSeen", by, ...(chance(r, 0.3) ? { more: 1 } : {}), message: "A click underfoot.", ...(chance(r, 0.5) ? { sound: "click" as const } : {}) } });
+  }
 }
 
 /**
@@ -1292,6 +1414,8 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
   if (chance(r, 0.06)) return castOp(r, state, who, { anyToken, seqId });
   // Attached tokens (docs/design-v1-attach.md), about one in fourteen.
   if (chance(r, 0.07)) return attachOp(r, state, anyToken);
+  // Traps (docs/design-v1-traps.md), about one in sixteen.
+  if (chance(r, 0.06)) return trapOp(r, state, anyToken, seqId);
 
   if (who.role === "player") {
     // Wave 4's moves, doors and lights, now and then.
@@ -1591,6 +1715,44 @@ function visionOp(r: () => number, state: RoomState, sceneId: string, who: Viewe
  * dragged creature stands, so they hold often enough to be carried, a move
  * beside a holder that sets up a drag, and Get off, Put down and Let go.
  */
+function wireFrom(x: number, length: number): TrapZone {
+  return { wire: { a: [x, 2], b: [x + length, 2] } };
+}
+
+function trapOp(r: () => number, state: RoomState, anyToken: () => string, seqId: string): Op {
+  const ids = Object.keys(state.traps);
+  const anyTrap = () => (ids.length > 0 && chance(r, 0.9) ? pick(r, ids) : "missing-trap");
+  const anyDue = (trapId: string) => {
+    const due = state.traps[trapId]?.rig?.due ?? [];
+    return due.length > 0 && chance(r, 0.85) ? pick(r, due).id : "9:9";
+  };
+  switch (int(r, 0, 6)) {
+    case 0:
+    case 1: {
+      const { id: _id, rev: _rev, state: _state, rig, ...rest } = trap(seqId.replace(/[^A-Za-z0-9_-]/g, "-"), { sceneId: pick(r, ["s1", "s2"]), found: chance(r, 0.3) });
+      const zone: TrapZone = chance(r, 0.7) ? { cells: [{ x: int(r, 0, 16), y: int(r, 0, 16), w: int(r, 1, 3), h: int(r, 1, 3) }] } : wireFrom(int(r, 0, 15), int(r, 1, 4));
+      const { noticedBy: _n, due: _d, usesLeft: _u, ...input } = rig!;
+      if ("wire" in zone) input.on = [];
+      if (chance(r, 0.3)) input.actions = [{ show: { tokenId: anyToken() } }];
+      return { t: "trap.create", trap: { id: seqId.replace(/[^A-Za-z0-9_-]/g, "-"), ...rest, zone, rig: input } };
+    }
+    case 2: {
+      const patch = pick(r, [{ state: "armed" }, { state: "disarmed" }, { state: "sprung" }, { found: true }, { found: false }, { name: "Renamed trap" }, { rig: { message: "Snap!" } }, { rig: { usesLeft: null } }] as const);
+      return { t: "trap.update", trapId: anyTrap(), patch: patch as never };
+    }
+    case 3:
+      return { t: "trap.delete", trapId: anyTrap() };
+    case 4: {
+      const trapId = anyTrap();
+      return { t: "trap.act", trapId, due: anyDue(trapId) };
+    }
+    default: {
+      const trapId = anyTrap();
+      return { t: "trap.settle", trapId, due: anyDue(trapId), ...(chance(r, 0.5) ? { sprung: true } : {}) };
+    }
+  }
+}
+
 function attachOp(r: () => number, state: RoomState, anyToken: () => string): Op {
   const carried = state.tokens[anyToken()];
   // Mostly a holder on the carried token's scene, and a kind its size allows, so links are made often.

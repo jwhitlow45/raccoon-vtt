@@ -28,7 +28,8 @@ export function DoorButton(props: { token: Token }) {
     [mine, chunks, scene, settings, fogTiles, token],
   );
   if (!door || !view) return null;
-  const [choice] = doorActions(token.sceneId, door, "player");
+  // The token whose bar opened the door is the one that opens it (docs/design-v1-traps.md 5.3).
+  const [choice] = doorActions(token.sceneId, door, "player", token.id);
   if (!choice) return null;
   return (
     <Button size="sm" onClick={() => actions.dispatch(choice.op)}>

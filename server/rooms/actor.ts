@@ -12,6 +12,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
+import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
 import { renewOpenDisplay } from "../auth/displaySessions.ts";
 import { checkDisplayGrant, checkGrant } from "../auth/grants.ts";
 import type { RoomGateway } from "./gateway.ts";
@@ -43,7 +44,7 @@ import {
   type RoomInfo,
 } from "./persistence.ts";
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
-import { growthBound, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { keptFrom, NOT_NEWEST, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 
@@ -344,7 +345,7 @@ export class RoomActor {
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
-    this.#sizes.stateMeasured(loaded.stateBytes);
+    this.#sizes.stateMeasured(measuredFromStored(loaded.stateBytes, loaded.state));
     this.#roomRate = new TokenBucket(this.#opts.roomOpsPerSec, this.#opts.roomOpsPerSec * 2, this.#opts.now);
     this.#receipts = new ReceiptBook(this.#opts.now, this.#opts.receiptCaps);
     // Who admitted a stored receipt is read from the member's kind now, which the DM grants keep (reconcileKinds).
@@ -1141,16 +1142,17 @@ export class RoomActor {
       if (!more.ok) return more;
     }
     // The split's counting pass (docs/design-v1-maps-vision.md 2.1), on every scene whose walls the op may have changed. Over a
-    // cap it refuses with `quota` before any piece is built.
-    const moved = wallsMoved(this.#staged.state, result.state);
+    // cap it refuses with `quota` before any piece is built. Both it and the sight cap read every pit border as raised, so a
+    // pit trap counts its walls from the start and opening one never raises a count (docs/design-v1-traps.md 6.7).
+    const moved = [...new Set([...wallsMoved(this.#staged.state, result.state), ...pitsMoved(this.#staged.state, result.state, trapsTouched(result.touched))])];
     for (const sceneId of moved) {
-      const split = splitCheck(result.state, sceneId);
+      const split = splitCheck(withPitsCounted(result.state, sceneId), sceneId);
       if (!split.ok) return split;
     }
     // The cap on a vision scene's potential sight pieces (docs/design-v1-maps-vision.md 2.4), on every scene whose walls or
     // vision the op may have changed.
     for (const sceneId of new Set([...sceneIds, ...moved])) {
-      const sight = sightPiecesCheck(result.state, sceneId, this.#staged.state);
+      const sight = sightPiecesCheck(withPitsCounted(result.state, sceneId), sceneId, withPitsCounted(this.#staged.state, sceneId));
       if (!sight.ok) return sight;
     }
     // Every scene the op wrote into, read from what it touched, so no op's growth escapes its scenes' bounds.
@@ -1558,7 +1560,7 @@ export class RoomActor {
         const bytes = await writeSnapshot(this.#pool, this.roomId, seq, state);
         this.#snapshotSeq = seq;
         this.#opsSinceSnapshot = this.#committed.seq - seq;
-        this.#sizes.stateMeasured(bytes);
+        this.#sizes.stateMeasured(measuredFromStored(bytes, state));
         await this.#checkQuota();
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");
@@ -1732,6 +1734,13 @@ function pagesWithSizes(pages: HandoutPage[], facts: Map<string, AssetFact>): Ha
  * (build ops, automatic walls, and restores of either), and a new scene
  * (a duplicate) brings its chunks with it.
  */
+/** The trap ids among an op's touched keys. */
+function trapsTouched(touched: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const key of touched) if (key.startsWith("trap:")) out.push(key.slice(5));
+  return out;
+}
+
 function wallsMoved(before: RoomState, after: RoomState): string[] {
   if (before.scenes === after.scenes) return [];
   const out: string[] = [];
@@ -1827,7 +1836,8 @@ function scenesOf(op: Op, before: RoomState, after: RoomState): string[] {
           parsed.kind === "label" ||
           parsed.kind === "stamp" ||
           parsed.kind === "light" ||
-          parsed.kind === "pin"
+          parsed.kind === "pin" ||
+          parsed.kind === "trap"
         ) {
           const restored = entry.value as { sceneId?: string } | null | undefined;
           if (restored?.sceneId) out.add(restored.sceneId);

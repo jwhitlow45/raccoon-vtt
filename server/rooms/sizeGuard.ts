@@ -1,4 +1,6 @@
 import { chunkKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
+import { CHUNK_CELLS, type Trap } from "#shared/model.ts";
+import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, exploringSceneId, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { tilesAcross } from "#shared/rules/fog.ts";
@@ -48,6 +50,15 @@ import { isWritable } from "#shared/writable.ts";
  * A DM's projection of a scene is exactly the two parts with the JSON around
  * them (and an empty sight map, whose real tiles the sight reserve covers),
  * so the measure is the projection's size, every whisper counted.
+ *
+ * Traps (docs/design-v1-traps.md 6.7) are counted so that a springing
+ * never moves a measure: a trap's own fields exactly and, in place of what
+ * the reducer writes on it and around it, fixed reserves from the complete
+ * serialized writes (trapReserve, Appendix B), and the room's occurrences
+ * and both trap logs at their bounds once it has a trap. So the measure is
+ * the same whether or not, and however often, a trap went off, and the
+ * actor measures a springing op without its trap step's writes, which the
+ * reserves already hold (server/rooms/actor.ts).
  *
  * Companion stat blocks ride in every DM projection too, but outside this
  * measure (docs/design-v1-companion-stat-blocks.md 3.4): the measure counts
@@ -109,7 +120,7 @@ export class SizeGuard {
     const reserve = exploredReserve(next);
     const state = this.#state;
     if (!state || state.bytes + state.growth + growth + reserve > this.stateLimit) {
-      const bytes = serializedBytes(next);
+      const bytes = measuredStateBytes(next);
       if (bytes + reserve > this.stateLimit) {
         return newlyExploring && bytes <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull(this.stateLimit);
       }
@@ -242,6 +253,8 @@ const ROOM_LEVEL = [
   "rolls",
   "handoutDocs",
   "casts",
+  "trapLog",
+  "trapSeen",
 ] as const satisfies readonly (keyof RoomState)[];
 
 const SCENE_LEVEL = [
@@ -256,6 +269,7 @@ const SCENE_LEVEL = [
   "lights",
   "exploredTiles",
   "pins",
+  "traps",
 ] as const satisfies readonly (keyof RoomState)[];
 
 type SceneLevel = (typeof SCENE_LEVEL)[number];
@@ -318,8 +332,106 @@ function collectionBytes(collection: unknown): number {
  */
 export function roomLevelBytes(state: RoomState): number {
   let bytes = 0;
-  for (const name of ROOM_LEVEL) bytes += fieldBytes(name) + (name === "meta" || name === "encounter" ? valueBytes(state[name]) : collectionBytes(state[name] ?? {}));
+  const trapped = hasTraps(state);
+  for (const name of ROOM_LEVEL) {
+    if ((name === "trapLog" || name === "trapSeen") && trapped) bytes += fieldBytes(name) + (name === "trapLog" ? TRAP_LOG_RESERVE : TRAP_SEEN_RESERVE + DUE_RESERVE);
+    else bytes += fieldBytes(name) + (name === "meta" || name === "encounter" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
+  }
   return bytes;
+}
+
+// ---------------------------------------------------------------------------
+// The traps' reserves (docs/design-v1-traps.md 6.7, Appendix B)
+
+/** Per trap, the small fields the reducer writes and `noticedBy` (160), and its actions' and stop's slack (100). */
+export const TRAP_RESERVE = 160 + 100;
+/** Per scene with a pit trap, the tokens a pit can move: 500 tokens at 8 bytes. */
+export const PIT_TOKENS_RESERVE = 4 * 1024;
+/** Per room once it has a trap: 10 occurrences, and both trap logs at their bounds. */
+export const DUE_RESERVE = 42 * 1024;
+export const TRAP_LOG_RESERVE = 45 * 1024;
+export const TRAP_SEEN_RESERVE = 30 * 1024;
+
+function hasTraps(state: RoomState): boolean {
+  for (const _ in state.traps ?? {}) return true;
+  return false;
+}
+
+/** A trap as the measures count it: its own fields exactly, and its reserve in place of what the reducer writes on it. */
+export function trapMeasure(trap: Trap): number {
+  let bytes = trapSizes.get(trap);
+  if (bytes === undefined) {
+    bytes = trapOwnBytes(trap) + TRAP_RESERVE;
+    trapSizes.set(trap, bytes);
+  }
+  return bytes;
+}
+
+const trapSizes = new WeakMap<Trap, number>();
+
+/** The chunks a pit trap's squares touch, each counted once. */
+function pitChunks(trap: Trap): Set<string> {
+  const out = new Set<string>();
+  if (!trap.rig?.pit || !("cells" in trap.zone)) return out;
+  for (const r of trap.zone.cells) {
+    for (let cy = Math.floor(r.y / CHUNK_CELLS); cy * CHUNK_CELLS < r.y + r.h; cy++) {
+      for (let cx = Math.floor(r.x / CHUNK_CELLS); cx * CHUNK_CELLS < r.x + r.w; cx++) out.add(`${cx},${cy}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * A scene's pit reserve: for every chunk a pit trap's squares touch, a
+ * whole new chunk as `buildHeight` fills it, map key and envelope included,
+ * `2K + 780` bytes with K the scene id's serialized length, whether or not
+ * the chunk exists yet, and 4 KiB for the tokens a pit can move once the
+ * scene has a pit trap. A chunk two pits touch counts for each.
+ */
+export function pitReserve(state: RoomState, sceneId: string): number {
+  let chunks = 0;
+  let pits = 0;
+  for (const trap of Object.values(state.traps ?? {})) {
+    if (trap.sceneId !== sceneId || !trap.rig?.pit) continue;
+    pits++;
+    chunks += pitChunks(trap).size;
+  }
+  if (pits === 0) return 0;
+  const k = utf8Bytes(JSON.stringify(sceneId));
+  return chunks * (2 * k + 780) + PIT_TOKENS_RESERVE;
+}
+
+/** Every reserve and trap measure the room's own bytes count: the traps, the pits, and the room's occurrences and logs. */
+function trapsMeasure(state: RoomState): number {
+  const traps = Object.entries(state.traps ?? {});
+  let bytes = Math.max(0, traps.length - 1);
+  const scenes = new Set<string>();
+  for (const [key, trap] of traps) {
+    bytes += fieldBytes(key) + trapMeasure(trap);
+    scenes.add(trap.sceneId);
+  }
+  for (const sceneId of scenes) bytes += pitReserve(state, sceneId);
+  if (traps.length > 0) return bytes + DUE_RESERVE + TRAP_LOG_RESERVE + TRAP_SEEN_RESERVE;
+  // A room whose traps were all deleted keeps their lines, which no springing can add to any more.
+  return bytes + collectionBytes(state.trapLog ?? []) - 2 + collectionBytes(state.trapSeen ?? []) - 2;
+}
+
+/** The room's own bytes as the guard counts them: everything exactly, the traps by their measures and reserves. */
+export function measuredStateBytes(state: RoomState): number {
+  return serializedBytes({ ...state, traps: {}, trapLog: [], trapSeen: [] }) + trapsMeasure(state);
+}
+
+/**
+ * The measure of a state already serialized to `bytes`, such as a snapshot
+ * just written, without serializing it again: its traps and their logs
+ * swapped for their measures.
+ */
+export function measuredFromStored(bytes: number, state: RoomState): number {
+  const traps = state.traps ?? {};
+  const log = state.trapLog ?? [];
+  const seen = state.trapSeen ?? [];
+  if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes;
+  return bytes - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
 
 /** The scene an entity of a scene-level collection belongs to. */
@@ -329,20 +441,25 @@ function sceneOfEntry(name: SceneLevel, key: string, value: unknown): string | u
   return typeof sceneId === "string" ? sceneId : undefined;
 }
 
-/** One scene's own part of a DM's projection: its scene-level collections, filtered to it, with their field names. */
+/** One scene's own part of a DM's projection: its scene-level collections, filtered to it, with their field names, and its pit reserve. */
 export function sceneOwnBytes(state: RoomState, sceneId: string): number {
-  let bytes = 0;
+  let bytes = pitReserve(state, sceneId);
   for (const name of SCENE_LEVEL) {
     let count = 0;
     let inside = 0;
     for (const [key, value] of Object.entries(state[name] ?? {})) {
       if (sceneOfEntry(name, key, value) !== sceneId) continue;
       count++;
-      inside += fieldBytes(key) + valueBytes(value);
+      inside += fieldBytes(key) + entryBytes(name, value);
     }
     bytes += fieldBytes(name) + 2 + inside + Math.max(0, count - 1);
   }
   return bytes;
+}
+
+/** An entity as a scene's part counts it: a trap by its measure, anything else exactly. */
+function entryBytes(name: SceneLevel, value: unknown): number {
+  return name === "traps" ? trapMeasure(value as Trap) : valueBytes(value);
 }
 
 /** Every scene's own part, in one pass over the state's scene-level entities. */
@@ -359,14 +476,14 @@ function allScenesOwnBytes(state: RoomState): Map<string, number> {
       const count = sceneId === undefined ? undefined : counts.get(sceneId);
       if (!count) continue;
       count[i]! += 1;
-      sizes.get(sceneId!)![i]! += fieldBytes(key) + valueBytes(value);
+      sizes.get(sceneId!)![i]! += fieldBytes(key) + entryBytes(name, value);
     }
   });
   const out = new Map<string, number>();
   for (const id of Object.keys(state.scenes)) {
     const count = counts.get(id)!;
     const size = sizes.get(id)!;
-    let bytes = 0;
+    let bytes = pitReserve(state, id);
     SCENE_LEVEL.forEach((name, i) => (bytes += fieldBytes(name) + 2 + size[i]! + Math.max(0, count[i]! - 1)));
     out.set(id, bytes);
   }
@@ -411,15 +528,29 @@ export function checkWholeScenes(state: RoomState, sceneLimit: number = LIMITS.p
  */
 export function growthBound(before: RoomState, after: RoomState, touched: readonly EntityKey[]): number {
   let growth = 0;
+  const trapped = hasTraps(after);
+  // A room's first trap brings the room's reserves for occurrences and both trap logs (docs/design-v1-traps.md 6.7).
+  if (trapped && !hasTraps(before)) growth += DUE_RESERVE + TRAP_LOG_RESERVE + TRAP_SEEN_RESERVE;
   for (const key of touched) {
     const next = readEntity(after, key);
     if (next === null || next === undefined) continue;
+    const parsed = parseKey(key);
+    // A trap's line is held by its log's reserve while the room has a trap.
+    if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
-    const delta = serializedBytes(next) + (added ? entryKeyBytes(key) : -serializedBytes(prev));
+    const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value));
+    const delta = size(next) + (added ? entryKeyBytes(key) : -size(prev));
     if (delta > 0) growth += delta;
   }
   return growth;
+}
+
+/** The most a trap's pit adds to its scene's reserve: its chunks, and the moved tokens' reserve as if it were the scene's only pit. */
+function pitGrowth(trap: Trap): number {
+  if (!trap.rig?.pit) return 0;
+  const k = utf8Bytes(JSON.stringify(trap.sceneId));
+  return pitChunks(trap).size * (2 * k + 780) + PIT_TOKENS_RESERVE;
 }
 
 /**
@@ -442,6 +573,8 @@ function entryKeyBytes(key: EntityKey): number {
     case "encounterHistory":
       return 0;
     case "log":
+    case "trapLog":
+    case "trapSeen":
       return 1;
     case "chunk":
       return jsonKeyBytes(chunkKey(parsed.sceneId, parsed.cx, parsed.cy));

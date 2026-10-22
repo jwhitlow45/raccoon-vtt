@@ -6,6 +6,8 @@ import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
   MAX_ALT_IMAGES,
   castSchemas,
+  trapSchemas,
+  TRAP_SOUNDS,
   diceSchemas,
   dmToolSchemas,
   rollAnswerSchemas,
@@ -626,6 +628,61 @@ const logEvent = z.discriminatedUnion("type", [
   }),
 ]);
 
+/** How a trap went off (TrapHow). */
+const trapHow = z.enum(["enter", "leave", "turnStart", "turnEnd", "cross", "open", "hand"]);
+const lineId = z.string().regex(/^\d{1,18}:\d{1,6}$/);
+
+/** A trap's waiting occurrence (docs/design-v1-traps.md 6.1), as the reducer stores it. */
+const trapDue = z.strictObject({
+  id: lineId,
+  at: iso,
+  how: trapHow,
+  by: z.array(id).max(LIMITS.trapBy),
+  more: count.optional(),
+  hits: z.array(id).max(LIMITS.trapHits),
+  hitsMore: count.optional(),
+  perceived: z.literal(true).optional(),
+  hidden: z.literal(true).optional(),
+  acted: z.literal(true).optional(),
+});
+
+/** A trap as stored: its op fields with what the reducer writes, uses down to 0, who the hint named and its occurrences. */
+const trap = z.strictObject({
+  id: trapSchemas.plainId,
+  rev,
+  sceneId: id,
+  name: trapSchemas.trapName,
+  zone: trapSchemas.trapZone,
+  state: z.enum(["armed", "sprung", "disarmed"]),
+  found: z.boolean(),
+  rig: trapSchemas.trapRigInput
+    .extend({
+      usesLeft: z.number().int().min(0).max(99).optional(),
+      noticedBy: id.optional(),
+      due: z.array(trapDue).max(LIMITS.trapDuePerTrap).optional(),
+    })
+    .optional(),
+});
+
+/** The lines of the two trap logs (docs/design-v1-traps.md 6.3). */
+const trapLine = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("trap"),
+    trapId: id,
+    name: trapSchemas.trapName,
+    how: trapHow,
+    by: z.array(id).max(LIMITS.trapBy),
+    more: count.optional(),
+    hits: count,
+    did: z.array(z.strictObject({ action: z.number().int().min(-1).max(LIMITS.trapActions - 1), ok: z.boolean() })).max(LIMITS.trapActions + 1),
+    seen: z.array(z.number().int().min(0).max(LIMITS.trapBy - 1)).max(LIMITS.trapBy).optional(),
+    hidden: z.literal(true).optional(),
+  }),
+  z.strictObject({ type: z.literal("trapSeen"), by: z.array(id).max(LIMITS.trapBy), more: count.optional(), message: trapSchemas.trapMessage, sound: z.enum(TRAP_SOUNDS).optional() }),
+  z.strictObject({ type: z.literal("trapNotice"), trapId: id, tokenId: id, passive: z.number().int().min(0).max(60), dc: dmToolSchemas.rollDc }),
+]);
+const trapLogEntry = z.strictObject({ id: lineId, at: iso, kind: z.literal("event"), data: trapLine });
+
 const logEntry = z.strictObject({
   id: z.string().regex(/^\d{1,18}:\d{1,6}$/),
   at: iso,
@@ -671,6 +728,10 @@ export const roomStateSchema = z.strictObject({
   companionBlocks: record(companionBlock),
   // Players' asks for saves. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
   casts: record(castAsk),
+  // Traps and their two logs. A backup from before them reaches this schema through the snapshot migration, which adds them empty.
+  traps: record(trap),
+  trapLog: z.array(trapLogEntry).max(LIMITS.trapLogLines),
+  trapSeen: z.array(trapLogEntry).max(LIMITS.trapSeenLines),
 });
 
 export function parseRoomState(value: unknown): { ok: true; state: RoomState } | { ok: false; message: string } {

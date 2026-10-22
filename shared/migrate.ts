@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 18;
-export const OP_VERSION = 14;
+export const SNAPSHOT_VERSION = 19;
+export const OP_VERSION = 15;
 
 export type MigrationStep = {
   from: number;
@@ -132,6 +132,17 @@ export const snapshotMigrations: MigrationStep[] = [
   // v18 room as it is. The number moves so that an older build, whose strict state schema refuses the fields and whose
   // reducer would move a holder without what it carries, refuses a v18 snapshot instead of loading it under old rules.
   { from: 17, to: 18, apply: (state) => state },
+  // v18 had no traps (docs/design-v1-traps.md 6.6). Rooms and backups from before them start with none and both trap
+  // logs empty. The number moves so that an older build, whose strict state schema refuses them, refuses a v19
+  // snapshot instead of loading it without its traps.
+  {
+    from: 18,
+    to: 19,
+    apply: (state) => {
+      if (state === null || typeof state !== "object" || ("traps" in state && "trapLog" in state && "trapSeen" in state)) return state;
+      return { ...state, ...(!("traps" in state) ? { traps: {} } : {}), ...(!("trapLog" in state) ? { trapLog: [] } : {}), ...(!("trapSeen" in state) ? { trapSeen: [] } : {}) };
+    },
+  },
 ];
 
 /**
@@ -439,6 +450,24 @@ export const opMigrations: MigrationStep[] = [
     to: 14,
     apply: (op) => op,
   },
+  {
+    // Traps (docs/design-v1-traps.md 6.6): the trap ops, `door.set`'s `by`
+    // and `actor.outcome`'s `trap` are new, which an older build's strict
+    // schemas refuse. No op stored before can meet a trap, so replay of an
+    // older op writes no trap field. The one rule traps change for every
+    // move, the area sweep of a teleport, keeps today's straight sweep below
+    // this version (`trapsGoOff`). A player's open without `by` is a
+    // permission rule, which replay does not run.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 15, and the shutdown writes version 19 snapshots.
+    // Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 14,
+    to: 15,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -738,6 +767,18 @@ export function walksRoutes(opVersion: number | undefined): boolean {
  */
 export function attaches(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 14);
+}
+
+/**
+ * Whether the reducer writes what traps add on its own
+ * (docs/design-v1-traps.md 6.6): springings on walks, landings, turns and
+ * doors, their stops, occurrences, lines and actions, and an area reminder
+ * that sweeps a teleport only where it lands. Ops stored before version 15
+ * met no trap and swept a teleport's straight leg, and replay by that rule.
+ * Live ops carry no stored version and take today's rule.
+ */
+export function trapsGoOff(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 15);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

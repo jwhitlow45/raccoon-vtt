@@ -474,6 +474,12 @@ function forPlayer(op: Op, c: Check): Decision {
     // A save-ends occurrence is the DM's to settle, and a group save's outcome the DM's to apply (docs/design-v1-roll-options.md 6.1, 5.5).
     case "actor.saveDue":
     case "actor.outcome":
+    // Traps are the DM's alone: players search and disarm through the DM's requests (docs/design-v1-traps.md 6.2).
+    case "trap.create":
+    case "trap.update":
+    case "trap.delete":
+    case "trap.act":
+    case "trap.settle":
       return FORBIDDEN;
 
     case "token.updateMany": {
@@ -1614,6 +1620,8 @@ function insideScene(scene: Scene, token: Token, at: Point): boolean {
 export const DOOR_LOCKED = "It's locked.";
 export const DOOR_TOO_FAR = "Too far from the door.";
 export const DOOR_DM_ONLY = "only the DM locks doors and marks secret doors";
+/** A player's open names who opens the door, so its door traps know whom they catch (docs/design-v1-traps.md 5.3). */
+export const CHOOSE_OPENER = "Choose who opens the door.";
 /**
  * How far a token reaches a door, by the room's own distance rule: 5 ft, or
  * one cell where a cell is wider, so a creature beside the door always
@@ -1636,9 +1644,16 @@ function doorCheck(c: Check, op: OpOf<"door.set">): Decision {
   const stored = c.state.buildChunks[chunkKey(op.sceneId, cx, cy)];
   if (!shown || !stored || !doorIn(shown, op.door)) return GONE;
   // Reach comes before the lock: a player learns a door is locked by trying it, so a door out of reach answers the same
-  // whether it is locked or not, and no request can list the locks across the scene.
-  const reached = Object.values(c.state.tokens).some((token) => token.sceneId === op.sceneId && ownsToken(c.state, c.actor, token) && reachesDoor(c.state, token, op.door, stored));
-  if (!reached) return refuse("forbidden", DOOR_TOO_FAR);
+  // whether it is locked or not, and no request can list the locks across the scene. An open names its opener, a token
+  // of theirs that reaches the door (docs/design-v1-traps.md 5.3), and a close any token of theirs that does.
+  if (op.state === "open") {
+    const by = op.by !== undefined ? c.visibleToken(op.by) : null;
+    if (!by || by.sceneId !== op.sceneId || !ownsToken(c.state, c.actor, by)) return refuse("invalid", CHOOSE_OPENER);
+    if (!reachesDoor(c.state, by, op.door, stored)) return refuse("forbidden", DOOR_TOO_FAR);
+  } else {
+    const reached = Object.values(c.state.tokens).some((token) => token.sceneId === op.sceneId && ownsToken(c.state, c.actor, token) && reachesDoor(c.state, token, op.door, stored));
+    if (!reached) return refuse("forbidden", DOOR_TOO_FAR);
+  }
   // The lock is read from the stored door, since players get a locked door as closed.
   if (doorIn(stored, op.door)?.state === "locked") return refuse("forbidden", DOOR_LOCKED);
   return OK;
