@@ -1,4 +1,4 @@
-import { attaches, walksRoutes } from "../migrate.ts";
+import { attaches, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
@@ -395,6 +395,9 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
   const walk = moved.tokens.size > 0 && !moved.walks ? walkOf(before, after, op, tx.env.opVersion) : null;
   const grouped = moved.walks && moved.walks.named.length > 0 ? { ...moved, walks: moved.walks } : null;
   const routed = op.t === "token.move" && op.route !== undefined && walksRoutes(tx.env.opVersion);
+  // A teleport enters an area only where it lands, as it sets off a trap only there (docs/design-v1-traps.md 6.6, 13.2). Ops stored
+  // before op version 15 swept its straight leg, and replay so.
+  const landsOnly = op.t === "token.move" && op.teleport !== undefined && trapsGoOff(tx.env.opVersion);
   let swept: RoomState[] | null = null;
   for (const template of Object.values(after.templates).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     if (!(template.triggers?.includes("enter") ?? false)) continue;
@@ -412,7 +415,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
-    const leg = outside.length > 0 ? (swept ??= grouped ? alongGroups(after, grouped, routed) : walk ? alongWalkBeforeV14(after, walk) : alongLeg(before, after, moved)) : [];
+    const leg = outside.length > 0 ? (swept ??= landsOnly ? [after] : grouped ? alongGroups(after, grouped, routed) : walk ? alongWalkBeforeV14(after, walk) : alongLeg(before, after, moved)) : [];
     for (const at of leg) {
       const area = at.templates[template.id];
       if (!area) continue;

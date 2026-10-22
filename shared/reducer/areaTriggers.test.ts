@@ -283,3 +283,29 @@ describe("getting on and off moves a creature into an area as a move does (docs/
     assert.deepEqual(entering(beside, { t: "token.attach", tokenId: "g1", to: "horse", kind: "drag", x: 9, y: 5, elevation: 0 }), []);
   });
 });
+
+describe("a teleport enters an area only where it lands (docs/design-v1-traps.md 6.6)", () => {
+  /** Grease across the goblin's row, between where it stands and where it goes. */
+  function greased(): RoomState {
+    const state = fight();
+    delete state.templates.sg;
+    state.templates.grease = template("grease", { shape: "cube", size: 10, origin: { x: 8, y: 5, z: 0 }, spell: "Grease", triggers: ["enter"] });
+    return state;
+  }
+  const remindersOf = (state: RoomState, op: Op, opVersion?: number) => {
+    const r = applyOp(state, op, DM, { ...env(5), ...(opVersion !== undefined ? { opVersion } : {}) });
+    assert.ok(r.ok);
+    return r.log.filter((e) => e.data?.type === "area").length;
+  };
+
+  test("a teleport over an area is not reminded of it, one onto it is, and a walk over it still is", () => {
+    const state = greased();
+    assert.equal(remindersOf(state, { t: "token.move", tokenId: "g1", x: 4, y: 5, teleport: "wall" }), 0, "jumped over");
+    assert.equal(remindersOf(state, { t: "token.move", tokenId: "g1", x: 8, y: 5, teleport: "wall" }), 1, "landed in it");
+    assert.equal(remindersOf(state, { t: "token.move", tokenId: "g1", x: 4, y: 5 }), 1, "walked through it");
+  });
+
+  test("a teleport stored before op version 15 replays by the straight sweep it was written under", () => {
+    assert.equal(remindersOf(greased(), { t: "token.move", tokenId: "g1", x: 4, y: 5, teleport: "wall" }, 14), 1);
+  });
+});
