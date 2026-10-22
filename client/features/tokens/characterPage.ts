@@ -59,6 +59,17 @@ export function patchForm(store: StoreApi<CharacterPageState>, id: string, patch
   store.setState((s) => (s.form?.id === id ? { form: patch(s.form) } : {}));
 }
 
+/**
+ * What the panel reads of the form in its place, each a field of its own
+ * for useShallow, so an id holding any character comes back whole. A
+ * character id may hold "|", which the schema allows.
+ */
+export function formFields(s: Pick<CharacterPageState, "form">): { kind: PanelForm["kind"]; characterId: string; id: string; opened: number } | null {
+  const form = s.form;
+  if (!form) return null;
+  return { kind: form.kind, characterId: form.kind === "new" ? "" : form.characterId, id: form.id, opened: form.opened };
+}
+
 /** A stat blocks page an outside open has passed since it opened, which gives way to that page, as nothing typed holds it. */
 export function staleList(s: Pick<CharacterPageState, "form" | "opened">): boolean {
   return s.form?.kind === "blocks" && s.form.opened !== s.opened;

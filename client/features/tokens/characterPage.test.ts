@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createCharacterPageStore, openCharacterPage, openForm, pageBackTo, patchForm, shownPage, staleList } from "./characterPage.ts";
+import { shallow } from "zustand/shallow";
+import { createCharacterPageStore, formFields, openCharacterPage, openForm, pageBackTo, patchForm, shownPage, staleList } from "./characterPage.ts";
 
 const BREE = { id: "bree" };
 const CYRA = { id: "cyra" };
@@ -49,6 +50,21 @@ describe("the form in the panel's place (LP10, FU16)", () => {
     const again = store.getState().form!;
     patchForm(store, sent, () => null);
     assert.equal(store.getState().form, again, "the late answer left the new instance alone");
+  });
+
+  test("the panel reads the form's fields whole, for a character id holding | too (FU16-A-4)", () => {
+    const store = createCharacterPageStore();
+    assert.equal(formFields(store.getState()), null);
+    openCharacterPage(store, "a|b");
+    openForm(store, { kind: "companion", characterId: "a|b" });
+    const form = store.getState().form!;
+    assert.deepEqual(formFields(store.getState()), { kind: "companion", characterId: "a|b", id: form.id, opened: 1 });
+    openForm(store, { kind: "blocks", characterId: "|x|" });
+    assert.equal(formFields(store.getState())?.characterId, "|x|");
+    openForm(store, { kind: "new" });
+    assert.equal(formFields(store.getState())?.characterId, "", "New character names no character");
+    // useShallow keeps the same answer while no field changed, so the panel draws nothing again.
+    assert.ok(shallow(formFields(store.getState()), formFields(store.getState())));
   });
 
   test("a stat blocks page an outside open passed gives way, the one opened after it stays", () => {

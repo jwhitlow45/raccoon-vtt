@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useStore } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import type { Character, CreatureSize, Member } from "#shared/model.ts";
 import { usePanelHeader, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
@@ -21,7 +22,7 @@ import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { characterPageSlot, DISCARD, openForm, pageBackTo, patchForm, shownPage, staleList, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, formFields, openForm, pageBackTo, patchForm, shownPage, staleList, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
 import { CompanionForm } from "./CompanionsSection.tsx";
 import { CREATURE_HEADING } from "./CreatureHeader.tsx";
@@ -59,13 +60,13 @@ export default function CharactersPanel(props: PanelProps) {
    * character whose "Add a companion" form shows, or the character whose
    * stat blocks page shows (docs/design-v1-companion-stat-blocks.md 6.4).
    */
-  const shownForm = useStore(pageStore, (s) => (s.form ? `${s.form.kind}|${s.form.kind === "new" ? "" : s.form.characterId}|${s.form.id}|${s.form.opened}` : null));
-  const [formKind, formFor = "", formId = "", formSince = "0"] = shownForm?.split("|") ?? [];
+  const shownForm = useStore(pageStore, useShallow(formFields));
+  const formId = shownForm?.id ?? "";
   const closeForm = () => patchForm(pageStore, formId, () => null);
-  const creating = formKind === "new";
-  const addingFor = formKind === "companion" ? formFor : null;
-  const blocksFor = formKind === "blocks" ? formFor : null;
-  const since = Number(formSince);
+  const creating = shownForm?.kind === "new";
+  const addingFor = shownForm?.kind === "companion" ? shownForm.characterId : null;
+  const blocksFor = shownForm?.kind === "blocks" ? shownForm.characterId : null;
+  const since = shownForm?.opened ?? 0;
   const dm = you?.role === "dm";
 
   const list = useMemo(
