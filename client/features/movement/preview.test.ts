@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import type { RoomState } from "#shared/model.ts";
+import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
+import { DM, actor, env, room, token } from "#shared/testutil.ts";
 import { planWalk } from "./drop.ts";
 import { frameFields, walkPreview } from "./preview.ts";
 import { line, thorn, world } from "./testing.ts";
@@ -71,5 +75,46 @@ describe("the picture of a drag's walk", () => {
     assert.deepEqual([preview.to, preview.corners, preview.read.dragFt], [held, [], 15]);
     const free = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: { kind: "none", capped: false }, held: null, world: null, role: "player" });
     assert.deepEqual([free.to, free.read.dragFt], [{ x: 9, y: 5 }, 35], "nothing held: the finger's spot");
+  });
+});
+
+describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach.md 7.3)", () => {
+  /** Bree (P1's, walking 30 ft) on her own turn, riding an independent warhorse at 4,4. */
+  function riding(diagonal: "five" | "fiveTen" = "five"): RoomState {
+    let state = room({
+      tokens: {
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        bree: token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" }, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+        gob: token("gob", { x: 20, y: 20 }),
+      },
+    });
+    state.meta.settings = { ...state.meta.settings, diagonal };
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    return state;
+  }
+
+  /** The preview's leg and the cost the reducer stores for the same drop, summed over the stops it adds. */
+  function both(state: RoomState, target: { x: number; y: number }, pieces?: RoutePiece[]): [number, number] {
+    const bree = state.tokens.bree!;
+    const answer = pieces ? { kind: "route" as const, route: { pieces, points: [], endsBlocked: false } } : { kind: "open" as const };
+    const preview = walkPreview({ view: state, token: bree, target, answer, held: null, world: publicWorld(state, bree, { role: "dm" }), role: "dm" });
+    const r = applyOp(state, { t: "token.move", tokenId: "bree", x: target.x, y: target.y, ...(pieces ? { route: pieces } : {}) }, DM, env(9));
+    assert.ok(r.ok);
+    const before = bree.path?.stops.length ?? 1;
+    const stored = r.state.tokens.bree!.path!.stops.slice(before).reduce((sum, s) => sum + (s.cost ?? 0), 0);
+    return [preview.read.dragFt, stored];
+  }
+
+  test("straight off, routed off and with the 5-10-5 diagonals running on, the band reads the stored half Speed and the rest", () => {
+    assert.deepEqual(both(riding(), { x: 8, y: 4 }), [25, 25]);
+    assert.deepEqual(both(riding(), { x: 7, y: 6 }, [[7, 4, 0, 0], [7, 6, 0, 0]]), [30, 30]);
+    const [shown, stored] = both(riding("fiveTen"), { x: 8, y: 8 });
+    assert.equal(shown, stored);
+    // A drop that keeps her seat is an ordinary leg.
+    assert.deepEqual(both(riding(), { x: 5, y: 5 }), [5, 5]);
   });
 });

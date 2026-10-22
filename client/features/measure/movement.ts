@@ -4,6 +4,7 @@ import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
+import { dismountCost } from "#shared/rules/dismount.ts";
 import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 
@@ -281,6 +282,9 @@ export type DragRead = { dragFt: number; left?: SpeedLeft; extra?: { ft: number;
 
 const BAND_ORDER: readonly SpeedLeft["band"][] = ["walk", "dash", "over"];
 
+/** A drag read with no walk has no map: a straight leg's spots then stand at the walk's own heights. */
+const NO_BUILD: Pick<BuildState, "buildChunks"> = { buildChunks: {} };
+
 /**
  * How a token drag reads against the creature's speed (features section 4,
  * docs/design-v1-movement.md 3.1 and 4.2): the cost of this leg, along its
@@ -313,6 +317,12 @@ export function dragReading(input: {
   costFt?: number;
   /** How a plain leg lands: its elevation and whether it squeezes there, which its cost reads as the move records it (route.ts `plainLegCost`). */
   landing?: { elevation: number; squeeze?: true };
+  /**
+   * The mount the drop leaves and half the rider's Speed, when the leg
+   * walks the rider off its ride (docs/design-v1-attach.md 7.3): on its own
+   * turn the leg then costs as the reducer stores it (rules/dismount.ts).
+   */
+  dismount?: { mount: PlacedToken; halfFt: number };
 }): DragRead {
   const { token, encounter, rules, walk } = input;
   const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: input.landing?.elevation ?? token.elevation };
@@ -332,7 +342,11 @@ export function dragReading(input: {
         ? plainLegCost(token, landed, rules, counter)
         : straightCost(token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
   const leg = legCost(points);
-  const legFt = input.costFt ?? leg.cost;
+  // Walked off its mount on its own turn, the leg costs what getting off costs and then the rest, as the reducer stores it.
+  const off = active && input.dismount && input.costFt === undefined ? input.dismount : undefined;
+  const taken = off ? dismountCost(walk?.build ?? NO_BUILD, token, off.mount, points, walk?.route?.pieces, rules, counter, off.halfFt, swimSpeed) : leg;
+  const surcharge = taken.cost - leg.cost;
+  const legFt = input.costFt ?? taken.cost;
   const out: DragRead = { dragFt: legFt };
   const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing) : [];
   if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
@@ -347,7 +361,7 @@ export function dragReading(input: {
   const inside = walk && !endHalved ? lastHalvedSpot(points, token, walk) : null;
   if (inside) {
     const prefix = [...points.slice(0, inside.piece + 1), inside.at];
-    const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost).find((s) => s.kind === atEnd.kind);
+    const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost + surcharge).find((s) => s.kind === atEnd.kind);
     if (there && BAND_ORDER.indexOf(there.band) > BAND_ORDER.indexOf(band)) band = there.band;
     // Past Dash in the area but not at the end: how far past is the area's to tell, against its halved Speed, where the end would read less than nothing.
     if (there && band === "over" && atEnd.band !== "over") {

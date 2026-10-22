@@ -8,7 +8,8 @@ import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/foo
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
-import { holderOf, linkHolds, overlaps } from "../rules/attach.ts";
+import { holderOf, linkHolds } from "../rules/attach.ts";
+import { dismountSplit } from "../rules/dismount.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -438,16 +439,11 @@ export function mountCost(tx: Tx, rider: Token): number | null {
 export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number, route?: readonly RoutePiece[]): Token {
   const from = { x: rider.x, y: rider.y, elevation: rider.elevation };
   const points = route ? routePoints(tx.state.buildChunks, rider, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
-  const walk = routeWalk(points, rider, tx.state, snapStep(rider));
-  const at = walk.findIndex((p, i) => i > 0 && !overlaps({ ...rider, x: p.x, y: p.y }, mount));
-  const clear = walk[at] ?? walk[walk.length - 1]!;
-  const off: Token = { ...next, x: clear.x, y: clear.y, elevation: clear.elevation };
+  // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.
+  const split = dismountSplit(tx.state, rider, mount, points, route);
+  const off: Token = { ...next, ...split.off };
   const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, undefined, undefined, cost);
-  if (sameSpot(off, next)) return first;
-  // The rest of the route from the clear spot: the piece it lies on, from there, and the pieces after it.
-  const [piece, k, n] = clear.progress;
-  const rest = route && at > 0 ? route.slice(k === n ? piece + 1 : piece) : undefined;
-  return withPath(tx, first, next, judged, false, rest && rest.length > 0 ? rest : undefined);
+  return split.whole || sameSpot(off, next) ? first : withPath(tx, first, next, judged, false, split.rest);
 }
 
 /**

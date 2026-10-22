@@ -1,5 +1,6 @@
 import type { RoomState, Token } from "#shared/model.ts";
-import { footprintSize, tokenHeightFt } from "#shared/rules/footprint.ts";
+import { holderOf, linkHolds } from "#shared/rules/attach.ts";
+import { footprintSize, tokenHeightFt, type PlacedToken } from "#shared/rules/footprint.ts";
 import { routePoints, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -49,6 +50,20 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
 }
 
 /**
+ * The mount a rider's drop at `at` walks it off, with half its Speed, as
+ * the reducer charges it on the rider's own turn (shared/reducer/tokens.ts
+ * walkedOwn): its ride no longer holds there. None without the speeds,
+ * which only the DM and the rider's owners hold.
+ */
+export function dismountOf(view: RoomState, token: Token, at: RoutePoint): { mount: PlacedToken; halfFt: number } | undefined {
+  if (token.attached?.kind !== "ride") return undefined;
+  const mount = holderOf(view.tokens, token) as Token | undefined;
+  const walk = speedsOf(view, token)?.walk;
+  if (!mount || walk === undefined || linkHolds(view.meta.settings, "ride", { ...token, ...at }, mount)) return undefined;
+  return { mount, halfFt: Math.floor(walk / 2) };
+}
+
+/**
  * The board's picture of a lone drag's walk (docs/design-v1-movement.md
  * 3.1): the line, its corners and the label, for where the drop would land
  * now. The walk is the one the drop lands with (`routeLanding`): a route
@@ -86,6 +101,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   const encounter = view.encounter;
   // A controlled mount sharing its rider's turn reads its own path and speeds (docs/design-v1-attach.md 7.2).
   const activeTokenId = turnMoverId(view) ?? null;
+  const dismount = dismountOf(view, token, points[points.length - 1]!);
   const read = dragReading({
     token,
     to,
@@ -96,6 +112,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
     role,
     // A plain leg reads its landing as the move records it: its height, and its squeeze (review ASTRA-18).
     ...(pieces ? {} : { landing: { elevation: points[points.length - 1]!.elevation, ...(to.squeeze === true ? { squeeze: true as const } : {}) } }),
+    ...(dismount ? { dismount } : {}),
     ...(world
       ? {
           walk: {
