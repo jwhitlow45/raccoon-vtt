@@ -48,10 +48,10 @@ type Fetched = { kind: "body"; status: number; json: unknown; bytes: number } | 
 /**
  * The pending request, ended by the signal however far it got. undici
  * aborts a request only once it holds a connection, and a proxy that keeps
- * its CONNECT open never gives it one, so the route would wait for the
- * proxy's own limit, a minute or more on squid, with both slots held and
- * the room's next import refused as busy. A request that answers after the
- * signal is thrown away.
+ * its CONNECT open never gives it one, so the route would wait for as long
+ * as the proxy takes to give up, with both slots held and the room's next
+ * import refused as busy. A request that answers after the signal is thrown
+ * away.
  */
 function untilAborted<T>(pending: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
