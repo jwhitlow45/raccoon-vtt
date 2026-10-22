@@ -70,7 +70,7 @@ import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
-import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, useSideSheetRoom, type AlertsSummary } from "./fold.ts";
+import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, foldsUnderSheet, useSideSheetRoom } from "./fold.ts";
 import { mapFocusSlot, panelFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { SideTabs } from "./SideTabs.tsx";
@@ -650,7 +650,7 @@ function RoomPage() {
   const summaryRef = useRef<HTMLButtonElement>(null);
   useDockSummaryButton(summaryRef);
   /** What the tap that closed the sheets asked to show, for where focus goes once they are gone. */
-  const showing = useRef<{ kind: "bar" } | { kind: "alerts"; first: AlertsSummary["first"] } | null>(null);
+  const showing = useRef<{ kind: "bar" } | null>(null);
   const rolls = useAlertsSummaryEntry();
   const dockActions: DockActions = {
     showBar: () => {
@@ -663,14 +663,16 @@ function RoomPage() {
       (backRef.current ?? closeRef.current)?.focus({ preventScroll: true });
     },
     showAlerts: (s) => {
-      if (rolls?.waiting) {
-        // A roll waits for this viewer's answer: its card shows and takes focus (features/rolls, 3.3.1).
-        showing.current = null;
-        closeSheets();
-        rolls.open();
-        return;
-      }
-      showing.current = { kind: "alerts", first: s.first };
+      /*
+       * The alerts column meets the ask once the sheets are gone, as its own
+       * row's tap would (pages/fold.ts DockState.showAsk): the token bar
+       * steps aside where it holds the row's lane, the cards open over the
+       * tool's options or the screen where they have no room, then a roll
+       * waiting for this viewer's answer opens with focus in its card
+       * (features/rolls, 3.3.1), else the alert it names takes focus.
+       */
+      showing.current = null;
+      dockStore.setState({ showAsk: rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: s.first } });
       closeSheets();
     },
   };
@@ -1081,7 +1083,9 @@ function RoomPage() {
  *   button's tap focuses what it showed. Otherwise, if focus was in the
  *   sheet and went with it, one decision places it (components/sheetFocus.ts):
  *   a roll card the sheet was hiding, else the token bar's frame, else
- *   where it fell, as before.
+ *   where it fell, as before. The alerts summary's tap leaves focus to the
+ *   alerts column, which moves it to what the tap named once the cards
+ *   show (pages/fold.ts DockState.showAsk).
  *
  * Both run after the render that folded or unfolded, when the folded
  * parts have their `hidden` set or cleared.
@@ -1091,7 +1095,7 @@ function useDockFocus(input: {
   sheetOpen: boolean;
   store: ReturnType<typeof dockSlot.create>;
   registry: ReturnType<typeof sheetFocusSlot.create>;
-  showing: { current: { kind: "bar" } | { kind: "alerts"; first: AlertsSummary["first"] } | null };
+  showing: { current: { kind: "bar" } | null };
   showRef: { current: HTMLButtonElement | null };
   summaryRef: { current: HTMLButtonElement | null };
 }): void {
@@ -1142,7 +1146,6 @@ function useDockFocus(input: {
         return;
       }
     }
-    if (asked?.kind === "alerts" && focusAlert(store.getState().column, asked.first)) return;
     // Focus stayed somewhere else, such as on the Panels button that closed the sheet: it stays there.
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;

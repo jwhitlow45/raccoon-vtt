@@ -448,6 +448,36 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
   });
 
+  test("fu20b-r2-7. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the alerts summary on the Panels sheet closes it and shows the cards over the screen (FU20B-OP-11)", async () => {
+    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Ruler");
+    await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
+    const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
+    const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+    await dm.getByRole("button", { name: "Panels", exact: true }).click();
+    const panels = dm.getByRole("region", { name: "Panels" });
+    await panels.waitFor();
+    const summary = dm.getByRole("button", { name: /went off.*Close the sheet to answer\.$/ });
+    await summary.waitFor();
+    await shots.take(dm, "traps-fu20b-r2-sheet-summary-cramped");
+    await summary.click();
+    await panels.waitFor({ state: "detached" });
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().waitFor();
+    await shots.take(dm, "traps-fu20b-r2-sheet-summary-cards-shown");
+    await alerts.getByRole("button", { name: "Close", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  });
+
   test("fu20b-2. on a DM phone held upright the waiting trap cards fold under the trap's pane, whose header and Close are whole in reach, and come back as it closes (LP13-TR-6)", async () => {
     await dm.setViewportSize(PHONE);
     await reopenRoom(dm);
