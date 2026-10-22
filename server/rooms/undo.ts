@@ -382,16 +382,22 @@ export function rootsOf(poses: Record<string, Pose> | undefined): Set<string> {
  * (`kept`), so nothing changed since turns a silent one into one that
  * answers, through the undo and every redo after it.
  */
-export type Passengers = { roots: ReadonlySet<string>; planned: RoomState } | { roots: ReadonlySet<string>; kept: Record<string, Pose> };
+export type Passengers = { roots: ReadonlySet<string>; planned: RoomState } | { roots: ReadonlySet<string>; kept: Record<string, Pose>; planned: RoomState };
 
 /** An op's passengers, by the state before it. */
 export function plannedOn(before: RoomState, op: Op): Passengers {
   return { roots: new Set(namedTokens(op)), planned: before };
 }
 
-/** A restore's passengers, as the step it takes back classed them. */
-export function keptFrom(poses: Record<string, Pose>): Passengers {
-  return { roots: rootsOf(poses), kept: poses };
+/**
+ * A restore's passengers, as the step it takes back classed them, and a
+ * token the step never held, which a link made since brought into the
+ * restore, by how it rode in `before`, the state the restore found: a
+ * torch handed to a hidden imp after the step is as silent there as one
+ * the imp held all along (docs/design-v1-attach.md 8.3).
+ */
+export function keptFrom(poses: Record<string, Pose>, before: RoomState): Passengers {
+  return { roots: rootsOf(poses), kept: poses, planned: before };
 }
 
 /**
@@ -409,7 +415,8 @@ export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Sho
   const roots = passengers?.roots;
   const silent = (id: string) => {
     if (!passengers) return silentPassenger(state, id, restoring);
-    return "kept" in passengers ? passengers.kept[id]?.silent === true : silentPassenger(passengers.planned, id, restoring, roots);
+    const kept = "kept" in passengers ? passengers.kept[id] : undefined;
+    return kept ? kept.silent === true : silentPassenger(passengers.planned, id, restoring, roots);
   };
   const poses: Record<string, Pose> = {};
   for (const id of restoring) {

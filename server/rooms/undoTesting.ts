@@ -102,7 +102,7 @@ export class UndoTable {
     if (!allowed.ok) return allowed.message;
     const r = this.#apply(who, op);
     if (typeof r === "string") return r;
-    if (r.inverse) this.stacks.pushRestored(who.memberId, from, r.inverse, step.label, step.poses ? posesAfter(this.state, r.inverse, this.#shows(who), keptFrom(step.poses)) : undefined, step.origin, step.teleport === true, step);
+    if (r.inverse) this.stacks.pushRestored(who.memberId, from, r.inverse, step.label, step.poses ? posesAfter(this.state, r.inverse, this.#shows(who), keptFrom(step.poses, this.last!.before)) : undefined, step.origin, step.teleport === true, step);
     return "ok";
   }
 

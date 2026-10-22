@@ -1043,7 +1043,7 @@ export class RoomActor {
       const inverse = reduced.inverse;
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
-      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses)) : undefined, step.origin, step.teleport === true, step);
+      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step);
     } else if (UndoStacks.records(viewer.role, op) && reduced.inverse) {
       const inverse = reduced.inverse;
       // A player's move or resize takes back only the move or the resize (undo.ts poseRestore). The DM's undo restores whole

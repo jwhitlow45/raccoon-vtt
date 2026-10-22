@@ -331,6 +331,31 @@ describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
   }
 });
 
+describe("a passenger new to a step since it was made is classed by where the restore found it (8.3)", () => {
+  test("a visible torch handed unseen to a hidden imp after the undo is a silent passenger of the redo's step, with the same answers", () => {
+    // P1's horse carries an imp no player sees. A torch nobody owns lies on the imp's seat, loose in both rooms.
+    const setup = (s: RoomState) => {
+      s.tokens.imp = token("imp", { name: "Imp", size: "tiny", x: 5, y: 5, visibility: "dm", attached: { to: "horse", kind: "perch" } });
+      s.tokens.torch = token("torch", { name: "Torch", kind: "object", size: "tiny", x: 5, y: 5 });
+    };
+    const a = table(setup);
+    const b = table(setup);
+    both(a, b, (t) => t.play(P1, { t: "token.move", tokenId: "horse", x: 8, y: 4 }));
+    both(a, b, (t) => t.undo());
+    // Room a: the DM hands the torch to the imp where it lies, which no copy shows. Room b: a neutral edit.
+    assert.equal(a.play(DM, { t: "token.attach", tokenId: "torch", to: "imp", kind: "carry", x: 5, y: 5, elevation: 0 }), "ok");
+    assert.equal(b.play(DM, { t: "token.update", tokenId: "gob", patch: { name: "Goblin" } }), "ok");
+    // The redo puts the horse and the imp back where the step left them, and the torch, out of the imp's reach there, comes
+    // loose in room a. The step never held the torch, so the redo's own step classes it by where the redo found it: under
+    // the hidden imp, a silent passenger, so the undo after never answers on a torch P1 may not move.
+    both(a, b, (t) => t.redo());
+    assert.equal(a.t("torch").attached, undefined, "the torch's link broke on the redo");
+    assert.equal(a.stacks.peek("p1", "undo")?.poses?.torch?.silent, true);
+    both(a, b, (t) => t.undo());
+    assert.deepEqual([a.t("torch").x, a.t("torch").y, a.t("torch").attached], [5, 5, undefined], "no longer under the group, it stays as it is");
+  });
+});
+
 describe("a passenger whose link breaks on the move is classed by the move's plan (8.3, review AT-ASTRA-1)", () => {
   test("a visible torch carried by a hidden creature the horse drags, both stopped at a wall, answers nothing on the undo", () => {
     // Room a: P1's horse drags a hidden lizard that holds the DM's torch. Room b: the torch lies loose where the lizard stood.
