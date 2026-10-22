@@ -56,15 +56,20 @@ export default function LogPanel(_props: PanelProps) {
   const roomId = useRoomView((s) => s.roomId);
   const you = useRoomView((s) => s.you);
   const sceneId = useRoomView((s) => s.sceneId);
-  const log = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
+  const mainLog = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
+  // Trap lines keep logs of their own, so no players' line ever pushes out a DM's, and read in among the rest (docs/design-v1-traps.md 6.3).
+  const trapLog = useRoomView((s) => s.view?.trapLog ?? EMPTY_LOG);
+  const trapSeen = useRoomView((s) => s.view?.trapSeen ?? EMPTY_LOG);
+  const log = useMemo(() => (trapLog.length + trapSeen.length === 0 ? mainLog : mergeLog(mergeLog(trapLog, trapSeen), mainLog)), [mainLog, trapLog, trapSeen]);
   const members = useRoomView((s) => s.view?.members);
   const tokens = useRoomView((s) => s.view?.tokens);
   const characters = useRoomView((s) => s.view?.characters);
   const handouts = useRoomView((s) => s.view?.handouts);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  const traps = useRoomView((s) => s.view?.traps);
   const names = useMemo<LogNames>(
-    () => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter }),
-    [members, tokens, characters, handouts, encounter],
+    () => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter, traps: traps ?? {} }),
+    [members, tokens, characters, handouts, encounter, traps],
   );
   const me = you?.memberId ?? "";
 
