@@ -133,6 +133,9 @@ function world(r: () => number): World {
     const y = int(r, 2, 10);
     for (let dy = 0; dy < int(r, 1, 3); dy++) for (let dx = 0; dx < int(r, 1, 3); dx++) heights[`${x + dx},${y + dy}`] = pick(r, [5, 10]);
   }
+  // Now and then the step of review AT-O-22's straddle: 10 ft ground under all but the west column of where the elk will stand.
+  const straddle = chance(r, 0.3) ? { x: int(r, 9, 12), y: int(r, 12, 15) } : null;
+  if (straddle) for (let dy = 0; dy < 3; dy++) for (let dx = 1; dx < 3; dx++) heights[`${straddle.x + dx},${straddle.y + dy}`] = 10;
   let state = room({ tokens: Object.fromEntries(list.map((t) => [t.id, t])), buildChunks: built(edges, heights) });
   state.meta.settings = { ...state.meta.settings, diagonal: pick(r, ["five", "fiveTen"] as const), revealHiddenOnTurn: false };
   const vision = chance(r, 0.2);
@@ -198,9 +201,17 @@ function world(r: () => number): World {
     // Then the DM takes the light, and now and then the torch, from P1, so the chain carries tokens P1 may not move.
     if (chain) for (const id of ["light", "torch"]) if (id === "light" || chance(r, 0.5)) dm({ t: "token.update", tokenId: id, patch: { ownerIds: [] } });
   }
-  // Else often review AT-O-22's case: a hidden imp hovering 10 ft up carries the visible light, which a drop by the DM lands as
-  // it would with no holder, since no player sees the imp.
-  if (!chain && chance(r, 0.4)) {
+  // Else review AT-O-22's straddle: a hidden elk stands on the step, and the visible light sits on its low column at the elk's
+  // 10 ft, over low ground, so only the hidden holder could land it there, which a drop by the DM never reads.
+  if (!chain && straddle) {
+    const on = { ...straddle, elevation: 10 };
+    loose("elk", { visibility: "dm", ...on });
+    loose("light", { visibility: "all", ...on });
+    dm({ t: "token.attach", tokenId: "light", to: "elk", kind: "carry", ...on });
+  }
+  // Else often its first case: a hidden imp hovering 10 ft up carries the visible light, which a drop by the DM lands as it
+  // would with no holder, since no player sees the imp.
+  else if (!chain && chance(r, 0.4)) {
     const over = { x: int(r, 8, 12), y: int(r, 7, 9), elevation: 10 };
     loose("imp", { visibility: "dm", ...over });
     loose("light", { visibility: "all", ...over });
@@ -320,6 +331,11 @@ function frameOf(drag: Drag, who: Viewer): Frame {
   return { sent: drag.frame, to: drag.preview.to, ...(who.role === "player" ? { picture: drag.preview } : {}) };
 }
 
+/** Whether a copy holds the token's path as the room does. */
+function wholePath(copy: RoomState, state: RoomState, id: string): boolean {
+  return JSON.stringify(copy.tokens[id]?.path ?? null) === JSON.stringify(state.tokens[id]?.path ?? null);
+}
+
 /** The same for a group drag: what its lead's frames send, and on a player's board its label. */
 function groupFrameOf(drag: GroupDrag, who: Viewer): Frame {
   return { sent: drag.frame, ...(who.role === "player" ? { picture: drag.label } : {}) };
@@ -389,7 +405,9 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
         a: (ga?.op as Op | null | undefined) ?? null,
         b: (gb?.op as Op | null | undefined) ?? null,
         ...(ga && gb ? { frames: [groupFrameOf(ga, who), groupFrameOf(gb, who)] as [Frame, Frame] } : {}),
-        costs: { lead: first.id, ft: [ga?.label.dragFt ?? null, gb?.label.dragFt ?? null] },
+        // Checked only where the actor's copy holds the lead's whole path: a player gets none of the stops of a turn the DM hid
+        // (docs/design-v1-movement.md 7.2), so its label cannot know the turn's diagonals then.
+        costs: { lead: first.id, ft: [ga && wholePath(copies[0], a, first.id) ? ga.label.dragFt : null, gb && wholePath(copies[1], b, first.id) ? gb.label.dragFt : null] },
       },
     };
   }
@@ -878,13 +896,59 @@ function run(seed: number, steps = 70): Seen {
    * answer parts the rooms and the step is not taken. Otherwise each room
    * takes its own.
    */
+  /**
+   * The tokens a built gesture touches in either room: those its ops name,
+   * what each carries and the holder each sits on, and with `near`, for a
+   * move, every token within two squares of the walk, whose space its route,
+   * cost and words read, and for an attach every token within the 30 ft the
+   * DM's Attach list reads.
+   */
+  const touchedBy = (ops: readonly (Op | null)[], near = true): string[] => {
+    const out = new Set<string>();
+    for (const op of ops) {
+      if (!op) continue;
+      for (const id of namedIn(op))
+        for (const s of [a.state, b.state]) {
+          for (const c of carriedGroup(s.tokens, id)) out.add(c);
+          const holder = s.tokens[id]?.attached?.to;
+          if (holder !== undefined) out.add(holder);
+        }
+      const legs = !near ? [] : op.t === "token.move" ? [{ ...op, route: op.route ?? [] }] : op.t === "token.moveMany" ? op.moves.map((m) => ({ ...m, route: [] as readonly (readonly number[])[] })) : [];
+      if (near && op.t === "token.attach")
+        for (const s of [a.state, b.state])
+          for (const id of [op.tokenId, op.to]) {
+            const at = s.tokens[id];
+            if (at) for (const t of Object.values(s.tokens)) if (t && t.sceneId === at.sceneId && Math.abs(t.x - at.x) <= 9 && Math.abs(t.y - at.y) <= 9) out.add(t.id);
+          }
+      for (const leg of legs)
+        for (const s of [a.state, b.state]) {
+          const from = s.tokens[leg.tokenId];
+          if (!from) continue;
+          const xs = [from.x, leg.x, ...leg.route.map((p) => p[0]!)];
+          const ys = [from.y, leg.y, ...leg.route.map((p) => p[1]!)];
+          const box = { x0: Math.min(...xs) - 2, y0: Math.min(...ys) - 2, x1: Math.max(...xs) + 4, y1: Math.max(...ys) + 4 };
+          for (const t of Object.values(s.tokens)) if (t && t.sceneId === from.sceneId && t.x < box.x1 && t.x + 3 > box.x0 && t.y < box.y1 && t.y + 3 > box.y0) out.add(t.id);
+        }
+    }
+    return [...out];
+  };
   const builtShared = (who: Viewer, step: Built): void => {
     if (!step.a && !step.b) return;
     const same = isSame(step.a, step.b) && (!step.frames || isSame(step.frames[0], step.frames[1]));
     const named = [step.a, step.b].flatMap((op) => (op ? namedIn(op) : []));
     const publicNamed = named.every((id) => [a.state, b.state].every((s) => s.tokens[id] !== undefined && inSightOfNonOwners(s, s.tokens[id]!, {})));
     if (!same) {
+      const what = `${where}: ${who.memberId}'s ${step.what} builds ${JSON.stringify(step.a)} against ${JSON.stringify(step.b)}${step.frames ? `, frames ${JSON.stringify(step.frames[0])} against ${JSON.stringify(step.frames[1])}` : ""}`;
+      // Only a token this gesture touches, sent apart by the reveal, lets the devices build it apart, never one elsewhere.
+      const touchesApart = touchedBy([step.a, step.b]).some((id) => apart.has(id));
       if (who.role === "dm" && (!step.a || !step.b)) {
+        // The DM builds it in one room only where a token it touches is one some player cannot see in a room, as the DM's list
+        // reads every token, one sent apart, or one whose link differs between the rooms, as a Get off shows only on a token
+        // still carried.
+        const linked = touchedBy([step.a, step.b], false);
+        const linksDiffer = linked.some((id) => JSON.stringify(a.state.tokens[id]?.attached) !== JSON.stringify(b.state.tokens[id]?.attached));
+        const publicAround = touchedBy([step.a, step.b]).every((id) => [a.state, b.state].every((s) => s.tokens[id] !== undefined && inSightOfNonOwners(s, s.tokens[id]!, {})));
+        assert.ok(!publicAround || touchesApart || linksDiffer, what);
         seen.dmOneRoom++;
         return;
       }
@@ -892,8 +956,7 @@ function run(seed: number, steps = 70): Seen {
         seen.dmSees++;
         return;
       }
-      const what = `${where}: ${who.memberId}'s ${step.what} builds ${JSON.stringify(step.a)} against ${JSON.stringify(step.b)}${step.frames ? `, frames ${JSON.stringify(step.frames[0])} against ${JSON.stringify(step.frames[1])}` : ""}`;
-      assert.ok(apart.size > 0 || (who.role === "dm" && !publicNamed), what);
+      assert.ok(touchesApart || (who.role === "dm" && !publicNamed), what);
       if (who.role === "player" || publicNamed || !step.a || !step.b) return;
       // On a scene of the party's sight, a visible party member sent apart moves what the whole party sees (world's note).
       if (start.vision && named.some((id) => [a.state, b.state].some((s) => s.tokens[id] !== undefined && s.tokens[id]!.visibility !== "dm" && isPartyMember(s, s.tokens[id]!)))) return;
@@ -1011,7 +1074,7 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
     assert.ok(total.restoresApart * 20 < total.restoresCompared, summary);
     // And the devices' own steps: player attaches and Get offs the room takes, the DM's ops and frames compared, and turns
     // of a hidden rider on a mount every player sees.
-    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 30 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
+    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
     if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
   });
 });
