@@ -20,8 +20,8 @@ const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 
 /**
  * Where the canvas mounts a trap's pane, for the DM (docs/design-v1-traps.md
- * 4.1), as it mounts a pin's: a bottom sheet on a phone, a card beside the
- * trap from 900 px. The pane loads only for a DM, and closes on its own
+ * 4.1), as it mounts a pin's: a bottom sheet on a map under 600 px wide, a
+ * card beside the trap from 600 px. The pane loads only for a DM, and closes on its own
  * once it no longer applies: its trap is gone or on another scene, or the
  * Trap tool was put down. A selection stays, since Set it off and the asks
  * for rolls take the selected creatures, and no token's bar shows while a

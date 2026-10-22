@@ -64,8 +64,9 @@ const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 /**
  * A trap's pane (docs/design-v1-traps.md 4.1), for the DM: where it started,
  * then its nine parts folded to one line each, and at its foot Armed and
- * Found, the asks for rolls, Set it off and Delete. It hangs beside the
- * trap from 900 px and is a bottom sheet on a phone, as a pin's pane is.
+ * Found, the asks for rolls, Set it off and Delete. It hangs over the map
+ * beside the trap where the map is 600 px wide or more, and is a bottom
+ * sheet below that, as on a phone held upright, as a pin's pane is.
  *
  * Each change sends `trap.update` with only the fields it changed, so two
  * DM devices editing different fields never undo each other, and an edit
