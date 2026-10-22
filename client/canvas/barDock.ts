@@ -1010,7 +1010,7 @@ export const TOAST_MIN = 44;
 
 /**
  * Where a toast that shows now starts on a phone (docs/design-v1-bar-dock.md
- * 1.3): 8 px under the alerts column's first card, `row ?? top` plus its
+ * 1.3): 8 px under the alerts column's first card, its top plus its
  * height, while the notices span the map over the column and it shows a
  * card (`cards`), so the toast never covers that card's buttons. Null
  * keeps it at the top of the notices as before: beside the lane, with no
@@ -1022,7 +1022,7 @@ export const TOAST_MIN = 44;
 export function toastTop(input: { spanning: boolean; column: ColumnFacts | null; cards: boolean; optionsTop: number }): number | null {
   const { column } = input;
   if (!input.spanning || !input.cards || !column || column.first <= 0) return null;
-  const top = (column.row ?? column.top) + column.first + EDGE;
+  const top = column.top + column.first + EDGE;
   return input.optionsTop - top >= TOAST_MIN ? top : null;
 }
 

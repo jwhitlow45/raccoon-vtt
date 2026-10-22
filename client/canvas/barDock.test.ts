@@ -883,7 +883,6 @@ describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", ()
 
   test("starts 8 px under the first card while the notices span the map", () => {
     assert.equal(toastTop(phone), 122 + 120 + EDGE);
-    assert.equal(toastTop({ ...phone, column: { ...column, row: 60 } }), 60 + 120 + EDGE, "under a row risen over the bars, from where it stands");
   });
 
   test("keeps the top of the notices beside the lane, with no card, with the cards folded or summarized, or with no room left for it", () => {
