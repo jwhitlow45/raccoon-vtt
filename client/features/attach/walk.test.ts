@@ -3,10 +3,12 @@ import { describe, test } from "node:test";
 import type { Token } from "#shared/model.ts";
 import { findRoute } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
-import { token } from "#shared/testutil.ts";
-import { line, thorn, world } from "../movement/testing.ts";
+import { canApply } from "#shared/permissions.ts";
+import { moveOpsOf, planOne } from "../movement/drop.ts";
+import { P1, actor, effect, token } from "#shared/testutil.ts";
+import { line, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
-import { towingWord, walkersFor } from "./walk.ts";
+import { onSeats, towingWord, walkersFor } from "./walk.ts";
 
 const goblin = (over: Partial<Token> = {}) => token("goblin", { name: "Goblin", x: 3, y: 5, attached: { to: "thorn", kind: "drag" }, ...over });
 
@@ -48,5 +50,24 @@ describe("a holder's walk", () => {
   test("the walkers are the dragged creatures players see", () => {
     const state = world({ edges: line("w", 6, 0, 5), tokens: [thorn({ x: 2, y: 5 }), goblin(), token("ghost", { x: 1, y: 5, visibility: "dm", attached: { to: "thorn", kind: "drag" } })] });
     assert.deepEqual(walkersFor(state, "thorn", "dm").map((t) => t.id), ["goblin"]);
+  });
+});
+
+describe("a new seat on a holder over uneven ground (docs/design-v1-attach.md 4.1)", () => {
+  test("is sent at the holder's elevation, which the server takes from a player who may only re-seat the token", () => {
+    // P1's warhorse straddles a 10 ft step, standing at 10 ft, and carries the DM's grappled kobold on its high half.
+    const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, elevation: 10, ownerIds: ["p1"] });
+    const kobold = token("kobold", { name: "Kobold", size: "small", x: 5, y: 4, elevation: 10, attached: { to: "horse", kind: "carry" }, actor: { inline: actor({ effects: [effect("g", { key: "grappled" })] }) } });
+    const state = world({ blockMovement: false, heights: raised(5, 4, 6, 6, 10), tokens: [horse, kobold] });
+    const plan = planOne(state, state.tokens.kobold!, { x: 4, y: 4 }, "free");
+    assert.equal(plan.moves[0]?.elevation, 0, "the drop alone would land it on the low ground under its new seat");
+    const answer = (moves: typeof plan.moves) => canApply(moveOpsOf(moves)[0]!, P1, state, { canUseAsset: () => true }).ok;
+    assert.equal(answer(plan.moves), false);
+    const seated = onSeats(state, plan.moves);
+    assert.deepEqual(seated, [{ tokenId: "kobold", x: 4, y: 4 }], "at the holder's 10 ft, its own height");
+    assert.equal(answer(seated), true);
+    // Off its holder, a drop lands on the ground as any drop does.
+    const off = planOne(state, state.tokens.kobold!, { x: 9, y: 9 }, "free").moves;
+    assert.deepEqual(onSeats(state, off), off);
   });
 });

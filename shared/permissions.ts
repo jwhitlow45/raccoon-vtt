@@ -1194,8 +1194,8 @@ function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> &
   if (!to || !link || !holder || !seenByAll(c, token) || !seenByAll(c, holder as Token)) return d;
   if (!moveCheck(c, holder.id).ok && !directsMount(c, holder as Token)) return d;
   const there = { ...token, x: to.x, y: to.y, elevation: to.elevation ?? token.elevation };
-  // A token they may not move keeps its height on its holder, and a dragged one lands as a walk lands (4.1, 4.3).
-  const height = onHolder(link.kind) ? there.elevation === token.elevation : landsAt(c.state.buildChunks, token, there);
+  // A token they may not move keeps its height on its holder, or takes the holder's, and a dragged one lands as a walk lands (4.1, 4.3).
+  const height = onHolder(link.kind) ? there.elevation === token.elevation || there.elevation === (holder as Token).elevation : landsAt(c.state.buildChunks, token, there);
   return height && linkHolds(c.state.meta.settings, link.kind, there, holder as Token) ? OK : d;
 }
 

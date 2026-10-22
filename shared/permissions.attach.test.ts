@@ -212,6 +212,10 @@ describe("moving a group (6)", () => {
     });
     assert.equal(answer(held, { t: "token.move", tokenId: "gob", x: 6, y: 4, elevation: 300 }), "forbidden: that is not yours");
     assert.equal(answer(held, { t: "token.move", tokenId: "gob", x: 6, y: 4, elevation: 0 }), "ok");
+    // A seat out of step with its holder's height may take the holder's, as a drop sends it.
+    const lagging = table((s) => (s.tokens.gob = grappled({ ...s.tokens.gob!, size: "small", x: 6, y: 4, elevation: 5, attached: { to: "bree", kind: "carry" } })));
+    assert.equal(answer(lagging, { t: "token.move", tokenId: "gob", x: 6, y: 4, elevation: 0 }), "ok");
+    assert.equal(answer(lagging, { t: "token.move", tokenId: "gob", x: 6, y: 4, elevation: 10 }), "forbidden: that is not yours");
     const dragged = table((s) => (s.tokens.gob = { ...s.tokens.gob!, attached: { to: "bree", kind: "drag" } }));
     assert.equal(answer(dragged, { t: "token.move", tokenId: "gob", x: 7, y: 4, elevation: 5 }), "forbidden: that is not yours");
     assert.equal(answer(dragged, { t: "token.move", tokenId: "gob", x: 7, y: 4, elevation: 0 }), "ok");

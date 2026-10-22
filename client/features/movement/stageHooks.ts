@@ -4,7 +4,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { routePoints, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkWorld, WorkBudget, worldUnits, type WalkRoute } from "#shared/rules/walk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
-import { walkersFor, walkersOfGroup } from "../attach/walk.ts";
+import { onSeats, walkersFor, walkersOfGroup } from "../attach/walk.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
@@ -349,14 +349,17 @@ export function dragStops(deps: DragDeps): DragStops {
     return walk;
   };
 
-  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
-    sendPlan(plan, {
+  // A new seat goes at its holder's elevation, which the server takes for a token a player may only re-seat (attach/walk.ts onSeats).
+  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] => {
+    const view = store.getState().view;
+    return sendPlan(view ? { ...plan, moves: onSeats(view, plan.moves) } : plan, {
       dispatch: (op, opts) => actions.dispatch(op, onAnswer ? { ...opts, onAnswer: (answer) => onAnswer(op, answer) } : opts),
       newId: () => actions.newId(),
       note: (note) => notes.setState({ note, busy: false }),
       notify: (text) => ui.notify(text),
       showActions: (open) => ui.showActions(open),
     });
+  };
 
   return {
     start(tokenId) {
