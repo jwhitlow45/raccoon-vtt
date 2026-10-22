@@ -707,10 +707,11 @@ function RoomPage() {
    * that last (the offline banner, a layer that did not load, the DM's
    * frame bar and "Viewing as Pat"), while toasts keep their place, so a
    * card never jumps under a finger for a toast. A toast that shows while
-   * the column shows a card starts under that card instead (toastLow). "Viewing as Pat" stays in
-   * the preview, outside this page, so a blackout and the ended screen keep
-   * its Exit: the preview tells this page how tall it is, and this page
-   * says where it goes. Spanning, this page's own notices start below it.
+   * the column shows a card starts under that card instead (toastLow).
+   * "Viewing as Pat" stays in the preview, outside this page, so a blackout
+   * and the ended screen keep its Exit: the preview tells this page how
+   * tall it is, and this page says where it goes. Spanning, this page's own
+   * notices start below it.
    */
   const free = freeArea({ width: mapWidth, height }, chrome ?? DEFAULT_CHROME);
   const beside = chrome ? noticePlace(free) : null;
