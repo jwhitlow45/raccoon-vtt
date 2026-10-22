@@ -1,3 +1,5 @@
+import type { PcStats } from "#shared/model.ts";
+import type { DdbSyncPatch } from "#shared/protocol.ts";
 import type { FillMerge, PcFill } from "#shared/rules/pcFill.ts";
 import { mergeFill } from "#shared/rules/pcFill.ts";
 import type { PcDraft } from "./draft.ts";
@@ -15,20 +17,34 @@ import { alsoSet, type AlsoKey, type AlsoLine, type AlsoSet } from "./fill.ts";
  * closing aborts the one in flight, and an answer that is not the latest
  * request's changes nothing.
  *
+ * A D&D Beyond read is reviewed as a re-sync is (docs/design-v1-resync.md
+ * 1.1): its ticks are the review's line ids, and its "Use it" carries the
+ * block, the fields beside it and the sync record the editor worked out
+ * from the draft as it is then, so Save sends the record with the block.
+ *
  * `step` returns the next state and the effects the editor runs: send the
  * Save's op, fetch or abort a D&D Beyond request, or close.
  */
 
 export type Step = "block" | "paste" | "ddb" | "review";
 
-/** A fill being looked over: what it read, what it does to the block, and the other fields it sets, ticked or not. */
-export type Review = { fill: PcFill; merge: FillMerge; lines: AlsoLine[]; from: "paste" | "ddb" };
+/**
+ * A fill being looked over: what it read, what it does to the block, and
+ * the other fields it sets, ticked or not. A D&D Beyond read has `ticks`,
+ * the re-sync review's, in place of `lines`.
+ */
+export type Review = { fill: PcFill; merge: FillMerge; lines: AlsoLine[]; from: "paste" | "ddb"; ticks?: ReadonlySet<string> };
+
+/** What a D&D Beyond review's Use it sets: the merged block and level, the fields beside it, and the record, or null when the record would not change. */
+export type SyncUse = { stats: PcStats; level: number | undefined; also: AlsoSet; record: DdbSyncPatch | null };
 
 export type FlowState = {
   step: Step;
   draft: PcDraft;
   /** The fields beside the block the last "Use it" set, sent with the next Save. */
   also: AlsoSet;
+  /** The sync record a D&D Beyond "Use it" made, sent with the next Save (docs/design-v1-resync.md 1.1). */
+  record: DdbSyncPatch | null;
   review: Review | null;
   /** A Save's op waits for its answer. */
   saving: boolean;
@@ -44,21 +60,25 @@ export type FlowEvent =
   | { t: "edit"; update(draft: PcDraft): PcDraft }
   | { t: "open"; step: "paste" | "ddb" }
   | { t: "back" }
-  /** A fill read, with its review's lines worked out against the character as it is now. */
-  | { t: "read"; fill: PcFill; lines: AlsoLine[] }
+  /** A fill read, with its review's lines worked out against the character as it is now, and a D&D Beyond read's ticks. */
+  | { t: "read"; fill: PcFill; lines: AlsoLine[]; ticks?: ReadonlySet<string> }
   | { t: "toggle"; key: AlsoKey }
-  | { t: "use" }
+  /** A D&D Beyond review's tick, or a bulk button's ticks. */
+  | { t: "tick"; id: string }
+  | { t: "ticks"; ticks: ReadonlySet<string> }
+  /** Use it. A D&D Beyond review's carries what it sets. */
+  | { t: "use"; sync?: SyncUse }
   | { t: "save" }
   | { t: "saved"; answer: "taken" | "refused" | "unknown" }
   | { t: "close" }
   | { t: "get" }
   /** A D&D Beyond request's answer: its fill and lines, or why it read nothing. */
-  | { t: "got"; id: number; result: { fill: PcFill; lines: AlsoLine[] } | { error: string } };
+  | { t: "got"; id: number; result: { fill: PcFill; lines: AlsoLine[]; ticks?: ReadonlySet<string> } | { error: string } };
 
 export type FlowEffect = { kind: "send" } | { kind: "close" } | { kind: "fetch"; id: number } | { kind: "abort"; id: number };
 
 export function openFlow(draft: PcDraft): FlowState {
-  return { step: "block", draft, also: {}, review: null, saving: false, closed: false, get: null, nextGet: 1, error: null };
+  return { step: "block", draft, also: {}, record: null, review: null, saving: false, closed: false, get: null, nextGet: 1, error: null };
 }
 
 /** The request in flight, aborted, for a step that leaves it behind. */
@@ -94,14 +114,14 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
       const result = event.result;
       if ("error" in result) return { state: { ...state, get: null, error: result.error }, effects: NONE };
       const merge = mergeFill(state.draft.stats, result.fill);
-      return { state: { ...state, get: null, step: "review", review: { fill: result.fill, merge, lines: result.lines, from: "ddb" } }, effects: NONE };
+      return { state: { ...state, get: null, step: "review", review: { fill: result.fill, merge, lines: result.lines, from: "ddb", ...(result.ticks ? { ticks: result.ticks } : {}) } }, effects: NONE };
     }
     case "read": {
       if (state.step !== "paste" && state.step !== "ddb") return { state, effects: NONE };
       // Pasted JSON read while a Get it waits: the paste wins, and the request goes.
       const dropped = dropGet(state);
       const merge = mergeFill(state.draft.stats, event.fill);
-      return { state: { ...dropped.state, step: "review", review: { fill: event.fill, merge, lines: event.lines, from: state.step } }, effects: dropped.effects };
+      return { state: { ...dropped.state, step: "review", review: { fill: event.fill, merge, lines: event.lines, from: state.step, ...(event.ticks ? { ticks: event.ticks } : {}) } }, effects: dropped.effects };
     }
     case "toggle": {
       const review = state.review;
@@ -109,9 +129,29 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
       const lines = review.lines.map((l) => (l.key === event.key ? { ...l, on: !l.on } : l));
       return { state: { ...state, review: { ...review, lines } }, effects: NONE };
     }
+    case "tick": {
+      const review = state.review;
+      if (!review?.ticks || state.step !== "review") return { state, effects: NONE };
+      const ticks = new Set(review.ticks);
+      if (ticks.has(event.id)) ticks.delete(event.id);
+      else ticks.add(event.id);
+      return { state: { ...state, review: { ...review, ticks } }, effects: NONE };
+    }
+    case "ticks": {
+      const review = state.review;
+      if (!review?.ticks || state.step !== "review") return { state, effects: NONE };
+      return { state: { ...state, review: { ...review, ticks: event.ticks } }, effects: NONE };
+    }
     case "use": {
       const review = state.review;
       if (!review || state.step !== "review" || state.saving) return { state, effects: NONE };
+      if (review.ticks) {
+        // A D&D Beyond review: the editor merged it from the draft as it is now, so it never undoes an edit made since it was read.
+        const sync = event.sync;
+        if (!sync) return { state, effects: NONE };
+        const draft: PcDraft = { stats: sync.stats, level: sync.level };
+        return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record ?? state.record }, effects: NONE };
+      }
       const also = { ...state.also, ...alsoSet(review.fill, review.lines) };
       // The block is merged again from the draft as it is now, so the review never undoes an edit made since it was read.
       const merged = mergeFill(state.draft.stats, review.fill).stats;

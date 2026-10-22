@@ -40,6 +40,24 @@ describe("the editor's flow", () => {
     assert.equal(taken.state.draft.level, 5);
   });
 
+  test("a D&D Beyond read is reviewed by its ticks, and Use it takes the block, the fields beside it and the record it carries (docs/design-v1-resync.md 1.1)", () => {
+    const ddb: PcFill = { ...FILL, source: "ddb" };
+    const start = openFlow({ stats: BLOCK, level: 5 });
+    let { state } = run(start, { t: "open", step: "ddb" }, { t: "get" });
+    state = run(state, { t: "got", id: 1, result: { fill: ddb, lines: [], ticks: new Set(["also:level"]) } }, { t: "tick", id: "field:spellAbility" }, { t: "tick", id: "also:level" }).state;
+    assert.deepEqual([...state.review!.ticks!], ["field:spellAbility"]);
+    state = run(state, { t: "ticks", ticks: new Set(["also:ac"]) }).state;
+    assert.deepEqual([...state.review!.ticks!], ["also:ac"]);
+    assert.equal(run(state, { t: "use" }).state.step, "review", "Use it needs what the editor worked out");
+    const record = { base: { level: 6 }, rolls: {} };
+    const used = run(state, { t: "use", sync: { stats: { ...BLOCK, saves: ["wis"] }, level: 6, also: { level: 6, ac: 16 }, record } }).state;
+    assert.deepEqual([used.step, used.draft.stats.saves, used.draft.level, used.also, used.record], ["block", ["wis"], 6, { level: 6, ac: 16 }, record]);
+    // A later Use it with nothing new keeps the record the first one made.
+    const again = run(used, { t: "open", step: "ddb" }, { t: "read", fill: ddb, lines: [], ticks: new Set() }, { t: "use", sync: { stats: used.draft.stats, level: 6, also: {}, record: null } }).state;
+    assert.equal(again.record, record);
+    assert.equal(run(start, { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [] }, { t: "tick", id: "x" }).state.review!.ticks, undefined, "pasted text keeps today's review");
+  });
+
   test("Back from the review returns to its step and drops what it read", () => {
     const { state } = run(openFlow({ stats: BLOCK, level: 5 }), { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [] }, { t: "back" });
     assert.equal(state.step, "paste");
@@ -85,9 +103,11 @@ describe("the fill flow under random taps and answers (docs/design-v1-pc-stats.m
           () => ({ t: "edit", update: (d) => ({ ...d, level: 1 + Math.floor(r() * 20) }) }),
           () => ({ t: "open", step: pick(["paste", "ddb"] as const) }),
           () => ({ t: "back" }),
-          () => ({ t: "read", fill, lines: [{ key: "ac", text: "AC", on: r() < 0.5 }] }),
+          () => ({ t: "read", fill, lines: [{ key: "ac", text: "AC", on: r() < 0.5 }], ...(fill.source === "ddb" ? { ticks: new Set(["also:ac"]) } : {}) }),
           () => ({ t: "toggle", key: "ac" }),
+          () => ({ t: "tick", id: pick(["also:ac", "field:spellAbility"]) }),
           () => ({ t: "use" }),
+          () => ({ t: "use", sync: { stats: { ...BLOCK, saves: [pick(["wis", "cha"] as const)] }, level: 1 + Math.floor(r() * 20), also: {}, record: r() < 0.5 ? { base: {}, rolls: {} } : null } }),
           () => ({ t: "save" }),
           () => ({ t: "saved", answer: pick(["taken", "refused", "unknown", "refused"] as const) }),
           () => ({ t: "get" }),
