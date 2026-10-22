@@ -20,6 +20,8 @@ import { holdSlot, routeSlot, type DragRoute, type Hold } from "./store.ts";
  * settle. It gives the picture the board draws there, the fields its frames
  * send others, and the plan the drop lands and the op it sends. `answer` is
  * what the search finds, searched again apart only when a test reads it.
+ * `slow` gives each frame that budget instead, so the straight leg's own
+ * check settles frames after the hold first stands, as on a busy device.
  * Never imported by production code.
  */
 export type Drag = {
@@ -52,9 +54,9 @@ class Hand implements Frames {
 const FRAMES = 200;
 
 /** The board's drag stops on one viewer's copy, with frames by hand and the ops they send kept. */
-function board(copy: RoomState, role: Role) {
+function board(copy: RoomState, role: Role, budget = 1e9) {
   const frames = new Hand();
-  const work = new RouteWork(frames, () => new WorkBudget({ limit: 1e9 }));
+  const work = new RouteWork(frames, () => new WorkBudget({ limit: budget }));
   const sent: ClientOp[] = [];
   const scope = new RoomScope();
   const stops = dragStops({
@@ -68,14 +70,15 @@ function board(copy: RoomState, role: Role) {
   return { frames, work, sent, scope, stops };
 }
 
-export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point): Drag {
-  const { frames, work, sent, scope, stops } = board(copy, role);
+export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point, slow?: { budget: number; frames: number }): Drag {
+  const { frames, work, sent, scope, stops } = board(copy, role, slow?.budget);
   const token = copy.tokens[tokenId]!;
   const finger = { x: () => raw.x, y: () => raw.y, position: () => {} };
   frames.frame();
   stops.start(tokenId);
   let preview: DragRoute | null = null;
-  for (let k = 0; k < FRAMES; k++) {
+  const most = slow?.frames ?? FRAMES;
+  for (let k = 0; k < most; k++) {
     stops.frame(finger, token);
     frames.frame();
     preview = scope.get(routeSlot).getState().route;
@@ -86,7 +89,7 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
   const hold = scope.get(holdSlot).getState().hold;
   let plan: DropPlan | null = null;
   stops.drop(finger, token, [token], (landed) => (plan = landed));
-  for (let k = 0; k < FRAMES && !plan; k++) frames.frame();
+  for (let k = 0; k < most && !plan; k++) frames.frame();
   if (!plan) throw new Error(`the drop of ${tokenId} never landed`);
   stops.send(plan);
   stops.end();

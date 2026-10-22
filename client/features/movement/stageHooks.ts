@@ -12,7 +12,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, sameCut, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -279,7 +279,7 @@ export function dragStops(deps: DragDeps): DragStops {
   const follow = (view: DropView, w: Walk | null, node: DragNode, token: DropToken, target: Point) => {
     const answer: RouteAnswer = w ? w.drag.answer : { kind: "open" };
     const holdAt = (at: Pose | null, walkers: WalkersCut | null = null) => {
-      if (!w || (samePose(w.held, at) && w.walkers?.at.x === walkers?.at.x && w.walkers?.at.y === walkers?.at.y && w.walkers?.pieces === walkers?.pieces)) return;
+      if (!w || (samePose(w.held, at) && sameCut(w.walkers, walkers))) return;
       w.held = at;
       w.walkers = walkers;
       publish(w);

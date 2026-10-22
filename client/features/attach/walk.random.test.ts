@@ -732,6 +732,28 @@ describe("a holder's route search walks the creatures it drags beside it with it
       const applied = applyOp(state, drag.op as Op, who, env(10));
       assert.ok(applied.ok, where);
       assert.deepEqual(drag.preview.to, { x: applied.state.tokens.kira!.x, y: applied.state.tokens.kira!.y }, `${where}: the picture showed another spot`);
+      // The leg drawn and priced is the one sent, a plain leg drawn straight (review FU20A-SOL-R3-1).
+      const route = (drag.op as Op & { t: "token.move" }).route ?? [];
+      assert.deepEqual(drag.preview.corners, route.slice(0, -1).map(([x, y]) => ({ x, y })), `${where}: the corners drawn`);
+      const stops = applied.state.tokens.kira!.path!.stops;
+      assert.deepEqual([drag.preview.read.dragFt, drag.frame.ft], [stops.at(-1)!.cost, stops.at(-1)!.cost], `${where}: the feet read`);
+    }
+    // On a busy device the straight leg's own route is checked frames after the hold first stands, cut with no route, at the
+    // same spot the plain leg's cut takes: the picture then follows the plain cut, drawn straight and priced as sent, which on
+    // difficult ground costs what the plain leg does, not the route's doubled feet (review FU20A-SOL-R3-1).
+    for (const budget of [5, 20, 80]) {
+      const { state, who, raw } = ruggedTow(4508);
+      for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+        const key = `s1:${cx},${cy}`;
+        state.buildChunks[key] = { ...(state.buildChunks[key] ?? { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} }), rough: "d".repeat(CHUNK_CELLS * CHUNK_CELLS) };
+      }
+      const drag = dragOf(copyFor(state, who), "player", "kira", raw, { budget, frames: 20_000 });
+      const op = drag.op as Op & { t: "token.move" };
+      assert.deepEqual([op.x, op.y, op.route], [21, 16.5, undefined], `budget ${budget}`);
+      const applied = applyOp(state, op, who, env(10));
+      assert.ok(applied.ok);
+      const stops = applied.state.tokens.kira!.path!.stops;
+      assert.deepEqual([drag.preview.to, drag.preview.corners, drag.preview.read.dragFt], [{ x: 21, y: 16.5 }, [], stops.at(-1)!.cost], `budget ${budget}: the leg drawn and priced is the plain one sent`);
     }
     // Each kind of cut: a shorter route, a stand further back, the plain leg, and none at all.
     assert.deepEqual(

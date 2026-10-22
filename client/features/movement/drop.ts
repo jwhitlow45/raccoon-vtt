@@ -537,9 +537,16 @@ function followersOf(state: BuildState, lead: Walker, points: readonly RoutePoin
 /**
  * Where a holder's walk is cut so the creatures it drags can follow: the
  * spot, and how many of its pieces it keeps whole before it. `plain` when
- * the cut goes as the plain straight leg to the spot, with no route.
+ * the cut goes as the plain straight leg to the spot, with no route, so
+ * it keeps no piece.
  */
 export type WalkersCut = { at: Point; pieces: number; plain?: true };
+
+/** Whether two walkers cuts are the same in every field the preview reads, so a change of any of them draws the walk again. */
+export function sameCut(a: WalkersCut | null, b: WalkersCut | null): boolean {
+  if (!a || !b) return a === b;
+  return a.at.x === b.at.x && a.at.y === b.at.y && a.pieces === b.pieces && a.plain === b.plain;
+}
 
 /**
  * A route cut at a walkers stop (walkersStop): the pieces kept whole, then
@@ -608,10 +615,10 @@ export function walkersStop(
         c.elevation = landedElevation(state.buildChunks, at, c);
         if (legStop(state, at, c) !== null || followers.stop(j, c) !== null) continue;
         const kept = taken(c, j - 1);
-        if (kept) return { at: c, pieces: j - 1, blocker: stopped.blocker, ...kept };
+        if (kept) return { at: c, pieces: kept.plain ? 0 : j - 1, blocker: stopped.blocker, ...kept };
       }
       const kept = j === 1 ? {} : taken(a, j - 1);
-      if (kept) return { at: a, pieces: j - 1, blocker: stopped.blocker, ...kept };
+      if (kept) return { at: a, pieces: kept.plain ? 0 : j - 1, blocker: stopped.blocker, ...kept };
     }
     return { at: start, pieces: 0, blocker: stopped.blocker };
   }
