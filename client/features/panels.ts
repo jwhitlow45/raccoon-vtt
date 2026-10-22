@@ -40,11 +40,21 @@ import "./starter/catalog.ts";
  * and here: `panel({ id: "handouts", title: "Handouts", order: 60, load: () => import("../panels/HandoutsPanel.tsx") }),`
  */
 
+/**
+ * A panel's close (PanelProps.close). A press that picks a tool which waits
+ * for a tap on the map, such as Place a token or Pin to the map, says so
+ * with `placing`: on a wide screen the side panel then keeps its panel
+ * tucked away, so a turn below 900 px shows the map and the tool's options
+ * (pages/Room.tsx closeSidePanel). Any other close leaves the side panel's
+ * panel open, as Add and place does.
+ */
+export type PanelClose = (options?: { placing?: boolean }) => void;
+
 export type PanelProps = {
   /** The token selected on the map, if any. */
   selectedTokenId: string | null;
-  /** Closes the panel's sheet on phones. On wide screens the side panel stays. */
-  close(): void;
+  /** Closes the panel's sheet on phones. On wide screens the side panel stays, tucked away when `placing` (PanelClose). */
+  close: PanelClose;
   /**
    * Whether the panel is on screen. A hidden sheet or side panel keeps its
    * panel mounted (docs/design-v1-layout-hierarchy.md 4.2), so whatever

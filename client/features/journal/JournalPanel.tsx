@@ -12,7 +12,7 @@ import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { usePanelHeader, type PanelProps } from "../panels.ts";
+import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { pinSlot } from "../pins/store.ts";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { accessText, groupPages } from "./draft.ts";
@@ -189,7 +189,7 @@ export function PageRow(props: { id: string; title: string; detail: string | nul
   );
 }
 
-function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBack(): void; onEdit(): void; close(): void }) {
+function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBack(): void; onEdit(): void; close: PanelClose }) {
   const { page, dm } = props;
   const actions = useRoomActions();
   const members = useRoomView((s) => s.view?.members ?? EMPTY_MEMBERS);
@@ -209,7 +209,7 @@ function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBac
   };
   // The phone's sheet closes first, so the map is free for the tap that places the pin (section 3.7).
   const pinToMap = () => {
-    props.close();
+    props.close({ placing: true });
     scope.get(pinSlot).store.setState({ placing: { pageId: page.id, title: page.title }, paneId: null });
     ui.setTool("pin");
   };

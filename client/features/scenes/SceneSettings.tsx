@@ -32,6 +32,7 @@ import { useStartFraming } from "./FrameView.tsx";
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import { layoutWidth } from "../device/layout.ts";
+import type { PanelClose } from "../panels.ts";
 
 /**
  * Settings of the scene the DM is looking at: name, map image, fog,
@@ -42,7 +43,7 @@ import { layoutWidth } from "../device/layout.ts";
  * or off is a Switch row named by the setting (docs/design-v1-visual.md
  * 3.7), never a button named by its state.
  */
-export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): void }) {
+export function SceneSettings(props: { scene: Scene; others: Scene[]; close: PanelClose }) {
   const { scene, others } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -113,7 +114,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close(): v
             size="sm"
             onClick={() => {
               ui.setTool("build");
-              props.close();
+              props.close({ placing: true });
             }}
           >
             Open the builder
@@ -203,7 +204,7 @@ function NameField(props: { name: string; onSave(name: string): void }) {
 }
 
 /** The grid lines' look, and for a map image, how its squares line up with the scene's. */
-function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; close(): void }) {
+function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; close: PanelClose }) {
   const { grid } = props.scene;
   const set = (patch: Partial<Scene["grid"]>) => props.onChange({ ...grid, ...patch });
   return (
@@ -232,7 +233,7 @@ function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; c
  * A map image's scale: aligning its grid with a box on the map, or by
  * counting the squares across and down the art.
  */
-function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close(): void }) {
+function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: PanelClose }) {
   const { scene, map } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -270,7 +271,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
             size="sm"
             onClick={() => {
               ui.setTool("grid");
-              props.close();
+              props.close({ placing: true });
             }}
           >
             Line up the grid
@@ -282,7 +283,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
             onClick={() => {
               findGrid(scene.id);
               ui.setTool("grid");
-              props.close();
+              props.close({ placing: true });
             }}
           >
             Find the grid
@@ -344,7 +345,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close():
  * privately). A scene's first image also brings the fog a map scene starts
  * with (create.ts `fogsWithFirstMap`), which the DM can decline there.
  */
-function MapImageRow(props: { scene: Scene; close(): void }) {
+function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   const { scene } = props;
   const map = scene.map;
   const actions = useRoomActions();
@@ -442,7 +443,7 @@ function MapImageRow(props: { scene: Scene; close(): void }) {
           showOutcome({ actions, store: gridStore, scene: { id: scene.id, bounds: scene.bounds, map: next }, found, fit: true, at, fallback, ownGrid });
         } else if (wait.later) landLater({ sceneId: scene.id, start: { id: scene.id, bounds: scene.bounds, map: next }, search: wait.later, fallback, ownGrid });
         ui.setTool("grid");
-        props.close();
+        props.close({ placing: true });
       }
     } catch (err) {
       if (!abort.signal.aborted) setUpload({ busy: false, waiting: false, error: uploadErrorText(err) });

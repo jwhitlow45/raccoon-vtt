@@ -23,7 +23,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -65,7 +65,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
-import { DEFAULT_TOOL, sheetOpen as sheetShows, type Ended, type Toast, type ToastDie } from "../state/types.ts";
+import { sheetOpen as sheetShows, type Ended, type Toast, type ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
@@ -554,22 +554,23 @@ function RoomPage() {
     saveSplit.current?.();
   }, []);
   /*
-   * A panel's `close` in the side panel (features/panels.ts PanelProps). A
+   * A panel's `close` in the side panel (features/panels.ts PanelClose). A
    * panel closes its phone's sheet to clear the map, as Add and place does,
    * and the side panel stands beside the map, so the panel stays open in the
    * room's state: a turn below 900 px then opens it as a sheet
    * (state/types.ts crossWide), as the side panel showed it. A place button
-   * picks a tool as it closes (Place a token, Pin to the map), and that
-   * tool's options wait for a tap on the map, so then the panel is kept
-   * tucked away, as a phone's Hide does: the turn keeps the map and the
-   * options in view, and Panels brings the panel back. The tool is read once
-   * the press's handler is done, since some pick it after they close.
+   * says `placing` (Place a token, Pin to the map): its tool's options wait
+   * for a tap on the map, so then the panel is kept tucked away, as a
+   * phone's Hide does, and the turn keeps the map and the options in view.
+   * Panels brings the panel back. The press says so itself, since a tool
+   * already active, such as the Ruler during Add and place, tells nothing.
    */
-  const closeSidePanel = useCallback(() => {
-    queueMicrotask(() => {
-      if (store.getState().local.tool !== DEFAULT_TOOL) ui.hideSheet(true);
-    });
-  }, [store, ui]);
+  const closeSidePanel = useCallback<PanelClose>(
+    (options) => {
+      if (options?.placing) ui.hideSheet(true);
+    },
+    [ui],
+  );
   // The bar's Close, whose bar goes with the bottom panel: focus goes to the chosen tab (9.2).
   const closeBelow = useCallback(() => {
     focusNext.current = { kind: "panel" };

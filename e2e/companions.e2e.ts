@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Companion stat blocks end to end (docs/design-v1-companion-stat-blocks.md
@@ -941,6 +941,31 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       const ash = companionOf("Ash");
       if (ash) await ops.send({ t: "token.delete", tokenId: ash.id }).catch(() => undefined);
       await setUp(ana, cdp, { width: 1280, height: 800, scale: 1 });
+    }
+  });
+
+  test("fu20b-r2-1. with the Ruler already picked on a tablet held sideways, Add and place still keeps the Characters panel open, so turning it upright shows Bree's page in a sheet (FU20B-ASTRA-2)", async () => {
+    const cdp = await anaContext.newCDPSession(ana);
+    await setUp(ana, cdp, { width: 1180, height: 820, scale: 1 });
+    try {
+      // A tool other than Select already active says nothing of the press: only a place button tucks the panel away.
+      await pickTool(ana, "Ruler");
+      await openCard(ana, run.bree.characterId);
+      await ana.locator(`[data-opener="companion:${run.bree.characterId}"]`).click();
+      await ana.getByRole("textbox", { name: "Name", exact: true }).fill("Rook");
+      await ana.getByRole("textbox", { name: "HP", exact: true }).fill("4");
+      await ana.getByRole("button", { name: "Add and place" }).click();
+      await waitFor("Rook on the server", () => companionOf("Rook"));
+      await ana.locator(`[data-opener="blocks:${run.bree.characterId}"]`).waitFor();
+      await ana.setViewportSize({ width: 820, height: 1180 });
+      const sheet = ana.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+      await sheet.locator(`[data-opener="blocks:${run.bree.characterId}"]`).waitFor();
+      await shots.take(ana, "companions-fu20b-r2-ruler-add-and-place-upright");
+    } finally {
+      const rook = companionOf("Rook");
+      if (rook) await ops.send({ t: "token.delete", tokenId: rook.id }).catch(() => undefined);
+      await setUp(ana, cdp, { width: 1280, height: 800, scale: 1 });
+      await pickTool(ana, "Select");
     }
   });
 

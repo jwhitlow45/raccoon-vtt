@@ -2,7 +2,7 @@ import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { Character, CreatureSize, Member } from "#shared/model.ts";
-import { usePanelHeader, type PanelProps } from "../panels.ts";
+import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -354,7 +354,7 @@ type NewCharacterDraft = { name: string; owners: string[]; size: CreatureSize; h
  * the map they are looking at. A subpage of the panel, "New character" with
  * "Back to Characters", and Cancel at its foot beside its buttons.
  */
-function NewCharacter(props: { formId: string; since: number; onDone(id: string | null, to: LeaveFor): void; close(): void; owner?: string; opened: number }) {
+function NewCharacter(props: { formId: string; since: number; onDone(id: string | null, to: LeaveFor): void; close: PanelClose; owner?: string; opened: number }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -419,7 +419,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
     } else if (placeAfter) {
       setPending(scope, { kind: "character", characterId: id, name: character.name });
       ui.setTool(PLACE_TOOL_ID);
-      props.close();
+      props.close({ placing: true });
     }
     props.onDone(id, "back");
   };
