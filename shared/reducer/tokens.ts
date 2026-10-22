@@ -420,17 +420,19 @@ function leftMount(tx: Tx, rider: Token, next: Token, judged: Judged): Token | u
  * Half the rider's walking Speed, rounded down (docs/design-v1-attach.md
  * 7.3): what getting on or off a mount costs on the rider's own turn,
  * whatever the leg's length. Null when it costs nothing: not the rider's
- * turn, a ride some player cannot see, or an op from before walked legs or
- * attached tokens recorded what they took. The cost reaches the rider's
- * owners, so like turn sharing (7.1) it reads only a ride every player
- * sees, both tokens and so the link: a hidden mount leaves the leg an
- * ordinary one (8.0).
+ * turn, a mount some player cannot see, or an op from before walked legs or
+ * attached tokens recorded what they took. The cost lands on the rider's
+ * own path, which only the DM and the rider's owners receive, and they
+ * always see their own rider. So only the mount is a private input: like
+ * turn sharing (7.1) the cost reads only a mount every player sees, and a
+ * hidden mount leaves the leg an ordinary one (8.0). A hidden rider, such
+ * as an invisible PC, still pays.
  */
 export function mountCost(tx: Tx, rider: Token, mount: Token): number | null {
   if (!walksRoutes(tx.env.opVersion) || !attaches(tx.env.opVersion)) return null;
   const turn = turnUnderWay(tx.state.encounter);
   if (!turn || turn.tokenId !== rider.id) return null;
-  if (!inSightOfNonOwners(tx.state, rider, tx.env) || !inSightOfNonOwners(tx.state, mount, tx.env)) return null;
+  if (!inSightOfNonOwners(tx.state, mount, tx.env)) return null;
   return Math.floor((speedsOf(tx.state, rider)?.walk ?? 0) / 2);
 }
 

@@ -80,15 +80,16 @@ describe("the picture of a drag's walk", () => {
 
 describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach.md 7.3)", () => {
   /** Bree (P1's, walking 30 ft) on her own turn, riding an independent warhorse at 4,4. */
-  function riding(diagonal: "five" | "fiveTen" = "five", hidden = false): RoomState {
+  function riding(diagonal: "five" | "fiveTen" = "five", hidden: "horse" | "bree" | undefined = undefined): RoomState {
+    const unseen = (id: string) => (hidden === id ? { visibility: "dm" as const } : {});
     let state = room({
       tokens: {
-        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, ...(hidden ? { visibility: "dm" as const } : {}), actor: { inline: actor({ speeds: { walk: 60 } }) } }),
-        bree: token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" }, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, ...unseen("horse"), actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        bree: token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" }, ...unseen("bree"), actor: { inline: actor({ speeds: { walk: 30 } }) } }),
         gob: token("gob", { x: 20, y: 20 }),
       },
     });
-    state.meta.settings = { ...state.meta.settings, diagonal };
+    state.meta.settings = { ...state.meta.settings, diagonal, revealHiddenOnTurn: false };
     for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
       const r = applyOp(state, op, DM, env(i + 1));
       assert.ok(r.ok);
@@ -119,6 +120,8 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     assert.deepEqual(both(riding("fiveTen"), { x: 7, y: 6 }, [[4, 5, 0, 0], [6, 5, 0, 0], [7, 6, 0, 0]]), [20, 20]);
     // A drop that keeps her seat is an ordinary leg, and so is one off a mount no player sees (8.0).
     assert.deepEqual(both(riding(), { x: 5, y: 5 }), [5, 5]);
-    assert.deepEqual(both(riding("five", true), { x: 8, y: 4 }), [20, 20]);
+    assert.deepEqual(both(riding("five", "horse"), { x: 8, y: 4 }), [20, 20]);
+    // A hidden rider still pays, since only the DM and her owners read her path (review AT-O-19).
+    assert.deepEqual(both(riding("five", "bree"), { x: 8, y: 4 }), [25, 25]);
   });
 });

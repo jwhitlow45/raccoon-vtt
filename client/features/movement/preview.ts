@@ -53,16 +53,15 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
  * The mount a rider's drop at `at` walks it off, with half its Speed, as
  * the reducer charges it on the rider's own turn (shared/reducer/tokens.ts
  * walkedOwn, mountCost): its ride no longer holds there, and every player
- * sees the rider and the mount, so the link. None without the speeds,
- * which only the DM and the rider's owners hold.
+ * sees the mount. The rider may be hidden, since only the DM and its owners
+ * read its path. None without the speeds, which only they hold.
  */
 export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: Role): { mount: PlacedToken; halfFt: number } | undefined {
   if (token.attached?.kind !== "ride") return undefined;
   const mount = holderOf(view.tokens, token) as Token | undefined;
   const walk = speedsOf(view, token)?.walk;
   if (!mount || walk === undefined || linkHolds(view.meta.settings, "ride", { ...token, ...at }, mount)) return undefined;
-  const seen = seenIn(view, role);
-  if (!seen(token) || !seen(mount)) return undefined;
+  if (!seenIn(view, role)(mount)) return undefined;
   return { mount, halfFt: Math.floor(walk / 2) };
 }
 

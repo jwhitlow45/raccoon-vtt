@@ -195,6 +195,19 @@ describe("what getting on and off costs (7.3)", () => {
     assert.deepEqual(owners(mount(bresTurn(away))), owners(bresTurn((s) => (delete s.tokens.horse, (s.tokens.bree = { ...s.tokens.bree!, x: 6, y: 4, attached: undefined }))).run({ t: "token.move", tokenId: "bree", x: 4, y: 4 })));
   });
 
+  test("a hidden rider still pays half Speed to get on, get off or be dragged off a mount every player sees, since only the DM and its owners read its path (review AT-O-19)", () => {
+    // An invisible Bree: hidden by the DM and not shown on her turn.
+    const invisible = (s: RoomState) => {
+      s.meta.settings = { ...s.meta.settings, revealHiddenOnTurn: false };
+      s.tokens.bree = { ...s.tokens.bree!, visibility: "dm" };
+    };
+    const on = bresTurn((s) => (invisible(s), (s.tokens.bree = { ...s.tokens.bree!, x: 6, y: 4, attached: undefined }))).run({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 5, y: 4, elevation: 0 });
+    assert.equal(on.state.tokens.bree!.visibility, "dm");
+    assert.equal(last(on.stops("bree")).cost, 15);
+    assert.equal(last(bresTurn(invisible).run({ t: "token.detach", tokenId: "bree", x: 6, y: 4 }).stops("bree")).cost, 15);
+    assert.deepEqual(bresTurn(invisible).run({ t: "token.move", tokenId: "bree", x: 8, y: 4 }).stops("bree").map((stop) => stop.cost), [undefined, 15, 10]);
+  });
+
   test("nothing is paid off the rider's turn", () => {
     const f = bresTurn().run({ t: "encounter.next" }).run({ t: "token.detach", tokenId: "bree", x: 6, y: 4 });
     assert.equal(f.state.tokens.bree!.path?.turn === f.state.encounter!.turnStart?.seq, false);
