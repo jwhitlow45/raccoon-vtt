@@ -5,7 +5,7 @@ import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.t
 import type { Point } from "./geom.ts";
 import { footing } from "./heights.ts";
 import { crossesInnerLedges, groundUnder, legStop, offKey, onOffHolder, pastHolder, stepTester, walkFrom, walkOn, type MovingToken, type StepTester, type Walker } from "./movement.ts";
-import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
+import { legSteps, routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
  * Finding the way a creature walks (docs/design-v1-movement.md section 5):
@@ -1476,6 +1476,7 @@ export class LegCheck {
   readonly #wantRoute: boolean;
   #phase: "test" | "steps" | "pieces" | "cost" | "done" = "test";
   #n = 0;
+  #legSteps: ReturnType<typeof legSteps> | null = null;
   #d = -2;
   #exact = false;
   #even: "slope" | "level" = "level";
@@ -1529,8 +1530,9 @@ export class LegCheck {
       const dx = to.x - token.x;
       const dy = to.y - token.y;
       const L = world.L;
-      this.#n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - EPS));
-      this.#exact = Math.abs(dx) < EPS || Math.abs(dy) < EPS || Math.abs(Math.abs(dx) - Math.abs(dy)) < EPS;
+      this.#legSteps = legSteps(token, to, L);
+      this.#n = this.#legSteps.n;
+      this.#exact = this.#legSteps.exact;
       this.#d = DX.findIndex((x, k) => Math.abs(x * L * this.#n - dx) < EPS && Math.abs(DY[k]! * L * this.#n - dy) < EPS);
       // Off the eight directions the samples are not lattice steps, so only level ground keeps one rise per step.
       this.#even = this.#exact ? (this.#n === 1 || world.input.rules.diagonal !== "fiveTen" || Math.abs(dx) < EPS || Math.abs(dy) < EPS ? "slope" : "level") : "level";
@@ -1548,16 +1550,13 @@ export class LegCheck {
       this.#phase = "steps";
     }
     if (this.#phase === "steps") {
-      const dx = to.x - token.x;
-      const dy = to.y - token.y;
-      const L = world.L;
       const n = this.#n;
       for (; this.#k <= n; this.#k++) {
         if (!this.#open && !this.#wantRoute) break;
         if (late()) return false;
         const k = this.#k;
-        const x = k === n ? to.x : token.x + (this.#exact ? (dx * k) / n : Math.round((dx * k) / n / L) * L);
-        const y = k === n ? to.y : token.y + (this.#exact ? (dy * k) / n : Math.round((dy * k) / n / L) * L);
+        // The straight leg's own steps, which the server's check of the route it makes reads too (route.ts alongStraightLeg).
+        const { x, y } = this.#legSteps!.at(k);
         if (x === this.#px && y === this.#py) continue;
         const node = world.nodeAt({ x, y });
         const e = node >= 0 ? world.elevationAt(node) : this.#pe;

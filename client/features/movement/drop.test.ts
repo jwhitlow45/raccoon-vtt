@@ -5,7 +5,8 @@ import { MAX_MOVES } from "#shared/protocol.ts";
 import type { DiagonalRule, EdgeFeature, RoomState, TerrainId, Token } from "#shared/model.ts";
 import { snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { plainLegCost, routeFeet, routePoints, routeStop, routeWalk, walkTrace, type RoutePiece } from "#shared/rules/route.ts";
+import { alongStraightLeg, plainLegCost, routeFeet, routePoints, routeStop, routeWalk, routeWalkers, walkTrace, type RoutePiece } from "#shared/rules/route.ts";
+import { legStop } from "#shared/rules/movement.ts";
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
@@ -369,7 +370,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     // Review ASTRA-15: a Large ally a square on into the space of a Medium enemy, which it may end in: both half steps pay its space, 10 ft, not 5.
     const ally = token("ogre", { size: "large", x: 0, y: 0, disposition: "ally" });
     cases.push({ view: world({ tokens: [ally, token("goblin", { x: 2, y: 0, disposition: "hostile" })] }), mover: ally, to: { x: 1, y: 0 }, rules: { feetPerCell: 5, diagonal: "five" }, seen: 30 });
-    for (let n = 0; n < 600; n++) {
+    for (let n = 0; n < 1200; n++) {
       const heights: Record<string, number> = {};
       const cells: Record<string, TerrainId> = {};
       const edges: Record<string, EdgeFeature> = {};
@@ -490,6 +491,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     const rises = [0, 0, 0, 1, 3, 5, 10];
     let routed = 0;
     let squeezed = 0;
+    let wholeLeg = 0;
     for (let n = 0; n < 300; n++) {
       const heights: Record<string, number> = {};
       const cells: Record<string, TerrainId> = {};
@@ -536,6 +538,17 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
       const move = plan.moves[0];
       if (move?.route) routed++;
       if (move?.squeeze) squeezed++;
+      // A straight drop keeps what its straight leg walks over: its own route goes with it, judged by the test of its whole
+      // leg where a piece alone would meet ground the leg passes beside (review MV-PLAIN-1). Only a squeeze at its end,
+      // judged at the end of the walk, sends it plain.
+      if (move && !move.route && goesStraight(seenRoom(view), mover, target, found, 5)) {
+        const own = keyStep(w, { x: move.x, y: move.y, ...(move.squeeze ? { squeeze: true } : {}) });
+        assert.ok(own.kind !== "route" || move.squeeze === true, `${label}: the straight drop went plain, dropping ${JSON.stringify(own)}`);
+      }
+      if (move?.route && alongStraightLeg(mover, move.route)) {
+        const trace = routeWalkers(view.buildChunks, walkerOf(seenRoom(view), mover), move.route, move.elevation ?? mover.elevation);
+        if (trace.some((at, i) => i > 0 && legStop(view, trace[i - 1]!, at) !== null)) wholeLeg++;
+      }
       // The picture, as the board draws it: held at the wall where the drop goes straight, reading the straight walk's own route.
       const answer = r === null ? { kind: "open" as const } : r === "none" ? { kind: "none" as const, capped: false } : { kind: "route" as const, route: r };
       const held = goesStraight(seenRoom(view), mover, target, answer, 5) ? planLands(planOne(seenRoom(view), mover, raw, "walk"), mover) : null;
@@ -550,7 +563,57 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
         assert.deepEqual([preview.read.dragFt, frameFields(preview).ft], [cost, cost], `${label}${move.squeeze ? ", squeezed" : ""}${move.route ? "" : ", plain"}: the label and the frame read what the move records`);
       }
     }
-    assert.ok(routed > 50 && squeezed > 0, `${routed} routed, ${squeezed} squeezed`);
+    assert.ok(routed > 50 && squeezed > 0 && wholeLeg > 5, `${routed} routed, ${squeezed} squeezed, ${wholeLeg} judged by the whole leg`);
+  });
+
+  test("random straight walks of Large and Huge creatures over scattered raised squares and rough ground keep what they walk over: the server takes the straight walk's own route by its whole leg, and the label reads what it stores (review MV-PLAIN-1)", () => {
+    const rand = mulberry32(29);
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+    let routed = 0;
+    let wholeLeg = 0;
+    let rough = 0;
+    let presses = 0;
+    for (let n = 0; n < 1200; n++) {
+      const heights: Record<string, number> = {};
+      const cells: Record<string, TerrainId> = {};
+      for (let k = int(10, 30); k > 0; k--) heights[`${int(2, 22)},${int(2, 22)}`] = [3, 5, 10][int(0, 2)]!;
+      for (let k = int(6, 20); k > 0; k--) cells[`${int(2, 20)},${int(2, 20)}`] = (["rubble", "water", "difficult"] as const)[int(0, 2)]!;
+      const base = world({ blockMovement: true, heights });
+      const chunk = base.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
+      base.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, ...cells } };
+      const placed = token("mover", { size: (["large", "large", "huge"] as const)[int(0, 2)], x: int(5, 13), y: int(5, 13), kind: "pc", ownerIds: ["p1"], disposition: "ally" });
+      base.tokens.mover = { ...placed, elevation: footprintGround(base.buildChunks, placed) };
+      base.meta = { ...base.meta, settings: { ...base.meta.settings, diagonal: (["five", "fiveTen", "euclid"] as const)[int(0, 2)]! } };
+      const view = onTurn(base, "mover");
+      const mover = view.tokens.mover!;
+      const known = publicWorld(view, ownWalk(mover), { role: "player" });
+      const w = new WalkWorld(known.input);
+      // An arrow key's press of a square, or a drop with no way searched, both straight.
+      const press = rand() < 0.4;
+      const raw = press ? { x: mover.x + int(-1, 1), y: mover.y + int(-1, 1) } : { x: mover.x + int(-7, 7), y: mover.y + int(-7, 7) };
+      const none = { kind: "none" as const, capped: false };
+      const plan = press ? planPress(seenRoom(view), w, mover, raw, "walk", 5) : planWalk(seenRoom(view), mover, raw, "walk", none, 5, (to) => keyStep(w, to));
+      const move = plan.moves[0];
+      if (!move) continue;
+      const label = `case ${n}: ${mover.size} from ${mover.x},${mover.y} to ${move.x},${move.y}${press ? ", pressed" : ""}`;
+      const [op] = moveOpsOf(plan.moves);
+      const answer = canApply(op!, P1, view, { canUseAsset: () => true });
+      assert.ok(answer.ok, `${label}: the server refuses ${JSON.stringify(op)}: ${answer.ok ? "" : answer.message}`);
+      const own = keyStep(w, { x: move.x, y: move.y, ...(move.squeeze ? { squeeze: true } : {}) });
+      if (own.kind === "route" && !move.squeeze) assert.deepEqual(move.route, own.route.pieces, `${label}: the drop carries its straight walk's own route`);
+      if (!move.route) continue;
+      routed++;
+      if (press) presses++;
+      if (move.route.some(([, , extra, swim]) => extra !== 0 || swim !== 0)) rough++;
+      const trace = routeWalkers(view.buildChunks, walkerOf(seenRoom(view), mover), move.route, move.elevation ?? mover.elevation);
+      if (trace.some((at, i) => i > 0 && legStop(view, trace[i - 1]!, at) !== null)) wholeLeg++;
+      if (press) continue;
+      const held = planLands(plan, mover);
+      const target = routeTarget(seenRoom(view), mover, raw);
+      const preview = walkPreview({ view: seenRoom(view), token: mover, target, answer: none, held, world: known, role: "player", straight: { to: held, pieces: own.kind === "route" ? own.route.pieces : [] } });
+      assert.equal(preview.read.dragFt, recordedCost(view, op!, "mover"), `${label}: the label reads what the move stores`);
+    }
+    assert.ok(routed > 300 && wholeLeg > 35 && rough > 200 && presses > 70, JSON.stringify({ routed, wholeLeg, rough, presses }));
   });
 
   test("a walk cut inside a 5 ft corridor lands squeezed, at a piece end where the squeeze is a real one", () => {

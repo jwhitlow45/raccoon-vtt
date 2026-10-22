@@ -126,15 +126,60 @@ export function routeBlocker<T extends Walker>(state: BuildState, token: T, rout
   return routeStop(state, token, route, landing, legBlocker)?.blocker ?? null;
 }
 
-/** `routeBlocker`, with the piece it stops at. */
+/**
+ * `routeBlocker`, with the piece it stops at. The straight walk's own route
+ * (`alongStraightLeg`) stands where its straight leg steps, so the leg test
+ * of that whole leg judges it, as it judges the plain move: a piece alone,
+ * from a stand on the way, can meet ground the whole leg passes beside,
+ * and the walk would then lose what it walks over (review MV-PLAIN-1).
+ * Never for a walk off a holder, whose pieces past it read the ground's
+ * rule (review AT-ASTRA-16).
+ */
 export function routeStop<T extends Walker>(state: BuildState, token: T, route: readonly RoutePiece[], landing: number, legBlocker: (state: BuildState, token: T, to: RoutePoint) => Blocker | null = (s, t, to) => legStop(s, t, to)?.blocker ?? null): { piece: number; blocker: Blocker } | null {
   const walkers = routeWalkers(state.buildChunks, token, route, landing);
   for (let i = 1; i < walkers.length; i++) {
     const { x, y, elevation } = walkers[i]!;
     const blocker = legBlocker(state, walkers[i - 1]!, { x, y, elevation });
-    if (blocker !== null) return { piece: i - 1, blocker };
+    if (blocker === null) continue;
+    const start = walkers[0]!;
+    const end = walkers[walkers.length - 1]!;
+    if (!start.offHolder && alongStraightLeg(start, route) && legBlocker(state, start, { x: end.x, y: end.y, elevation: end.elevation }) === null) return null;
+    return { piece: i - 1, blocker };
   }
   return null;
+}
+
+/**
+ * The lattice steps of the straight leg from `from` to `to` (walk.ts
+ * LegCheck): `n` of them on the lattice `L`, each `at(k)` exactly along the
+ * leg where it runs along one of the eight directions (`exact`), else
+ * snapped to the lattice, the last at `to`.
+ */
+export function legSteps(from: Point, to: Point, L: number): { n: number; exact: boolean; at(k: number): Point } {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / L - SLACK));
+  const exact = Math.abs(dx) < SLACK || Math.abs(dy) < SLACK || Math.abs(Math.abs(dx) - Math.abs(dy)) < SLACK;
+  const along = (d: number, k: number) => (exact ? (d * k) / n : Math.round((d * k) / n / L) * L);
+  return { n, exact, at: (k) => (k === n ? { x: to.x, y: to.y } : { x: from.x + along(dx, k), y: from.y + along(dy, k) }) };
+}
+
+/** Whether a route is the straight walk's own (walk.ts LegCheck): its every point one of the straight leg's lattice steps from where the token stands to the route's end, in order. */
+export function alongStraightLeg(token: PlacedToken & Point, route: readonly RoutePiece[]): boolean {
+  const last = route[route.length - 1];
+  if (!last) return false;
+  const steps = legSteps(token, { x: last[0], y: last[1] }, routeLattice(token));
+  const on = (k: number, x: number, y: number) => {
+    const p = steps.at(k);
+    return Math.abs(p.x - x) < 1e-7 && Math.abs(p.y - y) < 1e-7;
+  };
+  let k = 0;
+  for (const [x, y] of route) {
+    do k++;
+    while (k <= steps.n && !on(k, x, y));
+    if (k > steps.n) return false;
+  }
+  return true;
 }
 
 /** A piece's reach as the area sweep measures it (section 10): the most it moves along any axis, its rise in squares. */

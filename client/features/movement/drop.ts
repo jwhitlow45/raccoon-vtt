@@ -380,11 +380,14 @@ function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?
 
 /**
  * The route as it is, on a scene that stops moves, when the server's check
- * takes it piece by piece (route.ts `routeStop`), or null when it refuses
- * one: the drop then goes as the plain straight leg. A piece that fails is
- * never split into its lattice steps. A split can change what the walk
- * costs, since `routeFeet` rounds each piece up to the creature's step,
- * and in review no split passed where its piece failed (MV-O-28).
+ * takes it (route.ts `routeStop`): piece by piece, or for the straight
+ * walk's own route by the test of its whole leg, as the plain move is
+ * judged, so a straight drop keeps what it walks over (review MV-PLAIN-1).
+ * Null when the check refuses it: the drop then goes as the plain straight
+ * leg. A piece that fails is never split into its lattice steps: a split
+ * reads the ground at other stands (route.ts `routePoints`), so it can
+ * change what the walk costs, and in review no split passed where its
+ * piece failed (MV-O-28).
  */
 function passing(state: BuildState, token: DropToken & Walker, pieces: RoutePiece[], landing: number): RoutePiece[] | null {
   if (state.scenes[token.sceneId]?.blockMovement !== true) return pieces;

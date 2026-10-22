@@ -4,7 +4,7 @@ import type { DiagonalRule } from "../model.ts";
 import { legFeet } from "./distance.ts";
 import { sizeCategory, sizeSteps } from "./footprint.ts";
 import { legStop } from "./movement.ts";
-import { onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, routeStop, straightFeet, trueLength, type RoutePoint } from "./route.ts";
+import { alongStraightLeg, legSteps, onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, routeStop, straightFeet, trueLength, type RoutePoint } from "./route.ts";
 import { free, line, tok, world } from "./testWorld.ts";
 
 const RULES: DiagonalRule[] = ["five", "fiveTen", "euclid"];
@@ -239,6 +239,34 @@ describe("routeStop (6.1)", () => {
     const rise = world({ w: 14, h: 14, heights: { "3,3": 5, "6,6": 5, "6,7": 10 } });
     const other = tok(rise, { size: "large", x: 2.5, y: 2, squeeze: true });
     assert.equal(routeStop(rise, other, [[2, 1.5, 0, 0], [6.5, 8, 0, 0]], 0), null);
+  });
+
+  test("a straight walk's own route is judged by the leg test of its whole leg, as the plain move is, and no other route is (review MV-PLAIN-1)", () => {
+    // A Large creature walks north past a 10 ft block under the west half of its footprint: the whole leg passes, shifted half a
+    // square east, but the straight walk's stand at (13, 6) has the block under its core, and the piece into it climbs it.
+    const block = world({ w: 24, h: 24, heights: { "13,6": 10 } });
+    const ogre = tok(block, { size: "large", x: 13, y: 10 });
+    const straight: [number, number, number, 0 | 1][] = [[13, 6.5, 0, 0], [13, 6, 0, 0], [13, 4.5, 1, 0], [13, 4, 0, 0]];
+    assert.equal(alongStraightLeg(ogre, straight), true);
+    assert.equal(legStop(block, ogre, at(13, 4)), null, "the whole leg passes");
+    assert.notEqual(legStop(block, { ...ogre, x: 13, y: 6.5 }, at(13, 6, 10)), null, "the piece onto the block alone does not");
+    assert.equal(routeStop(block, ogre, straight, 0), null);
+    // Off the straight leg's own steps, each piece is judged alone again.
+    const bent: [number, number, number, 0 | 1][] = [[13.5, 6.5, 0, 0], [13, 6, 0, 0], [13, 4, 0, 0]];
+    assert.equal(alongStraightLeg(ogre, bent), false);
+    assert.deepEqual(routeStop(block, ogre, bent, 0), { piece: 1, blocker: "ledge" });
+    // And a straight walk whose whole leg the test stops is stopped.
+    const walled = world({ w: 24, h: 24, heights: { "13,6": 10 }, edges: line("n", 5, 10, 18) });
+    assert.notEqual(routeStop(walled, tok(walled, { size: "large", x: 13, y: 10 }), straight, 0), null);
+  });
+
+  test("the straight leg's steps are exact along the eight directions and snapped to the lattice off them", () => {
+    assert.deepEqual([1, 2, 3].map((k) => legSteps({ x: 2, y: 2 }, { x: 5, y: 5 }, 1).at(k)), [at(3, 3), at(4, 4), at(5, 5)].map(({ x, y }) => ({ x, y })));
+    const off = legSteps({ x: 0, y: 0 }, { x: 4, y: 1 }, 0.5);
+    assert.deepEqual([off.n, off.exact], [8, false]);
+    assert.deepEqual([1, 2, 3, 8].map((k) => off.at(k)), [{ x: 0.5, y: 0 }, { x: 1, y: 0.5 }, { x: 1.5, y: 0.5 }, { x: 4, y: 1 }]);
+    assert.equal(alongStraightLeg(tok(world({ w: 8, h: 8 }), { size: "tiny", x: 0, y: 0 }), [[1, 0.5, 0, 0], [4, 1, 0, 0]]), true);
+    assert.equal(alongStraightLeg(tok(world({ w: 8, h: 8 }), { size: "tiny", x: 0, y: 0 }), [[1, 0, 0, 0], [4, 1, 0, 0]]), false);
   });
 });
 
