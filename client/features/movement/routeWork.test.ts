@@ -88,6 +88,28 @@ describe("the board's route work (routeWork.ts)", () => {
     assert.deepEqual(frames.slice(0, 3), [100, 100, 100]);
   });
 
+  test("a budget's time counts from the outermost run's begin to its end, however runs nest (review ASTRA-17)", () => {
+    let t = 0;
+    const budget = new WorkBudget({ ms: 4, clock: () => t });
+    budget.begin();
+    // An inner run, as a drag's answer that sets off a preview's check does.
+    budget.begin();
+    t += 1;
+    budget.end();
+    t += 21;
+    budget.charge(16);
+    assert.equal(budget.spent, true, "22 ms of work in the outer run");
+    budget.end();
+    const units = new WorkBudget({ limit: 100 });
+    units.begin();
+    units.begin();
+    units.charge(60);
+    units.end();
+    units.charge(60);
+    units.end();
+    assert.equal(units.spent, true);
+  });
+
   test("a budget timed by its work: what ran before the turn counts against the frame", () => {
     let t = 0;
     const budget = new WorkBudget({ ms: 4, clock: () => t });

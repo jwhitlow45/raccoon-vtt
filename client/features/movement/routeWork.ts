@@ -85,12 +85,7 @@ export class RouteWork {
   /** Runs `fn` now on what is left of the frame's budget, its time counted. Reading what is known costs nothing once it is spent. */
   within<T>(fn: (budget: WorkBudget) => T): T {
     const budget = this.budget();
-    budget.begin();
-    try {
-      return fn(budget);
-    } finally {
-      budget.end();
-    }
+    return budget.timed(() => fn(budget));
   }
 
   /**
@@ -100,9 +95,7 @@ export class RouteWork {
   run(job: RouteJob): boolean {
     const budget = this.budget();
     if (!budget.spent) {
-      budget.begin();
-      const done = job.run(budget);
-      budget.end();
+      const done = budget.timed(() => job.run(budget));
       if (done) {
         this.drop(job);
         return true;
@@ -154,9 +147,7 @@ export class RouteWork {
     let ran = -1;
     for (const [k, job] of order.entries()) {
       if (budget.spent) break;
-      budget.begin();
-      const done = job.run(budget);
-      budget.end();
+      const done = budget.timed(() => job.run(budget));
       if (k >= firsts.length) ran = k - firsts.length;
       if (done) this.drop(job);
     }

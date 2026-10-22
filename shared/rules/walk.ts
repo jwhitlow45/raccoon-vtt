@@ -93,7 +93,9 @@ export const MAX_TRACED = 10_000;
  * built, about a microsecond each on a development laptop. It is spent when
  * its units reach `limit`, when the time its runs have taken (`begin` to
  * `end`) reaches `ms`, or when `clock` passes `deadline`, the clock read
- * every 16 units. Once spent it stays spent.
+ * every 16 units. Once spent it stays spent. Runs nest, as a drag's answer
+ * sets off a preview's check inside the drag's own run, and the time counts
+ * from the outermost `begin` to its `end` (review ASTRA-17).
  */
 export class WorkBudget {
   units = 0;
@@ -105,6 +107,7 @@ export class WorkBudget {
   #spent = false;
   #took = 0;
   #runAt: number | null = null;
+  #depth = 0;
 
   constructor(opts: { limit?: number; ms?: number; deadline?: number; clock?: () => number } = {}) {
     this.limit = opts.limit ?? Infinity;
@@ -128,15 +131,25 @@ export class WorkBudget {
     return new WorkBudget(clock ? { deadline, clock } : { deadline });
   }
 
-  /** A run of work begins: its time counts against `ms` until `end`. */
+  /** A run of work begins: its time counts against `ms` until the outermost run's `end`. */
   begin(): void {
-    if (this.#runAt === null && this.ms !== Infinity) this.#runAt = this.clock();
+    if (this.#depth++ === 0 && this.ms !== Infinity) this.#runAt = this.clock();
   }
 
   end(): void {
-    if (this.#runAt === null) return;
+    if (this.#depth === 0 || --this.#depth > 0 || this.#runAt === null) return;
     this.#took += this.clock() - this.#runAt;
     this.#runAt = null;
+  }
+
+  /** Runs `fn` as one run of work, its end paired with its begin however `fn` ends. */
+  timed<T>(fn: () => T): T {
+    this.begin();
+    try {
+      return fn();
+    } finally {
+      this.end();
+    }
   }
 
   charge(units = 1): void {
