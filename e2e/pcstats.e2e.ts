@@ -609,7 +609,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     }
   });
 
-  test("5. a D&D Beyond character's JSON pasted fills the review, and Use it then Save keeps Ana's own block parts it did not read", async () => {
+  test("5. a D&D Beyond character's JSON pasted fills the review, which lists what it replaces since Bree has no sync record, and Use it then Save keeps Ana's own block parts it did not read", async () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Edit", exact: true }).click();
     const sheet = editor(ana);
@@ -620,7 +620,10 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await step.getByRole("button", { name: "Read it", exact: true }).click();
     const review = ana.getByRole("dialog", { name: "Check what was read" });
     await review.getByText("Read from D&D Beyond: Wren Ashdown, level 7.").waitFor();
-    await review.getByText("AC 13 was worked out from the armor. Check it.", { exact: false }).waitFor();
+    // With no record of a past sync the fill takes what it read, and lists each typed value it replaces (docs/design-v1-resync.md 3.3).
+    await review.getByRole("heading", { name: /^Replaces your changes \(\d+\)$/ }).waitFor();
+    assert.equal(await review.getByRole("checkbox", { name: "AC 13, now 15", exact: true }).isChecked(), true);
+    await review.getByText("Worked out from the armor. Check it.", { exact: true }).waitFor();
     assert.equal(await review.getByRole("checkbox", { name: /^Name Wren Ashdown, now Bree$/ }).isChecked(), false, "the name starts off");
     assert.equal(await review.getByRole("checkbox", { name: /^Level 7, now 9$/ }).isChecked(), true);
     await shots.take(ana, "pcstats-ddb-review");
