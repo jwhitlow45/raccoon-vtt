@@ -1,6 +1,6 @@
 # raccoon-vtt v1: re-sync from D&D Beyond
 
-Status: draft 4, revised for design review rounds 1 to 3 (findings RS-O, RS-ASTRA and RS-UX) with the coordinator's decisions, which section 7 lists. Code is cited from main at `09651fbc7`. It builds on docs/design-v1-pc-stats.md ("the stat block note"), whose section 6 fills a block from D&D Beyond, and follows docs/design-v1-look-pass.md for every screen.
+Status: built. Draft 4, revised for design review rounds 1 to 3 (findings RS-O, RS-ASTRA and RS-UX) with the coordinator's decisions, which section 7 lists, and the build follows it. Section 8 records where the build chose what the note left open. Code is cited from main at `09651fbc7`. It builds on docs/design-v1-pc-stats.md ("the stat block note"), whose section 6 fills a block from D&D Beyond, and follows docs/design-v1-look-pass.md for every screen.
 
 The project owner, 2026-10-22: "Another useful feature would be to have a "re-sync charcter sheet" feature that allows someone to re-sync their stats and spells from an existing sync. As part of this we should keep track of manual changes that were made to stats and other static values (such as spell casting ability, my druid is a charisma caster for examples), and note that these were not changed on the resync, while giving the option to overwrite them if desired. I'll let you come up with where this should live and the design but I think it should be pretty simple given the new data from dnd beyond just has to be "merged" intelligently."
 
@@ -449,6 +449,28 @@ Asking is off. These are the choices most likely from the owner's words and past
 15. **A player undoes in the dialog, until it closes.** Rejected: a player's undo stack for character edits, which would let a player churn stored blocks past the bucket, and a toast with an action, which no toast has.
 16. **The route and its budgets are unchanged.** Rejected: merging on the server, which needs room state in the route and would freeze the merge into replay.
 17. **(C) `gone` holds 40, dropping the oldest with a warning before Apply.** Rejected: refusing the Apply, which would leave a player unable to re-sync, and keeping markers without a bound.
+
+## 8. As built
+
+Where the note left a choice open, the build took these:
+
+- **An own roll of a D&D Beyond roll's name, with a record of the same source,** is listed under Different from D&D Beyond, with the "did not give these at the last sync" intro, as a field without a base is. Without a record it is Different in the dialog and Replaces in the editor. Once linked, a later re-sync lists it under Kept with Overwrite.
+- **Own rolls meet the read by key text** (kind, name, spell level), in order, after the record's entries, the `gone` markers and an old import's marked rolls claimed theirs. A link waits while the entries the sync keeps and the orphans fill the record's 40 (2.4).
+- **A roll the player deleted while its kind was not read whole** keeps its entry (invariant 3). Additions stop when the block or the record is at 40, counted with the rolls that did not fit.
+- **One Overwrite all** covers Kept and Different rows. It sits on Kept's label, or on Different's when nothing is kept, so two buttons never share a name.
+- **Words the note did not give.** A flag reads "Jack of All Trades: Yes, now no". A kept field's first line is the field and its value ("Wisdom 16", "AC 15", "Level 5"). A roll's group summary is "Shortbow, your own, differs from D&D Beyond's", or in Replaces "Shortbow: yours, becomes D&D Beyond's". The late Undo toast is "Bree's re-sync was not undone." with the reason after it. Speed keeps `speedText` ("Fly 30 ft"). The UI uses the typographic apostrophe of `whose`, and the server's undo labels the straight one, as before.
+- **The losses warning** compares with the record's base where there is one, else the block, and counts the linked rolls as synced.
+- **Readings in the review** read D&D Beyond's rolls against the block the current ticks would leave, and the current ones against the block now.
+- **`at` is ISO to the millisecond** (`z.iso.datetime({ precision: 3 })`), so the 4,790-byte bound holds. Without it an `at` of thousands of digits was the one string the other bounds left open.
+- **`expect`'s HP** is `{ cur, max }`, temporary HP left out, and the shape is `{ srdId, wildShape }`. Undo expects `actor.shape` too.
+- **The editor.** With no block and nothing typed, a D&D Beyond fill is a first sync. Once anything is typed, the draft is the block and Replaces lists it. A record alone makes the draft count as unsaved.
+- **Re-sync shows in a shape too**, since the group keeps the row there. When the character leaves the view during a review, the dialog shows the "deleted or no longer yours" notice with Done.
+- **The done line** counts every unticked Also set line as kept, the name included.
+- **The reader.** One more roll reads "D&D Beyond has 1 more roll for Bree than the 40 that are read, so it was not read. Rolls here that it would change stay as they are." It says "the character" when no name was read. The classes, bonuses and scores warnings keep the note's words even when an override still reads max HP. A list's loop bound does not mark a kind unread. Both `bonusStats` and `overrideStats` missing, or both spell sources, make one warning. The missing-source warnings go first, and the cut warning keeps its place after the spell warnings.
+- **The e2e tests.** rs-2's edits go through the editor. rs-9 cancels the relinked review after Take these, then applies the sync of the typed number. rs-10 reads the Undo labels from Undo's toast. rs-11 first resets Bree to level 5 with no rolls and no record. Chrome's "Failed to load resource" lines for the refused imports are allowed in rs-8 and rs-9 only.
+- **Focus (3.6).** Each section's label takes focus (`tabIndex` -1). When a live rebuild removes the focused row, focus goes to its section's label, and when the section went too, to the review's first line.
+- **A `gone` marker that would go** is named in a list up to three ("Shortbow, Sling and Dagger"), then counted ("4 rolls you deleted").
+- **A live rebuild's new Also set line starts unticked** (RS-O-32, decided). When another device sets a kept AC back to its base, AC moves from Kept to Also set, and its line stays unticked, since ticks change only by a tick, a bulk button or a line going away. Unticked keeps the player's value, which is the safe side. A fresh review ticks it.
 
 ## Appendix A. Sizes
 
