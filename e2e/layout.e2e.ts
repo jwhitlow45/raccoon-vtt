@@ -381,7 +381,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
   // ------------------------------------------------ where the tool's options stand (cases 1, 2 and 4, docs/design-v1-tool-options.md 4)
 
-  const TOOLS = { dm: ["Ruler", "Area", "Draw", "Ping", "Fog", "Map builder", "Line up grid", "Add token", "Pin"], player: ["Ruler", "Area", "Draw", "Ping"] } as const;
+  const TOOLS = { dm: ["Ruler", "Area", "Draw", "Ping", "Fog", "Map builder", "Line up grid", "Add token", "Pin", "Trap"], player: ["Ruler", "Area", "Draw", "Ping"] } as const;
   /**
    * The sideways phones of 4.3: where the options stand for each role at
    * 100% and 130%, and the map's height between the top bar and the
@@ -1235,7 +1235,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
   test("9. the DM's toolbar has the play tools first with Fog fourth, a divider, then the setup tools, and a player's order is as before", async () => {
     const names = (page: Page) => toolbar(page).locator("button[aria-label]").evaluateAll((els) => els.map((el) => (el as unknown as DomEl).getAttribute("aria-label")));
-    assert.deepEqual((await names(desk)).filter((n) => n !== "Panels"), ["Select", "Ruler", "Area", "Fog", "Draw", "Ping", "Add token", "Pin", "Map builder", "Line up grid"]);
+    assert.deepEqual((await names(desk)).filter((n) => n !== "Panels"), ["Select", "Ruler", "Area", "Fog", "Draw", "Ping", "Add token", "Pin", "Trap", "Map builder", "Line up grid"]);
     const divider = await toolbar(desk).locator("[data-rvtt-divider]").evaluate((el) => (el as unknown as { nextElementSibling: DomEl | null }).nextElementSibling?.getAttribute("aria-label"));
     assert.equal(divider, "Add token", "the divider stands before the first setup tool");
     assert.deepEqual((await names(player)).filter((n) => n !== "Panels"), ["Select", "Ruler", "Area", "Draw", "Ping"]);
