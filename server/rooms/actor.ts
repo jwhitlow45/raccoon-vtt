@@ -175,6 +175,8 @@ type Batch = {
   rejects: Map<ClientKey, Reject[]>;
   /** What each client's undos and redos in the batch took back, for its toast. */
   restored: Map<ClientKey, Restored[]>;
+  /** Each player client's ops whose trap step refuses their Undo move, for the bar (docs/design-v1-traps.md 6.5). */
+  trapped: Map<ClientKey, number[]>;
   watermarks: Map<ClientKey, number>;
   hellos: Array<{ conn: Connection; key: ClientKey }>;
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
@@ -1042,6 +1044,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
+    if (reduced.trapped && viewer.role === "player") push(batch.trapped, key, n);
     batch.watermarks.set(key, n);
     if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
     if (restoredFrom && step) {
@@ -1368,6 +1371,7 @@ export class RoomActor {
         acks: new Map(),
         rejects: new Map(),
         restored: new Map(),
+        trapped: new Map(),
         watermarks: new Map(),
         hellos: [],
         sys: [],
@@ -1512,6 +1516,7 @@ export class RoomActor {
         acks: batch.acks,
         rejects: batch.rejects,
         restored: batch.restored,
+        trapped: batch.trapped,
       },
       this.#connections,
       (key) => this.#clients.get(key),

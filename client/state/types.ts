@@ -501,6 +501,13 @@ export type RoomView = {
    * sends nothing, leaves it out.
    */
   refused?: readonly number[];
+  /**
+   * The `n`s of this page's latest ops whose trap step refuses their Undo
+   * move, oldest first, at most MAX_REFUSED, as the server's ack marks them
+   * (docs/design-v1-traps.md 6.5). The token bar reads it to stop offering
+   * Undo move.
+   */
+  trapped?: readonly number[];
 };
 
 /** How many refused op numbers RoomView.refused keeps. One `ev` rarely refuses more than a handful. */

@@ -89,13 +89,13 @@ export function useTrapAlerts(): void {
       for (const p of now.pending) {
         if (p.n <= lastN) continue;
         lastN = p.n;
-        const w = watchOf(p.op, p.n, newestId(trapSeen));
+        const w = watchOf(p.op, p.n);
         if (w) watched.set(p.n, w);
       }
       for (const [n, w] of watched) {
         if (now.pending.some((p) => p.n === n)) continue;
         watched.delete(n);
-        if ((now.refused ?? []).includes(n) || !metTrap(w, now.confirmed ?? view, trapSeen)) continue;
+        if ((now.refused ?? []).includes(n) || !metTrap(w, now.trapped)) continue;
         const offers = scope.get(lastMoveSlot);
         const kept = offers.getState().offers.filter((o) => !o.ns.includes(n));
         if (kept.length !== offers.getState().offers.length) offers.setState({ offers: kept });

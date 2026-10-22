@@ -81,13 +81,12 @@ describe("what a trap going off tells each device", () => {
     assert.deepEqual(playerAlerts(seen, world(), DM).length, 0, "the DM owns no party creature here");
   });
 
-  test("a move met a trap when its token stands short of where it asked, or a players' line since names it", () => {
-    const w = watchOf({ t: "token.move", tokenId: "thorn", x: 6, y: 2 }, 7, "12:1")!;
-    assert.equal(metTrap(w, { tokens: { thorn: { x: 6, y: 2 } } }, seen), false, "landed, and Bree's line is not Thorn's");
-    assert.equal(metTrap(w, { tokens: { thorn: { x: 4, y: 2 } } }, seen), true, "stopped on the way");
-    assert.equal(metTrap({ ...w, since: "11:0" }, { tokens: { thorn: { x: 6, y: 2 } } }, seen), true, "its players were told");
-    const lift = watchOf({ t: "token.update", tokenId: "thorn", patch: { elevation: 5 } }, 8, null)!;
-    assert.deepEqual(lift.to, []);
-    assert.equal(watchOf({ t: "chat.send", text: "hi" } as never, 9, null), null);
+  test("a move met a trap when the server's ack marks it, the rule its undo refuses by, and a non-move is never watched", () => {
+    const w = watchOf({ t: "token.move", tokenId: "thorn", x: 6, y: 2 }, 7)!;
+    assert.equal(metTrap(w, undefined), false);
+    assert.equal(metTrap(w, [5, 6]), false, "another op's mark");
+    assert.equal(metTrap(w, [6, 7]), true);
+    assert.deepEqual(watchOf({ t: "token.update", tokenId: "thorn", patch: { elevation: 5 } }, 8), { n: 8 }, "a landing");
+    assert.equal(watchOf({ t: "chat.send", text: "hi" } as never, 9), null);
   });
 });

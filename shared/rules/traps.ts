@@ -894,8 +894,12 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
     let stopped = false;
     if (trap.rig!.stops) {
       for (const hit of together) {
-        if (!hit.walk.walker || stops.has(hit.walk.group.named)) continue;
-        stops.set(hit.walk.group.named, { t: event.at, s: stopAt(walks, hit.walk.group, event.at, before, seen) });
+        const group = hit.walk.group;
+        if (!hit.walk.walker || stops.has(group.named) || !cuts(op, walks, group)) continue;
+        const s = stopAt(walks, group, event.at, before, seen);
+        // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
+        if (compareProgress(s, endOf(group)) >= 0) continue;
+        stops.set(group.named, { t: event.at, s });
         stopped = true;
       }
     }
@@ -965,6 +969,17 @@ function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen
   candidates.sort((a, b) => compareProgress(b, a));
   for (const s of candidates) if (stands.every((spots) => latestAt(spots, s)?.stand !== false)) return s;
   return START;
+}
+
+/** Whether a stop can cut this group's move (cutOp): a walk a move or a group move names. A teleport, a Get off and a landing land where they asked. */
+function cuts(op: Op, walks: Walks, group: Group): boolean {
+  if (op.t !== "token.move" && op.t !== "token.moveMany") return false;
+  return walks.byId.get(group.named)?.teleport === false;
+}
+
+/** Where a group's walk ends, as its stops count along it. */
+function endOf(group: Group): Progress {
+  return group.base(group.step).at(-1)?.progress ?? START;
 }
 
 /** A walk's spots with `stand` (route.ts routeSpots), on its own route at `step`. A teleport's landing is the op's own. */

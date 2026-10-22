@@ -684,6 +684,12 @@ const TRAP_PAIRS: OpPair[] = [
     ["buildChunks", "scenes"],
   ),
   trapPair(
+    "a silent stopping trap nobody found where Thorn was going, in one room only: his step keeps its Undo move in both",
+    () => {},
+    (s) => trapOn(s, "plate", cells(13, 6), { message: undefined, foundOnSpring: false }),
+    [thornAcross, thornBack],
+  ),
+  trapPair(
     "Thorn walks into Grease beside a trap only one room has, which hints the DM before the area's reminder",
     (s) => {
       s.tokens.thorn = { ...s.tokens.thorn!, actor: { inline: actor({ passivePerception: 15 }) } };

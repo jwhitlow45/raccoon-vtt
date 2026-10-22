@@ -74,6 +74,34 @@ describe("a walk sets a trap off (5.1, 5.4, 5.5)", () => {
     assert.equal(r.trapped, undefined);
   });
 
+  test("a silent stopping trap where the move was going anyway is no stop: the walk to it, a Get off onto it and a landing on it leave Undo move as it is", () => {
+    const quiet = { message: undefined, foundOnSpring: false };
+    const horse = token("horse", { name: "Horse", kind: "npc", size: "large", ownerIds: ["p1"], x: 2, y: 4 });
+    const cases: [string, Token[], Op, [number, number]][] = [
+      ["the walk's own end", [thorn()], { t: "token.move", tokenId: "thorn", x: 3, y: 5 }, [3, 5]],
+      ["a Get off", [horse, thorn({ x: 2, y: 4, attached: { to: "horse", kind: "ride", steer: true } })], { t: "token.detach", tokenId: "thorn", x: 4, y: 5 }, [4, 5]],
+      ["a landing", [thorn({ x: 3, y: 5, elevation: 10 })], { t: "token.update", tokenId: "thorn", patch: { elevation: 0 } }, [3, 5]],
+    ];
+    for (const [name, tokens, op, [x, y]] of cases) {
+      const r = applied(world(tokens, [trap("plate", square(x, y), quiet)]), op, P1);
+      assert.equal(r.state.traps.plate!.state, "sprung", name);
+      assert.deepEqual(pos(r.state, "thorn"), [x, y], name);
+      assert.equal(r.trapped, undefined, `${name}: nothing the player sees changed`);
+    }
+    // Short of where it asked, the same trap stops the walk, which the player sees.
+    const short = applied(world([thorn()], [trap("plate", square(3, 5), quiet)]), { t: "token.move", tokenId: "thorn", x: 8, y: 5 }, P1);
+    assert.deepEqual([pos(short.state, "thorn"), short.trapped], [[3, 5], true]);
+  });
+
+  test("a Get off walks on past a stopping trap, so one further along its leg goes off too", () => {
+    const horse = token("horse", { name: "Horse", kind: "npc", size: "large", ownerIds: ["p1"], x: 2, y: 4 });
+    const rider = thorn({ x: 2, y: 4, attached: { to: "horse", kind: "ride", steer: true } });
+    // The first is under the horse, so it takes what is not on the floor.
+    const r = applied(world([horse, rider], [trap("a", square(3, 4), { floor: false }), trap("b", square(4, 4))]), { t: "token.detach", tokenId: "thorn", x: 4, y: 4 }, P1);
+    assert.deepEqual(pos(r.state, "thorn"), [4, 4]);
+    assert.deepEqual([r.state.traps.a!.state, r.state.traps.b!.state], ["sprung", "sprung"]);
+  });
+
   test("a sprung or disarmed trap does nothing, and only the players' scene outside a blackout goes off by itself", () => {
     for (const s of ["sprung", "disarmed"] as const) {
       const state = world([thorn()], [trap("plate", square(3, 5), {}, { state: s })]);

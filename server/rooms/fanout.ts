@@ -24,6 +24,8 @@ export type CommittedBatch = {
   acks: Map<ClientKey, number[]>;
   rejects: Map<ClientKey, Reject[]>;
   restored: Map<ClientKey, Restored[]>;
+  /** Each player client's ops in the batch whose trap step refuses their Undo move (docs/design-v1-traps.md 6.5). */
+  trapped?: Map<ClientKey, number[]>;
 };
 
 function viewerClass(conn: Connection, state: RoomState): string {
@@ -120,8 +122,9 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     const acks = mine ? batch.acks.get(key) : undefined;
     const rejects = mine ? batch.rejects.get(key) : undefined;
     const restored = mine ? batch.restored.get(key) : undefined;
+    const trapped = mine ? batch.trapped?.get(key) : undefined;
     if (diff.changes.length === 0 && !acks?.length && !rejects?.length) continue;
-    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[] } = {
+    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[] } = {
       t: "ev",
       seq: batch.seq,
       changes: diff.changes,
@@ -129,6 +132,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     if (acks?.length) msg.acks = acks;
     if (rejects?.length) msg.rejects = rejects;
     if (restored?.length) msg.restored = restored;
+    if (trapped?.length) msg.trapped = trapped;
     conn.send(msg);
   }
 }

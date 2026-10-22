@@ -4,7 +4,7 @@ import type { RoomState, Trap, TrapDoorRef, TrapDue, Viewer } from "../model.ts"
 import type { Op, OpOf } from "../protocol.ts";
 import { planDoor, planHand, planTrapMove, planTurn, walkOp, type Springing, type TrapRoom } from "../rules/traps.ts";
 import { pressChangesNothing } from "./encounter.ts";
-import { addDue, dmLine, orderedBy, PIT_ACTION, plainList, playersLine, runActions } from "./traps.ts";
+import { addDue, dmLine, orderedBy, PIT_ACTION, plainList, playersLine, runActions, type Did } from "./traps.ts";
 import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 
 /*
@@ -169,10 +169,25 @@ function write(tx: Tx, s: Springing, out: TrapWrites): void {
   if (did.some((d) => d.action === PIT_ACTION && d.ok)) out.pit = true;
   const perceived = s.pass === "public" && s.perceived;
   const next = sprungOf(tx.state.traps[trap.id] ?? trap);
-  if (perceived && rig.foundOnSpring) next.found = true;
+  const found = perceived && rig.foundOnSpring === true && !trap.found;
+  if (found) next.found = true;
   tx.write(keys.trap(trap.id), next);
   const line = dmLine(tx, next, { how: s.how, by: by.list, more: by.more, hits: s.hits.length, did, seen: s.seen, hidden: false });
   const told = perceived && playersLine(tx, next, by.list.filter((id) => s.seen.has(id)));
   if (rig.save || rig.damage || rig.conditions) addDue(tx, trap.id, occurrence(line.id, { ...(perceived ? { perceived: true as const } : {}), acted: true }));
-  if (s.pass === "public" && (s.stopped || told)) out.trapped = true;
+  if (s.pass === "public" && blocksUndo({ stopped: s.stopped, told, found, did })) out.trapped = true;
+}
+
+/**
+ * Whether a public springing changed what the op's player sees (6.5): a
+ * move it cut short of where it asked, a players' line, the trap marked
+ * found, or an action that did something, a door, a light, a reveal or a
+ * pit. Only such a step refuses the player's Undo move, and the ack tells
+ * the player's device so (`ev.trapped`), so the bar offers Undo move just
+ * when the server takes it. A silent trap nobody found that stops a token
+ * where it was going changes none of these: the token goes back, and what
+ * the trap wrote stays with the DM.
+ */
+export function blocksUndo(change: { stopped: boolean; told: boolean; found: boolean; did: readonly Did[] }): boolean {
+  return change.stopped || change.told || change.found || change.did.some((d) => d.ok);
 }

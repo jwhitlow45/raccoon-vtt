@@ -67,27 +67,19 @@ function namesOf(state: RoomState): LogNames {
 }
 
 /** A player's move this device sent, watched until its answer: where it asked its tokens to land, and the players' trap log when it went. */
-export type Watched = { n: number; tokenIds: readonly string[]; to: readonly { tokenId: string; x: number; y: number }[]; since: string | null };
+/** A move of the player's the bar may offer to take back (4.3), watched until the server answers it. */
+export type Watched = { n: number };
 
-export function watchOf(op: ClientOp, n: number, since: string | null): Watched | null {
-  if (!isPoseOp(op)) return null;
-  if (op.t === "token.move") return { n, tokenIds: [op.tokenId], to: [{ tokenId: op.tokenId, x: op.x, y: op.y }], since };
-  if (op.t === "token.moveMany") return { n, tokenIds: op.moves.map((m) => m.tokenId), to: op.moves.map((m) => ({ tokenId: m.tokenId, x: m.x, y: m.y })), since };
-  if (op.t === "token.detach" && op.x !== undefined && op.y !== undefined) return { n, tokenIds: [op.tokenId], to: [{ tokenId: op.tokenId, x: op.x, y: op.y }], since };
-  return "tokenId" in op ? { n, tokenIds: [op.tokenId], to: [], since } : null;
+export function watchOf(op: ClientOp, n: number): Watched | null {
+  return isPoseOp(op) ? { n } : null;
 }
 
 /**
- * Whether the server's answer shows a trap met the move (4.3): a token it
- * moved stands short of where the move asked, which only a trap's stop
- * does to a walk the device already checked, or a players' line since it
- * went names one of its tokens. Then the server refuses to take it back,
- * so the bar stops offering Undo move and Teleport here.
+ * Whether a trap met the move in a way the player sees (4.3): the server's
+ * ack marks the op (`ev.trapped`) by the same rule its undo refuses by
+ * (shared/reducer/trapStep.ts blocksUndo). Then the server refuses to take
+ * it back, so the bar stops offering Undo move and Teleport here.
  */
-export function metTrap(w: Watched, confirmed: { tokens: Readonly<Record<string, { x: number; y: number } | undefined>> }, trapSeen: readonly LogEntry[]): boolean {
-  for (const t of w.to) {
-    const now = confirmed.tokens[t.tokenId];
-    if (now && (Math.abs(now.x - t.x) > 1e-6 || Math.abs(now.y - t.y) > 1e-6)) return true;
-  }
-  return linesAfter(trapSeen, w.since).some((e) => e.data?.type === "trapSeen" && e.data.by.some((id) => w.tokenIds.includes(id)));
+export function metTrap(w: Watched, trapped: readonly number[] | undefined): boolean {
+  return trapped?.includes(w.n) ?? false;
 }

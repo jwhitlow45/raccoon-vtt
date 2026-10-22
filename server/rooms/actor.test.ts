@@ -2714,6 +2714,32 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
     });
   });
 
+  test("the ack marks a player's op whose trap step refuses its Undo move, and only that one", async () => {
+    for (const [x, marked] of [[8, true], [4, false]] as const) {
+      // Silent and never marking itself found: only a stop short of where the move asked shows.
+      const { state, dm, pc } = table({ message: undefined, foundOnSpring: false });
+      const db = new FakeDb({ state, dmGrants: [dm.id] });
+      const actor = await RoomActor.load(deps(db));
+      assert.ok(actor);
+      try {
+        const { conn, sent } = connect(actor, pc, "player");
+        await actor.hello(conn, { clientId: "c2", resumeFrom: 1 });
+        await actor.op(conn, 1, { t: "token.move", tokenId: "thorn", x, y: 2 });
+        const answer = await answerTo(sent, 1);
+        assert.ok(answer !== "stuck" && answer.acks?.includes(1));
+        assert.equal(actor.committed.state.traps.plate!.state, "sprung");
+        assert.deepEqual(answer.trapped, marked ? [1] : undefined, `a move to ${x}`);
+        await actor.op(conn, 2, { t: "undo" });
+        const undone = await answerTo(sent, 2);
+        assert.ok(undone !== "stuck");
+        assert.equal(undone.rejects?.length ?? 0, marked ? 1 : 0, "the undo answers as the mark says");
+      } finally {
+        db.freeze();
+        void actor.shutdown({ code: 1012, snapshot: false });
+      }
+    }
+  });
+
   test("one trapped op marks its whole gesture, so the merged step's undo is refused too", async () => {
     const { state, dm, pc } = table();
     await withTable(state, dm, pc, async (actor, _dmSend, pcSend) => {
@@ -2725,7 +2751,7 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
   });
 
   test("after a silent trap, or one only the player's hidden imp set off, the player's undo moves the token back", async () => {
-    const silent = table({ stops: false, message: undefined });
+    const silent = table({ stops: false, message: undefined, foundOnSpring: false });
     await withTable(silent.state, silent.dm, silent.pc, async (actor, _dmSend, pcSend) => {
       assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 8, y: 2 }), null);
       assert.equal(actor.committed.state.traps.plate!.state, "sprung");

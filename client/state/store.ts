@@ -304,6 +304,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     seq: 0,
     pending: [],
     refused: [],
+    trapped: [],
     sceneLoad: SCENE_LOAD_IDLE,
   }));
 
@@ -604,6 +605,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       for (const r of msg.rejects ?? []) settled.add(r.n);
       let pending = s.pending;
       let refused = s.refused;
+      let trapped = s.trapped;
       let toasts = s.toasts;
       const toast = (text: string, tone: Toast["tone"]) => {
         if (!toasts.some((t) => t.text === text)) toasts = [...toasts, { id: ++toastSeq, text, tone }].slice(-MAX_TOASTS);
@@ -636,6 +638,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         }
         pending = pending.filter((p) => !settled.has(p.n));
         if (msg.rejects?.length) refused = [...(refused ?? []), ...msg.rejects.map((r) => r.n)].slice(-MAX_REFUSED);
+        if (msg.trapped?.length) trapped = [...(trapped ?? []), ...msg.trapped].slice(-MAX_REFUSED);
         for (const n of settled) sentAt.delete(n);
         retryAttempt = 0;
       }
@@ -655,7 +658,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         sceneId = confirmed.meta.playerSceneId;
         ephemeral = EMPTY_EPHEMERAL;
       }
-      commit({ confirmed, seq: msg.seq, pending, refused, toasts, ephemeral, sceneId });
+      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId });
       const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
         s.pending.filter((p) => settled.has(p.n)),

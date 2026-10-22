@@ -2240,6 +2240,8 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
       .optional(),
     /** This client's undos and redos in the batch, each with what it took back, for the toast (design 7.7). */
     restored: z.array(z.strictObject({ n: z.number().int().min(1), what: z.string().max(200) })).optional(),
+    /** A player's ops in the batch whose trap step refuses their Undo move, so the bar stops offering it (docs/design-v1-traps.md 6.5). */
+    trapped: z.array(z.number().int().min(1)).optional(),
   }),
   z.strictObject({ t: z.literal("retry"), n: z.number().int().min(1).optional(), code: z.enum(["busy", "gap"]) }),
   z.strictObject({ t: z.literal("eph"), from: id, e: ephEventSchema }),
