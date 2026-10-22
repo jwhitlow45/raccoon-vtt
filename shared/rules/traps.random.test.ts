@@ -6,6 +6,7 @@ import { applyOp } from "../reducer.ts";
 import { DM, P1, chance, env, int, pick, rng, room, token } from "../testutil.ts";
 import { carriedGroup } from "./attach.ts";
 import { footprintRect } from "./footprint.ts";
+import { groundAt } from "./heights.ts";
 import { describeMove, planMove } from "./moveLeg.ts";
 import { planTrapMove, type TrapRoom } from "./traps.ts";
 
@@ -187,6 +188,9 @@ test("a pit that opens takes a walker that fits in it down from its first square
   let fell = 0;
   let rim = 0;
   let riders = 0;
+  let capped = 0;
+  // Free walls crossing in one square past the split's caps, which no import lets in, so a pit on that scene stays shut.
+  const pile = Array.from({ length: 300 }, (_, k) => ({ id: `p${k}`, a: [20 + (k % 64) / 64, 20] as [number, number], b: [20 + ((k * 7) % 64) / 64, 21] as [number, number], f: { kind: "wall" as const } }));
   for (let seed = 1; seed <= 500; seed++) {
     const r = rng(seed);
     const state = room();
@@ -203,12 +207,24 @@ test("a pit that opens takes a walker that fits in it down from its first square
     if (rides) state.tokens.bree = token("bree", { name: "Bree", kind: "pc", x: at.x + 1, y: at.y, attached: { to: "mover", kind: "ride" } });
     const op: Op = { t: "token.move", tokenId: "mover", ...(across ? { x: 15, y: at.y } : { x: at.x, y: 15 }) };
     const expected = pitLanding(state, op, state.traps.pit);
+    const shut = chance(r, 0.25);
+    if (shut) state.buildChunks["s1:1,1"] = { sceneId: "s1", cx: 1, cy: 1, rev: 1, cells: {}, edges: {}, walls: pile };
     const res = applyOp(state, op, DM, env(10));
     assert.ok(res.ok && expected);
     const after = res.state.tokens.mover!;
     const where = `seed ${seed}: a ${size} from ${at.x},${at.y} across ${JSON.stringify(c)}, at ${after.x},${after.y} ${after.elevation} ft`;
     // Only a walker that met the opening is stopped by it.
     if (after.x === 15 || after.y === 15) continue;
+    if (shut) {
+      // A pit the caps keep shut stops it where the same trap with no pit does, on the lid it never opens (review FU20A-R2-PITCAP).
+      const { pit: _pit, ...lid } = state.traps.pit.rig!;
+      const plain = applyOp({ ...state, traps: { pit: { ...state.traps.pit, rig: lid } } }, op, DM, env(10));
+      assert.ok(plain.ok);
+      assert.deepEqual([after.x, after.y, after.elevation], [plain.state.tokens.mover!.x, plain.state.tokens.mover!.y, 0], `${where}: as on a shut lid`);
+      assert.equal(groundAt(res.state.buildChunks, "s1", c.x, c.y), 0, `${where}: the pit stays shut`);
+      capped++;
+      continue;
+    }
     if (expected.fell) {
       assert.deepEqual([after.x, after.y, after.elevation], [expected.fell.x, expected.fell.y, -10], where);
       fell++;
@@ -221,5 +237,5 @@ test("a pit that opens takes a walker that fits in it down from its first square
       rim++;
     }
   }
-  assert.ok(fell > 140 && rim > 180 && riders > 14, JSON.stringify({ fell, rim, riders }));
+  assert.ok(fell > 100 && rim > 130 && riders > 10 && capped > 80, JSON.stringify({ fell, rim, riders, capped }));
 });

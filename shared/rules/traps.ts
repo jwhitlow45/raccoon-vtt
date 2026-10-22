@@ -986,7 +986,7 @@ type Stop = { until: Progress; s: Progress };
  * and the room before it, so replay plans the same. `op` is the op with
  * each stopped group's landing and route cut, which dispatch then moves.
  */
-export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }): MovePlan {
+export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opVersion?: number }, pitOpens?: (trap: Trap) => boolean): MovePlan {
   const none: MovePlan = { springings: [], op };
   const sceneId = liveTrapScene(before);
   if (sceneId === null || !walkOp(op)) return none;
@@ -1017,7 +1017,7 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
     spent.add(event.trap);
     const trap = index.traps[event.trap]!;
     if (trap.rig!.stops) {
-      const pit = forward ? opening(trap, before) : null;
+      const pit = forward ? opening(trap, before, pitOpens) : null;
       for (const hit of together) {
         const group = hit.walk.group;
         if (!hit.walk.walker || stops.has(group.named) || !cuts(op, walks, group)) continue;
@@ -1162,12 +1162,15 @@ function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen
 
 /**
  * The squares a stopping trap's pit opens on (5.7), when it opens: a pit on
- * squares not yet at its floor. A spot lies over it when every square its
- * footprint covers, squeezed where it squeezes, is one of them.
+ * squares not yet at its floor, which `opens`, the action's own test, says
+ * the caps let open. A spot lies over it when every square its footprint
+ * covers, squeezed where it squeezes, is one of them.
  */
-function opening(trap: Trap, before: RoomState): ((spot: RouteSpot, walk: Walk) => boolean) | null {
+function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean): ((spot: RouteSpot, walk: Walk) => boolean) | null {
   const pit = trap.rig?.pit;
   if (!pit || !("cells" in trap.zone) || pitOpen(before.buildChunks, trap.sceneId, trap.zone.cells, pit)) return null;
+  // The action's own test of whether the pit opens (reducer/traps.ts pitOpens): one the caps keep shut moves no walker over it.
+  if (opens && !opens(trap)) return null;
   const squares = new Set<string>();
   for (const r of trap.zone.cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) squares.add(`${x},${y}`);
   return (spot, walk) => {

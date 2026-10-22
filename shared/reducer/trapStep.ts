@@ -4,7 +4,7 @@ import type { RoomState, Trap, TrapDoorRef, TrapDue, Viewer } from "../model.ts"
 import type { Op, OpOf } from "../protocol.ts";
 import { planDoor, planHand, planTrapMove, planTurn, walkOp, type Springing, type TrapRoom } from "../rules/traps.ts";
 import { pressChangesNothing } from "./encounter.ts";
-import { addDue, dmLine, orderedBy, PIT_ACTION, plainList, playersLine, runActions } from "./traps.ts";
+import { addDue, dmLine, orderedBy, PIT_ACTION, pitOpens, plainList, playersLine, runActions } from "./traps.ts";
 import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 
 /*
@@ -32,7 +32,7 @@ export type TrapWrites = { wrote: boolean; pit?: true };
 export function planBefore(op: Op, before: RoomState, actor: Viewer, env: Env): TrapPlan {
   if (walkOp(op)) {
     try {
-      const plan = planTrapMove(op, before as TrapRoom, actor, env);
+      const plan = planTrapMove(op, before as TrapRoom, actor, env, (trap) => pitOpens(before, trap));
       return { op: plan.op, before: plan.springings };
     } catch (err) {
       // An op the move rules refuse is dispatch's to refuse, in its own words.

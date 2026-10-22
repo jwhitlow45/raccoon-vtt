@@ -10,6 +10,11 @@ import { DM, env, P1, room, token, trap as trapOf } from "../testutil.ts";
 
 const pitRig = (over: Partial<TrapRig> = {}): TrapRig => ({ ...trapOf("x").rig!, who: "any", stops: true, pit: { floor: -10 }, ...over });
 const pit = (over: Partial<Trap> = {}): Trap => trapOf("pit", { zone: { cells: [{ x: 4, y: 4, w: 2, h: 2 }] }, rig: pitRig(), ...over });
+/** The same stopping trap on the same squares with no pit. */
+const noPit = (): Trap => {
+  const { pit: _pit, ...rig } = pitRig();
+  return trapOf("pit", { zone: { cells: [{ x: 4, y: 4, w: 2, h: 2 }] }, rig });
+};
 
 function world(): RoomState {
   return room({
@@ -65,6 +70,29 @@ describe("a pit opens", () => {
     assert.deepEqual(cells(res.state), [-10, -10, -10, -10]);
     const line = res.state.trapLog.at(-1)!.data;
     assert.ok(line?.type === "trap" && line.by.includes("ogre"));
+  });
+
+  test("a pit the caps keep shut moves no Large walker over it: it stops where a shut lid would stop it, and stays on the lid (review FU20A-R2-PITCAP)", () => {
+    // A scene already over the split's caps, which no import lets in, so the pit can never open there (reducer/traps.ts
+    // openedFits): the planner asks the action's own test, a guard that keeps the two on one rule.
+    const pile = Array.from({ length: 300 }, (_, k) => ({ id: `p${k}`, a: [20 + (k % 64) / 64, 20] as [number, number], b: [20 + ((k * 7) % 64) / 64, 21] as [number, number], f: { kind: "wall" as const } }));
+    const shut = (pit: boolean) => {
+      const s = world();
+      delete s.tokens.thorn;
+      s.tokens.ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 });
+      if (pit) s.buildChunks["s1:1,1"] = { sceneId: "s1", cx: 1, cy: 1, rev: 1, cells: {}, edges: {}, walls: pile };
+      else s.traps = { pit: noPit() };
+      return run(s, { t: "token.move", tokenId: "ogre", x: 9, y: 4 }).state;
+    };
+    const capped = shut(true);
+    assert.deepEqual(cells(capped), [0, 0, 0, 0], "the pit stays shut");
+    const line = capped.trapLog.at(-1)!.data;
+    assert.ok(line?.type === "trap");
+    assert.deepEqual(line.did, [{ action: -1, ok: false }]);
+    // A stopping trap with no pit stops it at the same first stand.
+    const plain = shut(false);
+    assert.deepEqual([capped.tokens.ogre!.x, capped.tokens.ogre!.elevation], [plain.tokens.ogre!.x, 0]);
+    assert.ok(capped.tokens.ogre!.x < 4, "never moved on to the spot wholly over the pit");
   });
 
   test("a warhorse that fits in it falls with its rider, and a Medium creature as before", () => {

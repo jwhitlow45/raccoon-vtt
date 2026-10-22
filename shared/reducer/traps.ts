@@ -1,6 +1,6 @@
 import { keys } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { type LogEntry, type LogEvent, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
+import { type LogEntry, type LogEvent, type RoomState, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
@@ -231,10 +231,23 @@ export function runActions(tx: Tx, trap: Trap): Did[] {
  * at the floor, false when it could not open.
  */
 function openPit(tx: Tx, trap: Trap): boolean | null {
+  const op = pitOpening(tx.state, trap);
+  if (!op) return null;
+  if (!openedFits(tx.state, op)) return false;
+  try {
+    buildHeight(tx, op);
+    return true;
+  } catch (err) {
+    if (err instanceof Refuse) return false;
+    throw err;
+  }
+}
+
+/** The `build.height` that opens a trap's pit, each of its squares once at the floor, or null for no pit or one already open. */
+function pitOpening(state: RoomState, trap: Trap): OpOf<"build.height"> | null {
   const pit = trap.rig?.pit;
   if (!pit || !("cells" in trap.zone)) return null;
-  if (pitOpen(tx.state.buildChunks, trap.sceneId, trap.zone.cells, pit)) return null;
-  const floor = pitFloorOf(pit);
+  if (pitOpen(state.buildChunks, trap.sceneId, trap.zone.cells, pit)) return null;
   const cells: string[] = [];
   const seen = new Set<string>();
   for (const r of trap.zone.cells) {
@@ -247,26 +260,38 @@ function openPit(tx: Tx, trap: Trap): boolean | null {
       }
     }
   }
-  const op: OpOf<"build.height"> = { t: "build.height", sceneId: trap.sceneId, cells, height: floor };
-  try {
-    if (!openedFits(tx, op)) return false;
-    buildHeight(tx, op);
-    return true;
-  } catch (err) {
-    if (err instanceof Refuse) return false;
-    throw err;
-  }
+  return { t: "build.height", sceneId: trap.sceneId, cells, height: pitFloorOf(pit) };
+}
+
+/**
+ * Whether a trap's pit would open in `state`: not open yet, and its opened
+ * ground within the caps (openedFits). The stop planner asks it on the
+ * room before the move (rules/traps.ts `opening`), so a walker is moved
+ * over a pit only where the action opens it: a guard that keeps planning
+ * and the action on one test (review FU20A-R2-PITCAP).
+ */
+export function pitOpens(state: RoomState, trap: Trap): boolean {
+  const op = pitOpening(state, trap);
+  return op !== null && openedFits(state, op);
 }
 
 /**
  * Whether the scene's walls with the pit open stay within the split's caps
  * and the sight pieces' (6.7), read before anything is written. Counting a
- * pit's border ahead keeps every op within them, but nothing counted an
- * imported room's pits so, and there a pit over a cap stays shut.
+ * pit's border ahead keeps every op within them, and an import counts every
+ * pit it brings the same way, so no room the rules let in holds a pit over
+ * a cap. Should one ever, the pit stays shut.
  */
-function openedFits(tx: Tx, op: OpOf<"build.height">): boolean {
-  const opened = { scenes: tx.state.scenes, buildChunks: heightsPainted(tx.state.buildChunks, tx.scene(op.sceneId), op) };
-  return splitCheck(opened, op.sceneId).ok && sightPiecesCheck(opened, op.sceneId, tx.state).ok;
+function openedFits(state: RoomState, op: OpOf<"build.height">): boolean {
+  const scene = state.scenes[op.sceneId];
+  if (!scene) return false;
+  try {
+    const opened = { scenes: state.scenes, buildChunks: heightsPainted(state.buildChunks, scene, op) };
+    return splitCheck(opened, op.sceneId).ok && sightPiecesCheck(opened, op.sceneId, state).ok;
+  } catch (err) {
+    if (err instanceof Refuse) return false;
+    throw err;
+  }
 }
 
 function runAction(tx: Tx, sceneId: string, action: TrapAction): boolean {
