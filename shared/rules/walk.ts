@@ -3,7 +3,7 @@ import type { BuildState } from "../ruleHooks.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
-import { footprintGround, standing } from "./heights.ts";
+import { footing, footprintGround } from "./heights.ts";
 import { legStop, stepTester, type MovingToken, type StepTester } from "./movement.ts";
 import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
@@ -265,7 +265,7 @@ export class WalkWorld {
     this.w = fp.w;
     this.h = fp.h;
     this.L = routeLattice(token);
-    this.mode = standing(token.elevation, footprintGround(chunks, token));
+    this.mode = footing(chunks, token);
     this.height = heightFt(token, input.rules.feetPerCell);
     const L = this.L;
     // The lattice from where the token stands: x = token.x + (i - i0) * L, inside the scene.

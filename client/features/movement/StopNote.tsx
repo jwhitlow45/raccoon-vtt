@@ -10,7 +10,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { noteDoor } from "../doors/doors.ts";
 import { cardPlace } from "./anchor.ts";
-import { stopText } from "./drop.ts";
+import { dropView, stopText } from "./drop.ts";
 import { stopNoteSlot } from "./store.ts";
 import { runTeleport } from "./teleport.ts";
 
@@ -71,7 +71,11 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
     if (slot.getState().busy) return;
     slot.setState({ busy: true });
     runTeleport(note, {
-      view: () => store.getState().view,
+      // As the drop reads the room: a teleport off a holder every player sees lands by it (drop.ts dropLanding).
+      view: () => {
+        const state = store.getState();
+        return state.view ? dropView(state.view, state.you?.role ?? "player") : null;
+      },
       dispatch: (op, opts) => actions.dispatch(op, opts),
       notify: (text, tone) => ui.notify(text, tone),
       done: close,

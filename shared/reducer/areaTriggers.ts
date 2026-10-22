@@ -1,8 +1,9 @@
 import { attaches, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
-import { seenByNonOwners } from "../project.ts";
+import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
+import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import { pieceReach, routePoints, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
@@ -219,7 +220,11 @@ function walkOf(before: RoomState, after: RoomState, op: Op, opVersion: number |
   const from = before.tokens[op.tokenId];
   const to = after.tokens[op.tokenId];
   if (!from || !to || from.sceneId !== to.sceneId) return null;
-  return { tokenId: op.tokenId, points: routePoints(before.buildChunks, from, op.route, to.elevation) };
+  const seen = (t: { id: string }) => {
+    const token = before.tokens[t.id];
+    return token !== undefined && inSightOfNonOwners(before, token, { opVersion });
+  };
+  return { tokenId: op.tokenId, points: routePoints(before.buildChunks, walkerFor(before, from, to, seen), op.route, to.elevation) };
 }
 
 /** A route's sweep never takes more than this: every half square of 300 squares of reach, and one more a piece for rounding (section 10). */

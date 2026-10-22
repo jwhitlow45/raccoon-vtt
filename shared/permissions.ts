@@ -7,11 +7,11 @@ import { LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
-import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, withinReach } from "./rules/attach.ts";
+import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
-import { footprintGround, groundAt, standing } from "./rules/heights.ts";
+import { footing, footprintGround, groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY } from "./rules/movement.ts";
 import { onRouteLattice, routeBlocker, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
@@ -208,7 +208,7 @@ function routeFits(op: Op, c: Check): Decision {
     if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
     prev = { x, y };
   }
-  const points = routePoints(c.state.buildChunks, token, op.route, op.elevation ?? token.elevation);
+  const points = routePoints(c.state.buildChunks, walkerFor(c.state, token, op, seenAllIn(c)), op.route, op.elevation ?? token.elevation);
   return routeReach(points, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
@@ -1159,6 +1159,14 @@ function seenByAll(c: Check, token: Token): boolean {
   return inSightOfNonOwners(c.state, token, {});
 }
 
+/** seenByAll by id, as the attach rules ask it. */
+function seenAllIn(c: Check): (t: { id: string }) => boolean {
+  return (t) => {
+    const token = c.state.tokens[t.id];
+    return token !== undefined && seenByAll(c, token);
+  };
+}
+
 /**
  * Whether the player directs this mount (docs/design-v1-attach.md 6): it
  * carries a creature of theirs by a controlled ride, "it moves on your turn
@@ -1573,7 +1581,8 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   const token = c.state.tokens[tokenId];
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene || scene.blockMovement !== true) return OK;
-  let at: Token = token;
+  // Off a holder on the ground it walks on the ground, as the drag searched it (rules/attach.ts walkerFor).
+  let at: Token & { footing?: "ground" } = walkerFor(c.state, token, to, seenAllIn(c));
   for (const [n, route] of routes.entries()) {
     const last = n === routes.length - 1;
     const end = route[route.length - 1];
@@ -1593,7 +1602,7 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
 
 /** Where a kept route of a merged step ended, by the walk's rule: a walker on the ground there, any other token at its height. */
 function groundOrHeight(state: RoomState, token: Token, end: RoutePiece | undefined): number {
-  if (!end || standing(token.elevation, footprintGround(state.buildChunks, token)) !== "ground") return token.elevation;
+  if (!end || footing(state.buildChunks, token) !== "ground") return token.elevation;
   return footprintGround(state.buildChunks, { ...token, x: end[0], y: end[1], squeeze: undefined });
 }
 

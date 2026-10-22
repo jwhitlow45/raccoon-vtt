@@ -155,6 +155,15 @@ export function standing(elevation: number, ground: number): Standing {
   return elevation === ground ? "ground" : elevation > ground ? "flying" : "inside";
 }
 
+/**
+ * How a token stands for a walk: by its height over the ground under it, or
+ * on the ground where its walk off a holder says so (rules/attach.ts
+ * walkerFor), which every walk rule reads alike.
+ */
+export function footing(chunks: Chunks, token: PlacedToken & { sceneId: SceneId; elevation: number; footing?: "ground" }): Standing {
+  return token.footing ?? standing(token.elevation, footprintGround(chunks, token));
+}
+
 // ---------------------------------------------------------------------------
 // Stair directions
 

@@ -4,7 +4,7 @@ import { isWritable } from "../writable.ts";
 import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.ts";
 import { footprintRect, footprintSize, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
-import { footprintGround } from "./heights.ts";
+import { footprintGround, standing } from "./heights.ts";
 
 /**
  * Attached tokens (docs/design-v1-attach.md): a rider on a mount, a
@@ -190,6 +190,39 @@ export function getOffFits(settings: DistanceSettings, bounds: { w: number; h: n
   const r = fullRect(placed);
   if (r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS) return false;
   return !overlaps(placed, holder) && withinReach(settings, placed, holder);
+}
+
+/** A token as a walk reads it beside its link: what walkerFor needs of it and of its holder. */
+type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached">;
+
+/**
+ * The token as it walks to `end` (4.3, reviews AT-ASTRA-13 and AT-O-22):
+ * one that sits on a holder standing on the ground and walks off it walks on
+ * the ground, as it lands there, whatever the ground under its seat, which
+ * is lower where the holder straddles two heights. So the route search, the
+ * leg tests, the walk's points and its cost all read it as a walker on the
+ * ground, on the player's device and on the server alike, and every ledge
+ * stops it. This reads only a link every player sees (`seen`, both tokens):
+ * off a holder some player cannot see the token walks as itself, as it does
+ * with no holder at all (8.0). So does one that stays on its holder, sits on
+ * a holder that flies, or stands on its own ground. With no `end`, as a
+ * drag's search knows none, the walk is read as one off the holder. The copy
+ * is for the walk alone and is never stored.
+ */
+export function walkerFor<T extends Walking>(
+  state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0]; meta?: { settings: DistanceSettings } },
+  token: T,
+  end: Point | undefined,
+  seen: SeenByAll,
+): T & { footing?: "ground" } {
+  const link = token.attached;
+  if (!link || !onHolder(link.kind)) return token;
+  const holder = holderOf(state.tokens, token) as Walking | undefined;
+  if (!holder || !seen(token) || !seen(holder) || standing(holder.elevation, footprintGround(state.buildChunks, { ...holder, squeeze: undefined })) !== "ground") return token;
+  if (standing(token.elevation, footprintGround(state.buildChunks, token)) === "ground") return token;
+  const settings = state.meta?.settings;
+  if (end && (!settings || linkHolds(settings, link.kind, { ...token, x: end.x, y: end.y, elevation: holder.elevation }, holder))) return token;
+  return { ...token, footing: "ground" };
 }
 
 /**

@@ -43,7 +43,7 @@ export function teleportMove(state: DropState, token: DropToken, note: Pick<Stop
 
 export type TeleportDeps = {
   /** The room as this device sees it now. */
-  view(): (Pick<RoomState, "scenes" | "buildChunks"> & { tokens: Readonly<Record<string, (DropToken & Pick<Token, "kind"> & Partial<Pick<Token, "attached" | "locked">>) | undefined>> }) | null;
+  view(): (Pick<RoomState, "scenes" | "buildChunks"> & Pick<DropState, "meta" | "seen"> & { tokens: Readonly<Record<string, (DropToken & Pick<Token, "kind"> & Partial<Pick<Token, "attached" | "locked">>) | undefined>> }) | null;
   dispatch(op: ClientOp, opts: { onAnswer(answer: OpAnswer): void; quiet?: boolean }): number | null;
   notify(text: string, tone: "info" | "error"): void;
   /** The flow is over, whichever way it went: the note goes. */

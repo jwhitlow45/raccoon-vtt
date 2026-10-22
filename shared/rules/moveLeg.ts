@@ -3,8 +3,8 @@ import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { movementRules } from "../ruleHooks.ts";
-import { carriedGroup, moveGroups, onHolder, publicMembers } from "./attach.ts";
-import { footprintGround, standing } from "./heights.ts";
+import { carriedGroup, moveGroups, onHolder, publicMembers, walkerFor } from "./attach.ts";
+import { footing, footprintGround } from "./heights.ts";
 import { landing } from "./movement.ts";
 import { routePoints, type RoutePoint } from "./route.ts";
 
@@ -59,7 +59,7 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
       const token = before.tokens[op.tokenId];
       if (!token) return [];
       const to: Pose = { sceneId: token.sceneId, x: op.x, y: op.y, elevation: op.elevation ?? token.elevation };
-      if (op.route && walksRoutes(env.opVersion)) return [{ token, to, how: "walk", route: routePoints(before.buildChunks, token, op.route, to.elevation) }];
+      if (op.route && walksRoutes(env.opVersion)) return [{ token, to, how: "walk", route: routePoints(before.buildChunks, walkerFor(before, token, to, seenIn(before, env)), op.route, to.elevation) }];
       return [straight(token, to, op.teleport !== undefined ? "teleport" : "walk")];
     }
     case "token.moveMany":
@@ -109,13 +109,18 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
  * permissions' to test, so no landing or refusal reads a hidden one.
  * Sorted by token id.
  */
+/** Whether every player sees a token in this state, by the op's envelope. */
+function seenIn(state: RoomState, env: Versioned): (t: { id: string }) => boolean {
+  return (t) => {
+    const token = state.tokens[t.id];
+    return token !== undefined && inSightOfNonOwners(state, token, env);
+  };
+}
+
 export function planMove(op: Op, before: RoomState, actor: Viewer, env: Versioned): MovedToken[] {
   const named = namedMoves(op, before, env);
   if (named.length === 0) return [];
-  const seen = (t: { id: string }) => {
-    const token = before.tokens[t.id];
-    return token !== undefined && inSightOfNonOwners(before, token, env);
-  };
+  const seen = seenIn(before, env);
   const out: MovedToken[] = [];
   const names = new Set(named.map((n) => n.token.id));
   const groups = attaches(env.opVersion) ? moveGroups(before.tokens, [...names]) : new Map<string, string[]>();
@@ -129,7 +134,7 @@ export function planMove(op: Op, before: RoomState, actor: Viewer, env: Versione
       const member = before.tokens[id]!;
       const holderMove = walked.get(member.attached!.to);
       if (!holderMove) continue;
-      const moved = follow(before, actor, member, holderMove, shown.has(id) && shown.has(holderMove.tokenId));
+      const moved = follow(before, actor, member, holderMove, shown.has(id) && shown.has(holderMove.tokenId), seen);
       if (!moved) continue;
       walked.set(id, moved);
       if (!samePose(moved.from, moved.to)) out.push(moved);
@@ -143,7 +148,7 @@ function samePose(a: Pose, b: Pose): boolean {
 }
 
 /** How a carried token follows its holder's actual walk, or null when it stays (a dragged creature a teleport leaves). */
-function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedToken, isPublic: boolean): MovedToken | null {
+function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedToken, isPublic: boolean, seen: (t: { id: string }) => boolean): MovedToken | null {
   const kind = member.attached!.kind;
   const from = poseOf(member);
   const pass = isPublic ? "public" : "private";
@@ -159,7 +164,8 @@ function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedTo
   }
   const chunks = before.buildChunks;
   const holderToken = before.tokens[holder.tokenId];
-  const grounded = holderToken !== undefined && standing(holder.from.elevation, footprintGround(chunks, { ...holderToken, x: holder.from.x, y: holder.from.y, squeeze: undefined })) === "ground";
+  // A holder walking off its own mount walks on the ground (attach.ts walkerFor), and so does what it drags.
+  const grounded = holderToken !== undefined && footing(chunks, { ...walkerFor(before, holderToken, holder.to, seen), x: holder.from.x, y: holder.from.y, elevation: holder.from.elevation, squeeze: undefined }) === "ground";
   // Its own ground behind a walker, else the holder's change of elevation, never below the ground there.
   const elevationAt = (x: number, y: number, holderElevation: number): number => {
     const ground = footprintGround(chunks, { ...member, x, y, squeeze: undefined });

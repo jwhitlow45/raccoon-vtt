@@ -8,7 +8,7 @@ import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/foo
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
 import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
-import { holderOf, linkHolds } from "../rules/attach.ts";
+import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
@@ -436,6 +436,14 @@ export function mountCost(tx: Tx, rider: Token, mount: Token): number | null {
   return Math.floor((speedsOf(tx.state, rider)?.walk ?? 0) / 2);
 }
 
+/** Whether every player sees a token as the op finds the room, by its envelope: what a walk off a holder reads (rules/attach.ts walkerFor). */
+function seenNow(tx: Tx): (t: { id: string }) => boolean {
+  return (t) => {
+    const token = tx.state.tokens[t.id];
+    return token !== undefined && inSightOfNonOwners(tx.state, token, tx.env);
+  };
+}
+
 /**
  * Getting off a ride on the rider's turn (docs/design-v1-attach.md 7.3):
  * from the seat to the first spot of the walk clear of the mount costs half
@@ -444,9 +452,11 @@ export function mountCost(tx: Tx, rider: Token, mount: Token): number | null {
  */
 export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number, route?: readonly RoutePiece[]): Token {
   const from = { x: rider.x, y: rider.y, elevation: rider.elevation };
-  const points = route ? routePoints(tx.state.buildChunks, rider, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
+  // It walks off as a walker on the ground where its mount stands on it (rules/attach.ts walkerFor), as the drag searched it.
+  const walking = walkerFor(tx.state, rider, next, seenNow(tx));
+  const points = route ? routePoints(tx.state.buildChunks, walking, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
   // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.
-  const split = dismountSplit(tx.state, rider, mount, points, route);
+  const split = dismountSplit(tx.state, walking, mount, points, route);
   const off: Token = { ...next, ...split.off };
   const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, split.prefix, undefined, cost);
   return split.whole || sameSpot(off, next) ? first : withPath(tx, first, next, judged, false, split.rest);
@@ -571,7 +581,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
     walk = [...carried];
     taken = routeFeet(walk, walk.slice(1).map(() => ({ extra: 0, swim: 0 as const })), rules, counter, { swimSpeed: false, step: snapStep(before) });
   } else if (route) {
-    walk = routePoints(tx.state.buildChunks, before, route, after.elevation);
+    walk = routePoints(tx.state.buildChunks, walkerFor(tx.state, before, after, seenNow(tx)), route, after.elevation);
     const swimSpeed = (speedsOf(tx.state, before)?.swim ?? 0) > 0;
     taken = routeFeet(walk, route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
   } else {
@@ -585,7 +595,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   if (taken.diag[0] !== 0 || taken.diag[1] !== 0) out.diag = taken.diag;
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
   // Squeezed where it starts and ends as it was and will be. A walk squeezes nowhere between, as its elevation rule reads the full footprint.
-  const spots = routeWalk(walk, before, judged.before).map((p, i, all) => ({ ...p, squeezed: i === 0 ? isSqueezed(before) : i === all.length - 1 ? isSqueezed(after) : false }));
+  const spots = routeWalk(walk, walkerFor(tx.state, before, after, seenNow(tx)), judged.before).map((p, i, all) => ({ ...p, squeezed: i === 0 ? isSqueezed(before) : i === all.length - 1 ? isSqueezed(after) : false }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;
 }

@@ -8,7 +8,7 @@ import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, dropLanding, landedElevation, routeLanding, samePose, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropLanding, landedElevation, routeLanding, samePose, walkerOf, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -93,9 +93,11 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   }
   if (walkers) to = walkers.at;
   // Landed as the drop lands it, by its holder while it sits on one, so the band reads the leg the op sends.
+  // And walked as the search and the server walk it: on the ground off a holder that stands on it (drop.ts walkerOf).
+  const walking = walkerOf(view, token, to);
   const points = pieces
     ? walkers
-      ? routePoints(view.buildChunks, token, pieces, dropLanding(view, token, to))
+      ? routePoints(view.buildChunks, walking, pieces, dropLanding(view, token, to))
       : along!.points
     : [
         { x: token.x, y: token.y, elevation: token.elevation },
@@ -106,7 +108,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   const activeTokenId = turnMoverId(view) ?? null;
   const dismount = dismountOf(view, token, points[points.length - 1]!, role);
   const read = dragReading({
-    token,
+    token: walking,
     to,
     encounter,
     activeTokenId,

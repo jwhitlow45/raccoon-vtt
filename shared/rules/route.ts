@@ -3,7 +3,7 @@ import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
-import { footprintGround, standing } from "./heights.ts";
+import { footing, footprintGround } from "./heights.ts";
 import { coreBlocked, legStop, squeezeFits, straightClear, type MovingToken } from "./movement.ts";
 
 /**
@@ -58,7 +58,7 @@ export function onRouteLattice(from: Point, p: Point): boolean {
  * does a squeeze change it.
  */
 export function routePoints(chunks: BuildState["buildChunks"], token: MovingToken, route: readonly RoutePiece[], landing: number): RoutePoint[] {
-  const grounded = standing(token.elevation, footprintGround(chunks, token)) === "ground";
+  const grounded = footing(chunks, token) === "ground";
   const points: RoutePoint[] = [{ x: token.x, y: token.y, elevation: token.elevation }];
   for (const [i, [x, y]] of route.entries()) {
     const elevation = i === route.length - 1 ? landing : grounded ? footprintGround(chunks, { ...token, x, y, squeeze: undefined }) : token.elevation;
@@ -289,7 +289,7 @@ export function routeWalk(route: readonly RoutePoint[], token: MovingToken, buil
   const first = route[0];
   if (!first) return [];
   const lattice = step ?? routeLattice(token);
-  const grounded = standing(token.elevation, footprintGround(build.buildChunks, token)) === "ground";
+  const grounded = footing(build.buildChunks, token) === "ground";
   const stepsOf = (a: RoutePoint, b: RoutePoint) => Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / lattice - SLACK));
   const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, route.length > 1 ? stepsOf(first, route[1]!) : 0] }];
   const snap = (v: number) => Math.round(v / lattice) * lattice + 0;

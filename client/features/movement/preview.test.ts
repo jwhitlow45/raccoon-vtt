@@ -6,7 +6,7 @@ import { applyOp } from "#shared/reducer.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, actor, env, room, token } from "#shared/testutil.ts";
-import { moveOpsOf, planWalk } from "./drop.ts";
+import { dropView, moveOpsOf, planWalk } from "./drop.ts";
 import { frameFields, walkPreview } from "./preview.ts";
 import { line, raised, thorn, world } from "./testing.ts";
 
@@ -103,7 +103,8 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
   }
 
   /** The preview's leg and the cost the reducer stores for the op the drop sends, summed over the stops it adds. */
-  function both(state: RoomState, target: { x: number; y: number }, pieces?: RoutePiece[]): [number, number] {
+  function both(room: RoomState, target: { x: number; y: number }, pieces?: RoutePiece[]): [number, number] {
+    const state = dropView(room, "dm");
     const bree = state.tokens.bree!;
     const answer = pieces ? { kind: "route" as const, route: { pieces, points: [], endsBlocked: false } } : { kind: "open" as const };
     const preview = walkPreview({ view: state, token: bree, target, answer, held: null, world: publicWorld(state, bree, { role: "dm" }), role: "dm" });
@@ -134,10 +135,11 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
   test("off the low half of a horse straddling a step, the band reads the landing the drop sends, judged by the horse (review AT-ASTRA-13)", () => {
     // By her own footing Bree, at 10 ft over 0 ft ground, would fly off at 10 ft. Off a horse on the ground she lands on it.
     const state = riding("fiveTen", undefined, true);
-    const plan = planWalk(state, state.tokens.bree!, { x: 1, y: 4 }, "free", { kind: "open" }, 5);
+    const plan = planWalk(dropView(state, "dm"), state.tokens.bree!, { x: 1, y: 4 }, "free", { kind: "open" }, 5);
     assert.equal(plan.moves[0]?.elevation, 0);
     const [shown, stored] = both(state, { x: 1, y: 4 });
     assert.equal(shown, stored);
-    assert.equal(stored, 30);
+    // She walks off as a walker on the ground (rules/attach.ts walkerFor): half her Speed to step down clear of the horse, then 10 ft.
+    assert.equal(stored, 25);
   });
 });

@@ -32,8 +32,12 @@ import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
  * (footprint.ts).
  */
 
-/** The token fields the movement rule reads. */
-export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation">;
+/**
+ * The token fields the movement rule reads. `footing` is set only on a copy
+ * made for a walk off a holder on the ground (rules/attach.ts walkerFor),
+ * never on a stored token: it walks on the ground, whatever its height.
+ */
+export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: "ground" };
 
 /**
  * What a player hears when a wall or a ledge stops a move, or a resize,
@@ -205,7 +209,7 @@ export function pinches(segs: readonly (readonly [number, number, number, number
  */
 function ledgeFloor(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, endElevation: number): number {
   if (scene.blockMovement !== true || !walls.hasRelief) return Infinity;
-  switch (standing(token.elevation, walls.rangeGround(occupiedRange(token)))) {
+  switch (token.footing ?? standing(token.elevation, walls.rangeGround(occupiedRange(token)))) {
     case "ground":
       return -Infinity;
     case "flying":
