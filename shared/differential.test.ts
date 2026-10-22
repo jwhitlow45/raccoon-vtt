@@ -683,6 +683,16 @@ const TRAP_PAIRS: OpPair[] = [
     [{ who: DM, op: { t: "token.move", tokenId: "lurker", x: 10, y: 12 }, note: "the DM's hidden drag" }, thornAcross],
     ["buildChunks", "scenes"],
   ),
+  trapPair(
+    "Thorn walks into Grease beside a trap only one room has, which hints the DM before the area's reminder",
+    (s) => {
+      s.tokens.thorn = { ...s.tokens.thorn!, actor: { inline: actor({ passivePerception: 15 }) } };
+      s.templates.grease = template("grease", { shape: "cube", size: 10, origin: { x: 12, y: 6, z: 0 }, spell: "Grease", triggers: ["enter"] });
+    },
+    // Two squares below where Thorn stops, off his path, so only its hint differs.
+    (s) => trapOn(s, "wire", cells(13, 8), { notice: true, find: [{ ability: "wis", skill: "perception", dc: 10 }] }),
+    [...fightSteps, thornAcross],
+  ),
 ];
 
 describe("public determinism: traps' generators (docs/design-v1-traps.md 7)", () => {

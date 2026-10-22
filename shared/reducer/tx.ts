@@ -41,6 +41,13 @@ export type Env = {
 /** Log entries kept in memory. Older ones live in the room_log table. */
 export const MAX_LOG = 200;
 
+/**
+ * Where the DM's trap lines start counting within an op (Tx.addTrapLine):
+ * past any count the shared log reaches in one op, and inside the six
+ * digits a line id may have, so an occurrence's due still parses.
+ */
+export const DM_LINE_BASE = 900_000;
+
 export class Refuse extends Error {
   code: RefusalCode;
   constructor(code: RefusalCode, message: string) {
@@ -87,6 +94,7 @@ export class Tx {
   /** Keys this op wrote only for bookkeeping (see bumpWalls), which its inverse leaves out. */
   private readonly bookkeeping = new Set<EntityKey>();
   private logIndex = 0;
+  private dmLineIndex = 0;
 
   constructor(state: RoomState, actor: Viewer, env: Env) {
     this.state = { ...state };
@@ -222,13 +230,18 @@ export class Tx {
 
   /**
    * Appends a line to one of the trap logs (docs/design-v1-traps.md 6.3),
-   * numbered from the same envelope as the shared log's, so lines of every
-   * log sort together and a replay never writes one twice. Each log keeps
-   * only its own newest `keep`, so a line one audience cannot see never
-   * pushes out one it could. Trap lines never reach the stored log.
+   * numbered from the envelope, so lines of every log sort together and a
+   * replay never writes one twice. The players' lines share the shared
+   * log's count, since every player gets both. The DM's lines count on
+   * their own from DM_LINE_BASE, so a line only the DM sees never moves the
+   * id of a later line a player gets, and the DM's merged log never meets
+   * two lines with one id. Each log keeps only its own newest `keep`, so a
+   * line one audience cannot see never pushes out one it could. Trap lines
+   * never reach the stored log.
    */
   addTrapLine(ring: "trapLog" | "trapSeen", data: LogEvent, keep: number): LogEntry {
-    const line: LogEntry = { id: `${this.env.seq}:${this.logIndex++}`, at: this.env.at, kind: "event", data };
+    const index = ring === "trapLog" ? DM_LINE_BASE + this.dmLineIndex++ : this.logIndex++;
+    const line: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, kind: "event", data };
     const key = ring === "trapLog" ? keys.trapLog : keys.trapSeen;
     this.write(key(line.id), line);
     const lines = this.collection(ring);
