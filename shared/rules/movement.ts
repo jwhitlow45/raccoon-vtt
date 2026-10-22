@@ -435,9 +435,18 @@ export type Walking = Walker & { readonly [stepping]: true; readonly grounded: b
 
 type Chunks = BuildState["buildChunks"];
 
-/** The walk of `token` from where it stands: off its holder already where it stands clear of it, squeezed as it stands, and on the ground for the whole walk when it stands on it now. */
+/**
+ * The walk of `token` from where it stands: off its holder already where it
+ * stands clear of it, squeezed as it stands, and on the ground for the whole
+ * walk when it stands on it now. A walk off a holder on the ground starts on
+ * the ground under its own footprint, not at its seat, so stepping off a
+ * holder that straddles a step never counts the drop as distance, on a
+ * route or a straight leg (review LP12-AT-4). Getting off a ride pays for
+ * that already.
+ */
 export function walkFrom<T extends Walker>(chunks: Chunks, token: T): T & Walking {
-  const start = { ...token, grounded: footing(chunks, token) === "ground" } as T & Walking;
+  const grounded = footing(chunks, token) === "ground";
+  const start = { ...token, grounded, ...(grounded && token.offHolder ? { elevation: groundUnder(chunks, token, token) } : {}) } as T & Walking;
   return !start.offHolder || onOffHolder(start, start) ? start : pastHolder(start);
 }
 

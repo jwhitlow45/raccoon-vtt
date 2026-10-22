@@ -9,7 +9,7 @@ import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeWalkers } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
-import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
+import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, walkStart, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
 import { dragLead } from "../attach/groups.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
@@ -397,7 +397,7 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
   const read =
     move && trace
       ? dragReading({
-          token: walking,
+          token: walkStart(at.sim, walking),
           to: { x: move.x, y: move.y },
           encounter: null,
           activeTokenId: null,

@@ -8,7 +8,7 @@ import { areaTitle } from "../areas/labels.ts";
 import { dragReading, pathNow, type DragRead, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -51,7 +51,7 @@ export function groupReading(view: DropView, token: Token, to: Point, role: Role
   const landing = groupLanding(view, token, to);
   const dismount = dismountOf(view, token, { x: to.x, y: to.y, elevation: landing.elevation }, role);
   return dragReading({
-    token: walkerOf(view, token),
+    token: walkStart(view, walkerOf(view, token)),
     to,
     landing,
     encounter: view.encounter,
@@ -141,12 +141,13 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
   // Landed as the drop lands it, by its holder while it sits on one, so the band reads the leg the op sends.
   // And walked as the search and the server walk it (drop.ts walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
   const walking = walkerOf(view, token);
+  const start = walkStart(view, walking);
   const points = pieces
     ? walkers
       ? routePoints(view.buildChunks, walking, pieces, dropLanding(view, token, to))
       : along!.points
     : [
-        { x: token.x, y: token.y, elevation: token.elevation },
+        { x: token.x, y: token.y, elevation: start.elevation },
         { x: to.x, y: to.y, elevation: dropLanding(view, token, to) },
       ];
   const encounter = view.encounter;
@@ -158,7 +159,7 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
   const landed: Token = { ...standing, x: to.x, y: to.y, elevation: end.elevation, ...(to.squeeze === true ? { squeeze: true as const } : {}) };
   const trace = routeWalkers(view.buildChunks, walking, pieces ?? [[to.x, to.y, 0, 0]], end.elevation);
   const read = dragReading({
-    token: walking,
+    token: start,
     to,
     encounter,
     activeTokenId,

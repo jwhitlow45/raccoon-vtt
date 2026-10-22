@@ -6,11 +6,11 @@ import { inSightOfNonOwners, isPartyMember } from "#shared/project.ts";
 import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { carriedGroup, walkerFor } from "#shared/rules/attach.ts";
-import { LEDGE_IN_THE_WAY, legBlocker, ownWalk } from "#shared/rules/movement.ts";
-import { footprintRect } from "#shared/rules/footprint.ts";
+import { LEDGE_IN_THE_WAY, groundUnder, legBlocker, ownWalk } from "#shared/rules/movement.ts";
+import { footprintRect, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import type { Point, Rect } from "#shared/rules/geom.ts";
-import { routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { routeFeet, routePoints, routeReach, routeStop, straightCost, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { DM, P1, actor, chance, effect, env, int, pick, reveal, rng, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { dropLanding, dropView, walkerOf } from "../movement/drop.ts";
@@ -227,6 +227,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
     let held = 0;
     let reentered = 0;
     let squeezed = 0;
+    let offStep = 0;
     const walked = { plateau: 0, cart: 0 };
     // Past the first 400, a rider on a cart with the walls that send her off it and back over it (review AT-ASTRA-16), then a Large or Huge one with a gap to squeeze through (review AT-ASTRA-19).
     for (let seed = 1; seed <= 550; seed++) {
@@ -279,6 +280,22 @@ describe("a drag of an attached token plans the walk the server takes and stores
       const stored = (after.path?.stops ?? []).slice(before).reduce((sum, s) => sum + (s.cost ?? 0), 0);
       assert.equal(drag.preview.read.dragFt, stored, `${where}: the band read another cost than the one stored, ${JSON.stringify(op)}`);
       assert.equal(drag.frame.ft, stored, `${where}: the frames sent another cost than the one stored`);
+      // A walk off a holder on the ground starts on the ground under the walker's own footprint, however high its seat
+      // stands above it, so what it walked reads from there: along its route's pieces, or straight (review LP12-AT-4). A
+      // ride's dismount splits its walk, and a squeeze reads other footprints, so a carry that ends full size is read.
+      const seat = walkerFor(c.state, mover, seenAll(c.state));
+      const ground = groundUnder(c.state.buildChunks, mover, mover);
+      if (seat.offHolder && ground !== mover.elevation && op.t === "token.move" && mover.attached?.kind !== "ride" && !mover.squeeze && !after.squeeze) {
+        const landing = op.elevation ?? mover.elevation;
+        const start = { x: mover.x, y: mover.y, elevation: ground };
+        const rules = c.state.meta.settings;
+        const walked = route
+          ? routeFeet([start, ...routePoints(c.state.buildChunks, seat, route, landing).slice(1)], route.map(([, , extra, swim]) => ({ extra, swim })), rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(mover) }).moved
+          : straightCost(after, start, { x: op.x, y: op.y, elevation: landing }, rules, { h: 0, v: 0 }).moved;
+        const storedMoved = (after.path?.stops ?? []).slice(before).reduce((sum, s) => sum + (s.moved ?? 0), 0);
+        assert.equal(storedMoved, walked, `${where}: the walk off the holder counted ${storedMoved} ft where it walked ${walked} from the ground under it, ${JSON.stringify(op)}`);
+        offStep++;
+      }
       moved++;
       if (drag.answer.kind === "none") held++;
       if (op.t === "token.move" && op.route) routed++;
@@ -286,7 +303,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
       if (mover.attached && after.squeeze) squeezed++;
     }
     // A run that never walks off a mount, along a route, held at a wall, back over a cart or squeezed off one tests nothing.
-    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10 && reentered > 10 && squeezed > 20 && walked.plateau > 20 && walked.cart > 20, JSON.stringify({ moved, routed, off, held, reentered, squeezed, farRoutes, walked }));
+    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10 && reentered > 10 && squeezed > 20 && walked.plateau > 20 && walked.cart > 20 && offStep > 80, JSON.stringify({ moved, routed, off, held, reentered, squeezed, farRoutes, walked, offStep }));
   });
 
   test("random group drags of the same with a token of the player's far off: each leg is one the server's leg test takes, and the label reads what it stores", () => {

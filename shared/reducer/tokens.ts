@@ -11,6 +11,7 @@ import { onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWa
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
+import { walkFrom } from "../rules/movement.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -452,9 +453,10 @@ function seenNow(tx: Tx): (t: { id: string }) => boolean {
  * its route when it has one, two stops when the two differ.
  */
 export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number, route?: readonly RoutePiece[]): Token {
-  const from = { x: rider.x, y: rider.y, elevation: rider.elevation };
-  // It walks off on the ground, crossing only its mount's inner ledges, where its mount stands on it (rules/attach.ts walkerFor), as the drag searched it.
+  // It walks off on the ground, crossing only its mount's inner ledges, where its mount stands on it (rules/attach.ts walkerFor), as the drag searched it,
+  // from the ground under its own footprint (movement.ts walkFrom).
   const walking = walkerFor(tx.state, rider, seenNow(tx));
+  const from = { x: rider.x, y: rider.y, elevation: walkFrom(tx.state.buildChunks, walking).elevation };
   const points = route ? routePoints(tx.state.buildChunks, walking, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
   // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.
   const split = dismountSplit(tx.state, walking, mount, points, route);
@@ -589,7 +591,8 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
     taken = routeFeet(pointsOf(trace), route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
   } else {
     trace = routeWalkers(tx.state.buildChunks, walker, [[after.x, after.y, 0, 0]], after.elevation);
-    taken = straightCost(after, from, stop, rules, counter);
+    // From where the walk starts, on the ground under its footprint off a holder on the ground, as a route's first piece does (movement.ts walkFrom).
+    taken = straightCost(after, { ...from, elevation: trace[0]!.elevation }, stop, rules, counter);
   }
   const walk = carried ? [...carried.route] : pointsOf(trace);
   const out: PathStop = carried ? { ...stop, moved: taken.moved } : { ...stop, moved: taken.moved, cost: taken.cost };

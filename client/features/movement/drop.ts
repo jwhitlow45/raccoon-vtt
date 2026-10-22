@@ -153,6 +153,18 @@ export function walkerOf<T extends DropToken>(state: DropView, token: T): T & Wa
   return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder } as T & Walker) : ownWalk(token);
 }
 
+/**
+ * The walker where its walk starts, as the move counts it (movement.ts
+ * walkFrom): off a holder on the ground, on the ground under its own
+ * footprint, so stepping off a holder that straddles a step never reads
+ * the drop as distance (review LP12-AT-4). A drag's label reads a plain
+ * leg from here.
+ */
+export function walkStart<T extends DropToken & Walker>(state: Pick<BuildState, "buildChunks">, walking: T): T {
+  const elevation = walkFrom(state.buildChunks, walking).elevation;
+  return elevation === walking.elevation ? walking : { ...walking, elevation };
+}
+
 /** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
 export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"] };
 

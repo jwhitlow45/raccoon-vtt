@@ -11,7 +11,7 @@ import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
 import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkerOf, walkersStop, type Found } from "./drop.ts";
 import { dragReading } from "../measure/movement.ts";
-import { frameFields, groupLanding, walkPreview } from "./preview.ts";
+import { frameFields, groupLanding, groupReading, walkPreview } from "./preview.ts";
 import { CLOSED, line, onTurn, raised, recordedCost, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
 
@@ -215,8 +215,10 @@ describe("a group drag", () => {
       const plan = planGroup(view, [kite, view.tokens.mate!], to.x - kite.x, 0, "free");
       const move = plan.moves.find((m) => m.tokenId === "kite")!;
       assert.equal(move.elevation, 0, "off a holder on the ground it lands on the ground");
-      const read = dragReading({ token: walkerOf(view, kite), to, encounter: view.encounter, activeTokenId: "kite", speeds: undefined, rules: { feetPerCell: 5, diagonal: "five" }, role: "player", landing: groupLanding(view, kite, to) });
+      const read = groupReading(view, kite, to, "player");
       assert.equal(read.dragFt, recordedCost(view, moveOpsOf(plan.moves)[0]!, "kite"), `${feet} ft`);
+      // Its walk starts on the ground under its own footprint, so the seat's height above it is no distance (review LP12-AT-4).
+      assert.equal(read.dragFt, 5, `${feet} ft: one square, the drop from the seat not counted`);
     }
   });
 

@@ -163,6 +163,42 @@ describe("a walk off a holder on the ground, searched, checked and stored on the
   });
 });
 
+describe("a walk off a holder that straddles a step starts on the ground under the rider (review LP12-AT-4)", () => {
+  /**
+   * The warhorse at 10 ft on the platform's east step, its west half over the 10 ft platform at x 7 and its east half
+   * over the low ground at x 8, with P1's Bree seated on its low half on an Independent ride, on her own turn, and now and
+   * then the dust of review LP12-AT-4 on the horse, which slows whoever walks through it.
+   */
+  function step(dust: boolean): RoomState {
+    const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 7, y: 12, elevation: 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+    const bree = token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], x: 8, y: 13, elevation: 10, attached: { to: "horse", kind: "ride" }, actor: { inline: actor({ speeds: { walk: 30 } }) } });
+    let state = world({ heights: raised(0, 0, 8, 30, 10), tokens: [horse, bree] });
+    if (dust) state.templates.dust = template("dust", { shape: "emanation", size: 10, attachedTo: "horse", includeOrigin: true, slows: { kind: "difficult" } });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    return state;
+  }
+
+  test("two squares east count 10 ft walked, as a route through the dust and as a straight leg alike, and the label reads what the move stores", () => {
+    for (const dust of [false, true]) {
+      const state = step(dust);
+      const drag = dragOf(copyFor(state, P1), "player", "bree", { x: 10, y: 13 });
+      const op = drag.op as Op & { t: "token.move" };
+      assert.deepEqual([op.x, op.y, op.route !== undefined], [10, 13, dust], dust ? "a route through the dust" : "the straight leg");
+      const r = applyOp(state, op, P1, env(9));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      const stops = r.state.tokens.bree!.path!.stops.slice(1);
+      assert.equal(stops.reduce((sum, st) => sum + (st.moved ?? 0), 0), 10, "the seat's 10 ft above the ground is no distance");
+      assert.equal(drag.preview.read.dragFt, stops.reduce((sum, st) => sum + (st.cost ?? 0), 0), "the label reads what the move stores");
+      // Getting off costs half her Speed, then the square past the horse 5 ft, or 10 ft through the dust.
+      assert.equal(drag.preview.read.dragFt, dust ? 25 : 20);
+    }
+  });
+});
+
 describe("a group drag off a ride reads the dismount the reducer stores (review AT-ASTRA-15)", () => {
   test("a rider with 30 ft of Speed leaving her horse on her turn beside a token of hers: 15 ft to get off and 10 ft on, so 5 ft left", () => {
     const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } });
@@ -483,7 +519,8 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     assert.ok(r2.ok);
     assert.deepEqual([r2.state.tokens.imp!.elevation, r2.state.tokens.imp!.attached], [0, undefined]);
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), [off.preview.read.dragFt, back.preview.read.dragFt]);
-    assert.deepEqual(ruler.legs.map((leg) => leg.ft), [10, 5]);
+    // The walk off the cart starts on the ground under the imp, so its seat's 10 ft above it is no distance (review LP12-AT-4).
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), [5, 5]);
   });
 
   /**

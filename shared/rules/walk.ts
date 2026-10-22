@@ -1267,7 +1267,8 @@ export class PieceBuilder {
     this.#fiveTen = world.input.rules.diagonal === "fiveTen";
     this.#taut = taut;
     const first = steps.nodes[0]!;
-    this.#points = [{ x: world.xOf(first), y: world.yOf(first), elevation: world.input.token.elevation }];
+    // Where the walk starts, as its trace does: off a holder on the ground, on the ground under its footprint (movement.ts walkFrom).
+    this.#points = [{ x: world.xOf(first), y: world.yOf(first), elevation: walkFrom(world.input.build.buildChunks, world.input.token).elevation }];
   }
 
   /** Builds until done, the route, or until `late` says the slice is over, null, to go on when asked again. */
@@ -1524,7 +1525,7 @@ export class LegCheck {
       const route = this.#route!;
       late(route.pieces.length);
       const { rules, counter } = world.input;
-      const straight = straightCost(token, token, route.points[route.points.length - 1]!, rules, counter);
+      const straight = straightCost(token, { x: token.x, y: token.y, elevation: route.points[0]!.elevation }, route.points[route.points.length - 1]!, rules, counter);
       const walked = routeFeet(route.points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(token) });
       this.#open = straight.cost === walked.cost && straight.diag[0] === walked.diag[0] && straight.diag[1] === walked.diag[1];
       this.#phase = "done";
