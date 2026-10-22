@@ -96,6 +96,18 @@ describe("ride, perch and carry (6)", () => {
     assert.equal(answer(hidden, ontoHorse), answer(loose, ontoHorse));
   });
 
+  test("nothing takes over a token another holds: it is put down or let go first, while its own holder may change how it holds it", () => {
+    const held = table((s) => {
+      s.tokens.torch = { ...s.tokens.torch!, ownerIds: ["p1"], x: 6.5, y: 4.5, attached: { to: "bree", kind: "carry" } };
+      s.tokens.gob = grappled({ ...s.tokens.gob!, size: "small", attached: { to: "bree", kind: "drag" } });
+    });
+    assert.equal(answer(held, { t: "token.attach", tokenId: "torch", to: "horse", kind: "carry", x: 5, y: 4.5, elevation: 0 }), "forbidden: Bree puts down Torch first");
+    assert.equal(answer(held, { t: "token.attach", tokenId: "gob", to: "horse", kind: "drag", x: 7, y: 5, elevation: 0 }), "forbidden: Bree lets go of Goblin 2 first");
+    // Bree lifts the goblin she drags: the same holder, another hold.
+    assert.equal(answer(held, { t: "token.attach", tokenId: "gob", to: "bree", kind: "carry", x: 6, y: 4, elevation: 0 }), "ok");
+    assert.equal(answer(held, { t: "token.attach", tokenId: "torch", to: "horse", kind: "carry", x: 5, y: 4.5, elevation: 0 }, DM), "ok");
+  });
+
   test("a creature carried by a creature is a grappled one, as the list offers it, even for its own player", () => {
     const own = table((s) => (s.tokens.gob = { ...s.tokens.gob!, size: "small", x: 7, y: 4, ownerIds: ["p1"] }));
     const carry: Op = { t: "token.attach", tokenId: "gob", to: "bree", kind: "carry", x: 6, y: 4, elevation: 0 };

@@ -1260,8 +1260,8 @@ function ownTurnOr(c: Check, tokenId: string): Decision {
  * both and the two within reach as they stand. A drag needs the right to
  * move the holder, the two within reach, and the right to move the
  * creature too or a Grappled mark players see on it, and a creature
- * carried by a creature always needs that mark. A rider gets off before
- * anything else holds it. On a scene whose walls stop moves, every attach but a drag
+ * carried by a creature always needs that mark. A token already held comes
+ * off its holder before anything else holds it. On a scene whose walls stop moves, every attach but a drag
  * steps onto its seat by the leg test, and what the stepping token drags
  * follows that step by the walls test of a group move. A ride during a
  * fight waits for the rider's own turn. The
@@ -1275,9 +1275,10 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
   const settings = c.state.meta.settings;
   // The seat is at the holder's elevation, as the reducer puts it (4.1).
   const seat = { x: op.x, y: op.y, elevation: holder.elevation };
-  // A rider gets off first, which costs what getting off costs (7.3). Only the same ride again, as Controlled toggles, replaces it.
-  const mount = carried.attached?.kind === "ride" ? c.visibleToken(carried.attached.to) : undefined;
-  if (mount && !(op.kind === "ride" && op.to === mount.id)) return refuse("forbidden", `${shownName(carried)} gets off ${shownName(mount)} first`);
+  // A token already held, by a link the player sees, comes off it first, so a rider pays to get off (7.3) and no hold is taken over.
+  // Its own holder may change how it holds it, and a ride only to the same ride again, as Controlled toggles.
+  const held = carried.attached ? c.visibleToken(carried.attached.to) : undefined;
+  if (held && (op.to !== held.id || (carried.attached!.kind === "ride" && op.kind !== "ride"))) return refuse("forbidden", comesOffFirst(carried, held));
   const grapple = op.kind === "drag" || (op.kind === "carry" && isCreature(carried) && isCreature(holder));
   if (grapple) {
     const may = moveCheck(c, holder.id);
@@ -1303,6 +1304,12 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
   const dragged = draggedWalls(c, op);
   if (!dragged.ok) return dragged;
   return op.kind === "ride" ? ownTurnOr(c, carried.id) : OK;
+}
+
+/** Why a player's attach of a token already held waits for it to come off: in the words of the button that takes it off (4.3). */
+function comesOffFirst(carried: Token, holder: Token): string {
+  if (carried.attached?.kind === "drag") return `${shownName(holder)} lets go of ${shownName(carried)} first`;
+  return isCreature(carried) ? `${shownName(carried)} gets off ${shownName(holder)} first` : `${shownName(holder)} puts down ${shownName(carried)} first`;
 }
 
 /**
