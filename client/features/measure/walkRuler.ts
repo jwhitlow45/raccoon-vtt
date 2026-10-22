@@ -1,5 +1,4 @@
 import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
-import { inSightOfNonOwners } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
@@ -9,7 +8,7 @@ import { offKey, type Walker } from "#shared/rules/movement.ts";
 import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeWalkers } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
-import { groupWalkWorld, publicToken, type WalkViewer } from "#shared/rules/walkWorld.ts";
+import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
@@ -422,7 +421,7 @@ const RULER_ENV = { seq: 1, at: "1970-01-01T00:00:00.000Z" };
  * op: the token's group moves with it and a link that no longer holds
  * comes loose by the link pass. Who sees a token it moved is judged where
  * it now stands by the rule the server judges every player's sight by
- * (project.ts inSightOfNonOwners), any other as this view's drops read it,
+ * (walkWorld.ts seenWhereMoved), any other as this view's drops read it,
  * and for a shared ruler none players did not see where it starts
  * (`unseen`). A copy the reducer cannot apply it to, as a projection can
  * lack what the reducer assumes, moves the walker where the plan puts it
@@ -452,7 +451,7 @@ function simulated(view: RoomState, sim: RoomState, role: WalkViewer["role"], wa
     ...room,
     seen: (t) => {
       const token = room.tokens[t.id];
-      return token !== undefined && !unseen?.has(t.id) && (moved(t.id) ? inSightOfNonOwners(room, token, {}) : drops.seen(t));
+      return token !== undefined && !unseen?.has(t.id) && (moved(t.id) ? seenWhereMoved(room, token) : drops.seen(t));
     },
   };
   return { sim: room, seen, walker: room.tokens[walker.id]! };

@@ -676,6 +676,42 @@ describe("a walking ruler's later legs search the room its earlier legs leave (r
   });
 });
 
+describe("a walking ruler sees a party member its legs move where every player sees it, on any copy (review AT-SOL-7)", () => {
+  test("another player's PC the walker drags into the fog stays seen, so the ruler's later leg tows it and is cut where it meets a wall, as the drag is", () => {
+    // Hero, p1's, drags Ally, p2's PC, east out of the revealed ground, then north. Players always see a party member, under the
+    // fog too, so each drag pays 1 extra foot a foot, and a wall across Ally's lane north stops it, and Hero with it. A player's
+    // copy holds no owners of another player's token, so read by the owners there, Ally walked into the fog hidden: the ruler's
+    // second leg towed nothing, 20 ft where the drag reads 40, and went on past the wall where the drag is cut.
+    for (const wall of [false, true]) {
+      const state = world({
+        edges: wall ? line("n", 3, 9, 10) : {},
+        tokens: [
+          token("hero", { name: "Hero", kind: "pc", ownerIds: ["p1"], x: 5, y: 5 }),
+          token("ally", { name: "Ally", kind: "pc", ownerIds: ["p2"], x: 4, y: 5, attached: { to: "hero", kind: "drag" } }),
+        ],
+      });
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+      reveal(state, "s1", { x: 0, y: 0, w: 8, h: 12 });
+      const spots = [{ x: 10, y: 5 }, { x: 10, y: 1 }];
+      let room = state;
+      const read: number[] = [];
+      for (const [i, spot] of spots.entries()) {
+        const drag = dragOf(copyFor(room, P1), "player", "hero", spot);
+        const r = applyOp(room, drag.op as Op, P1, env(9 + i));
+        assert.ok(r.ok, r.ok ? "" : r.message);
+        room = r.state;
+        read.push(drag.preview.read.dragFt);
+      }
+      assert.deepEqual([read, room.tokens.hero!.y], wall ? [[50, 20], 3] : [[50, 40], 1], `wall ${wall}`);
+      const stops = [tokenStop(state.tokens.hero!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))];
+      const theirs = measureWalk({ view: copyFor(state, P1), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!;
+      assert.deepEqual(theirs.legs.map((leg) => leg.ft), read, `wall ${wall}, p1's ruler`);
+      const shared = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false })!;
+      assert.deepEqual(shared.legs.map((leg) => leg.ft), read, `wall ${wall}, the DM's shared ruler`);
+    }
+  });
+});
+
 describe("an area on a token carried rigidly with the mover never costs it (review AT-ASTRA-28)", () => {
   /** The drags of `id` by `who` on their copy to each spot in turn, each from where the one before left it: what each label read. */
   function dragsBy(state: RoomState, who: typeof DM, id: string, spots: readonly { x: number; y: number }[]): number[] {

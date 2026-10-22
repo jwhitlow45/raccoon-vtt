@@ -216,7 +216,20 @@ function shownTokens(state: RoomState, token: Token, viewer: WalkViewer, everyth
 
 /** Whether players see a token, as `publicToken` reads it, a token a walking ruler's earlier legs moved where those legs left it (WorldOptions `moved` and `unseen`). */
 function shownBy(state: RoomState, viewer: WalkViewer, opts: Pick<WorldOptions, "moved" | "unseen">): (t: Token) => boolean {
-  return (t) => !opts.unseen?.has(t.id) && (opts.moved?.has(t.id) ? inSightOfNonOwners(state, t, {}) : publicToken(state, t, viewer));
+  return (t) => !opts.unseen?.has(t.id) && (opts.moved?.has(t.id) ? seenWhereMoved(state, t) : publicToken(state, t, viewer));
+}
+
+/**
+ * Whether players who do not own a token see it where a walking ruler's
+ * earlier legs left it, by the rule the server judges every player's sight
+ * by (project.ts inSightOfNonOwners), on the DM's room or a player's copy.
+ * A copy holds no owners of another's token, so there a party member reads
+ * as one by the projection's `aboveFog`, set for a party member or a token
+ * the DM exempted, which tells no one who owns it (review AT-SOL-7).
+ */
+export function seenWhereMoved(state: RoomState, token: Token): boolean {
+  const above = (token as Token & { aboveFog?: boolean }).aboveFog === true;
+  return inSightOfNonOwners(state, above ? { ...token, fogExempt: true } : token, {});
 }
 
 /**

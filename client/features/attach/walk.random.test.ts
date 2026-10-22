@@ -5,7 +5,7 @@ import { canApply } from "#shared/permissions.ts";
 import { inSightOfNonOwners, isPartyMember } from "#shared/project.ts";
 import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { walkerFor } from "#shared/rules/attach.ts";
+import { carriedGroup, walkerFor } from "#shared/rules/attach.ts";
 import { LEDGE_IN_THE_WAY, legBlocker, ownWalk } from "#shared/rules/movement.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
@@ -334,7 +334,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
   });
 });
 
-type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: number; shared: number; lit: number; trailing: number; towed: number; compared: number; revealed: number };
+type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: number; shared: number; lit: number; trailing: number; towed: number; partyTowed: number; compared: number; revealed: number };
 
 /**
  * One random walking ruler of two or three legs against the drags it stands
@@ -343,10 +343,12 @@ type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: nu
  * the drags before it left the token, and a shared one must read the same on
  * the DM's room as on a player's copy. `lamps` adds now and then an area on
  * a lamp the mover, a creature it drags or its holder carries, `drags`
- * keeps the creatures a holder drags, and `carts` asks for a cart's layout.
- * Without the first two, the walk is the one review round 10 drew.
+ * keeps the creatures a holder drags, `party` now and then (or, "always",
+ * always) makes one of them another player's, `fog` sets whether the fog is
+ * on, and `carts` asks for a cart's layout. Without the first two, the walk
+ * is the one review round 10 drew.
  */
-function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolean; carts: boolean }, n: RulerCounts): void {
+function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolean; carts: boolean; party?: boolean | "always"; fog?: boolean }, n: RulerCounts): void {
   const r = rng(seed);
   const drawn = randomCase(r, opts.carts ? "cart" : undefined);
   // A ruler has no turn (docs/design-v1-movement.md 3.3): it leaves out other creatures' spaces and a dismount's half Speed.
@@ -367,6 +369,10 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
     const under = tokens[lampOn]!;
     tokens.lamp = token("lamp", { name: "Lamp", kind: "object", size: "tiny", x: under.x, y: under.y, elevation: under.elevation, attached: { to: lampOn, kind: "carry" } });
   }
+  // Now and then the creature the mover drags is p2's, a party member p1's copy holds no owners of, which players see wherever
+  // a leg takes it, the fog included (review AT-SOL-7).
+  const partyTowed = towed !== undefined && (opts.party === "always" || (opts.party === true && chance(r, 0.5)));
+  if (partyTowed) tokens[towed] = { ...tokens[towed]!, ownerIds: ["p2"] };
   // Every other ruler is the DM's, often of a creature outside the party, which players see only where the fog is lifted.
   const who = seed % 2 === 0 ? DM : drawn.who;
   if (who.role === "dm" && chance(r, 0.6)) tokens[drawn.mover] = { ...tokens[drawn.mover]!, kind: "npc", ownerIds: [] };
@@ -374,7 +380,7 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   if (lampOn) c.state.templates.glow = template("glow", { shape: "emanation", size: pick(r, [5, 10, 15]), attachedTo: "lamp", includeOrigin: true, slows: { kind: pick(r, ["difficult", "quarter"] as const) } });
   // Now and then fog, lifted only over a patch about the start, or over part of a cart, so later legs walk into it and out
   // of it, on the cart and off it, and a passenger the fog hides walks off as a token with no holder.
-  const fog = chance(r, 0.5);
+  const fog = opts.fog ?? chance(r, 0.5);
   if (fog) {
     const start = c.state.tokens[c.mover]!;
     const wagon = c.state.tokens.cart;
@@ -413,7 +419,7 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   // more than the DM's drag.
   const ruler = measureWalk({ view: startCopy, sceneId: "s1", stops, viewer: { role: c.who.role }, everything: dm });
   if (revealed) n.revealed++;
-  else if (!dm || !fog || (!isPartyMember(c.state, c.state.tokens[c.mover]!) && !lampOn)) {
+  else if (!dm || !fog || (!carriedGroup(c.state.tokens, c.mover).some((id) => isPartyMember(c.state, c.state.tokens[id]!)) && !lampOn)) {
     assert.deepEqual(ruler?.legs.map((leg) => leg.ft), read, `seed ${seed} (${c.who.memberId}'s ruler for ${c.mover} through ${JSON.stringify(stops.slice(1))})`);
     n.compared++;
   }
@@ -422,6 +428,7 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   if (fog) n.fogged++;
   if (lampOn === c.mover) n.lit++;
   if (lampOn !== undefined && lampOn === towed) n.trailing++;
+  if (partyTowed) n.partyTowed++;
   if (Object.values(c.state.tokens).some((t) => t?.attached?.kind === "drag" && t.attached.to === c.mover)) n.towed++;
   // Shared, the DM's ruler reads on the DM's room what it reads on a player's copy that shows the creature where it starts (review AT-SOL-5).
   const copy = copyFor(c.state, P1);
@@ -432,13 +439,21 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   n.shared++;
 }
 
-const noRulers = (): RulerCounts => ({ rulers: 0, legs: 0, offHolder: 0, fogged: 0, shared: 0, lit: 0, trailing: 0, towed: 0, compared: 0, revealed: 0 });
+const noRulers = (): RulerCounts => ({ rulers: 0, legs: 0, offHolder: 0, fogged: 0, shared: 0, lit: 0, trailing: 0, towed: 0, partyTowed: 0, compared: 0, revealed: 0 });
 
 describe("a walking ruler reads each leg as the drag it stands for (reviews AT-ASTRA-25, AT-SOL-5, AT-ASTRA-26, AT-O-31 and AT-O-32)", () => {
   test("random rulers of two and three legs, the DM's own on the room and a player's on their copy: each leg reads what the drag to its stop read, made from where the drags before it left the token, and a shared one reads the same on every copy", () => {
     const n = noRulers();
-    for (let seed = 1; seed <= 400; seed++) rulerSeed(seed, { lamps: seed % 3 === 0 ? "towed" : true, drags: true, carts: seed > 250 }, n);
-    assert.ok(n.rulers > 150 && n.compared > 130 && n.offHolder > 40 && n.fogged > 60 && n.shared > 60 && n.lit > 40 && n.trailing > 10 && n.towed > 20, JSON.stringify(n));
+    for (let seed = 1; seed <= 400; seed++) rulerSeed(seed, { lamps: seed % 3 === 0 ? "towed" : true, drags: true, carts: seed > 250, party: true }, n);
+    assert.ok(n.rulers > 150 && n.compared > 130 && n.offHolder > 40 && n.fogged > 60 && n.shared > 60 && n.lit > 40 && n.trailing > 10 && n.towed > 20 && n.partyTowed > 10, JSON.stringify(n));
+  });
+
+  test("random rulers of a creature dragging another player's into the fog: each leg tows it and is cut where it meets a wall as its drag is, on a player's copy too", () => {
+    // A player's copy holds no owners of another player's creature, so a ruler that judged where a leg leaves it by owners
+    // took it for hidden in the fog, where players always see a party member (review AT-SOL-7).
+    const n = noRulers();
+    for (let seed = 1; seed <= 300; seed++) rulerSeed(seed, { lamps: false, drags: true, carts: false, party: "always", fog: true }, n);
+    assert.ok(n.partyTowed > 60 && n.compared > 40 && n.shared > 40, JSON.stringify(n));
   });
 
   test("two walks a wider sweep found read the same shared on the DM's room as on a player's copy: a creature dragged in the fog, and one a leg drags into it", () => {
