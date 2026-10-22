@@ -13,7 +13,7 @@ import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
-import type { OpAnswer, OpRefusal } from "../../state/types.ts";
+import type { OpAnswer, OpRefusal, UnknownCause } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { DDB_WORDS, getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
@@ -191,7 +191,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
 
   const sendOp = (what: "apply" | "undo", sync: SyncOp) => {
     const who = name.current;
-    const onAnswer = (answer: OpAnswer, refusal?: OpRefusal) => {
+    const onAnswer = (answer: OpAnswer, refusal?: OpRefusal, _unknown?: UnknownCause, stamped?: string) => {
       const sorted = answerOf(answer, refusal);
       if (!open.current) {
         const text = what === "apply" ? lateApplyText(who, answer, refusal?.message) : lateUndoText(who, answer, refusal?.message);
@@ -200,7 +200,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
       }
       if (sorted.answer === "fast") setRetryAt(Date.now() + LIMITS.companionBlockWriteRefillMs);
       if (sorted.answer === "stale" && what === "apply") staleRebuild.current = true;
-      send(what === "apply" ? { t: "applied", ...sorted } : { t: "undid", ...sorted });
+      send(what === "apply" ? { t: "applied", ...sorted, ...(stamped ? { at: stamped } : {}) } : { t: "undid", ...sorted });
     };
     // In "view as a player" nothing is sent: the preview says so, and the review stays.
     if (actions.dispatch({ t: "character.update", characterId: props.characterId, patch: sync.patch, expect: sync.expect }, { onAnswer, quiet: true }) === null) {
@@ -220,14 +220,14 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
     send({ t: "apply", op });
   };
 
-  // Undo starts from the character Apply saw and the patch it sent, with the record the room now holds, and only while the live character still holds what Apply wrote.
+  // Undo starts from the character Apply saw, the patch it sent and the `at` its answer gave, and only while the live character still holds what Apply wrote.
   const undo = useMemo(() => {
     if (flow.step !== "done" || !flow.applied || !frozen.current || !live) return null;
-    const back = undoSync(frozen.current, flow.applied.patch, live.ddbSync);
+    const back = undoSync(frozen.current, flow.applied.patch, flow.appliedAt ?? undefined);
     if (!back) return null;
     const now = expectOf(live, Object.keys(back.expect) as ExpectPart[]);
     return Object.entries(back.expect).every(([part, hash]) => now[part as ExpectPart] === hash) ? back : null;
-  }, [flow.step, flow.applied, live]);
+  }, [flow.step, flow.applied, flow.appliedAt, live]);
 
   const close = () => send({ t: "close" });
   const blockBytes = result ? serializedBytes(result.stats) : 0;

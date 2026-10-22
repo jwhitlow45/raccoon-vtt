@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { serializedBytes, LIMITS } from "../limits.ts";
-import type { DdbBase, PcRoll, PcStats } from "../model.ts";
-import { ddbSyncForImport, ddbSyncPatchSchema, pcStatsForImport } from "../protocol.ts";
+import { CHARACTER_CHANGED, serializedBytes, LIMITS } from "../limits.ts";
+import type { Character, DdbBase, PcRoll, PcStats } from "../model.ts";
+import { canApply } from "../permissions.ts";
+import { ddbSyncForImport, ddbSyncPatchSchema, pcStatsForImport, type Op } from "../protocol.ts";
+import { applyOp } from "../reducer.ts";
+import { stampedAt } from "../reducer/tokens.ts";
 import type { PcFill } from "./pcFill.ts";
 import {
   afterSync,
@@ -15,6 +18,7 @@ import {
   planSync,
   rollHash,
   rollKeys,
+  sameRecord,
   syncPatch,
   syncResult,
   undoSync,
@@ -27,7 +31,7 @@ import {
   type SyncPlan,
 } from "./pcSync.ts";
 import { EMPTY_PC_STATS } from "./pcStats.ts";
-import { actor } from "../testutil.ts";
+import { DM, P1, actor, character, room } from "../testutil.ts";
 
 /**
  * The re-sync merge (docs/design-v1-resync.md 2 and 5): a table of each
@@ -298,7 +302,7 @@ describe("level, max HP, AC, Speed and senses keep their ticks (2.2, 2.3)", () =
     const sent = syncPatch(high, syncResult(down, defaultTicks(down)))!;
     const after = afterSync(high, sent.patch, AT);
     assert.deepEqual(after.actor.hp, { cur: 30, max: 30, temp: 0 });
-    const undo = undoSync(high, sent.patch, after.ddbSync)!;
+    const undo = undoSync(high, sent.patch, AT)!;
     assert.deepEqual(undo.patch.actor?.hp, { cur: 35, max: 38 });
     assert.deepEqual(afterSync(after, undo.patch, AT).actor.hp, { cur: 35, max: 38, temp: 0 });
   });
@@ -678,11 +682,53 @@ describe("the review's checks (3.3)", () => {
     assert.ok(sent.expect["actor.shape"], "the shape is always expected");
     assert.deepEqual(Object.keys(sent.expect).sort(), ["actor.shape", "ddbSync", "level", "stats.abilities"]);
     const after = afterSync(first, sent.patch, "2026-10-21T19:00:00.000Z");
-    const undo = undoSync(first, sent.patch, after.ddbSync)!;
+    const undo = undoSync(first, sent.patch, "2026-10-21T19:00:00.000Z")!;
     assert.deepEqual(undo.patch.ddbSync, first.ddbSync);
     assert.equal(undo.patch.level, 5);
     assert.deepEqual(afterSync(after, undo.patch, AT), first);
-    assert.equal(undoSync(first, sent.patch, { ...after.ddbSync!, from: "1" }), null, "a record that is not the one sent cannot be undone here");
+    assert.equal(undoSync(first, sent.patch, undefined), null, "with no at in Apply's answer, Undo is off");
     assert.equal(pcStatsForImport.safeParse(after.stats).success, true);
+  });
+
+  test("a second device's later sync of an equal record refuses the first device's Undo, which expects the at its own answer gave (RS-SOL-1)", () => {
+    // Bree as synced, with Wisdom saves the player added since, and D&D Beyond now at level 6.
+    const first = synced(fillOf(empty()));
+    const bree0: Character = character("bree", { ...first, ownerIds: ["p1"], stats: { ...first.stats!, saves: ["wis"] } });
+    const fill = fillOf(empty(), { level: 6 });
+    const apply = (c: Character, ticks?: (p: SyncPlan) => Set<string>) => {
+      const p = plan(c, fill);
+      const sent = syncPatch(c, syncResult(p, ticks ? ticks(p) : defaultTicks(p)))!;
+      return { sent, op: { t: "character.update", characterId: "bree", patch: sent.patch, expect: sent.expect } as Op };
+    };
+    const through = (state: ReturnType<typeof room>, op: Op, at: string) => {
+      assert.ok(canApply(op, P1, state, { canUseAsset: () => true }).ok, "the op's expect holds");
+      const r = applyOp(state, op, P1, { seq: 1, at });
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      return r.state;
+    };
+    const T1 = "2026-10-21T19:00:00.000Z";
+    const T2 = "2026-10-21T19:05:00.000Z";
+
+    // Device A applies the level and keeps the saves. The answer gives the at the server wrote.
+    const a = apply(bree0);
+    assert.deepEqual(Object.keys(a.sent.patch).sort(), ["ddbSync", "level"]);
+    const afterA = through(room({ characters: { bree: bree0 } }), a.op, T1);
+    const stampedA = stampedAt(a.op, afterA);
+    assert.equal(stampedA, T1);
+    const undoA = undoSync(bree0, a.sent.patch, stampedA)!;
+    const undoOp: Op = { t: "character.update", characterId: "bree", patch: undoA.patch, expect: undoA.expect };
+    assert.ok(canApply(undoOp, P1, afterA, { canUseAsset: () => true }).ok, "with nothing since, A's Undo is taken");
+
+    // Device B re-syncs from what A left and overwrites the saves, a part A never wrote. Its record equals A's, its at is later.
+    const b = apply(afterA.characters.bree!, (p) => new Set([...defaultTicks(p), "field:saves.wis"]));
+    assert.deepEqual(Object.keys(b.sent.patch).sort(), ["ddbSync", "stats"]);
+    assert.ok(sameRecord(b.sent.patch.ddbSync!, afterA.characters.bree!.ddbSync), "B's record equals A's");
+    const afterB = through(afterA, b.op, T2);
+    assert.equal(stampedAt(b.op, afterB), T2);
+
+    assert.deepEqual(canApply(undoOp, P1, afterB, { canUseAsset: () => true }), { ok: false, code: "invalid", message: CHARACTER_CHANGED });
+    // Taken from the view, the at would be B's, and A's Undo would roll B's sync back.
+    const fromView = undoSync(bree0, a.sent.patch, afterB.characters.bree!.ddbSync!.at)!;
+    assert.ok(canApply({ t: "character.update", characterId: "bree", patch: fromView.patch, expect: fromView.expect }, P1, afterB, { canUseAsset: () => true }).ok);
   });
 });

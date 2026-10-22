@@ -747,6 +747,18 @@ function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, bl
 }
 
 /**
+ * The `at` `syncRecord` wrote on a record that came without one, read from
+ * the state the op left, for the op's answer. A re-sync's Undo expects
+ * exactly that record, so its sender learns the `at` from the answer, never
+ * from a view that may already hold another device's later sync
+ * (docs/design-v1-resync.md 3.4).
+ */
+export function stampedAt(op: Op, after: RoomState): string | undefined {
+  if (op.t !== "character.update" || !op.patch.ddbSync || op.patch.ddbSync.at !== undefined) return undefined;
+  return after.characters[op.characterId]?.ddbSync?.at;
+}
+
+/**
  * Removes a character with every token that points at it, so no token is
  * left with a dangling actor, its companions, and the stat blocks it kept
  * for them (docs/design-v1-companion-stat-blocks.md 3.3).

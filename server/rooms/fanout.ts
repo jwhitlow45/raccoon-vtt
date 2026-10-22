@@ -15,6 +15,9 @@ export type Reject = { n: number; code: RefusalCode; message: string };
 /** An undo or redo that applied, and what it took back (design 7.7). */
 export type Restored = { n: number; what: string };
 
+/** An op that wrote a sync record without `at`, and the `at` the server wrote (docs/design-v1-resync.md 3.4). */
+export type Stamped = { n: number; at: string };
+
 export type CommittedBatch = {
   seq: number;
   before: RoomState;
@@ -26,6 +29,8 @@ export type CommittedBatch = {
   restored: Map<ClientKey, Restored[]>;
   /** Each player client's ops in the batch whose trap step refuses their Undo move (docs/design-v1-traps.md 6.5). */
   trapped?: Map<ClientKey, number[]>;
+  /** Each client's ops in the batch that wrote a sync record without `at`, with the `at` written. */
+  stamped?: Map<ClientKey, Stamped[]>;
 };
 
 function viewerClass(conn: Connection, state: RoomState): string {
@@ -123,8 +128,9 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     const rejects = mine ? batch.rejects.get(key) : undefined;
     const restored = mine ? batch.restored.get(key) : undefined;
     const trapped = mine ? batch.trapped?.get(key) : undefined;
+    const stamped = mine ? batch.stamped?.get(key) : undefined;
     if (diff.changes.length === 0 && !acks?.length && !rejects?.length) continue;
-    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[] } = {
+    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[] } = {
       t: "ev",
       seq: batch.seq,
       changes: diff.changes,
@@ -133,6 +139,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     if (rejects?.length) msg.rejects = rejects;
     if (restored?.length) msg.restored = restored;
     if (trapped?.length) msg.trapped = trapped;
+    if (stamped?.length) msg.stamped = stamped;
     conn.send(msg);
   }
 }

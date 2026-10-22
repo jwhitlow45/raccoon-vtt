@@ -1039,13 +1039,14 @@ export function afterSync(before: SyncCharacter, patch: CharacterPatch, at: stri
  * as it was, the exact current and maximum HP, since the HP rule run
  * backwards would not give them back, and the record from before, its
  * `at` included, or none. Its `expect` is of the result Apply produced.
- * `confirmed` is the record the room holds after Apply: Undo is offered
- * only when it is the one sent, `at` aside, since then its `at` is the
- * server's. Null when that cannot be established.
+ * `stamped` is the `at` the server wrote on Apply's record, from Apply's
+ * answer, never from the view: another device's later sync of an equal
+ * record would pass for Apply's there, and Undo would take it back. Null
+ * without it.
  */
-export function undoSync(before: SyncCharacter, sent: CharacterPatch, confirmed: DdbSync | undefined): { patch: CharacterPatch; expect: CharacterExpect } | null {
-  if (!sent.ddbSync || !confirmed || !sameRecord(sent.ddbSync, confirmed)) return null;
-  const after = afterSync(before, sent, confirmed.at);
+export function undoSync(before: SyncCharacter, sent: CharacterPatch, stamped: string | undefined): { patch: CharacterPatch; expect: CharacterExpect } | null {
+  if (!sent.ddbSync || stamped === undefined) return null;
+  const after = afterSync(before, sent, stamped);
   const patch: CharacterPatch = {};
   if (sent.stats !== undefined) {
     if (before.stats === undefined) patch.stats = null;

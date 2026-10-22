@@ -349,10 +349,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * store holds the settled state, so a sender that reads the view sees it.
    * Each op is told once: it has left `pending` by then.
    */
-  function tell(ops: readonly PendingOp[], answer: (p: PendingOp) => OpAnswer, refusal?: (p: PendingOp) => OpRefusal | undefined, unknown?: UnknownCause): void {
+  function tell(ops: readonly PendingOp[], answer: (p: PendingOp) => OpAnswer, refusal?: (p: PendingOp) => OpRefusal | undefined, unknown?: UnknownCause, stamped?: ReadonlyMap<number, string>): void {
     for (const p of ops) {
       const a = answer(p);
+      const at = a === "taken" ? stamped?.get(p.n) : undefined;
       if (a === "unknown" && unknown) p.onAnswer?.(a, undefined, unknown);
+      else if (at !== undefined) p.onAnswer?.(a, undefined, undefined, at);
       else p.onAnswer?.(a, refusal?.(p));
     }
   }
@@ -664,6 +666,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         s.pending.filter((p) => settled.has(p.n)),
         (p) => (refusedNow.has(p.n) ? "refused" : "taken"),
         (p) => refusedNow.get(p.n),
+        undefined,
+        new Map((msg.stamped ?? []).map((s) => [s.n, s.at])),
       );
       if (ephemeral !== s.ephemeral) armSweep();
       armAnswerTimer();

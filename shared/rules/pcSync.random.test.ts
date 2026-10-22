@@ -5,6 +5,7 @@ import type { Character, PcRoll, PcStats, RoomState } from "../model.ts";
 import { canApply, expectOf } from "../permissions.ts";
 import { ddbSyncForImport, ddbSyncPatchSchema, EXPECT_PARTS, MAX_PC_ROLLS, opSchema, pcStatsForImport, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
+import { stampedAt } from "../reducer/tokens.ts";
 import { DM, P1, character as testCharacter, actor as testActor, room } from "../testutil.ts";
 import type { PcFill } from "./pcFill.ts";
 import {
@@ -410,7 +411,7 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
     const out = after.stats!.rolls.find((x) => x.id === roll.id);
     if (out) assert.equal(out.id, roll.id, "6: a roll that stays keeps its id");
   }
-  const undo = undoSync(c, sent.patch, after.ddbSync);
+  const undo = undoSync(c, sent.patch, stampedAt({ t: "character.update", characterId: c.id, patch: sent.patch, expect: sent.expect }, afterState));
   assert.ok(undo, "7: Undo is offered");
   const undoOp: Op = { t: "character.update", characterId: c.id, patch: undo.patch, expect: undo.expect };
   assert.equal(opSchema.safeParse(undoOp).success, true);

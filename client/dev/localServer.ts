@@ -7,6 +7,7 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { clientMessageSchema, clientOpSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
+import { stampedAt } from "#shared/reducer/tokens.ts";
 import type { SocketLike } from "../state/socket.ts";
 
 /**
@@ -67,6 +68,7 @@ export class LocalServer {
     const out: ServerMessage[] = [];
     const acks: number[] = [];
     const rejects: { n: number; code: "invalid" | "forbidden" | "gone" | "quota"; message: string }[] = [];
+    const stamped: { n: number; at: string }[] = [];
     const touched: EntityKey[] = [];
     let global = false;
     for (const { n, op } of ops) {
@@ -121,12 +123,15 @@ export class LocalServer {
       touched.push(...result.touched);
       global ||= result.global;
       acks.push(n);
+      const at = stampedAt(next, this.state);
+      if (at !== undefined) stamped.push({ n, at });
     }
     const changes = this.fanOut(touched, global);
     if (changes.length > 0 || acks.length > 0 || rejects.length > 0) {
       const ev: Extract<ServerMessage, { t: "ev" }> = { t: "ev", seq: this.seq, changes };
       if (acks.length > 0) ev.acks = acks;
       if (rejects.length > 0) ev.rejects = rejects;
+      if (stamped.length > 0) ev.stamped = stamped;
       out.unshift(ev);
     }
     return out;

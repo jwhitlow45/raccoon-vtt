@@ -400,6 +400,33 @@ describe("a re-sync's race at the room actor (docs/design-v1-resync.md 5)", () =
     );
   });
 
+  test("Apply's answer gives the at the server wrote, and the DM's later sync of an equal record refuses Ana's Undo built on it (RS-SOL-1)", async () => {
+    let now = Date.parse("2026-10-21T19:00:00.000Z");
+    await play(
+      table(),
+      async ({ actor, dm, ana, id }) => {
+        const review = ana.sees(id);
+        const applied = await ana.post(update(id, review, APPLY));
+        const answer = await evOf(ana.sent, applied);
+        const at = actor.committed.state.characters[id]!.ddbSync!.at;
+        assert.equal(at, "2026-10-21T19:00:00.000Z");
+        assert.deepEqual(answer.stamped, [{ n: applied, at }]);
+        assert.equal(dm.sent.some((m) => m.t === "ev" && m.stamped !== undefined), false, "only the sender hears it");
+        const result = resultOf(review, APPLY, at);
+        const undo = undoOf(review, APPLY);
+        // The DM syncs the same record a minute later and takes Bree's saves back to D&D Beyond's, a part Ana's Apply never wrote.
+        now += 60_000;
+        const later: CharacterPatch = { stats: { saves: ["wis"] }, ddbSync: SYNCED };
+        assert.equal(await dm.send(update(id, dm.sees(id), later)), null);
+        assert.equal(actor.committed.state.characters[id]!.ddbSync!.at, "2026-10-21T19:01:00.000Z");
+        const before = structuredClone(actor.committed.state.characters[id]);
+        assert.deepEqual(await ana.send(update(id, result, undo)), STALE);
+        assert.deepEqual(actor.committed.state.characters[id], before, "the DM's sync stands");
+      },
+      { now: () => now },
+    );
+  });
+
   test("Ana's Apply on a character with a DM's note and a hidden effect is taken, though the DM changes both after her review", async () => {
     const setup = table({ actor: { dmNotes: "owes the thieves' guild", effects: [testEffect("hex", { hiddenFromPlayers: true })] } });
     await play(setup, async ({ actor, dm, ana, id }) => {

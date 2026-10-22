@@ -39,8 +39,9 @@ describe("the re-sync dialog's steps", () => {
     r = stepResync(s, { t: "apply", op: OP });
     assert.deepEqual(r.effects, [{ kind: "send", what: "apply", op: OP }]);
     assert.deepEqual(stepResync(r.state, { t: "apply", op: OP }).effects, [], "never a second while one waits");
-    s = stepResync(r.state, { t: "applied", answer: "taken" }).state;
-    assert.equal(s.step, "done");
+    assert.equal(stepResync(r.state, { t: "applied", answer: "taken" }).state.appliedAt, null, "an answer without at leaves Undo nothing to expect");
+    s = stepResync(r.state, { t: "applied", answer: "taken", at: "2026-10-21T19:00:00.000Z" }).state;
+    assert.deepEqual([s.step, s.appliedAt], ["done", "2026-10-21T19:00:00.000Z"]);
     r = stepResync(s, { t: "undo", op: OP });
     assert.equal(r.effects.length, 1);
     s = stepResync(r.state, { t: "undid", answer: "taken" }).state;

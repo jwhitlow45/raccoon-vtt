@@ -46,6 +46,8 @@ export type ResyncState = {
   applying: SyncOp | null;
   /** What Apply sent once it was taken, for Undo. */
   applied: SyncOp | null;
+  /** The `at` the server wrote on Apply's record, from its answer. Undo expects that very record, so without it Undo is off (3.4). */
+  appliedAt: string | null;
   undoing: boolean;
   /** The server refused Undo as stale: it stays off. */
   undoStale: boolean;
@@ -71,7 +73,7 @@ export type ResyncEvent =
   | { t: "lines"; ids: readonly string[]; changed: boolean }
   /** Apply, with the op worked out from the review, or null when nothing would change, which is Done. */
   | { t: "apply"; op: SyncOp | null }
-  | { t: "applied"; answer: SyncAnswer; message?: string }
+  | { t: "applied"; answer: SyncAnswer; message?: string; at?: string }
   | { t: "undo"; op: SyncOp }
   | { t: "undid"; answer: SyncAnswer; message?: string }
   /** The save budget refilled. */
@@ -83,7 +85,7 @@ export type ResyncEffect = { kind: "fetch"; id: number } | { kind: "abort"; id: 
 const NONE: ResyncEffect[] = [];
 
 export function openResync(): ResyncState {
-  return { step: "ddb", field: false, get: null, nextGet: 1, error: null, fill: null, from: null, ids: [], ticks: new Set(), live: null, applying: null, applied: null, undoing: false, undoStale: false, waiting: false, refused: null, closed: false };
+  return { step: "ddb", field: false, get: null, nextGet: 1, error: null, fill: null, from: null, ids: [], ticks: new Set(), live: null, applying: null, applied: null, appliedAt: null, undoing: false, undoStale: false, waiting: false, refused: null, closed: false };
 }
 
 function dropGet(state: ResyncState): { state: ResyncState; effects: ResyncEffect[] } {
@@ -149,7 +151,7 @@ export function stepResync(state: ResyncState, event: ResyncEvent): { state: Res
       return { state: { ...state, applying: event.op, refused: null }, effects: [{ kind: "send", what: "apply", op: event.op }] };
     case "applied": {
       if (!state.applying) return { state, effects: NONE };
-      if (event.answer === "taken") return { state: { ...state, applying: null, applied: state.applying, step: "done", refused: null }, effects: NONE };
+      if (event.answer === "taken") return { state: { ...state, applying: null, applied: state.applying, appliedAt: event.at ?? null, step: "done", refused: null }, effects: NONE };
       // A refusal or a lost answer leaves the review and its ticks, for the player to act on.
       return { state: { ...state, applying: null, waiting: event.answer === "fast", refused: { of: "apply", answer: event.answer, ...(event.message ? { message: event.message } : {}) } }, effects: NONE };
     }

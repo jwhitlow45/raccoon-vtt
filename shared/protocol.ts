@@ -2329,6 +2329,8 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
     restored: z.array(z.strictObject({ n: z.number().int().min(1), what: z.string().max(200) })).optional(),
     /** A player's ops in the batch whose trap step refuses their Undo move, so the bar stops offering it (docs/design-v1-traps.md 6.5). */
     trapped: z.array(z.number().int().min(1)).optional(),
+    /** This client's ops in the batch that wrote a sync record without `at`, each with the `at` the server wrote, so a re-sync's Undo expects that very record (docs/design-v1-resync.md 3.4). */
+    stamped: z.array(z.strictObject({ n: z.number().int().min(1), at: z.iso.datetime({ precision: 3 }) })).optional(),
   }),
   z.strictObject({ t: z.literal("retry"), n: z.number().int().min(1).optional(), code: z.enum(["busy", "gap"]) }),
   z.strictObject({ t: z.literal("eph"), from: id, e: ephEventSchema }),

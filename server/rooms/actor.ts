@@ -11,6 +11,7 @@ import { clientOpSchema, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
+import { stampedAt } from "#shared/reducer/tokens.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
 import { renewOpenDisplay } from "../auth/displaySessions.ts";
@@ -23,7 +24,7 @@ import { CLOSE, clientKey, type ClientKey, type Connection } from "./connection.
 import { isDiceOp, resolveDice } from "./dice.ts";
 import { cancelPreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp } from "./explore.ts";
-import { buildSnapshot, publishBatch, type Reject, type Restored } from "./fanout.ts";
+import { buildSnapshot, publishBatch, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
 import {
   assetIdsOf,
@@ -177,6 +178,8 @@ type Batch = {
   restored: Map<ClientKey, Restored[]>;
   /** Each player client's ops whose trap step refuses their Undo move, for the bar (docs/design-v1-traps.md 6.5). */
   trapped: Map<ClientKey, number[]>;
+  /** Each client's ops that wrote a sync record without `at`, with the `at` written (docs/design-v1-resync.md 3.4). */
+  stamped: Map<ClientKey, Stamped[]>;
   watermarks: Map<ClientKey, number>;
   hellos: Array<{ conn: Connection; key: ClientKey }>;
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
@@ -1046,6 +1049,8 @@ export class RoomActor {
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
     if (reduced.trapped && viewer.role === "player") push(batch.trapped, key, n);
+    const stamped = stampedAt(op, this.#staged.state);
+    if (stamped !== undefined) push(batch.stamped, key, { n, at: stamped });
     batch.watermarks.set(key, n);
     if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
     if (restoredFrom && step) {
@@ -1373,6 +1378,7 @@ export class RoomActor {
         rejects: new Map(),
         restored: new Map(),
         trapped: new Map(),
+        stamped: new Map(),
         watermarks: new Map(),
         hellos: [],
         sys: [],
@@ -1518,6 +1524,7 @@ export class RoomActor {
         rejects: batch.rejects,
         restored: batch.restored,
         trapped: batch.trapped,
+        stamped: batch.stamped,
       },
       this.#connections,
       (key) => this.#clients.get(key),

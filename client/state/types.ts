@@ -127,8 +127,12 @@ export type OpAnswer = "taken" | "refused" | "unknown";
  */
 export type UnknownCause = "snapshot" | "expired";
 
-/** Told once what became of an op: its answer, the reason when refused, and how an `unknown` came about. */
-export type OnAnswer = (answer: OpAnswer, refusal?: OpRefusal, unknown?: UnknownCause) => void;
+/**
+ * Told once what became of an op: its answer, the reason when refused, how
+ * an `unknown` came about, and, when taken with a sync record that had no
+ * `at`, the `at` the server wrote on it (docs/design-v1-resync.md 3.4).
+ */
+export type OnAnswer = (answer: OpAnswer, refusal?: OpRefusal, unknown?: UnknownCause, stamped?: string) => void;
 
 /**
  * Why the server refused an op, told with a `refused` answer, for a sender

@@ -627,6 +627,23 @@ describe("reconnect", () => {
     assert.equal(taken, undefined, "a taken op has no reason");
   });
 
+  test("a taken op that wrote a sync record without at hears the at the server wrote, and no other op does (docs/design-v1-resync.md 3.4)", () => {
+    const s = setup(room({ characters: { bree: character("bree", { name: "Bree" }) }, tokens: { g1: token("g1") } }));
+    s.connect();
+    const heard: { answer: OpAnswer; stamped: string | undefined }[] = [];
+    const listen = { onAnswer: (answer: OpAnswer, _refusal?: OpRefusal, _cause?: UnknownCause, stamped?: string) => heard.push({ answer, stamped }) };
+    s.room.dispatch({ t: "character.update", characterId: "bree", patch: { ddbSync: { base: { level: 6 }, rolls: {} } } }, listen);
+    s.room.dispatch(move("g1", 2, 2), listen);
+    const [ev] = s.deliver() as Ev[];
+    const at = s.state().view?.characters.bree?.ddbSync?.at;
+    assert.ok(ev && at);
+    assert.deepEqual(ev.stamped, [{ n: ev.acks![0]!, at }]);
+    assert.deepEqual(heard, [
+      { answer: "taken", stamped: at },
+      { answer: "taken", stamped: undefined },
+    ]);
+  });
+
   test("an op too old to send is unknown to its sender", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
