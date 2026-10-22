@@ -9,19 +9,24 @@
  * - A `token.moveMany` of 100 Gargantuan walkers carrying 400 more in the
  *   open, each on a straight leg of 199 squares, about 199,000 spots, at
  *   25 ms.
+ * - The same moveMany under traps that take fliers, so they go off: all
+ *   50 stopping nothing, one near the walks' end stopping every walker,
+ *   and 48 going off before that one stops them all, each at 25 ms. A
+ *   stop cuts the walks, so its whole op also applies the op again
+ *   without its traps (docs/design-v1-traps.md 6.7).
  * - An `encounter.next` springing all 50 traps twice, at the turn that
  *   ends and, after the `nextTurn` reset, at the turn that starts, with
  *   500 tokens in the room, at 15 ms.
  *
- * The first two time the trap step's plan of the move (`planTrapMove`):
- * the walks, both passes and every springing's frozen hits. The third
- * times the whole op, which walks nothing. Each also reports the whole op
- * for the record. The traps stop nothing, so every walk runs to its end.
- * The walkers fly, and 49 of the traps take only creatures on the floor,
- * so none of those ever goes off and every spot reads its squares and its
- * ground to the end, the most a walk can cost. The 50th takes fliers too
- * and lies near where the walks end, so it goes off late, its hits read at
- * a moment of 500 tokens.
+ * The moves time the trap step's plan of the move (`planTrapMove`):
+ * the walks, both passes and every springing's frozen hits. The turn
+ * times the whole op, which walks nothing. Each move also reports the
+ * whole op for the record. In the first two the traps stop nothing, so
+ * every walk runs to its end. The walkers fly, and 49 of the traps take
+ * only creatures on the floor, so none of those ever goes off and every
+ * spot reads its squares and its ground to the end, the most a walk can
+ * cost. The 50th takes fliers too and lies near where the walks end, so it
+ * goes off late, its hits read at a moment of 500 tokens.
  *
  * Run it alone on the machine being measured, since parallel load skews it:
  *
@@ -124,6 +129,23 @@ function manyRoom(): { state: RoomState; op: Op } {
   return { state, op: { t: "token.moveMany", moves } };
 }
 
+/**
+ * The moveMany's walkers and passengers under traps that take fliers too,
+ * so they go off: `going` traps that stop nothing across the walks, and
+ * with `stop`, one more near where the walks end that stops every walker.
+ */
+function goingRoom(going: number, stop: boolean): { state: RoomState; op: Op } {
+  const { state, op } = manyRoom();
+  const traps: Record<string, Trap> = {};
+  for (const t of Object.values(state.traps).slice(0, going)) traps[t.id] = { ...t, rig: { ...t.rig!, floor: false } };
+  if (stop) {
+    const last = lastTrap({ x: 190, y: 0 }).trap49!;
+    traps.trap49 = { ...last, rig: { ...last.rig!, stops: true } };
+  }
+  state.traps = traps;
+  return { state, op };
+}
+
 /** 500 tokens, two in a fight standing on all 50 traps, each going off at a turn's end and start and arming again for the next. */
 function turnRoom(): { state: RoomState; op: Op } {
   const state = room();
@@ -167,6 +189,16 @@ export function runTrapRows(runs = 15): Row[] {
   rows.push({ row: "500-token group, 300-square route, whole op", ms: time(runs, group.state, apply(group.op)) });
   rows.push({ row: `500-walker token.moveMany, plan (${manySprung} springings)`, ms: time(runs, many.state, plan(many.op)), gate: 25 });
   rows.push({ row: "500-walker token.moveMany, whole op", ms: time(runs, many.state, apply(many.op)) });
+  for (const [name, room] of [
+    ["all 50 traps going off", goingRoom(50, false)],
+    ["one trap stopping all 100 walkers", goingRoom(0, true)],
+    ["48 traps going off and one stopping all 100 walkers", goingRoom(48, true)],
+  ] as const) {
+    const plan0 = planTrapMove(room.op, fresh(room.state) as TrapRoom, DM, {});
+    const stops = plan0.op === room.op ? "" : ", the walks cut";
+    rows.push({ row: `500-walker token.moveMany, ${name}, plan (${plan0.springings.length} springings${stops})`, ms: time(runs, room.state, plan(room.op)), gate: 25 });
+    rows.push({ row: `500-walker token.moveMany, ${name}, whole op`, ms: time(runs, room.state, apply(room.op)) });
+  }
   rows.push({ row: "encounter.next, 50 traps going off twice, whole op", ms: time(runs, turn.state, apply(turn.op)), gate: 15 });
   return rows;
 }

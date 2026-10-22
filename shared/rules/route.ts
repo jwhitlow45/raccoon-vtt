@@ -4,7 +4,7 @@ import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnd, walkFrom, walkOn, type MovingToken, type Walker, type Walking } from "./movement.ts";
+import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnds, walkFrom, walkOn, type MovingToken, type WalkEnd, type Walker, type Walking } from "./movement.ts";
 
 /**
  * A move's route, what it costs and the spots it passes
@@ -389,42 +389,54 @@ function walkSpots(route: readonly RoutePoint[], token: Walker, build: Pick<Buil
  * squeezes, as the op does.
  */
 export function routeSpots(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}): RouteSpot[] {
+  const stands = routeStands(build, route, token, step, opts);
+  return stands.walk.map((_, s) => stands.spot(s));
+}
+
+/**
+ * `routeSpots` a spot at a time: the walk's spots and its trace, and each
+ * spot with `stand` worked out only when asked, once, so a search for where
+ * a walk may stop reads only the spots it needs. The same rule as
+ * `routeSpots` at every spot.
+ */
+export function routeStands(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
   // The walker where each piece starts, as the walk carries it (`WalkTrace`): ledges, the squeeze and the leg test count from here.
   const trace = walkTrace(build.buildChunks, token, route);
   const walk = routeWalk(trace, build, step);
-  if (walk.length === 0) return [];
   const lattice = step ?? routeLattice(token);
   const grid = snapStep(token);
   const blocks = build.scenes[token.sceneId]?.blockMovement === true;
   const squeezes = canSqueeze(token);
-  const spots: RouteSpot[] = [{ ...walk[0]!, squeezed: isSqueezed(token), stand: true }];
-  let piece = -1;
-  let at: Walker = trace[0]!;
-  let exact = false;
-  let sweep: boolean | undefined;
-  for (let s = 1; s < walk.length; s++) {
-    const w = walk[s]!;
-    const [i, k, n] = w.progress;
+  const pieces: { endAt: (p: Point) => WalkEnd; exact: boolean; sweep?: boolean }[] = [];
+  const pieceAt = (i: number) => {
     const a = route[i]!;
     const b = route[i + 1]!;
-    if (i !== piece) {
-      piece = i;
-      at = trace[i]!;
-      exact = latticePiece(b.x - a.x, b.y - a.y, lattice);
-      sweep = undefined;
-    }
+    // A spot as the end of the walk up to it, judged from where its piece starts (movement.ts WalkEnd).
+    return (pieces[i] ??= { endAt: walkEnds(build, trace[i]!), exact: latticePiece(b.x - a.x, b.y - a.y, lattice) });
+  };
+  const known: RouteSpot[] = [];
+  const spot = (s: number): RouteSpot => {
+    const hit = known[s];
+    if (hit) return hit;
+    const w = walk[s]!;
+    if (s === 0) return (known[0] = { ...w, squeezed: isSqueezed(token), stand: true });
+    const [i, k, n] = w.progress;
+    const b = route[i + 1]!;
+    const piece = pieceAt(i);
+    const at = trace[i]!;
     const end = k === n;
     const last = end && i === route.length - 2;
     const p = { x: w.x, y: w.y };
-    // The spot as the end of the walk up to it, judged from where its piece starts (movement.ts WalkEnd).
-    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, walkEnd(build, at, p));
+    let ended: WalkEnd | undefined;
+    const spotEnd = () => (ended ??= piece.endAt(p));
+    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : squeezes && squeezeFits(build, spotEnd());
     const onGrid = multipleOf(w.x - token.x, grid) && multipleOf(w.y - token.y, grid);
-    const sweepClear = () => (sweep ??= !blocks || straightClear(build, at, { x: b.x, y: b.y, elevation: b.elevation }));
+    const sweepClear = () => (piece.sweep ??= !blocks || straightClear(build, at, { x: b.x, y: b.y, elevation: b.elevation }));
     const stand =
       (squeezed || onGrid) &&
-      !coreBlocked(build, walkEnd(build, at, p)) &&
-      (!blocks || ((exact || end) && sweepClear()) || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
-    spots.push({ ...w, squeezed, stand });
-  }
-  return spots;
+      !coreBlocked(build, spotEnd()) &&
+      (!blocks || ((piece.exact || end) && sweepClear()) || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
+    return (known[s] = { ...w, squeezed, stand });
+  };
+  return { walk, trace, spot };
 }

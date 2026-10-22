@@ -532,6 +532,12 @@ export function walkEnd(build: Pick<BuildState, "buildChunks">, token: Walker, a
   return { walker, at: { x: at.x, y: at.y } } as unknown as WalkEnd;
 }
 
+/** `walkEnd` with no corners at many spots of one straight leg from where `token` stands, its walk worked out once. */
+export function walkEnds(build: Pick<BuildState, "buildChunks">, token: Walker): (at: Point) => WalkEnd {
+  const walker = walkFrom(build.buildChunks, token);
+  return (at) => ({ walker, at: { x: at.x, y: at.y } }) as unknown as WalkEnd;
+}
+
 /**
  * The movement set for the token at `at` as a walk from where it stands
  * reaches it: the holder's inner ledges left out while the walk has not

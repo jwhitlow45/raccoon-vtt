@@ -134,8 +134,19 @@ export function occupiedRange(token: PlacedToken): CellRange {
  * that asks at every spot (docs/design-v1-traps.md 9).
  */
 export function rangeAt(w: number, h: number, x: number, y: number): CellRange {
+  return rangeAtInto({ x0: 0, y0: 0, x1: 0, y1: 0 }, w, h, x, y);
+}
+
+/** `rangeAt` written into `out`, for a walk that asks at every spot and keeps no range past the next. */
+export function rangeAtInto(out: CellRange, w: number, h: number, x: number, y: number): CellRange {
   const step = sizeStep(w, h);
-  return rectRange(snap(x, step), snap(y, step), w, h);
+  const sx = snap(x, step);
+  const sy = snap(y, step);
+  out.x0 = Math.floor(sx);
+  out.y0 = Math.floor(sy);
+  out.x1 = Math.max(out.x0 + 1, Math.ceil(sx + w - EDGE_SLACK));
+  out.y1 = Math.max(out.y0 + 1, Math.ceil(sy + h - EDGE_SLACK));
+  return out;
 }
 
 function rectRange(x: number, y: number, w: number, h: number): CellRange {

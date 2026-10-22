@@ -5,11 +5,11 @@ import type { Op } from "../protocol.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, onHolder, walkerFor } from "./attach.ts";
-import { footprintRect, footprintSize, isSqueezed, occupiedRange, rangeAt, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
+import { footprintRect, footprintSize, isSqueezed, occupiedRange, rangeAtInto, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, sceneGround, standing } from "./heights.ts";
 import { planMove, type MovedToken } from "./moveLeg.ts";
 import { groundUnder } from "./movement.ts";
-import { onTrace, routeLattice, routeSpots, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
+import { onTrace, routeLattice, routeStands, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
 
@@ -204,7 +204,8 @@ export type TrapIndex = {
  * index into `sets` (0 for none), so a footprint over armed squares reads
  * one number a square and joins the few distinct sets it meets.
  */
-type SquareIndex = { w: number; h: number; sum: Int32Array; cells: Uint16Array; sets: readonly (readonly number[])[] };
+/** Each square's set of traps by id (0 none), with where each run of one set ends along its row, and the armed squares summed. */
+type SquareIndex = { w: number; h: number; sum: Int32Array; cells: Uint16Array; runEnd: Uint16Array; sets: readonly (readonly number[])[] };
 
 const EMPTY_INDEX: TrapIndex = { traps: [], squares: null, wires: [], doors: new Map(), turns: [] };
 
@@ -294,7 +295,15 @@ function buildIndex(traps: readonly Trap[], bounds: { w: number; h: number }): T
       }
       cells[k] = id;
     }
-    squares = { w, h, sum, cells, sets };
+    // Where each run of one set ends, so a footprint reads a row's sets a run at a time.
+    const runEnd = new Uint16Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = w - 1; x >= 0; x--) {
+        const k = y * w + x;
+        runEnd[k] = x + 1 < w && cells[k + 1] === cells[k] ? runEnd[k + 1]! : x + 1;
+      }
+    }
+    squares = { w, h, sum, cells, runEnd, sets };
   }
   return { traps, squares, wires, doors, turns };
 }
@@ -368,6 +377,8 @@ type Walk = {
   squeezeAtEnd: boolean;
   /** Whether its footprint is squeezed at spot `j`, as its walk's trace has it there (route.ts onTrace). */
   squeezedAt: (j: number) => boolean;
+  /** Its full footprint's size in cells (footprintSize). */
+  size: { w: number; h: number };
   /** Its elevation at each spot, worked out only where a trap needs it. */
   elevation: (j: number) => number;
 };
@@ -445,7 +456,11 @@ function twoSpots(route: readonly RoutePoint[]): WalkSpot[] {
   ];
 }
 
-type Walks = { all: Walk[]; byId: Map<string, Walk>; groups: Map<string, Group> };
+/** An op's walks, by token and by group, and each walker's spots with `stand` once a stop has read them (standSpots). */
+type Walks = { all: Walk[]; byId: Map<string, Walk>; groups: Map<string, Group>; stands: Map<Walk, Stands> };
+
+/** A walk's spots, and each with `stand` as asked (route.ts routeStands). */
+type Stands = { walk: readonly { progress: Progress }[]; spot: (i: number) => RouteSpot };
 
 /**
  * The walks of an op's move. A group's public members share one step, the
@@ -501,6 +516,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         teleport: e.how === "teleport",
         squeezeAtEnd: e === head && squeeze,
         squeezedAt: () => false,
+        size: footprintSize(token),
         elevation: () => 0,
       };
       walk.squeezedAt = squeezeRule(walk, endsAs(op, token, e === head && squeeze));
@@ -509,7 +525,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
       byId.set(e.tokenId, walk);
     }
   }
-  return { all, byId, groups };
+  return { all, byId, groups, stands: new Map() };
 }
 
 /**
@@ -612,14 +628,27 @@ function lightAt(walk: Walk, j: number): Light {
   return out;
 }
 
+/** The cells a walk's footprint covers at spot `j` (lightAt), written into `out` where it walks full size between its ends. */
+function cellsAt(walk: Walk, j: number, out: CellRange): CellRange {
+  // Only a token squeezed where it stands walks squeezed anywhere between (route.ts onTrace).
+  if (j === 0 || j === walk.spots.length - 1 || (walk.token.squeeze === true && walk.squeezedAt(j))) return occupiedRange(lightAt(walk, j));
+  return rangeAtInto(out, walk.size.w, walk.size.h, walk.spots[j]!.x + walk.ox, walk.spots[j]!.y + walk.oy);
+}
+
 /** The token as it stands at spot `j`, for a moment. */
 function placedAt(walk: Walk, j: number): Token {
+  const last = placed.get(walk);
+  if (last?.j === j) return last.token;
   const at = lightAt(walk, j);
   const out: Token = { ...walk.token, x: at.x, y: at.y, elevation: walk.elevation(j) };
   if (at.squeeze) out.squeeze = true;
-  else delete out.squeeze;
+  else if (out.squeeze !== undefined) delete out.squeeze;
+  placed.set(walk, { j, token: out });
   return out;
 }
+
+/** Each walk's token as the last moment placed it, which a walk stopped or ended stands at for every moment after. */
+const placed = new WeakMap<Walk, { j: number; token: Token }>();
 
 /** The holder a named token is getting off, which carries it while the token stays inside it, by a link every player sees (5.2). */
 function leaving(walk: Walk, before: RoomState, seen: (id: string) => boolean): Token | null {
@@ -655,20 +684,43 @@ const FLOOR = 2;
 const ENTER = 4;
 const LEAVE = 8;
 
-/** One square set of the index as a walk reads it: the traps it can set off there on the floor, and off the floor. */
-type SetReading = { floor: readonly number[]; off: readonly number[] };
+/** One square set of the index as a walk reads it: the traps it can set off there on the floor, and off the floor, and whether they differ. */
+type SetReading = Mix;
 
-/** The traps a walk can set off, as flags by trap, and each square set read by them, shared by the walks of a pass with the same flags. */
-type Reading = { flags: Uint8Array; sets: (SetReading | undefined)[] };
+/**
+ * The traps a walk can set off, as flags by trap, each square set read by
+ * them, and the union of each mix of sets a footprint covers, shared by
+ * the walks of a pass with the same flags. One list a mix, so a walk over
+ * the same mix as its last spot steps onto and off nothing.
+ */
+type Reading = { flags: Uint8Array; sets: (SetReading | undefined)[]; unions: Map<number | string, readonly number[]>; mixes: Map<number, Mix>; members: Map<readonly number[], Uint8Array> };
 
-/** What the walks of one pass share: their readings and the scene's ground. */
-type PassCache = { readings: Map<string, Reading>; ground: (r: CellRange) => number };
+/** What a footprint over some cells reads (walkEvents): the traps there on the floor and off it, and whether the floor rule tells them apart. */
+type Mix = { off: readonly number[]; floor: readonly number[]; needs: boolean };
+
+/** What the walks of one pass share: their readings, by flags and by what of a creature `setsOff` reads, and the scene's ground. */
+type PassCache = { readings: Map<string, Reading>; byKind: Map<number, Reading | null>; ground: (r: CellRange) => number };
 
 function passCache(before: RoomState, sceneId: string): PassCache {
-  return { readings: new Map(), ground: sceneGround(before.buildChunks, sceneId) };
+  return { readings: new Map(), byKind: new Map(), ground: sceneGround(before.buildChunks, sceneId) };
 }
 
+/**
+ * A walk's reading. `setsOff` reads only whether it is a creature, whether
+ * it is Tiny and whether a player plays it, and the pass's spent traps stay
+ * as they are while it reads its walks, so walks alike in those read alike.
+ */
 function readingOf(walk: Walk, index: TrapIndex, before: RoomState, spent: ReadonlySet<number>, cache: PassCache): Reading | null {
+  const token = walk.token;
+  const kind = (trapCreature(before, token) ? 1 : 0) | (sizeCategory(token) === "tiny" ? 2 : 0) | (playersToken(before, token) ? 4 : 0);
+  const known = cache.byKind.get(kind);
+  if (known !== undefined) return known;
+  const read = readingFor(walk, index, before, spent, cache);
+  cache.byKind.set(kind, read);
+  return read;
+}
+
+function readingFor(walk: Walk, index: TrapIndex, before: RoomState, spent: ReadonlySet<number>, cache: PassCache): Reading | null {
   const traps = index.traps;
   const flags = new Uint8Array(traps.length);
   let any = false;
@@ -681,7 +733,18 @@ function readingOf(walk: Walk, index: TrapIndex, before: RoomState, spent: Reado
   if (!any) return null;
   const key = flags.join("");
   let hit = cache.readings.get(key);
-  if (!hit) cache.readings.set(key, (hit = { flags, sets: [] }));
+  if (!hit) cache.readings.set(key, (hit = { flags, sets: [], unions: new Map(), mixes: new Map(), members: new Map() }));
+  return hit;
+}
+
+/** Which traps a list of a reading holds, by trap. */
+function membersOf(reading: Reading, list: readonly number[]): Uint8Array {
+  let hit = reading.members.get(list);
+  if (!hit) {
+    hit = new Uint8Array(reading.flags.length);
+    for (const i of list) hit[i] = 1;
+    reading.members.set(list, hit);
+  }
   return hit;
 }
 
@@ -697,7 +760,7 @@ function setReading(reading: Reading, squares: SquareIndex, id: number): SetRead
       if (!(f & FLOOR)) off.push(i);
     }
     // The same list when the floor changes nothing, which tells a spot it need not read its ground.
-    reading.sets[id] = hit = { floor, off: off.length === floor.length ? floor : off };
+    reading.sets[id] = hit = { floor, off: off.length === floor.length ? floor : off, needs: off.length !== floor.length };
   }
   return hit;
 }
@@ -725,10 +788,10 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   const squares = index.squares;
   const spots = walk.spots;
   const last = spots.length - 1;
-  const { w, h } = footprintSize(walk.token);
   const holder = leaving(walk, before, seen);
-  // Only a token squeezed where it stands walks squeezed anywhere between (route.ts onTrace).
-  const rangeOf = (j: number): CellRange => (j === 0 || j === last || (walk.token.squeeze === true && walk.squeezedAt(j)) ? occupiedRange(lightAt(walk, j)) : rangeAt(w, h, spots[j]!.x + walk.ox, spots[j]!.y + walk.oy));
+  // One range for every spot between the ends, which no reader keeps past the spot.
+  const scratch: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  const rangeOf = (j: number): CellRange => cellsAt(walk, j, scratch);
   const floorAt = (j: number, r: CellRange): boolean => {
     if (walk.carriedOn) return false;
     if (holder && insideHolder(lightAt(walk, j), holder)) return false;
@@ -736,43 +799,15 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   };
   const marks = new Int32Array(traps.length);
   let stamp = 0;
-  const onAt = (j: number): readonly number[] => {
-    if (!squares) return NONE;
-    const r = rangeOf(j);
-    const x0 = Math.max(0, r.x0);
-    const y0 = Math.max(0, r.y0);
-    const x1 = Math.min(squares.w, r.x1);
-    const y1 = Math.min(squares.h, r.y1);
-    if (x0 >= x1 || y0 >= y1) return NONE;
-    const W = squares.w + 1;
-    const sum = squares.sum;
-    if (sum[y1 * W + x1]! - sum[y0 * W + x1]! - sum[y1 * W + x0]! + sum[y0 * W + x0]! === 0) return NONE;
-    // The distinct square sets under the footprint: one under a creature of a square or less, a few under a larger one.
-    let first = 0;
-    let more: number[] | null = null;
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        const id = squares.cells[y * squares.w + x]!;
-        if (id === 0 || id === first) continue;
-        if (first === 0) first = id;
-        else if (!more) more = [id];
-        else if (!more.includes(id)) more.push(id);
-      }
-    }
-    const a = setReading(reading, squares, first);
-    let needs = a.off !== a.floor;
-    if (more && !needs) {
-      for (const id of more) {
-        const b = setReading(reading, squares, id);
-        if (b.off !== b.floor) needs = true;
-      }
-    }
-    const floor = needs && floorAt(j, r);
-    let one = floor ? a.floor : a.off;
-    if (!more) return one;
+  const buffer: number[] = [];
+  /** The union of the lists one side of these sets reads, one list a mix of sets (Reading.unions). */
+  const unionOf = (first: number, more: readonly number[], floor: boolean, one: readonly number[]): readonly number[] => {
+    const key = more.length === 1 ? (floor ? -1 : 1) * (first * 65536 + more[0]!) : `${floor ? "f" : "o"}${first},${more.join(",")}`;
+    const known = reading.unions.get(key);
+    if (known) return known;
     let union: number[] | null = null;
     for (const id of more) {
-      const b = setReading(reading, squares, id);
+      const b = setReading(reading, squares!, id);
       const list = floor ? b.floor : b.off;
       if (list.length === 0 || list === one) continue;
       if (one.length === 0) {
@@ -790,24 +825,89 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
         union.push(i);
       }
     }
-    return union ?? one;
+    const out = union ?? one;
+    reading.unions.set(key, out);
+    return out;
+  };
+  /** What a footprint over these cells reads, on the floor and off it, and whether the floor rule tells them apart. */
+  const mixOf = (x0: number, y0: number, x1: number, y1: number): Mix => {
+    const sq = squares!;
+    // The distinct square sets under the footprint: one under a creature of a square or less, a few under a larger one.
+    let first = 0;
+    let more: number[] | null = null;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x = sq.runEnd[y * sq.w + x]!) {
+        const id = sq.cells[y * sq.w + x]!;
+        if (id === 0 || id === first) continue;
+        if (first === 0) first = id;
+        else if (!more) {
+          // One buffer for every spot, which only this call reads.
+          more = buffer;
+          more.length = 0;
+          more.push(id);
+        } else if (!more.includes(id)) more.push(id);
+      }
+    }
+    const a = setReading(reading, sq, first);
+    if (!more) return a;
+    let needs = a.needs;
+    more.sort((p, q) => p - q);
+    for (const id of more) if (!needs && setReading(reading, sq, id).needs) needs = true;
+    const off = unionOf(first, more, false, a.off);
+    return { off, floor: needs ? unionOf(first, more, true, a.floor) : off, needs };
+  };
+  const last0 = new Int32Array([-1, -1, -1, -1]);
+  let lastMix: Mix | null = null;
+  const onAt = (j: number): readonly number[] => {
+    if (!squares) return NONE;
+    const r = rangeOf(j);
+    const x0 = Math.max(0, r.x0);
+    const y0 = Math.max(0, r.y0);
+    const x1 = Math.min(squares.w, r.x1);
+    const y1 = Math.min(squares.h, r.y1);
+    if (x0 >= x1 || y0 >= y1) return NONE;
+    const W = squares.w + 1;
+    const sum = squares.sum;
+    // The same cells as the spot before, as a small creature's half steps often are, read the same.
+    if (x0 === last0[0] && y0 === last0[1] && x1 === last0[2] && y1 === last0[3]) return lastMix!.needs && floorAt(j, r) ? lastMix!.floor : lastMix!.off;
+    if (sum[y1 * W + x1]! - sum[y0 * W + x1]! - sum[y1 * W + x0]! + sum[y0 * W + x0]! === 0) return NONE;
+    let mix: Mix;
+    // A footprint of more than one square reads the same mix wherever the same cells lie under it, as walkers on one lane do, so its read is kept.
+    // A scene is at most 200 squares a side, so the cells pack into one small integer.
+    if ((x1 - x0 > 1 || y1 - y0 > 1) && x1 - x0 < 32 && y1 - y0 < 32 && x0 < 256 && y0 < 256) {
+      const key = (x0 << 18) | (y0 << 10) | ((x1 - x0) << 5) | (y1 - y0);
+      const known = reading.mixes.get(key);
+      if (known) mix = known;
+      else reading.mixes.set(key, (mix = mixOf(x0, y0, x1, y1)));
+    } else mix = mixOf(x0, y0, x1, y1);
+    last0[0] = x0;
+    last0[1] = y0;
+    last0[2] = x1;
+    last0[3] = y1;
+    lastMix = mix;
+    return mix.needs && floorAt(j, r) ? mix.floor : mix.off;
   };
   const wires = walk.teleport ? [] : index.wires.filter((wire) => flags[wire.i]! & CAN);
-  // Which spot each trap was last on, so a step tells what it entered and left in one pass over both lists.
-  const lastOn = new Int32Array(traps.length).fill(-1);
+  // Only a walk's first event for a trap can set it off: by any later one the trap has gone off, or the walk's group has stopped.
+  const done = new Uint8Array(traps.length);
   let prevOn = onAt(0);
-  for (const i of prevOn) lastOn[i] = 0;
   for (let j = 1; j <= last; j++) {
     const on = onAt(j);
-    if (on === prevOn) {
-      for (const i of on) lastOn[i] = j;
-    } else {
+    // A spot over the same list as the one before steps onto and off nothing.
+    if (on !== prevOn) {
+      const was = membersOf(reading, prevOn);
+      const now = membersOf(reading, on);
       const progress = spots[j]!.progress;
       for (const i of on) {
-        if (lastOn[i] !== j - 1 && flags[i]! & ENTER) out.push({ trap: i, how: "enter", at: progress, tokenId: walk.token.id, walk });
-        lastOn[i] = j;
+        if (was[i] || done[i] || !(flags[i]! & ENTER)) continue;
+        done[i] = 1;
+        out.push({ trap: i, how: "enter", at: progress, tokenId: walk.token.id, walk });
       }
-      for (const i of prevOn) if (lastOn[i] !== j && flags[i]! & LEAVE) out.push({ trap: i, how: "leave", at: progress, tokenId: walk.token.id, walk });
+      for (const i of prevOn) {
+        if (now[i] || done[i] || !(flags[i]! & LEAVE)) continue;
+        done[i] = 1;
+        out.push({ trap: i, how: "leave", at: progress, tokenId: walk.token.id, walk });
+      }
     }
     if (wires.length > 0) {
       const a = centerOf(lightAt(walk, j - 1));
@@ -817,7 +917,8 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
         const { a: wa, b: wb } = (traps[wire.i]!.zone as { wire: { a: [number, number]; b: [number, number] } }).wire;
         if (orient(wa[0], wa[1], wb[0], wb[1], a.x, a.y) === 0) continue;
         if (contact(a.x, a.y, b.x, b.y, wa[0], wa[1], wb[0], wb[1]) === APART) continue;
-        if (flags[wire.i]! & FLOOR && !floorAt(j - 1, rangeOf(j - 1))) continue;
+        if (done[wire.i] || (flags[wire.i]! & FLOOR && !floorAt(j - 1, rangeOf(j - 1)))) continue;
+        done[wire.i] = 1;
         out.push({ trap: wire.i, how: "cross", at: spots[j]!.progress, tokenId: walk.token.id, walk });
       }
     }
@@ -875,20 +976,17 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const springings: Springing[] = [];
 
   // The public pass (5.5): only creatures and links seen by all decide what other viewers observe.
-  const events: TrapEvent[] = [];
   const pub = passCache(before, sceneId);
-  for (const walk of walks.all) if (walk.isPublic) events.push(...walkEvents(walk, index, before, seen, spent, pub));
-  events.sort(compareEvents);
+  const events = byTrap(walks.all.filter((w) => w.isPublic), (walk) => walkEvents(walk, index, before, seen, spent, pub));
   const stops = new Map<string, Stop>();
   const after = (e: TrapEvent) => {
     const stop = stops.get(e.walk.group.named);
     return stop !== undefined && compareProgress(e.at, stop.t) > 0;
   };
-  for (let e = 0; e < events.length; e++) {
-    const event = events[e]!;
-    if (spent.has(event.trap) || after(event)) continue;
+  const nextPublic = picker(events, spent, (e) => !after(e), () => stops.size);
+  for (let event = nextPublic(); event !== null; event = nextPublic()) {
     // Every creature whose event for this trap falls at this same progress sets it off with it (5.4).
-    const together = sameMoment(events, e, (other) => other.trap === event.trap && !after(other));
+    const together = sameMoment(events.get(event.trap)!, event, after);
     spent.add(event.trap);
     const trap = index.traps[event.trap]!;
     let stopped = false;
@@ -903,22 +1001,22 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
         stopped = true;
       }
     }
-    springings.push(springingAt(trap, event.how, "public", together, momentAt(before, walks.all, event.at, stops), env, stopped));
+    springings.push(springingIn(trap, event.how, "public", together, momentAt(before, walks.byId, event.at, stops), env, stopped));
   }
 
   // The private pass (5.5): every other creature, on the walks the public pass left, each on its own step. It never stops.
   const cut = stops.size > 0 ? cutOp(op, walks, stops, before, seen) : op;
+  // A move with no walk players cannot see has no private pass, so its cut op needs no walks of its own.
+  if (!walks.all.some((w) => !w.isPublic)) return { springings, op: cut };
   const rest = cut === op ? walks : walksOf(cut, before, planMove(cut, before, actor, env).filter(onScene), seen);
-  const hidden: TrapEvent[] = [];
   const priv = passCache(before, sceneId);
-  for (const walk of rest.all) if (!walk.isPublic) hidden.push(...walkEvents(walk, index, before, seen, spent, priv));
-  hidden.sort(compareEvents);
-  for (let e = 0; e < hidden.length; e++) {
-    const event = hidden[e]!;
-    if (spent.has(event.trap)) continue;
-    const together = sameMoment(hidden, e, (other) => other.trap === event.trap);
+  const hidden = byTrap(rest.all.filter((w) => !w.isPublic), (walk) => walkEvents(walk, index, before, seen, spent, priv));
+  const never = () => false;
+  const nextPrivate = picker(hidden, spent, () => true, () => 0);
+  for (let event = nextPrivate(); event !== null; event = nextPrivate()) {
+    const together = sameMoment(hidden.get(event.trap)!, event, never);
     spent.add(event.trap);
-    springings.push(springingAt(index.traps[event.trap]!, event.how, "private", together, momentAt(before, rest.all, event.at, new Map()), env, false));
+    springings.push(springingIn(index.traps[event.trap]!, event.how, "private", together, momentAt(before, rest.byId, event.at, new Map()), env, false));
   }
   return { springings, op: cut };
 }
@@ -945,14 +1043,59 @@ function spotAt(walk: Walk, j: number): { x: number; y: number; progress: Progre
 }
 
 /** The events at the same progress as `events[from]` that `take` keeps, one per creature. */
-function sameMoment(events: readonly TrapEvent[], from: number, take: (e: TrapEvent) => boolean): TrapEvent[] {
-  const at = events[from]!.at;
+function sameMoment(list: readonly TrapEvent[], event: TrapEvent, after: (e: TrapEvent) => boolean): TrapEvent[] {
+  const at = list.filter((e) => compareProgress(e.at, event.at) === 0 && !after(e)).sort(compareEvents);
   const out: TrapEvent[] = [];
-  for (let f = from; f < events.length && compareProgress(events[f]!.at, at) === 0; f++) {
-    const other = events[f]!;
-    if (take(other) && !out.some((t) => t.tokenId === other.tokenId)) out.push(other);
+  const ids = new Set<string>();
+  for (const e of at) {
+    if (ids.has(e.tokenId)) continue;
+    ids.add(e.tokenId);
+    out.push(e);
   }
   return out;
+}
+
+/** Each trap's events, in the order the walks gave them. */
+function byTrap(walks: readonly Walk[], eventsOf: (walk: Walk) => TrapEvent[]): Map<number, TrapEvent[]> {
+  const out = new Map<number, TrapEvent[]>();
+  for (const walk of walks) {
+    for (const e of eventsOf(walk)) {
+      let list = out.get(e.trap);
+      if (!list) out.set(e.trap, (list = []));
+      list.push(e);
+    }
+  }
+  return out;
+}
+
+/**
+ * The event that sets the next trap off (5.4): of the traps not spent, the
+ * earliest event that still counts, by compareEvents, so the order a sort
+ * of every event would give without sorting them. Each trap's earliest is
+ * kept until `version` moves, as a new stop moves it, the only thing that
+ * makes an event stop counting.
+ */
+function picker(events: ReadonlyMap<number, readonly TrapEvent[]>, spent: ReadonlySet<number>, counts: (e: TrapEvent) => boolean, version: () => number): () => TrapEvent | null {
+  const first = new Map<number, TrapEvent | null>();
+  let known = version();
+  return () => {
+    if (version() !== known) {
+      first.clear();
+      known = version();
+    }
+    let best: TrapEvent | null = null;
+    for (const [trap, list] of events) {
+      if (spent.has(trap)) continue;
+      let e = first.get(trap);
+      if (e === undefined) {
+        e = null;
+        for (const x of list) if (counts(x) && (e === null || compareEvents(x, e) < 0)) e = x;
+        first.set(trap, e);
+      }
+      if (e !== null && (best === null || compareEvents(e, best) < 0)) best = e;
+    }
+    return best;
+  };
 }
 
 /**
@@ -963,12 +1106,24 @@ function sameMoment(events: readonly TrapEvent[], from: number, take: (e: TrapEv
  * definition, so a stop never refuses the op.
  */
 function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen: (id: string) => boolean): Progress {
-  const stands = walks.all.filter((w) => w.group === group && w.walker).map((w) => standSpots(w, before, group.step, seen));
+  const stands = walks.all.filter((w) => w.group === group && w.walker).map((w) => standSpots(walks, w, before, seen));
+  // One walker, as most groups are: its own spots back from the event, each asked whether it stands only as the search reaches it.
+  if (stands.length === 1) {
+    const one = stands[0]!;
+    for (let i = latestIndex(one.walk, t); i > 0; i--) if (compareProgress(one.walk[i]!.progress, t) <= 0 && one.spot(i).stand) return one.walk[i]!.progress;
+    return START;
+  }
   const candidates: Progress[] = [START];
-  for (const spots of stands) for (const s of spots) if (compareProgress(s.progress, t) <= 0) candidates.push(s.progress);
+  for (const one of stands) for (const w of one.walk) if (compareProgress(w.progress, t) <= 0) candidates.push(w.progress);
   candidates.sort((a, b) => compareProgress(b, a));
-  for (const s of candidates) if (stands.every((spots) => latestAt(spots, s)?.stand !== false)) return s;
+  for (const s of candidates) if (stands.every((one) => standsAt(one, s))) return s;
   return START;
+}
+
+/** Whether a walk's latest spot at or before `p` is one it may stop at, or it has none there. */
+function standsAt(one: Stands, p: Progress): boolean {
+  if (one.walk.length === 0 || compareProgress(one.walk[0]!.progress, p) > 0) return true;
+  return one.spot(latestIndex(one.walk, p)).stand;
 }
 
 /** Whether a stop can cut this group's move (cutOp): a walk a move or a group move names. A teleport, a Get off and a landing land where they asked. */
@@ -982,23 +1137,26 @@ function endOf(group: Group): Progress {
   return group.base(group.step).at(-1)?.progress ?? START;
 }
 
-/** A walk's spots with `stand` (route.ts routeSpots), on its own route at `step`. A teleport's landing is the op's own. */
-function standSpots(walk: Walk, before: RoomState, step: number, seen: (id: string) => boolean): RouteSpot[] {
-  if (walk.teleport) return walk.spots.map((s, j) => ({ ...s, x: s.x + walk.ox, y: s.y + walk.oy, squeezed: walk.squeezedAt(j), stand: true }));
-  // A walker with a holder in the op walks as its trace has it, as itself and never squeezed (route.ts followerTrace): a creature
-  // its holder drags beside it, or one on a holder some player cannot see.
-  const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id));
-  return routeSpots(before, walk.entry.route, token, step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd });
-}
-
-/** The latest spot at or before `p`. */
-function latestAt<T extends { progress: Progress }>(spots: readonly T[], p: Progress): T | undefined {
-  let found: T | undefined;
-  for (const s of spots) {
-    if (compareProgress(s.progress, p) > 0) break;
-    found = s;
+/**
+ * A walk's spots with `stand` (route.ts routeStands), on its own route at
+ * its group's step, worked out once a walk: a stop's search and its cut
+ * read the same. A teleport's landing is the op's own.
+ */
+function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: string) => boolean): Stands {
+  const known = walks.stands.get(walk);
+  if (known) return known;
+  let stands: Stands;
+  if (walk.teleport) {
+    const spots: RouteSpot[] = walk.spots.map((s, j) => ({ ...s, x: s.x + walk.ox, y: s.y + walk.oy, squeezed: walk.squeezedAt(j), stand: true }));
+    stands = { walk: spots, spot: (i) => spots[i]! };
+  } else {
+    // A walker with a holder in the op walks as its trace has it, as itself and never squeezed (route.ts followerTrace): a creature
+    // its holder drags beside it, or one on a holder some player cannot see.
+    const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id));
+    stands = routeStands(before, walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd });
   }
-  return found;
+  walks.stands.set(walk, stands);
+  return stands;
 }
 
 /**
@@ -1020,17 +1178,36 @@ function latestIndex(spots: readonly { progress: Progress }[], p: Progress): num
 /**
  * The room as an event saw it (5.6): every token of the op on its latest
  * spot at or before the event's progress, a group stopped earlier at its
- * stop, everything else as before the op. Built only for a springing, so a
- * walk builds no room copy per spot.
+ * stop, everything else as before the op. Read only as far as a springing
+ * needs: a token asked for is placed alone, and the whole room is built
+ * only for what reads other tokens, the party's sight on a vision scene
+ * and an area's hits. So a walk builds no room copy per spot, and most
+ * springings none at all.
  */
-function momentAt(before: RoomState, walks: readonly Walk[], p: Progress, stops: ReadonlyMap<string, Stop>): RoomState {
-  const tokens = { ...before.tokens };
-  for (const walk of walks) {
-    const stop = stops.get(walk.group.named);
-    const at = stop && compareProgress(p, stop.t) > 0 ? stop.s : p;
-    tokens[walk.token.id] = placedAt(walk, latestIndex(walk.spots, at));
+type Moment = { before: RoomState; walks: ReadonlyMap<string, Walk>; p: Progress; stops: ReadonlyMap<string, Stop>; room?: RoomState };
+
+function momentAt(before: RoomState, walks: ReadonlyMap<string, Walk>, p: Progress, stops: ReadonlyMap<string, Stop>): Moment {
+  return { before, walks, p, stops };
+}
+
+/** The spot a walk is on at the moment. */
+function spotIn(m: Moment, walk: Walk): number {
+  const stop = m.stops.get(walk.group.named);
+  return latestIndex(walk.spots, stop && compareProgress(m.p, stop.t) > 0 ? stop.s : m.p);
+}
+
+function tokenAt(m: Moment, id: string): Token | undefined {
+  const walk = m.walks.get(id);
+  return walk ? placedAt(walk, spotIn(m, walk)) : m.before.tokens[id];
+}
+
+function roomAt(m: Moment): RoomState {
+  if (!m.room) {
+    const tokens = { ...m.before.tokens };
+    for (const walk of m.walks.values()) tokens[walk.token.id] = placedAt(walk, spotIn(m, walk));
+    m.room = { ...m.before, tokens };
   }
-  return { ...before, tokens };
+  return m.room;
 }
 
 /**
@@ -1047,10 +1224,13 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
     if (!stop || !group || !walk || walk.teleport) return null;
     const token = walkerFor(before, walk.token, (t) => seen(t.id));
     const squeeze = op.t === "token.move" && op.tokenId === named && op.squeeze === true;
-    const spots = routeSpots(before, group.head.route, token, group.step, { squeeze });
-    const at = latestAt(spots, stop.s) ?? spots[0]!;
+    // The named token's own walk, as its stop's search read it when it walks as the group's head.
+    const stands = walk.holder ? routeStands(before, group.head.route, token, group.step, { squeeze }) : standSpots(walks, walk, before, seen);
+    if (stands.walk.length === 0) return null;
+    const i = latestIndex(stands.walk, stop.s);
+    const at = stands.spot(i);
     // A walk on the ground reads the ground under the footprint its trace has there (route.ts routeWalk), and a stop squeezed there lands on the ground under the squeezed one, as every landing does (movement's landedElevation).
-    if (!at.squeezed || at === spots[spots.length - 1] || footing(before.buildChunks, token) !== "ground") return at;
+    if (!at.squeezed || i === stands.walk.length - 1 || footing(before.buildChunks, token) !== "ground") return at;
     return { ...at, elevation: footprintGround(before.buildChunks, { ...token, x: at.x, y: at.y, squeeze: true }) };
   };
   switch (op.t) {
@@ -1084,6 +1264,68 @@ function cutRoute(route: readonly RoutePiece[], progress: Progress, at: { x: num
   return kept;
 }
 
+/**
+ * A springing of a walk's, frozen at its moment (5.6), as `springingAt`
+ * reads it. Off a vision scene whether players see a creature reads only
+ * the creature where it stands, never the other tokens (project.ts
+ * withheldFromPlayers), so the moment places each one alone.
+ */
+function springingIn(trap: Trap, how: TrapHow, pass: "public" | "private", together: readonly TrapEvent[], m: Moment, env: { opVersion?: number }, stopped: boolean): Springing {
+  const by = [...new Set(together.map((t) => t.tokenId))].sort(cmp);
+  const sightRoom = m.before.scenes[trap.sceneId]?.vision?.on === true ? roomAt(m) : m.before;
+  const seen = new Set<string>();
+  const party = new Set<string>();
+  for (const id of by) {
+    const token = tokenAt(m, id);
+    if (!token) continue;
+    if (seenByNonOwners(sightRoom, token, env)) seen.add(id);
+    if (playersToken(m.before, token)) party.add(id);
+  }
+  return { trap, how, pass, by, hits: hitsIn(trap, m, by), perceived: pass === "public" && seen.size > 0, seen, party, stopped };
+}
+
+/** `trapHits` at a walk's moment: on squares, each creature of the op read from its spot, never placed whole. */
+function hitsIn(trap: Trap, m: Moment, by: readonly string[]): string[] {
+  const hits = trap.rig?.hits;
+  if (hits === undefined) return [];
+  const rects = hits === "zone" ? zoneRects(trap.zone) : typeof hits === "object" && "cells" in hits ? hits.cells : null;
+  if (hits === "trigger" || (hits === "zone" && !rects)) {
+    return by.filter((id) => {
+      const t = tokenAt(m, id);
+      return t !== undefined && t.sceneId === trap.sceneId && trapCreature(m.before, t);
+    });
+  }
+  if (!rects) return trapHits(trap, roomAt(m), by);
+  const box = rectsBox(rects);
+  const scratch: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  const out: string[] = [];
+  for (const t of Object.values(m.before.tokens)) {
+    if (t.sceneId !== trap.sceneId || !trapCreature(m.before, t)) continue;
+    const walk = m.walks.get(t.id);
+    if (onRects(walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(t), rects, box)) out.push(t.id);
+  }
+  return out.sort(cmp);
+}
+
+/** The box around some rectangles of cells. */
+function rectsBox(rects: readonly CellRect[]): CellRange {
+  const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const r of rects) {
+    box.x0 = Math.min(box.x0, r.x);
+    box.y0 = Math.min(box.y0, r.y);
+    box.x1 = Math.max(box.x1, r.x + r.w);
+    box.y1 = Math.max(box.y1, r.y + r.h);
+  }
+  return box;
+}
+
+/** Whether any cell of a range is a cell of the rectangles, `box` around them. */
+function onRects(r: CellRange, rects: readonly CellRect[], box: CellRange): boolean {
+  if (r.x1 <= box.x0 || r.x0 >= box.x1 || r.y1 <= box.y0 || r.y0 >= box.y1) return false;
+  for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) if (inRects(rects, x, y)) return true;
+  return false;
+}
+
 /** A springing's record, frozen at its moment (5.6). */
 function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", together: readonly TrapEvent[] | readonly string[], moment: RoomState, env: { opVersion?: number }, stopped: boolean): Springing {
   const ids = together.map((t) => (typeof t === "string" ? t : t.tokenId));
@@ -1110,27 +1352,26 @@ function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", toget
 export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): string[] {
   const rig = trap.rig;
   if (!rig) return [];
-  const creatures = Object.values(moment.tokens)
-    .filter((t) => t.sceneId === trap.sceneId && trapCreature(moment, t))
-    .sort((a, b) => cmp(a.id, b.id));
-  const alive = new Set(creatures.map((t) => t.id));
-  const onCells = (rects: readonly CellRect[]) =>
-    creatures
-      .filter((t) => {
-        const r = occupiedRange(t);
-        for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) if (inRects(rects, x, y)) return true;
-        return false;
-      })
-      .map((t) => t.id);
+  const isCreature = (t: Token | undefined): t is Token => t !== undefined && t.sceneId === trap.sceneId && trapCreature(moment, t);
+  const named = () => by.filter((id) => isCreature(moment.tokens[id]));
+  const onCells = (rects: readonly CellRect[]) => {
+    const box = rectsBox(rects);
+    const out: string[] = [];
+    for (const t of Object.values(moment.tokens)) if (isCreature(t) && onRects(occupiedRange(t), rects, box)) out.push(t.id);
+    return out.sort(cmp);
+  };
   const hits = rig.hits;
-  if (hits === "trigger") return by.filter((id) => alive.has(id));
+  if (hits === "trigger") return named();
   if (hits === "zone") {
     const rects = zoneRects(trap.zone);
-    return rects ? onCells(rects) : by.filter((id) => alive.has(id));
+    return rects ? onCells(rects) : named();
   }
   if ("cells" in hits) return onCells(hits.cells);
   const scene = moment.scenes[trap.sceneId];
   if (!scene) return [];
+  const creatures = Object.values(moment.tokens)
+    .filter(isCreature)
+    .sort((a, b) => cmp(a.id, b.id));
   const template = { id: `trap:${trap.id}`, rev: 0, sceneId: trap.sceneId, ...hits.area };
   const ctx = { settings: moment.meta.settings, bounds: scene.bounds, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
   return creaturesInArea(template, creatures, ctx).sort(cmp);
