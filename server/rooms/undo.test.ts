@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { keys } from "#shared/keys.ts";
 import type { Token, Viewer } from "#shared/model.ts";
 import { MAX_RESTORE_ENTRIES, type ClientOp, type Op, type RestoreEntry } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { CHANGED_SINCE } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { canApply } from "#shared/permissions.ts";
+import { projectEntity } from "#shared/project.ts";
 import { NO_ROOM_TO_GROW } from "#shared/rules/resize.ts";
 import { actor, apply, castAsk, castTable, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
 import { MOVED_SINCE, mergeInverses, poseRestore, posesAfter, UNDO_DEPTH, UndoStacks } from "./undo.ts";
+import { UndoTable } from "./undoTesting.ts";
 import { tallyOf } from "./undoLabels.ts";
 
 const inverse = (n: number): RestoreEntry[] => [{ key: `token:${n}`, value: null, expectRev: n }];
@@ -371,6 +374,23 @@ describe("a player's move undo and the path of the turn", () => {
     // HP is still none of its business.
     const fresh = apply(marked.state, { t: "actor.hp", target: { tokenId: "wolf" }, change: { kind: "damage", amount: 5 } }, DM, 5);
     assert.ok(poseRestore(fresh, { ...step, poses: step.poses! }, visible).ok);
+  });
+
+  test("reads no path the player's copy does not show: the DM's mark on a leg of a row hidden from them refuses nothing (docs/design-v1-attach.md 8.0)", () => {
+    for (const hidden of [false, true]) {
+      let state = room({ tokens: { dog: token("dog", { name: "Mastiff", kind: "npc", ownerIds: ["p1"], x: 5, y: 5, visibility: "dm", actor: { inline: actor({ speeds: { walk: 30 } }) } }) } });
+      state.meta.settings = { ...state.meta.settings, revealHiddenOnTurn: false };
+      state = apply(state, { t: "encounter.start", entries: [{ id: "ed", tokenId: "dog", value: 20, hidden }, { id: "n2", value: 5 }] }, DM, 1);
+      state = apply(state, { t: "encounter.next" }, DM, 2);
+      const table = new UndoTable(state);
+      table.seq = 10;
+      assert.equal(table.play(P1, { t: "token.move", tokenId: "dog", x: 7, y: 5 }), "ok");
+      const path = (projectEntity(keys.token("dog"), table.state, P1, { sceneId: "s1" }) as Token).path;
+      assert.equal(path === undefined, hidden, "the path reaches P1 only while the row is shown");
+      assert.equal(table.play(DM, { t: "token.countLeg", tokenId: "dog", counts: false }), "ok");
+      // A mark P1 sees refuses the undo, as a move would. One P1 never receives refuses nothing, so the answer tells nothing.
+      assert.equal(table.undo(P1), hidden ? "ok" : MOVED_SINCE);
+    }
   });
 });
 

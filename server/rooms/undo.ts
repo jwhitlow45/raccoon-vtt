@@ -345,7 +345,8 @@ function sizeOf(token: Pick<Token, "size" | "w" | "h">): Pick<Token, "size" | "w
   return { size: token.size, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) };
 }
 
-function samePose(a: Pose, b: Pose): boolean {
+/** `path`: whether the paths are compared, which they are not where the player's copy shows no path (poseRestore). */
+function samePose(a: Pose, b: Pose, path = true): boolean {
   return (
     a.sceneId === b.sceneId &&
     a.x === b.x &&
@@ -356,7 +357,7 @@ function samePose(a: Pose, b: Pose): boolean {
     a.size === b.size &&
     a.w === b.w &&
     a.h === b.h &&
-    a.path === b.path &&
+    (!path || a.path === b.path) &&
     a.attached === b.attached
   );
 }
@@ -481,10 +482,14 @@ function stillUnder(state: RoomState, tokenId: string, restoring: ReadonlySet<st
  *
  * A token the player cannot see now answers as if it were gone, before its
  * position is looked at, so a refusal never tells a player that a creature
- * hidden from them has moved. The restore is guarded by the token's value
- * now, like every other (design 7.7), and replays the same way.
+ * hidden from them has moved. Its path is looked at only while their copy
+ * shows one (`pathShown`): a path of a row they cannot see, or of a turn
+ * gone by, never reaches them, so a refusal never tells a player that the
+ * DM marked a leg there (docs/design-v1-attach.md 8.3). The restore is
+ * guarded by the token's value now, like every other (design 7.7), and
+ * replays the same way.
  */
-export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<string, Pose> }, visible: (tokenId: string) => boolean): PoseRestore {
+export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<string, Pose> }, visible: (tokenId: string) => boolean, pathShown: (tokenId: string) => boolean = () => true): PoseRestore {
   const tokens: { key: string; before: Token; current: Token; left: Pose | undefined }[] = [];
   const quiet: RestoreEntry[] = [];
   const quietIds: string[] = [];
@@ -518,7 +523,7 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
     if (!before) return { ok: false, code: "invalid", message: "only token moves and resizes undo this way" };
     tokens.push({ key: entry.key, before, current, left: step.poses[parsed.id] });
   }
-  if (tokens.some((t) => !t.left || !samePose(poseOf(t.current, visible), t.left))) return { ok: false, code: "invalid", message: MOVED_SINCE };
+  if (tokens.some((t) => !t.left || !samePose(poseOf(t.current, visible), t.left, pathShown(t.current.id)))) return { ok: false, code: "invalid", message: MOVED_SINCE };
   return {
     ok: true,
     entries: [...tokens.map((t) => ({ key: t.key, value: putBack(t.current, t.before, (id) => state.tokens[id] !== undefined), expectHash: guardHash(t.key, t.current) })), ...quiet],

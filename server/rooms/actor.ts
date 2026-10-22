@@ -4,7 +4,7 @@ import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimit
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import type { HandoutPage, LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
 import { projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { clientOpSchema, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
@@ -936,7 +936,8 @@ export class RoomActor {
       let quiet: string[] | undefined;
       if (step.poses) {
         const state = this.#staged.state;
-        const moved = poseRestore(state, { ...step, poses: step.poses }, (id) => viewer.role === "dm" || projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) !== null);
+        const shown = (id: string) => (viewer.role === "dm" ? (state.tokens[id] ?? null) : (projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) as Partial<Token> | null));
+        const moved = poseRestore(state, { ...step, poses: step.poses }, (id) => shown(id) !== null, (id) => shown(id)?.path !== undefined);
         if (!moved.ok) {
           this.#refuse(key, wm, n, moved.code, `could not ${op.t} ${step.label}: ${moved.message}`);
           return;

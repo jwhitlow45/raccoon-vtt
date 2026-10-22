@@ -37,6 +37,12 @@ export class UndoTable {
     return (id) => who.role === "dm" || projectEntity(keys.token(id), state, who, { sceneId: state.meta.playerSceneId }) !== null;
   }
 
+  /** Whether the player's copy shows a path on the token now (undo.ts poseRestore). */
+  #pathShown(who: Viewer): (id: string) => boolean {
+    const state = this.state;
+    return (id) => (who.role === "dm" ? state.tokens[id] : (projectEntity(keys.token(id), state, who, { sceneId: state.meta.playerSceneId }) as Partial<Token> | null))?.path !== undefined;
+  }
+
   #apply(who: Viewer, op: Op): Applied | string {
     const before = this.state;
     const seq = this.seq + 1;
@@ -77,7 +83,7 @@ export class UndoTable {
     let entries = step.entries;
     let quiet: string[] | undefined;
     if (step.poses) {
-      const moved = poseRestore(this.state, { ...step, poses: step.poses }, this.#shows(who));
+      const moved = poseRestore(this.state, { ...step, poses: step.poses }, this.#shows(who), this.#pathShown(who));
       if (!moved.ok) return moved.message;
       entries = moved.entries;
       quiet = moved.quiet;
