@@ -137,18 +137,20 @@ function seenSeat(state: DropState, token: DropToken): { holder: DropToken; kept
 
 /**
  * The room as a drop of `token` at `at` leaves it, at the elevation it
- * lands at (dropLanding): the token there, squeezed only where it
- * squeezes, and off its holder unless the link still holds there. A
- * walking ruler walks each later stop in it, so a leg that leaves the
- * holder takes its later landings off it too (review AT-SOL-1).
+ * lands at (dropLanding), as this viewer's drops read it: the token there,
+ * squeezed only where it squeezes, off its holder unless the link still
+ * holds there, and who sees it judged where it now stands. A walking ruler
+ * walks each later stop in it, so a leg that leaves the holder takes its
+ * later landings off it too (review AT-SOL-1), and so does one that takes
+ * the token out of every player's sight (review AT-SOL-3).
  */
-export function droppedIn<S extends DropState>(state: S, token: DropToken, at: Point & { squeeze?: boolean }, elevation: number): S {
-  const seated = state.tokens?.[token.id];
-  if (!seated || !state.tokens) return state;
+export function droppedIn(view: DropView, role: Role, token: DropToken, at: Point & { squeeze?: boolean }, elevation: number): DropView {
+  const seated = view.tokens[token.id];
+  if (!seated) return view;
   const { attached, squeeze: _squeeze, ...rest } = seated;
-  const left = seenSeat(state, token)?.keptAt(at) === false;
-  const moved = { ...rest, ...(attached && !left ? { attached } : {}), x: at.x, y: at.y, elevation, ...(at.squeeze ? { squeeze: true as const } : {}) };
-  return { ...state, tokens: { ...state.tokens, [token.id]: moved } };
+  const left = seenSeat(view, token)?.keptAt(at) === false;
+  const moved: Token = { ...rest, ...(attached && !left ? { attached } : {}), x: at.x, y: at.y, elevation, ...(at.squeeze ? { squeeze: true as const } : {}) };
+  return dropView({ ...view, tokens: { ...view.tokens, [token.id]: moved } }, role);
 }
 
 /**

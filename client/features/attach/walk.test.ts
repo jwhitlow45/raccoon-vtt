@@ -8,7 +8,7 @@ import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, type Landed } from "../movement/drop.ts";
-import { DM, P1, actor, effect, env, template, token } from "#shared/testutil.ts";
+import { DM, P1, actor, effect, env, reveal, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
@@ -482,6 +482,30 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     assert.deepEqual([r2.state.tokens.imp!.elevation, r2.state.tokens.imp!.attached], [0, undefined]);
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), [off.preview.read.dragFt, back.preview.read.dragFt]);
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), [10, 5]);
+  });
+
+  test("a walking ruler's later legs judge who sees the token where its earlier legs left it (review AT-SOL-3)", () => {
+    // Fog lifted only over the cart's north east corner, where an imp rides it. Its first leg keeps it on the cart, in the fog,
+    // where no player sees it, so its next leg west off the cart walks as a token with no holder: 10 ft up, over low ground.
+    const state = gap();
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+    reveal(state, "s1", { x: 11, y: 6, w: 2, h: 2 });
+    state.tokens.imp = token("imp", { name: "Imp", x: 11, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" } });
+    // The ogre out of the way: a ruler leaves out other creatures' spaces, which a drag does not. The DM's own ruler reads the
+    // fogged ground, as the DM's drag does.
+    const { attached: _link, ...ogre } = state.tokens.ogre!;
+    state.tokens.ogre = { ...ogre, x: 20, y: 20, elevation: 0 };
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }], viewer: { role: "dm" }, everything: true })!;
+    const along = dragOf(state, "dm", "imp", { x: 9, y: 8 });
+    const r = applyOp(state, along.op as Op, DM, env(9));
+    assert.ok(r.ok);
+    assert.deepEqual([r.state.tokens.imp!.attached?.to, r.state.tokens.imp!.elevation], ["cart", 10]);
+    const off = dragOf(r.state, "dm", "imp", { x: 8, y: 8 });
+    const r2 = applyOp(r.state, off.op as Op, DM, env(10));
+    assert.ok(r2.ok);
+    assert.equal(r2.state.tokens.imp!.elevation, 10);
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), [along.preview.read.dragFt, off.preview.read.dragFt]);
+    assert.equal(ruler.legs[1]!.ft, 5);
   });
 
   test("a walk past 64 pieces cut where it squeezes in the gap sends a squeezed drop the server takes", () => {

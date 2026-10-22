@@ -233,7 +233,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     if (!answer) {
       searching = true;
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });
-      seen = droppedIn(seen, walker, target, landing);
+      seen = droppedIn(seen, input.viewer.role, walker, target, landing);
       walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
       continue;
     }
@@ -251,7 +251,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     counter.v += taken.diag[1];
     totalFt += taken.cost;
     legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: taken.cost, none });
-    seen = droppedIn(seen, walker, target, landing);
+    seen = droppedIn(seen, input.viewer.role, walker, target, landing);
     walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
   }
   const words = extraWords(pieces, false, false);
