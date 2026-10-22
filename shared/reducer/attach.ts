@@ -9,7 +9,7 @@ import { footprintSize } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
 import { sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
-import { carriedAlong, dismounted, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, withPath } from "./tokens.ts";
+import { carriedAlong, dismounted, hiddenTurnOf, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, withPath } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /**
@@ -170,7 +170,7 @@ function mountingCost(tx: Tx, rider: Token, mountId: string): number | null {
  * so a full path joins its oldest legs as for any other stop.
  */
 function mountedInPlace(tx: Tx, seated: Token, cost: number): Token {
-  const turn = turnUnderWay(tx.state.encounter);
+  const turn = turnUnderWay(tx.state.encounter) ?? hiddenTurnOf(tx.state.encounter, seated);
   if (!turn) return seated;
   const start: PathStop = { x: turn.x, y: turn.y, elevation: turn.elevation, ...(turn.seen ? { seen: true as const } : {}) };
   const path: TokenPath = seated.path?.turn === turn.seq ? seated.path : { turn: turn.seq, stops: turn.sceneId === seated.sceneId ? [start] : [] };

@@ -432,7 +432,8 @@ function leftMount(tx: Tx, rider: Token, next: Token, judged: Judged): Token | u
  */
 export function mountCost(tx: Tx, rider: Token, mount: Token): number | null {
   if (!walksRoutes(tx.env.opVersion) || !attaches(tx.env.opVersion)) return null;
-  const turn = turnUnderWay(tx.state.encounter);
+  // A player's copy predicts a waiting move on a turn the DM hid by the path it holds, as withPath does (hiddenTurnOf).
+  const turn = turnUnderWay(tx.state.encounter) ?? hiddenTurnOf(tx.state.encounter, rider);
   if (!turn || turn.tokenId !== rider.id) return null;
   if (!inSightOfNonOwners(tx.state, mount, tx.env)) return null;
   return Math.floor((speedsOf(tx.state, rider)?.walk ?? 0) / 2);
@@ -547,12 +548,13 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
  * the DM hid from them (project.ts projectPathCtx, review AT-HIDDENPATH).
  * So a move the device predicts before the server answers goes on with
  * that path, as the store goes on with it, and a second drag or arrow
- * press reads its legs and their diagonals (review FU20A-OP-4). Only a
+ * press reads its legs and their diagonals (review FU20A-OP-4), and what
+ * getting on or off a mount costs (mountCost, review FU20A-ASTRA-6). Only a
  * player's projection marks a turn started with no acting row
  * (Encounter `started`), so the server's own state never takes this, and
  * nothing it stores changes. Null otherwise.
  */
-function hiddenTurnOf(encounter: RoomState["encounter"], before: Token): (TurnStart & { seq: number }) | null {
+export function hiddenTurnOf(encounter: RoomState["encounter"], before: Token): (TurnStart & { seq: number }) | null {
   if (encounter?.started !== true || encounter.activeEntryId !== null || !before.path) return null;
   return { entryId: "", tokenId: before.id, sceneId: before.sceneId, x: before.x, y: before.y, elevation: before.elevation, seq: before.path.turn };
 }
