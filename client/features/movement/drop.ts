@@ -120,12 +120,35 @@ export function dropView(view: RoomState, role: Role): DropView {
  * and the leg tests judge the height sent.
  */
 export function dropLanding(state: DropState, token: DropToken, at: Point & { squeeze?: boolean }): number {
+  const seat = seenSeat(state, token);
+  if (!seat) return landedElevation(state.buildChunks, token, at);
+  return seat.keptAt(at) ? seat.holder.elevation : landedElevation(state.buildChunks, token, at, seat.holder);
+}
+
+/** The holder a token sits on, when every player sees both, and whether its link still holds with the token dropped at a spot. */
+function seenSeat(state: DropState, token: DropToken): { holder: DropToken; keptAt: (at: Point) => boolean } | null {
   const seated = state.tokens?.[token.id];
   const link = seated?.attached;
   const holder = seated && link && onHolder(link.kind) && state.tokens ? (holderOf(state.tokens, seated) as NonNullable<typeof seated> | undefined) : undefined;
-  if (!link || !holder || !state.meta || !state.seen || !state.seen(seated) || !state.seen(holder)) return landedElevation(state.buildChunks, token, at);
-  const stays = linkHolds(state.meta.settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder);
-  return stays ? holder.elevation : landedElevation(state.buildChunks, token, at, holder);
+  const settings = state.meta?.settings;
+  if (!link || !holder || !settings || !state.seen || !state.seen(seated) || !state.seen(holder)) return null;
+  return { holder, keptAt: (at) => linkHolds(settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder) };
+}
+
+/**
+ * The room as a drop of `token` at `at` leaves it, at the elevation it
+ * lands at (dropLanding): the token there, squeezed only where it
+ * squeezes, and off its holder unless the link still holds there. A
+ * walking ruler walks each later stop in it, so a leg that leaves the
+ * holder takes its later landings off it too (review AT-SOL-1).
+ */
+export function droppedIn<S extends DropState>(state: S, token: DropToken, at: Point & { squeeze?: boolean }, elevation: number): S {
+  const seated = state.tokens?.[token.id];
+  if (!seated || !state.tokens) return state;
+  const { attached, squeeze: _squeeze, ...rest } = seated;
+  const left = seenSeat(state, token)?.keptAt(at) === false;
+  const moved = { ...rest, ...(attached && !left ? { attached } : {}), x: at.x, y: at.y, elevation, ...(at.squeeze ? { squeeze: true as const } : {}) };
+  return { ...state, tokens: { ...state.tokens, [token.id]: moved } };
 }
 
 /**

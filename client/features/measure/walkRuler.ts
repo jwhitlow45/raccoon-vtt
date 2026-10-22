@@ -2,11 +2,11 @@ import type { Actor, RoomState, Token } from "#shared/model.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { offKey, pastHolder, walkAlong, type Walker } from "#shared/rules/movement.ts";
+import { offKey, type Walker } from "#shared/rules/movement.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
-import { dropLanding, dropView, routeTarget, walkerOf } from "../movement/drop.ts";
+import { dropLanding, droppedIn, dropView, routeTarget, walkerOf } from "../movement/drop.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
 import { extraWords, joinWords } from "./movement.ts";
 import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
@@ -205,7 +205,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   let walker = first ? walkerAt(view, input.sceneId, first) : null;
   if (!walker || stops.length < 2) return null;
   const size = footprintSize(walker);
-  const seen = dropView(view, input.viewer.role);
+  // The room as the drops so far leave it: a leg that leaves a holder walks and lands every later one off it, as the token would (review AT-SOL-1).
+  let seen = dropView(view, input.viewer.role);
   const rules = { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal };
   const counter: DiagonalCounter = { h: 0, v: 0 };
   const legs: WalkLeg[] = [];
@@ -213,8 +214,6 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   let totalFt = 0;
   let extraFt = 0;
   let searching = false;
-  // Off a holder, the walk crosses its inner ledges only until it first stands clear of it, on every later leg too (movement.ts walkOn).
-  let cleared = false;
   for (const [k, drawn] of stops.slice(1).entries()) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
@@ -228,18 +227,18 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const walking: Token & Walker = cleared ? pastHolder(walkerOf(seen, walker)) : walkerOf(seen, walker);
+    const walking: Token & Walker = walkerOf(seen, walker);
     const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walking, input, counter, target, budget, progress));
     if (answer) progress.answers[k] = answer;
     if (!answer) {
       searching = true;
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });
+      seen = droppedIn(seen, walker, target, landing);
       walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
       continue;
     }
     if (answer.kind === "route") {
       const points = routePoints(view.buildChunks, walking, answer.pieces, landing);
-      cleared ||= walkAlong(walking, points).offHolder === undefined;
       taken = routeFeet(points, answer.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
       corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
       pieces.push(...answer.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
@@ -247,12 +246,12 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     } else {
       none = answer.kind === "none";
       taken = straightCost(walker, walker, end, rules, counter);
-      cleared ||= walkAlong(walking, [end]).offHolder === undefined;
     }
     counter.h += taken.diag[0];
     counter.v += taken.diag[1];
     totalFt += taken.cost;
     legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: taken.cost, none });
+    seen = droppedIn(seen, walker, target, landing);
     walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
   }
   const words = extraWords(pieces, false, false);

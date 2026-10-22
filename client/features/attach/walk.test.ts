@@ -13,6 +13,8 @@ import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
+import { tokenStop } from "../measure/ruler.ts";
+import { measureWalk } from "../measure/walkRuler.ts";
 import { towingWord, walkersFor, walkersOfGroup } from "./walk.ts";
 import { detachOp, getOffPlace } from "./detach.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreBlocked, legBlocker, ownWalk, walkEnd } from "#shared/rules/movement.ts";
@@ -442,6 +444,24 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     };
     assert.deepEqual(entered(false), [["ogre", "enter"]]);
     assert.deepEqual(entered(true), [["ogre", "enter"]], "squeezed only in the gap, it passes the sphere full size");
+  });
+
+  test("a walking ruler off the cart to the ground and back walks its later legs as the token would once off it (review AT-SOL-1)", () => {
+    // An imp on the cart's west half, which stands over the low ground at 10 ft, steps west onto the ground and back.
+    const state = gap();
+    state.tokens.imp = token("imp", { name: "Imp", kind: "pc", ownerIds: ["p1"], x: 9, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" } });
+    const view = copyFor(state, P1);
+    const ruler = measureWalk({ view, sceneId: "s1", stops: [tokenStop(view.tokens.imp!), { x: 8.5, y: 6.5 }, { x: 9.5, y: 6.5 }], viewer: { role: "player" }, everything: false })!;
+    // The same two drags, made one after the other: the first leaves the cart, so the second walks on the ground.
+    const off = dragOf(view, "player", "imp", { x: 8, y: 6 });
+    const r = applyOp(state, off.op as Op, P1, env(9));
+    assert.ok(r.ok);
+    const back = dragOf(copyFor(r.state, P1), "player", "imp", { x: 9, y: 6 });
+    const r2 = applyOp(r.state, back.op as Op, P1, env(10));
+    assert.ok(r2.ok);
+    assert.deepEqual([r2.state.tokens.imp!.elevation, r2.state.tokens.imp!.attached], [0, undefined]);
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), [off.preview.read.dragFt, back.preview.read.dragFt]);
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), [10, 5]);
   });
 
   test("a walk past 64 pieces cut where it squeezes in the gap sends a squeezed drop the server takes", () => {
