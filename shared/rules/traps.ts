@@ -703,9 +703,10 @@ type SetReading = Mix;
  * The traps a walk can set off, as flags by trap, each square set read by
  * them, and the union of each mix of sets a footprint covers, shared by
  * the walks of a pass with the same flags. One list a mix, so a walk over
- * the same mix as its last spot steps onto and off nothing.
+ * the same mix as its last spot steps onto and off nothing. `offFloor`
+ * says whether any of them takes creatures off the floor.
  */
-type Reading = { flags: Uint8Array; sets: (SetReading | undefined)[]; unions: Map<number | string, readonly number[]>; mixes: Map<number, Mix>; members: Map<readonly number[], Uint8Array> };
+type Reading = { flags: Uint8Array; offFloor: boolean; sets: (SetReading | undefined)[]; unions: Map<number | string, readonly number[]>; mixes: Map<number, Mix>; members: Map<readonly number[], Uint8Array> };
 
 /** What a footprint over some cells reads (walkEvents): the traps there on the floor and off it, and whether the floor rule tells them apart. */
 type Mix = { off: readonly number[]; floor: readonly number[]; needs: boolean };
@@ -736,16 +737,18 @@ function readingFor(walk: Walk, index: TrapIndex, before: RoomState, spent: Read
   const traps = index.traps;
   const flags = new Uint8Array(traps.length);
   let any = false;
+  let offFloor = false;
   for (let i = 0; i < traps.length; i++) {
     const rig = traps[i]!.rig!;
     if (spent.has(i) || !setsOff(rig, before, walk.token)) continue;
     flags[i] = CAN | (rig.floor ? FLOOR : 0) | (rig.on.includes("enter") ? ENTER : 0) | (rig.on.includes("leave") ? LEAVE : 0);
     any = true;
+    if (!rig.floor) offFloor = true;
   }
   if (!any) return null;
   const key = flags.join("");
   let hit = cache.readings.get(key);
-  if (!hit) cache.readings.set(key, (hit = { flags, sets: [], unions: new Map(), mixes: new Map(), members: new Map() }));
+  if (!hit) cache.readings.set(key, (hit = { flags, offFloor, sets: [], unions: new Map(), mixes: new Map(), members: new Map() }));
   return hit;
 }
 
@@ -794,7 +797,8 @@ function setReading(reading: Reading, squares: SquareIndex, id: number): SetRead
 function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: string) => boolean, spent: ReadonlySet<number>, cache: PassCache): TrapEvent[] {
   const out: TrapEvent[] = [];
   const reading = readingOf(walk, index, before, spent, cache);
-  if (!reading) return out;
+  // What its holder carries is never on the floor, so it sets off nothing where every trap it could takes only the floor.
+  if (!reading || (walk.carriedOn && !reading.offFloor)) return out;
   const { flags } = reading;
   const traps = index.traps;
   const squares = index.squares;
@@ -868,7 +872,10 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
     const off = unionOf(first, more, false, a.off);
     return { off, floor: needs ? unionOf(first, more, true, a.floor) : off, needs };
   };
-  const last0 = new Int32Array([-1, -1, -1, -1]);
+  let lx0 = -1;
+  let ly0 = -1;
+  let lx1 = -1;
+  let ly1 = -1;
   let lastMix: Mix | null = null;
   const onAt = (j: number): readonly number[] => {
     if (!squares) return NONE;
@@ -881,7 +888,7 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
     const W = squares.w + 1;
     const sum = squares.sum;
     // The same cells as the spot before, as a small creature's half steps often are, read the same.
-    if (x0 === last0[0] && y0 === last0[1] && x1 === last0[2] && y1 === last0[3]) return lastMix!.needs && floorAt(j, r) ? lastMix!.floor : lastMix!.off;
+    if (x0 === lx0 && y0 === ly0 && x1 === lx1 && y1 === ly1) return lastMix!.needs && floorAt(j, r) ? lastMix!.floor : lastMix!.off;
     if (sum[y1 * W + x1]! - sum[y0 * W + x1]! - sum[y1 * W + x0]! + sum[y0 * W + x0]! === 0) return NONE;
     let mix: Mix;
     // A footprint of more than one square reads the same mix wherever the same cells lie under it, as walkers on one lane do, so its read is kept.
@@ -892,10 +899,10 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
       if (known) mix = known;
       else reading.mixes.set(key, (mix = mixOf(x0, y0, x1, y1)));
     } else mix = mixOf(x0, y0, x1, y1);
-    last0[0] = x0;
-    last0[1] = y0;
-    last0[2] = x1;
-    last0[3] = y1;
+    lx0 = x0;
+    ly0 = y0;
+    lx1 = x1;
+    ly1 = y1;
     lastMix = mix;
     return mix.needs && floorAt(j, r) ? mix.floor : mix.off;
   };
@@ -1161,7 +1168,9 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
     // A walker with a holder in the op walks as its trace has it, as itself and never squeezed (route.ts followerTrace): a creature
     // its holder drags beside it, or one on a holder some player cannot see.
     const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id));
-    stands = routeStands(before, walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd });
+    // The group's head walks its group's own walk at its step, so its spots are already there.
+    const head = walk.entry === walk.group.head && walk.step === walk.group.step;
+    stands = routeStands(before, walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd }, head ? walk.group.base(walk.group.step) : undefined);
   }
   walks.stands.set(walk, stands);
   return stands;

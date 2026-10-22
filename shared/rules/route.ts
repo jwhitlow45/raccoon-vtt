@@ -1,9 +1,9 @@
 import type { PathStop } from "../model.ts";
 import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
-import { canSqueeze, footprintRect, footprintSize, isSqueezed, snapStep, stopFootprint, type PlacedToken } from "./footprint.ts";
+import { canSqueeze, footprintRect, footprintSize, isSqueezed, rangeAtInto, snapStep, stopFootprint, type CellRange, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
-import { footing, footprintGround } from "./heights.ts";
+import { footing, footprintGround, sceneGround } from "./heights.ts";
 import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnds, walkFrom, walkOn, type MovingToken, type WalkEnd, type Walker, type Walking } from "./movement.ts";
 
 /**
@@ -354,6 +354,10 @@ function walkSpots(route: readonly RoutePoint[], token: Walker, build: Pick<Buil
   const grounded = walkFrom(build.buildChunks, token).grounded;
   const stepsOf = (a: RoutePoint, b: RoutePoint) => Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / lattice - SLACK));
   const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, route.length > 1 ? stepsOf(first, route[1]!) : 0] }];
+  // `groundUnder` at every spot, as fast as a walk of 200 squares needs it: the scene's chunks read once a walk, and an
+  // unsqueezed walker's cells found from its size (footprint.ts rangeAtInto) rather than a token built at each spot.
+  const over = grounded ? sceneGround(build.buildChunks, token.sceneId) : null;
+  const cells: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
   const snap = (v: number) => Math.round(v / lattice) * lattice + 0;
   for (let i = 1; i < route.length; i++) {
     const a = route[i - 1]!;
@@ -362,13 +366,16 @@ function walkSpots(route: readonly RoutePoint[], token: Walker, build: Pick<Buil
     const dy = b.y - a.y;
     const n = stepsOf(a, b);
     const exact = latticePiece(dx, dy, lattice);
+    const walker = walkerOn(i - 1);
+    const size = over && !isSqueezed(walker) ? footprintSize(walker) : null;
+    const groundAt = (x: number, y: number) => (size ? over!(rangeAtInto(cells, size.w, size.h, x, y)) : groundUnder(build.buildChunks, walker, { x, y }));
     for (let k = 1; k <= n; k++) {
       const end = k === n;
       const x = end ? b.x : exact ? a.x + (dx * k) / n : a.x + snap((dx * k) / n);
       const y = end ? b.y : exact ? a.y + (dy * k) / n : a.y + snap((dy * k) / n);
       const prev = spots[spots.length - 1]!;
       if (!end && x === prev.x && y === prev.y) continue;
-      const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, walkerOn(i - 1), { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
+      const elevation = end ? b.elevation : grounded ? groundAt(x, y) : a.elevation + ((b.elevation - a.elevation) * k) / n;
       spots.push({ x, y, elevation, progress: [i - 1, k, n] });
     }
   }
@@ -397,12 +404,13 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
  * `routeSpots` a spot at a time: the walk's spots and its trace, and each
  * spot with `stand` worked out only when asked, once, so a search for where
  * a walk may stop reads only the spots it needs. The same rule as
- * `routeSpots` at every spot.
+ * `routeSpots` at every spot. `spots` are the walk's spots when the caller
+ * has them already, as `routeWalk` gives them on this route at this step.
  */
-export function routeStands(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
+export function routeStands(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}, spots?: readonly WalkSpot[]): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
   // The walker where each piece starts, as the walk carries it (`WalkTrace`): ledges, the squeeze and the leg test count from here.
   const trace = walkTrace(build.buildChunks, token, route);
-  const walk = routeWalk(trace, build, step);
+  const walk = spots ?? routeWalk(trace, build, step);
   const lattice = step ?? routeLattice(token);
   const grid = snapStep(token);
   const blocks = build.scenes[token.sceneId]?.blockMovement === true;

@@ -14,6 +14,12 @@
  *   and 48 going off before that one stops them all, each at 25 ms. A
  *   stop cuts the walks, so its whole op also applies the op again
  *   without its traps (docs/design-v1-traps.md 6.7).
+ * - The same moves on the ground, under the floor traps the fliers pass:
+ *   the moveMany with one trap stopping every walker, under 49, and under
+ *   48 and one stopping them all, each at 25 ms, and the group under 50,
+ *   alone and with the 50th stopping it near the route's end, each at
+ *   40 ms. Each hits its whole zone. The moveMany's first trap lies under
+ *   where the walkers start, so it never goes off.
  * - An `encounter.next` springing all 50 traps twice, at the turn that
  *   ends and, after the `nextTurn` reset, at the turn that starts, with
  *   500 tokens in the room, at 15 ms.
@@ -93,13 +99,20 @@ function lastTrap(at: { x: number; y: number }): Record<string, Trap> {
   return { trap49: { ...t, id: "trap49", name: "Plate 49" } };
 }
 
-/** A flying Gargantuan holder at 2,2 carrying 499 hidden tokens, a route of 300 squares in six pieces back and forth over a band of armed squares. */
-function groupRoom(): { state: RoomState; op: Op } {
+/** How high the walkers go: flying 30 ft up, over traps that take only creatures on the floor, or walking on the ground. */
+type Height = "flying" | "ground";
+
+const speedsOf = (height: Height) => (height === "flying" ? { walk: 2000, fly: 2000 } : { walk: 2000 });
+const elevationOf = (height: Height) => (height === "flying" ? 30 : 0);
+
+/** A Gargantuan holder at 2,2 carrying 499 hidden tokens, a route of 300 squares in six pieces back and forth over a band of armed squares. */
+function groupRoom(height: Height = "flying"): { state: RoomState; op: Op } {
   const state = room();
+  const elevation = elevationOf(height);
   state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 140, h: 60 } };
-  state.tokens.h = token("h", { name: "Roc", kind: "npc", size: "gargantuan", x: 2, y: 2, elevation: 30, actor: { inline: actor({ speeds: { walk: 2000, fly: 2000 } }) } });
+  state.tokens.h = token("h", { name: "Roc", kind: "npc", size: "gargantuan", x: 2, y: 2, elevation, actor: { inline: actor({ speeds: speedsOf(height) }) } });
   for (let i = 0; i < 499; i++) {
-    state.tokens[`p${i}`] = token(`p${i}`, { name: `Passenger ${i}`, size: "tiny", visibility: "dm", x: 2 + (i % 8) * 0.5, y: 2 + (Math.floor(i / 8) % 8) * 0.5, elevation: 30, attached: { to: "h", kind: "carry" } }) as Token;
+    state.tokens[`p${i}`] = token(`p${i}`, { name: `Passenger ${i}`, size: "tiny", visibility: "dm", x: 2 + (i % 8) * 0.5, y: 2 + (Math.floor(i / 8) % 8) * 0.5, elevation, attached: { to: "h", kind: "carry" } }) as Token;
   }
   state.traps = { ...traps({ x0: 0, y0: 0, columns: 25, rows: 2 }, {}, 49), ...lastTrap({ x: 92, y: 12 }) };
   // 96 east, 4 south, 96 west, 4 south, 96 east, 4 south: 300 squares.
@@ -114,15 +127,16 @@ function groupRoom(): { state: RoomState; op: Op } {
   return { state, op: { t: "token.move", tokenId: "h", x: 98, y: 14, route } };
 }
 
-/** 100 flying Gargantuan walkers in a 20-row band, each carrying 4 tokens in the open, each flying 199 squares east over armed squares. */
-function manyRoom(): { state: RoomState; op: Op } {
+/** 100 Gargantuan walkers in a 20-row band, each carrying 4 tokens in the open, each going 199 squares east over armed squares. */
+function manyRoom(height: Height = "flying"): { state: RoomState; op: Op } {
   const state = room();
+  const elevation = elevationOf(height);
   state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 220, h: 30 } };
   const moves: { tokenId: string; x: number; y: number }[] = [];
   for (let i = 0; i < 100; i++) {
     const y = (i % 5) * 4;
-    state.tokens[`w${i}`] = token(`w${i}`, { name: `Walker ${i}`, kind: "npc", size: "gargantuan", x: 0, y, elevation: 30, actor: { inline: actor({ speeds: { walk: 2000, fly: 2000 } }) } });
-    for (let k = 0; k < 4; k++) state.tokens[`w${i}c${k}`] = token(`w${i}c${k}`, { name: `Pack ${i}.${k}`, size: "tiny", x: k, y, elevation: 30, attached: { to: `w${i}`, kind: "carry" } }) as Token;
+    state.tokens[`w${i}`] = token(`w${i}`, { name: `Walker ${i}`, kind: "npc", size: "gargantuan", x: 0, y, elevation, actor: { inline: actor({ speeds: speedsOf(height) }) } });
+    for (let k = 0; k < 4; k++) state.tokens[`w${i}c${k}`] = token(`w${i}c${k}`, { name: `Pack ${i}.${k}`, size: "tiny", x: k, y, elevation, attached: { to: `w${i}`, kind: "carry" } }) as Token;
     moves.push({ tokenId: `w${i}`, x: 199, y });
   }
   state.traps = { ...traps({ x0: 0, y0: 0, columns: 50, rows: 1 }, {}, 49), ...lastTrap({ x: 196, y: 0 }) };
@@ -134,15 +148,25 @@ function manyRoom(): { state: RoomState; op: Op } {
  * so they go off: `going` traps that stop nothing across the walks, and
  * with `stop`, one more near where the walks end that stops every walker.
  */
-function goingRoom(going: number, stop: boolean): { state: RoomState; op: Op } {
-  const { state, op } = manyRoom();
+function goingRoom(going: number, stop: boolean, height: Height = "flying"): { state: RoomState; op: Op } {
+  const { state, op } = manyRoom(height);
   const traps: Record<string, Trap> = {};
-  for (const t of Object.values(state.traps).slice(0, going)) traps[t.id] = { ...t, rig: { ...t.rig!, floor: false } };
+  // Flying walkers set off only traps that take fliers. On the ground the floor traps go off as they are.
+  const floor = height === "ground";
+  for (const t of Object.values(state.traps).slice(0, going)) traps[t.id] = { ...t, rig: { ...t.rig!, floor } };
   if (stop) {
     const last = lastTrap({ x: 190, y: 0 }).trap49!;
-    traps.trap49 = { ...last, rig: { ...last.rig!, stops: true } };
+    traps.trap49 = { ...last, rig: { ...last.rig!, floor, stops: true } };
   }
   state.traps = traps;
+  return { state, op };
+}
+
+/** The group on the ground under its 50 floor traps, which go off as it walks, and with `stop` the 50th stopping it near the route's end. */
+function groundGroupRoom(stop: boolean): { state: RoomState; op: Op } {
+  const { state, op } = groupRoom("ground");
+  const last = state.traps.trap49!;
+  state.traps = { ...state.traps, trap49: { ...last, rig: { ...last.rig!, floor: true, stops: stop } } };
   return { state, op };
 }
 
@@ -198,6 +222,18 @@ export function runTrapRows(runs = 15): Row[] {
     const stops = plan0.op === room.op ? "" : ", the walks cut";
     rows.push({ row: `500-walker token.moveMany, ${name}, plan (${plan0.springings.length} springings${stops})`, ms: time(runs, room.state, plan(room.op)), gate: 25 });
     rows.push({ row: `500-walker token.moveMany, ${name}, whole op`, ms: time(runs, room.state, apply(room.op)) });
+  }
+  for (const [name, room, gate] of [
+    ["500-walker token.moveMany on the ground, one floor trap stopping all 100 walkers", goingRoom(0, true, "ground"), 25],
+    ["500-walker token.moveMany on the ground under 49 floor traps", goingRoom(49, false, "ground"), 25],
+    ["500-walker token.moveMany on the ground under 48 floor traps and one stopping all 100 walkers", goingRoom(48, true, "ground"), 25],
+    ["500-token group on the ground, 300-square route, under 50 floor traps", groundGroupRoom(false), 40],
+    ["500-token group on the ground, 300-square route, under 50 floor traps, the 50th stopping it", groundGroupRoom(true), 40],
+  ] as const) {
+    const plan0 = planTrapMove(room.op, fresh(room.state) as TrapRoom, DM, {});
+    const stops = plan0.op === room.op ? "" : ", the walks cut";
+    rows.push({ row: `${name}, plan (${plan0.springings.length} springings${stops})`, ms: time(runs, room.state, plan(room.op)), gate });
+    rows.push({ row: `${name}, whole op`, ms: time(runs, room.state, apply(room.op)) });
   }
   rows.push({ row: "encounter.next, 50 traps going off twice, whole op", ms: time(runs, turn.state, apply(turn.op)), gate: 15 });
   return rows;
