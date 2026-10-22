@@ -2,7 +2,7 @@ import { keys } from "../keys.ts";
 import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
-import { MAX_RULER_STOPS, syncStamp, type ActorPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
+import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
@@ -734,6 +734,11 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
  * the patch has none, which a sync's never has. Removing the block removes
  * the record too, since its base then describes no block. The record may
  * still name rolls the block no longer holds.
+ *
+ * An `at` the patch sends is an earlier server stamp, as Undo puts back.
+ * One more than a day past the op's time is refused, so no stored record
+ * is from the future, which an import would have to change. The op's time
+ * is the envelope's, so replay decides the same.
  */
 function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, blockRemoved: boolean, at: string): void {
   if (blockRemoved || record === null) {
@@ -741,6 +746,7 @@ function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, bl
     return;
   }
   if (record === undefined) return;
+  if (record.at !== undefined && syncAtAhead(record.at, Date.parse(at))) throw new Refuse("invalid", SYNC_AT_AHEAD);
   const stored: DdbSync = { ...record, at: record.at ?? syncStamp(at, next.ddbSync?.at) };
   if (serializedBytes(stored) > LIMITS.ddbSyncBytes) throw new Refuse("quota", `${next.name}'s sync record would be too large to save.`);
   next.ddbSync = stored;

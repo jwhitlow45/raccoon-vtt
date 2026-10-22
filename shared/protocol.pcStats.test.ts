@@ -145,7 +145,6 @@ describe("a re-sync's schema", () => {
     assert.ok(ddbSyncForImport.safeParse({ ...RECORD, at: AT }).success);
     assert.equal(ddbSyncForImport.safeParse(RECORD).success, false);
     assert.equal(ddbSyncForImport.safeParse({ ...RECORD, at: AT, rolls: entries(MAX_PC_ROLLS + 1) }).success, false);
-    assert.equal(ddbSyncForImport.safeParse({ ...RECORD, at: "9999-12-31T23:59:59.999Z" }).success, false, "a record from the future (RS-SOL-2)");
   });
 
   test("a stamp past a record parses up to the schema's last millisecond, and none fits past it (RS-SOL-2)", () => {

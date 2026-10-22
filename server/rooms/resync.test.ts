@@ -7,7 +7,7 @@ import { CHARACTER_CHANGED } from "#shared/limits.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { Actor, Character, DdbSync, Member, PcStats, RoomState } from "#shared/model.ts";
 import { expectOf } from "#shared/permissions.ts";
-import { EXPECT_PARTS, type CharacterPatch, type ExpectPart, type Op, type PcStatsPatch, type ServerMessage } from "#shared/protocol.ts";
+import { EXPECT_PARTS, SYNC_AT_AHEAD, type CharacterPatch, type ExpectPart, type Op, type PcStatsPatch, type ServerMessage } from "#shared/protocol.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor as testActor, character as testCharacter, effect as testEffect } from "#shared/testutil.ts";
 import { RoomActor, type ActorDeps } from "./actor.ts";
@@ -442,6 +442,23 @@ describe("a re-sync's race at the room actor (docs/design-v1-resync.md 5)", () =
         const before = structuredClone(actor.committed.state.characters[id]);
         assert.deepEqual(await ana.send(update(id, resultOf(review, APPLY, "2026-10-21T19:00:00.000Z"), undoOf(review, APPLY))), STALE);
         assert.deepEqual(actor.committed.state.characters[id], before, "the DM's sync stands");
+      },
+      { now: () => now },
+    );
+  });
+
+  test("a record Ana sends with an at from the future is refused and changes nothing, and one a day ahead exactly is taken (RS-O-37)", async () => {
+    const now = Date.parse("2026-10-21T19:00:00.000Z");
+    await play(
+      table({ ddbSync: EARLIER }),
+      async ({ actor, ana, id }) => {
+        const before = structuredClone(actor.committed.state.characters[id]);
+        const refused = await ana.send({ t: "character.update", characterId: id, patch: { ddbSync: { ...SYNCED, at: "9999-12-31T23:59:59.999Z" } } });
+        assert.deepEqual(refused, { code: "invalid", message: SYNC_AT_AHEAD });
+        assert.deepEqual(await ana.send({ t: "character.update", characterId: id, patch: { ddbSync: { ...SYNCED, at: "2026-10-22T19:00:00.001Z" } } }), { code: "invalid", message: SYNC_AT_AHEAD });
+        assert.deepEqual(actor.committed.state.characters[id], before, "nothing changed");
+        assert.equal(await ana.send({ t: "character.update", characterId: id, patch: { ddbSync: { ...SYNCED, at: "2026-10-22T19:00:00.000Z" } } }), null);
+        assert.equal(actor.committed.state.characters[id]!.ddbSync!.at, "2026-10-22T19:00:00.000Z");
       },
       { now: () => now },
     );

@@ -761,8 +761,20 @@ export function syncStampFits(before: string | undefined): boolean {
   return before === undefined || ddbSyncFields.at.safeParse(new Date(Date.parse(before) + 1).toISOString()).success;
 }
 
-/** How far past the import's time a record's `at` may be: a sync's time comes from a server, never from the future, and a day covers any clock. */
-const SYNC_AHEAD_MS = 24 * 60 * 60 * 1000;
+/**
+ * How far past the time at hand a record's `at` may be: the op's time for
+ * a live write, the import's time for a backup. A sync's time comes from a
+ * server, never from the future, and a day covers any clock.
+ */
+export const SYNC_AHEAD_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a record's `at` is more than `SYNC_AHEAD_MS` past `now`, which no server's stamp is. */
+export function syncAtAhead(at: string, now: number): boolean {
+  return Date.parse(at) > now + SYNC_AHEAD_MS;
+}
+
+/** A live write's refusal when its record's own `at` is from the future (docs/design-v1-resync.md 4). */
+export const SYNC_AT_AHEAD = "a sync record's time is at most a day past now";
 /** As a patch sends it: the server writes `at` when it is left out, which a sync always does. */
 const ddbSyncPatch = z.strictObject({ ...ddbSyncFields, at: ddbSyncFields.at.optional() }).refine((s) => serializedBytes(s) <= LIMITS.ddbSyncBytes, withinDdbSyncBytes);
 
@@ -2181,7 +2193,7 @@ export const pcStatsPatchSchema = pcStatsPatch;
 /** A fill as the D&D Beyond route answers it (docs/design-v1-pc-stats.md 6.3). */
 export const pcFillSchema = pcFill;
 /** A character's sync record as stored, so the stored-state schema checks imported ones by the same bounds. */
-export const ddbSyncForImport = ddbSync.refine((s) => Date.parse(s.at) <= Date.now() + SYNC_AHEAD_MS, { message: "a sync record's time is at most a day past the import's" });
+export const ddbSyncForImport = ddbSync;
 /** A sync record as a patch sends it, for the re-sync to check what it would send. */
 export const ddbSyncPatchSchema = ddbSyncPatch;
 /** Who may move any token, so the stored-state schema checks imports the same way. */

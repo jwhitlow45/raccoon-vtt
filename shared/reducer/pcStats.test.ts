@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, DdbSync, PcRoll, PcStats } from "../model.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { clientOpSchema, type CharacterPatch, type DdbSyncPatch, type Op } from "../protocol.ts";
+import { clientOpSchema, SYNC_AT_AHEAD, type CharacterPatch, type DdbSyncPatch, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsTooBig } from "../rules/pcStats.ts";
 import { actor, apply, AT, character, DM, env, refused, room, token } from "../testutil.ts";
@@ -162,11 +162,26 @@ describe("a character's D&D Beyond sync record in the reducer (docs/design-v1-re
     assert.equal(s.characters.bree!.ddbSync!.at, "2026-10-20T18:30:00.002Z");
     s = applyAt(s, update({ ddbSync: RECORD }), "2026-10-20T18:31:00.000Z").state;
     assert.equal(s.characters.bree!.ddbSync!.at, "2026-10-20T18:31:00.000Z", "a later time is the op's own");
-    // A record from a clock ahead, as a restored backup may hold, is passed by 1 ms.
-    const ahead = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: { ...RECORD, at: "2026-10-21T00:00:00.000Z" } }), AT).state;
-    assert.equal(applyAt(ahead, update({ ddbSync: RECORD }), LATER).state.characters.bree!.ddbSync!.at, "2026-10-21T00:00:00.001Z");
+    // A record from a clock a few hours ahead, within the day a write may be, is passed by 1 ms.
+    const ahead = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: { ...RECORD, at: "2026-10-13T00:00:00.000Z" } }), AT).state;
+    assert.equal(applyAt(ahead, update({ ddbSync: RECORD }), AT).state.characters.bree!.ddbSync!.at, "2026-10-13T00:00:00.001Z");
     // An at the patch sends is kept even when earlier, as Undo puts the record before back.
     assert.equal(applyAt(s, update({ ddbSync: { ...RECORD, at: AT } }), LATER).state.characters.bree!.ddbSync!.at, AT);
+  });
+
+  test("a record whose own at is more than a day past the op's time is refused, a day exactly is taken, and Undo's earlier at always is (RS-O-37)", () => {
+    const s = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), LATER).state;
+    const at = (when: string) => applyOp(s, update({ ddbSync: { ...RECORD, at: when } }), DM, { ...env(3), at: LATER });
+    const day = at("2026-10-21T18:30:00.000Z");
+    assert.ok(day.ok);
+    assert.equal(day.state.characters.bree!.ddbSync!.at, "2026-10-21T18:30:00.000Z");
+    const past = at("2026-10-21T18:30:00.001Z");
+    assert.deepEqual(past.ok ? null : [past.code, past.message], ["invalid", SYNC_AT_AHEAD]);
+    const far = at("9999-12-31T23:59:59.999Z");
+    assert.equal(far.ok, false);
+    const undo = at(AT);
+    assert.ok(undo.ok, "an earlier server stamp, as Undo sends");
+    assert.equal(undo.state.characters.bree!.ddbSync!.at, AT);
   });
 
   test("null drops the record and keeps the block", () => {

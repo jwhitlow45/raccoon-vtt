@@ -26,6 +26,7 @@ import {
   pcStatsForImport,
   knownFormsSchema,
   ddbSyncForImport,
+  syncAtAhead,
   fogOpSchema,
   handoutSchemas,
   mapSchemas,
@@ -739,11 +740,22 @@ export const roomStateSchema = z.strictObject({
   trapSeen: z.array(trapLogEntry).max(LIMITS.trapSeenLines),
 });
 
-export function parseRoomState(value: unknown): { ok: true; state: RoomState } | { ok: false; message: string } {
+/**
+ * The stored state an import's room.json holds, checked whole. A sync
+ * record whose `at` is more than a day past the import's time takes the
+ * import's time instead (docs/design-v1-resync.md 4). The record and its
+ * base stay, so the next re-sync still compares three ways, and no record
+ * from the future reaches a stored room, where the next stamp would follow it.
+ */
+export function parseRoomState(value: unknown, now = Date.now()): { ok: true; state: RoomState } | { ok: false; message: string } {
   const parsed = roomStateSchema.safeParse(value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return { ok: false, message: `${issue?.path.join(".") ?? ""}: ${issue?.message ?? "invalid"}` };
   }
-  return { ok: true, state: parsed.data as RoomState };
+  const state = parsed.data as RoomState;
+  for (const character of Object.values(state.characters)) {
+    if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };
+  }
+  return { ok: true, state };
 }

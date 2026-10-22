@@ -146,20 +146,30 @@ describe("roomStateSchema", () => {
     assert.equal(withLevel(4.5), false);
   });
 
-  test("a character's sync record may be at most a day past the import's time, since a sync's time comes from a server (RS-SOL-2)", () => {
+  test("a sync record more than a day past the import's time imports with the import's time, its base kept (RS-O-37)", () => {
     const state = JSON.parse(JSON.stringify(randomState(rng(3))));
     const first = Object.keys(state.characters)[0]!;
-    const withAt = (at: string) => {
+    const NOW = Date.parse("2026-10-22T12:00:00.000Z");
+    const imported = (at: string) => {
       const s = JSON.parse(JSON.stringify(state));
       s.characters[first].stats = { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] };
-      s.characters[first].ddbSync = { at, base: { level: 5 }, rolls: {} };
-      return parseRoomState(s).ok;
+      s.characters[first].ddbSync = { at, from: "123456789", base: { level: 5 }, rolls: {} };
+      const parsed = parseRoomState(s, NOW);
+      assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+      return parsed.state.characters[first]!.ddbSync!;
     };
-    const DAY = 24 * 60 * 60 * 1000;
-    assert.equal(withAt("2026-10-20T19:00:00.000Z"), true);
-    assert.equal(withAt(new Date(Date.now() + DAY - 60_000).toISOString()), true, "within a day of a fast clock");
-    assert.equal(withAt(new Date(Date.now() + DAY + 60_000).toISOString()), false);
-    assert.equal(withAt("9999-12-31T23:59:59.999Z"), false, "the schema's last millisecond is the future");
+    assert.equal(imported("2026-10-20T19:00:00.000Z").at, "2026-10-20T19:00:00.000Z");
+    assert.equal(imported("2026-10-23T12:00:00.000Z").at, "2026-10-23T12:00:00.000Z", "a day exactly stays");
+    assert.equal(imported("2026-10-23T12:00:00.001Z").at, "2026-10-22T12:00:00.000Z", "a day and 1 ms takes the import's time");
+    assert.deepEqual(imported("9999-12-31T23:59:59.999Z"), { at: "2026-10-22T12:00:00.000Z", from: "123456789", base: { level: 5 }, rolls: {} });
+    // The import's next steps keep the clamped time.
+    const s = JSON.parse(JSON.stringify(state));
+    s.characters[first].stats = { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] };
+    s.characters[first].ddbSync = { at: "9999-12-31T23:59:59.999Z", base: { level: 5 }, rolls: {} };
+    const parsed = parseRoomState(s, NOW);
+    assert.ok(parsed.ok);
+    const remapped = remapState(parsed.state, { assets: new Map() });
+    assert.deepEqual(Object.values(remapped.characters).map((c) => c.ddbSync?.at).filter(Boolean), ["2026-10-22T12:00:00.000Z"]);
   });
 
   test("an Exhaustion level from before the 1 to 6 rule is brought within it, and any other effect keeps its 0 to 99", () => {
