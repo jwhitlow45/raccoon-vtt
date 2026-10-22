@@ -1,5 +1,5 @@
 import type Konva from "konva";
-import { createContext, memo, useContext, useMemo } from "react";
+import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
 import type { Actor, Effect } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
@@ -92,9 +92,25 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
   const name = displayName(token);
+  /*
+   * A drag moves the node by hand, and a drop puts it where the plan lands
+   * it (Stage.tsx landDrop). react-konva then sets only the coordinates
+   * whose props changed, so where the move lands elsewhere on one axis
+   * alone, as the DM's own copy stops a walk at a pit on the row it
+   * started on, the other kept the drop's value and the picture stood
+   * apart from its badges. Each new place sets both.
+   */
+  const groupRef = useRef<Konva.Group>(null);
+  useLayoutEffect(() => {
+    const node = groupRef.current;
+    if (!node || node.isDragging() || (node.x() === token.x && node.y() === token.y)) return;
+    node.position({ x: token.x, y: token.y });
+    node.getLayer()?.batchDraw();
+  }, [token.x, token.y]);
 
   return (
     <Group
+      ref={groupRef}
       id={token.id}
       name="token"
       x={token.x}

@@ -499,4 +499,29 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     for (const due of trap(dmSocket)?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: run.trapId, due: due.id });
     await waitFor("the springings settled", () => (trap(dmSocket)?.rig?.due === undefined ? true : null));
   });
+
+  test("lp15-tr-1. the DM drags a goblin across a pit from the row it stops on: the goblin's picture is drawn where the pit stops it, in the pit with its badges (review LP15-FU-4)", async () => {
+    await dm.setViewportSize(DESKTOP);
+    await reopenRoom(dm);
+    await dm.locator(".konvajs-content").first().waitFor();
+    const goblin = randomUUID();
+    const pitId = randomUUID().replace(/-/g, "").slice(0, 16);
+    await ops.send({ t: "token.create", token: { id: goblin, sceneId: run.sceneId, kind: "monster", name: "Goblin", size: "medium", visibility: "all", x: 1, y: 9, disposition: "hostile", actor: { inline: actor() } } });
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, pit: { floor: -10 }, hits: "trigger", actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: pitId, sceneId: run.sceneId, name: "Low Pit", zone: { cells: [{ x: 4, y: 9, w: 2, h: 2 }] }, rig } });
+    await waitFor("the goblin on the DM's map", () => token(dmSocket, goblin));
+    // The DM's own copy holds the trap, so the move the drop predicts already stops in the pit, on the row the goblin started on.
+    await dragCells(dm, BOUNDS, { x: 1, y: 9 }, { x: 8, y: 10 });
+    const stopped = await waitFor("the goblin stopped in the pit", () => (token(dmSocket, goblin)?.elevation === -10 ? token(dmSocket, goblin) : null));
+    await dm.waitForTimeout(500);
+    const drawn = await dm.evaluate((id) => {
+      type Node = { x(): number; y(): number };
+      const konva = (globalThis as unknown as { Konva: { stages: { findOne(selector: string): Node | undefined }[] } }).Konva;
+      const node = konva.stages[0]!.findOne(`#${id}`);
+      return node ? { x: node.x(), y: node.y() } : null;
+    }, goblin);
+    await shots.take(dm, "traps-lp15-dm-pit-picture");
+    assert.deepEqual(drawn, { x: stopped.x, y: stopped.y }, `the goblin stands at ${stopped.x}, ${stopped.y}, its picture is drawn elsewhere`);
+    for (const due of state(dmSocket)?.traps?.[pitId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: pitId, due: due.id });
+  });
 });
