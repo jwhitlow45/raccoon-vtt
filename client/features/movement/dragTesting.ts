@@ -1,9 +1,13 @@
 import type { RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import { footprintSize } from "#shared/rules/footprint.ts";
 import { findRoute, WorkBudget } from "#shared/rules/walk.ts";
+import { snapPosition } from "../../lib/scene.ts";
+import type { DragRead } from "../measure/movement.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { dropView, routeTarget, type DropPlan, type Point, type Role } from "./drop.ts";
 import { worldFor } from "./press.ts";
+import { groupReading } from "./preview.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import { RouteWork, type Frames } from "./routeWork.ts";
 import { dragStops, type DragDeps, type DragStops } from "./stageHooks.ts";
@@ -98,20 +102,28 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
   };
 }
 
-/** A group drag as the board takes it, for tests: the lead dropped at `raw`, the others by the same offset, and what the drop sends. */
-export type GroupDrag = { plan: DropPlan; op: ClientOp | null };
+/**
+ * A group drag as the board takes it, for tests: the lead dropped at `raw`,
+ * the others by the same offset, the lead's label as the board's ruler
+ * reads it there (RulerLayer.tsx DragMeasure), the fields its frames send,
+ * and what the drop sends.
+ */
+export type GroupDrag = { label: DragRead; frame: ReturnType<DragStops["groupFields"]>; plan: DropPlan; op: ClientOp | null };
 
 export function groupDragOf(copy: RoomState, role: Role, tokenIds: readonly string[], raw: Point): GroupDrag {
   const { frames, sent, stops } = board(copy, role);
   const group = tokenIds.map((id) => copy.tokens[id]!);
   const finger = { x: () => raw.x, y: () => raw.y, position: () => {} };
+  const lead = group[0]!;
+  const label = groupReading(dropView(copy, role), lead, snapPosition(raw.x, raw.y, footprintSize(lead)), role);
+  const frame = stops.groupFields(lead, raw);
   frames.frame();
-  stops.start(group[0]!.id);
+  stops.start(lead.id);
   let plan: DropPlan | null = null;
   stops.drop(finger, group[0]!, group, (landed) => (plan = landed));
   for (let k = 0; k < FRAMES && !plan; k++) frames.frame();
   if (!plan) throw new Error("the group's drop never landed");
   stops.send(plan);
   stops.end();
-  return { plan, op: sent[0] ?? null };
+  return { label, frame, plan, op: sent[0] ?? null };
 }

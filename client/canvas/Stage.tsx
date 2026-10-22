@@ -1189,9 +1189,12 @@ export function MapStage(props: {
         // A lone lead's preview stays at a wall or a ledge that stops its walk, or the walk of a creature it drags, so its frames do too.
         const leadNode = drag.lead.id === token.id ? node : offsetNode(node, token, drag.lead);
         if (lone) dragStopsRef.current.frame(leadNode, drag.lead);
-        // A lone lead's frames carry its route's corners and its cost (docs/design-v1-movement.md 6.5).
+        // A lone lead's frames carry its route's corners and its cost (docs/design-v1-movement.md 6.5), and a group's named tokens
+        // their own leg's cost, as the group's label reads it (review AT-ASTRA-15).
         const leadFields = lone ? dragStopsRef.current.frameFields(drag.lead.id) : {};
-        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...(token.id === drag.lead.id ? leadFields : {}) });
+        const named = lone ? null : new Set(drag.named.map((t) => t.id));
+        const fieldsOf = (t: ViewToken, x: number, y: number) => (lone ? (t.id === drag.lead.id ? leadFields : {}) : named!.has(t.id) ? dragStopsRef.current.groupFields(t, { x, y }) : {});
+        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...fieldsOf(token, node.x(), node.y()) });
         setSpot(token, node.x(), node.y());
         if (drag.followers.length === 0) return;
         const dx = node.x() - token.x;
@@ -1203,7 +1206,7 @@ export function MapStage(props: {
           f.node.position({ x, y });
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
-          actions.sendEph({ k: "dragMove", tokenId: f.token.id, x, y, ...(f.token.id === drag.lead.id ? leadFields : {}) });
+          actions.sendEph({ k: "dragMove", tokenId: f.token.id, x, y, ...fieldsOf(f.token, x, y) });
           setSpot(f.token, x, y);
         }
         for (const layer of layers) layer.batchDraw();

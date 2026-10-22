@@ -11,8 +11,8 @@ import type { DragPreview } from "../../state/types.ts";
 import { useRoomView } from "../../state/view.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
-import { dropView, type DropView } from "../movement/drop.ts";
-import { groupLanding } from "../movement/preview.ts";
+import { dropView, type DropView, type Role } from "../movement/drop.ts";
+import { groupReading } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
 import { dragLabel, dragReading, remoteWalk, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
@@ -56,7 +56,7 @@ const LEG_LABEL_MIN_PX = 56;
 /** Green, yellow and red, as features section 4 names them, whatever the viewer's accent. */
 const BAND_COLOR: Record<SpeedLeft["band"], string> = { walk: theme.color.success, dash: theme.color.crest, over: theme.color.danger };
 
-type ReadDrag = (token: Token, to: Point, walk?: { corners: readonly Point[]; costFt?: number }, landing?: { elevation: number }) => DragRead;
+type ReadDrag = (token: Token, to: Point, walk?: { corners: readonly Point[]; costFt?: number }) => DragRead;
 
 export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const rulers = useRoomView((s) => s.ephemeral.rulers);
@@ -84,10 +84,10 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   // The turn's walker: the active creature, or the controlled mount sharing its turn (docs/design-v1-attach.md 7.2).
   const activeTokenId = useRoomView((s) => turnMoverId(s.view) ?? null);
   const read = useMemo<ReadDrag>(() => {
-    return (token, to, walk, landing) => {
+    return (token, to, walk) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.
       const speeds: Speeds | undefined = "inline" in token.actor ? token.actor.inline.speeds : characters?.[token.actor.ref]?.actor.speeds;
-      return dragReading({ token, to, encounter, activeTokenId, speeds, rules, role, ...(walk ? { walk: remoteWalk(token, to, walk.corners) } : {}), ...(walk?.costFt !== undefined ? { costFt: walk.costFt } : {}), ...(landing ? { landing } : {}) });
+      return dragReading({ token, to, encounter, activeTokenId, speeds, rules, role, ...(walk ? { walk: remoteWalk(token, to, walk.corners) } : {}), ...(walk?.costFt !== undefined ? { costFt: walk.costFt } : {}) });
     };
   }, [encounter, activeTokenId, characters, rules, role]);
   if (!settings) return <Group ref={groupRef} listening={false} />;
@@ -137,7 +137,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
           to={snapPosition(localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
-          room={dropRoom}
+          group={dropRoom ? { room: dropRoom, role } : undefined}
           read={read}
           scale={props.scale}
           color={youId ? colorOf(youId) : theme.color.crest}
@@ -290,14 +290,15 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; co
  * through the corners a remote frame carries, how far that is, and what the
  * creature's speed has left after it.
  */
-function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: number; color: string; corners?: readonly Point[]; costFt?: number; room?: DropView | undefined }) {
+function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: number; color: string; corners?: readonly Point[]; costFt?: number; group?: { room: DropView; role: Role } | undefined }) {
   const { token, to, scale } = props;
   const fp = footprint(token);
   if (to.x === token.x && to.y === token.y) return null;
   const corners = props.corners ?? [];
-  // This device's own drag with no walk preview, a group's, reads where its token lands, as `token.moveMany` records it.
-  const landing = props.room ? groupLanding(props.room, token, to) : undefined;
-  const read = props.read(token, to, corners.length > 0 || props.costFt !== undefined ? { corners, ...(props.costFt !== undefined ? { costFt: props.costFt } : {}) } : undefined, landing);
+  // This device's own drag with no walk preview, a group's, reads where its token lands and its dismount, as `token.moveMany` records them.
+  const read = props.group
+    ? groupReading(props.group.room, token, to, props.group.role)
+    : props.read(token, to, corners.length > 0 || props.costFt !== undefined ? { corners, ...(props.costFt !== undefined ? { costFt: props.costFt } : {}) } : undefined);
   const left = read.left;
   const color = left ? BAND_COLOR[left.band] : props.color;
   const flat = [token, ...corners, to].flatMap((p) => [p.x + fp.w / 2, p.y + fp.h / 2]);

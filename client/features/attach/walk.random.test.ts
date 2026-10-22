@@ -156,10 +156,11 @@ describe("a drag of an attached token plans the walk the server takes and stores
     assert.ok(moved > 200 && routed > 30 && off > 60 && held > 10, JSON.stringify({ moved, routed, off, held, refusedRoutes }));
   });
 
-  test("random group drags of the same with a token of the player's far off: each leg is one the server's leg test takes", () => {
+  test("random group drags of the same with a token of the player's far off: each leg is one the server's leg test takes, and the label reads what it stores", () => {
     let groups = 0;
     let legs = 0;
     let heldBack = 0;
+    let groupOff = 0;
     for (let seed = 1; seed <= 400; seed++) {
       const r = rng(seed);
       const c = randomCase(r);
@@ -178,9 +179,17 @@ describe("a drag of an attached token plans the walk the server takes and stores
       const applied = applyOp(c.state, op, c.who, env(10));
       assert.ok(applied.ok, `${where}: ${applied.ok ? "" : applied.message}`);
       for (const m of moves) assert.deepEqual([applied.state.tokens[m.tokenId]!.x, applied.state.tokens[m.tokenId]!.y], [m.x, m.y], `${where}: ${m.tokenId} landed elsewhere`);
+      // The mover's label and frames read the cost its leg stores, a dismount on its own turn included (review AT-ASTRA-15).
+      const lead = moves.find((m) => m.tokenId === c.mover);
+      if (lead) {
+        const before = mover.path?.stops.length ?? 1;
+        const stored = (applied.state.tokens[c.mover]!.path?.stops ?? []).slice(before).reduce((sum, s) => sum + (s.cost ?? 0), 0);
+        assert.deepEqual([drag.label.dragFt, drag.frame.ft], [stored, stored], `${where}: the label and the frames read another cost than the one stored, ${JSON.stringify(op)} ${JSON.stringify({ label: drag.label.dragFt, frame: drag.frame.ft, stored, from: [mover.x, mover.y, mover.elevation], stops: applied.state.tokens[c.mover]!.path?.stops.slice(before) })}`);
+        if (mover.attached && !applied.state.tokens[c.mover]!.attached) groupOff++;
+      }
       groups++;
       legs += moves.length;
     }
-    assert.ok(groups > 200 && heldBack > 30, JSON.stringify({ groups, legs, heldBack }));
+    assert.ok(groups > 200 && heldBack > 30 && groupOff > 40, JSON.stringify({ groups, legs, heldBack, groupOff }));
   });
 });

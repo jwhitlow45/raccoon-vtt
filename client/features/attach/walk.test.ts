@@ -9,7 +9,7 @@ import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { dropView, moveOpsOf, planGroup, planOne, routeLanding, type Landed } from "../movement/drop.ts";
 import { DM, P1, actor, effect, env, token } from "#shared/testutil.ts";
-import { dragOf } from "../movement/dragTesting.ts";
+import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
@@ -158,6 +158,24 @@ describe("a walk off a holder on the ground, searched, checked and stored on the
       });
       assert.deepEqual(after[0], after[1], JSON.stringify(raw));
     }
+  });
+});
+
+describe("a group drag off a ride reads the dismount the reducer stores (review AT-ASTRA-15)", () => {
+  test("a rider with 30 ft of Speed leaving her horse on her turn beside a token of hers: 15 ft to get off and 10 ft on, so 5 ft left", () => {
+    const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } });
+    const bree = token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], x: 4, y: 4, attached: { to: "horse", kind: "ride" }, actor: { inline: actor({ speeds: { walk: 30 } }) } });
+    let state = world({ tokens: [horse, bree, token("mate", { name: "Mate", kind: "pc", ownerIds: ["p1"], x: 10, y: 10 })] });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }] }, { t: "encounter.next" }] as Op[]).entries()) {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok);
+      state = r.state;
+    }
+    const drag = groupDragOf(copyFor(state, P1), "player", ["bree", "mate"], { x: 1, y: 4 });
+    const r = applyOp(state, drag.op as Op, P1, env(9));
+    assert.ok(r.ok);
+    const stored = r.state.tokens.bree!.path!.stops.slice(1).reduce((sum, st) => sum + (st.cost ?? 0), 0);
+    assert.deepEqual([stored, drag.label.dragFt, drag.frame.ft, drag.label.left?.leftFt], [25, 25, 25, 5]);
   });
 });
 

@@ -5,10 +5,10 @@ import { routePoints, type RoutePiece, type RoutePoint } from "#shared/rules/rou
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
-import { dragReading, type Speeds } from "../measure/movement.ts";
+import { dragReading, type DragRead, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, type DropState, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -34,6 +34,29 @@ export function frameFields(route: Pick<DragRoute, "to" | "cut" | "corners" | "r
  */
 export function groupLanding(state: DropState, token: Token, to: Point): { elevation: number } {
   return { elevation: dropLanding(state, token, { x: to.x, y: to.y }) };
+}
+
+/**
+ * A group drag's reading of one of its named tokens dropped at `to`, for its
+ * label and the cost its frames send (review AT-ASTRA-15): landed as the
+ * group's drop lands it (`groupLanding`), walked as its walk is
+ * (drop.ts walkerOf), and off a ride on its own turn at the half Speed the
+ * reducer stores (`dismountOf`), as a lone drag reads it.
+ */
+export function groupReading(view: DropView, token: Token, to: Point, role: Role): DragRead {
+  const landing = groupLanding(view, token, to);
+  const dismount = dismountOf(view, token, { x: to.x, y: to.y, elevation: landing.elevation }, role);
+  return dragReading({
+    token: walkerOf(view, token),
+    to,
+    landing,
+    encounter: view.encounter,
+    activeTokenId: turnMoverId(view) ?? null,
+    speeds: speedsOf(view, token),
+    rules: { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal },
+    role,
+    ...(dismount ? { dismount, build: view } : {}),
+  });
 }
 
 export function speedsOf(view: RoomState, token: Token): Speeds | undefined {

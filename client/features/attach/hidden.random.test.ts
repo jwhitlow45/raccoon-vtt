@@ -13,12 +13,11 @@ import { applyOp } from "#shared/reducer.ts";
 import { carriedGroup, getOffSpot, holderOf, seatSpot } from "#shared/rules/attach.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, rng, room, token } from "#shared/testutil.ts";
-import { dragOf, type Drag } from "../movement/dragTesting.ts";
-import { dropMode, dropView, moveOpsOf, planGroup } from "../movement/drop.ts";
+import { dragOf, groupDragOf, type Drag, type GroupDrag } from "../movement/dragTesting.ts";
+import { turnMoverId } from "./turns.ts";
 import { barSlots, detachChoice, detachOp, getOffPlace } from "./detach.ts";
 import { dragLead } from "./groups.ts";
 import { attachOp, attachRows } from "./list.ts";
-import { walkersOfGroup } from "./walk.ts";
 
 /**
  * The hidden-state generator (docs/design-v1-attach.md 8.0, the class of
@@ -36,11 +35,12 @@ import { walkersOfGroup } from "./walk.ts";
  * detaches, drags off a mount, undos, redos and Next.
  *
  * Most steps are built as the actor's device builds them, from that
- * actor's own copy of each room, the DM's included: a drag by the board's
- * planner (dragTesting.ts), its route from the search, a group drag by
- * planGroup, an attach from a row of the Attach list, and Get off, Put
+ * actor's own copy of each room, the DM's included: a drag and a group
+ * drag by the board's own drag stops (dragTesting.ts), the drag's route from
+ * the search, an attach from a row of the Attach list, and Get off, Put
  * down and Let go from the carried token's bar. A player's copies of the
- * two rooms are alike, so are the ops and the drag's frames they build. So
+ * two rooms are alike, so are the ops and the drag's frames they build, and
+ * a group's label reads the cost the move stores (review AT-ASTRA-15). So
  * must the DM's be, for an op that names only tokens every player sees:
  * a hidden link or token never shapes the DM's op either (8.0, the
  * landings). The rest are sent as written, the shapes of the reviews'
@@ -314,10 +314,15 @@ function rawStep(r: () => number, state: RoomState, apart: ReadonlySet<string>):
  * DM's own picture reads what only the DM sees, so only what it sends is
  * compared.
  */
-type Frame = { sent: Drag["frame"]; to: { x: number; y: number }; picture?: Drag["preview"] };
+type Frame = { sent: Drag["frame"] | GroupDrag["frame"]; to?: { x: number; y: number }; picture?: Drag["preview"] | GroupDrag["label"] };
 
 function frameOf(drag: Drag, who: Viewer): Frame {
   return { sent: drag.frame, to: drag.preview.to, ...(who.role === "player" ? { picture: drag.preview } : {}) };
+}
+
+/** The same for a group drag: what its lead's frames send, and on a player's board its label. */
+function groupFrameOf(drag: GroupDrag, who: Viewer): Frame {
+  return { sent: drag.frame, ...(who.role === "player" ? { picture: drag.label } : {}) };
 }
 
 /** What each room's device builds for the same gesture, from the actor's copy of each: null where it sends nothing. */
@@ -326,6 +331,8 @@ type Built = {
   a: Op | null;
   b: Op | null;
   frames?: [Frame, Frame];
+  /** A group drag's lead and the cost its label reads in each room, which must be what the reducer stores (review AT-ASTRA-15). */
+  costs?: { lead: string; ft: [number | null, number | null] };
   /**
    * The DM's Get off, whose place may differ by what only the DM sees, and
    * by nothing else: it avoids every creature the viewer sees (4.3), and
@@ -361,19 +368,30 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
     return { who, built: { what: "drag", a: (da?.op as Op | null | undefined) ?? null, b: (db?.op as Op | null | undefined) ?? null, ...(da && db ? { frames: [frameOf(da, who), frameOf(db, who)] } : {}) } };
   }
   if (n < 0.58) {
-    const first = dragLead(copies[0].tokens, pick(r, tokens));
+    // Half the time led by the creature whose turn it is, so its label is checked against what its move stores.
+    const mover = tokens.find((t) => t.id === turnMoverId(copies[0]));
+    const first = dragLead(copies[0].tokens, mover && chance(r, 0.5) ? mover : pick(r, tokens));
     const second = dragLead(copies[0].tokens, pick(r, tokens));
     if (first.id === second.id) return null;
     const dx = int(r, -3, 3);
     const dy = int(r, -3, 3);
-    const [ga, gb] = copies.map((copy): Op | null => {
-      const group = [copy.tokens[first.id], copy.tokens[second.id]];
-      if (!group[0] || !group[1] || carriedGroup(copy.tokens, first.id).includes(second.id) || carriedGroup(copy.tokens, second.id).includes(first.id)) return null;
-      const view = dropView(copy, who.role);
-      const plan = planGroup(view, group as Token[], dx, dy, dropMode(who.role, view.scenes[first.sceneId]), walkersOfGroup(view, group as Token[], who.role));
-      return (moveOpsOf(plan.moves)[0] as Op | undefined) ?? null;
+    // As the board drags them (dragTesting.ts groupDragOf), by the same offset from where each copy has the lead: its plan,
+    // its lead's label and the cost its frames send.
+    const [ga, gb] = copies.map((copy): GroupDrag | null => {
+      const lead = copy.tokens[first.id];
+      if (!lead || !copy.tokens[second.id] || carriedGroup(copy.tokens, first.id).includes(second.id) || carriedGroup(copy.tokens, second.id).includes(first.id)) return null;
+      return groupDragOf(copy, who.role, [first.id, second.id], { x: lead.x + dx, y: lead.y + dy });
     });
-    return { who, built: { what: "group", a: ga!, b: gb! } };
+    return {
+      who,
+      built: {
+        what: "group",
+        a: (ga?.op as Op | null | undefined) ?? null,
+        b: (gb?.op as Op | null | undefined) ?? null,
+        ...(ga && gb ? { frames: [groupFrameOf(ga, who), groupFrameOf(gb, who)] as [Frame, Frame] } : {}),
+        costs: { lead: first.id, ft: [ga?.label.dragFt ?? null, gb?.label.dragFt ?? null] },
+      },
+    };
   }
   if (n < 0.82) {
     // A token whose list offers something, as the bar shows Attach only then.
@@ -702,6 +720,8 @@ type Seen = {
   getOffsTaken: number;
   /** Drag frames compared between the rooms. */
   frames: number;
+  /** Group drags whose lead's label was checked against the cost the move stored. */
+  groupCosts: number;
   /** A turn of a creature some player cannot see, riding a mount every player sees under its control. */
   hiddenRiderTurns: number;
   /** Trackers the DM's undo left apart, made alike by hand. */
@@ -711,7 +731,7 @@ type Seen = {
   rejoined: number;
 };
 
-const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
+const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
 
 /** One run: its seed and the steps it took. */
 function run(seed: number, steps = 70): Seen {
@@ -885,7 +905,18 @@ function run(seed: number, steps = 70): Seen {
     if (who.role === "dm" && publicNamed) seen.dmBuiltCompared++;
     seen.built++;
     if (who.role === "player") seen.builtByPlayers++;
+    const costs = step.costs;
+    const pathsBefore = [a.state, b.state].map((s) => (costs ? (s.tokens[costs.lead]?.path?.stops.length ?? 0) : 0));
     shared({ who, op: step.a! }, step.what);
+    // The lead's label reads the cost the move stores on its turn, a dismount included, in each room.
+    if (costs)
+      [a.state, b.state].forEach((s, i) => {
+        const stops = s.tokens[costs.lead]?.path?.stops ?? [];
+        if (stops.length <= pathsBefore[i]! || costs.ft[i] === null) return;
+        const stored = stops.slice(pathsBefore[i]).reduce((sum, st) => sum + (st.cost ?? 0), 0);
+        assert.equal(costs.ft[i], stored, `${where}: ${who.memberId}'s group label reads ${costs.ft[i]} ft where room ${i === 0 ? "a" : "b"} stores ${stored} for ${JSON.stringify(step.a)}`);
+        seen.groupCosts++;
+      });
   };
   for (let i = 0; i < steps; i++) {
     where = `seed ${seed} step ${i + 1}`;
@@ -980,7 +1011,7 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
     assert.ok(total.restoresApart * 20 < total.restoresCompared, summary);
     // And the devices' own steps: player attaches and Get offs the room takes, the DM's ops and frames compared, and turns
     // of a hidden rider on a mount every player sees.
-    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
+    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 30 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
     if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
   });
 });

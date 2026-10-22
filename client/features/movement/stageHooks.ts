@@ -1,17 +1,19 @@
 import { useEffect, useMemo } from "react";
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import { footprintSize } from "#shared/rules/footprint.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkWorld, WorkBudget, worldUnits, type WalkRoute } from "#shared/rules/walk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
+import { snapPosition } from "../../lib/scene.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
 import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
-import { frameFields as routeFrame, walkPreview } from "./preview.ts";
+import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
@@ -45,6 +47,8 @@ export type DragStops = {
   frame(node: DragNode, token: DropToken): void;
   /** What a frame sends others besides where the token is: the route's corners and the leg's cost (6.5), and where a cut walk lands. */
   frameFields(tokenId: string): { x?: number; y?: number; path?: number[]; ft?: number };
+  /** What a group drag's frame of one of its named tokens at `at` sends besides where it is: the leg's cost, as its label reads it (review AT-ASTRA-15). */
+  groupFields(token: DropToken, at: Point): { ft?: number };
   /**
    * An arrow key's press: where it puts the token, and the rest of its
    * group, by the rules, a step of one square, never searched round a wall,
@@ -384,6 +388,12 @@ export function dragStops(deps: DragDeps): DragStops {
       const route = routes.getState().route;
       if (!route || route.tokenId !== tokenId) return {};
       return routeFrame(route);
+    },
+    groupFields(token, at) {
+      const view = seenView(store.getState().view);
+      const full = view?.tokens[token.id];
+      if (!view || !full) return {};
+      return { ft: groupReading(view, full, snapPosition(at.x, at.y, footprintSize(full)), role).dragFt };
     },
     press(node, drawn, drawnGroup) {
       const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
