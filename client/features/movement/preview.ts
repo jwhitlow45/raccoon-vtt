@@ -8,7 +8,7 @@ import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, dropLanding, landedElevation, routeLanding, samePose, walkerOf, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, type DropState, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -26,9 +26,14 @@ export function frameFields(route: Pick<DragRoute, "to" | "cut" | "corners" | "r
   };
 }
 
-/** How a group drag's dragged token lands, for its label: on the ground there and never squeezed, as `token.moveMany` records it (review ASTRA-18). */
-export function groupLanding(chunks: RoomState["buildChunks"], token: Token, to: Point): { elevation: number } {
-  return { elevation: landedElevation(chunks, token, { x: to.x, y: to.y }) };
+/**
+ * How a group drag's dragged token lands, for its label: never squeezed,
+ * as `token.moveMany` records it (review ASTRA-18), and at the height the
+ * group's drop sends (drop.ts dropLanding): by its holder while it sits on
+ * one every player sees, else on the ground there.
+ */
+export function groupLanding(state: DropState, token: Token, to: Point): { elevation: number } {
+  return { elevation: dropLanding(state, token, { x: to.x, y: to.y }) };
 }
 
 export function speedsOf(view: RoomState, token: Token): Speeds | undefined {

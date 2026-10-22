@@ -9,7 +9,7 @@ import { plainLegCost, routeFeet, routePoints, routeStop, routeWalk, type RouteP
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
-import { cutForWalkers, dropMode, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkersStop, type Found } from "./drop.ts";
+import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkersStop, type Found } from "./drop.ts";
 import { dragReading } from "../measure/movement.ts";
 import { frameFields, groupLanding, walkPreview } from "./preview.ts";
 import { CLOSED, line, onTurn, raised, recordedCost, thorn, world } from "./testing.ts";
@@ -190,10 +190,33 @@ describe("a group drag", () => {
       if (move.elevation !== undefined && move.elevation !== lead.elevation) climbed++;
       const cost = recordedCost(view, moveOpsOf(plan.moves)[0]!, "lead");
       const to = { x: lead.x + dx, y: lead.y + dy };
-      const read = dragReading({ token: lead, to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view.buildChunks, lead, to) });
+      const read = dragReading({ token: lead, to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
       assert.equal(read.dragFt, cost, `case ${n}: ${size} by ${dx},${dy} under ${diagonal}`);
     }
     assert.ok(climbed > 10, `${climbed} landed at another height`);
+  });
+
+  test("a group's dragged token that sits on a holder straddling a step reads the landing the drop sends, judged by the holder (docs/design-v1-attach.md 4.3)", () => {
+    // The horse stands on the high half of a step, at its height, and the kite perches over the low half.
+    for (const feet of [10, 30]) {
+      const base = world({
+        blockMovement: false,
+        heights: raised(5, 4, 6, 6, feet),
+        tokens: [
+          token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, elevation: feet }),
+          token("kite", { name: "Kite", kind: "pc", size: "tiny", ownerIds: ["p1"], disposition: "ally", x: 4, y: 4, elevation: feet, attached: { to: "horse", kind: "perch" } }),
+          token("mate", { name: "Mate", x: 1, y: 8, kind: "pc", ownerIds: ["p1"], disposition: "ally" }),
+        ],
+      });
+      const view = dropView(onTurn(base, "kite"), "player");
+      const kite = view.tokens.kite!;
+      const to = { x: 3, y: 4 };
+      const plan = planGroup(view, [kite, view.tokens.mate!], to.x - kite.x, 0, "free");
+      const move = plan.moves.find((m) => m.tokenId === "kite")!;
+      assert.equal(move.elevation, 0, "off a holder on the ground it lands on the ground");
+      const read = dragReading({ token: kite, to, encounter: view.encounter, activeTokenId: "kite", speeds: undefined, rules: { feetPerCell: 5, diagonal: "five" }, role: "player", landing: groupLanding(view, kite, to) });
+      assert.equal(read.dragFt, recordedCost(view, moveOpsOf(plan.moves)[0]!, "kite"), `${feet} ft`);
+    }
   });
 
   test("a group never squeezes, so a creature that would have to stays put on a walk", () => {

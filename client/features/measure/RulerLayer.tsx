@@ -11,6 +11,7 @@ import type { DragPreview } from "../../state/types.ts";
 import { useRoomView } from "../../state/view.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
+import { dropView, type DropView } from "../movement/drop.ts";
 import { groupLanding } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
@@ -68,12 +69,14 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const drawings = useRoomView((s) => s.view?.drawings ?? EMPTY_DRAWINGS);
   const characters = useRoomView((s) => s.view?.characters);
   const role = useRoomView((s) => s.you?.role ?? "player");
-  const chunks = useRoomView((s) => s.view?.buildChunks);
   // Walking rulers search the room itself, so only they read the whole view.
   const anyWalk = useRoomView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.view?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
   const view = useRoomView((s) => (anyWalk ? s.view : null));
   const groupRef = useRef<Konva.Group>(null);
   const localDrag = useLocalDrag(groupRef);
+  // Only this device's own drag reads the room, for where its token lands: by its holder while it sits on one every player sees.
+  const dragRoom = useRoomView((s) => (localDrag ? s.view : null));
+  const dropRoom = useMemo(() => (dragRoom ? dropView(dragRoom, role) : undefined), [dragRoom, role]);
   const feetPerCell = settings?.feetPerCell ?? 5;
   const diagonal = settings?.diagonal ?? "five";
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
@@ -134,7 +137,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
           to={snapPosition(localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
-          chunks={chunks}
+          room={dropRoom}
           read={read}
           scale={props.scale}
           color={youId ? colorOf(youId) : theme.color.crest}
@@ -287,13 +290,13 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; co
  * through the corners a remote frame carries, how far that is, and what the
  * creature's speed has left after it.
  */
-function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: number; color: string; corners?: readonly Point[]; costFt?: number; chunks?: RoomState["buildChunks"] | undefined }) {
+function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: number; color: string; corners?: readonly Point[]; costFt?: number; room?: DropView | undefined }) {
   const { token, to, scale } = props;
   const fp = footprint(token);
   if (to.x === token.x && to.y === token.y) return null;
   const corners = props.corners ?? [];
   // This device's own drag with no walk preview, a group's, reads where its token lands, as `token.moveMany` records it.
-  const landing = props.chunks ? groupLanding(props.chunks, token, to) : undefined;
+  const landing = props.room ? groupLanding(props.room, token, to) : undefined;
   const read = props.read(token, to, corners.length > 0 || props.costFt !== undefined ? { corners, ...(props.costFt !== undefined ? { costFt: props.costFt } : {}) } : undefined, landing);
   const left = read.left;
   const color = left ? BAND_COLOR[left.band] : props.color;
