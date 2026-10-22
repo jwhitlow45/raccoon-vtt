@@ -215,6 +215,106 @@ export function tokensOn(trap: Pick<Trap, "zone" | "sceneId">, tokens: Readonly<
   return out.sort();
 }
 
+// ------------------------------------------------------------ the drag label
+
+/** A trap as a player's view holds it: no state, and `disarmed` once the DM disarms it (shared/project.ts ProjectedTrap). */
+export type SeenTrap = Pick<Trap, "id" | "name" | "zone" | "sceneId"> & { state?: Trap["state"]; disarmed?: true };
+
+/**
+ * Whether a drag's label warns of a trap (4.5): for the DM every armed
+ * one, and for a player every found one not disarmed, which is every trap
+ * their view holds that the DM did not disarm. Client only: it reads only
+ * what the viewer already holds.
+ */
+export function warnsOf(trap: SeenTrap, role: "dm" | "player"): boolean {
+  return role === "dm" ? trap.state === "armed" : trap.disarmed !== true;
+}
+
+const EPS = 1e-9;
+
+/** Which side of the line a-b the point is on: 1, -1, or 0 on it. */
+function side(ax: number, ay: number, bx: number, by: number, px: number, py: number): number {
+  const v = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+  return v > EPS ? 1 : v < -EPS ? -1 : 0;
+}
+
+function segmentsMeet(a: Point, b: Point, c: readonly [number, number], d: readonly [number, number]): boolean {
+  const d1 = side(c[0], c[1], d[0], d[1], a.x, a.y);
+  const d2 = side(c[0], c[1], d[0], d[1], b.x, b.y);
+  const d3 = side(a.x, a.y, b.x, b.y, c[0], c[1]);
+  const d4 = side(a.x, a.y, b.x, b.y, d[0], d[1]);
+  if (d1 * d2 > 0 || d3 * d4 > 0) return false;
+  if (d1 !== 0 || d2 !== 0) return true;
+  // Along the wire's own line: they meet only where they overlap.
+  return Math.max(a.x, b.x) >= Math.min(c[0], d[0]) - EPS && Math.min(a.x, b.x) <= Math.max(c[0], d[0]) + EPS && Math.max(a.y, b.y) >= Math.min(c[1], d[1]) - EPS && Math.min(a.y, b.y) <= Math.max(c[1], d[1]) + EPS;
+}
+
+/** Positions along a polyline of a token's top-left corners, every quarter cell, the start first. */
+function samples(points: readonly Point[]): Point[] {
+  const out: Point[] = points.length > 0 ? [points[0]!] : [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 4));
+    for (let k = 1; k <= n; k++) out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+  }
+  return out;
+}
+
+/**
+ * The traps a drag's walk crosses, in the order it meets them: squares its
+ * footprint is on anywhere past where it starts, and wires the line through
+ * its footprint's middle crosses, by the same orientation rule the server
+ * reads (shared/rules/traps.ts walkEvents). `points` are the token's top
+ * left corners along the walk, the start first. A door trap goes off when
+ * the door opens, never on a walk.
+ */
+export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(traps: readonly T[], fp: { w: number; h: number }, points: readonly Point[]): T[] {
+  if (traps.length === 0 || points.length < 2) return [];
+  const at = samples(points);
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const p of at) {
+    x0 = Math.min(x0, p.x);
+    y0 = Math.min(y0, p.y);
+    x1 = Math.max(x1, p.x + fp.w);
+    y1 = Math.max(y1, p.y + fp.h);
+  }
+  const hits: { trap: T; at: number }[] = [];
+  for (const trap of traps) {
+    const zone = trap.zone;
+    if ("cells" in zone) {
+      const rects = zone.cells.filter((r) => r.x < x1 - EPS && r.x + r.w > x0 + EPS && r.y < y1 - EPS && r.y + r.h > y0 + EPS);
+      if (rects.length === 0) continue;
+      const j = at.findIndex((p, i) => i > 0 && rects.some((r) => p.x < r.x + r.w - EPS && p.x + fp.w > r.x + EPS && p.y < r.y + r.h - EPS && p.y + fp.h > r.y + EPS));
+      if (j > 0) hits.push({ trap, at: j });
+    } else if ("wire" in zone) {
+      const { a, b } = zone.wire;
+      if (Math.max(a[0], b[0]) < x0 || Math.min(a[0], b[0]) > x1 || Math.max(a[1], b[1]) < y0 || Math.min(a[1], b[1]) > y1) continue;
+      for (let j = 1; j < at.length; j++) {
+        const p = { x: at[j - 1]!.x + fp.w / 2, y: at[j - 1]!.y + fp.h / 2 };
+        const q = { x: at[j]!.x + fp.w / 2, y: at[j]!.y + fp.h / 2 };
+        if (side(a[0], a[1], b[0], b[1], p.x, p.y) === 0) continue;
+        if (segmentsMeet(p, q, a, b)) {
+          hits.push({ trap, at: j });
+          break;
+        }
+      }
+    }
+  }
+  return hits.sort((m, n) => m.at - n.at || (m.trap.id < n.trap.id ? -1 : 1)).map((h) => h.trap);
+}
+
+/** "Crosses Hidden Pit", "Crosses Hidden Pit and Falling Net", "Crosses Hidden Pit and 2 more". */
+export function crossesText(names: readonly string[]): string | null {
+  if (names.length === 0) return null;
+  if (names.length === 1) return `Crosses ${names[0]}`;
+  if (names.length === 2) return `Crosses ${names[0]} and ${names[1]}`;
+  return `Crosses ${names[0]} and ${names.length - 1} more`;
+}
+
 // ------------------------------------------------------------ a new trap
 
 /** A blank trap's rig: it goes off for party creatures stepping onto it, stops them and hits them, and does nothing else until the DM says. */

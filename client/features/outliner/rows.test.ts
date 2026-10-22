@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BuildChunk, Drawing, Light, Pin, Stamp } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { character, reveal, room, scene, template, token } from "#shared/testutil.ts";
+import { character, reveal, room, scene, template, token, trap } from "#shared/testutil.ts";
 import { filterRows, frameRect, listItems, outlineRows, ROW_PX, windowRange, type OutlineRow } from "./rows.ts";
 
 const stamp = (id: string, o: Partial<Stamp> = {}): Stamp => ({ id, rev: 0, sceneId: "s1", art: { key: "chest" }, x: 20, y: 20, w: 1, h: 1, rotation: 0, z: 0, visibility: "all", ...o });
@@ -26,6 +26,31 @@ function byKey(rows: OutlineRow[]): Map<string, OutlineRow> {
 }
 
 describe("the scene outliner's rows", () => {
+  test("traps (docs/design-v1-traps.md 4.6): each with its state, Found or Hidden as players get it, and a door trap whose door is gone", () => {
+    const state = room({
+      scenes: { s1: scene("s1", { fogEnabled: true }) },
+      traps: {
+        pit: trap("pit"),
+        net: trap("net", { name: "Falling Net", state: "sprung", found: true, zone: { wire: { a: [1, 1], b: [3, 1] } } }),
+        far: trap("far", { name: "Far Pit", state: "disarmed", found: true, zone: { cells: [{ x: 30, y: 30, w: 1, h: 1 }] } }),
+        needle: trap("needle", { name: "Poisoned Needle", zone: { door: { edge: "9,9,w" } } }),
+        other: trap("other", { sceneId: "s2" }),
+      },
+    });
+    reveal(state, "s1", { x: 0, y: 0, w: 10, h: 10 });
+    const r = byKey(outlineRows(state, "s1"));
+    assert.equal(r.get("trap:other"), undefined);
+    assert.deepEqual([r.get("trap:pit")?.detail, r.get("trap:pit")?.mark, r.get("trap:pit")?.group], ["Armed", "Hidden", "traps"]);
+    assert.deepEqual([r.get("trap:net")?.detail, r.get("trap:net")?.mark], ["Sprung", "Found"]);
+    assert.deepEqual([r.get("trap:far")?.detail, r.get("trap:far")?.mark], ["Disarmed", "Found, under fog"]);
+    assert.equal(r.get("trap:needle")?.detail, "Armed. Its door is gone");
+    assert.deepEqual(r.get("trap:pit")?.rect, { x: 4, y: 4, width: 2, height: 2 });
+    assert.deepEqual(
+      filterRows([...r.values()], "", "traps").map((x) => x.name),
+      ["Falling Net", "Far Pit", "Hidden Pit", "Poisoned Needle"],
+    );
+  });
+
   test("every kind is listed in its group with what players get of it, read through the projection", () => {
     const state = room({
       scenes: { s1: scene("s1", { fogEnabled: true }), s2: scene("s2") },

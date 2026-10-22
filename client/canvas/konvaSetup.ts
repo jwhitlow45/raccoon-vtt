@@ -7,6 +7,7 @@ import "konva/lib/shapes/Ellipse";
 import "konva/lib/shapes/Image";
 import "konva/lib/shapes/Label";
 import "konva/lib/shapes/Line";
+import "konva/lib/shapes/Path";
 import "konva/lib/shapes/Rect";
 import "konva/lib/shapes/Text";
 import { pixelRatioFor } from "../features/device/settings.ts";

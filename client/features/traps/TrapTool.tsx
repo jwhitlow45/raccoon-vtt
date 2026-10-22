@@ -312,8 +312,3 @@ export const trapTool: ToolDef = {
   Options: TrapOptions,
 };
 
-/** Opens a trap's pane with the Trap tool, from the Outliner or a card. */
-export function openTrapPane(scope: ToolContext["scope"], ui: { setTool(id: string): void }, trapId: string): void {
-  ui.setTool("trap");
-  scope.get(trapSlot).store.setState({ paneId: trapId, picking: null });
-}

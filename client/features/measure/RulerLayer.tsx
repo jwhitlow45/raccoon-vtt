@@ -21,6 +21,7 @@ import { Pill, pillGeometry } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { useWalkMeasure } from "./useWalkMeasure.ts";
 import { walkText, type WalkInput } from "./walkRuler.ts";
+import { TrapCrossing } from "../traps/Crossing.tsx";
 
 /**
  * Rulers and the distance a dragged token travels (design sections 7.6 and
@@ -272,6 +273,8 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; co
   const text = finding ? "Finding the way…" : dragLabel(route.read);
   const at = { x: to.x + fp.w, y: to.y + fp.h };
   const main = pillGeometry({ value: text, scale, size: "screen", offsetPx: 4 });
+  const endsText = `Ends in ${route.endsIn}'s space`;
+  const ends = pillGeometry({ value: endsText, scale, size: "screen", offsetPx: 4, small: true });
   return (
     <>
       <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
@@ -280,9 +283,8 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; co
         <Circle key={i} x={c.x + fp.w / 2} y={c.y + fp.h / 2} radius={3.5 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />
       ))}
       <Pill x={at.x} y={at.y} scale={scale} value={text} size="screen" color={color} offsetPx={4} />
-      {!finding && route.endsIn ? (
-        <Pill x={at.x} y={at.y + (main.height + 4) / scale} scale={scale} value={`Ends in ${route.endsIn}'s space`} size="screen" color={theme.color.warning} offsetPx={4} small />
-      ) : null}
+      {!finding && route.endsIn ? <Pill x={at.x} y={at.y + (main.height + 4) / scale} scale={scale} value={endsText} size="screen" color={theme.color.warning} offsetPx={4} small /> : null}
+      {!finding ? <TrapCrossing token={token} path={[token, ...corners, to]} x={at.x} y={at.y + (main.height + 4 + (route.endsIn ? ends.height + 4 : 0)) / scale} scale={scale} /> : null}
     </>
   );
 }
@@ -312,6 +314,7 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
         <Circle key={i} x={c.x + fp.w / 2} y={c.y + fp.h / 2} radius={3.5 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />
       ))}
       <Pill x={to.x + fp.w} y={to.y + fp.h} scale={scale} value={dragLabel(read)} size="screen" color={color} offsetPx={4} />
+      <TrapCrossing token={token} path={[token, ...corners, to]} x={to.x + fp.w} y={to.y + fp.h + (pillGeometry({ value: dragLabel(read), scale, size: "screen", offsetPx: 4 }).height + 4) / scale} scale={scale} />
     </>
   );
 }

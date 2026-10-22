@@ -11,6 +11,9 @@ import { DM, env, room, token } from "#shared/testutil.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   cleanLine,
+  crossedTraps,
+  crossesText,
+  warnsOf,
   disarmFill,
   newTrapInput,
   presetLine,
@@ -107,6 +110,35 @@ describe("the trap under a tap", () => {
     const tokens = { t1: token("t1", { x: 2, y: 2 }), t2: token("t2", { x: 4, y: 2 }), t3: token("t3", { x: 3, y: 3, sceneId: "s2" }) };
     assert.deepEqual(tokensOn(traps[0]!, tokens), ["t1"]);
     assert.deepEqual(tokensOn(traps[2]!, tokens), []);
+  });
+});
+
+describe("the drag label's warning (4.5)", () => {
+  const pit = { id: "pit", name: "Hidden Pit", sceneId: "s1", zone: { cells: [{ x: 4, y: 0, w: 2, h: 2 }] } };
+  const wire = { id: "wire", name: "Falling Net", sceneId: "s1", zone: { wire: { a: [8, 0] as [number, number], b: [8, 3] as [number, number] } } };
+  const one = { w: 1, h: 1 };
+
+  test("a walk crosses squares its footprint touches past its start and wires its middle crosses, in the order it meets them", () => {
+    assert.deepEqual(crossedTraps([wire, pit], one, [{ x: 0, y: 0 }, { x: 10, y: 0 }]).map((t) => t.id), ["pit", "wire"]);
+    assert.deepEqual(crossedTraps([pit], one, [{ x: 0, y: 2 }, { x: 10, y: 2 }]), [], "beside the squares");
+    assert.deepEqual(crossedTraps([pit], { w: 2, h: 2 }, [{ x: 0, y: 2.5 }, { x: 10, y: 2.5 }]), [], "a Large token passing under");
+    assert.deepEqual(crossedTraps([pit], { w: 2, h: 2 }, [{ x: 0, y: 1 }, { x: 10, y: 1 }]).map((t) => t.id), ["pit"], "its footprint's top half over the squares");
+    assert.deepEqual(crossedTraps([wire], one, [{ x: 0, y: 0 }, { x: 7, y: 0 }]), [], "stopping short of the wire");
+    assert.deepEqual(crossedTraps([wire], one, [{ x: 7.5, y: 1 }, { x: 9, y: 1 }]), [], "starting with its middle on the wire's line");
+    assert.deepEqual(crossedTraps([wire], one, [{ x: 7, y: 4 }, { x: 9, y: 4 }]), [], "past the wire's end");
+    assert.deepEqual(crossedTraps([pit, wire], one, [{ x: 0, y: 5 }, { x: 4, y: 5 }, { x: 4, y: 0 }]).map((t) => t.id), ["pit"], "through a corner");
+    assert.deepEqual(crossedTraps([pit], one, [{ x: 4, y: 0 }]), [], "no walk");
+  });
+
+  test("players are warned of found traps not disarmed, the DM of armed ones", () => {
+    assert.equal(warnsOf({ ...pit }, "player"), true, "a player's view holds only found traps");
+    assert.equal(warnsOf({ ...pit, disarmed: true }, "player"), false);
+    assert.equal(warnsOf({ ...pit, state: "armed" }, "dm"), true);
+    assert.equal(warnsOf({ ...pit, state: "sprung" }, "dm"), false);
+    assert.equal(crossesText([]), null);
+    assert.equal(crossesText(["Hidden Pit"]), "Crosses Hidden Pit");
+    assert.equal(crossesText(["Hidden Pit", "Falling Net"]), "Crosses Hidden Pit and Falling Net");
+    assert.equal(crossesText(["A", "B", "C"]), "Crosses A and 2 more");
   });
 });
 

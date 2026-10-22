@@ -1,10 +1,11 @@
-import { type AreaTemplate, type BuildChunk, type Drawing, type FreeWall, type RoomState, type Token, type Viewer } from "#shared/model.ts";
+import { type AreaTemplate, type BuildChunk, type Drawing, type FreeWall, type RoomState, type Token, type Trap, type Viewer } from "#shared/model.ts";
 import { keys } from "#shared/keys.ts";
 import { projectEntity, projectState, stampCells } from "#shared/project.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import type { Rect } from "../../lib/camera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { shippedStamp } from "../builder/stamps/rules.ts";
+import { zoneBox } from "../traps/rules.ts";
 
 /**
  * The scene outliner's rows (docs/design-v1-dm-tools.md 3.2), as pure
@@ -19,7 +20,7 @@ import { shippedStamp } from "../builder/stamps/rules.ts";
  * stamps and pins linked to pages.
  */
 
-export type OutlineGroup = "tokens" | "map" | "areas" | "drawings" | "doors";
+export type OutlineGroup = "tokens" | "map" | "areas" | "drawings" | "doors" | "traps";
 
 export const GROUPS: readonly { id: OutlineGroup; title: string; chip: string }[] = [
   { id: "tokens", title: "Creatures and objects", chip: "Creatures" },
@@ -27,9 +28,10 @@ export const GROUPS: readonly { id: OutlineGroup; title: string; chip: string }[
   { id: "areas", title: "Areas", chip: "Areas" },
   { id: "drawings", title: "Drawings", chip: "Drawings" },
   { id: "doors", title: "Doors", chip: "Doors" },
+  { id: "traps", title: "Traps", chip: "Traps" },
 ];
 
-export type OutlineKind = "token" | "stamp" | "label" | "pin" | "light" | "area" | "drawing" | "door" | "window";
+export type OutlineKind = "token" | "stamp" | "label" | "pin" | "light" | "area" | "drawing" | "door" | "window" | "trap";
 
 export type OutlineRow = {
   /** Unique in the list: kind and id. */
@@ -95,6 +97,7 @@ const DRAWING_WORD: Record<Drawing["kind"], string> = {
   text: "Text",
   ruler: "Kept ruler",
 };
+const TRAP_STATE_WORD: Record<Trap["state"], string> = { armed: "Armed", sprung: "Sprung", disarmed: "Disarmed" };
 const SHAPE_WORD: Record<AreaTemplate["shape"], string> = {
   cone: "Cone",
   cube: "Cube",
@@ -207,6 +210,23 @@ export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
   }
 
   for (const door of sceneDoors(view.buildChunks, sceneId)) add(door);
+
+  for (const t of Object.values(view.traps ?? {})) {
+    if (!t || t.sceneId !== sceneId) continue;
+    const box = zoneBox(t, view.buildChunks);
+    const doorGone = "door" in t.zone && box === null;
+    // Found is the party's (docs/design-v1-traps.md 4.5): a found trap reaches players by its name and place, unless the fog covers it.
+    const mark = !t.found ? "Hidden" : seen.traps[t.id] ? "Found" : "Found, under fog";
+    add({
+      group: "traps",
+      kind: "trap",
+      id: t.id,
+      name: t.name,
+      detail: `${TRAP_STATE_WORD[t.state]}${doorGone ? ". Its door is gone" : ""}`,
+      mark,
+      rect: box ? rectOf(box.x0, box.y0, box.x1, box.y1) : pointRect(0, 0),
+    });
+  }
 
   const order = new Map(GROUPS.map((g, i) => [g.id, i]));
   return rows.sort(

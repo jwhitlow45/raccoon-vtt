@@ -9,13 +9,14 @@ import { stampSlot } from "../builder/stamps/store.ts";
 import { findCamera } from "../find/findToken.ts";
 import { lightModeSlot } from "../lights/store.ts";
 import { pinSlot } from "../pins/store.ts";
+import { trapSlot } from "../traps/store.ts";
 import { flash } from "./flash.ts";
 import { frameRect, type OutlineRow } from "./rows.ts";
 
 /**
  * A tap on an outliner row (docs/design-v1-dm-tools.md 3.2): the map frames
  * the item with the Find my token framing, and the item is picked where it
- * can be. A token opens its action bar, a label or a pin its pane, an area
+ * can be. A token opens its action bar, a label, a pin or a trap its pane, an area
  * becomes the area tool's pick, and a stamp or a light opens the builder in
  * its mode with it selected. The rest have no selection, so their outline
  * flashes.
@@ -66,6 +67,11 @@ function pick(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: Roo
       ui.select(null);
       ui.setTool("pin");
       scope.get(pinSlot).store.setState({ paneId: row.id, placing: null });
+      return;
+    case "trap":
+      // The pane opens with the Trap tool, as a tap with it does (traps/TrapTool.tsx). A selection stays, for Set it off.
+      ui.setTool("trap");
+      scope.get(trapSlot).store.setState({ paneId: row.id, picking: null });
       return;
     case "drawing":
     case "door":
