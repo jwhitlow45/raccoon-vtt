@@ -1588,7 +1588,7 @@ function ToolIcon(props: { tool: ToolDef }) {
   if ("glyph" in icon) return <span aria-hidden style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: 1 }}>{icon.glyph}</span>;
   if ("icon" in icon) return <Icon name={icon.icon} size={TOOL_ICON_PX} />;
   return (
-    <svg aria-hidden viewBox="0 0 24 24" width={TOOL_ICON_PX} height={TOOL_ICON_PX} style={{ display: "block" }}>
+    <svg aria-hidden viewBox={`0 0 ${icon.box ?? 24} ${icon.box ?? 24}`} width={TOOL_ICON_PX} height={TOOL_ICON_PX} style={{ display: "block" }}>
       <path d={icon.path} fill="currentColor" />
     </svg>
   );

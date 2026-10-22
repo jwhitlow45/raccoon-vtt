@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { TrapSound } from "#shared/model.ts";
 
 /**
  * How a turn banner gets attention beyond the screen (design section 14.4).
@@ -128,4 +129,54 @@ export function announceTurn(): void {
     }
   }
   if (soundOn) playChime("yours");
+}
+
+/**
+ * A trap's sound (docs/design-v1-traps.md 2 and 4.3): white noise through
+ * a filter that sweeps, shaped to each, synthesized as the chime is so no
+ * file needs a license. It plays where this device has sound on, or with
+ * `always` for the trap pane's play button, a tap that asks for it.
+ */
+const TRAP_SOUND_SHAPES: Record<TrapSound, { seconds: number; filter: BiquadFilterType; from: number; to: number; gain: number; attack: number }> = {
+  click: { seconds: 0.06, filter: "highpass", from: 2500, to: 2500, gain: 0.5, attack: 0.002 },
+  rumble: { seconds: 1.4, filter: "lowpass", from: 140, to: 50, gain: 0.9, attack: 0.1 },
+  crash: { seconds: 0.9, filter: "bandpass", from: 900, to: 250, gain: 0.8, attack: 0.004 },
+  whoosh: { seconds: 0.7, filter: "bandpass", from: 300, to: 2400, gain: 0.45, attack: 0.25 },
+  hiss: { seconds: 1, filter: "highpass", from: 4000, to: 6500, gain: 0.25, attack: 0.06 },
+};
+
+let noise: AudioBuffer | null = null;
+
+function noiseBuffer(ctx: AudioContext): AudioBuffer {
+  if (noise && noise.sampleRate === ctx.sampleRate) return noise;
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 1.5), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  noise = buffer;
+  return buffer;
+}
+
+export function playTrapSound(sound: TrapSound, always = false): void {
+  if (!soundOn && !always) return;
+  const ctx = context();
+  if (!ctx) return;
+  if (ctx.state !== "running") void ctx.resume().catch(() => {});
+  const shape = TRAP_SOUND_SHAPES[sound];
+  const at = ctx.currentTime + 0.02;
+  const end = at + shape.seconds;
+  const source = ctx.createBufferSource();
+  source.buffer = noiseBuffer(ctx);
+  source.loop = true;
+  const filter = ctx.createBiquadFilter();
+  filter.type = shape.filter;
+  filter.frequency.setValueAtTime(shape.from, at);
+  filter.frequency.exponentialRampToValueAtTime(shape.to, end);
+  const gain = ctx.createGain();
+  // A ramp in and an exponential fade, so it never clicks but for the click itself.
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(shape.gain, at + shape.attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, end);
+  source.connect(filter).connect(gain).connect(ctx.destination);
+  source.start(at);
+  source.stop(end + 0.02);
 }

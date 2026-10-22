@@ -16,6 +16,7 @@ import { stageCameraSlot } from "../features/scenes/stageCamera.ts";
 import { layersOf, type LayerProps } from "../features/layers.ts";
 import { LightPaneHost } from "../features/lights/LightPaneHost.tsx";
 import { PinPaneHost } from "../features/pins/PinPaneHost.tsx";
+import { TrapPaneHost } from "../features/traps/TrapPaneHost.tsx";
 import { DoorPillHost } from "../features/doors/DoorPill.tsx";
 import { onHoldPing } from "../features/pings/hold.ts";
 import { StopNoteHost } from "../features/movement/StopNote.tsx";
@@ -1358,6 +1359,7 @@ export function MapStage(props: {
           {role === "dm" ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
           {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
           {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
+          {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
           <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
           <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
           {draggingId === null ? <StopNoteHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}

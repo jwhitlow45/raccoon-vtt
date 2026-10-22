@@ -6,8 +6,8 @@
  *
  * The DM's play tools come first, Fog fourth: it is the DM's busiest tool
  * after Select while exploring, and was eighth, past a phone's swipe. Then
- * a divider and the setup tools: Add token, Pin, Map builder and Line up
- * grid serve a scene being set up. A player's tools keep their order.
+ * a divider and the setup tools: Add token, Pin, Trap, Map builder and
+ * Line up grid serve a scene being set up. A player's tools keep their order.
  */
 
 export const TOOL_ORDER = {
@@ -19,12 +19,13 @@ export const TOOL_ORDER = {
   ping: 50,
   "add-token": 55,
   pin: 60,
+  trap: 65,
   build: 80,
   grid: 90,
 } as const;
 
 /** The tools for setting a scene up rather than playing in it, which stand past the divider. */
-export const SETUP_TOOLS: ReadonlySet<string> = new Set(["add-token", "pin", "build", "grid"]);
+export const SETUP_TOOLS: ReadonlySet<string> = new Set(["add-token", "pin", "trap", "build", "grid"]);
 
 /** The index in a toolbar's tools before which the divider stands: its first setup tool, or null when it has none or only those. */
 export function setupDivider(tools: readonly { id: string }[]): number | null {

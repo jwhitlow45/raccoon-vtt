@@ -9,6 +9,9 @@ import { Popover, usePopover } from "../../components/Popover.tsx";
 import { dismissedBy } from "../../components/popoverRules.ts";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomScope } from "../../state/scope.ts";
+import { trapAreaOf } from "../traps/rules.ts";
+import { trapSlot } from "../traps/store.ts";
 import {
   ChoiceTiles,
   OptButton,
@@ -109,6 +112,7 @@ export function AreaOptions(props: { role: "dm" | "player" }) {
   const scene = sceneId ? view?.scenes[sceneId] : undefined;
   if (!view || !scene || !youId) return null;
   const env: AreaEnv = { actions, view, scene, role: props.role, youId, area };
+  if (st.draft && st.forTrap) return <TrapAreaOptions env={env} st={st} draft={st.draft} trapId={st.forTrap} />;
   if (st.draft) return <DraftOptions env={env} st={st} draft={st.draft} />;
   const selected = st.selectedId ? view.templates[st.selectedId] : undefined;
   if (selected && selected.sceneId === scene.id) return <SelectedOptions env={env} st={st} template={selected} />;
@@ -583,6 +587,64 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
               DM only
             </OptButton>,
           ),
+      ]}
+    />
+  );
+}
+
+/**
+ * Aiming the area a trap hits (docs/design-v1-traps.md 4.1): the area's
+ * shapes, size and handles, then Save puts the shape into the trap and
+ * goes back to its pane, as Cancel does without saving. No caster, owner,
+ * look or preview for players: a trap's area is only its shape.
+ */
+function TrapAreaOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft; trapId: string }) {
+  const { env, st, draft: d, trapId } = props;
+  const ui = useRoomUi();
+  const scope = useRoomScope();
+  const t = currentTemplate(env, d);
+  const set = (patch: Partial<AreaDraft>) => setDraft(env, { ...d, ...patch });
+  const trapName = env.view.traps[trapId]?.name ?? "The trap";
+  const back = () => {
+    ui.setTool("trap");
+    scope.get(trapSlot).store.setState({ paneId: trapId });
+  };
+  const save = () => {
+    if (!t) return;
+    if (env.actions.dispatch({ t: "trap.update", trapId, patch: { rig: { hits: { area: trapAreaOf(t) } } } }) !== null) back();
+  };
+  const title = `${trapName} hits ${d.size} ft ${shapeName(d.shape)}` + (canPitch(d.shape) ? aimSuffix(clampPitch(d.pitch)) : "");
+  return (
+    <OptionsStrip
+      tool="Area"
+      task
+      line={t ? inAreaLine({ env, t, moving: st.moving, title }) : { tone: "hint", content: `Tap the map where ${trapName}'s area starts.` }}
+      slots={[
+        { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => setDraft(env, withShape(d, shape))} /> },
+        { id: "size", priority: 3, home: "shape", control: <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} /> },
+        {
+          id: "save",
+          priority: 1,
+          control: (
+            <OptButton tone="primary" disabled={!t} ends onClick={save}>
+              Save to trap
+            </OptButton>
+          ),
+        },
+        {
+          id: "cancel",
+          priority: 2,
+          control: (
+            <OptButton ends onClick={back}>
+              Cancel
+            </OptButton>
+          ),
+        },
+        more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />),
+        canPitch(d.shape) && more("aim", <AimControl pitch={clampPitch(d.pitch)} onChange={(pitch) => set({ pitch })} />),
+        d.shape === "line" && more("width", <Stepper label="Width" unit="ft" value={d.width} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => set({ width })} />),
+        d.shape === "cylinder" && more("height", <Stepper label="Height" unit="ft" value={d.height} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => set({ height })} />),
+        d.point && !d.fromId && more("elevation", <Stepper label="Elevation" unit="ft" value={d.point.z} step={5} min={-1000} max={1000} onChange={(z) => set({ point: { ...d.point!, z } })} />),
       ]}
     />
   );

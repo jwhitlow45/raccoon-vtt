@@ -87,6 +87,8 @@ const gestureSlot = scopeSlot(() => ({
   gesture: null as (Gesture & { screen: { x: number; y: number }; moved: boolean }) | null,
   /** A template the Areas panel asked to open the tool on. */
   pendingPick: null as string | null,
+  /** A trap's area its pane asked to aim, applied once the tool's activation has cleared the last draft. */
+  pendingTrap: null as { trapId: string; draft: AreaDraft } | null,
 }));
 
 function envOf(ctx: ToolContext): AreaEnv | null {
@@ -348,11 +350,14 @@ export const areaTool: ToolDef = {
     resetAreaTool(area, null);
     if (local.pendingPick) select(area, local.pendingPick);
     local.pendingPick = null;
+    if (local.pendingTrap) area.store.setState({ draft: local.pendingTrap.draft, forTrap: local.pendingTrap.trapId, shape: local.pendingTrap.draft.shape });
+    local.pendingTrap = null;
   },
   deactivate(ctx) {
     const local = ctx.scope.get(gestureSlot);
     local.gesture = null;
     local.pendingPick = null;
+    local.pendingTrap = null;
     resetAreaTool(ctx.scope.get(areaSlot), ctx.actions);
   },
   Options: AreaOptions,
@@ -368,4 +373,14 @@ export function pickTemplate(scope: RoomScope, id: string, actions: RoomActions)
   if (draft && shared) actions.sendEph({ k: "aoeEnd", id: draft.id });
   areaStore.setState({ draft: null, shared: false, selectedId: id, live: null, query: "", pickCaster: false });
   scope.get(gestureSlot).pendingPick = id;
+}
+
+/**
+ * For a trap's pane (docs/design-v1-traps.md 4.1): aim the area a trap hits
+ * with the area tool's shapes and handles. The draft starts as the trap's
+ * own area, and the tool's Save puts it back into the trap.
+ */
+export function aimTrapArea(scope: RoomScope, ui: { setTool(id: string): void }, trapId: string, draft: AreaDraft): void {
+  scope.get(gestureSlot).pendingTrap = { trapId, draft };
+  ui.setTool("area");
 }

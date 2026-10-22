@@ -47,6 +47,12 @@ export type AreaToolState = {
    * tool, since the panel opens with any tool.
    */
   damageId: string | null;
+  /**
+   * The trap whose area the draft aims (docs/design-v1-traps.md 4.1, "Everyone
+   * in an area"): Save puts its shape into the trap rather than placing an
+   * area, and the tool goes back to the trap's pane.
+   */
+  forTrap: string | null;
 };
 
 /** One Room page's area tool (client/state/scope.ts). */
@@ -73,6 +79,7 @@ export const areaSlot = scopeSlot<AreaScope>(
       query: "",
       saved: null,
       damageId: null,
+      forTrap: null,
     })),
     selection: { ids: [], count: 0 },
     choiceAt: 0,
@@ -285,7 +292,7 @@ export function resetAreaTool(a: AreaScope, actions: RoomActions | null): void {
   const { draft, shared } = a.store.getState();
   if (actions && draft && shared) actions.sendEph({ k: "aoeEnd", id: draft.id });
   markRested(a);
-  a.store.setState({ draft: null, shared: false, selectedId: null, live: null, pickCaster: false, query: "" });
+  a.store.setState({ draft: null, shared: false, selectedId: null, live: null, pickCaster: false, query: "", forTrap: null });
 }
 
 /** The rules context for drawing or listing the area being worked on. */

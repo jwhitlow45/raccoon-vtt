@@ -9,10 +9,10 @@ function toolbar(ids: readonly (keyof typeof TOOL_ORDER)[]) {
 
 describe("the toolbar's order (docs/design-v1-layout-hierarchy.md M1)", () => {
   test("the DM's play tools come first, Fog fourth, then a divider and the setup tools", () => {
-    const dm = toolbar(["select", "add-token", "ruler", "area", "draw", "ping", "pin", "fog", "build", "grid"]);
+    const dm = toolbar(["select", "add-token", "ruler", "area", "draw", "ping", "trap", "pin", "fog", "build", "grid"]);
     assert.deepEqual(
       dm.map((t) => t.id),
-      ["select", "ruler", "area", "fog", "draw", "ping", "add-token", "pin", "build", "grid"],
+      ["select", "ruler", "area", "fog", "draw", "ping", "add-token", "pin", "trap", "build", "grid"],
     );
     assert.equal(setupDivider(dm), 6, "the divider stands before Add token");
   });
@@ -30,12 +30,12 @@ describe("the toolbar's order (docs/design-v1-layout-hierarchy.md M1)", () => {
     assert.equal(setupDivider([{ id: "pin" }, { id: "select" }]), null);
     assert.equal(setupDivider([{ id: "select" }, { id: "ruler" }]), null);
     assert.equal(setupDivider([]), null);
-    assert.deepEqual([...SETUP_TOOLS].sort(), ["add-token", "build", "grid", "pin"]);
+    assert.deepEqual([...SETUP_TOOLS].sort(), ["add-token", "build", "grid", "pin", "trap"]);
   });
 });
 
 describe("the buttons a toolbar draws (docs/design-v1-tool-options.md 5.1)", () => {
-  const dm = toolbar(["select", "add-token", "ruler", "area", "draw", "ping", "pin", "fog", "build", "grid"]);
+  const dm = toolbar(["select", "add-token", "ruler", "area", "draw", "ping", "pin", "trap", "fog", "build", "grid"]);
   const player = toolbar(["select", "ruler", "area", "draw", "ping"]);
 
   test("on a phone the DM's setup tools stand behind Setup, after the divider", () => {

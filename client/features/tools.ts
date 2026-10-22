@@ -10,6 +10,7 @@ import { drawTool } from "./drawings/DrawTool.tsx";
 import { rulerTool } from "./measure/RulerTool.tsx";
 import { pingTool } from "./pings/PingTool.tsx";
 import { pinTool } from "./pins/PinTool.tsx";
+import { trapTool } from "./traps/TrapTool.tsx";
 import { builderTool } from "./builder/tool.tsx";
 import { fogTool } from "./fog/tool.tsx";
 import { gridTool } from "./grid/tool.tsx";
@@ -95,8 +96,8 @@ export type ToolPointerHandlers = {
   hover?(p: ToolPointer, ctx: ToolContext): void;
 };
 
-/** An SVG path in a 24 x 24 box, filled with the current text color, an interface icon by its meaning, or a short text glyph. */
-export type ToolIcon = { path: string } | { icon: IconName } | { glyph: string };
+/** An SVG path in a 24 x 24 box (or a square `box` of its own, as a game-icons.net path's 512), filled with the current text color, an interface icon by its meaning, or a short text glyph. */
+export type ToolIcon = { path: string; box?: number } | { icon: IconName } | { glyph: string };
 
 export type ToolDef = {
   id: string;
@@ -161,6 +162,7 @@ export const TOOLS: readonly ToolDef[] = [
   drawTool,
   pingTool,
   pinTool,
+  trapTool,
 ];
 
 /** The role's tools in toolbar order. With the room's state, those a tool's own rule hides are left out too. */
