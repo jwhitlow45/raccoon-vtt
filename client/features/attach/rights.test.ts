@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { AttachKind, MoveAnyToken, RoomState, Token, Viewer } from "#shared/model.ts";
+import type { Op } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import { actor, character, DM, effect, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import { copyFor } from "./testing.ts";
@@ -120,7 +121,7 @@ describe("who may attach, detach and drag", () => {
  * locked camel with a pack on it, p1's hidden scout steering a mule, and a
  * captive Thorn drags.
  */
-function crowd(who: MoveAnyToken, turn: "none" | "thorn" | "goblin" | "hero" | "hidden"): RoomState {
+function crowd(who: MoveAnyToken, turn: "none" | "thorn" | "goblin" | "hero" | "hidden" | "thornHidden" | "thornHiddenUnmoved"): RoomState {
   const state = room();
   state.meta.settings.playersMoveAny = who;
   state.characters.hero = character("hero", { ownerIds: ["p1"] });
@@ -146,9 +147,12 @@ function crowd(who: MoveAnyToken, turn: "none" | "thorn" | "goblin" | "hero" | "
   ];
   state.tokens = Object.fromEntries(list.map((t) => [t.id, t]));
   if (turn !== "none") {
-    const rows = [entry("i-t", { tokenId: "thorn" }), entry("i-g", { tokenId: "goblin" }), entry("i-h", { characterId: "hero" }), entry("i-x", { tokenId: "goblin", hidden: true })];
-    const active = { thorn: "i-t", goblin: "i-g", hero: "i-h", hidden: "i-x" }[turn];
+    const rows = [entry("i-t", { tokenId: "thorn" }), entry("i-g", { tokenId: "goblin" }), entry("i-h", { characterId: "hero" }), entry("i-x", { tokenId: "goblin", hidden: true }), entry("i-y", { tokenId: "thorn", hidden: true })];
+    const active = { thorn: "i-t", goblin: "i-g", hero: "i-h", hidden: "i-x", thornHidden: "i-y", thornHiddenUnmoved: "i-y" }[turn];
     state.encounter = { rev: 1, round: 1, started: true, activeEntryId: active, entries: rows } as unknown as RoomState["encounter"];
+    // Thorn's own turn on a row the DM hid (review FU20A-RIDEHIDDEN): moved, its owners get its path, which tells them the turn.
+    if (turn === "thornHidden" || turn === "thornHiddenUnmoved") state.encounter!.turnStart = { entryId: "i-y", tokenId: "thorn", sceneId: "s1", x: 5, y: 6, elevation: 0, seq: 1 };
+    if (turn === "thornHidden") state.tokens.thorn = { ...state.tokens.thorn!, path: { turn: 1, stops: [{ x: 5, y: 6, elevation: 0 }, { x: 6, y: 6, elevation: 0, moved: 5, cost: 5 }] } };
   }
   return state;
 }
@@ -158,7 +162,7 @@ const DEPS = { canUseAsset: () => true };
 
 describe("the rights agree with the server (shared/permissions.ts)", () => {
   const settings: MoveAnyToken[] = ["none", "all", ["p1"], ["p2"]];
-  const turns = ["none", "thorn", "goblin", "hero", "hidden"] as const;
+  const turns = ["none", "thorn", "goblin", "hero", "hidden", "thornHidden"] as const;
   const viewers: Viewer[] = [P1, P2];
   const each = (check: (state: RoomState, view: RoomState, viewer: Viewer, where: string) => void) => {
     for (const who of settings) {
@@ -183,6 +187,26 @@ describe("the rights agree with the server (shared/permissions.ts)", () => {
         }
       }
     });
+  });
+
+  test("on Thorn's own turn on a row the DM hid, Ride is offered once his path tells his player the turn, as the server takes it (review FU20A-RIDEHIDDEN)", () => {
+    const ride: Op = { t: "token.attach", tokenId: "thorn", to: "horse", kind: "ride", x: 6, y: 6, elevation: 0 };
+    const p2 = { role: "player" as const, memberId: P2.memberId };
+    const moved = crowd("all", "thornHidden");
+    const view = copyFor(moved, P1);
+    assert.equal(view.encounter?.activeEntryId, null, "his player's copy holds no acting row");
+    assert.ok(view.tokens.thorn?.path, "but his path");
+    assert.equal(attachAllowed(view, p1, "ride", t(view, "thorn"), t(view, "horse")), true);
+    assert.equal(canApply(ride, P1, moved, DEPS).ok, true);
+    // Before he moves the copy cannot tell his turn from another's, so it offers no Ride, though the server would take one.
+    const unmoved = crowd("all", "thornHiddenUnmoved");
+    const before = copyFor(unmoved, P1);
+    assert.equal(attachAllowed(before, p1, "ride", t(before, "thorn"), t(before, "horse")), false);
+    assert.equal(canApply(ride, P1, unmoved, DEPS).ok, true);
+    // Another player the room lets move both gets no path, no Ride and the server's refusal.
+    const other = copyFor(moved, P2);
+    assert.equal(attachAllowed(other, p2, "ride", t(other, "thorn"), t(other, "horse")), false);
+    assert.equal(canApply(ride, P2, moved, DEPS).ok, false);
   });
 
   test("on every Get off, Put down and Let go", () => {

@@ -133,6 +133,30 @@ describe("ride, perch and carry (6)", () => {
     owl.tokens.owl = token("owl", { kind: "npc", size: "tiny", x: 6, y: 5, ownerIds: ["p1"] });
     assert.equal(answer(owl, { t: "token.attach", tokenId: "owl", to: "bree", kind: "perch", x: 6, y: 4, elevation: 0 }), "ok");
   });
+
+  test("on a row the DM hid, the owner rides on her own creature's turn, which its path already tells her, and every other hidden turn refuses in the same words (review FU20A-RIDEHIDDEN)", () => {
+    const hiddenTurn = (active: "eb" | "eh" | "eg", setup?: (s: RoomState) => void) =>
+      table((s) => {
+        const tokenId = { eb: "bree", eh: "horse", eg: "gob" }[active];
+        const at = s.tokens[tokenId]!;
+        s.encounter = {
+          rev: 0,
+          round: 1,
+          activeEntryId: active,
+          entries: [entry("eb", { tokenId: "bree", value: 15, hidden: true }), entry("eh", { tokenId: "horse", value: 12, tieOrder: 1, hidden: true }), entry("eg", { tokenId: "gob", value: 10, tieOrder: 2, hidden: true })],
+          turnStart: { entryId: active, tokenId, sceneId: at.sceneId, x: at.x, y: at.y, elevation: at.elevation, seq: 1 },
+        };
+        setup?.(s);
+      });
+    assert.equal(answer(hiddenTurn("eb"), ride()), "ok");
+    // Her own warhorse's turn and the goblin's are not hers, though she plays the horse.
+    assert.equal(answer(hiddenTurn("eh"), ride()), `forbidden: ${RIDE_ON_YOUR_TURN}`);
+    assert.equal(answer(hiddenTurn("eg"), ride()), `forbidden: ${RIDE_ON_YOUR_TURN}`);
+    // A player the room lets move any token, who does not play her, gets no path on her turn, so the hidden turn stays hidden from them.
+    const anyToken = (s: RoomState) => (s.meta.settings.playersMoveAny = "all");
+    assert.equal(answer(hiddenTurn("eb", anyToken), ride(), P2), `forbidden: ${RIDE_ON_YOUR_TURN}`);
+    assert.equal(answer(hiddenTurn("eb", anyToken), ride(), P2), answer(hiddenTurn("eg", anyToken), ride(), P2));
+  });
 });
 
 describe("drag, and a creature carried (6)", () => {

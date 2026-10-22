@@ -7,13 +7,13 @@ import type { Pose } from "#server/rooms/undo.ts";
 import { UndoTable } from "#server/rooms/undoTesting.ts";
 import { keys } from "#shared/keys.ts";
 import { CHUNK_CELLS, type AttachKind, type BuildChunk, type EdgeFeature, type RoomState, type Token, type Viewer } from "#shared/model.ts";
-import { canApply, mayMoveToken } from "#shared/permissions.ts";
+import { RIDE_ON_YOUR_TURN, canApply, mayMoveToken } from "#shared/permissions.ts";
 import { applyChanges, inSightOfNonOwners, isPartyMember, ownsToken, projectState, type ProjectedState } from "#shared/project.ts";
 import type { Change, ClientOp, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { carriedGroup, getOffSpot, holderOf, seatSpot, walkerFor } from "#shared/rules/attach.ts";
+import { carriedGroup, getOffSpot, holderOf, seatSpot, walkerFor, withinReach } from "#shared/rules/attach.ts";
 import { isSqueezed } from "#shared/rules/footprint.ts";
-import { walkEnd, walkStates, type Walker } from "#shared/rules/movement.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, walkEnd, walkStates, type Walker } from "#shared/rules/movement.ts";
 import { encodeHeights, footing, footprintGround } from "#shared/rules/heights.ts";
 import { stopsForOwners, turnUnderWay } from "#shared/rules/path.ts";
 import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, reveal, rng, room, token } from "#shared/testutil.ts";
@@ -1423,10 +1423,10 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
    * has taken. `play` applies an op on the server, `waiting` predicts one on
    * her owner's copy as the store's replayPending does.
    */
-  function hiddenRide(bree: Partial<Token>, first: Op) {
+  function hiddenRide(bree: Partial<Token>, first: Op, horse: Partial<Token> = {}) {
     let state = room({
       tokens: {
-        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) }, ...horse }),
         bree: token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], visibility: "dm", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 30 } }) }, ...bree }),
         thorn: token("thorn", { name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 12, y: 12, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
       },
@@ -1474,17 +1474,113 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
     assert.equal(ride.state.encounter?.started, undefined);
   });
 
-  test("getting on a mount, a step on or in place, on a turn the DM hid pays half her Speed in her owner's copy, as the store charges it (review FU20A-ASTRA-6)", () => {
+  test("getting on a mount, a step on or in place, on her own turn the DM hid: her list offers Ride, the server takes it, and her owner's copy pays half her Speed as the store charges it (reviews FU20A-ASTRA-6 and FU20A-RIDEHIDDEN)", () => {
     for (const [where, at] of [["a step on", { x: 3, y: 4 }], ["in place", { x: 4, y: 4 }]] as const) {
-      const ride = hiddenRide({ x: at.x, y: 6 }, { t: "token.move", tokenId: "bree", x: at.x, y: at.y });
-      const on = { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 4, y: 4, elevation: 0 } as const;
+      // A warhorse P1 plays, so P1 may move both.
+      const ride = hiddenRide({ x: at.x, y: 6 }, { t: "token.move", tokenId: "bree", x: at.x, y: at.y }, { ownerIds: ["p1"] });
+      const row = attachRows(copyOf(ride.state, P1), P1, "bree").find((x) => x.kind === "ride" && x.holderId === "horse");
+      assert.ok(row, `${where}: her list offers Ride Warhorse`);
+      const on = attachOp(row, false);
+      assert.ok(canApply(on as Op, P1, ride.state, deps).ok, `${where}: the server takes it on her own turn`);
       const predicted = ride.waiting(on);
-      // A player's server refuses a mount while no row they see acts (permissions.ts ownTurnOr), so the store's own charge is the reducer's.
-      ride.play(DM, on);
+      ride.play(P1, on as Op);
       const stored = copyOf(ride.state, P1).tokens.bree?.path;
       assert.deepEqual(predicted.tokens.bree?.path, stored, where);
       assert.equal(stored?.stops[stored.stops.length - 1]?.cost, 15, `${where}: half her Speed`);
     }
+  });
+
+  test("random rides on and off a warhorse by its owner on her own turn the DM hid, among walls: the list offers Ride once her path tells her the turn, the server takes what it offers, the waiting path is the stored one, and no other player learns a thing (review FU20A-RIDEHIDDEN)", () => {
+    const seen = { rides: 0, getOffs: 0, walks: 0, unmovedRides: 0, otherTurns: 0, predicted: 0 };
+    for (let seed = 1; seed <= 120; seed++) {
+      const r = rng(seed);
+      const edges: Record<string, EdgeFeature> = {};
+      for (let i = int(r, 0, 3); i > 0; i--) {
+        const at = int(r, 6, 14);
+        const from = int(r, 4, 12);
+        for (let v = from; v < from + int(r, 1, 3); v++) edges[chance(r, 0.5) ? `${at},${v},w` : `${v},${at},n`] = { kind: "wall" };
+      }
+      const horse = { x: int(r, 8, 11), y: int(r, 8, 11) };
+      let state = room({
+        tokens: {
+          horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: ["p1"], ...horse, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+          bree: token("bree", { name: "Bree", kind: "pc", ownerIds: ["p1"], ...(chance(r, 0.5) ? { visibility: "dm" as const } : {}), x: horse.x + int(r, -2, 3), y: horse.y + pick(r, [-1, 2]), actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+          thorn: token("thorn", { name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p2"], x: 2, y: 2, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+          gob: token("gob", { name: "Goblin", x: 20, y: 20, visibility: "dm" }),
+        },
+        buildChunks: built(edges, {}),
+      });
+      state.scenes.s1 = { ...state.scenes.s1!, blockMovement: chance(r, 0.6), autoWalls: "off" };
+      state.meta.settings = { ...state.meta.settings, diagonal: pick(r, ["five", "fiveTen"] as const), revealHiddenOnTurn: false };
+      let seq = 0;
+      const play = (who: Viewer, op: Op) => {
+        const out = applyOp(state, op, who, env(++seq));
+        assert.ok(out.ok, `seed ${seed}: ${out.ok ? "" : out.message} for ${JSON.stringify(op)}`);
+        state = out.state;
+      };
+      // Bree's row hidden, and now and then the goblin's turn, also hidden, comes first: her player reads the two alike.
+      const theirs = chance(r, 0.3);
+      play(DM, { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "eg", tokenId: "gob", value: theirs ? 15 : 5 }, { id: "eb", tokenId: "bree", value: 10, hidden: true }] });
+      play(DM, { t: "encounter.next" });
+      play(DM, { t: "encounter.next" });
+      const own = !theirs;
+      assert.equal(state.encounter?.activeEntryId, own ? "eb" : "eg", `seed ${seed}: the turn`);
+      for (let k = int(r, 3, 6); k > 0; k--) {
+        const copy = copyOf(state, P1);
+        assert.equal(copy.encounter?.activeEntryId, null, `seed ${seed}: her player's copy holds no acting row`);
+        assert.equal(copyOf(state, P2).tokens.bree?.path, undefined, `seed ${seed}: another player gets no path of hers`);
+        const bree = copy.tokens.bree!;
+        const riding = bree.attached?.to === "horse";
+        const row = riding ? undefined : attachRows(copy, P1, "bree").find((x) => x.kind === "ride" && x.holderId === "horse");
+        const ride: Op | null = row ? (attachOp(row, chance(r, 0.5)) as Op) : null;
+        // The server takes a ride on her own turn whether or not she has moved, and refuses one on another's in the words a row
+        // she sees would get, where no wall stops the step onto the seat first.
+        const seat = seatSpot(state.tokens.bree!, state.tokens.horse!);
+        const direct: Op | null = !riding && seat && withinReach(state.meta.settings, state.tokens.bree!, state.tokens.horse!) ? { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: seat.x, y: seat.y, elevation: state.tokens.horse!.elevation } : null;
+        const answer = direct ? canApply(direct, P1, state, deps) : null;
+        if (answer && !own) {
+          assert.ok(!answer.ok && [RIDE_ON_YOUR_TURN, WALL_IN_THE_WAY, LEDGE_IN_THE_WAY].includes(answer.message), `seed ${seed}: on another's hidden turn, ${JSON.stringify(answer)}`);
+          if (answer.message === RIDE_ON_YOUR_TURN) seen.otherTurns++;
+        }
+        if (answer && own) assert.ok(answer.ok || answer.message !== RIDE_ON_YOUR_TURN, `seed ${seed}: on her own turn`);
+        if (answer?.ok && own && !bree.path) {
+          assert.equal(row, undefined, `seed ${seed}: her copy cannot tell her turn before she moves, so it offers no Ride`);
+          seen.unmovedRides++;
+        }
+        // The list offers Ride only where the server takes it.
+        if (ride) assert.ok(canApply(ride, P1, state, deps).ok, `seed ${seed}: offered ${JSON.stringify(ride)}, refused ${JSON.stringify(canApply(ride, P1, state, deps))}`);
+        let op: Op | null = null;
+        if (ride && chance(r, 0.6)) {
+          op = ride;
+          seen.rides++;
+        } else if (riding && chance(r, 0.5)) {
+          const place = getOffPlace(copy, P1, bree);
+          if (place) {
+            op = detachOp("bree", place) as Op;
+            seen.getOffs++;
+          }
+        }
+        if (!op) {
+          const to = { x: Math.max(1, Math.min(24, bree.x + int(r, -3, 3))), y: Math.max(1, Math.min(24, bree.y + int(r, -3, 3))) };
+          const drag = dragOf(copy, "player", "bree", to);
+          if (!drag.op || !canApply(drag.op as Op, P1, state, deps).ok) continue;
+          op = drag.op as Op;
+          seen.walks++;
+        }
+        const replay = replayPending({ confirmed: copy as unknown as ProjectedState, seq, pending: [{ n: 1, op: op as ClientOp, at: 0 }], viewer: P1, sceneId: "s1" });
+        play(P1, op);
+        const stored = copyOf(state, P1).tokens.bree;
+        // A copy that held her path predicts each leg as the store keeps it: where, how far, what it cost. The marks of who could
+        // see are the server's to send (project.ts stopsForOwners). Before her first move the copy cannot tell her turn, and an
+        // op that reads what the copy lacks, a controlled ride's rows or its turn's mounts, waits for the server's answer.
+        if (!bree.path || replay.waiting.length > 0) continue;
+        const legs = (path: Token["path"]) => path && [path.turn, path.stops.map((st) => [st.x, st.y, st.elevation, st.moved, st.cost, st.diag, st.uncounted])];
+        assert.deepEqual(legs(replay.state.tokens.bree?.path), legs(stored?.path), `seed ${seed}: the waiting path for ${JSON.stringify(op)}`);
+        assert.deepEqual(replay.state.tokens.bree?.attached, stored?.attached, `seed ${seed}: the waiting link`);
+        if (op.t !== "token.move") seen.predicted++;
+      }
+    }
+    assert.ok(seen.rides > 20 && seen.getOffs > 8 && seen.walks > 300 && seen.unmovedRides > 40 && seen.otherTurns > 20 && seen.predicted > 15, JSON.stringify(seen));
   });
 
   test("a move still waiting for the server keeps the turn's path in its owner's copy, so a second diagonal reads 10 ft as the store does (review FU20A-OP-4)", () => {

@@ -17,6 +17,7 @@ import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from
 import { onRouteLattice, routeBlocker, routePoints, routeReach, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
+import { turnUnderWay } from "./rules/path.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
 import { EXHAUSTION_MAX_LEVEL, levelFits } from "./srd/conditions.ts";
 
@@ -1357,12 +1358,21 @@ function grappledShown(c: Check, token: Token): boolean {
   return actor?.effects.some((e) => e.key === "grappled" && e.hiddenFromPlayers !== true) ?? false;
 }
 
-/** Whether a turn is running in the player's copy and its acting row is the creature's own (7.1: mounting is "during your move"). */
+/**
+ * Whether a turn is running in the player's copy and its acting row is the
+ * creature's own (7.1: mounting is "during your move"). On a row the DM hid
+ * from them, it is still their own creature's turn by the rule that sends
+ * its owners its path then (project.ts projectPathCtx, review
+ * FU20A-RIDEHIDDEN): they learn the turn once it moves anyway, so getting on
+ * a mount tells them nothing more. Any other hidden row refuses in the same
+ * words as a row they see, so the answer never says whose turn it is.
+ * Permissions never run at replay, so this needs no op version.
+ */
 function ownTurnOr(c: Check, tokenId: string): Decision {
   const encounter = c.visibleEncounter();
   if (!encounter || (encounter.activeEntryId === null && encounter.started !== true)) return OK;
   const entry = encounter.activeEntryId !== null ? c.visibleEntry(encounter.activeEntryId) : undefined;
-  if (!entry) return refuse("forbidden", RIDE_ON_YOUR_TURN);
+  if (!entry) return turnUnderWay(c.state.encounter)?.tokenId === tokenId && c.ownsTokenId(tokenId) ? OK : refuse("forbidden", RIDE_ON_YOUR_TURN);
   const token = c.state.tokens[tokenId];
   const ref = token && "ref" in token.actor ? token.actor.ref : undefined;
   const its = entry.tokenId === tokenId || (entry.tokenId === undefined && ref !== undefined && entry.characterId === ref);

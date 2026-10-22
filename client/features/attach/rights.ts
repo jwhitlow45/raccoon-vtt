@@ -102,7 +102,11 @@ function effectsOf(view: RightsView, token: Token): readonly Effect[] {
  * "You can get on a mount on your own turn." The acting row is the rider's
  * by its token, or by its character on a row with no token. A player's
  * copy says a turn has begun by `started` even while a row they cannot see
- * acts, which reads as someone else's.
+ * acts, which reads as someone else's, unless the copy holds the rider's
+ * path: its owners get that only on its own turn (project.ts
+ * projectPathCtx), when the server takes the ride (shared/permissions.ts
+ * ownTurnOr, review FU20A-RIDEHIDDEN). Before its first move there the
+ * copy cannot tell, so the list offers no Ride until then.
  */
 export function notRidersTurn(view: RightsView, riderId: string): boolean {
   const encounter = view.encounter;
@@ -110,8 +114,8 @@ export function notRidersTurn(view: RightsView, riderId: string): boolean {
   const running = encounter.activeEntryId !== null || encounter.started === true;
   if (!running) return false;
   const active = encounter.entries.find((e) => e.id === encounter.activeEntryId);
-  if (!active) return true;
   const rider = view.tokens[riderId];
+  if (!active) return !(encounter.activeEntryId === null && rider?.path !== undefined);
   const ref = rider && "ref" in rider.actor ? rider.actor.ref : undefined;
   return !(active.tokenId === riderId || (active.tokenId === undefined && ref !== undefined && active.characterId === ref));
 }
