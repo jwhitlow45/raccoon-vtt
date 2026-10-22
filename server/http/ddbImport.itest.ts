@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import Fastify, { type FastifyInstance } from "fastify";
-import { MockAgent } from "undici";
+import { Dispatcher, MockAgent } from "undici";
 import { FakeAuth, randomRoomId, testConfig } from "../assets/testApp.ts";
 import { tempDir } from "../assets/testImages.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./ddbImport.ts";
@@ -37,6 +37,15 @@ function character(id = 12345678): object {
       race: { weightSpeeds: { normal: { walk: 30 } } },
     },
   };
+}
+
+/** An egress proxy that takes the CONNECT and never answers it: undici never hands the request a connection. */
+class NeverConnects extends Dispatcher {
+  override dispatch(): boolean {
+    return true;
+  }
+  override async close(): Promise<void> {}
+  override async destroy(): Promise<void> {}
 }
 
 let dir: string;
@@ -136,6 +145,14 @@ describe("POST /api/rooms/:id/ddb-import", () => {
     const started = Date.now();
     assert.equal((await post("10")).json().error, "fetch_failed");
     assert.ok(Date.now() - started < 1400, "the limit, not the slow answer, ends it");
+  });
+
+  test("a proxy that never connects fails at the time limit and gives both slots back", { timeout: 10_000 }, async () => {
+    const { post } = await setup({ dispatcher: new NeverConnects(), timeoutMs: 300, slots: { server: 1, room: 1 } });
+    const started = Date.now();
+    assert.equal((await post("12345678")).json().error, "fetch_failed");
+    assert.ok(Date.now() - started < 2000, "the limit ends it");
+    assert.equal((await post("12345678")).json().error, "fetch_failed", "the next import is not refused as busy");
   });
 
   test("budgets per session, address and server, spent only when the request goes out", async () => {

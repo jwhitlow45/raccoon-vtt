@@ -215,7 +215,7 @@ export function CompanionForm(props: {
   const changeRef = useRef<HTMLButtonElement>(null);
   const focusChange = useRef(false);
   // Typed changes ask first, but not once Add sent them: then leaving throws nothing away.
-  const leave = useLeaveForm(typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened, props.since);
+  const leave = useLeaveForm(formId, typed, !waiting && JSON.stringify(typed) !== start, props.onDone, props.opened, props.since);
   usePanelHeader({
     title: `Add a companion for ${character.name}`,
     parent: character.name,

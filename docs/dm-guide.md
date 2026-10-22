@@ -771,7 +771,7 @@ If the player withdraws the ask while you have it open, the page says so and car
 
 ## Alerts during a fight
 
-Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders and recharge rolls. Where the screen is short, they fold into one row that names the most pressing one.
+Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders and recharge rolls. Where the screen is short, they fold into one row that names the most pressing one. On a phone, a label's, pin's, light's or trap's pane that opens from the bottom of the screen folds the cards away too, so the pane's header and Close stay in reach, and their row sits on the pane's top edge when the screen has room for it. Tap the row, or close the pane, to bring the cards back.
 
 ![A recharge card at the start of the dragon's turn, "Fire Breath can recharge (5–6)." with Roll and Dismiss, beside its tracker row's legendary pips.](dm-guide/alerts.webp)
 
@@ -802,7 +802,7 @@ Here is how the turn's path works, and how to correct it:
 - **Doesn't count**, in the action bar, leaves the last leg out of the total, for a shove or a teleport.
 - Players get **Undo move** for their own newest move. Your own moves are undone with Undo in the top bar. A move a trap cut short, or one whose trap showed its player anything, is the one a player can't undo (see [Traps](#traps)).
 
-**The walking ruler.** The Ruler's **Measure** chip chooses **Straight** or **Walking**, and your device remembers the choice. Walking measures how far the creature the ruler starts on would walk to each point, or a Medium creature when you start on empty ground: around walls, through open doors, up stairs and counting difficult terrain, just as a drag would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any, and a leg with no way through draws straight in red. A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know.
+**The walking ruler.** The Ruler's **Measure** chip chooses **Straight** or **Walking**, and your device remembers the choice. On a narrow phone the chip shows them as **Line** and **Walk**. Walking measures how far the creature the ruler starts on would walk to each point, or a Medium creature when you start on empty ground: around walls, through open doors, up stairs and counting difficult terrain, just as a drag would. The total reads "Walking 40 ft", with "+10 ft for difficult terrain" under it when terrain added any, and a leg with no way through draws straight in red. A walking ruler leaves out other creatures, since they will have moved by the time anyone walks there. A shared or kept walking ruler reads the same on every screen, using only what the players have seen. Your own ruler, before you share it, uses everything you know.
 
 Distances between tokens are measured from edge to edge and include height. The room's **Diagonal moves** setting decides how diagonals count. The default, every square 5 ft, is the 2024 rule.
 
@@ -869,7 +869,7 @@ When a section asks for something on the map, such as **Add squares**, the squar
 
 At the foot of the pane, **Armed** and **Found** show the trap's state, and you can change either by hand. **Ask to search** and **Ask to disarm** send a roll request for the trap's checks to the creatures you have selected, or to the whole party. **Set it off** sets the trap off now, by the creatures you have selected or else by those standing on it, for when a character prods the plate with a pole. **Delete** asks for a second tap.
 
-On your map, an armed trap is hatched in red with its name over it, a sprung one turns grey, a disarmed one keeps a grey dashed outline, and an eye marks one the players have found. Tap a trap with the Trap tool to open its pane again, or find it under **Traps** in the Outliner. A scene holds up to 50 traps.
+On your map, an armed trap is hatched in red with its name over it, a sprung one turns grey, a disarmed one keeps a grey dashed outline, and an eye marks one the players have found. Zoom far out, to where creatures' names disappear, and traps lose their names too, keeping just their icons, so a crowded map stays readable. Tap a trap with the Trap tool to open its pane again, or find it under **Traps** in the Outliner. A scene holds up to 50 traps.
 
 > [!TIP]
 > Build your traps on a scene the players aren't on yet, or while their screens are blacked out. Traps go off by themselves only on the players' scene, and never during a blackout.
@@ -893,7 +893,7 @@ A player can't take back a move with **Undo move** once a trap cut it short or c
 
 ### Found traps, searching and disarming
 
-Once the players know about a trap, mark it **Found** in its pane, or from the hint's toast below. Unless you turned it off, a trap also marks itself found when the players see it go off. Your players then see the trap's name and its outline, hatched in a warning color, and "Disarmed" once you disarm it, but never whether it is still armed, its DC or what it does. When a player drags a token across a found trap that is not disarmed, the drag's label warns them: "Crosses Hidden Pit". Your own drags warn you about every armed trap.
+Once the players know about a trap, mark it **Found** in its pane, or from the hint's toast below. Unless you turned it off, a trap also marks itself found when the players see it go off. Your players then see the trap's name and its outline, hatched in a warning color, and "Disarmed" once you disarm it, but never whether it is still armed, its DC or what it does. Like yours, their map drops a trap's name when zoomed far out. When a player drags a token across a found trap that is not disarmed, the drag's label warns them: "Crosses Hidden Pit". Your own drags warn you about every armed trap.
 
 To let the players look for traps, open the trap's pane and press **Ask to search**. It asks the selected creatures, or the party, for the trap's find check. **Ask to disarm** does the same with its disarm check. When they succeed, turn off **Armed**, and the trap is disarmed.
 

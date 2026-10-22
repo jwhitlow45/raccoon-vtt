@@ -145,11 +145,16 @@ export const PANE_WIDTH = 296;
 const GAP = 10;
 const MARGIN = 8;
 /** A pane squeezed past this scrolls rather than shrinking further. */
-const MIN_HEIGHT = 120;
+export const PANE_MIN_HEIGHT = 120;
 
 export type PanePlacement =
   | { kind: "sheet"; bottom: number; maxHeight: number }
   | { kind: "card"; left: number; top: number; width: number; maxHeight: number };
+
+/** The height between the bars (`insets`) that a bottom sheet pane may take, less its margins. Where that is under PANE_MIN_HEIGHT, the pane keeps PANE_MIN_HEIGHT all the same. */
+export function sheetPaneRoom(input: { viewport: Size; insets: Insets }): number {
+  return input.viewport.height - input.insets.bottom - input.insets.top - 2 * MARGIN;
+}
 
 /**
  * Where the pane sits over the canvas. On a narrow screen it is a bottom
@@ -163,7 +168,7 @@ export function panePlacement(input: { viewport: Size; insets: Insets; box: Labe
   const topLimit = insets.top + MARGIN;
   const bottomLimit = viewport.height - insets.bottom - MARGIN;
   if (viewport.width < SHEET_BELOW_PX) {
-    return { kind: "sheet", bottom: insets.bottom, maxHeight: Math.max(MIN_HEIGHT, bottomLimit - topLimit) };
+    return { kind: "sheet", bottom: insets.bottom, maxHeight: Math.max(PANE_MIN_HEIGHT, sheetPaneRoom(input)) };
   }
   const width = Math.min(PANE_WIDTH, viewport.width - insets.left - insets.right - 2 * MARGIN);
   const center = (box.x0 + box.x1) / 2;
@@ -173,7 +178,7 @@ export function panePlacement(input: { viewport: Size; insets: Insets; box: Labe
   const aboveBottom = Math.min(bottomLimit, box.y0 - GAP);
   const spaceAbove = aboveBottom - topLimit;
   if (height <= spaceBelow || spaceBelow >= spaceAbove) {
-    return { kind: "card", left, top: belowTop, width, maxHeight: Math.max(MIN_HEIGHT, spaceBelow) };
+    return { kind: "card", left, top: belowTop, width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceBelow) };
   }
-  return { kind: "card", left, top: Math.max(topLimit, aboveBottom - height), width, maxHeight: Math.max(MIN_HEIGHT, spaceAbove) };
+  return { kind: "card", left, top: Math.max(topLimit, aboveBottom - height), width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceAbove) };
 }

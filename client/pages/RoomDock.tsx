@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
@@ -9,7 +9,7 @@ import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
-import { alertsSummary, DOCK_PX, dockSlot, type AlertsSummary } from "./fold.ts";
+import { alertsSummary, DOCK_PX, dockSlot, useFoldUnderPane, type AlertsSummary, type SummaryHides } from "./fold.ts";
 import { inModal, useModalSlot } from "./modalSlot.tsx";
 
 /*
@@ -34,7 +34,7 @@ export type DockActions = {
  * the same, with the advice for what leaves it no room (`hides`): the
  * docked token bar, or a short screen's tool options.
  */
-export function useDockSummary(hides: "sheet" | "bar" | "room" = "sheet"): AlertsSummary | null {
+export function useDockSummary(hides: SummaryHides = "sheet"): AlertsSummary | null {
   const alerts = useStore(useScoped(dockSlot), (s) => s.alerts);
   const rolls = useAlertsSummaryEntry();
   const text = rolls?.text ?? null;
@@ -124,6 +124,83 @@ export function DockRow(props: {
           style={{ ...paneLook, flex: "0 1 auto", marginLeft: "auto", padding: `0 ${theme.space(3)}px` }}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A map pane shown as a bottom sheet (`on`: a label's, pin's, light's or
+ * trap's, features/builder/labelEdit.ts panePlacement) folds the alerts
+ * column (fold.ts useFoldUnderPane), and their summary docks on the pane's
+ * top edge in its place, as on a panel sheet (docs/design-v1-visual.md
+ * 3.2.1), with advice to close the pane. The token bar keeps the panel
+ * sheets' rule. `reserve` is the room the pane keeps free above itself
+ * under the top bars while the summary shows, so the row never stands
+ * over the bars, and the row stands on the pane, never over its header
+ * and Close. Where the row and the pane's least height do not both fit
+ * (`fits`, fold.ts paneDockFits), the pane keeps no row, and the alerts
+ * come back as it closes. The row rides the pane's swipe as a panel
+ * sheet's dock does (`row` for PaneDockRow's ref, `riders` for
+ * useSheetSwipe).
+ */
+export function usePaneDock(on: boolean, fits: boolean): { reserve: number; summary: AlertsSummary | null; row: (el: HTMLDivElement | null) => void; riders: readonly (HTMLElement | null)[] } {
+  useFoldUnderPane(on);
+  const summary = useDockSummary("pane");
+  const [row, setRow] = useState<HTMLDivElement | null>(null);
+  const riders = useMemo(() => [row], [row]);
+  const shows = on && fits && summary !== null;
+  return { reserve: shows ? DOCK_PX : 0, summary: shows ? summary : null, row: setRow, riders };
+}
+
+/**
+ * The alerts summary on a map pane's top edge (usePaneDock): `bottom` is
+ * where the pane's foot stands, and the row follows the pane's top as the
+ * pane grows and shrinks. Its tap closes the pane and asks the alerts
+ * column for what it named (fold.ts DockState.showAsk), which the column
+ * shows once it unfolds, as its own row's tap would: over the tool's
+ * options or the screen where the cards have no room, then a roll waiting
+ * for this viewer opens, else the alert it names takes focus.
+ */
+export function PaneDockRow(props: { ref?: Ref<HTMLDivElement>; pane: RefObject<HTMLElement | null>; bottom: number; summary: AlertsSummary; onClose(): void }) {
+  const { summary } = props;
+  const store = useScoped(dockSlot);
+  const rolls = useAlertsSummaryEntry();
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = props.pane.current;
+    if (!el) return;
+    const read = () => setHeight(el.offsetHeight);
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [props.pane]);
+  return (
+    <div
+      ref={props.ref}
+      data-rvtt-pane-dock=""
+      style={{
+        ...GRAB_STYLE,
+        position: "absolute",
+        left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
+        right: `calc(${theme.safe.right} + ${theme.space(2)}px)`,
+        bottom: props.bottom + height,
+        zIndex: theme.z.pane,
+        display: "flex",
+        justifyContent: "flex-end",
+        height: DOCK_PX,
+        pointerEvents: "none",
+        visibility: height > 0 ? undefined : "hidden",
+      }}
+    >
+      <SummaryButton
+        summary={summary}
+        onClick={() => {
+          store.setState({ showAsk: summary.first.kind === "rolls" && rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first } });
+          props.onClose();
+        }}
+        style={{ ...paneLook, flex: "0 1 auto", minWidth: 0, padding: `0 ${theme.space(3)}px` }}
+      />
     </div>
   );
 }

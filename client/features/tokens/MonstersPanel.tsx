@@ -2,7 +2,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import type { CustomMonster, ImageRef, StatBlock } from "#shared/model.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { emptyStatBlock, statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
-import { usePanelHeader, type PanelProps } from "../panels.ts";
+import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -143,7 +143,7 @@ export default function MonstersPanel(props: PanelProps) {
 function MonsterDetail(props: {
   listed: Listed;
   onBack(): void;
-  close(): void;
+  close: PanelClose;
   onEdit(monster: CustomMonster): void;
   onCopy(monster: SrdMonster): void;
   onDeleted(): void;
@@ -176,7 +176,7 @@ function MonsterDetail(props: {
     const source = listed.source === "room" ? { monsterId: listed.monster.id } : {};
     setPending(scope, { kind: "monster", monster: m, ...source, count, hp: useTyped ? typedHp : null, hidden, inLair: lair && inLair });
     ui.setTool(PLACE_TOOL_ID);
-    props.close();
+    props.close({ placing: true });
   };
 
   return (

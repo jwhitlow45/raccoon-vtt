@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { readDdbCharacter } from "#shared/ddb/read.ts";
 import { checkedFill } from "#shared/rules/pcFill.ts";
+import { untilAborted } from "../assets/egress.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { Semaphore } from "../assets/slots.ts";
 import { accessRoutes, HttpError, parseBody, roomParam } from "../auth/http.ts";
@@ -54,7 +55,7 @@ type Fetched = { kind: "body"; status: number; json: unknown; bytes: number } | 
  */
 async function fetchCharacter(dispatcher: Dispatcher, url: string, signal: AbortSignal, timeoutMs: number, maxBytes: number): Promise<Fetched> {
   try {
-    const res = await request(url, {
+    const pending = request(url, {
       dispatcher,
       method: "GET",
       headers: { accept: "application/json", "accept-encoding": "identity", "user-agent": "raccoon-vtt (self-hosted virtual tabletop)" },
@@ -62,6 +63,7 @@ async function fetchCharacter(dispatcher: Dispatcher, url: string, signal: Abort
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
     });
+    const res = await untilAborted(pending, signal, (late) => late.body.destroy());
     const chunks: Buffer[] = [];
     let bytes = 0;
     for await (const chunk of res.body) {

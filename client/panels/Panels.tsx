@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { LoadBoundary, LoadFailureNotice, type FallbackProps } from "../components/LoadBoundary.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { PanelGuideLink } from "../features/guide/GuideLink.tsx";
-import { PanelHeaderHost, PanelHere, panelById, type PanelHeader } from "../features/panels.ts";
+import { PanelHeaderHost, PanelHere, panelById, type PanelClose, type PanelHeader } from "../features/panels.ts";
 import { rememberReopen, type Reopen } from "../lib/reopen.ts";
 import { useRoomView } from "../state/view.ts";
 
@@ -18,7 +18,7 @@ import { useRoomView } from "../state/view.ts";
  *
  * A panel the DM guide covers ends, for the DM, in a link to its section.
  */
-export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: string | null; close(): void; onHeader?(header: PanelHeader | null): void }) {
+export function PanelBody(props: { id: string; shown: boolean; selectedTokenId: string | null; close: PanelClose; onHeader?(header: PanelHeader | null): void }) {
   const dm = useRoomView((s) => s.you?.role === "dm");
   const def = panelById(props.id);
   if (!def) return null;

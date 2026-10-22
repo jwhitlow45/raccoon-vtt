@@ -191,6 +191,8 @@ The e2e runs Chrome only. The rest is a hand check in the live play review, each
 - On a Mac: a file copied in Finder, and a picture copied in Photos or Preview, each by Cmd+V and by the button.
 - Firefox: Copy Image, then Ctrl+V with focus in a text field (the picker's search box, New scene's name). Firefox is believed to put the image's address on the clipboard as `text/plain` beside the bytes, and by the text field rule (1.3) the field then keeps the paste and inserts the address. The check says whether it does.
 
+Paste worked on the real devices the project owner tried on 2026-10-22, and the `beforepaste` remedy (section 2.1) stays. That settles no more than it says: the Finder icon case (2.3), a Photos copy held only as HEIC (3.2) and Firefox's text field above are still open.
+
 ## 9. Build plan
 
 One lane, five commits:

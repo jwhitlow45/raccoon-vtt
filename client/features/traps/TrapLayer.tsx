@@ -14,7 +14,7 @@ import { findDoor } from "../doors/doors.ts";
 import type { LayerProps } from "../layers.ts";
 import { Pill } from "../measure/Pill.tsx";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
-import { boxCenter, zoneBox, type SeenTrap } from "./rules.ts";
+import { boxCenter, trapNameShown, zoneBox, type SeenTrap } from "./rules.ts";
 import { trapSlot, type TrapDraft } from "./store.ts";
 import { useTrapAlerts } from "./useTrapAlerts.ts";
 
@@ -118,11 +118,12 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   }
   if (!badge) return null;
   const words = !dm && seen.disarmed ? "Disarmed" : undefined;
+  const named = trapNameShown(scale);
   return (
     <Group opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
       {body}
       <Badge x={badge.x} y={badge.y} scale={scale} look={look} found={dm && trap.found} />
-      {over ? (
+      {!named ? null : over ? (
         <Pill x={over.x} y={over.y} scale={scale} name={trap.name} value={words} size="map" color={look.color} small maxLines={1} above />
       ) : (
         <Pill x={badge.x} y={badge.y + (BADGE_PX / 2 + 2) * s} scale={scale} name={trap.name} value={words} size="map" color={look.color} small maxLines={1} below />

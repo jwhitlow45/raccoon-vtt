@@ -107,8 +107,10 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
   }, []);
 
   const reviewOf = (fill: PcFill) => {
-    const now = store.getState().view?.characters[props.characterId];
-    if (!now) return null;
+    const state = store.getState();
+    const now = state.view?.characters[props.characterId];
+    // Another player's copy of a character lacks the parts a sync reads, so one no longer this viewer's is reviewed as gone.
+    if (!now || !editsPcStats(state.you, now)) return null;
     seen.current = now;
     const plan = planFor(now, fill);
     return { fill, ids: lineIds(plan), ticks: defaultTicks(plan) };
@@ -164,8 +166,11 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
     );
   };
 
+  // The character as last seen while it was this viewer's. Another player's copy lacks the parts a sync reads, so a character given away during the review keeps that review, with Apply off and the notice saying why (3.5).
+  const lastYours = useRef<Character | null>(null);
+  if (live && yours) lastYours.current = live;
   // The review follows the live character, except while Apply waits, when it holds still on what Apply sent.
-  const reviewCharacter = flow.applying ? frozen.current : (live ?? null);
+  const reviewCharacter = flow.applying ? frozen.current : live === undefined ? null : yours ? live : lastYours.current;
   const plan = useMemo(() => (flow.fill && reviewCharacter ? planFor(reviewCharacter, flow.fill) : null), [flow.fill, reviewCharacter]);
   const result = useMemo(() => (plan ? syncResult(plan, flow.ticks) : null), [plan, flow.ticks]);
   const op = useMemo(() => (plan && result && reviewCharacter ? syncPatch(reviewCharacter, result) : null), [plan, result, reviewCharacter]);

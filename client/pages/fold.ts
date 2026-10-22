@@ -3,8 +3,9 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { barDockSlot, freeArea, WINDOW_FOLD_BELOW, type Chrome } from "../canvas/barDock.ts";
 import { sheetRoom, SHEET_MIN_HEIGHT, type SheetSpace } from "../components/sheetCap.ts";
+import { PANE_MIN_HEIGHT, sheetPaneRoom } from "../features/builder/labelEdit.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
-import type { Size } from "../lib/camera.ts";
+import type { Insets, Size } from "../lib/camera.ts";
 import { revealAndFocus } from "../lib/reveal.ts";
 import { theme } from "../lib/theme.ts";
 import { scopeSlot, useScoped } from "../state/scope.ts";
@@ -20,7 +21,8 @@ import { useRoomView } from "../state/view.ts";
  * sheet's top edge in their place: the token's name with a Show button
  * and its Close, then one alerts summary. Room draws the dock, the token
  * bar and the column publish here what it needs, and each reads the same
- * rule for when to fold.
+ * rule for when to fold. A map pane's bottom sheet folds the column too,
+ * and the alerts summary alone docks on its top edge (useFoldUnderPane).
  */
 
 /**
@@ -58,13 +60,52 @@ export function useSideSheetRoom(): number | undefined {
   return sideSheetRoom(layout, chrome);
 }
 
-/** foldsUnderSheet for this Room now, in the chrome's own pixels (features/device/layout.ts). */
+/**
+ * foldsUnderSheet for this Room now, in the chrome's own pixels
+ * (features/device/layout.ts), or a map pane's bottom sheet showing
+ * (useFoldUnderPane). The token bar keeps to the panel sheets' rule alone.
+ * Under a pane the alerts' summary row docks on the pane's top edge
+ * (pages/RoomDock.tsx usePaneDock), and the alerts come back as it closes.
+ */
 export function useUnderSheet(): boolean {
   const { width, height } = useLayoutSize();
   const open = useRoomView((s) => sheetOpen(s.local));
-  const full = useStore(useScoped(dockSlot), (s) => s.sheetFull);
+  const dock = useScoped(dockSlot);
+  const full = useStore(dock, (s) => s.sheetFull);
+  const pane = useStore(dock, (s) => s.paneSheets > 0);
   const sideRoom = useSideSheetRoom();
-  return foldsUnderSheet({ width, height, sheetOpen: open, full, sideRoom });
+  return pane || foldsUnderSheet({ width, height, sheetOpen: open, full, sideRoom });
+}
+
+/**
+ * Whether the alerts' summary row has room on a map pane's bottom sheet
+ * (pages/RoomDock.tsx usePaneDock): the row and the pane at its least
+ * height (features/builder/labelEdit.ts PANE_MIN_HEIGHT) both between the
+ * bars (`insets`), in the panes' layout px. Where they do not, as on a
+ * short screen held sideways or at a large interface size, the row would
+ * reach under the top bars, so the pane keeps none, and the alerts come
+ * back as it closes.
+ */
+export function paneDockFits(input: { viewport: Size; insets: Insets }, dockHeight = DOCK_PX): boolean {
+  return sheetPaneRoom(input) - dockHeight >= PANE_MIN_HEIGHT;
+}
+
+/**
+ * Folds the alerts column while a map pane (a label's, pin's, light's or
+ * trap's, features/builder/labelEdit.ts panePlacement) shows as a bottom
+ * sheet, `on`: the sheet spans the map's width and may rise to the top
+ * bars, where the column's cards would cover its header and Close. In any
+ * orientation, since the pane is a bottom sheet only under 600 px wide.
+ * The panes call it through usePaneDock (pages/RoomDock.tsx), which docks
+ * the alerts' summary row on the pane's top edge.
+ */
+export function useFoldUnderPane(on: boolean): void {
+  const store = useScoped(dockSlot);
+  useLayoutEffect(() => {
+    if (!on) return;
+    store.setState((s) => ({ paneSheets: s.paneSheets + 1 }));
+    return () => store.setState((s) => ({ paneSheets: s.paneSheets - 1 }));
+  }, [store, on]);
 }
 
 /** The dock's row height, and the gap kept above it under the top bars. */
@@ -96,6 +137,12 @@ export type ColumnAlert =
 export type RollsLine = { text: string; name: string; waiting: boolean; requests: number };
 
 export type SummaryKind = "rolls" | ColumnAlert["kind"];
+
+/** What a summary's tap asks the alerts column to show (DockState.showAsk). */
+export type ShowAsk = { kind: "rolls" } | { kind: "alert"; first: { kind: SummaryKind; id: string } };
+
+/** What stands over the alerts, which a summary's advice names (alertsSummary). */
+export type SummaryHides = "sheet" | "bar" | "room" | "pane";
 
 export type AlertsSummary = {
   /** The most pressing alert's words: the summary's visible text, which may shrink. */
@@ -135,9 +182,11 @@ function phrase(text: string): string {
  * "Hide the bar to see it.". `room` is a screen whose tool's options leave
  * the column under one whole card, where the row's tap brings up what it
  * stands for over them: "Tap to answer.", "Tap to see them.", "Tap to see
- * it.".
+ * it.". `pane` is a map pane's bottom sheet (useFoldUnderPane), whose row's
+ * tap closes the pane: "Close the pane to answer.", "Close the pane to see
+ * them.", "Close the pane to see it.".
  */
-export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAlert[], hides: "sheet" | "bar" | "room" = "sheet"): AlertsSummary | null {
+export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAlert[], hides: SummaryHides = "sheet"): AlertsSummary | null {
   const items: Item[] = [];
   if (rolls?.waiting) items.push({ kind: "rolls", id: "rolls", text: rolls.text, phrase: rolls.name });
   for (const a of alerts) {
@@ -154,7 +203,7 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   if (!first) return null;
   const more = items.length > 1 ? `+${items.length - 1}` : "";
   const several = items.length > 1 || (rolls !== null && rolls.requests > 1);
-  const way = hides === "bar" ? "Hide the bar" : hides === "room" ? "Tap" : "Close the sheet";
+  const way = hides === "bar" ? "Hide the bar" : hides === "room" ? "Tap" : hides === "pane" ? "Close the pane" : "Close the sheet";
   const advice = first.kind === "rolls" && rolls?.waiting ? `${way} to answer.` : several ? `${way} to see them.` : `${way} to see it.`;
   const head = more ? `${first.text} ${more}` : first.text;
   return { text: first.text, more, name: `${head}: ${items.map((i) => i.phrase).join(", ")}. ${advice}`, first: { kind: first.kind, id: first.id } };
@@ -188,12 +237,21 @@ type DockState = {
    * once the panel it opens covers the screen (features/tokens/statBlockOpen.ts).
    */
   sheetFullMode: boolean;
+  /** How many map panes show as a bottom sheet now (useFoldUnderPane), which fold the alerts column as a panel sheet does. */
+  paneSheets: number;
+  /**
+   * What a summary on a map pane's edge asked to show as its tap closed the
+   * pane (RoomDock.tsx PaneDockRow): a roll waiting for this viewer, or the
+   * alert it named. The alerts column meets it once it unfolds, as its own
+   * row's tap would (features/encounter/InitiativeStrip.tsx FightAlerts).
+   */
+  showAsk: ShowAsk | null;
 };
 
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, showAsk: null })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

@@ -11,10 +11,12 @@ import { useBackClose } from "../../lib/backClose.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
+import { paneDockFits } from "../../pages/fold.ts";
+import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { lightCaption, lightSlot } from "../builder/lightTap.ts";
-import { paneEscape, panePlacement, sheetPanAnchor } from "../builder/labelEdit.ts";
+import { paneEscape, panePlacement, sheetPanAnchor, SHEET_BELOW_PX } from "../builder/labelEdit.ts";
 import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
 import { PaneFooter } from "../builder/PaneFooter.tsx";
 import { requestPan } from "../encounter/pan.ts";
@@ -70,7 +72,11 @@ export default function LightPane(props: { light: Light; camera: Camera; viewpor
   }, []);
 
   const box = lightScreenBox(light, camera);
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
+  // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars (pages/RoomDock.tsx usePaneDock).
+  const sheet = props.viewport.width < SHEET_BELOW_PX;
+  const dock = usePaneDock(sheet, paneDockFits({ viewport: props.viewport, insets: props.insets }));
+  const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
+  const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
 
   // A bottom sheet brings its light into view above it, once per light, so a later pan away is the DM's to keep.
   const scope = useRoomScope();
@@ -78,19 +84,21 @@ export default function LightPane(props: { light: Light; camera: Camera; viewpor
   useEffect(() => {
     if (place.kind !== "sheet" || height === null || pannedFor.current === light.id) return;
     pannedFor.current = light.id;
-    const anchor = sheetPanAnchor({ viewport: props.viewport, insets: props.insets, sheetHeight: height, box });
+    const anchor = sheetPanAnchor({ viewport: props.viewport, insets, sheetHeight: height, box });
     if (anchor) requestPan(scope, { sceneId: light.sceneId, x: light.x, y: light.y, anchor });
   });
 
   // As a bottom sheet it swipes down to close, as its close does. Each choice is sent as it is made and its name on blur, so the focus rule alone holds it (docs/design-v1-sheet-swipe.md 4.6).
-  const sheet = place.kind === "sheet";
-  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: light.id, clip: "foot" });
+  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: light.id, clip: "foot", riders: dock.riders });
 
   return (
-    <div ref={paneRef} role="dialog" aria-label="Edit light" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
-      {/* Keyed by light, so a half-typed name or an armed Delete never carries over to the next light tapped. */}
-      <LightEditor key={light.id} light={light} onClose={props.onClose} sheet={sheet} />
-    </div>
+    <>
+      <div ref={paneRef} role="dialog" aria-label="Edit light" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
+        {/* Keyed by light, so a half-typed name or an armed Delete never carries over to the next light tapped. */}
+        <LightEditor key={light.id} light={light} onClose={props.onClose} sheet={sheet} />
+      </div>
+      {dock.summary && place.kind === "sheet" ? <PaneDockRow ref={dock.row} pane={paneRef} bottom={place.bottom} summary={dock.summary} onClose={() => closeRef.current()} /> : null}
+    </>
   );
 }
 

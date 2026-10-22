@@ -764,10 +764,17 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
       assert.ok(box && Math.abs(box.width - 44) < 1, `${name} is ${box?.width ?? 0} px wide`);
     }
     await shots.take(dm, "lp8-ruler-375");
-    // At 360 px the row cannot hold all five even in their short forms, so Measure and the kept rulers wait behind ⋯, Measure the first to go.
+    // At 360 px Measure's short words, "Line" or "Walk", keep all five in the row (MV-360).
     await view(dm, dmCdp, { width: 360, height: 780, insets: {} });
     await dm.waitForTimeout(300);
-    assert.deepEqual(await inlineIds(), ["shared", "keep", "clear"]);
+    assert.deepEqual(await inlineIds(), ["shared", "measure", "keep", "clear", "kept"]);
+    assert.equal(await options(dm).locator("[data-rvtt-more]").count(), 0, "⋯ shows");
+    const measure = row.locator('[data-rvtt-slot="measure"] button').first();
+    // The chip stacks every value's words to keep its width, the others hidden from sight.
+    const shows = (await measure.innerText()).trim();
+    assert.match(shows, /^(Line|Walk)$/);
+    // Its name holds the words it shows and the choice's own (FU20B-OP-1).
+    assert.equal(await measure.getAttribute("aria-label"), shows === "Line" ? "Measure: Line (Straight)" : "Measure: Walking");
     await shots.take(dm, "lp8-ruler-360-measure");
     await key(dm, "v");
   });

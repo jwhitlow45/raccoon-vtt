@@ -1543,6 +1543,24 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await pickTool(phone, "Select");
   });
 
+  test("fu20b-6. a large phone turned sideways with a sheet open starts the side panel shown on that panel, though the stored choice is hidden, and turned back the sheet opens again (LP11-REG-2)", async () => {
+    await view(phone, phoneCdp, { width: 430, height: 932 }, { top: 59, bottom: 34 });
+    await reloadAt(phone, 1);
+    assert.equal(await phone.evaluate(() => localStorage.getItem("rvtt.sidePanel")), "hidden", "step 6 stored the choice");
+    await openPanel(phone, "Initiative");
+    await view(phone, phoneCdp, { width: 932, height: 430 }, { side: 59, bottom: 21 });
+    const side = sidePanel(phone);
+    await side.waitFor();
+    assert.equal(await phone.getByRole("tab", { name: "Initiative", exact: true }).getAttribute("aria-selected"), "true");
+    assert.equal(await phone.evaluate(() => localStorage.getItem("rvtt.sidePanel")), "hidden", "the stored choice is left alone");
+    await shots.take(phone, "layout-fu20b-sideways-with-sheet");
+    await view(phone, phoneCdp, { width: 430, height: 932 }, { top: 59, bottom: 34 });
+    await sheet(phone, "Initiative").waitFor();
+    assert.equal(await sheetOpen(phone, "Initiative"), true, "the sheet opens again on the turn back");
+    await sheet(phone, "Initiative").getByRole("button", { name: "Close Initiative" }).tap();
+    await sheet(phone, "Initiative").waitFor({ state: "detached" });
+  });
+
   test("5. a player's open journal page hidden with the side panel counts as unread until it shows again", async () => {
     await view(player, playerCdp, { width: 1280, height: 800 });
     await reloadAt(player, 1);

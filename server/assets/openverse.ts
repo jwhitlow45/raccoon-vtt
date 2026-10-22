@@ -5,6 +5,7 @@ import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { assetCreditSchema, imageCreditSchema, type AssetCredit, type ImageCredit, type SearchResult } from "#shared/protocol.ts";
 import { isOpenverseThumbnail } from "#shared/searchThumbnails.ts";
+import { untilAborted } from "./egress.ts";
 import { AssetError } from "./errors.ts";
 import { WindowLimiter } from "./limits.ts";
 import { configureSharp } from "./process.ts";
@@ -464,7 +465,8 @@ async function originalSize(path: string): Promise<{ width: number; height: numb
  */
 export function openverseHttp(dispatcher: Dispatcher, timeoutMs = TIMEOUT_MS): OpenverseHttp {
   return async ({ url, method = "GET", headers = {}, form }) => {
-    const res = await request(url, {
+    const signal = AbortSignal.timeout(timeoutMs);
+    const pending = request(url, {
       dispatcher,
       method,
       headers: {
@@ -475,10 +477,11 @@ export function openverseHttp(dispatcher: Dispatcher, timeoutMs = TIMEOUT_MS): O
         ...headers,
       },
       body: form ? new URLSearchParams(form).toString() : undefined,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
     });
+    const res = await untilAborted(pending, signal, (late) => late.body.destroy());
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of res.body) {

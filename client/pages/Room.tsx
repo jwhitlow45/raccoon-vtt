@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, type Chrome } from "../canvas/barDock.ts";
+import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, toastTop, type Chrome } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
@@ -23,7 +23,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelDef, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -65,13 +65,13 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
-import type { Ended, Toast, ToastDie } from "../state/types.ts";
+import { sheetOpen as sheetShows, type Ended, type Toast, type ToastDie } from "../state/types.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { endedText } from "./endedText.ts";
-import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, focusAlert, foldsUnderSheet, useSideSheetRoom, type AlertsSummary } from "./fold.ts";
-import { mapFocusSlot } from "./mapFocus.ts";
+import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, foldsUnderSheet, useSideSheetRoom } from "./fold.ts";
+import { mapFocusSlot, panelFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
 import { SideTabs } from "./SideTabs.tsx";
 import { SplitBar } from "./SplitBar.tsx";
@@ -349,20 +349,23 @@ function RoomPage() {
   /*
    * The side panel from 900 px up, which can be hidden
    * (docs/design-v1-layout-hierarchy.md 4.1). Its first state on this page
-   * is worked out once, the first time the layout is wide, from this
-   * device's choice or the short screen's default (pages/sidePanel.ts), in
-   * a layout effect so a panel that starts hidden never paints a frame.
+   * is worked out once, the first time the layout is wide, from a phone's
+   * sheet open as it turned, this device's choice or the short screen's
+   * default (pages/sidePanel.ts), in a layout effect so a panel that starts
+   * hidden never paints a frame. It runs before crossWide below, so
+   * `wasWide` still says whether the layout was narrow until now.
    */
   const sideShown = wide && !sidePanelHidden;
   const sideFirst = useRef<boolean | null>(null);
+  const wasWide = useRef(wide);
   useLayoutEffect(() => {
     if (sideFirst.current !== null || !wide) return;
-    const first = firstSidePanel(null, { wide, height, stored: readSidePanel() });
+    const sheet = !wasWide.current && sheetShows(store.getState().local);
+    const first = firstSidePanel(null, { wide, height, stored: readSidePanel(), sheet });
     sideFirst.current = first;
     if (first !== null) ui.hideSidePanel(first);
-  }, [wide, height, ui]);
+  }, [wide, height, ui, store]);
   // Crossing 900 px, a phone's hidden sheet and the side panel hand over to each other (state/types.ts crossWide).
-  const wasWide = useRef(wide);
   useLayoutEffect(() => {
     if (wasWide.current === wide) return;
     wasWide.current = wide;
@@ -550,6 +553,24 @@ function RoomPage() {
     setShare(next);
     saveSplit.current?.();
   }, []);
+  /*
+   * A panel's `close` in the side panel (features/panels.ts PanelClose). A
+   * panel closes its phone's sheet to clear the map, as Add and place does,
+   * and the side panel stands beside the map, so the panel stays open in the
+   * room's state: a turn below 900 px then opens it as a sheet
+   * (state/types.ts crossWide), as the side panel showed it. A place button
+   * says `placing` (Place a token, Pin to the map): its tool's options wait
+   * for a tap on the map, so then the panel is kept tucked away, as a
+   * phone's Hide does, and the turn keeps the map and the options in view.
+   * Panels brings the panel back. The press says so itself, since a tool
+   * already active, such as the Ruler during Add and place, tells nothing.
+   */
+  const closeSidePanel = useCallback<PanelClose>(
+    (options) => {
+      if (options?.placing) ui.hideSheet(true);
+    },
+    [ui],
+  );
   // The bar's Close, whose bar goes with the bottom panel: focus goes to the chosen tab (9.2).
   const closeBelow = useCallback(() => {
     focusNext.current = { kind: "panel" };
@@ -559,6 +580,8 @@ function RoomPage() {
   // ------------------------------------------------ the dock (pages/fold.ts)
   const dockStore = scope.get(dockSlot);
   const hasBar = useStore(dockStore, (s) => s.bar !== null);
+  // A map pane's bottom sheet folds the alerts column too (fold.ts useFoldUnderPane), and their summary row docks on the pane's top edge where it has room (RoomDock.tsx usePaneDock), so what arrives under it is still read out.
+  const underPane = useStore(dockStore, (s) => s.paneSheets > 0);
   const summary = useDockSummary();
   const safe = useSafeAreas();
   /*
@@ -627,7 +650,7 @@ function RoomPage() {
   const summaryRef = useRef<HTMLButtonElement>(null);
   useDockSummaryButton(summaryRef);
   /** What the tap that closed the sheets asked to show, for where focus goes once they are gone. */
-  const showing = useRef<{ kind: "bar" } | { kind: "alerts"; first: AlertsSummary["first"] } | null>(null);
+  const showing = useRef<{ kind: "bar" } | null>(null);
   const rolls = useAlertsSummaryEntry();
   const dockActions: DockActions = {
     showBar: () => {
@@ -640,14 +663,16 @@ function RoomPage() {
       (backRef.current ?? closeRef.current)?.focus({ preventScroll: true });
     },
     showAlerts: (s) => {
-      if (rolls?.waiting) {
-        // A roll waits for this viewer's answer: its card shows and takes focus (features/rolls, 3.3.1).
-        showing.current = null;
-        closeSheets();
-        rolls.open();
-        return;
-      }
-      showing.current = { kind: "alerts", first: s.first };
+      /*
+       * The alerts column meets the ask once the sheets are gone, as its own
+       * row's tap would (pages/fold.ts DockState.showAsk): the token bar
+       * steps aside where it holds the row's lane, the cards open over the
+       * tool's options or the screen where they have no room, then a roll
+       * waiting for this viewer's answer opens with focus in its card
+       * (features/rolls, 3.3.1), else the alert it names takes focus.
+       */
+      showing.current = null;
+      dockStore.setState({ showAsk: rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: s.first } });
       closeSheets();
     },
   };
@@ -684,10 +709,12 @@ function RoomPage() {
    * Otherwise it spans as before, and the column starts below the notices
    * that last (the offline banner, a layer that did not load, the DM's
    * frame bar and "Viewing as Pat"), while toasts keep their place, so a
-   * card never jumps under a finger for a toast. "Viewing as Pat" stays in
-   * the preview, outside this page, so a blackout and the ended screen keep
-   * its Exit: the preview tells this page how tall it is, and this page
-   * says where it goes. Spanning, this page's own notices start below it.
+   * card never jumps under a finger for a toast. A toast that shows while
+   * the column shows a card starts under that card instead (toastLow).
+   * "Viewing as Pat" stays in the preview, outside this page, so a blackout
+   * and the ended screen keep its Exit: the preview tells this page how
+   * tall it is, and this page says where it goes. Spanning, this page's own
+   * notices start below it.
    */
   const free = freeArea({ width: mapWidth, height }, chrome ?? DEFAULT_CHROME);
   const beside = chrome ? noticePlace(free) : null;
@@ -744,6 +771,18 @@ function RoomPage() {
     // The observer hears the stack's size only, so what moves it measures again: the turn band coming or going, the notch, the preview's notice.
   }, [barDock, besideLane, previewBottom, zoom, role, topInset, safe.top, laneTop]);
   const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields || s.columnCramped) && summary !== null;
+  /*
+   * Where a toast that shows now starts (barDock.ts toastTop): on a phone,
+   * where the notices span the map over the alerts column and the column
+   * shows a card, 8 px under its first card, so a toast never covers the
+   * card's buttons. Each toast takes its place once, as it shows (Toasts),
+   * in a layer of its own beside the notices, whose stack would move it.
+   */
+  const columnNow = useStore(barDock, (s) => s.column);
+  const alertsOverlay = useStore(barDock, (s) => s.alertsOverlay);
+  const cardsShow = !folded && !underPane && !columnSummary && !alertsOverlay;
+  const toastLow = chrome ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop: height - chrome.bottom }) : null;
+  const [toastLayer, setToastLayer] = useState<HTMLDivElement | null>(null);
   // Where the row and its line would stand above the last lasting notice's foot, they stand over it, so the tool's controls stay in reach (8).
   const lastingBottom = useStore(barDock, (s) => s.lasting);
   const overNotice = chrome !== null && lastingBottom !== null && height - chrome.bottom < lastingBottom;
@@ -787,6 +826,19 @@ function RoomPage() {
     else sheetRef.current?.querySelector<HTMLElement>(`[data-opener="${panelTile(ask.panelId)}"]`)?.focus();
   };
   useLayoutEffect(placeFocus);
+  // The same for a panel opened from outside Room's controls (mapFocus.ts panelFocusSlot): asked now, and answered now or by the render that draws it.
+  const placeFocusNow = useRef(placeFocus);
+  placeFocusNow.current = placeFocus;
+  const panelFocus = scope.get(panelFocusSlot);
+  useLayoutEffect(() => {
+    panelFocus.focus = (panelId) => {
+      focusNext.current = { kind: "panel", ...(panelId !== null ? { id: panelId } : {}) };
+      placeFocusNow.current();
+    };
+    return () => {
+      panelFocus.focus = null;
+    };
+  }, [panelFocus]);
 
   if (ended) return <EndedScreen ended={ended} roomId={roomId} role={role} />;
   // A blackout is for a break or a reveal (features section 13), so players
@@ -856,8 +908,9 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts />
+          <Toasts low={toastLow} layer={toastLayer} />
         </div>
+        <div ref={setToastLayer} {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
           <Sheet
             // Each panel gets a sheet of its own, so one that replaces another in place, as the turn strip's Initiative replaces Token, never opens at the other's scroll (features/panels.ts usePanelScroll).
@@ -1004,14 +1057,14 @@ function RoomPage() {
           onShare={placeShare}
           onHide={hideSidePanel}
           subpages={subpages}
-          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(id)} />}
+          panel={(id, shown) => <PanelBody id={id} shown={shown} selectedTokenId={selectedId} close={closeSidePanel} onHeader={headerOf(id)} />}
           scrollSubject={(id) => panelSubject(id, selectedId)}
           tabRef={sideTabRef}
           nameRef={belowNameRef}
           onTabsDrawn={placeFocus}
         />
       ) : null}
-      <FoldStatus folded={folded || columnSummary} />
+      <FoldStatus folded={folded || underPane || columnSummary} />
       <HandoutPopup />
       <ShortcutSheetHost role={role} />
       <RoomPasteHost />
@@ -1030,7 +1083,9 @@ function RoomPage() {
  *   button's tap focuses what it showed. Otherwise, if focus was in the
  *   sheet and went with it, one decision places it (components/sheetFocus.ts):
  *   a roll card the sheet was hiding, else the token bar's frame, else
- *   where it fell, as before.
+ *   where it fell, as before. The alerts summary's tap leaves focus to the
+ *   alerts column, which moves it to what the tap named once the cards
+ *   show (pages/fold.ts DockState.showAsk).
  *
  * Both run after the render that folded or unfolded, when the folded
  * parts have their `hidden` set or cleared.
@@ -1040,7 +1095,7 @@ function useDockFocus(input: {
   sheetOpen: boolean;
   store: ReturnType<typeof dockSlot.create>;
   registry: ReturnType<typeof sheetFocusSlot.create>;
-  showing: { current: { kind: "bar" } | { kind: "alerts"; first: AlertsSummary["first"] } | null };
+  showing: { current: { kind: "bar" } | null };
   showRef: { current: HTMLButtonElement | null };
   summaryRef: { current: HTMLButtonElement | null };
 }): void {
@@ -1091,7 +1146,6 @@ function useDockFocus(input: {
         return;
       }
     }
-    if (asked?.kind === "alerts" && focusAlert(store.getState().column, asked.first)) return;
     // Focus stayed somewhere else, such as on the Panels button that closed the sheet: it stays there.
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
@@ -1422,23 +1476,33 @@ function Banner() {
   );
 }
 
+/** Where a toast first showed: at the top of the map's notices, under the alerts column's first card (at `low`, in the chrome's px), or in the very short sheet. */
+type ToastPlace = "map" | "sheet" | { low: number };
+
 /**
  * Refusals and notices from the store (design 7.4), each gone after a few
  * seconds or a tap, in the Notice look (components/Notice.tsx).
  *
  * While a sheet shows in the very short mode, a new toast shows and is read
  * out inside it, at the top of its body (pages/modalSlot.tsx), since the
- * modal leaves the map's notices out of reach. Each toast stays where it
- * first showed until it ends, so it is never moved and never announced
- * again: one shown in the sheet goes with the sheet.
+ * modal leaves the map's notices out of reach. On a phone whose alerts
+ * column shows a card, a new toast starts under that card (`low`,
+ * barDock.ts toastTop), in `layer`, and joins any toast already there,
+ * below it, so their stack keeps the place its first took. Each toast
+ * stays where it first showed until it ends, so it is never moved and
+ * never announced again: one shown in the sheet goes with the sheet.
  */
-function Toasts() {
+function Toasts(props: { low: number | null; layer: HTMLElement | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
-  // Where each toast first showed, by id: over the map, or in the very short sheet. Set once, so a toast never moves.
-  const places = useRef(new Map<number, "map" | "sheet">());
-  for (const t of toasts) if (!places.current.has(t.id)) places.current.set(t.id, slot ? "sheet" : "map");
+  // Where each toast first showed, by id. Set once, so a toast never moves.
+  const places = useRef(new Map<number, ToastPlace>());
+  for (const t of toasts) {
+    if (places.current.has(t.id)) continue;
+    const below = [...places.current.values()].find((p): p is { low: number } => typeof p === "object");
+    places.current.set(t.id, slot ? "sheet" : props.low !== null && props.layer ? (below ?? { low: props.low }) : "map");
+  }
   useEffect(() => {
     for (const id of places.current.keys()) if (!toasts.some((t) => t.id === id)) places.current.delete(id);
   }, [toasts]);
@@ -1452,13 +1516,25 @@ function Toasts() {
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   if (toasts.length === 0) return null;
-  const overMap = toasts.filter((t) => places.current.get(t.id) !== "sheet");
+  const overMap = toasts.filter((t) => places.current.get(t.id) === "map");
   const inSheet = slot ? toasts.filter((t) => places.current.get(t.id) === "sheet") : [];
+  const low = toasts.filter((t) => typeof places.current.get(t.id) === "object");
+  const lowAt = low.length > 0 ? (places.current.get(low[0]!.id) as { low: number }).low : null;
   return (
     <>
       {overMap.map((t) => (
         <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
       ))}
+      {props.layer && lowAt !== null
+        ? createPortal(
+            <div style={{ position: "absolute", top: lowAt, left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }}>
+              {low.map((t) => (
+                <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
+              ))}
+            </div>,
+            props.layer,
+          )
+        : null}
       {slot && inSheet.length > 0
         ? createPortal(
             inSheet.map((t) => <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />),

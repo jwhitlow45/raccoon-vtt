@@ -107,7 +107,7 @@ export default function AreasPanel(props: PanelProps) {
                   pickTemplate(scope, t.id, actions);
                   ui.setTool("area");
                   // The tool's bar shows only with no sheet open on a phone.
-                  props.close();
+                  props.close({ placing: true });
                 }}
               >
                 {editable ? "Edit" : "Show"}

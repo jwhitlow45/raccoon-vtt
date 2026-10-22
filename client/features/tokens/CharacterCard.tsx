@@ -35,6 +35,7 @@ import { hpUnits, unitText, vitals } from "./statSummary.ts";
 import { CardNotesField, SheetUrlField, StatsFields } from "./StatsSection.tsx";
 import { ConfirmButton, NumberField, TextField } from "./ui.tsx";
 import { isAssetImage } from "#shared/imageRef.ts";
+import type { PanelClose } from "../panels.ts";
 
 export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
   { value: "tiny", label: "Tiny" },
@@ -60,7 +61,7 @@ export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
  * allows: name, image, level, HP and the stat card's numbers, senses,
  * notes, the sheet link and the stat block (docs/design-v1-pc-stats.md 7.1).
  */
-export function CharacterPage(props: { character: Character; close(): void; onAddCompanion(): void; onBlocks(): void; onDelete(): number | null }) {
+export function CharacterPage(props: { character: Character; close: PanelClose; onAddCompanion(): void; onBlocks(): void; onDelete(): number | null }) {
   const { character } = props;
   const actions = useRoomActions();
   const you = useRoomView((s) => s.you);
@@ -258,7 +259,7 @@ function CharacterOwners(props: { character: Character; members: RoomState["memb
 }
 
 /** The DM's "Place a token", under the header: the place tool, holding this character. */
-function PlaceToken(props: { character: Character; close(): void }) {
+function PlaceToken(props: { character: Character; close: PanelClose }) {
   const { character } = props;
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -269,7 +270,7 @@ function PlaceToken(props: { character: Character; close(): void }) {
         onClick={() => {
           setPending(scope, { kind: "character", characterId: character.id, name: character.name });
           ui.setTool(PLACE_TOOL_ID);
-          props.close();
+          props.close({ placing: true });
         }}
       >
         Place a token

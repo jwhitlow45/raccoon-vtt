@@ -8,12 +8,12 @@ import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { containTab, inertOutside } from "../../lib/modalDialog.ts";
-import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
+import { focusMap, mapFocusSlot, panelFocusSlot } from "../../pages/mapFocus.ts";
 import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { drawn, focusAlert, usePublishAlerts, useUnderSheet, type AlertsSummary, type ColumnAlert } from "../../pages/fold.ts";
+import { dockSlot, drawn, focusAlert, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useUiScale } from "../device/settings.ts";
@@ -514,6 +514,9 @@ function FightAlerts() {
   const sheetWidth = !wide && width > height && panelOpen ? Math.min(theme.layout.landscapeSheetWidth, width * 0.6) : 0;
   const zoom = useUiScale();
   const ui = useRoomUi();
+  // Under 600 px a player's waiting roll shows in a card at the screen's foot (rolls/PlayerRolls.tsx). The DM's cards stay in this column at any width, so the row's tap shows the column for them.
+  const player = useRoomView((s) => s.you?.role === "player");
+  const footRolls = player && width < CARD_MIN_WIDTH;
 
   useEffect(() => unlockAudioOnTap(), []);
 
@@ -683,6 +686,25 @@ function FightAlerts() {
     focusRow.current = true;
   }, []);
   useBackClose(overlay, closeOverlay);
+  /*
+   * So does a card's action that opens a panel (barDock.ts closeAlertsOverlay),
+   * which would otherwise open out of reach behind them. The panel takes
+   * focus, not the row, as Room's own buttons hand it to a panel they open.
+   * A phone's sheet for that panel folds the column as it opens, which hides
+   * the alerts already, so the ask is met whether they show now or not: they
+   * must not come back over the screen when the sheet closes.
+   */
+  const closeAsks = useStore(dock, (s) => s.alertsClose);
+  const closesHeard = useRef(closeAsks);
+  const focusPanelNext = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (closesHeard.current === closeAsks) return;
+    closesHeard.current = closeAsks;
+    if (asked !== "overlay" && asked !== "fullScreen") return;
+    setAsked(null);
+    focusPanelNext.current = dock.getState().alertsClosePanel;
+  }, [closeAsks, asked, dock]);
+  const panelFocus = useScoped(panelFocusSlot);
   // Modal as a <dialog> is (lib/modalDialog.ts) without becoming one, which would mount its cards afresh and drop a half-typed total: the page behind takes no focus and no tap, and Tab keeps inside.
   useLayoutEffect(() => {
     const box = boxRef.current;
@@ -708,6 +730,13 @@ function FightAlerts() {
   // Measured again once closed, the cards stand in the column for a moment before the row returns, so focus waits for it.
   const mapFocus = useScoped(mapFocusSlot);
   useLayoutEffect(() => {
+    // Once the alerts are gone, and the page behind them is no longer inert.
+    if (focusPanelNext.current !== null && !overlay) {
+      const panel = focusPanelNext.current;
+      focusPanelNext.current = null;
+      panelFocus.focus?.(panel);
+      return;
+    }
     if (focusMapNext.current && !overlay) {
       focusMapNext.current = false;
       focusRow.current = false;
@@ -774,22 +803,44 @@ function FightAlerts() {
     return () => observer.disconnect();
   }, []);
 
-  // The summary row's tap hides the bar, and once the cards show again, opens a roll that waits for this viewer or focuses the alert it named, as the dock's does.
-  const [showAfter, setShowAfter] = useState<{ kind: "rolls" } | { kind: "alert"; first: AlertsSummary["first"] } | null>(null);
+  // The summary row's tap hides the bar, and once the cards show again, opens a roll that waits for this viewer or focuses the alert it named, as the dock's does. `barAway: false` leaves the token bar as it was for the roll.
+  const [showAfter, setShowAfter] = useState<(ShowAsk & { barAway?: boolean }) | null>(null);
   useLayoutEffect(() => {
     if (!showAfter || summarized) return;
     // Drawn again once the bar steps aside, the cards may turn out to have no room for one whole card: measured now, they open where they fit before the request is met.
     const cards = cardsRef.current;
     const first = cards ? firstCardHeight(cards) / zoom : 0;
-    const footRoll = showAfter.kind === "rolls" && width < CARD_MIN_WIDTH;
+    const footRoll = showAfter.kind === "rolls" && footRolls;
     if (!asked && !footRoll && chrome && first > 0 && toOptions < EDGE + first) {
       setAsked(askedWhere(first));
       return;
     }
     setShowAfter(null);
-    if (showAfter.kind === "rolls") rolls?.open({ barAway: true });
+    if (showAfter.kind === "rolls") rolls?.open({ barAway: showAfter.barAway ?? true });
     else focusAlert(boxRef.current, showAfter.first);
   });
+  /*
+   * A summary on a map pane's edge (pages/RoomDock.tsx PaneDockRow) closes
+   * the pane and asks for what it named (pages/fold.ts DockState.showAsk).
+   * Once the column unfolds the ask is met as this column's own row's tap:
+   * the token bar steps aside where it holds the row's lane, the cards open
+   * over the tool's options or the screen where they have no room for one
+   * whole card, then the roll opens or the alert takes focus. The bar stays
+   * where the cards show beside it.
+   */
+  const alertsDock = useScoped(dockSlot);
+  const showAsk = useStore(alertsDock, (s) => s.showAsk);
+  useLayoutEffect(() => {
+    if (!showAsk || folded) return;
+    alertsDock.setState({ showAsk: null });
+    const barLane = bar?.lane === "summary";
+    if (barLane) ui.showActions(false);
+    if (forFootCard) {
+      rolls?.open({ barAway: true });
+      return;
+    }
+    setShowAfter({ ...showAsk, barAway: barLane });
+  }, [showAsk, folded, alertsDock, bar, ui, forFootCard, rolls]);
 
   // Where the cards show once asked for (barDock.ts askedAlerts), from the first card's height and the room the bars leave.
   const askedWhere = (first = firstHeight): AskedAlerts =>
@@ -821,9 +872,9 @@ function FightAlerts() {
       return;
     }
     if (!showAfter || !forRoom) return;
-    if (showAfter.kind === "rolls" && width < CARD_MIN_WIDTH) {
+    if (showAfter.kind === "rolls" && footRolls) {
       setShowAfter(null);
-      rolls?.open({ barAway: true });
+      rolls?.open({ barAway: showAfter.barAway ?? true });
       return;
     }
     setAsked(askedWhere());
@@ -927,7 +978,7 @@ function FightAlerts() {
           onClick={() => {
             ui.showActions(false);
             // A card at a phone's foot opens at once, since it may stay folded for want of room until asked for, and the column has no room to show it.
-            if (forFootCard || (forRoom && rolls?.waiting && width < CARD_MIN_WIDTH)) {
+            if (forFootCard || (forRoom && rolls?.waiting && footRolls)) {
               rolls?.open({ barAway: true });
               return;
             }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { RoomScope } from "../state/scope.ts";
 import {
   BAR_WIDTH,
   laneChoice,
@@ -57,6 +58,10 @@ import {
   pastBars,
   raisedRow,
   askedAlerts,
+  barDockSlot,
+  closeAlertsOverlay,
+  TOAST_MIN,
+  toastTop,
   readSpot,
   releaseSpot,
   restingBar,
@@ -855,5 +860,38 @@ describe("a summary row risen over the bars (follow-up to docs/design-v1-bar-doc
     assert.equal(raised.row, 8);
     assert.equal(columnFacts(raised, { top: 122, measured: null, row: 8 }), raised);
     assert.equal(columnFacts(raised, { top: 122, measured: null })!.row, undefined, "back at its place");
+  });
+});
+
+describe("a card's action that opens a panel (LP13-TR-3)", () => {
+  test("asks the alerts over the screen to close, each time, and asks nothing while they are where they are", () => {
+    const scope = new RoomScope();
+    const dock = scope.get(barDockSlot);
+    closeAlertsOverlay(scope, "dice");
+    assert.equal(dock.getState().alertsClose, 0, "no alerts over the screen: nothing to close");
+    dock.setState({ alertsOverlay: true });
+    closeAlertsOverlay(scope, "dice");
+    closeAlertsOverlay(scope, "areas");
+    assert.equal(dock.getState().alertsClose, 2, "each ask is a new one, so the column hears both");
+    assert.equal(dock.getState().alertsClosePanel, "areas", "the panel the last ask opened, which takes focus");
+  });
+});
+
+describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", () => {
+  const column = { top: 122, content: 260, first: 120 };
+  const phone = { spanning: true, column, cards: true, optionsTop: 700 };
+
+  test("starts 8 px under the first card while the notices span the map", () => {
+    assert.equal(toastTop(phone), 122 + 120 + EDGE);
+  });
+
+  test("keeps the top of the notices beside the lane, with no card, with the cards folded or summarized, or with no room left for it", () => {
+    assert.equal(toastTop({ ...phone, spanning: false }), null);
+    assert.equal(toastTop({ ...phone, column: null }), null);
+    assert.equal(toastTop({ ...phone, column: { ...column, first: 0 } }), null);
+    assert.equal(toastTop({ ...phone, cards: false }), null);
+    const top = 122 + 120 + EDGE;
+    assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
+    assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
   });
 });

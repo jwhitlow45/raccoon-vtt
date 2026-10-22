@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { after, before, describe, test } from "node:test";
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
-import { MockAgent } from "undici";
+import { Dispatcher, MockAgent } from "undici";
 import { PIPELINE } from "../assets/kinds.ts";
 import { deleteUnreferencedFiles, roomFileKeys, variantPath } from "../assets/store.ts";
 import { FakeAuth, buildAssetApp, dropRooms, makeRoom, testConfig, testPool } from "../assets/testApp.ts";
@@ -470,8 +470,25 @@ describe("listing and serving", () => {
   });
 });
 
+/** An egress port whose proxy takes the CONNECT for one host and never answers it, so undici never hands that request a connection. */
+class StuckFor extends Dispatcher {
+  readonly #host: string;
+  readonly #rest: Dispatcher;
+  constructor(host: string, rest: Dispatcher) {
+    super();
+    this.#host = host;
+    this.#rest = rest;
+  }
+  override dispatch(opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler): boolean {
+    if (new URL(String(opts.origin)).hostname === this.#host) return true;
+    return this.#rest.dispatch(opts, handler);
+  }
+  override async close(): Promise<void> {}
+  override async destroy(): Promise<void> {}
+}
+
 describe("URL import", () => {
-  async function importApp() {
+  async function importApp(publicPort?: (mock: MockAgent) => Dispatcher) {
     const importDir = await tempDir();
     const publicMock = new MockAgent();
     publicMock.disableNetConnect();
@@ -483,7 +500,7 @@ describe("URL import", () => {
       auth,
       options: {
         egress: {
-          public: publicMock,
+          public: publicPort ? publicPort(publicMock) : publicMock,
           strict: strictMock,
           close: async () => {
             await publicMock.close();
@@ -613,6 +630,26 @@ describe("URL import", () => {
       const res = await post(t.imp, roomId, player, { url: "https://art.example/never.png", kind: "token" });
       assert.equal(res.statusCode, 503);
       assert.ok(Number(res.headers["retry-after"]) > 0);
+    } finally {
+      for (const release of held) release?.();
+      await t.close();
+    }
+  });
+
+  test("a host whose proxy never connects fails at the time limit and frees its outbound slot, so the next import is not busy", { timeout: 40_000 }, async () => {
+    const t = await importApp((mock) => new StuckFor("stuck.example", mock));
+    // Three of the four slots held elsewhere, so the stuck import holds the last one.
+    const held = [1, 2, 3].map(() => t.imp.assets.outbound.tryAcquire());
+    try {
+      const roomId = await room();
+      const player = auth.allow(roomId, "player");
+      const started = Date.now();
+      const stuck = await post(t.imp, roomId, player, { url: "https://stuck.example/goblin.png", kind: "token" });
+      assert.deepEqual([stuck.statusCode, stuck.json()], [422, { error: "fetch_failed" }]);
+      assert.ok(Date.now() - started < 15_000, "the 10 s limit ends it");
+      t.publicMock.get("https://art.example").intercept({ path: "/goblin.png" }).reply(200, tokenPng);
+      const next = await post(t.imp, roomId, player, { url: "https://art.example/goblin.png", kind: "token" });
+      assert.equal(next.statusCode, 200, next.body);
     } finally {
       for (const release of held) release?.();
       await t.close();

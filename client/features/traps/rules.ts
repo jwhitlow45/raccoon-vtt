@@ -9,6 +9,7 @@ import { damageTypeName } from "#shared/rules/damage.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { LEVEL_BANDS, TRAP_PRESET_IDS, trapPreset, type LevelBand } from "#shared/srd/traps.ts";
 import type { AskFill } from "../rolls/logic.ts";
+import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { findDoor, segmentDistance, type Point } from "../doors/doors.ts";
 
 /*
@@ -535,4 +536,15 @@ export function trapAreaOf(t: TrapArea): TrapArea {
     ...(t.anchor !== undefined ? { anchor: t.anchor } : {}),
     includeOrigin: t.includeOrigin,
   };
+}
+
+/**
+ * Whether a trap's name shows on the map at this zoom, in screen px per
+ * square: only where a Medium creature's name shows (canvas/useBoardText.ts,
+ * which drops a token's name under DECOR_MIN_PX), so a crowded map zoomed
+ * out keeps its badges and no names that run into each other and the
+ * creatures' (docs/design-v1-traps.md 4.1).
+ */
+export function trapNameShown(scale: number): boolean {
+  return scale >= DECOR_MIN_PX;
 }

@@ -4,7 +4,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { MAX_ENCOUNTER_CREATURES, MAX_ENCOUNTER_KINDS, MAX_PARTY_GROUPS, savedEncounterInputSchema } from "#shared/protocol.ts";
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
 import { MAX_LEVEL, MIN_LEVEL } from "#shared/srd/xp-budget.ts";
-import { usePanelHeader, type PanelProps } from "../panels.ts";
+import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -148,7 +148,7 @@ function summary(e: SavedEncounter, srd: SrdList, monsters: Readonly<Record<stri
   return parts.join(" · ");
 }
 
-function Builder(props: { id: string | null; srd: SrdList; close(): void; onBack(): void; onSaved(id: string): void }) {
+function Builder(props: { id: string | null; srd: SrdList; close: PanelClose; onBack(): void; onSaved(id: string): void }) {
   const actions = useRoomActions();
   const saved = useRoomView((s) => (props.id === null ? undefined : s.view?.savedEncounters[props.id]));
   const monsters = useRoomMonsters();
@@ -282,7 +282,7 @@ function Builder(props: { id: string | null; srd: SrdList; close(): void; onBack
  * It places what the builder shows, saved or not, and one undo takes it all
  * back.
  */
-function PlaceSection(props: { draft: Draft; srd: SrdList; close(): void }) {
+function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -316,7 +316,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close(): void }) {
       place: (world, ctx) => place(ctx.getState().view, ctx.scene, world),
     });
     ui.setTool(PLACE_TOOL_ID);
-    props.close();
+    props.close({ placing: true });
   };
 
   const atMiddle = () => {

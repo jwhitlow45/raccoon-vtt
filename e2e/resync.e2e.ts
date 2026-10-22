@@ -782,6 +782,58 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await reopen(ana, DESKTOP, 1);
   });
 
+  test("lp14-rs-a. the DM takes Bree from Ana while her re-sync review, then her editor's D&D Beyond review, is open: each keeps its review, says Bree is no longer hers, the re-sync review rebuilds when she comes back, and the room stays up", async () => {
+    const crashed = ana.getByText("Something went wrong in the room.", { exact: true });
+    const playedBy = (ownerIds: string[]) => ops.send({ t: "character.update", characterId: run.bree.characterId, patch: { ownerIds } });
+    // A new Speed, so the review has a Speed line, which reads the actor's speeds that another player's copy lacks.
+    const faster = () => {
+      const json = fixtureB() as { data: Json };
+      json.data.race = { weightSpeeds: { normal: { walk: 35 } } };
+      return json;
+    };
+    anaDdb.next({ fixture: faster });
+    const review = await openResync(ana);
+    await review.getByRole("checkbox", { name: "Speed 35 ft, now 30 ft", exact: true }).waitFor();
+    await playedBy([]);
+    await review.getByText("This character was deleted or is no longer yours, so it cannot be re-synced.", { exact: true }).waitFor();
+    assert.equal(await crashed.count(), 0, "the room stays up");
+    assert.equal(await review.getByRole("button", { name: "Apply", exact: true }).isDisabled(), true, "Apply is off");
+    // Given back while the review is open, Bree is reviewed from her fresh copy again.
+    await playedBy([run.anaId]);
+    await review.getByText("Bree changed on another device. The lists show the latest.", { exact: true }).waitFor();
+    assert.equal(await review.getByText("This character was deleted or is no longer yours, so it cannot be re-synced.", { exact: true }).count(), 0, "the notice goes");
+    assert.equal(await review.getByRole("button", { name: "Apply", exact: true }).isEnabled(), true, "Apply is on again");
+    await review.getByRole("checkbox", { name: "Speed 35 ft, now 30 ft", exact: true }).waitFor();
+    await review.getByRole("button", { name: "Cancel", exact: true }).click();
+    await review.waitFor({ state: "detached" });
+    await waitFor("Bree's block back in Ana's view", () => breeIn(anaSocket)?.stats ?? null);
+
+    const panel = await breeBlock(ana);
+    await panel.getByRole("button", { name: "Edit", exact: true }).click();
+    const sheet = editor(ana);
+    await sheet.waitFor();
+    anaDdb.next({ fixture: faster });
+    await sheet.getByRole("button", { name: "D&D Beyond", exact: true }).click();
+    await ana.getByRole("dialog", { name: "D&D Beyond" }).getByRole("button", { name: "Get it", exact: true }).click();
+    const read = ana.getByRole("dialog", { name: "Check what was read" });
+    await read.getByText(/^Read from D&D Beyond: Bree Tallow, level 6\./).waitFor();
+    await playedBy([]);
+    await waitFor("Bree's block gone from Ana's view", () => (breeIn(anaSocket) && breeIn(anaSocket)!.stats === undefined ? true : null));
+    await sleep(300);
+    assert.equal(await crashed.count(), 0, "the room stays up");
+    // The review reads against Bree as Ana last saw her, and the editor then says it cannot save.
+    await read.getByText(/^Read from D&D Beyond: Bree Tallow, level 6\./).waitFor();
+    await read.getByRole("button", { name: "Use it", exact: true }).click();
+    await sheet.getByText("This stat block was deleted or is no longer yours, so it cannot be saved.", { exact: true }).waitFor();
+    await shots.take(ana, "resync-lp14-taken");
+    await playedBy([run.anaId]);
+    await waitFor("Bree's block back in Ana's view", () => breeIn(anaSocket)?.stats ?? null);
+    await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+    const discard = ana.getByRole("button", { name: /^Discard/ });
+    if (await discard.count()) await discard.first().click();
+    await sheet.waitFor({ state: "detached" });
+  });
+
   test("rs-12. no page logged an error, and every import request was planned", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");

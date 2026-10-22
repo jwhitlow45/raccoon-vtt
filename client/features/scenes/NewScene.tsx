@@ -23,6 +23,7 @@ import { thisDevice } from "../uvtt/limits.ts";
 import { ColorInput, NumberInput } from "./controls.tsx";
 import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, type MapAsset } from "./create.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
+import type { PanelClose } from "../panels.ts";
 
 type Kind = "mat" | "map" | "builder";
 
@@ -54,7 +55,7 @@ const MAX_SCENES = 50;
  * nothing, so the form folds with its own Cancel. During an upload that
  * Cancel stops the upload and keeps the form, so the DM can try again.
  */
-export function NewScene(props: { sceneCount: number; close(): void }) {
+export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
@@ -128,7 +129,7 @@ export function NewScene(props: { sceneCount: number; close(): void }) {
     setFile(null);
     if (tool) {
       ui.setTool(tool);
-      props.close();
+      props.close({ placing: true });
     }
   };
 

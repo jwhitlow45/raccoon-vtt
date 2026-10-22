@@ -1,7 +1,7 @@
 import dns from "node:dns";
 import type { LookupAddress, LookupOptions } from "node:dns";
 import ipaddr from "ipaddr.js";
-import { Agent, ProxyAgent, type Dispatcher } from "undici";
+import { Agent, Pool, ProxyAgent, type Dispatcher } from "undici";
 import type { Config } from "../config.ts";
 
 /**
@@ -23,14 +23,30 @@ import type { Config } from "../config.ts";
  */
 export type Egress = { public: Dispatcher; strict: Dispatcher; close(): Promise<void> };
 
-export function createEgress(config: Pick<Config, "production" | "EGRESS_PUBLIC_PROXY" | "EGRESS_STRICT_PROXY">): Egress {
+/** How long a proxy may take to answer a CONNECT. */
+const CONNECT_ANSWER_MS = 10_000;
+
+/**
+ * A ProxyAgent whose own Pool, which carries only the CONNECTs to the proxy
+ * and never a tunnel's traffic, waits at most `connectAnswerMs` for the
+ * proxy's answer. Squid's limits (docker/squid.conf) bound a connect it
+ * tries and its search for a path, but not a CONNECT it takes and never
+ * answers, or a DNS lookup that stalls. undici's own default there is five
+ * minutes, and every request to that host queues behind it.
+ */
+function proxyAgent(uri: string, connectAnswerMs: number): ProxyAgent {
+  return new ProxyAgent({ uri, clientFactory: (origin, options) => new Pool(origin, { ...options, headersTimeout: connectAnswerMs }) });
+}
+
+export function createEgress(config: Pick<Config, "production" | "EGRESS_PUBLIC_PROXY" | "EGRESS_STRICT_PROXY">, opts: { connectAnswerMs?: number } = {}): Egress {
   if (config.production && (!config.EGRESS_PUBLIC_PROXY || !config.EGRESS_STRICT_PROXY)) {
     throw new Error("Production needs EGRESS_PUBLIC_PROXY and EGRESS_STRICT_PROXY.");
   }
+  const connectAnswerMs = opts.connectAnswerMs ?? CONNECT_ANSWER_MS;
   let direct: Agent | undefined;
   const guarded = (): Agent => (direct ??= guardedAgent());
-  const pub = config.EGRESS_PUBLIC_PROXY ? new ProxyAgent({ uri: config.EGRESS_PUBLIC_PROXY }) : guarded();
-  const strict = config.EGRESS_STRICT_PROXY ? new ProxyAgent({ uri: config.EGRESS_STRICT_PROXY }) : guarded();
+  const pub = config.EGRESS_PUBLIC_PROXY ? proxyAgent(config.EGRESS_PUBLIC_PROXY, connectAnswerMs) : guarded();
+  const strict = config.EGRESS_STRICT_PROXY ? proxyAgent(config.EGRESS_STRICT_PROXY, connectAnswerMs) : guarded();
   return {
     public: pub,
     strict,
@@ -74,4 +90,33 @@ export function guardedLookup(resolve: Resolver = dns.lookup as unknown as Resol
 
 export function guardedAgent(resolve?: Resolver): Agent {
   return new Agent({ connect: { lookup: guardedLookup(resolve) } });
+}
+
+/**
+ * A pending request, ended by its signal however far it got. undici aborts
+ * a request only once it holds a connection, and a proxy that keeps its
+ * CONNECT open never gives it one, so a caller would wait for as long as the
+ * proxy takes to give up, holding whatever slot it took for the fetch. A
+ * request that answers after the signal is thrown away. Every `request()`
+ * through either port goes through this.
+ */
+export function untilAborted<T>(pending: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      pending.then(discard, () => undefined);
+      reject(signal.reason);
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }

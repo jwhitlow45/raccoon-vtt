@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useStore } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import type { Character, CreatureSize, Member } from "#shared/model.ts";
-import { usePanelHeader, type PanelProps } from "../panels.ts";
+import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -21,7 +22,7 @@ import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
-import { characterPageSlot, DISCARD, openForm, pageBackTo, patchForm, shownPage, staleList, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
+import { characterPageSlot, DISCARD, formFields, openForm, pageBackTo, patchForm, shownPage, staleList, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
 import { CharacterBlocksPage } from "./CompanionBlocks.tsx";
 import { CompanionForm } from "./CompanionsSection.tsx";
 import { CREATURE_HEADING } from "./CreatureHeader.tsx";
@@ -59,13 +60,13 @@ export default function CharactersPanel(props: PanelProps) {
    * character whose "Add a companion" form shows, or the character whose
    * stat blocks page shows (docs/design-v1-companion-stat-blocks.md 6.4).
    */
-  const shownForm = useStore(pageStore, (s) => (s.form ? `${s.form.kind}|${s.form.kind === "new" ? "" : s.form.characterId}|${s.form.id}|${s.form.opened}` : null));
-  const [formKind, formFor = "", formId = "", formSince = "0"] = shownForm?.split("|") ?? [];
+  const shownForm = useStore(pageStore, useShallow(formFields));
+  const formId = shownForm?.id ?? "";
   const closeForm = () => patchForm(pageStore, formId, () => null);
-  const creating = formKind === "new";
-  const addingFor = formKind === "companion" ? formFor : null;
-  const blocksFor = formKind === "blocks" ? formFor : null;
-  const since = Number(formSince);
+  const creating = shownForm?.kind === "new";
+  const addingFor = shownForm?.kind === "companion" ? shownForm.characterId : null;
+  const blocksFor = shownForm?.kind === "blocks" ? shownForm.characterId : null;
+  const since = shownForm?.opened ?? 0;
   const dm = you?.role === "dm";
 
   const list = useMemo(
@@ -353,7 +354,7 @@ type NewCharacterDraft = { name: string; owners: string[]; size: CreatureSize; h
  * the map they are looking at. A subpage of the panel, "New character" with
  * "Back to Characters", and Cancel at its foot beside its buttons.
  */
-function NewCharacter(props: { formId: string; since: number; onDone(id: string | null, to: LeaveFor): void; close(): void; owner?: string; opened: number }) {
+function NewCharacter(props: { formId: string; since: number; onDone(id: string | null, to: LeaveFor): void; close: PanelClose; owner?: string; opened: number }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -386,7 +387,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
   // Only Create sends the form, so a sheet's swipe springs back once anything in it changed (docs/design-v1-sheet-swipe.md 4.5), a number still being typed too.
   useUnsavedSince(typed);
   useKeepDraft(props.formId, typed, start);
-  const leave = useLeaveForm(typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened, props.since);
+  const leave = useLeaveForm(props.formId, typed, JSON.stringify(typed) !== start, (to) => props.onDone(null, to), props.opened, props.since);
   usePanelHeader({ title: "New character", parent: "Characters", id: "new-character", onBack: leave.press, armed: leave.asking ? DISCARD : null, backTo: ["new-character"] });
 
   const create = (placeAfter: boolean) => {
@@ -418,7 +419,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
     } else if (placeAfter) {
       setPending(scope, { kind: "character", characterId: id, name: character.name });
       ui.setTool(PLACE_TOOL_ID);
-      props.close();
+      props.close({ placing: true });
     }
     props.onDone(id, "back");
   };

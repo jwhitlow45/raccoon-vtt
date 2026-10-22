@@ -2,6 +2,7 @@ import type pg from "pg";
 import { request, type Dispatcher } from "undici";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import type { SearchResult } from "#shared/protocol.ts";
+import { untilAborted } from "./egress.ts";
 import { AssetError } from "./errors.ts";
 import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
 
@@ -325,14 +326,16 @@ export async function isCachedThumbnail(pool: pg.Pool, url: string): Promise<boo
  */
 export function httpJson(dispatcher: Dispatcher, timeoutMs = 30_000): HttpJson {
   return async (url) => {
-    const res = await request(url, {
+    const signal = AbortSignal.timeout(timeoutMs);
+    const pending = request(url, {
       dispatcher,
       method: "GET",
       headers: { accept: "application/json", "accept-encoding": "identity" },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
     });
+    const res = await untilAborted(pending, signal, (late) => late.body.destroy());
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of res.body) {

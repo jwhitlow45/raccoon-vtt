@@ -115,6 +115,20 @@ function boardTexts(page: Page): Promise<string[]> {
   });
 }
 
+/** Where focus is: the element's role and name, and whether it is inside the side panel or which sheet holds it. */
+function focusAt(page: Page): Promise<{ role: string | null; name: string; side: boolean; sheet: string | null }> {
+  return page.evaluate(() => {
+    type Node = { getAttribute(n: string): string | null; textContent: string | null; closest(s: string): Node | null };
+    const a = (globalThis as unknown as { document: { activeElement: Node | null } }).document.activeElement;
+    return {
+      role: a?.getAttribute("role") ?? null,
+      name: (a?.getAttribute("aria-label") ?? a?.textContent ?? "").trim(),
+      side: a?.closest("aside") != null,
+      sheet: a?.closest("dialog[data-rvtt-sheet]")?.getAttribute("aria-label") ?? null,
+    };
+  });
+}
+
 /** Whether any frame Pat's page received names the trap. */
 function patHeardOfTrap(): boolean {
   return patSocket.received.some((frame) => frame.includes(run.trapId));
@@ -328,5 +342,161 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-pane-375x667-130-foot");
     await done.click();
     await pane(dm).waitFor({ state: "detached" });
+  });
+
+  test("fu20b-3. on a short laptop screen the trap cards show over the screen, and a card's Save and damage closes them, so the group save it opens in the side panel takes a click (LP13-TR-3)", async () => {
+    await dm.setViewportSize({ width: 1280, height: 320 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Select");
+    for (let i = 0; i < 2; i++) await ops.send({ t: "trap.spring", trapId: run.trapId, tokenIds: [run.thorn] });
+    await waitFor("two springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 2 ? true : null));
+    // The first card does not fit between the top bar and the toolbar, so the column's row stands for the cards, and its tap shows them over the screen.
+    const row = dm.getByRole("button", { name: /went off.*Tap to answer\.$/ });
+    await row.click();
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    await shots.take(dm, "traps-fu20b-alerts-over-the-screen");
+    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().getByRole("button", { name: "Save and damage", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    const page = dm.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.");
+    await page.waitFor();
+    // The panel the card opened takes focus, at its chosen tab, as Details hands focus to the Token tab.
+    const at = await waitFor("focus in the side panel", async () => {
+      const f = await focusAt(dm);
+      return f.side ? f : null;
+    }).catch(async () => assert.fail(`focus is not in the side panel: ${JSON.stringify(await focusAt(dm))}`));
+    assert.equal(at.role, "tab", `focus went to ${JSON.stringify(at)}`);
+    // Nothing is left inert behind the alerts, and the page's Ask takes a click once scrolled to on this short screen.
+    assert.equal(await dm.locator("[inert]").count(), 0, "the page behind the alerts is still inert");
+    const ask = dm.getByRole("button", { name: "Ask 1 player", exact: true });
+    await ask.scrollIntoViewIfNeeded();
+    assert.ok(await wholeInReach(ask), "the group save in the side panel takes no click");
+    await shots.take(dm, "traps-fu20b-save-in-reach");
+  });
+
+  test("fu20b-r1-2. on a 320 x 568 phone at 130%, where an opened card leaves the column too short for it, the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading, and closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
+    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Ruler");
+    await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
+    // A phone's card starts folded to its first line. Open, it leaves the column above the Ruler's options too short for it, so the column's row stands for the cards, and its tap shows them over the screen.
+    const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
+    const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).click();
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    const inAlerts = alerts.getByRole("group", { name: "Hidden Pit went off" }).first();
+    const toggleThere = inAlerts.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggleThere.getAttribute("aria-expanded")) !== "true") await toggleThere.click();
+    await shots.take(dm, "traps-fu20b-r1-phone-alerts");
+    await inAlerts.getByRole("button", { name: "Save and damage", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    const dice = dm.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+    await dice.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.").waitFor();
+    const at = await waitFor("focus in the Dice sheet", async () => {
+      const f = await focusAt(dm);
+      return f.sheet === "Dice" ? f : null;
+    }).catch(async () => assert.fail(`focus is not in the Dice sheet: ${JSON.stringify(await focusAt(dm))}`));
+    // The sheet's heading, which names the group save the card opened.
+    assert.equal(at.name, "Hidden Pit's save", `focus went to ${JSON.stringify(at)}`);
+    await shots.take(dm, "traps-fu20b-r1-phone-dice");
+    await dice.getByRole("button", { name: "Close Dice", exact: true }).click();
+    await dice.waitFor({ state: "detached" });
+    await dm.waitForTimeout(500);
+    assert.ok((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1, "no springing waits any more");
+    assert.equal(await alerts.count(), 0, "the alerts came back over the screen when the Dice sheet closed");
+    await shots.take(dm, "traps-fu20b-r1-phone-after-dice");
+    await pickTool(dm, "Select");
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  });
+
+  test("fu20b-r2-2. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the summary row on the trap pane's edge closes the pane and shows the cards over the screen (FU20B-ASTRA-3)", async () => {
+    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Trap");
+    await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
+    // Opened, the card leaves the column too short for it, so the column's own row stands for the cards.
+    const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
+    const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+    await tapCell(dm, BOUNDS, { x: 6, y: 5 });
+    await pane(dm).waitFor();
+    const row = dm.locator("[data-rvtt-pane-dock]").getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
+    await row.waitFor();
+    await shots.take(dm, "traps-fu20b-r2-pane-row-cramped");
+    await row.click();
+    await pane(dm).waitFor({ state: "detached" });
+    // The cards it stood for show, over the screen where the column has no room for the opened card, not just the column's row again.
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().waitFor();
+    await shots.take(dm, "traps-fu20b-r2-pane-row-cards-shown");
+    await alerts.getByRole("button", { name: "Close", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  });
+
+  test("fu20b-r2-7. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the alerts summary on the Panels sheet closes it and shows the cards over the screen (FU20B-OP-11)", async () => {
+    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Ruler");
+    await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
+    const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
+    const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+    await dm.getByRole("button", { name: "Panels", exact: true }).click();
+    const panels = dm.getByRole("region", { name: "Panels" });
+    await panels.waitFor();
+    const summary = dm.getByRole("button", { name: /went off.*Close the sheet to answer\.$/ });
+    await summary.waitFor();
+    await shots.take(dm, "traps-fu20b-r2-sheet-summary-cramped");
+    await summary.click();
+    await panels.waitFor({ state: "detached" });
+    const alerts = dm.getByRole("dialog", { name: "Alerts" });
+    await alerts.waitFor();
+    await alerts.getByRole("group", { name: "Hidden Pit went off" }).first().waitFor();
+    await shots.take(dm, "traps-fu20b-r2-sheet-summary-cards-shown");
+    await alerts.getByRole("button", { name: "Close", exact: true }).click();
+    await alerts.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  });
+
+  test("fu20b-2. on a DM phone held upright the waiting trap cards fold under the trap's pane, whose header and Close are whole in reach, and come back as it closes (LP13-TR-6)", async () => {
+    await dm.setViewportSize(PHONE);
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    const cards = dm.getByRole("group", { name: "Hidden Pit went off" });
+    await cards.first().waitFor();
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 5 });
+    await pane(dm).waitFor();
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    assert.equal(await cards.first().isVisible(), false, "a card draws over the pane");
+    assert.ok(await wholeInReach(pane(dm).getByRole("button", { name: "Close", exact: true })), "the pane's Close is out of reach");
+    await shots.take(dm, "traps-fu20b-pane-over-folded-cards");
+    await pane(dm).getByRole("button", { name: "Close", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await cards.first().waitFor();
+    await pickTool(dm, "Select");
+    for (const due of trap(dmSocket)?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: run.trapId, due: due.id });
+    await waitFor("the springings settled", () => (trap(dmSocket)?.rig?.due === undefined ? true : null));
   });
 });

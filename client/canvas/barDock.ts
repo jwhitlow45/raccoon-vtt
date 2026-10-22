@@ -2,7 +2,7 @@ import { createStore } from "zustand/vanilla";
 import type { Point, Size } from "../lib/camera.ts";
 import { isFinePointer } from "../lib/device.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
-import { scopeSlot } from "../state/scope.ts";
+import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /*
  * Where the token action bar sits (docs/design-v1-bar-dock.md), as plain
@@ -1005,6 +1005,27 @@ export function columnCards(input: { mapWidth: number; sheet: number; safe: Pick
   return { card, shadowLeft: Math.min(SHADOW_ROOM, input.mapWidth - card - rightPad) };
 }
 
+/** A toast's least height, a touch target's: the room it needs under the column's first card. */
+export const TOAST_MIN = 44;
+
+/**
+ * Where a toast that shows now starts on a phone (docs/design-v1-bar-dock.md
+ * 1.3): 8 px under the alerts column's first card, its top plus its
+ * height, while the notices span the map over the column and it shows a
+ * card (`cards`), so the toast never covers that card's buttons. Null
+ * keeps it at the top of the notices as before: beside the lane, with no
+ * card, with the cards folded or a summary row standing for them, or with
+ * under 44 px left above the tool's options (`optionsTop`). In the chrome's
+ * own px from the page's top, read once as each toast shows, so a toast
+ * never moves.
+ */
+export function toastTop(input: { spanning: boolean; column: ColumnFacts | null; cards: boolean; optionsTop: number }): number | null {
+  const { column } = input;
+  if (!input.spanning || !input.cards || !column || column.first <= 0) return null;
+  const top = column.top + column.first + EDGE;
+  return input.optionsTop - top >= TOAST_MIN ? top : null;
+}
+
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);
@@ -1053,14 +1074,29 @@ type BarDockState = {
   columnCramped: boolean;
   /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
   alertsOverlay: boolean;
+  /** Asks for the alerts over the screen to close (closeAlertsOverlay), counted so each ask is heard, and the panel the ask opened, which then takes focus. */
+  alertsClose: number;
+  alertsClosePanel: string | null;
   /** A popover of the tool's options is open (pages/Room.tsx ToolOptions). It rises under a roll card at a narrow screen's foot, which folds while it is open. */
   toolPopover: boolean;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
 );
+
+/**
+ * Closes the alerts over the screen for an action on a card there that
+ * opened `panel`, such as a trap's Save and damage or an ask's Open: the
+ * alerts are modal, so the panel would stay out of reach behind them, and
+ * it takes focus once they are gone (features/encounter/InitiativeStrip.tsx
+ * FightAlerts). With the alerts where they are, it asks nothing.
+ */
+export function closeAlertsOverlay(scope: RoomScope, panel: string): void {
+  const dock = scope.get(barDockSlot);
+  if (dock.getState().alertsOverlay) dock.setState((s) => ({ alertsClose: s.alertsClose + 1, alertsClosePanel: panel }));
+}
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));

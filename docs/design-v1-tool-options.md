@@ -348,6 +348,7 @@ Line: today's hint, then the reading "35 ft (15 ft + 20 ft)" with the diagonal r
 | Slot | Kind | Priority | Compact |
 |---|---|---|---|
 | Shared (DM) | Pressed toggle | 1 | |
+| Measure, Straight or Walking (docs/design-v1-movement.md) | Segmented | 4 | A chip with "Line" or "Walk" |
 | Keep ("Keep this ruler on the map") | Button | 2 | |
 | Clear | Danger | 2 | |
 | "Kept rulers (2)" (while this person has kept rulers to remove) | Chip, opens the "Kept rulers" setting popover | 3 | "Kept (2)" |

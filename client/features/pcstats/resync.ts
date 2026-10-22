@@ -181,8 +181,11 @@ export function keptRow(item: SyncItem, blocks: ReadingBlocks): KeptRow {
       return { first: `${rollTitle(theirs!)}: you removed it.`, theirs: `D&D Beyond says ${reading(blocks.after, theirs!)}.`, tick: "Add it back" };
     case "sameName":
       return { first: `${rollTitle(mine!)}, your own: ${reading(blocks.now, mine!)}`, theirs: `D&D Beyond says ${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond’s" };
-    default:
-      return { first: `${rollTitle(mine!)}, as you changed it: ${reading(blocks.now, mine!)}`, ...(tag ? { tag } : {}), theirs: `D&D Beyond says ${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond’s" };
+    default: {
+      // A roll renamed here can read just as D&D Beyond's does, so D&D Beyond's line names it whenever the names differ.
+      const named = rollTitle(theirs!) === rollTitle(mine!) ? "" : `${rollTitle(theirs!)}: `;
+      return { first: `${rollTitle(mine!)}, as you changed it: ${reading(blocks.now, mine!)}`, ...(tag ? { tag } : {}), theirs: `D&D Beyond says ${named}${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond’s" };
+    }
   }
 }
 

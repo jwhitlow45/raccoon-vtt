@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from "react";
 import { uuidv7 } from "#shared/ids.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
+import { closeAlertsOverlay } from "../../../canvas/barDock.ts";
+import { useRoomScope } from "../../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { askSwitches } from "../../rolls/logic.ts";
 import { newPage, readDraft, replace, restoredPage, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
@@ -74,6 +76,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
   const sceneId = useRoomView((s) => s.sceneId);
   const ui = useRoomUi();
   const actions = useRoomActions();
+  const scope = useRoomScope();
   return useMemo(
     () => (input: StartInput, opts: { replace?: boolean } = {}) => {
       restoreDraft(store, roomId);
@@ -100,8 +103,10 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
       });
       store.setState({ page, shownIn: input.panel, restored: false });
       ui.openPanel(input.panel);
+      // Started from a card in the alerts over the screen, the panel would open behind them, out of reach.
+      closeAlertsOverlay(scope, input.panel);
       return true;
     },
-    [store, roomId, sceneId, ui, actions],
+    [store, roomId, sceneId, ui, actions, scope],
   );
 }
