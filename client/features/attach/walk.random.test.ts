@@ -48,6 +48,11 @@ function randomCase(r: () => number): Case {
     const from = int(r, hy - 4, hy + 2);
     for (let v = from; v < from + int(r, 1, 5); v++) edges[chance(r, 0.5) ? `${at},${v},w` : `${v},${at},n`] = { kind: "wall" };
   }
+  // Now and then a wall right across the scene, so a walk past it finds no way and is held at it, straight.
+  if (chance(r, 0.3)) {
+    const at = int(r, hx - 4, hx + 6);
+    for (let v = 0; v < 30; v++) edges[`${at},${v},w`] = { kind: "wall" };
+  }
   const flies = chance(r, 0.15);
   const horse = token("horse", { name: "Warhorse", kind: "npc", size: "large", ownerIds: chance(r, 0.7) ? ["p1"] : [], x: hx, y: hy, elevation: flies ? 20 : 10, actor: { inline: actor({ speeds: { walk: 60 } }) } });
   // An independent ride: a drag of a controlled mount's rider moves the mount instead (Stage.tsx), so the board never walks her alone.
@@ -87,6 +92,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
     let routed = 0;
     let off = 0;
     let refusedRoutes = 0;
+    let held = 0;
     for (let seed = 1; seed <= 400; seed++) {
       const r = rng(seed);
       const c = randomCase(r);
@@ -127,10 +133,11 @@ describe("a drag of an attached token plans the walk the server takes and stores
       assert.equal(drag.preview.read.dragFt, stored, `${where}: the band read another cost than the one stored, ${JSON.stringify(op)}`);
       assert.equal(drag.frame.ft, stored, `${where}: the frames sent another cost than the one stored`);
       moved++;
+      if (drag.answer.kind === "none") held++;
       if (op.t === "token.move" && op.route) routed++;
       if (mover.attached && !after.attached) off++;
     }
-    // A run that never walks off a mount or along a route tests nothing.
-    assert.ok(moved > 200 && routed > 30 && off > 60, JSON.stringify({ moved, routed, off, refusedRoutes }));
+    // A run that never walks off a mount, along a route or held at a wall tests nothing.
+    assert.ok(moved > 200 && routed > 30 && off > 60 && held > 30, JSON.stringify({ moved, routed, off, held, refusedRoutes }));
   });
 });
