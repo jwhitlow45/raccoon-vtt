@@ -869,7 +869,7 @@ When a section asks for something on the map, such as **Add squares**, the squar
 
 At the foot of the pane, **Armed** and **Found** show the trap's state, and you can change either by hand. **Ask to search** and **Ask to disarm** send a roll request for the trap's checks to the creatures you have selected, or to the whole party. **Set it off** sets the trap off now, by the creatures you have selected or else by those standing on it, for when a character prods the plate with a pole. **Delete** asks for a second tap.
 
-On your map, an armed trap is hatched in red with its name over it, a sprung one turns grey, a disarmed one keeps a grey dashed outline, and an eye marks one the players have found. Tap a trap with the Trap tool to open its pane again, or find it under **Traps** in the Outliner. A scene holds up to 50 traps.
+On your map, an armed trap is hatched in red with its name over it, a sprung one turns grey, a disarmed one keeps a grey dashed outline, and an eye marks one the players have found. Zoom far out, to where creatures' names disappear, and traps lose their names too, keeping just their icons, so a crowded map stays readable. Tap a trap with the Trap tool to open its pane again, or find it under **Traps** in the Outliner. A scene holds up to 50 traps.
 
 > [!TIP]
 > Build your traps on a scene the players aren't on yet, or while their screens are blacked out. Traps go off by themselves only on the players' scene, and never during a blackout.
@@ -893,7 +893,7 @@ A player can't take back a move with **Undo move** once a trap cut it short or c
 
 ### Found traps, searching and disarming
 
-Once the players know about a trap, mark it **Found** in its pane, or from the hint's toast below. Unless you turned it off, a trap also marks itself found when the players see it go off. Your players then see the trap's name and its outline, hatched in a warning color, and "Disarmed" once you disarm it, but never whether it is still armed, its DC or what it does. When a player drags a token across a found trap that is not disarmed, the drag's label warns them: "Crosses Hidden Pit". Your own drags warn you about every armed trap.
+Once the players know about a trap, mark it **Found** in its pane, or from the hint's toast below. Unless you turned it off, a trap also marks itself found when the players see it go off. Your players then see the trap's name and its outline, hatched in a warning color, and "Disarmed" once you disarm it, but never whether it is still armed, its DC or what it does. Like yours, their map drops a trap's name when zoomed far out. When a player drags a token across a found trap that is not disarmed, the drag's label warns them: "Crosses Hidden Pit". Your own drags warn you about every armed trap.
 
 To let the players look for traps, open the trap's pane and press **Ask to search**. It asks the selected creatures, or the party, for the trap's find check. **Ask to disarm** does the same with its disarm check. When they succeed, turn off **Armed**, and the trap is disarmed.
 
