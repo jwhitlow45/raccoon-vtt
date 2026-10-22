@@ -759,7 +759,7 @@ function withHeights(state: RoomState, heights: Readonly<Record<string, number>>
 }
 
 describe("a holder's route search keeps the creatures it drags beside it to ground players have seen (review FU20A-ASTRA-4)", () => {
-  test("random tows by the fog's edge: two rooms that differ only in the heights of squares players have not seen give the same way and the same note", () => {
+  test("random tows by the fog's edge: two rooms that differ only in the heights of squares players have not seen give the same search answer, the follower it names included", () => {
     let compared = 0;
     let towedAway = 0;
     let routes = 0;
