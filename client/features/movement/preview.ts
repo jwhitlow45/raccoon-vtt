@@ -8,7 +8,7 @@ import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, landedElevation, routeLanding, samePose, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropLanding, landedElevation, routeLanding, samePose, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -92,13 +92,14 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
     pieces = kept.length > 0 ? kept : undefined;
   }
   if (walkers) to = walkers.at;
+  // Landed as the drop lands it, by its holder while it sits on one, so the band reads the leg the op sends.
   const points = pieces
     ? walkers
-      ? routePoints(view.buildChunks, token, pieces, landedElevation(view.buildChunks, token, to))
+      ? routePoints(view.buildChunks, token, pieces, dropLanding(view, token, to))
       : along!.points
     : [
         { x: token.x, y: token.y, elevation: token.elevation },
-        { x: to.x, y: to.y, elevation: landedElevation(view.buildChunks, token, to) },
+        { x: to.x, y: to.y, elevation: dropLanding(view, token, to) },
       ];
   const encounter = view.encounter;
   // A controlled mount sharing its rider's turn reads its own path and speeds (docs/design-v1-attach.md 7.2).

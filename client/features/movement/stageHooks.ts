@@ -4,13 +4,13 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { routePoints, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkWorld, WorkBudget, worldUnits, type WalkRoute } from "#shared/rules/walk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
-import { onSeats, walkersFor, walkersOfGroup } from "../attach/walk.ts";
+import { walkersFor, walkersOfGroup } from "../attach/walk.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, cutRoute, dropMode, goesStraight, keyStep, landedElevation, planGroup, planLands, planOne, planWalk, routeTarget, samePose, walkersStop, type DropPlan, type DropToken, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, cutRoute, dropMode, dropLanding, goesStraight, keyStep, planGroup, planLands, planOne, planWalk, routeTarget, samePose, walkersStop, type DropPlan, type DropToken, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -169,7 +169,7 @@ export function dragStops(deps: DragDeps): DragStops {
       // The route as the drop would land it, cut past 64 pieces (drop.ts cutRoute), as the preview draws it.
       const long = route ? cutRoute(view, token, route.pieces) : null;
       const end = long ? long.at : target;
-      const landing = landedElevation(view.buildChunks, token, end);
+      const landing = dropLanding(view, token, end);
       const points = route
         ? routePoints(view.buildChunks, token, long ? long.pieces : route.pieces, landing)
         : [
@@ -349,17 +349,14 @@ export function dragStops(deps: DragDeps): DragStops {
     return walk;
   };
 
-  // A new seat goes at its holder's elevation, which the server takes for a token a player may only re-seat (attach/walk.ts onSeats).
-  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] => {
-    const view = store.getState().view;
-    return sendPlan(view ? { ...plan, moves: onSeats(view, plan.moves) } : plan, {
+  const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
+    sendPlan(plan, {
       dispatch: (op, opts) => actions.dispatch(op, onAnswer ? { ...opts, onAnswer: (answer) => onAnswer(op, answer) } : opts),
       newId: () => actions.newId(),
       note: (note) => notes.setState({ note, busy: false }),
       notify: (text) => ui.notify(text),
       showActions: (open) => ui.showActions(open),
     });
-  };
 
   return {
     start(tokenId) {

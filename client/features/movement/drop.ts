@@ -1,6 +1,7 @@
-import type { BuildChunk, Scene, Token } from "#shared/model.ts";
+import type { BuildChunk, RoomState, Scene, Token } from "#shared/model.ts";
 import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorRef, type OpOf } from "#shared/protocol.ts";
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
+import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround, standing } from "#shared/rules/heights.ts";
 import { landing, legStop, previewSqueezed, squeezeFits, type DropMode } from "#shared/rules/movement.ts";
@@ -78,6 +79,29 @@ export function landedOffHolder(chunks: Readonly<Record<string, BuildChunk>>, to
   return holderStands === "ground" ? there : Math.max(token.elevation, there);
 }
 
+/** What a drop reads beside the build: the tokens and the settings, when it has them, so a token on a holder lands by it (dropLanding). */
+export type DropState = BuildState & { tokens?: Readonly<Record<string, (DropToken & Pick<Token, "kind"> & Partial<Pick<Token, "attached" | "height">>) | undefined>>; meta?: Pick<RoomState["meta"], "settings"> };
+
+/**
+ * The elevation a drop lands a token at. One that sits on a holder
+ * (docs/design-v1-attach.md 4.1 and 4.3) lands by the holder, not by the
+ * ground under its seat, which differs where the holder straddles two
+ * heights: at the holder's elevation where the link still holds there, the
+ * height the server takes for a new seat, else as a Get off lands
+ * (landedOffHolder). Any other token lands by its own footing
+ * (landedElevation). Every drop, its picture on the board and the op it
+ * sends read this one landing, so the band reads the leg the server stores
+ * and the leg tests judge the height sent.
+ */
+export function dropLanding(state: DropState, token: DropToken, at: Point & { squeeze?: boolean }): number {
+  const seated = state.tokens?.[token.id];
+  const link = seated?.attached;
+  const holder = seated && link && onHolder(link.kind) && state.tokens ? (holderOf(state.tokens, seated) as NonNullable<typeof seated> | undefined) : undefined;
+  if (!link || !holder || !state.meta) return landedElevation(state.buildChunks, token, at);
+  const stays = linkHolds(state.meta.settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder);
+  return stays ? holder.elevation : landedOffHolder(state.buildChunks, token, holder, at);
+}
+
 /** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
 export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"] };
 
@@ -114,9 +138,9 @@ function moved(token: DropToken, at: Point & { squeeze: boolean }): boolean {
   return at.x !== token.x || at.y !== token.y || at.squeeze !== (token.squeeze === true);
 }
 
-export function landed(chunks: Readonly<Record<string, BuildChunk>>, token: DropToken, at: Point & { squeeze: boolean }): Landed {
+export function landed(state: DropState, token: DropToken, at: Point & { squeeze: boolean }): Landed {
   const out: Landed = { tokenId: token.id, x: at.x, y: at.y };
-  const elevation = landedElevation(chunks, token, at);
+  const elevation = dropLanding(state, token, at);
   if (elevation !== token.elevation) out.elevation = elevation;
   if (at.squeeze) out.squeeze = true;
   return out;
@@ -136,12 +160,12 @@ export function landed(chunks: Readonly<Record<string, BuildChunk>>, token: Drop
  * the far side. So a squeezed creature dragged along its corridor stays
  * in it, and a nudge leaves it where it is.
  */
-export function squeezedSpot(state: BuildState, token: DropToken, raw: Point, mode: DropMode): (Point & { squeeze: true }) | null {
+export function squeezedSpot(state: DropState, token: DropToken, raw: Point, mode: DropMode): (Point & { squeeze: true }) | null {
   if (!canSqueeze(token)) return null;
   const size = footprintSize(token);
   const to = snapPosition(raw.x, raw.y, size);
   const spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
-  const land = landing(state, token, { ...spot, elevation: landedElevation(state.buildChunks, token, spot) }, mode);
+  const land = landing(state, token, { ...spot, elevation: dropLanding(state, token, spot) }, mode);
   return land.squeeze && !land.stopped && land.x === spot.x && land.y === spot.y ? { ...spot, squeeze: true } : null;
 }
 
@@ -152,15 +176,15 @@ export function squeezedSpot(state: BuildState, token: DropToken, raw: Point, mo
  * walks a player's token up to the last clear spot and lines a squeezing
  * creature up with a narrow opening.
  */
-export function planOne(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
+export function planOne(state: DropState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
   const squeezed = squeezedSpot(state, token, raw, mode);
-  if (squeezed) return { moves: moved(token, squeezed) ? [landed(state.buildChunks, token, squeezed)] : [], stop: null, held: [] };
+  if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
   const to = snapPosition(raw.x, raw.y, footprintSize(token));
   if (to.x === token.x && to.y === token.y) return { moves: [], stop: null, held: [] };
-  const elevation = landedElevation(state.buildChunks, token, to);
+  const elevation = dropLanding(state, token, to);
   const land = landing(state, token, { x: to.x, y: to.y, elevation }, mode);
   const at = { x: land.x, y: land.y, squeeze: land.squeeze };
-  const moves = moved(token, at) ? [landed(state.buildChunks, token, at)] : [];
+  const moves = moved(token, at) ? [landed(state, token, at)] : [];
   const stop: Stop | null = land.stopped
     ? { tokenId: token.id, sceneId: token.sceneId, blocker: land.stopped.blocker, door: land.stopped.door, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: land.x, y: land.y } }
     : null;
@@ -177,7 +201,7 @@ export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "
  * route steps on the lattice from where the token stands, so a token that
  * stands off its grid lands on that lattice, the nearest spot to it.
  */
-export function routeTarget(state: BuildState, token: DropToken, raw: Point): Point & { squeeze: boolean } {
+export function routeTarget(state: DropState, token: DropToken, raw: Point): Point & { squeeze: boolean } {
   const placed = planOne(state, token, raw, "free").moves[0];
   const at = placed ? { x: placed.x, y: placed.y, squeeze: placed.squeeze === true } : { x: token.x, y: token.y, squeeze: token.squeeze === true };
   const L = routeLattice(token);
@@ -221,8 +245,8 @@ export function cutRoute(state: BuildState, token: DropToken, pieces: readonly R
  * the server refuses. Kept per route, so a drag's every frame reads it
  * once.
  */
-export function routeLanding(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
-  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell}`;
+export function routeLanding(state: DropState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
+  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell},${holderKey(state, token)}`;
   const known = landings.get(pieces);
   if (known && known.key === key && known.chunks === state.buildChunks && known.scene === state.scenes[token.sceneId]) return known.landing;
   const landing = landingOf(state, token, target, pieces, feetPerCell);
@@ -237,7 +261,7 @@ type Landing = { pieces: RoutePiece[]; at: Point & { squeeze?: boolean }; points
  * search found no route, or one `routeLanding` will not take. The board's
  * picture and the drop read it alike.
  */
-export function goesStraight(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, answer: Found | { kind: "searching" }, feetPerCell: number): boolean {
+export function goesStraight(state: DropState, token: DropToken, target: Point & { squeeze?: boolean }, answer: Found | { kind: "searching" }, feetPerCell: number): boolean {
   return answer.kind === "none" || (answer.kind === "route" && !routeLanding(state, token, target, answer.route.pieces, feetPerCell));
 }
 
@@ -256,11 +280,19 @@ export function planLands(plan: DropPlan, token: DropToken): Pose {
 
 const landings = new WeakMap<readonly RoutePiece[], { key: string; chunks: object; scene: unknown; landing: Landing | null }>();
 
-function landingOf(state: BuildState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
+/** What a landing kept per route reads of the token's holder (dropLanding), so it is worked out again when the holder moves or the link changes. */
+function holderKey(state: DropState, token: DropToken): string {
+  const seated = state.tokens?.[token.id];
+  const link = seated?.attached;
+  const holder = seated && link && state.meta && state.tokens && onHolder(link.kind) ? (holderOf(state.tokens, seated) as NonNullable<typeof seated> | undefined) : undefined;
+  return holder ? `${link!.kind},${holder.id},${holder.size},${holder.w},${holder.h},${holder.x},${holder.y},${holder.elevation}` : "";
+}
+
+function landingOf(state: DropState, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
   const cut = cutRoute(state, token, pieces);
   if (pieces.length === 0 || (pieces.length > MAX_ROUTE_PIECES && !cut)) return null;
   const at = cut ? cut.at : target;
-  const elevation = landedElevation(state.buildChunks, token, at);
+  const elevation = dropLanding(state, token, at);
   const kept = passing(state, token, cut ? cut.pieces : [...pieces], elevation);
   if (!kept) return null;
   const points = routePoints(state.buildChunks, token, kept, elevation);
@@ -310,7 +342,7 @@ export function keyStep(world: WalkWorld, target: Point, charge: (units?: number
  * never searched, what it walks over counted (`keyStep`), and held at a
  * wall as a drop is.
  */
-export function planPress(state: BuildState, world: WalkWorld | null, token: DropToken, at: Point, mode: Exclude<DropMode, "teleport">, feetPerCell: number, charge?: (units?: number) => void): DropPlan {
+export function planPress(state: DropState, world: WalkWorld | null, token: DropToken, at: Point, mode: Exclude<DropMode, "teleport">, feetPerCell: number, charge?: (units?: number) => void): DropPlan {
   const found = world ? keyStep(world, routeTarget(state, token, at), charge) : { kind: "open" as const };
   return planWalk(state, token, at, mode, found, feetPerCell, world ? (to) => keyStep(world, to, charge) : undefined);
 }
@@ -335,10 +367,10 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * straight leg, as the DM's drop through a wall, it goes as the straight
  * leg alone.
  */
-export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
+export function planWalk(state: DropState, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
   const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
   if (walk) {
-    const move = landed(state.buildChunks, token, { ...walk.at, squeeze: walk.at.squeeze === true });
+    const move = landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true });
     const route = walk.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
     return { moves: [{ ...move, route }], stop: null, held: [], ...(walk.cut ? { cut: true as const } : {}) };
   }
@@ -365,17 +397,17 @@ export function planWalk(state: BuildState, token: DropToken, raw: Point, mode: 
  * (docs/design-v1-attach.md 4.2), each tested on the token's leg offset by
  * its place: a token one of them could not follow stays where it was.
  */
-export function planGroup(state: BuildState, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
+export function planGroup(state: DropState, tokens: readonly DropToken[], dx: number, dy: number, mode: Exclude<DropMode, "teleport">, walkersOf: (token: DropToken) => readonly DropToken[] = () => []): DropPlan {
   const moves: Landed[] = [];
   const held: DropPlan["held"] = [];
   for (const token of tokens) {
     const to = snapPosition(token.x + dx, token.y + dy, footprintSize(token));
     if (to.x === token.x && to.y === token.y) continue;
-    const elevation = landedElevation(state.buildChunks, token, to);
+    const elevation = dropLanding(state, token, to);
     const from = { x: token.x, y: token.y, elevation: token.elevation };
     const stopped = mode === "walk" ? (legStop(state, token, { x: to.x, y: to.y, elevation }) ?? walkerStop(state, token, walkersOf(token), from, { x: to.x, y: to.y, elevation })) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
-    else moves.push(landed(state.buildChunks, token, { ...to, squeeze: false }));
+    else moves.push(landed(state, token, { ...to, squeeze: false }));
   }
   return { moves, stop: null, held };
 }
@@ -457,7 +489,7 @@ export function walkersStop(state: BuildState, lead: DropToken, points: readonly
  * kept up to there, and the walk is stopped there as a lone walk is at a
  * wall, with the note that says so.
  */
-export function cutForWalkers(state: BuildState, lead: DropToken, plan: DropPlan, walkers: readonly DropToken[], mode: Exclude<DropMode, "teleport">): DropPlan {
+export function cutForWalkers(state: DropState, lead: DropToken, plan: DropPlan, walkers: readonly DropToken[], mode: Exclude<DropMode, "teleport">): DropPlan {
   const move = plan.moves.find((m) => m.tokenId === lead.id);
   if (mode !== "walk" || walkers.length === 0 || !move) return plan;
   const landing = move.elevation ?? lead.elevation;
@@ -467,7 +499,7 @@ export function cutForWalkers(state: BuildState, lead: DropToken, plan: DropPlan
   const others = plan.moves.filter((m) => m !== move);
   const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y } };
   if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted };
-  const cut = landed(state.buildChunks, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
+  const cut = landed(state, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
   if (move.route) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
   return { ...plan, moves: [...others, cut], stop: halted };
 }

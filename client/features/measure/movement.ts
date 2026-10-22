@@ -315,7 +315,7 @@ export function dragReading(input: {
   walk?: DragWalk;
   /** The leg's cost as another device's frame gives it, terrain included, which the corners alone cannot tell: the band and what is left read it. */
   costFt?: number;
-  /** How a plain leg lands: its elevation and whether it squeezes there, which its cost reads as the move records it (route.ts `plainLegCost`). */
+  /** How a plain leg lands: its elevation, by its holder while it sits on one (movement/drop.ts dropLanding), and whether it squeezes there, which its cost reads as the move records it (route.ts `plainLegCost`). */
   landing?: { elevation: number; squeeze?: true };
   /**
    * The mount the drop leaves and half the rider's Speed, when the leg

@@ -6,9 +6,9 @@ import { applyOp } from "#shared/reducer.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, actor, env, room, token } from "#shared/testutil.ts";
-import { planWalk } from "./drop.ts";
+import { moveOpsOf, planWalk } from "./drop.ts";
 import { frameFields, walkPreview } from "./preview.ts";
-import { line, thorn, world } from "./testing.ts";
+import { line, raised, thorn, world } from "./testing.ts";
 
 /** A lone drag's picture and frames (docs/design-v1-movement.md 3.1, review MV-O-6 and MV-O-9). */
 
@@ -80,14 +80,18 @@ describe("the picture of a drag's walk", () => {
 
 describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach.md 7.3)", () => {
   /** Bree (P1's, walking 30 ft) on her own turn, riding an independent warhorse at 4,4. */
-  function riding(diagonal: "five" | "fiveTen" = "five", hidden: "horse" | "bree" | undefined = undefined): RoomState {
+  function riding(diagonal: "five" | "fiveTen" = "five", hidden: "horse" | "bree" | undefined = undefined, step = false): RoomState {
     const unseen = (id: string) => (hidden === id ? { visibility: "dm" as const } : {});
-    let state = room({
-      tokens: {
-        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, ...unseen("horse"), actor: { inline: actor({ speeds: { walk: 60 } }) } }),
-        bree: token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" }, ...unseen("bree"), actor: { inline: actor({ speeds: { walk: 30 } }) } }),
-        gob: token("gob", { x: 20, y: 20 }),
-      },
+    // With `step`, the horse straddles a 10 ft step, standing on its high half at 10 ft, and Bree sits on its low half.
+    const up = step ? { elevation: 10 } : {};
+    let state = world({
+      blockMovement: false,
+      heights: step ? raised(5, 4, 6, 6, 10) : {},
+      tokens: [
+        token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, ...up, ...unseen("horse"), actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, ...up, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" }, ...unseen("bree"), actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+        token("gob", { x: 20, y: 20 }),
+      ],
     });
     state.meta.settings = { ...state.meta.settings, diagonal, revealHiddenOnTurn: false };
     for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }, { id: "e2", tokenId: "gob", value: 5 }] }, { t: "encounter.next" }] as Op[]).entries()) {
@@ -98,13 +102,15 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     return state;
   }
 
-  /** The preview's leg and the cost the reducer stores for the same drop, summed over the stops it adds. */
+  /** The preview's leg and the cost the reducer stores for the op the drop sends, summed over the stops it adds. */
   function both(state: RoomState, target: { x: number; y: number }, pieces?: RoutePiece[]): [number, number] {
     const bree = state.tokens.bree!;
     const answer = pieces ? { kind: "route" as const, route: { pieces, points: [], endsBlocked: false } } : { kind: "open" as const };
     const preview = walkPreview({ view: state, token: bree, target, answer, held: null, world: publicWorld(state, bree, { role: "dm" }), role: "dm" });
-    const move: Op = { t: "token.move", tokenId: "bree", x: target.x, y: target.y, ...(pieces ? { route: pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } : {}) };
-    const r = applyOp(state, move, DM, env(9));
+    const plan = planWalk(state, bree, target, "free", pieces ? { kind: "route", route: { pieces } } : { kind: "open" }, state.meta.settings.feetPerCell);
+    const [move] = moveOpsOf(plan.moves);
+    assert.ok(move);
+    const r = applyOp(state, move as Op, DM, env(9));
     assert.ok(r.ok);
     const before = bree.path?.stops.length ?? 1;
     const stored = r.state.tokens.bree!.path!.stops.slice(before).reduce((sum, s) => sum + (s.cost ?? 0), 0);
@@ -123,5 +129,15 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     assert.deepEqual(both(riding("five", "horse"), { x: 8, y: 4 }), [20, 20]);
     // A hidden rider still pays, since only the DM and her owners read her path (review AT-O-19).
     assert.deepEqual(both(riding("five", "bree"), { x: 8, y: 4 }), [25, 25]);
+  });
+
+  test("off the low half of a horse straddling a step, the band reads the landing the drop sends, judged by the horse (review AT-ASTRA-13)", () => {
+    // By her own footing Bree, at 10 ft over 0 ft ground, would fly off at 10 ft. Off a horse on the ground she lands on it.
+    const state = riding("fiveTen", undefined, true);
+    const plan = planWalk(state, state.tokens.bree!, { x: 1, y: 4 }, "free", { kind: "open" }, 5);
+    assert.equal(plan.moves[0]?.elevation, 0);
+    const [shown, stored] = both(state, { x: 1, y: 4 });
+    assert.equal(shown, stored);
+    assert.equal(stored, 30);
   });
 });
