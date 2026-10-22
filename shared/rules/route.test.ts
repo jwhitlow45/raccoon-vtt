@@ -4,7 +4,7 @@ import type { DiagonalRule } from "../model.ts";
 import { legFeet } from "./distance.ts";
 import { sizeCategory, sizeSteps } from "./footprint.ts";
 import { legStop } from "./movement.ts";
-import { onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, straightFeet, trueLength, type RoutePoint } from "./route.ts";
+import { onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, routeStop, straightFeet, trueLength, type RoutePoint } from "./route.ts";
 import { free, line, tok, world } from "./testWorld.ts";
 
 const RULES: DiagonalRule[] = ["five", "fiveTen", "euclid"];
@@ -226,6 +226,19 @@ describe("routeSpots (6.1, contract 4.3)", () => {
       spots.map((p) => p.elevation),
       [0, 5, 5, 0],
     );
+  });
+});
+
+describe("routeStop (6.1)", () => {
+  test("a walk squeezes only where it starts: a later piece's ledges are judged on the full footprint, whichever way that falls", () => {
+    // At (5, 7.5) its full footprint stands on the 10 ft cell (5, 9), so it walks on at 10 ft, and every ledge stops it, the 10 ft block at (7, 6) on its way. Its squeezed footprint there is off that cell, and would read it as flying at 10 ft, which that block does not stop.
+    const block = world({ w: 14, h: 14, heights: { "7,6": 10, "5,9": 10 } });
+    const ogre = tok(block, { size: "large", x: 3, y: 4, squeeze: true });
+    assert.deepEqual(routeStop(block, ogre, [[5, 7.5, 0, 0], [6.5, 4.5, 0, 0], [1, 6.5, 0, 0]], 0), { piece: 1, blocker: "ledge" });
+    // Here the walk starts inside the 5 ft cell (3, 3) and keeps its elevation. At (2, 1.5) its full footprint is still inside, where no ledge stops it. Its squeezed one there would stand on the ground, which every ledge stops.
+    const rise = world({ w: 14, h: 14, heights: { "3,3": 5, "6,6": 5, "6,7": 10 } });
+    const other = tok(rise, { size: "large", x: 2.5, y: 2, squeeze: true });
+    assert.equal(routeStop(rise, other, [[2, 1.5, 0, 0], [6.5, 8, 0, 0]], 0), null);
   });
 });
 
