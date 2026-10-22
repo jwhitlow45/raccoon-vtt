@@ -176,6 +176,25 @@ describe("what getting on and off costs (7.3)", () => {
     assert.equal(bresTurn(free).refused({ t: "token.detach", tokenId: "bree" }), "getting off a mount needs a place beside it");
   });
 
+  test("a ride no player sees costs nothing to leave or take, so the rider's owner reads the same leg with or without a hidden mount (8.0)", () => {
+    // Room a: Bree rides a horse no player sees. Room b: she stands there alone. Her owner's copies are the same.
+    const hidden = () => bresTurn((s) => (s.tokens.horse = { ...s.tokens.horse!, visibility: "dm" }) && (s.tokens.bree = { ...s.tokens.bree!, attached: { to: "horse", kind: "ride" } }));
+    const alone = () => bresTurn((s) => (delete s.tokens.horse, (s.tokens.bree = { ...s.tokens.bree!, attached: undefined })));
+    const owners = (f: ReturnType<typeof bresTurn>) => projectState(f.state, P1, { sceneId: "s1" }).tokens.bree!.path?.stops;
+    assert.deepEqual(owners(hidden()), owners(alone()));
+    const ops: [string, Op][] = [
+      ["a move off", { t: "token.move", tokenId: "bree", x: 7, y: 4 }],
+      ["a group move off", { t: "token.moveMany", moves: [{ tokenId: "bree", x: 7, y: 4 }, { tokenId: "gob", x: 21, y: 20 }] }],
+    ];
+    for (const [name, op] of ops) assert.deepEqual(owners(hidden().run(op)), owners(alone().run(op)), name);
+    // The DM's Get off of the hidden ride reads as the same walk taken by a move.
+    assert.deepEqual(owners(hidden().run({ t: "token.detach", tokenId: "bree", x: 6, y: 4 })), owners(alone().run({ t: "token.move", tokenId: "bree", x: 6, y: 4 })));
+    // And getting on one costs only the leg.
+    const mount = (f: ReturnType<typeof bresTurn>) => f.run({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: 4, y: 4, elevation: 0 });
+    const away = (s: RoomState) => (s.tokens.horse = { ...s.tokens.horse!, visibility: "dm" }) && (s.tokens.bree = { ...s.tokens.bree!, x: 6, y: 4, attached: undefined });
+    assert.deepEqual(owners(mount(bresTurn(away))), owners(bresTurn((s) => (delete s.tokens.horse, (s.tokens.bree = { ...s.tokens.bree!, x: 6, y: 4, attached: undefined }))).run({ t: "token.move", tokenId: "bree", x: 4, y: 4 })));
+  });
+
   test("nothing is paid off the rider's turn", () => {
     const f = bresTurn().run({ t: "encounter.next" }).run({ t: "token.detach", tokenId: "bree", x: 6, y: 4 });
     assert.equal(f.state.tokens.bree!.path?.turn === f.state.encounter!.turnStart?.seq, false);

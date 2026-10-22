@@ -160,7 +160,7 @@ export function settleMounts(tx: Tx): void {
  */
 function mountingCost(tx: Tx, rider: Token, mountId: string): number | null {
   if (rider.attached?.kind === "ride" && rider.attached.to === mountId) return null;
-  return mountCost(tx, rider);
+  return mountCost(tx, rider, tx.token(mountId));
 }
 
 /**
@@ -209,7 +209,7 @@ export function tokenDetach(tx: Tx, op: OpOf<"token.detach">): void {
   const next: Token = { ...loose, ...spot };
   delete next.squeeze;
   const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
-  const cost = link.kind === "ride" ? mountCost(tx, carried) : null;
+  const cost = link.kind === "ride" ? mountCost(tx, carried, holder) : null;
   tx.write(keys.token(carried.id), cost === null ? withPath(tx, carried, next, judged) : dismounted(tx, carried, next, holder, judged, cost));
   placeCarried(tx, along, judged);
 }

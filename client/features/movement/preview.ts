@@ -7,7 +7,7 @@ import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
 import { dragReading, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
-import { towingWord } from "../attach/walk.ts";
+import { seenIn, towingWord } from "../attach/walk.ts";
 import { cutPieces, landedElevation, routeLanding, samePose, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
@@ -52,14 +52,17 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
 /**
  * The mount a rider's drop at `at` walks it off, with half its Speed, as
  * the reducer charges it on the rider's own turn (shared/reducer/tokens.ts
- * walkedOwn): its ride no longer holds there. None without the speeds,
+ * walkedOwn, mountCost): its ride no longer holds there, and every player
+ * sees the rider and the mount, so the link. None without the speeds,
  * which only the DM and the rider's owners hold.
  */
-export function dismountOf(view: RoomState, token: Token, at: RoutePoint): { mount: PlacedToken; halfFt: number } | undefined {
+export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: Role): { mount: PlacedToken; halfFt: number } | undefined {
   if (token.attached?.kind !== "ride") return undefined;
   const mount = holderOf(view.tokens, token) as Token | undefined;
   const walk = speedsOf(view, token)?.walk;
   if (!mount || walk === undefined || linkHolds(view.meta.settings, "ride", { ...token, ...at }, mount)) return undefined;
+  const seen = seenIn(view, role);
+  if (!seen(token) || !seen(mount)) return undefined;
   return { mount, halfFt: Math.floor(walk / 2) };
 }
 
@@ -101,7 +104,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   const encounter = view.encounter;
   // A controlled mount sharing its rider's turn reads its own path and speeds (docs/design-v1-attach.md 7.2).
   const activeTokenId = turnMoverId(view) ?? null;
-  const dismount = dismountOf(view, token, points[points.length - 1]!);
+  const dismount = dismountOf(view, token, points[points.length - 1]!, role);
   const read = dragReading({
     token,
     to,

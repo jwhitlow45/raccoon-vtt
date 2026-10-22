@@ -80,10 +80,10 @@ describe("the picture of a drag's walk", () => {
 
 describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach.md 7.3)", () => {
   /** Bree (P1's, walking 30 ft) on her own turn, riding an independent warhorse at 4,4. */
-  function riding(diagonal: "five" | "fiveTen" = "five"): RoomState {
+  function riding(diagonal: "five" | "fiveTen" = "five", hidden = false): RoomState {
     let state = room({
       tokens: {
-        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, ...(hidden ? { visibility: "dm" as const } : {}), actor: { inline: actor({ speeds: { walk: 60 } }) } }),
         bree: token("bree", { name: "Bree", kind: "pc", x: 4, y: 4, ownerIds: ["p1"], attached: { to: "horse", kind: "ride" }, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
         gob: token("gob", { x: 20, y: 20 }),
       },
@@ -115,7 +115,8 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     assert.deepEqual(both(riding(), { x: 7, y: 6 }, [[7, 4, 0, 0], [7, 6, 0, 0]]), [30, 30]);
     const [shown, stored] = both(riding("fiveTen"), { x: 8, y: 8 });
     assert.equal(shown, stored);
-    // A drop that keeps her seat is an ordinary leg.
+    // A drop that keeps her seat is an ordinary leg, and so is one off a mount no player sees (8.0).
     assert.deepEqual(both(riding(), { x: 5, y: 5 }), [5, 5]);
+    assert.deepEqual(both(riding("five", true), { x: 8, y: 4 }), [20, 20]);
   });
 });
