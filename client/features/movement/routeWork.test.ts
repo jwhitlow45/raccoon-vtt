@@ -107,6 +107,114 @@ describe("the board's route work (routeWork.ts)", () => {
     assert.deepEqual(log, ["dropper"]);
   });
 
+  test("the rest take turns by who comes next, however many finish or are dropped during a turn (review MV-O-25)", () => {
+    const clock = new Clock();
+    const work = new RouteWork(clock, () => new WorkBudget({ limit: 10 }));
+    let frame: string[] = [];
+    const frames: string[][] = [];
+    /** Work that runs once a frame, spending its budget, or finishes at once. */
+    const job = (name: string, quick = false): RouteJob => ({
+      run: (budget) => {
+        frame.push(name);
+        if (quick) return true;
+        budget.charge(10);
+        return false;
+      },
+    });
+    const turn = () => {
+      frame = [];
+      clock.frame();
+      frames.push(frame);
+    };
+    const [b, c, d, e] = ["b", "c", "d", "e"].map((name) => job(name));
+    work.add(job("a", true));
+    for (const each of [b, c, d, e]) work.add(each!);
+    for (let f = 0; f < 6; f++) turn();
+    // a finished in the first frame's turn, so c, which came after the last that ran, goes next.
+    assert.deepEqual(frames, [["a", "b"], ["c"], ["d"], ["e"], ["b"], ["c"]]);
+    // d comes next. Dropped between frames, e goes next instead.
+    work.drop(d!);
+    turn();
+    assert.deepEqual(frames.at(-1), ["e"]);
+    // e's work, now last in the order, drops b, which comes after it: c goes next instead.
+    const dropper: RouteJob = {
+      run: (budget) => {
+        frame.push("e");
+        work.drop(b!);
+        budget.charge(10);
+        return false;
+      },
+    };
+    work.drop(e!);
+    work.add(dropper);
+    for (let f = 0; f < 4; f++) turn();
+    assert.deepEqual(frames.slice(-4), [["b"], ["c"], ["e"], ["c"]]);
+  });
+
+  test("random work, finished, dropped between frames and by other work: none waiting sees another run twice before its own turn (review MV-O-25)", () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      let a = seed;
+      const rand = () => {
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const clock = new Clock();
+      const work = new RouteWork(clock, () => new WorkBudget({ limit: 10 }));
+      const live = new Set<RouteJob>();
+      /** For each job waiting, the jobs that ran since it last ran or came. */
+      const since = new Map<RouteJob, Set<RouteJob>>();
+      let made = 0;
+      const ran = (job: RouteJob) => {
+        for (const [waiting, seen] of since) {
+          if (waiting === job) continue;
+          assert.ok(!seen.has(job), `seed ${seed}: a job ran twice while another waited`);
+          seen.add(job);
+        }
+        since.set(job, new Set());
+      };
+      const gone = (job: RouteJob) => {
+        live.delete(job);
+        since.delete(job);
+      };
+      const make = (): RouteJob => {
+        made++;
+        const job: RouteJob = {
+          run: (budget) => {
+            ran(job);
+            if (rand() < 0.15) {
+              const other = [...live][Math.floor(rand() * live.size)];
+              if (other && other !== job) {
+                work.drop(other);
+                gone(other);
+              }
+            }
+            budget.charge(1 + Math.floor(rand() * 10));
+            const done = rand() < 0.2;
+            if (done) gone(job);
+            return done;
+          },
+        };
+        return job;
+      };
+      for (let e = 0; e < 80; e++) {
+        const r = rand();
+        if (r < 0.35 || live.size === 0) {
+          const job = make();
+          live.add(job);
+          since.set(job, new Set());
+          work.add(job);
+        } else if (r < 0.45) {
+          const job = [...live][Math.floor(rand() * live.size)]!;
+          work.drop(job);
+          gone(job);
+        } else clock.frame();
+      }
+      assert.ok(made > 10, `seed ${seed}: ${made} jobs`);
+    }
+  });
+
   test("a budget's time counts from the outermost run's begin to its end, however runs nest (review ASTRA-17)", () => {
     let t = 0;
     const budget = new WorkBudget({ ms: 4, clock: () => t });

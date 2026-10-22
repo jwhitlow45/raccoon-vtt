@@ -44,7 +44,8 @@ export class RouteWork {
   readonly #observe: ((units: number) => void) | null;
   #budget: WorkBudget | null = null;
   readonly #jobs: RouteJob[] = [];
-  #next = 0;
+  /** The rest's work that runs first in the next turn: the one after the last that ran. */
+  #next: RouteJob | null = null;
   #handle: number | null = null;
 
   /**
@@ -107,11 +108,16 @@ export class RouteWork {
   drop(job: RouteJob): void {
     const k = this.#jobs.indexOf(job);
     if (k < 0) return;
+    if (job === this.#next) this.#next = this.#after(job);
     this.#jobs.splice(k, 1);
-    const firsts = this.#jobs.filter((j) => j.first).length;
-    if (!job.first && k - firsts < this.#next) this.#next--;
   }
 
+  /** The rest's work after `job`, in the order it came and round to the start. Null when there is no other. */
+  #after(job: RouteJob): RouteJob | null {
+    const rest = this.#jobs.filter((j) => !j.first);
+    const next = rest[(rest.indexOf(job) + 1) % rest.length] ?? null;
+    return next === job ? null : next;
+  }
 
   #ask(): void {
     if (this.#handle === null) this.#handle = this.#frames.request(() => this.#turn());
@@ -124,20 +130,18 @@ export class RouteWork {
     const budget = (this.#budget = this.#open());
     const firsts = this.#jobs.filter((j) => j.first);
     const rest = this.#jobs.filter((j) => !j.first);
-    const start = rest.length > 0 ? this.#next % rest.length : 0;
+    const start = this.#next ? Math.max(0, rest.indexOf(this.#next)) : 0;
     const order = [...firsts, ...rest.slice(start), ...rest.slice(0, start)];
-    let ran = -1;
-    for (const [k, job] of order.entries()) {
+    for (const job of order) {
       if (budget.spent) break;
       // Dropped by work earlier in this turn: what it was for has ended.
       if (!this.#jobs.includes(job)) continue;
+      // Held by the job, not its place, so work that ends or is dropped during the turn moves no other's turn (review MV-O-25).
+      if (!job.first) this.#next = job;
       const done = budget.timed(() => job.run(budget));
-      if (k >= firsts.length) ran = k - firsts.length;
       if (done) this.drop(job);
+      else if (this.#next === job) this.#next = this.#after(job);
     }
-    // Next frame the rest start past the last that ran.
-    const left = this.#jobs.filter((j) => !j.first).length;
-    if (ran >= 0) this.#next = left > 0 ? (start + ran + 1) % Math.max(1, rest.length) : 0;
     if (this.#jobs.length > 0 || budget.units > 0) this.#ask();
   }
 }
