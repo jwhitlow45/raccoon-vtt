@@ -161,4 +161,12 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     // Nothing used before the drag on her turn, so 25 of her 30 ft leaves 5, within her Speed.
     assert.deepEqual([preview.read.left?.band, preview.read.left?.leftFt], ["walk", 5]);
   });
+  test("a drop that keeps the rider's seat on her mount never reads as ending in its space, while one beside a creature still does (review LP15-FU-3)", () => {
+    const state = dropView(riding(), "dm");
+    const bree = state.tokens.bree!;
+    const read = (target: { x: number; y: number }) => walkPreview({ view: state, token: bree, target, answer: { kind: "open" }, held: null, world: publicWorld(state, ownWalk(bree), { role: "dm" }), role: "dm" }).endsIn;
+    assert.equal(read({ x: 5, y: 5 }), null);
+    // Off the horse into the goblin's square, the warning stands.
+    assert.equal(read({ x: 20, y: 20 }), "Goblin");
+  });
 });

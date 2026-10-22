@@ -1,5 +1,5 @@
 import type { RoomState, Token } from "#shared/model.ts";
-import { holderOf, linkHolds } from "#shared/rules/attach.ts";
+import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintSize, tokenHeightFt, type PlacedToken } from "#shared/rules/footprint.ts";
 import { placedOnTrace, routePoints, routeWalkers, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
@@ -88,7 +88,12 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
   const { w, h } = footprintSize(token);
   const lo = at.elevation;
   const hi = lo + tokenHeightFt(token, world.input.rules.feetPerCell);
+  // A rider or a passenger set down on its own holder keeps its seat there (docs/design-v1-attach.md 4.2): sharing that space is riding, not ending a move in it.
+  const link = token.attached;
+  const holder = link && onHolder(link.kind) ? (holderOf(view.tokens, token) as Token | undefined) : undefined;
+  const seat = link && holder && linkHolds(view.meta.settings, link.kind, { ...token, x: at.x, y: at.y }, holder) ? holder.id : null;
   for (const s of world.spaces) {
+    if (s.id === seat) continue;
     const overlaps = at.x < s.x1 - 1e-9 && at.x + w > s.x0 + 1e-9 && at.y < s.y1 - 1e-9 && at.y + h > s.y0 + 1e-9 && lo < s.hi && hi > s.lo;
     const other = view.tokens[s.id];
     if (overlaps && other) return displayName(other);
