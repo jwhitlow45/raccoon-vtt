@@ -5,6 +5,7 @@ import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.t
 import { footprintRect, footprintSize, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
+import { walksOffFromGround } from "../migrate.ts";
 import type { Walker } from "./movement.ts";
 
 /**
@@ -211,11 +212,16 @@ type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached
  * tokens): off a holder some player cannot see the token walks as itself,
  * as it does with no holder at all (8.0). So does one on a holder that
  * flies. The copy is for the walk alone and is never stored.
+ *
+ * Its walk starts on the ground under its own footprint (movement.ts
+ * `groundStart`), for the op version `off` names (migrate.ts
+ * walksOffFromGround). An op stored before version 17 starts at the seat.
  */
 export function walkerFor<T extends Walking>(
   state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0] },
   token: T,
   seen: SeenByAll,
+  off: WalkOff = {},
 ): T & Walker {
   const link = token.attached;
   // Off no holder, or one some player cannot see or that flies, the token walks as itself.
@@ -223,8 +229,11 @@ export function walkerFor<T extends Walking>(
   const holder = holderOf(state.tokens, token) as Walking | undefined;
   if (!holder || !seen(token) || !seen(holder) || footing(state.buildChunks, holder) !== "ground") return token as T & Walker;
   const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
-  return { ...token, footing: "ground", offHolder } as T & Walker;
+  return { ...token, footing: "ground", offHolder, ...(walksOffFromGround(off.opVersion) ? { groundStart: true as const } : {}) } as T & Walker;
 }
+
+/** What a walk off a holder reads of its move (walkerFor): the op version it replays at, none for a live one. */
+export type WalkOff = { opVersion?: number };
 
 /**
  * Whether a token set down at `spot` lands as a walk lands (4.3): on the

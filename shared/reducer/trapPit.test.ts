@@ -22,8 +22,8 @@ function world(): RoomState {
 }
 
 let seq = 50;
-function run(state: RoomState, op: Op, who: Viewer = DM) {
-  const res = applyOp(state, op, who, env(seq++));
+function run(state: RoomState, op: Op, who: Viewer = DM, opVersion?: number) {
+  const res = applyOp(state, op, who, { ...env(seq++), ...(opVersion === undefined ? {} : { opVersion }) });
   assert.ok(res.ok, res.ok ? "" : res.message);
   return res;
 }
@@ -64,6 +64,17 @@ describe("a pit opens", () => {
     assert.deepEqual(cells(res.state), [-10, -10, -10, -10]);
     const line = res.state.trapLog.at(-1)!.data;
     assert.ok(line?.type === "trap" && line.by.includes("ogre"));
+  });
+
+  test("the same move stored at version 16 replays to where it stopped then, beside the lid, and at version 17 by today's rule", () => {
+    const s = world();
+    delete s.tokens.thorn;
+    s.tokens.ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 });
+    const op: Op = { t: "token.move", tokenId: "ogre", x: 9, y: 4 };
+    const old = run(s, op, DM, 16).state;
+    assert.deepEqual([old.tokens.ogre!.x, old.tokens.ogre!.elevation], [2, 0]);
+    const now = run(s, op, DM, 17).state;
+    assert.deepEqual([now.tokens.ogre!.x, now.tokens.ogre!.elevation], [3, 0]);
   });
 
   test("a dragged creature left 10 ft above its fallen holder comes loose in the second link pass", () => {

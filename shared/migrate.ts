@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 20;
-export const OP_VERSION = 16;
+export const OP_VERSION = 17;
 
 export type MigrationStep = {
   from: number;
@@ -490,6 +490,25 @@ export const opMigrations: MigrationStep[] = [
     to: 16,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 20 (docs/design-v1-traps.md 6.6, docs/design-v1-attach.md
+    // 8.6): no op changes shape, so the step is the identity. Two rules the
+    // reducer replays an op by change from this version: a stopping trap
+    // stops a walker at the first spot at or after it goes off where it may
+    // stand (`stopsOnTrap`), and a walk that leaves a holder on the ground
+    // starts on the ground under its own footprint (`walksOffFromGround`).
+    // Older ops replay by the rules they were written under, so a stored
+    // restore's hash guards still match.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 17, and the shutdown writes version 20 snapshots, as
+    // before. Rollback: an older build refuses to migrate either down
+    // (runMigrations), so going back restores that backup, losing the play
+    // since.
+    from: 16,
+    to: 17,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -812,6 +831,28 @@ export function trapsGoOff(opVersion: number | undefined): boolean {
  */
 export function syncsFromDdb(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 16);
+}
+
+/**
+ * Whether a stopping trap stops a walker at the first spot at or after it
+ * goes off where the walker may stand, what it meets up to there counting
+ * (docs/design-v1-traps.md 5.5, review LP13-TR-2). Ops stored before
+ * version 17 stopped at the latest such spot at or before it and replay by
+ * that rule. Live ops carry no stored version and take today's rule.
+ */
+export function stopsOnTrap(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 17);
+}
+
+/**
+ * Whether a walk off a holder on the ground starts on the ground under the
+ * walker's own footprint rather than at its seat (docs/design-v1-attach.md
+ * 4.4, review LP12-AT-4). Ops stored before version 17 started at the seat
+ * and replay by that rule. Live ops carry no stored version and take
+ * today's rule.
+ */
+export function walksOffFromGround(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 17);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

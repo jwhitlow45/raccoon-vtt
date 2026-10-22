@@ -57,7 +57,7 @@ type Named = { token: Token; to: Pose; route: RoutePoint[]; trace: WalkTrace; ho
 function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
   // Its walk off a holder on the ground as every walk of it reads it (attach.ts walkerFor), a straight leg its one piece.
   const walked = (token: Token, to: Pose, how: MoveHow, pieces: readonly (readonly [number, number, number, 0 | 1])[] = [[to.x, to.y, 0, 0]]): Named => {
-    const trace = routeWalkers(before.buildChunks, walkerFor(before, token, seenIn(before, env)), pieces, to.elevation);
+    const trace = routeWalkers(before.buildChunks, walkerFor(before, token, seenIn(before, env), { opVersion: env.opVersion }), pieces, to.elevation);
     return { token, to, how, trace, route: trace.map(({ x, y, elevation }) => ({ x, y, elevation })) };
   };
   const straight = (token: Token, to: Pose, how: MoveHow): Named => walked(token, to, how);

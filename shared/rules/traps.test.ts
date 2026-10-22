@@ -38,6 +38,11 @@ function plan(state: TrapRoom, op: Op, who = DM) {
   return planTrapMove(op, state, who, {});
 }
 
+/** The plan of an op stored at version 16, before the trap stop's rule changed (migrate.ts stopsOnTrap). */
+function plan16(state: TrapRoom, op: Op, who = DM) {
+  return planTrapMove(op, state, who, { opVersion: 16 });
+}
+
 function summary(springings: readonly Springing[]): string[] {
   return springings.map((s) => `${s.trap.id}:${s.how}:${s.pass}:${s.by.join("+")}`);
 }
@@ -360,6 +365,22 @@ describe("stops (5.5)", () => {
     const state = world([thorn(), owl], [trap("plate", square(3, 5), { stops: true }), glyph("glyph", 3), glyph("past", 4)]);
     const p = plan(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 });
     assert.deepEqual(summary(p.springings), ["plate:enter:public:thorn", "glyph:enter:public:owl"]);
+  });
+
+  test("an op stored before version 17 stops where it stopped then: at the latest stand at or before the trap, meeting nothing past it", () => {
+    const ogre = token("ogre", { name: "Ogre", size: "large", x: 0, y: 4 });
+    const pit = plan16(world([ogre], [trap("pit", square(4, 4, 2, 2), { stops: true })]), { t: "token.move", tokenId: "ogre", x: 9, y: 4 });
+    assert.deepEqual(pit.op.t === "token.move" ? [pit.op.x, pit.op.y] : null, [2, 4], "beside the lid, as before");
+    const owl = token("owl", { name: "Owl", size: "tiny", x: 0, y: 5, attached: { to: "thorn", kind: "perch" } });
+    const glyph = (id: string, x: number) => trap(id, square(x, 5), { who: "others", floor: false });
+    const state = world([thorn(), owl], [trap("plate", square(3, 5), { stops: true }), glyph("glyph", 3), glyph("past", 4)]);
+    const group = plan16(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 });
+    assert.deepEqual(group.op.t === "token.move" ? [group.op.x, group.op.y] : null, [2, 5]);
+    assert.deepEqual(summary(group.springings), ["plate:enter:public:thorn"], "the glyph past where the plate went off never counts");
+    assert.deepEqual(summary(plan(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 }).springings), ["plate:enter:public:thorn", "glyph:enter:public:owl"], "a live op meets it");
+    // A second trap on the plate's square, met at the same moment after the plate, still counts: up to the event, not the stop.
+    const both = world([thorn(), owl], [trap("plate", square(3, 5), { stops: true }), trap("warn", square(3, 5))]);
+    assert.deepEqual(summary(plan16(both, { t: "token.move", tokenId: "thorn", x: 6, y: 5 }).springings), ["plate:enter:public:thorn", "warn:enter:public:thorn"]);
   });
 
   test("a taut route is cut at its stop, a piece's extra kept", () => {

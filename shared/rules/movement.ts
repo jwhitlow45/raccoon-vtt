@@ -47,9 +47,11 @@ import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
  * every ledge beyond, so she climbs none either. Each leg is one straight
  * test, walls and ledges alike. `offHolder` is the walk's state: a walk
  * drops it at its first spot clear of the holder (`walkOn`), and the walk
- * comes back over the holder on the ground's rule.
+ * comes back over the holder on the ground's rule. `groundStart` marks a
+ * walk off it that starts on the ground under its own footprint rather
+ * than at its seat (`walkFrom`, rules/attach.ts walkerFor).
  */
-export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: Standing; offHolder?: OffHolder };
+export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: Standing; offHolder?: OffHolder; groundStart?: true };
 
 /** The holder a walk off it leaves, where it stands. */
 export type OffHolder = PlacedToken;
@@ -438,15 +440,16 @@ type Chunks = BuildState["buildChunks"];
 /**
  * The walk of `token` from where it stands: off its holder already where it
  * stands clear of it, squeezed as it stands, and on the ground for the whole
- * walk when it stands on it now. A walk off a holder on the ground starts on
- * the ground under its own footprint, not at its seat, so stepping off a
- * holder that straddles a step never counts the drop as distance, on a
- * route or a straight leg (review LP12-AT-4). Getting off a ride pays for
- * that already.
+ * walk when it stands on it now. A walk off a holder on the ground that its
+ * walker marks `groundStart` (rules/attach.ts walkerFor) starts on the
+ * ground under its own footprint, not at its seat, so stepping off a holder
+ * that straddles a step never counts the drop as distance, on a route or a
+ * straight leg (review LP12-AT-4). Getting off a ride pays for that
+ * already.
  */
 export function walkFrom<T extends Walker>(chunks: Chunks, token: T): T & Walking {
   const grounded = footing(chunks, token) === "ground";
-  const start = { ...token, grounded, ...(grounded && token.offHolder ? { elevation: groundUnder(chunks, token, token) } : {}) } as T & Walking;
+  const start = { ...token, grounded, ...(grounded && token.offHolder && token.groundStart ? { elevation: groundUnder(chunks, token, token) } : {}) } as T & Walking;
   return !start.offHolder || onOffHolder(start, start) ? start : pastHolder(start);
 }
 

@@ -455,7 +455,7 @@ function seenNow(tx: Tx): (t: { id: string }) => boolean {
 export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judged: Judged, cost: number, route?: readonly RoutePiece[]): Token {
   // It walks off on the ground, crossing only its mount's inner ledges, where its mount stands on it (rules/attach.ts walkerFor), as the drag searched it,
   // from the ground under its own footprint (movement.ts walkFrom).
-  const walking = walkerFor(tx.state, rider, seenNow(tx));
+  const walking = walkerFor(tx.state, rider, seenNow(tx), { opVersion: tx.env.opVersion });
   const from = { x: rider.x, y: rider.y, elevation: walkFrom(tx.state.buildChunks, walking).elevation };
   const points = route ? routePoints(tx.state.buildChunks, walking, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
   // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.
@@ -577,7 +577,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   const rules = tx.state.meta.settings;
   const from = path.stops[path.stops.length - 1]!;
   const counter = pathCounters(after, path.stops, rules);
-  const walker = walkerFor(tx.state, before, seenNow(tx));
+  const walker = walkerFor(tx.state, before, seenNow(tx), { opVersion: tx.env.opVersion });
   let taken: LegCost;
   // The walk's trace (route.ts WalkTrace): its own, its route's or the straight leg's, or its holder's taking it along.
   let trace: WalkTrace;

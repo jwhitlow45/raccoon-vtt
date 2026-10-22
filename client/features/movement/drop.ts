@@ -150,7 +150,7 @@ export function walkerOf<T extends DropToken>(state: DropView, token: T): T & Wa
   if (!seated) return ownWalk(token);
   const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks }, seated, state.seen);
   // The seated token's walk, at the place this one stands.
-  return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder } as T & Walker) : ownWalk(token);
+  return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder, ...(walker.groundStart ? { groundStart: true } : {}) } as T & Walker) : ownWalk(token);
 }
 
 /**

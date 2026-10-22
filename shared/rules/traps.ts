@@ -2,6 +2,7 @@ import { CHUNK_CELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomSt
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
+import { stopsOnTrap } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, onHolder, walkerFor } from "./attach.ts";
@@ -469,7 +470,8 @@ function twoSpots(route: readonly RoutePoint[]): WalkSpot[] {
 }
 
 /** An op's walks, by token and by group, and each walker's spots with `stand` once a stop has read them (standSpots). */
-type Walks = { all: Walk[]; byId: Map<string, Walk>; groups: Map<string, Group>; stands: Map<Walk, Stands> };
+/** `opVersion` is the op's, which a walk off a holder starts by (attach.ts walkerFor). */
+type Walks = { all: Walk[]; byId: Map<string, Walk>; groups: Map<string, Group>; stands: Map<Walk, Stands>; opVersion: number | undefined };
 
 /** A walk's spots, and each with `stand` as asked (route.ts routeStands). */
 type Stands = { walk: readonly { progress: Progress }[]; spot: (i: number) => RouteSpot };
@@ -482,7 +484,7 @@ type Stands = { walk: readonly { progress: Progress }[]; spot: (i: number) => Ro
  * its place reads that walk's spots, so a group of 500 builds one walk per
  * step it takes.
  */
-function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen: (id: string) => boolean): Walks {
+function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen: (id: string) => boolean, opVersion: number | undefined): Walks {
   const all: Walk[] = [];
   const byId = new Map<string, Walk>();
   const groups = new Map<string, Group>();
@@ -537,7 +539,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
       byId.set(e.tokenId, walk);
     }
   }
-  return { all, byId, groups, stands: new Map() };
+  return { all, byId, groups, stands: new Map(), opVersion };
 }
 
 /**
@@ -970,8 +972,13 @@ export type Springing = {
 /** What the trap step found in a move: what went off, in order, and the op with its stopped landings (13.2 step 1). */
 export type MovePlan = { springings: Springing[]; op: Op };
 
-/** Where a stopped group stops, as progress along its walk. */
-type Stop = { s: Progress };
+/**
+ * Where a stopped group stops, as progress along its walk (`s`), and the
+ * progress past which what it meets no longer counts and the moments read
+ * it at its stop (`until`): the stop itself, or for an op stored before
+ * version 17 the event that stopped it (migrate.ts stopsOnTrap).
+ */
+type Stop = { until: Progress; s: Progress };
 
 /**
  * The trap step's plan of a move (13.2 step 1): both passes, their events,
@@ -989,7 +996,7 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const entries = planMove(op, before, actor, env).filter(onScene);
   if (entries.length === 0) return none;
   const seen = seenByAll(before, env);
-  const walks = walksOf(op, before, entries, seen);
+  const walks = walksOf(op, before, entries, seen, env.opVersion);
   const spent = new Set<number>();
   const springings: Springing[] = [];
 
@@ -997,10 +1004,11 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const pub = passCache(before, sceneId);
   const events = byTrap(walks.all.filter((w) => w.isPublic), (walk) => walkEvents(walk, index, before, seen, spent, pub));
   const stops = new Map<string, Stop>();
+  const forward = stopsOnTrap(env.opVersion);
   // A stopped group walks on to its stop, so what it meets up to there counts, and nothing after.
   const after = (e: TrapEvent) => {
     const stop = stops.get(e.walk.group.named);
-    return stop !== undefined && compareProgress(e.at, stop.s) > 0;
+    return stop !== undefined && compareProgress(e.at, stop.until) > 0;
   };
   const nextPublic = picker(events, spent, (e) => !after(e), () => stops.size);
   for (let event = nextPublic(); event !== null; event = nextPublic()) {
@@ -1012,10 +1020,10 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
       for (const hit of together) {
         const group = hit.walk.group;
         if (!hit.walk.walker || stops.has(group.named) || !cuts(op, walks, group)) continue;
-        const s = stopAt(walks, group, event.at, before, seen);
+        const s = forward ? stopAt(walks, group, event.at, before, seen) : stopBefore(walks, group, event.at, before, seen);
         // A stop where the group was going anyway changes nothing, so it is no stop (6.5).
         if (compareProgress(s, endOf(group)) >= 0) continue;
-        stops.set(group.named, { s });
+        stops.set(group.named, { until: forward ? s : event.at, s });
       }
     }
     springings.push(springingIn(trap, event.how, "public", together, momentAt(before, walks.byId, event.at, stops), env));
@@ -1025,7 +1033,7 @@ export function planTrapMove(op: Op, before: TrapRoom, actor: Viewer, env: { opV
   const cut = stops.size > 0 ? cutOp(op, walks, stops, before, seen) : op;
   // A move with no walk players cannot see has no private pass, so its cut op needs no walks of its own.
   if (!walks.all.some((w) => !w.isPublic)) return { springings, op: cut };
-  const rest = cut === op ? walks : walksOf(cut, before, planMove(cut, before, actor, env).filter(onScene), seen);
+  const rest = cut === op ? walks : walksOf(cut, before, planMove(cut, before, actor, env).filter(onScene), seen, env.opVersion);
   const priv = passCache(before, sceneId);
   const hidden = byTrap(rest.all.filter((w) => !w.isPublic), (walk) => walkEvents(walk, index, before, seen, spent, priv));
   const never = () => false;
@@ -1048,7 +1056,7 @@ export function trapWalks(op: Op, before: TrapRoom, actor: Viewer, env: { opVers
   const sceneId = liveTrapScene(before);
   if (sceneId === null || !walkOp(op)) return [];
   const entries = planMove(op, before, actor, env).filter((e) => e.from.sceneId === sceneId && e.to.sceneId === sceneId);
-  const walks = walksOf(op, before, entries, seenByAll(before, env));
+  const walks = walksOf(op, before, entries, seenByAll(before, env), env.opVersion);
   return walks.all
     .map((w) => ({ tokenId: w.token.id, isPublic: w.isPublic, walker: w.walker, step: w.step, spots: w.spots.map((_, j) => spotAt(w, j)) }))
     .sort((a, b) => cmp(a.tokenId, b.tokenId));
@@ -1141,6 +1149,26 @@ function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen
   return end;
 }
 
+/**
+ * Where a group stopped by an op stored before version 17 stops
+ * (migrate.ts stopsOnTrap): the latest progress at or before `t` where
+ * every walker of the group stands on a spot with `stand`, progress 0,
+ * where the group stood, a stand by definition.
+ */
+function stopBefore(walks: Walks, group: Group, t: Progress, before: RoomState, seen: (id: string) => boolean): Progress {
+  const stands = walks.all.filter((w) => w.group === group && w.walker).map((w) => standSpots(walks, w, before, seen));
+  if (stands.length === 1) {
+    const one = stands[0]!;
+    for (let i = latestIndex(one.walk, t); i > 0; i--) if (compareProgress(one.walk[i]!.progress, t) <= 0 && one.spot(i).stand) return one.walk[i]!.progress;
+    return START;
+  }
+  const candidates: Progress[] = [START];
+  for (const one of stands) for (const w of one.walk) if (compareProgress(w.progress, t) <= 0) candidates.push(w.progress);
+  candidates.sort((a, b) => compareProgress(b, a));
+  for (const s of candidates) if (stands.every((one) => standsAt(one, s))) return s;
+  return START;
+}
+
 /** The index of the first spot at or after `p`, past the last when none is. */
 function firstIndex(spots: readonly { progress: Progress }[], p: Progress): number {
   if (spots.length === 0) return 0;
@@ -1180,7 +1208,7 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
   } else {
     // A walker with a holder in the op walks as its trace has it, as itself and never squeezed (route.ts followerTrace): a creature
     // its holder drags beside it, or one on a holder some player cannot see.
-    const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id));
+    const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion });
     // The group's head walks its group's own walk at its step, so its spots are already there.
     const head = walk.entry === walk.group.head && walk.step === walk.group.step;
     stands = routeStands(before, walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd }, head ? walk.group.base(walk.group.step) : undefined);
@@ -1223,7 +1251,7 @@ function momentAt(before: RoomState, walks: ReadonlyMap<string, Walk>, p: Progre
 /** The spot a walk is on at the moment. */
 function spotIn(m: Moment, walk: Walk): number {
   const stop = m.stops.get(walk.group.named);
-  return latestIndex(walk.spots, stop && compareProgress(m.p, stop.s) > 0 ? stop.s : m.p);
+  return latestIndex(walk.spots, stop && compareProgress(m.p, stop.until) > 0 ? stop.s : m.p);
 }
 
 function tokenAt(m: Moment, id: string): Token | undefined {
@@ -1252,7 +1280,7 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
     const group = walks.groups.get(named);
     const walk = walks.byId.get(named);
     if (!stop || !group || !walk || walk.teleport) return null;
-    const token = walkerFor(before, walk.token, (t) => seen(t.id));
+    const token = walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion });
     const squeeze = op.t === "token.move" && op.tokenId === named && op.squeeze === true;
     // The named token's own walk, as its stop's search read it when it walks as the group's head.
     const stands = walk.holder ? routeStands(before, group.head.route, token, group.step, { squeeze }) : standSpots(walks, walk, before, seen);

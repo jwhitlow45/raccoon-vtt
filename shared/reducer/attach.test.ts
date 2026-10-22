@@ -413,3 +413,41 @@ describe("replay below op version 14 (8.6)", () => {
   });
 });
 
+
+describe("replay below op version 17 (8.6, review LP12-AT-4)", () => {
+  /**
+   * A Large horse at 10 ft straddling a step, its west half over 10 ft ground at x 7 and its east half over the ground at
+   * 0 ft, and Bree on its east half at 10 ft, on her turn, carried or on an independent ride.
+   */
+  function straddling(kind: "carry" | "ride"): RoomState {
+    let state = room({
+      tokens: {
+        horse: token("horse", { name: "Warhorse", kind: "npc", size: "large", x: 7, y: 13, elevation: 10 }),
+        bree: token("bree", { name: "Bree", kind: "pc", x: 8, y: 13, elevation: 10, ownerIds: ["p1"], attached: { to: "horse", kind }, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+      },
+    });
+    heights(state, { "7,13": 10, "7,14": 10 });
+    for (const [i, op] of ([{ t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 20 }] }, { t: "encounter.next" }] as Op[]).entries()) state = run(state, op, DM, i + 1);
+    return state;
+  }
+  const leg = (s: RoomState) => s.tokens.bree!.path!.stops.slice(1).map((p) => [p.moved, p.cost]);
+
+  test("a step off the holder counts the drop from the seat at version 16 and none from version 17, plain, routed and in a group alike", () => {
+    const ops: Op[] = [
+      { t: "token.move", tokenId: "bree", x: 9, y: 13, elevation: 0 },
+      { t: "token.move", tokenId: "bree", x: 9, y: 13, elevation: 0, route: [[9, 13, 0, 0]] },
+      { t: "token.moveMany", moves: [{ tokenId: "bree", x: 9, y: 13, elevation: 0 }] },
+    ];
+    for (const op of ops) {
+      assert.deepEqual(leg(run(straddling("carry"), op, DM, 5, 16)), [[10, 10]], `${JSON.stringify(op)} at 16`);
+      assert.deepEqual(leg(run(straddling("carry"), op, DM, 5, 17)), [[5, 5]], `${JSON.stringify(op)} at 17`);
+      assert.deepEqual(leg(run(straddling("carry"), op, DM, 5)), [[5, 5]], `${JSON.stringify(op)} live`);
+    }
+  });
+
+  test("getting off a ride walks from the seat at version 16 and from the ground under her from version 17", () => {
+    const op: Op = { t: "token.move", tokenId: "bree", x: 9, y: 13, elevation: 0 };
+    assert.deepEqual(leg(run(straddling("ride"), op, DM, 5, 16)), [[10, 15]]);
+    assert.deepEqual(leg(run(straddling("ride"), op, DM, 5, 17)), [[5, 15]]);
+  });
+});

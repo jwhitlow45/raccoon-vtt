@@ -224,7 +224,7 @@ function walkOf(before: RoomState, after: RoomState, op: Op, opVersion: number |
     const token = before.tokens[t.id];
     return token !== undefined && inSightOfNonOwners(before, token, { opVersion });
   };
-  return { tokenId: op.tokenId, points: routePoints(before.buildChunks, walkerFor(before, from, seen), op.route, to.elevation) };
+  return { tokenId: op.tokenId, points: routePoints(before.buildChunks, walkerFor(before, from, seen, { opVersion }), op.route, to.elevation) };
 }
 
 /** A route's sweep never takes more than this: every half square of 300 squares of reach, and one more a piece for rounding (section 10). */

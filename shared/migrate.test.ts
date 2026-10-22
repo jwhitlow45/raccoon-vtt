@@ -18,6 +18,8 @@ import {
   attaches,
   trapsGoOff,
   syncsFromDdb,
+  stopsOnTrap,
+  walksOffFromGround,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -905,9 +907,9 @@ describe("traps: op version 15 and snapshot version 19 (docs/design-v1-traps.md 
 });
 
 describe("re-sync from D&D Beyond: op version 16 and snapshot version 20 (docs/design-v1-resync.md 4)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 16);
-    assert.equal(SNAPSHOT_VERSION, 20);
+  test("came before follow-up batch 20's op version", () => {
+    assert.ok(OP_VERSION >= 16);
+    assert.ok(SNAPSHOT_VERSION >= 20);
   });
 
   test("both steps are the identity, a room whose character holds a record and an op that writes one included", () => {
@@ -932,5 +934,29 @@ describe("re-sync from D&D Beyond: op version 16 and snapshot version 20 (docs/d
   test("a version 16 op and a version 20 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 16, 15, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 20, 19, snapshotMigrations), /down/);
+  });
+});
+
+describe("follow-up batch 20: op version 17, snapshot version 20 (docs/design-v1-traps.md 6.6, docs/design-v1-attach.md 8.6)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 17);
+    assert.equal(SNAPSHOT_VERSION, 20);
+  });
+
+  test("the op step is the identity", () => {
+    const ops: unknown[] = [{ t: "token.move", tokenId: "t1", x: 3, y: 4, route: [[3, 4, 0, 0]] }, { t: "token.moveMany", moves: [{ tokenId: "t1", x: 3, y: 4 }] }];
+    for (const op of ops) assert.equal(runMigrations(op, 16, 17, opMigrations), op);
+  });
+
+  test("only ops stored before version 17 replay by the old trap stop and the seat start of a walk off a holder", () => {
+    for (const gate of [stopsOnTrap, walksOffFromGround]) {
+      assert.equal(gate(16), false);
+      assert.equal(gate(17), true);
+      assert.equal(gate(undefined), true);
+    }
+  });
+
+  test("a version 17 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 17, 16, opMigrations), /down/);
   });
 });

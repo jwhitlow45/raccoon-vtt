@@ -252,6 +252,8 @@ A holder's move reads the holder and every token of its group in the viewer's vi
 
 This feature takes its own next free op version and snapshot version when it is built, after movement's and before traps'. The snapshot step is an identity step: its stored fields are optional, so an older build refuses the room cleanly, and going back is the backup's restore (design 16.2). Below its op version, replay writes none of its stored fields: with `opVersion !== undefined && opVersion < N`, a move is the token alone, `withStop` joins as before, and Next writes no `skipRound` or `markRound` and resets Reactions as before. Older ops never meet a link, so the gate changes nothing they did, and it keeps the boundary exact.
 
+Op version 17 (follow-up batch 20) starts a walk that leaves a holder on the ground on the ground under the walker's own footprint (4.4, review LP12-AT-4). The walker carries it (attach.ts `walkerFor`, movement.ts `groundStart`), so the reducer's every reading of the walk takes it alike: a leg's cost, its trace, a dismount's split, the area sweep and `routeSeen`. Below it (`walksOffFromGround`) the walk starts at its seat, as it did.
+
 ## 9. The shared contract and the other two notes
 
 The contract (agreed with movement and traps on 2026-10-18, revised after review rounds 1 and 2) describes every move once, as `MovedToken` entries `{ tokenId, from, to, route, how, carriedBy? }` from `planMove` before the reducer and `describeMove` after it, and binds all three notes to public determinism (contract section 5).
