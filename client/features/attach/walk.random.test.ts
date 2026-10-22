@@ -334,7 +334,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
   });
 });
 
-type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: number; shared: number; lit: number; trailing: number; towed: number; partyTowed: number; compared: number; revealed: number };
+type RulerCounts = { rulers: number; legs: number; offHolder: number; fogged: number; shared: number; lit: number; trailing: number; towed: number; partyTowed: number; compared: number; revealed: number; dmFogLit: number };
 
 /**
  * One random walking ruler of two or three legs against the drags it stands
@@ -416,12 +416,14 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   // The DM's own ruler walks as the DM's drag does, a player's as the player's drag does. The DM's own ruler also knows what
   // players do not: DM-only areas and an area's reach past a secret door, which these rooms have none of, and under the fog
   // the ground a party member's drag keeps off and an area on a token players do not see. So here only under fog can it read
-  // more than the DM's drag.
+  // more than the DM's drag, and not for a lamp the mover carries, whose area goes where the mover goes however hidden
+  // (review AT-O-37).
   const ruler = measureWalk({ view: startCopy, sceneId: "s1", stops, viewer: { role: c.who.role }, everything: dm });
   if (revealed) n.revealed++;
-  else if (!dm || !fog || (!carriedGroup(c.state.tokens, c.mover).some((id) => isPartyMember(c.state, c.state.tokens[id]!)) && !lampOn)) {
+  else if (!dm || !fog || (!carriedGroup(c.state.tokens, c.mover).some((id) => isPartyMember(c.state, c.state.tokens[id]!)) && (!lampOn || lampOn === drawn.mover))) {
     assert.deepEqual(ruler?.legs.map((leg) => leg.ft), read, `seed ${seed} (${c.who.memberId}'s ruler for ${c.mover} through ${JSON.stringify(stops.slice(1))})`);
     n.compared++;
+    if (dm && fog && lampOn === drawn.mover) n.dmFogLit++;
   }
   n.rulers++;
   n.legs += read.length;
@@ -439,13 +441,13 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   n.shared++;
 }
 
-const noRulers = (): RulerCounts => ({ rulers: 0, legs: 0, offHolder: 0, fogged: 0, shared: 0, lit: 0, trailing: 0, towed: 0, partyTowed: 0, compared: 0, revealed: 0 });
+const noRulers = (): RulerCounts => ({ rulers: 0, legs: 0, offHolder: 0, fogged: 0, shared: 0, lit: 0, trailing: 0, towed: 0, partyTowed: 0, compared: 0, revealed: 0, dmFogLit: 0 });
 
 describe("a walking ruler reads each leg as the drag it stands for (reviews AT-ASTRA-25, AT-SOL-5, AT-ASTRA-26, AT-O-31 and AT-O-32)", () => {
   test("random rulers of two and three legs, the DM's own on the room and a player's on their copy: each leg reads what the drag to its stop read, made from where the drags before it left the token, and a shared one reads the same on every copy", () => {
     const n = noRulers();
     for (let seed = 1; seed <= 400; seed++) rulerSeed(seed, { lamps: seed % 3 === 0 ? "towed" : true, drags: true, carts: seed > 250, party: true }, n);
-    assert.ok(n.rulers > 150 && n.compared > 130 && n.offHolder > 40 && n.fogged > 60 && n.shared > 60 && n.lit > 40 && n.trailing > 10 && n.towed > 20 && n.partyTowed > 10, JSON.stringify(n));
+    assert.ok(n.rulers > 150 && n.compared > 130 && n.offHolder > 40 && n.fogged > 60 && n.shared > 60 && n.lit > 40 && n.trailing > 10 && n.towed > 20 && n.partyTowed > 10 && n.dmFogLit > 10, JSON.stringify(n));
   });
 
   test("random rulers of a creature dragging another player's into the fog: each leg tows it and is cut where it meets a wall as its drag is, on a player's copy too", () => {

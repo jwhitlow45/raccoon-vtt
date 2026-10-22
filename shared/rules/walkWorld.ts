@@ -144,7 +144,8 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const blocks = scene?.blockMovement === true;
   const everything = opts.everything === true && viewer.role === "dm";
   const shown = shownTokens(state, token, viewer, everything, opts);
-  const rigid = rigidWith(state, token, shownBy(state, viewer, opts));
+  // The DM's own ruler reads every area, so it judges every link seen too: an area that rides with the mover then costs it nothing, as on the DM's drag and in the store (review AT-O-37).
+  const rigid = rigidWith(state, token, everything ? () => true : shownBy(state, viewer, opts));
   // A player's drag, the DM's of a party member and every shared ruler keep to ground players have seen. The DM's other drags read the DM's own map.
   const publicGround = !everything && (opts.seenGround === true || viewer.role === "player" || isPartyMember(state, token));
   const ground = publicGround && scene && scene.fogEnabled !== false ? playersSeeGround(state, scene.id) : null;
@@ -253,8 +254,9 @@ function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, 
  * 15, review AT-ASTRA-28): its public members on links that sit on their
  * holder (attach.ts onHolder), which go where it goes. A creature it drags
  * trails behind it, and its holder stays where it is. Only links every
- * player sees count, as `shown` judges them even for the DM's own ruler, so
- * no hidden link changes what an area costs.
+ * player sees count, as `shown` judges them, so no hidden link changes what
+ * an area costs. The DM's own ruler, which reads every area, judges every
+ * link seen.
  */
 function rigidWith(state: RoomState, token: Token, shown: (t: Token) => boolean): ReadonlySet<string> {
   const pub = (t: { id: string }) => {
