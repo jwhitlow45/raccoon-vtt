@@ -8,13 +8,16 @@ import type { SrdMonster } from "../shared/srd/monsters.ts";
 import { srdRollsOf } from "../shared/srd/rolls.ts";
 import type { RulesText, RulesTextEntry } from "../shared/srd/rules-text.ts";
 import type { XpBudgetRow } from "../shared/srd/xp-budget.ts";
+import { trapPresetFacts } from "../shared/srd/traps.ts";
 
 /**
  * Regenerates the SRD 5.2.1 data in shared/srd/ from the text of the SRD PDF:
  * monsters.json (every stat block), area-spells.json (spell presets for area
  * templates), save-spells.json (what a pass takes for each spell that deals
  * damage on a save), rules-text.json (the conditions and the statuses the SRD
- * defines) and xp-budget.json (the encounter XP budget per character). The hand-written parts, such as summaries and colors, live in
+ * defines) and xp-budget.json (the encounter XP budget per character). It
+ * also checks the Trap tool's presets (shared/srd/traps.ts), which are
+ * written by hand, against the SRD's example traps. The hand-written parts, such as summaries and colors, live in
  * conditions.ts and statuses.ts and are never touched here. rolls.json (each
  * creature's saves, skills and spell numbers) is read from the stat blocks,
  * so `--rolls` writes it again from monsters.json alone.
@@ -1410,6 +1413,51 @@ function parseXpBudget(lines: readonly Line[]): XpBudgetRow[] {
 }
 
 // ---------------------------------------------------------------------------
+// Trap presets
+
+/**
+ * The Trap tool's presets (shared/srd/traps.ts) against the SRD's example
+ * traps (pages 199 to 201): each preset's trigger words, and every DC,
+ * damage die and pit depth it uses, must be in its entry. A new SRD
+ * revision that changes a trap fails the run, so its preset is read again.
+ */
+function checkTrapPresets(raw: string): string[] {
+  const start = raw.indexOf("\nExample Traps\n");
+  const end = raw.indexOf("\nCombat Encounters\n", start);
+  if (start < 0 || end < 0) return ["the SRD's Example Traps section is missing"];
+  const section = raw.slice(start, end);
+  const facts = trapPresetFacts();
+  const problems: string[] = [];
+  facts.forEach((fact, i) => {
+    const from = section.indexOf(`\n${fact.name}\n`);
+    const later = facts[i + 1];
+    const to = later ? section.indexOf(`\n${later.name}\n`, from + 1) : section.length;
+    if (from < 0 || to < 0) {
+      problems.push(`${fact.name}: no entry among the SRD's example traps`);
+      return;
+    }
+    const text = trapText(section.slice(from, to));
+    const trigger = /Trigger:\s*(.*?)\s*Duration:/.exec(text)?.[1] ?? "";
+    if (!trigger.includes(fact.trigger)) problems.push(`${fact.name}: its trigger is "${trigger}", not "${fact.trigger}"`);
+    for (const fragment of fact.fragments) {
+      const any = Array.isArray(fragment) ? fragment : [fragment];
+      if (!any.some((f) => text.includes(f))) problems.push(`${fact.name}: the SRD has no "${any.join('" or "')}"`);
+    }
+  });
+  return problems;
+}
+
+/** A trap's entry as one line: page headers out, hyphenation joined, curly apostrophes straight. */
+function trapText(entry: string): string {
+  return entry
+    .replace(/=====PAGE \d+=====\nSystem Reference Document 5\.2\.1\n\d+\n/g, "")
+    .replace(/\u2019/g, "'")
+    .replace(/([a-z]) -[ \t]*\n\s*([a-z])/g, "$1$2")
+    .replace(/([a-z])-[ \t]*\n\s*([a-z])/g, "$1$2")
+    .replace(/\s+/g, " ");
+}
+
+// ---------------------------------------------------------------------------
 // Main
 
 function main(): void {
@@ -1428,8 +1476,12 @@ function main(): void {
   if (hash !== TEXT_SHA256) {
     console.warn(`warning: the text's SHA-256 is ${hash}, not the ${TEXT_SHA256} this script was written against (from the PDF with SHA-256 ${PDF_SHA256}). Review the output diff by hand.`);
   }
-  const lines = loadLines(applyErrata(raw));
+  const corrected = applyErrata(raw);
+  const lines = loadLines(corrected);
   stats = wordStats(lines);
+  const trapProblems = checkTrapPresets(corrected);
+  if (trapProblems.length > 0) throw new Error(`trap preset checks failed:\n${trapProblems.join("\n")}`);
+  console.log(`trap presets checked: ${trapPresetFacts().length}`);
 
   const spells = parseSpells(lines);
   console.log(`spells: ${spells.length}`);
