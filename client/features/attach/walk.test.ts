@@ -8,7 +8,7 @@ import { groupWalkWorld, publicWorld } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { dropView, moveOpsOf, planGroup, planOne, planWalk, routeLanding, type Landed } from "../movement/drop.ts";
-import { DM, P1, actor, effect, env, token } from "#shared/testutil.ts";
+import { DM, P1, actor, effect, env, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
@@ -428,6 +428,20 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     // The server's test that a player's set down of a creature lands as a walk lands reads the same squeezed footprint.
     const ogre = state.tokens.ogre!;
     assert.deepEqual([landsAt(state.buildChunks, ogre, { x: 9.5, y: 13.5, elevation: 0, squeeze: true }), landsAt(state.buildChunks, ogre, { x: 9.5, y: 13.5, elevation: 0 })], [true, false]);
+  });
+
+  test("a walk that squeezes only where it ends is reminded of an area it passes with its full footprint (review AT-SOL-2)", () => {
+    // A 5 ft sphere at 10 ft by the cart's south east corner, which the ogre's full footprint covers on its way down the gap.
+    const state = gap();
+    state.templates.orb = template("orb", { shape: "sphere", size: 5, origin: { x: 11.5, y: 8.5, z: 10 }, triggers: ["enter"] });
+    const route: [number, number, number, 0 | 1][] = [[9.5, 6.5, 0, 0], [9.5, 8, 0, 0], [9.5, 13.5, 1, 0]];
+    const entered = (squeeze: boolean) => {
+      const r = applyOp(state, { t: "token.move", tokenId: "ogre", x: 9.5, y: 13.5, elevation: 0, ...(squeeze ? { squeeze: true } : {}), route }, DM, env(9));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      return r.log.flatMap((e) => (e.data?.type === "area" ? [[e.data.tokenId, e.data.trigger]] : []));
+    };
+    assert.deepEqual(entered(false), [["ogre", "enter"]]);
+    assert.deepEqual(entered(true), [["ogre", "enter"]], "squeezed only in the gap, it passes the sphere full size");
   });
 
   test("a walk past 64 pieces cut where it squeezes in the gap sends a squeezed drop the server takes", () => {

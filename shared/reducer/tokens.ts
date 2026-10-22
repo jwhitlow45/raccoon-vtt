@@ -6,7 +6,7 @@ import { MAX_RULER_STOPS, type ActorPatch, type Op, type OpOf, type TokenPatch }
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
-import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
+import { routeFeet, routePoints, routeWalk, squeezedOnWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
@@ -594,8 +594,10 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   const out: PathStop = carried ? { ...stop, moved: taken.moved } : { ...stop, moved: taken.moved, cost: taken.cost };
   if (taken.diag[0] !== 0 || taken.diag[1] !== 0) out.diag = taken.diag;
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
-  // Squeezed where it starts and ends as it was and will be. A walk squeezes nowhere between, as its elevation rule reads the full footprint.
-  const spots = routeWalk(walk, walkerFor(tx.state, before, seenNow(tx)), judged.before).map((p, i, all) => ({ ...p, squeezed: i === 0 ? isSqueezed(before) : i === all.length - 1 ? isSqueezed(after) : false }));
+  const spots = routeWalk(walk, walkerFor(tx.state, before, seenNow(tx)), judged.before).map((p, i, all) => ({
+    ...p,
+    squeezed: squeezedOnWalk(i === 0 ? "start" : i === all.length - 1 ? "end" : "between", before, after),
+  }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;
 }

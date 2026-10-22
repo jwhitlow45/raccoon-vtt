@@ -275,6 +275,26 @@ function latticePiece(dx: number, dy: number, step: number): boolean {
   return Math.abs(dx) < SLACK || Math.abs(dy) < SLACK || Math.abs(Math.abs(dx) - Math.abs(dy)) < SLACK;
 }
 
+/** Where a spot lies on a walk: where it starts, where it ends, or between. */
+export type WalkPlace = "start" | "between" | "end";
+
+/**
+ * Whether a walk has its token squeezed at a spot (4.1): where it starts as
+ * the token stood (`before`), where it ends as the move leaves it
+ * (`after`), and nowhere between, since the walk reads the full footprint
+ * between its ends (routePoints). A path's visibility and the areas a walk
+ * enters both read a walk's footprint by this one rule (review AT-SOL-2).
+ */
+export function squeezedOnWalk(place: WalkPlace, before: PlacedToken, after: PlacedToken): boolean {
+  return place === "start" ? isSqueezed(before) : place === "end" ? isSqueezed(after) : false;
+}
+
+/** The token at a spot of its walk: as the move leaves it, with the footprint the walk has there (squeezedOnWalk). */
+export function standingOnWalk<T extends PlacedToken & { elevation: number }>(before: PlacedToken, after: T, spot: RoutePoint, place: WalkPlace): T {
+  const { squeeze: _squeeze, ...rest } = after;
+  return { ...rest, x: spot.x, y: spot.y, elevation: spot.elevation, ...(squeezedOnWalk(place, before, after) ? { squeeze: true as const } : {}) } as T;
+}
+
 /** A spot of a walk without what standing there needs: where the footprint is, how high, and how far along. */
 export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
 
