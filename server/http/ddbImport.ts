@@ -46,6 +46,35 @@ const Body = z.strictObject({ link: z.string().min(1).max(300) });
 type Fetched = { kind: "body"; status: number; json: unknown; bytes: number } | { kind: "failed" };
 
 /**
+ * The pending request, ended by the signal however far it got. undici
+ * aborts a request only once it holds a connection, and a proxy that keeps
+ * its CONNECT open never gives it one, so the route would wait for the
+ * proxy's own limit, a minute or more on squid, with both slots held and
+ * the room's next import refused as busy. A request that answers after the
+ * signal is thrown away.
+ */
+function untilAborted<T>(pending: Promise<T>, signal: AbortSignal, discard: (late: T) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      pending.then(discard, () => undefined);
+      reject(signal.reason);
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
  * One GET of the character's JSON: no cookie or credential, identity
  * encoding, no redirect followed (undici's request follows none), and at
  * most `maxBytes` counted while it streams. A body that is not JSON reads
@@ -54,7 +83,7 @@ type Fetched = { kind: "body"; status: number; json: unknown; bytes: number } | 
  */
 async function fetchCharacter(dispatcher: Dispatcher, url: string, signal: AbortSignal, timeoutMs: number, maxBytes: number): Promise<Fetched> {
   try {
-    const res = await request(url, {
+    const pending = request(url, {
       dispatcher,
       method: "GET",
       headers: { accept: "application/json", "accept-encoding": "identity", "user-agent": "raccoon-vtt (self-hosted virtual tabletop)" },
@@ -62,6 +91,7 @@ async function fetchCharacter(dispatcher: Dispatcher, url: string, signal: Abort
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
     });
+    const res = await untilAborted(pending, signal, (late) => late.body.destroy());
     const chunks: Buffer[] = [];
     let bytes = 0;
     for await (const chunk of res.body) {
