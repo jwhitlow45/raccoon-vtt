@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { EdgeFeature, RoomState, Token, Viewer } from "#shared/model.ts";
+import { CHUNK_CELLS, type EdgeFeature, type RoomState, type Token, type Viewer } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
-import { inSightOfNonOwners, isPartyMember } from "#shared/project.ts";
+import { inSightOfNonOwners, isPartyMember, playersSeeGround } from "#shared/project.ts";
 import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { carriedGroup, walkerFor } from "#shared/rules/attach.ts";
 import { LEDGE_IN_THE_WAY, groundUnder, legBlocker, ownWalk } from "#shared/rules/movement.ts";
 import { footprintRect, snapStep } from "#shared/rules/footprint.ts";
-import { footprintGround } from "#shared/rules/heights.ts";
+import { encodeHeights, footprintGround } from "#shared/rules/heights.ts";
 import type { Point, Rect } from "#shared/rules/geom.ts";
 import { routeFeet, routePoints, routeReach, routeStop, straightCost, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { DM, P1, actor, chance, effect, env, int, pick, reveal, rng, template, token } from "#shared/testutil.ts";
-import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
+import { dragOf, groupDragOf, settledAt } from "../movement/dragTesting.ts";
 import { dropLanding, dropView, routeTarget, walkerOf } from "../movement/drop.ts";
 import { worldFor } from "../movement/press.ts";
 import { findRoute } from "#shared/rules/walk.ts";
@@ -645,5 +645,87 @@ describe("a holder's route search walks the creatures it drags beside it with it
     }
     // A run that never reroutes a tow, names one left behind or finds no way at all tests nothing.
     assert.ok(opens > 50 && routes > 300 && rerouted > 80 && named > 20 && noneAlone > 15 && hiddenTows > 20, JSON.stringify({ opens, routes, rerouted, named, noneAlone, hiddenTows }));
+  });
+});
+
+/** The room with these ground heights in feet by cell key and every other square at 0, its chunks' heights encoded as the store keeps them. */
+function withHeights(state: RoomState, heights: Readonly<Record<string, number>>): RoomState {
+  const chunks = { ...state.buildChunks };
+  const feet = new Map<string, number[]>();
+  for (const [key, v] of Object.entries(heights)) {
+    const [x, y] = key.split(",").map(Number) as [number, number];
+    const cx = Math.floor(x / CHUNK_CELLS);
+    const cy = Math.floor(y / CHUNK_CELLS);
+    const at = `s1:${cx},${cy}`;
+    chunks[at] ??= { sceneId: "s1", cx, cy, rev: 1, cells: {}, edges: {} };
+    if (!feet.has(at)) feet.set(at, new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0));
+    feet.get(at)![(y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS)] = v;
+  }
+  for (const [at, f] of feet) chunks[at] = { ...chunks[at]!, heights: encodeHeights(f) };
+  return { ...state, buildChunks: chunks };
+}
+
+describe("a holder's route search keeps the creatures it drags beside it to ground players have seen (review FU20A-ASTRA-4)", () => {
+  test("random tows by the fog's edge: two rooms that differ only in the heights of squares players have not seen give the same way and the same note", () => {
+    let compared = 0;
+    let towedAway = 0;
+    let routes = 0;
+    let named = 0;
+    let walkerReads = 0;
+    for (let seed = 1; seed <= 500; seed++) {
+      const r = rng(seed);
+      const c = towCase(r);
+      const kira = c.state.tokens.kira!;
+      const side = kira.size === "large" ? 2 : 1;
+      // Fog lifted over the holder's start, its towed creatures there most often, and a few strips about it the walk can keep to.
+      const fogged: RoomState = { ...c.state, scenes: { ...c.state.scenes, s1: { ...c.state.scenes.s1!, fogEnabled: true } }, fogTiles: { ...c.state.fogTiles } };
+      const margin = chance(r, 0.8) ? 1 : 0;
+      reveal(fogged, "s1", { x: kira.x - margin, y: kira.y - margin, w: side + 2 * margin, h: side + 2 * margin });
+      for (let i = int(r, 1, 3); i > 0; i--) {
+        const across = chance(r, 0.5);
+        const long = int(r, 4, 12);
+        const wide = int(r, 1, 3);
+        const x = kira.x + int(r, across ? -long : -2, 2);
+        const y = kira.y + int(r, across ? -2 : -long, 2);
+        reveal(fogged, "s1", { x: Math.max(0, x), y: Math.max(0, y), w: across ? long : wide, h: across ? wide : long });
+      }
+      const seen = playersSeeGround(fogged, "s1");
+      const lit = (x: number, y: number) => x >= 0 && y >= 0 && x < 30 && y < 30 && seen(x, y);
+      // A walker's diagonal step on seen ground reads the square in the corner it cuts, which it alone is answerable for, so
+      // the heights change only under the fog away from such corners: squares with seen ground on one side at most.
+      const dark: string[] = [];
+      for (let y = 0; y < 30; y++) for (let x = 0; x < 30; x++) if (!lit(x, y) && !((lit(x - 1, y) || lit(x + 1, y)) && (lit(x, y - 1) || lit(x, y + 1)))) dark.push(`${x},${y}`);
+      const heights = (): Record<string, number> => Object.fromEntries(dark.filter(() => chance(r, 0.35)).map((key) => [key, 10]));
+      const a = withHeights(fogged, heights());
+      const b = withHeights(fogged, heights());
+      const role = c.who.role;
+      const near = chance(r, 0.7);
+      let raw = { x: Math.max(0, Math.min(27, kira.x + int(r, -8, 8))), y: Math.max(0, Math.min(27, kira.y + int(r, -8, 8))) };
+      // Most drags end on ground players have seen, where a way can be found at all.
+      for (let k = 0; near && k < 20 && !lit(raw.x, raw.y); k++) raw = { x: Math.max(0, Math.min(27, kira.x + int(r, -8, 8))), y: Math.max(0, Math.min(27, kira.y + int(r, -8, 8))) };
+      const answers = [a, b].map((room) => {
+        const copy = role === "dm" ? room : copyFor(room, c.who);
+        const view = dropView(copy, role);
+        const input = worldFor(view, view.tokens.kira!, role).input;
+        const target = routeTarget(view, view.tokens.kira!, raw);
+        const { towed, ...own } = input;
+        return { towed: towed?.length ?? 0, alone: settledAt(own, target), both: settledAt(input, target) };
+      });
+      const [inA, inB] = answers as [(typeof answers)[0], (typeof answers)[0]];
+      if (inA.towed === 0) continue;
+      // The walker's own way reads the room as the walker's rules do, apart from what it drags (reviews MV-O-21 and LP12-AT-2).
+      if (JSON.stringify(inA.alone) !== JSON.stringify(inB.alone)) {
+        walkerReads++;
+        continue;
+      }
+      const where = `seed ${seed} (${c.who.memberId} drags kira to ${raw.x},${raw.y})`;
+      assert.deepEqual(inB.both, inA.both, `${where}: the fog's heights changed the answer`);
+      compared++;
+      if (JSON.stringify(inA.both) !== JSON.stringify(inA.alone)) towedAway++;
+      if (inA.both.kind === "route") routes++;
+      if (inA.both.kind === "none" && inA.both.follower !== undefined) named++;
+    }
+    // A run that never sends a tow round the fog, finds a way or names one left behind tests nothing.
+    assert.ok(compared > 300 && towedAway > 80 && routes > 70 && named > 50 && walkerReads < 40, JSON.stringify({ compared, towedAway, routes, named, walkerReads }));
   });
 });

@@ -1,14 +1,14 @@
 import type { RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { footprintSize } from "#shared/rules/footprint.ts";
-import { findRoute, WorkBudget } from "#shared/rules/walk.ts";
+import { findRoute, WorkBudget, type WalkInput } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 import type { DragRead } from "../measure/movement.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { dropView, routeTarget, type DropPlan, type Point, type Role } from "./drop.ts";
 import { worldFor } from "./press.ts";
 import { groupReading } from "./preview.ts";
-import type { RouteAnswer } from "./routeDrag.ts";
+import { RouteDrag, type RouteAnswer, type Settled } from "./routeDrag.ts";
 import { RouteWork, type Frames } from "./routeWork.ts";
 import { dragStops, type DragDeps, type DragStops } from "./stageHooks.ts";
 import { holdSlot, routeSlot, type DragRoute, type Hold } from "./store.ts";
@@ -104,6 +104,16 @@ export function dragOf(copy: RoomState, role: Role, tokenId: string, raw: Point)
     plan,
     op: sent[0] ?? null,
   };
+}
+
+/** What a drag's search settles on for a spot, its drop's work run to the end at once: the way it shows, and the note when there is none. */
+export function settledAt(input: WalkInput, to: Point): Settled {
+  const drag = new RouteDrag(() => input, new RouteWork(new Hand(), () => new WorkBudget({ limit: 1e9 })));
+  let answer: Settled | null = null;
+  drag.drop(to, (landed) => (answer = landed));
+  drag.flush();
+  if (!answer) throw new Error("the drag's search never settled");
+  return answer;
 }
 
 /**

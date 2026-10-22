@@ -276,8 +276,8 @@ export class WalkWorld {
   #stamp = 0;
   /** Per node, whether the footprint there is on the holder the walk leaves: 0 not yet known, 1 on it, 2 clear. */
   readonly #on: Uint8Array;
-  /** The creatures the walker drags beside it (WalkInput `towed`), each with its place beside the walker and its own step test. */
-  readonly #towed: readonly { walker: Walker & { id: string }; dx: number; dy: number; tester: StepTester }[];
+  /** The creatures the walker drags beside it (WalkInput `towed`), each with its place beside the walker, its footprint's size and its own step test. */
+  readonly #towed: readonly { walker: Walker & { id: string }; dx: number; dy: number; w: number; h: number; tester: StepTester }[];
   /** Whether all of them take a step, by lattice node and direction: 0 not yet known, 1 they do, 2 one of them does not. */
   readonly #towedSteps: Uint8Array;
 
@@ -326,7 +326,7 @@ export class WalkWorld {
     // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
     this.#towed = pre ? pre.#towed : this.tester ? (input.towed ?? []).flatMap((t) => {
       const tester = stepTester(build, t);
-      return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, tester }] : [];
+      return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, ...footprintSize(t), tester }] : [];
     }) : [];
     this.#towedSteps = pre ? pre.#towedSteps : new Uint8Array(this.#towed.length > 0 ? nodes * 8 : 0);
     if (pre) {
@@ -426,9 +426,32 @@ export class WalkWorld {
     return ok;
   }
 
-  /** Whether every creature the walker drags beside it follows the walker's straight sweep between two stored positions, offset by its place, by its own step test. */
+  /** Whether every creature the walker drags beside it follows the walker's straight sweep between two stored positions, offset by its place, on seen ground and by its own step test. */
   towedClear(ax: number, ay: number, bx: number, by: number): boolean {
-    for (const t of this.#towed) if (!t.tester.clear(ax + t.dx, ay + t.dy, bx + t.dx, by + t.dy)) return false;
+    for (const t of this.#towed) if (!this.#towedSeen(t, ax, ay, bx, by) || !t.tester.clear(ax + t.dx, ay + t.dy, bx + t.dx, by + t.dy)) return false;
+    return true;
+  }
+
+  /**
+   * Whether a creature the walker drags beside it keeps to ground players
+   * have seen as it follows the walker's straight sweep between two stored
+   * positions, offset by its place (review FU20A-ASTRA-4). Each lattice step
+   * of the sweep reads the box its footprint sweeps over, the start's place
+   * included, so its step test never reads a square under the fog, and a
+   * creature in the fog follows no searched way at all.
+   */
+  #towedSeen(t: { dx: number; dy: number; w: number; h: number }, ax: number, ay: number, bx: number, by: number): boolean {
+    if (!this.input.seen) return true;
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / this.L - EPS));
+    let px = ax + t.dx;
+    let py = ay + t.dy;
+    for (let k = 1; k <= n; k++) {
+      const x = (k === n ? bx : ax + ((bx - ax) * k) / n) + t.dx;
+      const y = (k === n ? by : ay + ((by - ay) * k) / n) + t.dy;
+      if (!this.#seenRect(Math.min(px, x), Math.min(py, y), Math.max(px, x) + t.w, Math.max(py, y) + t.h)) return false;
+      px = x;
+      py = y;
+    }
     return true;
   }
 
@@ -440,7 +463,9 @@ export class WalkWorld {
    */
   towedFollow(to: Point): boolean {
     const chunks = this.input.build.buildChunks;
+    const { x: ax, y: ay } = this.input.token;
     for (const t of this.#towed) {
+      if (!this.#towedSeen(t, ax, ay, to.x, to.y)) return false;
       const x = to.x + t.dx;
       const y = to.y + t.dy;
       const ground = groundUnder(chunks, t.walker, { x, y });
@@ -454,7 +479,7 @@ export class WalkWorld {
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1]!;
       const b = points[i]!;
-      for (const t of this.#towed) if (!t.tester.clear(a.x + t.dx, a.y + t.dy, b.x + t.dx, b.y + t.dy)) return t.walker.id;
+      for (const t of this.#towed) if (!this.#towedSeen(t, a.x, a.y, b.x, b.y) || !t.tester.clear(a.x + t.dx, a.y + t.dy, b.x + t.dx, b.y + t.dy)) return t.walker.id;
     }
     return null;
   }
@@ -467,12 +492,13 @@ export class WalkWorld {
   /** Whether the footprint at a stored position lies on ground the search may read: every square under it seen, under the squeezed footprint where it squeezes. */
   seenAt(x: number, y: number, n = -2): boolean {
     if (!this.input.seen) return true;
-    const flags = this.flags;
     const box = this.#box(x, y, n, this.#seenBox);
-    const x0 = box[0]!;
-    const y0 = box[1]!;
-    const x1 = box[2]!;
-    const y1 = box[3]!;
+    return this.#seenRect(box[0]!, box[1]!, box[2]!, box[3]!);
+  }
+
+  /** Whether every square under a box lies on ground the search may read, none of it off the scene. */
+  #seenRect(x0: number, y0: number, x1: number, y1: number): boolean {
+    const flags = this.flags;
     for (let cy = Math.floor(y0 + EPS); cy < Math.ceil(y1 - EPS); cy++)
       for (let cx = Math.floor(x0 + EPS); cx < Math.ceil(x1 - EPS); cx++) {
         if (cx < 0 || cy < 0 || cx >= this.W || cy >= this.H || (flags[cy * this.W + cx]! & SEEN) === 0) return false;

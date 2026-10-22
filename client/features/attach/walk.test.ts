@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState, Token } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { findRoute, WorkBudget } from "#shared/rules/walk.ts";
+import { findRoute, WalkWorld, WorkBudget } from "#shared/rules/walk.ts";
 import { groupWalkWorld, halvedAt, publicWorld, speedAreas } from "#shared/rules/walkWorld.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
@@ -11,6 +11,7 @@ import { dropView, holdLabel, moveOpsOf, planGroup, planOne, planWalk, routeLand
 import { DM, P1, actor, effect, env, reveal, template, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf } from "../movement/dragTesting.ts";
 import { copyFor } from "./testing.ts";
+import { worldFor } from "../movement/press.ts";
 import { line, onTurn, raised, thorn, world } from "../movement/testing.ts";
 import { extraWords } from "../measure/movement.ts";
 import { tokenStop, type RulerStop } from "../measure/ruler.ts";
@@ -131,6 +132,24 @@ describe("a holder's route search walks the creature it drags beside it with it 
     const copy = copyFor(state, P1);
     const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.thorn!), { x: 5.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
     assert.deepEqual(ruler.legs.map((leg) => leg.none), [true]);
+  });
+
+  test("the goblin keeps to ground players have seen: its step past a square under the fog never reads the square, raised or not (review FU20A-ASTRA-4)", () => {
+    // Fog over the one square (6, 4) whose corner the goblin's diagonal step from (5, 4) to (6, 3) cuts, as Thorn steps from (4, 4) to (5, 3).
+    const clears = [0, 10].map((feet) => {
+      const grappledGoblin = goblin({ x: 5, y: 4, size: "small", actor: { inline: actor({ effects: [effect("g1", { key: "grappled" })] }) } });
+      const state = onTurn(world({ heights: { "6,4": feet }, tokens: [thorn({ x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 60 } }) } }), grappledGoblin] }), "thorn");
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+      reveal(state, "s1", { x: 0, y: 0, w: 6, h: 30 });
+      reveal(state, "s1", { x: 6, y: 0, w: 24, h: 4 });
+      reveal(state, "s1", { x: 6, y: 5, w: 24, h: 25 });
+      reveal(state, "s1", { x: 7, y: 4, w: 23, h: 1 });
+      const copy = copyFor(state, P1);
+      const walk = new WalkWorld(worldFor(dropView(copy, "player"), copy.tokens.thorn!, "player").input);
+      assert.equal(walk.tows, true);
+      return [walk.towedClear(4, 4, 5, 3), walk.towedClear(4, 4, 4, 3)];
+    });
+    assert.deepEqual(clears, [[false, true], [false, true]]);
   });
 
   test("a goblin straight behind him follows him through the 5 ft door, and alone he walks round the wall as before", () => {
