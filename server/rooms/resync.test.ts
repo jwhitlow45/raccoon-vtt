@@ -427,6 +427,26 @@ describe("a re-sync's race at the room actor (docs/design-v1-resync.md 5)", () =
     );
   });
 
+  test("the DM's equal sync in the same millisecond as Ana's Apply gets its own stamp, and refuses Ana's Undo (RSBUILD-ASTRA-04)", async () => {
+    const now = Date.parse("2026-10-21T19:00:00.000Z");
+    await play(
+      table(),
+      async ({ actor, dm, ana, id }) => {
+        const review = ana.sees(id);
+        const applied = await ana.post(update(id, review, APPLY));
+        const answer = await evOf(ana.sent, applied);
+        assert.deepEqual(answer.stamped, [{ n: applied, at: "2026-10-21T19:00:00.000Z" }]);
+        const later: CharacterPatch = { stats: { saves: ["wis"] }, ddbSync: SYNCED };
+        const synced = await dm.post(update(id, dm.sees(id), later));
+        assert.deepEqual((await evOf(dm.sent, synced)).stamped, [{ n: synced, at: "2026-10-21T19:00:00.001Z" }], "the clock has not moved, the stamp has");
+        const before = structuredClone(actor.committed.state.characters[id]);
+        assert.deepEqual(await ana.send(update(id, resultOf(review, APPLY, "2026-10-21T19:00:00.000Z"), undoOf(review, APPLY))), STALE);
+        assert.deepEqual(actor.committed.state.characters[id], before, "the DM's sync stands");
+      },
+      { now: () => now },
+    );
+  });
+
   test("Ana's Apply on a character with a DM's note and a hidden effect is taken, though the DM changes both after her review", async () => {
     const setup = table({ actor: { dmNotes: "owes the thieves' guild", effects: [testEffect("hex", { hiddenFromPlayers: true })] } });
     await play(setup, async ({ actor, dm, ana, id }) => {

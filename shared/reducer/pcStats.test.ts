@@ -153,6 +153,22 @@ describe("a character's D&D Beyond sync record in the reducer (docs/design-v1-re
     assert.deepEqual(s.characters.bree!.ddbSync, { ...next, at: LATER });
   });
 
+  test("a record's stamp is the op's time, or 1 ms past the record it replaces when that is as late, so no two writes share one (RSBUILD-ASTRA-04)", () => {
+    let s = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), LATER).state;
+    assert.equal(s.characters.bree!.ddbSync!.at, LATER);
+    s = applyAt(s, update({ ddbSync: RECORD }), LATER).state;
+    assert.equal(s.characters.bree!.ddbSync!.at, "2026-10-20T18:30:00.001Z", "an equal record in the same millisecond");
+    s = applyAt(s, update({ ddbSync: RECORD }), LATER).state;
+    assert.equal(s.characters.bree!.ddbSync!.at, "2026-10-20T18:30:00.002Z");
+    s = applyAt(s, update({ ddbSync: RECORD }), "2026-10-20T18:31:00.000Z").state;
+    assert.equal(s.characters.bree!.ddbSync!.at, "2026-10-20T18:31:00.000Z", "a later time is the op's own");
+    // A record from a clock ahead, as a restored backup may hold, is passed by 1 ms.
+    const ahead = applyAt(withBree({ stats: BLOCK }), update({ ddbSync: { ...RECORD, at: "2026-10-21T00:00:00.000Z" } }), AT).state;
+    assert.equal(applyAt(ahead, update({ ddbSync: RECORD }), LATER).state.characters.bree!.ddbSync!.at, "2026-10-21T00:00:00.001Z");
+    // An at the patch sends is kept even when earlier, as Undo puts the record before back.
+    assert.equal(applyAt(s, update({ ddbSync: { ...RECORD, at: AT } }), LATER).state.characters.bree!.ddbSync!.at, AT);
+  });
+
   test("null drops the record and keeps the block", () => {
     const s = applyAt(applyAt(withBree({ stats: BLOCK }), update({ ddbSync: RECORD }), AT).state, update({ ddbSync: null }), LATER).state;
     assert.equal("ddbSync" in s.characters.bree!, false);

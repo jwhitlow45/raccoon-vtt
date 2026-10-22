@@ -730,10 +730,10 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
 
 /**
  * A character's D&D Beyond sync record as a patch leaves it
- * (docs/design-v1-resync.md 4): stored as sent, with the op's time as `at`
- * when the patch has none, which a sync's never has. Removing the block
- * removes the record too, since its base then describes no block. The
- * record may still name rolls the block no longer holds.
+ * (docs/design-v1-resync.md 4): stored as sent, with a stamp as `at` when
+ * the patch has none, which a sync's never has. Removing the block removes
+ * the record too, since its base then describes no block. The record may
+ * still name rolls the block no longer holds.
  */
 function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, blockRemoved: boolean, at: string): void {
   if (blockRemoved || record === null) {
@@ -741,9 +741,22 @@ function syncRecord(next: Character, record: DdbSyncPatch | null | undefined, bl
     return;
   }
   if (record === undefined) return;
-  const stored: DdbSync = { ...record, at: record.at ?? at };
+  const stored: DdbSync = { ...record, at: record.at ?? syncStamp(at, next.ddbSync?.at) };
   if (serializedBytes(stored) > LIMITS.ddbSyncBytes) throw new Refuse("quota", `${next.name}'s sync record would be too large to save.`);
   next.ddbSync = stored;
+}
+
+/**
+ * The op's time, or 1 ms past the record it replaces when that is as late.
+ * A re-sync's Undo expects the record Apply wrote, `at` and all, so two
+ * equal records written in the same millisecond must not share one, or
+ * Undo would take back the later write too (3.4). Replay gives the same
+ * stamp, since the op's time and the record before are both stored.
+ */
+function syncStamp(at: string, before: string | undefined): string {
+  if (before === undefined) return at;
+  const after = Date.parse(before) + 1;
+  return Date.parse(at) >= after ? at : new Date(after).toISOString();
 }
 
 /**

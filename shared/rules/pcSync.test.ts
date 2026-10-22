@@ -756,4 +756,26 @@ describe("the review's checks (3.3)", () => {
     const fromView = undoSync(bree0, a.sent.patch, afterB.characters.bree!.ddbSync!.at)!;
     assert.ok(canApply({ t: "character.update", characterId: "bree", patch: fromView.patch, expect: fromView.expect }, P1, afterB, { canUseAsset: () => true }).ok);
   });
+
+  test("an editor's Save of an equal record in the same millisecond as Apply gets its own stamp, so Apply's Undo is refused after it (RSBUILD-ASTRA-04)", () => {
+    const first = synced(fillOf(empty()));
+    const bree0: Character = character("bree", { ...first, ownerIds: ["p1"], stats: { ...first.stats!, saves: ["wis"] } });
+    const p = plan(bree0, fillOf(empty(), { level: 6 }));
+    const sent = syncPatch(bree0, syncResult(p, defaultTicks(p)))!;
+    const T = "2026-10-21T19:00:00.000Z";
+    const applyOpA: Op = { t: "character.update", characterId: "bree", patch: sent.patch, expect: sent.expect };
+    const a = applyOp(room({ characters: { bree: bree0 } }), applyOpA, P1, { seq: 1, at: T });
+    assert.ok(a.ok);
+    const stampedA = stampedAt(applyOpA, a.state);
+    assert.equal(stampedA, T);
+    // Another device's editor Save carries the same record, with the saves set back, at the same clock time.
+    const save: Op = { t: "character.update", characterId: "bree", patch: { stats: { saves: [] }, ddbSync: sent.patch.ddbSync! } };
+    assert.ok(canApply(save, P1, a.state, { canUseAsset: () => true }).ok);
+    const b = applyOp(a.state, save, P1, { seq: 2, at: T });
+    assert.ok(b.ok);
+    assert.ok(sameRecord(b.state.characters.bree!.ddbSync!, a.state.characters.bree!.ddbSync), "the same record");
+    assert.equal(stampedAt(save, b.state), "2026-10-21T19:00:00.001Z", "its own stamp");
+    const undo = undoSync(bree0, sent.patch, stampedA)!;
+    assert.deepEqual(canApply({ t: "character.update", characterId: "bree", patch: undo.patch, expect: undo.expect }, P1, b.state, { canUseAsset: () => true }), { ok: false, code: "invalid", message: CHARACTER_CHANGED });
+  });
 });
