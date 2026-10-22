@@ -390,7 +390,7 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await dm.keyboard.press("ArrowDown");
     assert.equal(await focused(), "Pin");
     await dm.keyboard.press("ArrowRight");
-    assert.equal(await focused(), "Map builder");
+    assert.equal(await focused(), "Trap");
     await dm.keyboard.press("ArrowUp");
     assert.equal(await focused(), "Pin");
     await dm.keyboard.press("ArrowLeft");
