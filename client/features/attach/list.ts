@@ -1,6 +1,6 @@
 import type { AttachKind, RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { attachDistanceFt, attachReachFt, isCreature, kindRefusal, linkLimitRefusal, onHolder, seatSpot } from "#shared/rules/attach.ts";
+import { attachDistanceFt, attachReachFt, holderOf, isCreature, kindRefusal, linkLimitRefusal, onHolder, seatSpot } from "#shared/rules/attach.ts";
 import { sizeCategory } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
@@ -68,11 +68,14 @@ function sentence(choice: AttachChoice, name: string): string {
  * the selected token getting on the other, then the other getting on it,
  * then a drag. A creature carried by a creature is one the viewer sees
  * Grappled, as the rules carry a grappled foe, and a friend is dragged.
- * Beyond reach nothing is dragged.
+ * Beyond reach nothing is dragged. A token already carried offers only
+ * what it would hold, Carry and Drag: it changes mounts through Get off,
+ * which charges the dismount (docs/design-v1-attach.md 4.3).
  */
 function choicesFor(view: RoomState, selected: Token, other: Token, farther: boolean): AttachChoice[] {
   const out: AttachChoice[] = [];
-  if (isCreature(selected)) {
+  const carried = holderOf(view.tokens, selected) !== undefined;
+  if (isCreature(selected) && !carried) {
     if (!isCreature(other)) out.push("getOn");
     else out.push(sizeCategory(selected) === "tiny" ? "perch" : "ride");
   }

@@ -3,9 +3,9 @@ import type { Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction, NO_ROOM_TO_GET_OFF } from "./detach.ts";
+import { barSlots, DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction, NO_ROOM_TO_GET_OFF } from "./detach.ts";
 import { groupLine } from "./groups.ts";
-import { detachAllowed, offersAttach, type AttachViewer } from "./rights.ts";
+import { detachAllowed, type AttachViewer } from "./rights.ts";
 
 /** Who is looking, as the attach rules read it. */
 export function useAttachViewer(): AttachViewer {
@@ -13,21 +13,15 @@ export function useAttachViewer(): AttachViewer {
   return useMemo(() => ({ role: you?.role ?? "player", memberId: you?.memberId ?? null }), [you]);
 }
 
-/**
- * What the bar's Attach slot holds for this token (docs/design-v1-attach.md
- * 4.1 and 4.3): Get off, Put down or Let go on a carried token whose link
- * the viewer may undo, Attach for whoever may attach it, or nothing.
- */
-export function useAttachSlot(token: Token): "attach" | "detach" | null {
+/** What the bar's attach slots hold for this token (detach.ts barSlots). */
+export function useAttachSlots(token: Token): ("detach" | "attach")[] {
   const viewer = useAttachViewer();
   const view = useRoomView((s) => s.view);
-  if (!view) return null;
-  if (detachChoice(view.tokens, token)) return detachAllowed(view, viewer, token) ? "detach" : null;
-  return offersAttach(view, viewer, token) ? "attach" : null;
+  return view ? barSlots(view, viewer, token) : [];
 }
 
 /**
- * Get off, Put down or Let go, in Attach's place on a carried token's bar
+ * Get off, Put down or Let go, on a carried token's bar before its Attach
  * (4.3). Get off finds its spot beside the holder as this viewer sees the
  * room (detach.ts getOffPlace), and without one it is disabled, with why
  * under it.

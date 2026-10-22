@@ -5,7 +5,7 @@ import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { DM, P1, room, scene, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
-import { DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction } from "./detach.ts";
+import { barSlots, DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction } from "./detach.ts";
 
 const dm = { role: "dm" as const, memberId: DM.memberId };
 const p1 = { role: "player" as const, memberId: P1.memberId };
@@ -69,6 +69,15 @@ describe("getting off and letting go", () => {
     assert.equal(asP1(detachOp("bree", spot)).ok, true);
     assert.equal(asP1(detachOp("bree", { x: 7, y: 6, elevation: 0 })).ok, false);
     assert.deepEqual(getOffPlace(dragging, dm, rider), { x: 7, y: 6, elevation: 0 }, "the DM's get off is placed, never walked");
+  });
+
+  test("a carried creature's bar offers Attach beside Get off, a carried object's Put down alone, a loose token's Attach alone", () => {
+    const state = withTokens([horse, rider, torch, goblin]);
+    assert.deepEqual(barSlots(state, p1, rider), ["detach", "attach"]);
+    assert.deepEqual(barSlots(state, dm, torch), ["detach"]);
+    assert.deepEqual(barSlots(state, dm, horse), ["attach"]);
+    // A player who may neither undo the goblin's link nor move it gets nothing.
+    assert.deepEqual(barSlots(state, p1, goblin), []);
   });
 
   test("the ops: Get off with its place, the others where it stands", () => {

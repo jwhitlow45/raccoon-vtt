@@ -24,7 +24,7 @@ import { DoorButton } from "../features/doors/DoorButton.tsx";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { LightChip } from "../features/vision/LightChip.tsx";
 import { AttachButton } from "../features/attach/AttachButton.tsx";
-import { DetachButton, GroupLine, useAttachSlot } from "../features/attach/BarParts.tsx";
+import { DetachButton, GroupLine, useAttachSlots } from "../features/attach/BarParts.tsx";
 import { offersRequest } from "../features/rolls/logic.ts";
 import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
@@ -182,7 +182,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const scope = useRoomScope();
   const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
-  const attachSlot = useAttachSlot(token);
+  const attachSlots = useAttachSlots(token);
 
   const access = useMemo(
     () =>
@@ -247,7 +247,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     door: true,
     light: (scene !== undefined && visionOn(scene)) || (token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0)),
     companion: isCompanion(token),
-    attach: attachSlot,
+    attach: attachSlots,
   });
   const button = (id: BarButtonId): ReactNode => {
     switch (id) {

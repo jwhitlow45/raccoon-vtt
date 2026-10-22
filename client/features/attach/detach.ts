@@ -5,7 +5,7 @@ import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
 import { landedElevation, walkersStop } from "../movement/drop.ts";
-import type { AttachViewer } from "./rights.ts";
+import { detachAllowed, offersAttach, type AttachViewer, type RightsView } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
 
 /**
@@ -22,6 +22,21 @@ export function detachChoice(tokens: RoomState["tokens"], token: Token): DetachC
   if (!token.attached || !holderOf(tokens, token)) return null;
   if (token.attached.kind === "drag") return "letGo";
   return isCreature(token) ? "getOff" : "putDown";
+}
+
+/**
+ * What the bar's attach slots hold for this token (docs/design-v1-attach.md
+ * 4.1 and 4.3): Get off, Put down or Let go on a carried token whose link
+ * the viewer may undo, and Attach for whoever may attach it, beside the
+ * first on a carried creature, so a rider can still take up a torch or
+ * drag a grappled foe. A carried object attaches nothing.
+ */
+export function barSlots(view: RightsView, viewer: AttachViewer, token: Token): ("detach" | "attach")[] {
+  const carried = detachChoice(view.tokens, token) !== null;
+  const out: ("detach" | "attach")[] = [];
+  if (carried && detachAllowed(view, viewer, token)) out.push("detach");
+  if ((!carried || isCreature(token)) && offersAttach(view, viewer, token)) out.push("attach");
+  return out;
 }
 
 /** The carried token's own button. */

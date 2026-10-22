@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { barButtons, barCapacity, barShort, isCompanion, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
 import { DEFAULT_SPOT, placeBar, type Chrome } from "./barDock.ts";
 
-const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, companion: false, attach: null };
+const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, companion: false, attach: [] };
 const DM: BarButtonInput = { ...NOTHING, dm: true };
 const OWNER: BarButtonInput = { ...NOTHING, owner: true };
 
@@ -37,11 +37,12 @@ describe("the bar's rows", () => {
     });
   });
 
-  test("Attach follows Light on the steady line, and Get off takes its place on a carried token (docs/design-v1-attach.md 4.1, 4.3)", () => {
-    assert.deepEqual(barButtons({ ...DM, light: true, attach: "attach" }).play, ["conditions", "hidden", "multiSelect", "roll", "light", "attach"]);
-    assert.deepEqual(barButtons({ ...OWNER, attach: "detach" }).play, ["conditions", "multiSelect", "roll", "detach"]);
+  test("Attach follows Light on the steady line, and Get off comes before it on a carried token (docs/design-v1-attach.md 4.1, 4.3)", () => {
+    assert.deepEqual(barButtons({ ...DM, light: true, attach: ["attach"] }).play, ["conditions", "hidden", "multiSelect", "roll", "light", "attach"]);
+    assert.deepEqual(barButtons({ ...OWNER, attach: ["detach"] }).play, ["conditions", "multiSelect", "roll", "detach"]);
+    assert.deepEqual(barButtons({ ...OWNER, attach: ["detach", "attach"] }).play, ["conditions", "multiSelect", "roll", "detach", "attach"]);
     // A player who may move another's token may attach it, or let it go, without owning it.
-    assert.deepEqual(barButtons({ ...NOTHING, attach: "attach" }).play, ["multiSelect", "attach"]);
+    assert.deepEqual(barButtons({ ...NOTHING, attach: ["attach"] }).play, ["multiSelect", "attach"]);
     assert.equal(barButtons(DM).play.includes("attach"), false);
   });
 

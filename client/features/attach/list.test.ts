@@ -55,6 +55,13 @@ describe("the Attach list", () => {
     assert.ok(!fromThorn.includes("Carry Pip"));
   });
 
+  test("a token already carried offers only what it would hold, so a rider changes mounts through Get off", () => {
+    const state = table([token("pony", { name: "Pony", kind: "npc", size: "large", x: 3, y: 4 })]);
+    state.tokens.thorn = { ...state.tokens.thorn!, x: 6, y: 5, attached: { to: "horse", kind: "ride" } };
+    const texts = attachRows(state, dm, "thorn").map((r) => r.text);
+    assert.ok(texts.length > 0 && texts.every((t) => t.startsWith("Carry ") || t.startsWith("Drag ")), texts.join(", "));
+  });
+
   test("the DM's list goes on to 30 ft under Farther away, with Ride, Perch and Carry only", () => {
     const pony = token("pony", { name: "Pony", size: "large", x: 9, y: 5 });
     const far = token("far", { name: "Far horse", size: "large", x: 20, y: 5 });
