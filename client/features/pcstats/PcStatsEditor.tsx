@@ -164,10 +164,9 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     getDdbFill(roomId, ddbLink, controller.signal).then(
       (fill) => {
         gets.current.delete(id);
-        // A character gone from the view meanwhile still gets its review, with nothing beside the block to set.
-        const live = store.getState().view?.characters[props.characterId];
+        // A character gone from the view meanwhile still gets its review, against the character as last seen. One never seen gets an import's review, with nothing beside the block.
         const plan = syncPlan(fill, flowRef.current);
-        if (open.current) send({ t: "got", id, result: { fill, lines: live ? alsoLines(fill, live) : [], ticks: plan ? defaultTicks(plan) : new Set() } });
+        if (open.current) send({ t: "got", id, result: plan ? { fill, lines: [], ticks: defaultTicks(plan) } : { fill, lines: [] } });
       },
       (err: unknown) => {
         gets.current.delete(id);
@@ -243,12 +242,11 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     readPastedJson(ddbJson).then(
       (result) => {
         setReadingJson(false);
-        const live = store.getState().view?.characters[props.characterId];
         if (!open.current) return;
         if ("error" in result) setLinkError(result.error);
         else {
           const plan = syncPlan(result.fill, flowRef.current);
-          send({ t: "read", fill: result.fill, lines: live ? alsoLines(result.fill, live) : [], ticks: plan ? defaultTicks(plan) : new Set() });
+          send({ t: "read", fill: result.fill, lines: [], ...(plan ? { ticks: defaultTicks(plan) } : {}) });
         }
       },
       () => {
@@ -582,7 +580,7 @@ function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
           ))}
         </section>
       ) : null}
-      <p style={{ margin: 0 }}>{fillSummary(review.fill, review.merge)}</p>
+      {review.merge ? <p style={{ margin: 0 }}>{fillSummary(review.fill, review.merge)}</p> : null}
       {review.lines.length > 0 ? (
         <section style={{ display: "grid", gap: theme.space(1) }}>
           <SectionLabel>Also set</SectionLabel>

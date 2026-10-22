@@ -34,9 +34,9 @@ export type Step = "block" | "paste" | "ddb" | "review";
 /**
  * A fill being looked over: what it read, what it does to the block, and
  * the other fields it sets, ticked or not. A D&D Beyond read has `ticks`,
- * the re-sync review's, in place of `lines`.
+ * the re-sync review's, in place of `merge` and `lines`, which stay empty.
  */
-export type Review = { fill: PcFill; merge: FillMerge; lines: AlsoLine[]; from: "paste" | "ddb"; ticks?: ReadonlySet<string> };
+export type Review = { fill: PcFill; merge?: FillMerge; lines: AlsoLine[]; from: "paste" | "ddb"; ticks?: ReadonlySet<string> };
 
 /**
  * What a D&D Beyond review's Use it sets: the merged block and level, the
@@ -143,15 +143,15 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
       if (state.get !== event.id || state.step !== "ddb") return { state, effects: NONE };
       const result = event.result;
       if ("error" in result) return { state: { ...state, get: null, error: result.error }, effects: NONE };
-      const merge = mergeFill(state.draft.stats, result.fill);
-      return { state: { ...state, get: null, step: "review", review: { fill: result.fill, merge, lines: result.lines, from: "ddb", ...(result.ticks ? { ticks: result.ticks } : {}) } }, effects: NONE };
+      const reviewed = result.ticks ? { ticks: result.ticks } : { merge: mergeFill(state.draft.stats, result.fill) };
+      return { state: { ...state, get: null, step: "review", review: { fill: result.fill, lines: result.lines, from: "ddb", ...reviewed } }, effects: NONE };
     }
     case "read": {
       if (state.step !== "paste" && state.step !== "ddb") return { state, effects: NONE };
       // Pasted JSON read while a Get it waits: the paste wins, and the request goes.
       const dropped = dropGet(state);
-      const merge = mergeFill(state.draft.stats, event.fill);
-      return { state: { ...dropped.state, step: "review", review: { fill: event.fill, merge, lines: event.lines, from: state.step, ...(event.ticks ? { ticks: event.ticks } : {}) } }, effects: dropped.effects };
+      const reviewed = event.ticks ? { ticks: event.ticks } : { merge: mergeFill(state.draft.stats, event.fill) };
+      return { state: { ...dropped.state, step: "review", review: { fill: event.fill, lines: event.lines, from: state.step, ...reviewed } }, effects: dropped.effects };
     }
     case "toggle": {
       const review = state.review;

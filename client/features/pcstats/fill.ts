@@ -1,7 +1,7 @@
 import type { Actor, Character } from "#shared/model.ts";
 import type { ActorPatch, CharacterPatch, DdbSyncPatch } from "#shared/protocol.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { hpForMax } from "#shared/rules/pcSync.ts";
+import { hpForMax, sensesWords } from "#shared/rules/pcSync.ts";
 import { speedText } from "../tokens/companionBlocks.ts";
 
 /**
@@ -28,10 +28,6 @@ export function readLine(fill: PcFill): string {
 
 function sameSpeeds(a: Actor["speeds"], b: Actor["speeds"]): boolean {
   return a.walk === b.walk && a.fly === b.fly && a.swim === b.swim && a.climb === b.climb && a.burrow === b.burrow && (a.hover ?? false) === (b.hover ?? false);
-}
-
-function sensesWords(senses: string): string {
-  return senses.trim().replace(/\.$/, "");
 }
 
 /** One line per field the fill would change, in the review's order. */

@@ -83,6 +83,7 @@ describe("the editor's flow", () => {
     let { state } = run(start, { t: "open", step: "ddb" }, { t: "get" });
     state = run(state, { t: "got", id: 1, result: { fill: ddb, lines: [], ticks: new Set(["also:level"]) } }, { t: "tick", id: "field:spellAbility" }, { t: "tick", id: "also:level" }).state;
     assert.deepEqual([...state.review!.ticks!], ["field:spellAbility"]);
+    assert.equal(state.review!.merge, undefined, "a review by its ticks merges nothing of its own");
     state = run(state, { t: "ticks", ticks: new Set(["also:ac"]) }).state;
     assert.deepEqual([...state.review!.ticks!], ["also:ac"]);
     assert.equal(run(state, { t: "use" }).state.step, "review", "Use it needs what the editor worked out");
@@ -92,7 +93,9 @@ describe("the editor's flow", () => {
     // A later Use it replaces the record, and null, one equal to the saved record, drops it.
     const again = run(used, { t: "open", step: "ddb" }, { t: "read", fill: ddb, lines: [], ticks: new Set() }, { t: "use", sync: { stats: used.draft.stats, level: 6, also: {}, record: null } }).state;
     assert.equal(again.record, null);
-    assert.equal(run(start, { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [] }, { t: "tick", id: "x" }).state.review!.ticks, undefined, "pasted text keeps today's review");
+    const pasted = run(start, { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [] }, { t: "tick", id: "x" }).state.review!;
+    assert.equal(pasted.ticks, undefined, "pasted text keeps today's review");
+    assert.ok(pasted.merge, "with its summary's merge");
   });
 
   test("Back from the review returns to its step and drops what it read", () => {
