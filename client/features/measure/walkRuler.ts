@@ -2,7 +2,7 @@ import type { Actor, RoomState, Token } from "#shared/model.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { offKey, pastHolder, walkAlong, type MovingToken } from "#shared/rules/movement.ts";
+import { offKey, pastHolder, walkAlong, type Walker } from "#shared/rules/movement.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
@@ -121,7 +121,7 @@ function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter)
  * (review MV-O-23). Over the cap the one asked for longest ago goes: a
  * ruler still searching holds its own (Progress).
  */
-function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter, key: string, budget: WorkBudget): WalkSearch {
+function searchFor(view: RoomState, walker: Token & Walker, viewer: WalkViewer, everything: boolean, counter: DiagonalCounter, key: string, budget: WorkBudget): WalkSearch {
   const kept = keptFor(view, walker.sceneId);
   let search = kept.searches.get(key);
   if (search) kept.searches.delete(key);
@@ -141,7 +141,7 @@ function searchFor(view: RoomState, walker: Token, viewer: WalkViewer, everythin
  * allowance of its own: the frame's work (routeWork.ts) gives the frame's
  * first work its bit of progress, once a frame (review ASTRA-14).
  */
-function legAnswer(view: RoomState, walker: Token, input: WalkInput, counter: DiagonalCounter, target: Point, budget: WorkBudget, progress: Progress): LegAnswer | null {
+function legAnswer(view: RoomState, walker: Token & Walker, input: WalkInput, counter: DiagonalCounter, target: Point, budget: WorkBudget, progress: Progress): LegAnswer | null {
   const kept = keptFor(view, walker.sceneId);
   const key = searchKey(walker, input.everything, counter);
   const legKey = `${key}|${target.x},${target.y}`;
@@ -228,7 +228,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     let corners: Point[] = [];
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
-    const walking: Token & MovingToken = cleared ? pastHolder(walkerOf(seen, walker)) : walkerOf(seen, walker);
+    const walking: Token & Walker = cleared ? pastHolder(walkerOf(seen, walker)) : walkerOf(seen, walker);
     const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walking, input, counter, target, budget, progress));
     if (answer) progress.answers[k] = answer;
     if (!answer) {

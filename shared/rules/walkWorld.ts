@@ -6,6 +6,7 @@ import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { footprintRect, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
 import { publicCounters } from "./path.ts";
+import type { Walker } from "./movement.ts";
 import type { WalkArea, WalkCreature, WalkInput } from "./walk.ts";
 import { sceneWalls } from "./walls.ts";
 
@@ -123,7 +124,7 @@ function publicAreas(state: RoomState, sceneId: string, seen: (id: string) => To
  * it. `stops` are the creature's earlier stops this turn as this viewer
  * holds them, for the public counters, or none outside a turn.
  */
-export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, stops: readonly PathStop[] = [], opts: WorldOptions = {}): PublicWorld {
+export function publicWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = [], opts: WorldOptions = {}): PublicWorld {
   const scene = state.scenes[token.sceneId];
   const rules: DistanceSettings = { feetPerCell: state.meta.settings.feetPerCell, diagonal: state.meta.settings.diagonal };
   const blocks = scene?.blockMovement === true;
@@ -175,7 +176,7 @@ export function publicWorld(state: RoomState, token: Token, viewer: WalkViewer, 
  * route then carries. What moves with it never stands in its way, since it
  * is not there once the holder has gone.
  */
-export function groupWalkWorld(state: RoomState, token: Token, viewer: WalkViewer, stops: readonly PathStop[] = []): PublicWorld {
+export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: WalkViewer, stops: readonly PathStop[] = []): PublicWorld {
   const seen = (t: { id: string }) => {
     const other = state.tokens[t.id];
     return other !== undefined && publicToken(state, other, viewer);

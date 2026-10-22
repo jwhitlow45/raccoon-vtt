@@ -1,7 +1,7 @@
 import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type Scene, type StairMark, type TerrainId, type WallFeature } from "../model.ts";
 import type { BuildState } from "../ruleHooks.ts";
 import { encodeHeights } from "./heights.ts";
-import type { MovingToken } from "./movement.ts";
+import { ownWalk, type MovingToken, type Walker } from "./movement.ts";
 
 /**
  * Small built scenes for the route and walk tests, split into stored chunks
@@ -66,8 +66,9 @@ export function world(spec: WorldSpec): BuildState & { sceneId: string } {
   return { sceneId, scenes: { [sceneId]: scene }, buildChunks: chunks };
 }
 
-export function tok(state: { sceneId: string }, over: Partial<MovingToken> = {}): MovingToken {
-  return { sceneId: state.sceneId, size: "medium", x: 0, y: 0, elevation: 0, ...over };
+/** A token on the test world's scene, walking as itself (movement.ts ownWalk). */
+export function tok(state: { sceneId: string }, over: Partial<MovingToken> = {}): Walker {
+  return ownWalk({ sceneId: state.sceneId, size: "medium", x: 0, y: 0, elevation: 0, ...over });
 }
 
 /** Edge walls along a line of cells: "n" edges from (x0, y) to (x1, y), or "w" edges from (x, y0) to (x, y1). */

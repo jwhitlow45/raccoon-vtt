@@ -7,6 +7,7 @@ import { P1, actor, effect, reveal, room, template, token } from "../testutil.ts
 import { legGeometry, publicCounters } from "./path.ts";
 import { findRoute } from "./walk.ts";
 import { creatureWay, groupWalkWorld, halvedAt, publicWorld, speedAreas, type PublicWorld, type WorldOptions } from "./walkWorld.ts";
+import { ownWalk } from "./movement.ts";
 
 /** The public world a route is searched in (docs/design-v1-movement.md 4.3 and 5.5). */
 
@@ -37,9 +38,9 @@ describe("creatures in the way (4.3)", () => {
       },
     });
     state.scenes.s1 = { ...state.scenes.s1!, blockMovement: true };
-    const onDm = publicWorld(state, state.tokens.hero!, { role: "dm" });
+    const onDm = publicWorld(state, ownWalk(state.tokens.hero!), { role: "dm" });
     const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
-    const onPlayer = publicWorld(view, view.tokens.hero!, { role: "player" });
+    const onPlayer = publicWorld(view, ownWalk(view.tokens.hero!), { role: "player" });
     assert.deepEqual(onDm.spaces.map((s) => s.id), ["knocked", "seen"]);
     assert.deepEqual(onDm.input.creatures, onPlayer.input.creatures);
     assert.deepEqual(onDm.input.creatures.map((c) => c.way), ["blocked", "blocked"], "an Unconscious the DM hid does not let the hero through");
@@ -51,12 +52,12 @@ describe("ground, areas and Prone as players get them (5.5)", () => {
     const state = room({ tokens: { hero: token("hero", { kind: "pc", ownerIds: ["p1"], x: 2, y: 2 }), gob: token("gob", { x: 3, y: 3 }) } });
     state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
     reveal(state, "s1", { x: 0, y: 0, w: 10, h: 10 });
-    const dmHero = publicWorld(state, state.tokens.hero!, { role: "dm" }).input.seen!;
+    const dmHero = publicWorld(state, ownWalk(state.tokens.hero!), { role: "dm" }).input.seen!;
     const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
-    const playerHero = publicWorld(view, view.tokens.hero!, { role: "player" }).input.seen!;
+    const playerHero = publicWorld(view, ownWalk(view.tokens.hero!), { role: "player" }).input.seen!;
     for (const [x, y] of [[5, 5], [12, 5], [9, 9], [10, 9]] as const) assert.equal(dmHero(x, y), playerHero(x, y), `${x}, ${y}`);
     assert.equal(dmHero(12, 5), false);
-    assert.equal(publicWorld(state, state.tokens.gob!, { role: "dm" }).input.seen, null);
+    assert.equal(publicWorld(state, ownWalk(state.tokens.gob!), { role: "dm" }).input.seen, null);
   });
 
   test("an area that slows: DM-only, another player's unseen, or on a hidden token is left out, a hidden caster leaves it slowing everyone", () => {
@@ -65,7 +66,7 @@ describe("ground, areas and Prone as players get them (5.5)", () => {
         tokens: { hero: token("hero", { kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 2, y: 2 }), druid: token("druid", { disposition: "ally", x: 20, y: 20 }) },
         templates: { web: template("web", { shape: "cube", size: 10, origin: { x: 5, y: 5, z: 0 }, ownerId: "dm1", slows: { kind: "difficult" } }) },
       });
-    const areasOf = (state: RoomState) => publicWorld(state, state.tokens.hero!, { role: "dm" }).input.areas;
+    const areasOf = (state: RoomState) => publicWorld(state, ownWalk(state.tokens.hero!), { role: "dm" }).input.areas;
     assert.equal(areasOf(base()).length, 1);
     const dmOnly = base();
     dmOnly.templates.web = { ...dmOnly.templates.web!, visibility: "dm" };
@@ -87,7 +88,7 @@ describe("ground, areas and Prone as players get them (5.5)", () => {
   test("Prone counts only where players receive it", () => {
     const prone = (hidden: boolean) => {
       const gob = token("gob", { actor: { inline: actor({ effects: [effect("e1", { key: "prone", hiddenFromPlayers: hidden })] }) } });
-      return publicWorld(room({ tokens: { gob } }), gob, { role: "dm" }).input.prone;
+      return publicWorld(room({ tokens: { gob } }), ownWalk(gob), { role: "dm" }).input.prone;
     };
     assert.equal(prone(false), true);
     assert.equal(prone(true), false);
@@ -170,7 +171,7 @@ describe("the same public world on every device (5.5, review MV-O-1 and MV-O-10)
     const state = busy();
     setup?.(state);
     const view = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
-    const build = (s: RoomState, role: "dm" | "player") => (grouped ? groupWalkWorld(s, s.tokens[walker] as Token, { role }) : publicWorld(s, s.tokens[walker] as Token, { role }, [], opts));
+    const build = (s: RoomState, role: "dm" | "player") => (grouped ? groupWalkWorld(s, ownWalk(s.tokens[walker] as Token), { role }) : publicWorld(s, ownWalk(s.tokens[walker] as Token), { role }, [], opts));
     const onDm = build(state, "dm");
     const onPlayer = build(view, "player");
     const bounds = state.scenes.s1!.bounds;

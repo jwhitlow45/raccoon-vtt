@@ -9,10 +9,11 @@ import { plainLegCost, routeFeet, routePoints, routeStop, routeWalk, type RouteP
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
-import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkersStop, type Found } from "./drop.ts";
+import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkerOf, walkersStop, type Found } from "./drop.ts";
 import { dragReading } from "../measure/movement.ts";
 import { frameFields, groupLanding, walkPreview } from "./preview.ts";
 import { CLOSED, line, onTurn, raised, recordedCost, thorn, world } from "./testing.ts";
+import { ownWalk } from "#shared/rules/movement.ts";
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -190,7 +191,7 @@ describe("a group drag", () => {
       if (move.elevation !== undefined && move.elevation !== lead.elevation) climbed++;
       const cost = recordedCost(view, moveOpsOf(plan.moves)[0]!, "lead");
       const to = { x: lead.x + dx, y: lead.y + dy };
-      const read = dragReading({ token: lead, to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
+      const read = dragReading({ token: walkerOf(view, lead), to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
       assert.equal(read.dragFt, cost, `case ${n}: ${size} by ${dx},${dy} under ${diagonal}`);
     }
     assert.ok(climbed > 10, `${climbed} landed at another height`);
@@ -214,7 +215,7 @@ describe("a group drag", () => {
       const plan = planGroup(view, [kite, view.tokens.mate!], to.x - kite.x, 0, "free");
       const move = plan.moves.find((m) => m.tokenId === "kite")!;
       assert.equal(move.elevation, 0, "off a holder on the ground it lands on the ground");
-      const read = dragReading({ token: kite, to, encounter: view.encounter, activeTokenId: "kite", speeds: undefined, rules: { feetPerCell: 5, diagonal: "five" }, role: "player", landing: groupLanding(view, kite, to) });
+      const read = dragReading({ token: walkerOf(view, kite), to, encounter: view.encounter, activeTokenId: "kite", speeds: undefined, rules: { feetPerCell: 5, diagonal: "five" }, role: "player", landing: groupLanding(view, kite, to) });
       assert.equal(read.dragFt, recordedCost(view, moveOpsOf(plan.moves)[0]!, "kite"), `${feet} ft`);
     }
   });
@@ -253,7 +254,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
   /** The wall along x = 6 stops at y = 10, so the way from 2, 5 to 9, 5 goes round its end. */
   const around = () => world({ edges: line("w", 6, 0, 10) });
   const searched = (state: ReturnType<typeof world>, t: ReturnType<typeof thorn>, to: { x: number; y: number }): Found => {
-    const answer = findRoute(publicWorld(state, t, { role: "player" }).input, to);
+    const answer = findRoute(publicWorld(state, ownWalk(t), { role: "player" }).input, to);
     return answer === null ? { kind: "open" } : answer === "none" ? { kind: "none", capped: false } : { kind: "route", route: answer };
   };
 
@@ -309,7 +310,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
         view.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, [key]: terrain } };
       }
       const hero = thorn(from);
-      const found = keyStep(new WalkWorld(publicWorld(view, hero, { role: "player" }).input), to);
+      const found = keyStep(new WalkWorld(publicWorld(view, ownWalk(hero), { role: "player" }).input), to);
       return { found, plan: planWalk(view, hero, to, "walk", found, 5) };
     };
     assert.deepEqual(press({ x: 2, y: 2 }, { x: 3, y: 2 }).found, { kind: "open" });
@@ -326,10 +327,10 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     const chunk = state.buildChunks["s1:0,0"] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
     state.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "1,0": "rubble" } };
     const sprite = token("sprite", { size: "tiny", x: 0, y: 0 });
-    const found = keyStep(new WalkWorld(publicWorld(state, sprite, { role: "dm" }).input), { x: 1, y: 0 });
+    const found = keyStep(new WalkWorld(publicWorld(state, ownWalk(sprite), { role: "dm" }).input), { x: 1, y: 0 });
     assert.deepEqual(found, { kind: "route", route: { pieces: [[0.5, 0, 0, 0], [1, 0, 1, 0]] } }, "the first half square is plain, the second in rubble");
     const pieces = found.kind === "route" ? found.route.pieces : [];
-    const feet = routeFeet(routePoints(state.buildChunks, sprite, pieces, 0), pieces.map(([, , extra, swim]) => ({ extra, swim })), { feetPerCell: 5, diagonal: "five" }, { h: 0, v: 0 }, { swimSpeed: false, step: 0.5 });
+    const feet = routeFeet(routePoints(state.buildChunks, ownWalk(sprite), pieces, 0), pieces.map(([, , extra, swim]) => ({ extra, swim })), { feetPerCell: 5, diagonal: "five" }, { h: 0, v: 0 }, { swimSpeed: false, step: 0.5 });
     assert.equal(feet.cost, 7.5, "2.5 ft, then 5 ft for the half square of rubble");
   });
 
@@ -342,14 +343,14 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     type Case = { view: RoomState; mover: Token; to: { x: number; y: number }; rules: Rules; seen: number };
     /** The world a press walks in: the public one, seen only left of `seen`. */
     const worldOf = (c: Case) => {
-      const input = publicWorld({ ...c.view, meta: { ...c.view.meta, settings: { ...c.view.meta.settings, ...c.rules } } }, c.mover, { role: "dm" }).input;
+      const input = publicWorld({ ...c.view, meta: { ...c.view.meta, settings: { ...c.view.meta.settings, ...c.rules } } }, ownWalk(c.mover), { role: "dm" }).input;
       return new WalkWorld({ ...input, seen: c.seen < 30 ? (x: number) => x < c.seen : null });
     };
     /** What a move costs as the reducer counts it: its route's feet, or the plain straight leg's, squeezed where it lands squeezed. */
     const moveFeet = (c: Case, at: { x: number; y: number; squeeze?: true }, pieces: readonly RoutePiece[] | undefined) => {
       const landing = landedElevation(c.view.buildChunks, c.mover, at);
       if (!pieces) return plainLegCost(c.mover, { ...c.mover, ...at, elevation: landing }, c.rules, { h: 0, v: 0 }).cost;
-      return routeFeet(routePoints(c.view.buildChunks, c.mover, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), c.rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(c.mover) }).cost;
+      return routeFeet(routePoints(c.view.buildChunks, ownWalk(c.mover), pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), c.rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(c.mover) }).cost;
     };
     const cases: Case[] = [];
     // Review ASTRA-13: a Tiny creature a square on, half a square up onto ground 10 ft higher and half a square across it, which the straight leg counted as 10 ft.
@@ -412,7 +413,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
       if (dx > 1e-9 && dy > 1e-9 && Math.abs(dx - dy) > 1e-9) continue;
       walked++;
       // The route along the leg the move walks, one piece a step as the reducer steps it (route.ts routeWalk), each with what that step pays.
-      const spots = routeWalk([{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }], c.mover, c.view);
+      const spots = routeWalk([{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }], ownWalk(c.mover), c.view);
       const each: RoutePiece[] = spots.slice(1).map((q, i) => {
         const p = spots[i]!;
         const node = w.nodeAt(q);
@@ -421,7 +422,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
       });
       const label = `case ${n}: ${c.mover.size} from ${c.mover.x},${c.mover.y} to ${move.x},${move.y} of ${c.to.x},${c.to.y} under ${c.rules.diagonal}, seen x < ${c.seen}${plan.stop ? ", held" : ""}`;
       // Where the server's check refuses the walk piece by piece, a ledge met from the low half of a step, the move goes as the plain straight leg, and the drag's picture reads it so (review MV-O-24).
-      if (!move.route && c.view.scenes.s1!.blockMovement && routeStop(c.view, c.mover, each, landedElevation(c.view.buildChunks, c.mover, move)) !== null) {
+      if (!move.route && c.view.scenes.s1!.blockMovement && routeStop(c.view, ownWalk(c.mover), each, landedElevation(c.view.buildChunks, c.mover, move)) !== null) {
         plain++;
         continue;
       }
@@ -440,7 +441,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     view.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "8,7": "rubble" } };
     const ogre = token("ogre", { size: "large", x: 2, y: 7, kind: "pc", ownerIds: ["p1"], disposition: "ally" });
     view.tokens.ogre = ogre;
-    const w = new WalkWorld(publicWorld(view, ogre, { role: "player" }).input);
+    const w = new WalkWorld(publicWorld(view, ownWalk(ogre), { role: "player" }).input);
     const plan = planWalk(view, ogre, { x: 20, y: 7 }, "walk", { kind: "none", capped: false }, 5, (to) => keyStep(w, to));
     assert.deepEqual([plan.moves[0]!.x, plan.moves[0]!.y, plan.stop?.searched], [12, 7, true]);
     const [op] = moveOpsOf(plan.moves);
@@ -452,13 +453,13 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     const view = world({ blockMovement: true, edges: line("w", 6, 0, 10) });
     const hero = token("hero", { x: 2, y: 2, kind: "pc", ownerIds: ["p1"], disposition: "ally" });
     view.tokens.hero = hero;
-    const seen = publicWorld(view, hero, { role: "player" });
+    const seen = publicWorld(view, ownWalk(hero), { role: "player" });
     const w = new WalkWorld(seen.input);
     const raw = { x: 9.2, y: 2.1 };
     const target = routeTarget(view, hero, raw);
     // A route through the wall: the server refuses it, and it has no lattice steps that pass.
     const pieces: RoutePiece[] = [[4, 2, 0, 0], [9, 2, 0, 0]];
-    const answer = { kind: "route" as const, route: { pieces, points: routePoints(view.buildChunks, hero, pieces, 0), endsBlocked: false } };
+    const answer = { kind: "route" as const, route: { pieces, points: routePoints(view.buildChunks, ownWalk(hero), pieces, 0), endsBlocked: false } };
     assert.equal(goesStraight(view, hero, target, answer, 5), true);
     const plan = planWalk(view, hero, raw, "walk", answer, 5, (to) => keyStep(w, to));
     const held = planLands(planOne(view, hero, raw, "walk"), hero);
@@ -508,7 +509,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
       const mover = view.tokens.mover!;
       // Half the scenes seen only part of the way across, where a route may cross a wall the party has not seen.
       const edge = rand() < 0.5 ? null : 3 + Math.floor(rand() * 10);
-      const known = publicWorld(view, mover, { role: "player" });
+      const known = publicWorld(view, ownWalk(mover), { role: "player" });
       const seen = { ...known, input: { ...known.input, seen: edge === null ? null : (x: number) => x < edge } };
       const w = new WalkWorld(seen.input);
       const raw = { x: 1 + rand() * 14, y: 1 + rand() * 14 };
@@ -555,8 +556,8 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     // The drag's label for the cut walk reads what its move records (review ASTRA-18).
     const turn = onTurn({ ...state, tokens: { ogre } }, "ogre");
     const target = routeTarget(turn, ogre, { x: 9.5, y: 15.5 });
-    const answer = { kind: "route" as const, route: { pieces: long, points: routePoints(turn.buildChunks, ogre, long, 0), endsBlocked: false } };
-    const preview = walkPreview({ view: turn, token: turn.tokens.ogre!, target, answer, held: null, world: publicWorld(turn, ogre, { role: "dm" }), role: "dm" });
+    const answer = { kind: "route" as const, route: { pieces: long, points: routePoints(turn.buildChunks, ownWalk(ogre), long, 0), endsBlocked: false } };
+    const preview = walkPreview({ view: turn, token: turn.tokens.ogre!, target, answer, held: null, world: publicWorld(turn, ownWalk(ogre), { role: "dm" }), role: "dm" });
     assert.deepEqual([preview.cut, preview.read.dragFt], [true, recordedCost(turn, moveOpsOf(onGrid.moves)[0]!, "ogre", DM)]);
     // The 64th ends at y 13, half a square off it: the cut steps back to the 63rd.
     const offGrid = planWalk(state, ogre, { x: 9.5, y: 15.5 }, "free", { kind: "route", route: { pieces: [...above, ...down([12.5, 13, 13.5, 14, 14.5, 15, 15.5])] } }, 5);
@@ -593,9 +594,9 @@ describe("a holder that drags a creature beside it (docs/design-v1-attach.md 4.2
       { x: 2, y: 5, elevation: 0 },
       { x: 9, y: 5, elevation: 0 },
     ];
-    assert.deepEqual(walkersStop(state, holder(), points, [goblin]), { at: { x: 5, y: 5, elevation: 0 }, pieces: 0, blocker: "wall" });
-    assert.equal(walkersStop(state, holder(), points, []), null);
-    assert.equal(walkersStop(state, holder(), [points[0]!, { x: 5, y: 5, elevation: 0 }], [goblin]), null);
+    assert.deepEqual(walkersStop(state, ownWalk(holder()), points, [goblin]), { at: { x: 5, y: 5, elevation: 0 }, pieces: 0, blocker: "wall" });
+    assert.equal(walkersStop(state, ownWalk(holder()), points, []), null);
+    assert.equal(walkersStop(state, ownWalk(holder()), [points[0]!, { x: 5, y: 5, elevation: 0 }], [goblin]), null);
   });
 
   test("a cut on a piece along no axis or diagonal stands on the holder's lattice, as a route's spots do", () => {
@@ -605,7 +606,7 @@ describe("a holder that drags a creature beside it (docs/design-v1-attach.md 4.2
       { x: 2, y: 5, elevation: 0 },
       { x: 7, y: 8, elevation: 0 },
     ];
-    assert.deepEqual(walkersStop(state, holder(), points, [goblin]), { at: { x: 5, y: 7, elevation: 0 }, pieces: 0, blocker: "wall" });
+    assert.deepEqual(walkersStop(state, ownWalk(holder()), points, [goblin]), { at: { x: 5, y: 7, elevation: 0 }, pieces: 0, blocker: "wall" });
   });
 
   test("a player's drop is cut there with the note a wall gives, and the DM's goes on", () => {

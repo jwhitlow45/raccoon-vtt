@@ -9,6 +9,7 @@ import { DM, actor, env, room, token } from "#shared/testutil.ts";
 import { dropView, moveOpsOf, planWalk } from "./drop.ts";
 import { frameFields, walkPreview } from "./preview.ts";
 import { line, raised, thorn, world } from "./testing.ts";
+import { ownWalk } from "#shared/rules/movement.ts";
 
 /** A lone drag's picture and frames (docs/design-v1-movement.md 3.1, review MV-O-6 and MV-O-9). */
 
@@ -57,7 +58,7 @@ describe("the picture of a drag's walk", () => {
     const held = { x: 5, y: 5 };
     const none = { kind: "none" as const, capped: false };
     // Held at the wall over a square of rubble: 15 ft straight, 20 ft walked, and the drop sends the walk.
-    const seen = publicWorld(view, token, { role: "player" });
+    const seen = publicWorld(view, ownWalk(token), { role: "player" });
     const plain = walkPreview({ view, token, target: { x: 9, y: 5 }, answer: none, held, world: seen, role: "player" });
     assert.equal(plain.read.dragFt, 15, "before its route is checked");
     const pieces: RoutePiece[] = [[3, 5, 0, 0], [4, 5, 1, 0], [5, 5, 0, 0]];
@@ -107,7 +108,7 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     const state = dropView(room, "dm");
     const bree = state.tokens.bree!;
     const answer = pieces ? { kind: "route" as const, route: { pieces, points: [], endsBlocked: false } } : { kind: "open" as const };
-    const preview = walkPreview({ view: state, token: bree, target, answer, held: null, world: publicWorld(state, bree, { role: "dm" }), role: "dm" });
+    const preview = walkPreview({ view: state, token: bree, target, answer, held: null, world: publicWorld(state, ownWalk(bree), { role: "dm" }), role: "dm" });
     const plan = planWalk(state, bree, target, "free", pieces ? { kind: "route", route: { pieces } } : { kind: "open" }, state.meta.settings.feetPerCell);
     const [move] = moveOpsOf(plan.moves);
     assert.ok(move);

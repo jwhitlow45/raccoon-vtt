@@ -5,7 +5,7 @@ import type { Op } from "../protocol.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { carriedGroup, moveGroups, onHolder, publicMembers, walkerFor } from "./attach.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { landing } from "./movement.ts";
+import { landing, ownWalk } from "./movement.ts";
 import { routePoints, type RoutePoint } from "./route.ts";
 
 /**
@@ -193,7 +193,8 @@ function stoppedAtWalls(before: RoomState, member: Token, route: RoutePoint[], h
   for (let i = 1; i < route.length; i++) {
     const a = route[i - 1]!;
     const b = route[i]!;
-    const at: Token = { ...member, x: a.x, y: a.y, elevation: a.elevation };
+    // A creature a holder drags beside it walks as itself, since a drag is no seat.
+    const at = ownWalk<Token>({ ...member, x: a.x, y: a.y, elevation: a.elevation });
     delete at.squeeze;
     if (movementRules.legBlocker(before, at, b) === null) continue;
     const stop = landing(before, at, b, "walk");

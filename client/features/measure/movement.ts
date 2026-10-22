@@ -5,6 +5,7 @@ import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footpri
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
+import type { Walker } from "#shared/rules/movement.ts";
 import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 
@@ -303,7 +304,8 @@ const NO_BUILD: Pick<BuildState, "buildChunks"> = { buildChunks: {} };
  * last spot inside such an area.
  */
 export function dragReading(input: {
-  token: MovingToken;
+  /** The creature as its walk reads it (rules/attach.ts walkerFor). */
+  token: MovingToken & Walker;
   /** The drop point. */
   to: Point;
   encounter: TurnView | null | undefined;
@@ -389,7 +391,7 @@ export function remoteWalk(token: MovingToken, to: Point, corners: readonly Poin
 }
 
 /** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on. */
-function lastHalvedSpot(points: readonly RoutePoint[], token: MovingToken, walk: DragWalk): { piece: number; at: RoutePoint } | null {
+function lastHalvedSpot(points: readonly RoutePoint[], token: MovingToken & Walker, walk: DragWalk): { piece: number; at: RoutePoint } | null {
   const spots = routeWalk(points, token, walk.build);
   for (let i = spots.length - 2; i > 0; i--) {
     const s = spots[i]!;

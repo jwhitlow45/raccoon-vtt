@@ -1,6 +1,6 @@
 import type { RoomState, SceneId, SightTile, Token } from "./model.ts";
 import type { DoorRef } from "./protocol.ts";
-import { legBlocker, lineClear, squeezeFits } from "./rules/movement.ts";
+import { legBlocker, lineClear, squeezeFits, type Walker } from "./rules/movement.ts";
 import type { Point } from "./rules/geom.ts";
 import { partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
 import { sceneWalls } from "./rules/walls.ts";
@@ -38,9 +38,9 @@ export type MovementRules = {
    * it, raised edges included for a walking or low-flying token. Callers
    * ask only on a scene whose `blockMovement` is on.
    */
-  legBlocker(state: BuildState, token: Token, to: LegEnd): Blocker | null;
+  legBlocker(state: BuildState, token: Walker, to: LegEnd): Blocker | null;
   /** Section 4.1's four checks for a move that stops the token squeezed at `at`. */
-  squeezeFits(state: BuildState, token: Token, at: Point): boolean;
+  squeezeFits(state: BuildState, token: Walker, at: Point): boolean;
   /**
    * Whether the straight line from the token's footprint center to `to`, a
    * door's midpoint, crosses no movement blocker other than that door: the

@@ -11,6 +11,7 @@ import { findRoute } from "../rules/walk.ts";
 import { publicWorld } from "../rules/walkWorld.ts";
 import { DM, P1, P2, actor, env, reveal, room, template, token, withoutWalked } from "../testutil.ts";
 import type { Env } from "./tx.ts";
+import { ownWalk } from "../rules/movement.ts";
 
 /**
  * Moves walking their routes (docs/design-v1-movement.md 6.2 and 7): what
@@ -96,7 +97,7 @@ describe("what a leg takes (6.2)", () => {
       s.scenes.s1 = { ...s.scenes.s1!, bounds: { w: 16, h: 16 } };
       s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) };
     });
-    const found = findRoute(publicWorld(f.state, f.state.tokens.wolf!, { role: "player" }).input, { x: 3, y: 1 });
+    const found = findRoute(publicWorld(f.state, ownWalk(f.state.tokens.wolf!), { role: "player" }).input, { x: 3, y: 1 });
     assert.ok(found !== null && found !== "none", "the straight leg over the rise is not the walk");
     f.run(move(3, 1, { route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) }), P1);
     assert.deepEqual(pick(f.stops()[1]!), { moved: 20, cost: 20, diag: undefined }, "10 ft up and 10 ft down");

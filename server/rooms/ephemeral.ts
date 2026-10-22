@@ -3,7 +3,7 @@ import type { RoomState, Token } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
 import { ownsToken, projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
 import type { EphEvent } from "#shared/protocol.ts";
-import { previewSqueezed } from "#shared/rules/movement.ts";
+import { ownWalk, previewSqueezed } from "#shared/rules/movement.ts";
 import type { Connection, PreviewKind } from "./connection.ts";
 
 /**
@@ -116,7 +116,7 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
  */
 function previewWithheld(state: RoomState, token: Token, x: number, y: number): boolean {
   const { squeeze: _squeeze, ...rest } = token;
-  const at: Token = previewSqueezed(state, token, { x, y }) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y };
+  const at: Token = previewSqueezed(state, ownWalk(token), { x, y }) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y };
   return withheldWhereItStands(state, at);
 }
 

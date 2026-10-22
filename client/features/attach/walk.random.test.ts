@@ -6,7 +6,7 @@ import { inSightOfNonOwners } from "#shared/project.ts";
 import { MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
-import { LEDGE_IN_THE_WAY, legBlocker } from "#shared/rules/movement.ts";
+import { LEDGE_IN_THE_WAY, legBlocker, ownWalk } from "#shared/rules/movement.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import type { Point, Rect } from "#shared/rules/geom.ts";
@@ -160,7 +160,7 @@ function walkFault(c: Case, tokenId: string, points: readonly RoutePoint[], reen
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const squeeze = i === 1 ? token.squeeze : undefined;
-    if (legBlocker(wallsOnly, { ...token, attached: undefined, x: a.x, y: a.y, elevation: a.elevation, squeeze }, points[i]!) === "wall") return `piece ${i - 1} crosses a wall`;
+    if (legBlocker(wallsOnly, ownWalk({ ...token, attached: undefined, x: a.x, y: a.y, elevation: a.elevation, squeeze }), points[i]!) === "wall") return `piece ${i - 1} crosses a wall`;
     if (!holder) continue;
     const on = overlaps(footprintRect({ ...token, x: a.x, y: a.y, squeeze: undefined }), holder);
     back ||= clear && on;

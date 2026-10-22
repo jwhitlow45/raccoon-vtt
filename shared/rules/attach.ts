@@ -5,6 +5,7 @@ import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.t
 import { footprintRect, footprintSize, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footprintGround, standing } from "./heights.ts";
+import type { Walker } from "./movement.ts";
 
 /**
  * Attached tokens (docs/design-v1-attach.md): a rider on a mount, a
@@ -215,13 +216,14 @@ export function walkerFor<T extends Walking>(
   state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0] },
   token: T,
   seen: SeenByAll,
-): T & { footing?: "ground"; offHolder?: PlacedToken } {
+): T & Walker {
   const link = token.attached;
-  if (!link || !onHolder(link.kind)) return token;
+  // Off no holder, or one some player cannot see or that flies, the token walks as itself.
+  if (!link || !onHolder(link.kind)) return token as T & Walker;
   const holder = holderOf(state.tokens, token) as Walking | undefined;
-  if (!holder || !seen(token) || !seen(holder) || standing(holder.elevation, footprintGround(state.buildChunks, { ...holder, squeeze: undefined })) !== "ground") return token;
+  if (!holder || !seen(token) || !seen(holder) || standing(holder.elevation, footprintGround(state.buildChunks, { ...holder, squeeze: undefined })) !== "ground") return token as T & Walker;
   const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
-  return { ...token, footing: "ground", offHolder };
+  return { ...token, footing: "ground", offHolder } as T & Walker;
 }
 
 /**

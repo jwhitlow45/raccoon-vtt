@@ -26,7 +26,7 @@
 import type { BuildChunk, EdgeFeature, FreeWall, RoomState, Scene, TerrainId } from "../shared/model.ts";
 import { LIMITS } from "../shared/limits.ts";
 import { footprintGround } from "../shared/rules/heights.ts";
-import type { MovingToken } from "../shared/rules/movement.ts";
+import { ownWalk, type MovingToken } from "../shared/rules/movement.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 import { forgetStepCaches, WalkSearch, WalkWorld, type WalkInput } from "../shared/rules/walk.ts";
 import { seenAtEvery } from "../shared/project.ts";
@@ -115,7 +115,7 @@ export function cases(): Case[] {
 function runCase(c: Case): number {
   const sceneId = Object.keys(c.state.scenes)[0]!;
   // On its own ground, so a walker on the stairs stands on them.
-  const token = { ...c.token, sceneId, elevation: footprintGround(c.state.buildChunks, { ...c.token, sceneId }) };
+  const token = ownWalk({ ...c.token, sceneId, elevation: footprintGround(c.state.buildChunks, { ...c.token, sceneId }) });
   const input: WalkInput = { build: c.state, token, rules: { feetPerCell: 5, diagonal: c.diagonal ?? "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } };
   const search = new WalkSearch(new WalkWorld(input));
   // A spot's row times the completed route, the trace with the fewest corners included (review ASTRA-08).
@@ -185,7 +185,7 @@ function slicedRows(row: string, diagonal: "five" | "euclid", to: { x: number; y
   for (let y = 0; y < 60; y++) edges.set(`10,${y},w`, { kind: "wall" });
   const sceneId = `bench-route-sliced-${diagonal}`;
   const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, sceneId);
-  const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId };
+  const token = ownWalk({ size: "large" as const, x: 2, y: 2, elevation: 0, sceneId });
   const whole: number[] = [];
   const longest: number[] = [];
   let slices = 0;
@@ -220,7 +220,7 @@ function traceRow(row: string, wallX: number, wallLength: number, to: { x: numbe
   for (let y = 0; y < wallLength; y++) edges.set(`${wallX},${y},w`, { kind: "wall" });
   const sceneId = `bench-route-trace-${wallX}-${wallLength}`;
   const state = stateOf({ cells: new Map(), edges, walls: [], heights: new Map() }, sceneId);
-  const token = { size: "large" as const, x: 2, y: 2, elevation: 0, sceneId };
+  const token = ownWalk({ size: "large" as const, x: 2, y: 2, elevation: 0, sceneId });
   let settled = 0;
   const times: number[] = [];
   for (let r = 0; r < runs + 3; r++) {

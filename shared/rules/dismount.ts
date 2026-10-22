@@ -3,7 +3,7 @@ import type { PlacedToken } from "./footprint.ts";
 import { snapStep } from "./footprint.ts";
 import { overlaps } from "./attach.ts";
 import type { BuildState } from "../ruleHooks.ts";
-import type { MovingToken } from "./movement.ts";
+import { walkOn, type Walker } from "./movement.ts";
 import { routeFeet, routePoints, routeWalk, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
@@ -29,7 +29,7 @@ export type DismountSplit = { off: RoutePoint; prefix: readonly RoutePiece[] | u
  * points from the seat, `route` its pieces when it has one. `whole` is
  * true when the first clear spot is the walk's end, so there is no rest.
  */
-export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: MovingToken, mount: PlacedToken, points: readonly RoutePoint[], route?: readonly RoutePiece[]): DismountSplit {
+export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: Walker, mount: PlacedToken, points: readonly RoutePoint[], route?: readonly RoutePiece[]): DismountSplit {
   const walk = routeWalk(points, rider, build, snapStep(rider));
   const at = walk.findIndex((p, i) => i > 0 && !overlaps({ ...rider, x: p.x, y: p.y }, mount));
   const clear = walk[at] ?? walk[walk.length - 1]!;
@@ -56,7 +56,7 @@ export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: Mov
  */
 export function dismountCost(
   build: Pick<BuildState, "buildChunks">,
-  rider: MovingToken,
+  rider: Walker,
   mount: PlacedToken,
   points: readonly RoutePoint[],
   route: readonly RoutePiece[] | undefined,
@@ -68,13 +68,13 @@ export function dismountCost(
   const split = dismountSplit(build, rider, mount, points, route);
   const seat = points[0]!;
   const opts = { swimSpeed, step: snapStep(rider) };
-  const along = (from: MovingToken, pieces: readonly RoutePiece[], landing: number) =>
+  const along = (from: Walker, pieces: readonly RoutePiece[], landing: number) =>
     routeFeet(routePoints(build.buildChunks, from, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, running, opts);
   let running = counter;
   const first = split.prefix ? along(rider, split.prefix, split.off.elevation) : straightCost(rider, seat, split.off, rules, counter);
   if (split.whole) return { moved: first.moved, cost: halfFt, diag: first.diag };
   running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
   const end = points[points.length - 1]!;
-  const rest = split.rest ? along({ ...rider, ...split.off }, split.rest, end.elevation) : straightCost(rider, split.off, end, rules, running);
+  const rest = split.rest ? along(walkOn(rider, split.off), split.rest, end.elevation) : straightCost(rider, split.off, end, rules, running);
   return { moved: first.moved + rest.moved, cost: halfFt + rest.cost, diag: [first.diag[0] + rest.diag[0], first.diag[1] + rest.diag[1]] };
 }

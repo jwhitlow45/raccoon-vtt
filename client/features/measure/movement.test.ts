@@ -8,13 +8,15 @@ import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
 import { DM, P1, P2, room, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
 import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
+import { ownWalk, type Walker } from "#shared/rules/movement.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
 const euclid = { feetPerCell: 5, diagonal: "euclid" as const };
 
-function tok(over: Partial<MovingToken> = {}): MovingToken {
-  return { id: "t1", sceneId: "s1", size: "medium", x: 0, y: 0, elevation: 0, ...over };
+/** A token walking as itself (rules/movement.ts ownWalk). */
+function tok(over: Partial<MovingToken> = {}): MovingToken & Walker {
+  return ownWalk({ id: "t1", sceneId: "s1", size: "medium", x: 0, y: 0, elevation: 0, ...over });
 }
 
 const start: TurnStart = { entryId: "e1", tokenId: "t1", sceneId: "s1", x: 2, y: 2, elevation: 0 };

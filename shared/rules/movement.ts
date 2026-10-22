@@ -53,6 +53,29 @@ export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & {
 /** The holder a walk off it leaves, where it stands. */
 export type OffHolder = PlacedToken;
 
+declare const walking: unique symbol;
+
+/**
+ * A token as its walk reads it (review AT-ASTRA-19). Every leg and spot test
+ * of a move takes only this: rules/attach.ts `walkerFor` makes one from a
+ * token where it stands, `walkOn` carries it from stop to stop, and
+ * `pastHolder` takes it off its holder. So no check can judge a stored
+ * token by its own footing where its walk reads another, as a rider's
+ * ground under a holder that stands on the ground. A check that judges a
+ * token as itself, with no holder to leave, says so with `ownWalk`.
+ */
+export type Walker = MovingToken & { readonly [walking]: true };
+
+/**
+ * The token walking as itself, with no holder to leave: for what is never
+ * a walk off a holder, as a creature a holder drags beside it, a token not
+ * yet in the room, or a footprint the walk has already worked out. Every
+ * other move reads its walker from `walkerFor`.
+ */
+export function ownWalk<T extends MovingToken>(token: T): T & Walker {
+  return token as T & Walker;
+}
+
 /**
  * What a player hears when a wall or a ledge stops a move, or a resize,
  * which is judged as one (resize.ts). A secret door not yet found answers as
@@ -400,13 +423,13 @@ function holderRect(holder: OffHolder): { x: number; y: number; w: number; h: nu
  * AT-ASTRA-16). Every walk of more than one leg, a route's pieces and a
  * redo's routes, carries the token from leg to leg by this.
  */
-export function walkOn<T extends MovingToken>(token: T, at: Point & { elevation: number }): T {
+export function walkOn<T extends Walker>(token: T, at: Point & { elevation: number }): T {
   const next: T = { ...token, x: at.x, y: at.y, elevation: at.elevation };
   return !next.offHolder || onOffHolder(token, at) ? next : pastHolder(next);
 }
 
 /** The token as a walk that has cleared the holder it walks off reads it: on the ground, off no holder. */
-export function pastHolder<T extends MovingToken>(token: T): T {
+export function pastHolder<T extends Walker>(token: T): T {
   if (!token.offHolder) return token;
   const next: T = { ...token };
   delete next.offHolder;
@@ -419,7 +442,7 @@ export function pastHolder<T extends MovingToken>(token: T): T {
  * holder and comes back judge its steps there differently, so only then
  * does the route search keep the two apart (walk.ts WalkWorld `post`).
  */
-export function crossesInnerLedges(state: BuildState, token: MovingToken): boolean {
+export function crossesInnerLedges(state: BuildState, token: Walker): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene || scene.blockMovement !== true || !token.offHolder) return false;
   const walls = sceneWalls(scene, state.buildChunks);
@@ -427,7 +450,7 @@ export function crossesInnerLedges(state: BuildState, token: MovingToken): boole
 }
 
 /** `walkOn` along a walk's stops in turn: the token at the last, off the holder for good once any of them is clear of it. */
-export function walkAlong<T extends MovingToken>(token: T, stops: readonly (Point & { elevation: number })[]): T {
+export function walkAlong<T extends Walker>(token: T, stops: readonly (Point & { elevation: number })[]): T {
   let at = token;
   for (const stop of stops) at = walkOn(at, stop);
   return at;
@@ -461,7 +484,7 @@ export type LegStop = { blocker: Blocker; door: DoorRef | null };
  * stopped, the blocker the straight path meets first names it, a wall when
  * a wall and a ledge are met at once.
  */
-export function legStop(state: BuildState, token: MovingToken, to: LegEnd): LegStop | null {
+export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to);
@@ -475,7 +498,7 @@ export function legStop(state: BuildState, token: MovingToken, to: LegEnd): LegS
  * lattice holding the shifted spots itself. A route's piece made of such
  * steps passes `legStop` too, since its straight sweep is theirs joined.
  */
-export function straightClear(state: BuildState, token: MovingToken, to: LegEnd): boolean {
+export function straightClear(state: BuildState, token: Walker, to: LegEnd): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return true;
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to);
@@ -506,7 +529,7 @@ export type StepTester = {
   pinched(x: number, y: number): boolean;
 };
 
-export function stepTester(state: BuildState, token: MovingToken): StepTester | null {
+export function stepTester(state: BuildState, token: Walker): StepTester | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
   const walls = sceneWalls(scene, state.buildChunks);
@@ -541,7 +564,7 @@ export function stepTester(state: BuildState, token: MovingToken): StepTester | 
     }
     hit = true;
   };
-  const squeezer: MovingToken = { ...token, squeeze: undefined };
+  const squeezer: Walker = { ...token, squeeze: undefined };
   return {
     walls,
     clear(ax, ay, bx, by) {
@@ -563,7 +586,7 @@ export function stepTester(state: BuildState, token: MovingToken): StepTester | 
 }
 
 /** Section 4.1's test as the core asks it (shared/ruleHooks.ts). */
-export function legBlocker(state: BuildState, token: Token, to: LegEnd): Blocker | null {
+export function legBlocker(state: BuildState, token: Walker, to: LegEnd): Blocker | null {
   return legStop(state, token, to)?.blocker ?? null;
 }
 
@@ -634,7 +657,7 @@ function coreTouchesAt(walls: WallSet, token: MovingToken, at: Point, floor: num
 }
 
 /** Whether the token's core, at the stored position `at`, touches the movement set, so no leg may end there. */
-export function coreBlocked(state: BuildState, token: MovingToken, at: Point): boolean {
+export function coreBlocked(state: BuildState, token: Walker, at: Point): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
@@ -689,7 +712,7 @@ export function resizeLegStop(state: BuildState, token: MovingToken, to: PlacedT
  * unsnapped, so its squeezed footprint may overlap a corridor's wall by a
  * hair, and the core fitting is enough there.
  */
-function squeezedThere(state: BuildState, token: MovingToken, at: Point, fit: boolean): boolean {
+function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean): boolean {
   if (!canSqueeze(token)) return false;
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
@@ -720,7 +743,7 @@ function squeezedThere(state: BuildState, token: MovingToken, at: Point, fit: bo
  * wall. `token` is the token as it stands before the move: where it stands
  * then decides which ledges count, as for the move's leg.
  */
-export function squeezeFits(state: BuildState, token: MovingToken, at: Point): boolean {
+export function squeezeFits(state: BuildState, token: Walker, at: Point): boolean {
   if (!canSqueeze(token)) return false;
   const c = storedCenter({ ...token, x: at.x, y: at.y });
   const { w, h } = squeezedSize(token);
@@ -736,7 +759,7 @@ export function squeezeFits(state: BuildState, token: MovingToken, at: Point): b
  * the preview point (`footprintRect({ ...token, x, y, squeeze: true })`),
  * else by the full one.
  */
-export function previewSqueezed(state: BuildState, token: MovingToken, at: Point): boolean {
+export function previewSqueezed(state: BuildState, token: Walker, at: Point): boolean {
   return squeezedThere(state, token, at, false);
 }
 
@@ -769,7 +792,7 @@ export type DropMode = "walk" | "free" | "teleport";
  * Elevation is the caller's: a landing writes the ground (section 4.2,
  * heights.ts), and `to.elevation` is only read for a flier's ledges.
  */
-export function landing(state: BuildState, token: MovingToken, to: LegEnd, mode: DropMode): Landing {
+export function landing(state: BuildState, token: Walker, to: LegEnd, mode: DropMode): Landing {
   const scene = state.scenes[token.sceneId];
   if (!scene) return { x: to.x, y: to.y, squeeze: false, stopped: null };
   const walls = sceneWalls(scene, state.buildChunks);

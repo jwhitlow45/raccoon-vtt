@@ -4,7 +4,7 @@ import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footing, footprintGround, standing } from "#shared/rules/heights.ts";
-import { landing, legStop, previewSqueezed, squeezeFits, walkOn, type DropMode, type MovingToken, type OffHolder } from "#shared/rules/movement.ts";
+import { landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkOn, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { routeLattice, routePoints, routeReach, routeStop, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
@@ -141,11 +141,13 @@ export function dropLanding(state: DropState, token: DropToken, at: Point & { sq
  * search, the drop, its picture and the server's checks all judge the one
  * walk the op sends.
  */
-export function walkerOf<T extends DropToken>(state: DropState, token: T): T & { footing?: "ground"; offHolder?: OffHolder } {
+export function walkerOf<T extends DropToken>(state: DropState, token: T): T & Walker {
   const seated = state.tokens?.[token.id];
-  if (!seated || !state.tokens || !state.seen) return token;
+  // A token the room does not hold yet, or a view that reads no sight, has no holder to leave.
+  if (!seated || !state.tokens || !state.seen) return ownWalk(token);
   const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks }, seated, state.seen);
-  return walker.offHolder ? { ...token, footing: "ground", offHolder: walker.offHolder } : token;
+  // The seated token's walk, at the place this one stands.
+  return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder } as T & Walker) : ownWalk(token);
 }
 
 /** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
@@ -269,8 +271,8 @@ export function cutRoute(state: DropState, token: DropToken, pieces: readonly Ro
   const grid = snapStep(token);
   const onGrid = (v: number, from: number) => Math.abs((v - from) / grid - Math.round((v - from) / grid)) < 1e-9;
   // Squeezed or not as the walk that stands at each piece's end judges it (walkerOf), off the holder for good once a stop before was clear of it (movement.ts walkOn).
-  const standing: MovingToken[] = [];
-  let walking: MovingToken = walkerOf(state, token);
+  const standing: Walker[] = [];
+  let walking: Walker = walkerOf(state, token);
   for (const [x, y] of pieces.slice(0, MAX_ROUTE_PIECES)) standing.push((walking = walkOn(walking, { x, y, elevation: walking.elevation })));
   for (let k = MAX_ROUTE_PIECES; k > 0; k--) {
     const [x, y] = pieces[k - 1]!;
@@ -366,7 +368,7 @@ function landingOf(state: DropState, token: DropToken, target: Point & { squeeze
  * costs, since `routeFeet` rounds each piece up to the creature's step,
  * and in review no split passed where its piece failed (MV-O-28).
  */
-function passing(state: BuildState, token: DropToken, pieces: RoutePiece[], landing: number): RoutePiece[] | null {
+function passing(state: BuildState, token: DropToken & Walker, pieces: RoutePiece[], landing: number): RoutePiece[] | null {
   if (state.scenes[token.sceneId]?.blockMovement !== true) return pieces;
   return routeStop(state, token, pieces, landing) ? null : pieces;
 }
@@ -487,11 +489,15 @@ function walkerAt(state: BuildState, lead: DropToken, walker: DropToken, p: Rout
   return { x, y, elevation: grounded ? ground : Math.max(walker.elevation + p.elevation - lead.elevation, ground) };
 }
 
-/** The first of the walkers whose leg beside the holder's from `a` to `b` a wall or a ledge stops, with what stopped it. */
+/**
+ * The first of the walkers whose leg beside the holder's from `a` to `b` a
+ * wall or a ledge stops, with what stopped it. A creature a holder drags
+ * beside it walks as itself, since a drag is no seat (`ownWalk`).
+ */
 function walkerStop(state: BuildState, lead: DropToken, walkers: readonly DropToken[], a: RoutePoint, b: RoutePoint): { blocker: Blocker } | null {
   for (const w of walkers) {
     const from = walkerAt(state, lead, w, a);
-    const stop = legStop(state, { ...w, x: from.x, y: from.y, elevation: from.elevation, squeeze: undefined }, walkerAt(state, lead, w, b));
+    const stop = legStop(state, ownWalk({ ...w, x: from.x, y: from.y, elevation: from.elevation, squeeze: undefined }), walkerAt(state, lead, w, b));
     if (stop) return stop;
   }
   return null;
@@ -525,11 +531,11 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
  * Null when all of them walk the whole way. `pieces` counts the pieces
  * kept whole before it.
  */
-export function walkersStop(state: BuildState, lead: DropToken, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
+export function walkersStop(state: BuildState, lead: DropToken & Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { at: RoutePoint; pieces: number; blocker: Blocker } | null {
   if (walkers.length === 0) return null;
   const L = routeLattice(lead);
   // The holder's walk as it goes on, off the holder it walks off once a stop is clear of it (movement.ts walkOn).
-  let walking: DropToken = lead;
+  let walking = lead;
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;

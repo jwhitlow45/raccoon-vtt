@@ -4,7 +4,7 @@ import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { crossesInnerLedges, legStop, offKey, onOffHolder, pastHolder, stepTester, type MovingToken, type StepTester } from "./movement.ts";
+import { crossesInnerLedges, legStop, offKey, onOffHolder, pastHolder, stepTester, type MovingToken, type StepTester, type Walker } from "./movement.ts";
 import { routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
@@ -50,8 +50,8 @@ export type WalkArea = { extra: 1 | 3; cells: readonly Point[] };
 
 export type WalkInput = {
   build: BuildState;
-  /** The mover where it stands. */
-  token: MovingToken;
+  /** The mover where it stands, as its walk reads it. */
+  token: Walker;
   rules: DistanceSettings;
   /** The ground the search may read, as squares players have seen, or null for all of it. Terrain and marks count only there. */
   seen: ((x: number, y: number) => boolean) | null;

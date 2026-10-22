@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiagonalRule, EdgeFeature, TerrainId } from "../model.ts";
 import type { BuildState } from "../ruleHooks.ts";
-import { legStop, type MovingToken } from "./movement.ts";
+import { legStop, ownWalk, type MovingToken } from "./movement.ts";
 import { routeFeet, type RoutePoint } from "./route.ts";
 import { CLOSED_DOOR, line, OPEN_DOOR, SECRET_DOOR, tok, world, type WorldSpec } from "./testWorld.ts";
 import { findRoute, openLeg, WalkSearch, WalkWorld, type WalkCreature, type WalkInput, type WalkRoute } from "./walk.ts";
@@ -18,7 +18,7 @@ function mulberry32(seed: number): () => number {
 }
 
 function input(build: BuildState, token: MovingToken, over: Partial<WalkInput> = {}): WalkInput {
-  return { build, token, rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 }, ...over };
+  return { build, token: ownWalk(token), rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 }, ...over };
 }
 
 function routeOf(i: WalkInput, to: { x: number; y: number }): WalkRoute {

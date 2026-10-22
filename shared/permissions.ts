@@ -13,7 +13,7 @@ import { planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { footing, footprintGround, groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, walkAlong } from "./rules/movement.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkAlong, type Walker } from "./rules/movement.ts";
 import { onRouteLattice, routeBlocker, routePoints, routeReach, type RoutePiece } from "./rules/route.ts";
 import { OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
@@ -263,7 +263,7 @@ function squeezeFits(op: Op, c: Check): Decision {
   if (op.t !== "token.move" || !op.squeeze) return OK;
   const token = c.state.tokens[op.tokenId];
   if (!token) return OK;
-  return movementRules.squeezeFits(c.state, token, { x: op.x, y: op.y }) ? OK : refuse("invalid", NOT_A_SQUEEZE);
+  return movementRules.squeezeFits(c.state, ownWalk(token), { x: op.x, y: op.y }) ? OK : refuse("invalid", NOT_A_SQUEEZE);
 }
 
 const LEVEL_DOES_NOT_FIT = refuse("invalid", `Exhaustion is level 1 to ${EXHAUSTION_MAX_LEVEL}`);
@@ -1230,7 +1230,8 @@ function draggedWalls(c: Check, op: Op): Decision {
       const a = moved.route[i - 1]!;
       const from: Token = { ...member, x: a.x, y: a.y, elevation: a.elevation };
       delete from.squeeze;
-      const blocker = movementRules.legBlocker(c.state, from, moved.route[i]!);
+      // A creature a holder drags beside it walks as itself, since a drag is no seat.
+      const blocker = movementRules.legBlocker(c.state, ownWalk(from), moved.route[i]!);
       if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
     }
   }
@@ -1583,7 +1584,7 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene || scene.blockMovement !== true) return OK;
   // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges until clear of it, as the drag searched it (rules/attach.ts walkerFor).
-  let at: Token & { footing?: "ground" } = walkerFor(c.state, token, seenAllIn(c));
+  let at: Token & Walker = walkerFor(c.state, token, seenAllIn(c));
   for (const [n, route] of routes.entries()) {
     const last = n === routes.length - 1;
     const end = route[route.length - 1];
@@ -1834,7 +1835,8 @@ export function withinCompanionReach(settings: RoomSettings, spot: Parameters<ty
  * spot it picks is one the server takes.
  */
 export function companionLegBlocker(state: RoomState, input: TokenInput, from: Pick<Token, "x" | "y" | "elevation">): "wall" | "ledge" | null {
-  const walker = { ...inputAsToken(input), x: from.x, y: from.y, elevation: from.elevation };
+  // A token not yet in the room has no holder to leave.
+  const walker = ownWalk({ ...inputAsToken(input), x: from.x, y: from.y, elevation: from.elevation });
   return movementRules.legBlocker(state, walker, { x: input.x, y: input.y, elevation: input.elevation ?? from.elevation });
 }
 

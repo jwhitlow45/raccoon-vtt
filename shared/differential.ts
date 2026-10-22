@@ -7,6 +7,7 @@ import { applyOp } from "./reducer.ts";
 import { moveGroups } from "./rules/attach.ts";
 import { pathThisTurn } from "./rules/path.ts";
 import { findRoute } from "./rules/walk.ts";
+import { ownWalk } from "./rules/movement.ts";
 import { groupWalkWorld } from "./rules/walkWorld.ts";
 import { env } from "./testutil.ts";
 
@@ -74,7 +75,7 @@ function dragged(state: RoomState, drag: Drag): { route: unknown; op: Op; inputs
   const mine = view.tokens[drag.tokenId];
   if (!mine) return null;
   // The world a device's drag searches, with what the token carries (client/features/movement/stageHooks.ts worldFor).
-  const world = groupWalkWorld(view, mine, { role: drag.who.role }, stopsNow(view, mine, drag.who.role));
+  const world = groupWalkWorld(view, ownWalk(mine), { role: drag.who.role }, stopsNow(view, mine, drag.who.role));
   const found = findRoute(world.input, drag.to);
   const route = found === null || found === "none" ? found : found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
   const op: Op = { t: "token.move", tokenId: drag.tokenId, x: drag.to.x, y: drag.to.y, ...(Array.isArray(route) ? { route } : {}) };

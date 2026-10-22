@@ -5,6 +5,7 @@ import { RouteDrag } from "../client/features/movement/routeDrag.ts";
 import { RouteWork, SLICE_MS, type Frames } from "../client/features/movement/routeWork.ts";
 import type { BuildChunk, EdgeFeature, RoomState } from "../shared/model.ts";
 import { forgetStepCaches, WorkBudget } from "../shared/rules/walk.ts";
+import { ownWalk } from "../shared/rules/movement.ts";
 import { publicWorld } from "../shared/rules/walkWorld.ts";
 import { reveal, room, scene, template, token } from "../shared/testutil.ts";
 import type { RouteRow } from "./bench-route.ts";
@@ -27,7 +28,7 @@ export function runPublicWorldRow(runs = 15): RouteRow {
   for (let r = 0; r < runs + 3; r++) {
     const view = { ...state, buildChunks: { ...state.buildChunks } };
     const t = performance.now();
-    publicWorld(view, view.tokens.hero!, { role: "dm" });
+    publicWorld(view, ownWalk(view.tokens.hero!), { role: "dm" });
     if (r >= 3) times.push(performance.now() - t);
   }
   return { row: "The public world on 200 x 200 under fog, 300 creatures and 4 areas, on the DM's device (settled holds the creatures)", settled: 300, ms: stats(times) };

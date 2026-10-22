@@ -21,7 +21,7 @@ import { wallChunk } from "../shared/keys.ts";
 import type { BuildChunk, EdgeFeature, FreeWall, RoomState, Scene, StairMark, TerrainId } from "../shared/model.ts";
 import { checkLimits, LIMITS } from "../shared/limits.ts";
 import { encodeHeights } from "../shared/rules/heights.ts";
-import { landing, legStop, type MovingToken } from "../shared/rules/movement.ts";
+import { landing, legStop, ownWalk, type MovingToken } from "../shared/rules/movement.ts";
 import { AREAS, SIGHT } from "../shared/rules/segments.ts";
 import { countChunksSplit, sceneWalls, splitCheck } from "../shared/rules/walls.ts";
 import { planOne } from "../client/features/movement/drop.ts";
@@ -430,7 +430,7 @@ export function runMovementBench(runs = 200): MoveRow[] {
     const chunks = chunksOf(c.build, sceneId);
     const scene = { id: sceneId, rev: 1, bounds: { w: SIZE, h: SIZE }, autoWalls: "all", blockMovement: true } as Scene;
     const state = { scenes: { [sceneId]: scene }, buildChunks: chunks };
-    const token = { ...c.token, sceneId };
+    const token = ownWalk({ ...c.token, sceneId });
     const dragged = { ...token, id: "bench" };
     const once = () =>
       c.frame
