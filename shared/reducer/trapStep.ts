@@ -69,7 +69,7 @@ export function trapStep(tx: Tx, op: Op, before: RoomState, plan: TrapPlan): Tra
     for (const [id, t] of Object.entries(traps)) if (rearms(t)) traps[id] = { ...t, state: "armed" };
     rest = planTurn({ ...tx.state, traps }, started, "turnStart", env);
   } else if (op.t === "door.set" && op.by !== undefined && op.state === "open" && doorWasShut(before, op.sceneId, op.door)) {
-    rest = planDoor(tx.state as TrapRoom, op.sceneId, op.door, op.by, env);
+    rest = planDoor(before, tx.state as TrapRoom, op.sceneId, op.door, op.by, env);
   }
   for (const s of plan.before) write(tx, s, out);
   if (started !== null) armNextTurn(tx);

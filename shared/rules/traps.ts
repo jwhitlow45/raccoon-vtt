@@ -1128,10 +1128,14 @@ export function standsOn(state: RoomState, trap: Trap, token: Token, seen: (id: 
   for (let y = r.y0; y < r.y1 && !on; y++) for (let x = r.x0; x < r.x1 && !on; x++) on = inRects(rects, x, y);
   if (!on) return false;
   if (!trap.rig.floor) return true;
+  return onFloor(state, token, carriedSeen(state, token, seen));
+}
+
+/** Whether a creature standing still rides or sits on a holder, within its footprint, by a link every player sees (5.2). */
+function carriedSeen(state: Pick<RoomState, "tokens">, token: Token, seen: (id: string) => boolean): boolean {
   const link = token.attached;
   const holder = link && onHolder(link.kind) ? (holderOf(state.tokens, token) as Token | undefined) : undefined;
-  const carried = holder !== undefined && seen(token.id) && seen(holder.id) && insideHolder(token, holder);
-  return onFloor(state, token, carried);
+  return holder !== undefined && seen(token.id) && seen(holder.id) && insideHolder(token, holder);
 }
 
 /**
@@ -1157,20 +1161,25 @@ export function planTurn(room: TrapRoom, tokenId: string, how: "turnStart" | "tu
   return out;
 }
 
-/** A door opened by a creature (5.3): the door traps on it go off for the opener, in trap id order. `room` is the room after the door opened. */
-export function planDoor(room: TrapRoom, sceneId: string, door: TrapDoorRef, by: string, env: { opVersion?: number }): Springing[] {
+/**
+ * A door opened by a creature (5.3): the door traps on it go off for the
+ * opener, in trap id order. `room` is the room after the door opened, the
+ * springing's moment. Who sees the opener, and whether it rides a holder
+ * every player sees, are read on `before`, as for a walk (5.5).
+ */
+export function planDoor(before: RoomState, room: TrapRoom, sceneId: string, door: TrapDoorRef, by: string, env: { opVersion?: number }): Springing[] {
   if (liveTrapScene(room) !== sceneId) return [];
-  const token = room.tokens[by];
+  const token = before.tokens[by];
   if (!token || token.sceneId !== sceneId) return [];
   const index = trapIndex(room, sceneId);
   const list = index.doors.get(doorKey(door));
   if (!list) return [];
-  const seen = seenByAll(room, env);
+  const seen = seenByAll(before, env);
   const out: Springing[] = [];
   for (const i of list) {
     const trap = index.traps[i]!;
-    if (!setsOff(trap.rig!, room, token)) continue;
-    if (trap.rig!.floor && !onFloor(room, token, false)) continue;
+    if (!setsOff(trap.rig!, before, token)) continue;
+    if (trap.rig!.floor && !onFloor(before, token, carriedSeen(before, token, seen))) continue;
     out.push(springingAt(trap, "open", seen(token.id) ? "public" : "private", [token.id], room, env, false));
   }
   return out;

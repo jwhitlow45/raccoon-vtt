@@ -243,6 +243,30 @@ describe("doors (5.3)", () => {
     assert.equal(applied(open, { t: "door.set", sceneId: "s1", door: { edge: "9,5,w" }, state: "closed" }, P1).state.traps.needle!.state, "armed");
     assert.equal(applied(open, { t: "door.set", sceneId: "s1", door: { edge: "9,5,w" }, state: "open", by: "thorn" }, P1).state.traps.needle!.state, "armed", "an open door is not opened");
   });
+
+  test("a rider on a mount every player sees is off the floor: a floor-only door trap lets it open the door, one that catches riders goes off", () => {
+    for (const floor of [true, false]) {
+      const horse = token("horse", { name: "Horse", kind: "npc", size: "large", disposition: "ally", ownerIds: ["p1"], x: 7, y: 4 });
+      const rider = thorn({ x: 7, y: 4, elevation: 0, attached: { to: "horse", kind: "ride", steer: true } });
+      const state = world([horse, rider], [trap("needle", { door: { edge: "9,5,w" } }, { on: [], floor, stops: false })], (s) => (s.buildChunks[chunkKey("s1", 0, 0)] = doorChunk()));
+      const r = applied(state, { t: "door.set", sceneId: "s1", door: { edge: "9,5,w" }, state: "open", by: "thorn" }, P1);
+      assert.equal(r.state.traps.needle!.state, floor ? "armed" : "sprung");
+    }
+  });
+
+  test("a goblin no player sees opens a door into their sight: who saw it is read before the door opened, so its springing stays the DM's", () => {
+    const state = world([thorn({ x: 3, y: 5 }), goblin({ x: 10, y: 5 })], [needle()], (s) => {
+      const edges: BuildChunk["edges"] = {};
+      for (let y = 0; y < 16; y++) edges[`9,${y},w`] = { kind: "wall" };
+      edges["9,5,w"] = { kind: "door", state: "closed", secret: false, discovered: false };
+      s.buildChunks[chunkKey("s1", 0, 0)] = { ...doorChunk(), edges };
+      s.scenes.s1 = { ...s.scenes.s1!, vision: { on: true, light: "bright" } };
+    });
+    const r = applied(state, { t: "door.set", sceneId: "s1", door: { edge: "9,5,w" }, state: "open", by: "gob" });
+    const t = r.state.traps.needle!;
+    assert.deepEqual([t.state, t.found, t.rig!.due?.[0]?.perceived], ["sprung", false, undefined]);
+    assert.deepEqual(r.state.trapSeen, [], "no players' line");
+  });
 });
 
 describe("the DM's Set it off, and settling (6.2)", () => {
