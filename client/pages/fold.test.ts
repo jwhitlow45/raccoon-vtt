@@ -129,6 +129,15 @@ describe("alertsSummary", () => {
     assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Tap to see it.");
   });
 
+  test("for the summary row on a map pane's bottom sheet, each advice says to close the pane", () => {
+    const answer = alertsSummary({ text: "Roll asked", name: "Hidden Pit went off", waiting: true, requests: 1 }, [], "pane");
+    assert.equal(answer?.name, "Roll asked: Hidden Pit went off. Close the pane to answer.");
+    const them = alertsSummary(null, [prompt("p1", "Thorn"), timeUp], "pane");
+    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Close the pane to see them.");
+    const it = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")], "pane");
+    assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Close the pane to see it.");
+  });
+
   test("the newest notice leads when nothing else waits", () => {
     const s = alertsSummary(null, [notice("n1", "Bless ended on Thorn."), notice("n2", "Hex ended on Goblin.")]);
     assert.equal(s?.text, "Hex ended on Goblin");

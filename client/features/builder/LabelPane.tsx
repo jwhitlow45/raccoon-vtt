@@ -12,11 +12,11 @@ import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "..
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
-import { useFoldUnderPane } from "../../pages/fold.ts";
+import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { requestPan } from "../encounter/pan.ts";
-import { CONFIRM_MS, commitDraft, paneEscape, panePlacement, paneSizes, sheetPanAnchor, tapDelete, type LabelDraft } from "./labelEdit.ts";
+import { CONFIRM_MS, commitDraft, paneEscape, panePlacement, paneSizes, SHEET_BELOW_PX, sheetPanAnchor, tapDelete, type LabelDraft } from "./labelEdit.ts";
 import { labelPaneFrame, labelScreenBox, PANE_HEIGHT_UNMEASURED } from "./labelPaneFrame.ts";
 import { PaneFooter } from "./PaneFooter.tsx";
 import { useBuilderStore } from "./store.ts";
@@ -71,7 +71,11 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
   // A label being dragged in the builder takes its pane along.
   const moving = useStore(useBuilderStore(), (b) => b.labelMove);
   const screenBox = labelScreenBox(moving?.id === label.id ? { ...label, x: moving.x, y: moving.y } : label, camera);
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: screenBox, height: height ?? PANE_HEIGHT_UNMEASURED });
+  // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars (pages/RoomDock.tsx usePaneDock).
+  const sheet = props.viewport.width < SHEET_BELOW_PX;
+  const dock = usePaneDock(sheet);
+  const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
+  const place = panePlacement({ viewport: props.viewport, insets, box: screenBox, height: height ?? PANE_HEIGHT_UNMEASURED });
 
   // A bottom sheet brings the label it opened for into view above it, once
   // per label, so a later pan away is the DM's to keep.
@@ -80,30 +84,30 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
   useEffect(() => {
     if (place.kind !== "sheet" || height === null || pannedFor.current === label.id) return;
     pannedFor.current = label.id;
-    const anchor = sheetPanAnchor({ viewport: props.viewport, insets: props.insets, sheetHeight: height, box: screenBox });
+    const anchor = sheetPanAnchor({ viewport: props.viewport, insets, sheetHeight: height, box: screenBox });
     if (anchor) requestPan(scope, { sceneId: label.sceneId, x: label.x, y: label.y, anchor });
   });
 
   // As a bottom sheet it swipes down to close, as its close does (docs/design-v1-sheet-swipe.md section 3).
-  const sheet = place.kind === "sheet";
   const drafts = useDraftRegistry();
-  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: label.id, clip: "foot", drafts });
-  // The alerts column folds under it, as under a panel sheet, so its header and Close stay in reach (pages/fold.ts).
-  useFoldUnderPane(sheet);
+  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: label.id, clip: "foot", riders: dock.riders, drafts });
 
   return (
-    <div
-      ref={paneRef}
-      role="dialog"
-      aria-label="Edit label"
-      data-map-pane=""
-      style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}
-    >
-      {/* Keyed by label, so a draft or an armed Delete never carries over to the next label tapped. */}
-      <DraftScope value={drafts}>
-        <LabelEditor key={label.id} label={label} onClose={props.onClose} sheet={sheet} />
-      </DraftScope>
-    </div>
+    <>
+      <div
+        ref={paneRef}
+        role="dialog"
+        aria-label="Edit label"
+        data-map-pane=""
+        style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}
+      >
+        {/* Keyed by label, so a draft or an armed Delete never carries over to the next label tapped. */}
+        <DraftScope value={drafts}>
+          <LabelEditor key={label.id} label={label} onClose={props.onClose} sheet={sheet} />
+        </DraftScope>
+      </div>
+      {dock.summary && place.kind === "sheet" ? <PaneDockRow ref={dock.row} pane={paneRef} bottom={place.bottom} summary={dock.summary} onClose={() => closeRef.current()} /> : null}
+    </>
   );
 }
 

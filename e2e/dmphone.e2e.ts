@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
@@ -751,6 +751,71 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await waitFor(`${label}: the zombie deleted by the second tap`, () => (dmSocket.state && !dmSocket.state.tokens[id] ? true : null));
     }
     await dmCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  });
+
+  test("fu20b-r1-5. at 390 x 844 a trap that goes off while its pane is open docks the alerts' summary row on the pane's top edge, clear of the top bars and of the pane's header and Close: its tap closes the pane and shows the trap's card, and the pane's Close brings the cards back too (fu20b Q2)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    // Left of the middle, clear of the alerts column down the right.
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Dart Plate", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId] ?? null);
+    await pickTool(dm, "Trap");
+    const pane = dm.getByRole("dialog", { name: "Edit trap" });
+    const openPane = async (label: string) => {
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      assert.equal(await hit(dm, p), "CANVAS", `${label}: the trap is under something`);
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.waitFor();
+      await pane.getByText("Dart Plate", { exact: true }).first().waitFor();
+    };
+    await openPane("first");
+    await ops.send({ t: "trap.spring", trapId, tokenIds: [run.hag] });
+    const cards = dm.getByRole("group", { name: "Dart Plate went off" });
+    const dock = dm.locator("[data-rvtt-pane-dock]");
+    const row = dock.getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
+    const close = pane.getByRole("button", { name: "Close", exact: true });
+    const onEdge = async (label: string) => {
+      await row.waitFor();
+      // The row follows the pane's height once it is measured, and the pane makes room for it.
+      await dm.waitForTimeout(300);
+      const r = await rectOf(dock);
+      const s = await rectOf(pane);
+      const bars = await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }));
+      assert.ok(Math.abs(r.bottom - s.top) <= 1.5, `${label}: the row (foot ${r.bottom}) is not on the pane's edge (${s.top})`);
+      assert.ok(r.top >= bars.bottom - 0.5, `${label}: the row (top ${r.top}) runs under the top bars (foot ${bars.bottom})`);
+      assert.ok(await wholeInReach(row), `${label}: something covers the row`);
+      assert.ok(await wholeInReach(close), `${label}: the pane's Close is out of reach`);
+      assert.equal(await cards.first().isVisible(), false, `${label}: a card draws over the pane`);
+    };
+    await onEdge("as the trap goes off");
+    await shots.take(dm, "dmphone-fu20b-r1-pane-dock");
+    // Its tap closes the pane, and the trap's card shows with focus in it, as the dock's row does under a panel sheet.
+    await row.tap();
+    await pane.waitFor({ state: "detached" });
+    await cards.first().waitFor();
+    await waitFor("focus in the trap's card", () =>
+      dm.evaluate(() => {
+        type Node = { closest(s: string): Node | null };
+        const a = (globalThis as unknown as { document: { activeElement: Node | null } }).document.activeElement;
+        return a?.closest('[data-alert="rolls"]') != null || null;
+      }),
+    );
+    assert.equal(await dock.count(), 0, "the row stayed with the pane gone");
+    await shots.take(dm, "dmphone-fu20b-r1-pane-dock-tapped");
+    // The pane's own Close brings the cards back too.
+    await openPane("again");
+    await onEdge("with the trap still waiting");
+    await close.tap();
+    await pane.waitFor({ state: "detached" });
+    await cards.first().waitFor();
+    assert.equal(await dock.count(), 0, "the row stayed after Close");
+    for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+    await ops.send({ t: "trap.delete", trapId });
+    await waitFor("the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] ? true : null));
+    await pickTool(dm, "Select");
   });
 });
 

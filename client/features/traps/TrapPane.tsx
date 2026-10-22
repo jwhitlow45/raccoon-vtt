@@ -19,12 +19,12 @@ import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { displayName } from "../../lib/scene.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { useFoldUnderPane } from "../../pages/fold.ts";
+import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { aimTrapArea } from "../areas/AreaTool.tsx";
 import { draftFromTemplate, newDraft } from "../areas/placement.ts";
-import { paneEscape, panePlacement, sheetPanAnchor } from "../builder/labelEdit.ts";
+import { paneEscape, panePlacement, sheetPanAnchor, SHEET_BELOW_PX } from "../builder/labelEdit.ts";
 import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
 import { PaneFooter } from "../builder/PaneFooter.tsx";
 import { findDoor } from "../doors/doors.ts";
@@ -109,7 +109,11 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
   }, []);
 
   const box = trapScreenBox(trap, chunks, camera);
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
+  // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars (pages/RoomDock.tsx usePaneDock).
+  const sheet = props.viewport.width < SHEET_BELOW_PX;
+  const dock = usePaneDock(sheet && !hidden);
+  const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
+  const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
 
   // A bottom sheet brings its trap into view above it, once per trap.
   const scope = useRoomScope();
@@ -117,29 +121,29 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
   useEffect(() => {
     if (place.kind !== "sheet" || height === null || hidden || pannedFor.current === trap.id) return;
     pannedFor.current = trap.id;
-    const anchor = sheetPanAnchor({ viewport: props.viewport, insets: props.insets, sheetHeight: height, box });
+    const anchor = sheetPanAnchor({ viewport: props.viewport, insets, sheetHeight: height, box });
     const world = zoneBox(trap, chunks);
     if (anchor && world) requestPan(scope, { sceneId: trap.sceneId, ...boxCenter(world), anchor });
   });
 
   // As a bottom sheet it swipes down to close. Each choice is sent as it is made and text when its field is left, so the focus rule alone holds it.
-  const sheet = place.kind === "sheet";
-  useSheetSwipe(paneRef, { enabled: sheet && !hidden, onClose: () => closeRef.current(), item: trap.id, clip: "foot" });
-  // The alerts column folds under it, as under a panel sheet, so its header and Close stay in reach (pages/fold.ts).
-  useFoldUnderPane(sheet && !hidden);
+  useSheetSwipe(paneRef, { enabled: sheet && !hidden, onClose: () => closeRef.current(), item: trap.id, clip: "foot", riders: dock.riders });
 
   return (
-    <div
-      ref={paneRef}
-      role="dialog"
-      aria-label="Edit trap"
-      data-map-pane=""
-      hidden={hidden}
-      style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text, ...(hidden ? { display: "none" } : null) }}
-    >
-      {/* Keyed by trap, so a half-typed field or an armed Delete never carries over to the next trap tapped. */}
-      <TrapEditor key={trap.id} trap={trap} sheet={sheet} onClose={props.onClose} />
-    </div>
+    <>
+      <div
+        ref={paneRef}
+        role="dialog"
+        aria-label="Edit trap"
+        data-map-pane=""
+        hidden={hidden}
+        style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text, ...(hidden ? { display: "none" } : null) }}
+      >
+        {/* Keyed by trap, so a half-typed field or an armed Delete never carries over to the next trap tapped. */}
+        <TrapEditor key={trap.id} trap={trap} sheet={sheet} onClose={props.onClose} />
+      </div>
+      {dock.summary && place.kind === "sheet" && !hidden ? <PaneDockRow ref={dock.row} pane={paneRef} bottom={place.bottom} summary={dock.summary} onClose={() => closeRef.current()} /> : null}
+    </>
   );
 }
 
