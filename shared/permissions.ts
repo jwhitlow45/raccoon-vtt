@@ -1370,7 +1370,9 @@ function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
   const inPlace = restored !== null && restored.sceneId === current.sceneId && restored.x === current.x && restored.y === current.y;
   // An undo or a redo takes the right its op took (docs/design-v1-attach.md 6 and 8.3): a move's, a controlled mount's
   // and a new seat's (namedMoveCheck), and a link's own, which its owner may always undo, locked or not, as detachCheck lets them.
-  const linkChanges = restored !== null && restored.attached?.to !== current.attached?.to;
+  // Only a link the player sees counts, so a hidden steed never changes the answer (8.0).
+  const shownTo = (t: Token) => (t.attached && c.visibleToken(t.attached.to) ? t.attached.to : undefined);
+  const linkChanges = restored !== null && shownTo(restored) !== shownTo(current);
   const may =
     (inPlace && ownsToken(c.state, c.actor, token)) || viaHolder(c, current, restored) || (linkChanges && ownsToken(c.state, c.actor, token)) ? OK : namedMoveCheck(c, tokenId, restored ?? undefined);
   if (!may.ok) return may;
@@ -1397,7 +1399,8 @@ function carriedThroughout(c: Check, tokenId: string, value: unknown, restoring:
   const linkOf = (id: string, put: boolean): string | undefined => {
     const v = put && restoring.has(id) ? restoring.get(id) : c.state.tokens[id];
     const to = v && typeof v === "object" ? (v as Token).attached?.to : undefined;
-    return to !== undefined && c.state.tokens[to]?.sceneId === c.state.tokens[id]?.sceneId ? to : undefined;
+    // Up links the player sees alone: a hidden holder between never carries a token through (8.0).
+    return to !== undefined && c.visibleToken(to) && c.state.tokens[to]?.sceneId === c.state.tokens[id]?.sceneId ? to : undefined;
   };
   const under = (put: boolean): string | undefined => {
     const visited = new Set<string>([tokenId]);

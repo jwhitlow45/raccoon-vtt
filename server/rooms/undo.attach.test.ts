@@ -336,6 +336,20 @@ describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
  * attached tokens, then its undo, its redo and its undo again, each with
  * nothing changed between.
  */
+describe("a hidden link never lends a player's undo a right (8.0, review AT-O-16)", () => {
+  test("Thorn moved off a steed no player sees, then locked, answers as Thorn on nothing", () => {
+    const steed = (s: RoomState) => {
+      s.tokens.steed = token("steed", { name: "Phantom steed", kind: "npc", size: "large", x: 4, y: 6, visibility: "dm" });
+      s.tokens.thorn = { ...s.tokens.thorn!, attached: { to: "steed", kind: "ride" } };
+    };
+    const a = table(steed);
+    const b = table();
+    both(a, b, (t) => t.play(P1, { t: "token.move", tokenId: "thorn", x: 9, y: 6 }));
+    both(a, b, (t) => t.play(DM, { t: "token.update", tokenId: "thorn", patch: { locked: true } }));
+    assert.equal(both(a, b, (t) => t.undo()), "that token is locked");
+  });
+});
+
 describe("a player's undo and redo take the forward op's rights (6 and 8.3)", () => {
   const grappled = { actor: { inline: actor({ effects: [effect("g", { key: "grappled" })] }) } };
   /** The DM's warhorse, which P1's Thorn rides by a controlled ride. */
