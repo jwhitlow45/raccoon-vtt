@@ -287,6 +287,15 @@ describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
     { name: "the DM puts down the visible torch the hidden imp carries", setup: imp, move: moveHorse, unseen: [{ t: "token.detach", tokenId: "torch" }] },
     { name: "the DM deletes the hidden imp, so the torch comes loose", setup: imp, move: moveHorse, unseen: [{ t: "token.delete", tokenId: "imp" }] },
     {
+      name: "the DM puts down the torch, which carries a visible light: silence runs down the whole chain from the hidden imp",
+      setup: (s) => {
+        imp(s);
+        s.tokens.light = token("light", { name: "Light", kind: "object", size: "tiny", x: 5, y: 5, attached: { to: "torch", kind: "carry" } });
+      },
+      move: moveHorse,
+      unseen: [{ t: "token.detach", tokenId: "torch" }],
+    },
+    {
       name: "the DM hands the torch to another hidden creature in the same spot",
       setup: (s) => {
         imp(s);
@@ -313,7 +322,7 @@ describe("no hidden state changes a player's undo or redo answer (8.3)", () => {
       for (const op of pair.unseen) assert.equal(b.play(DM, op), "ok", `${op.t} in room b`);
       a.play(DM, neutral);
       // The torch follows its hidden holder back and forth in room a only, by the reveal: its copy is the one thing that may differ.
-      const revealed = ["torch"];
+      const revealed = ["torch", "light"];
       both(a, b, (t) => t.undo(), [P1, P2], revealed);
       both(a, b, (t) => t.redo(), [P1, P2], revealed);
       both(a, b, (t) => t.undo(), [P1, P2], revealed);

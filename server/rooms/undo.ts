@@ -51,6 +51,12 @@ export type Pose = Place &
      * turn it into a token the answer reads. Not part of the comparison.
      */
     silent?: true;
+    /**
+     * The op named the token: a root of its groups (shared/rules/attach.ts
+     * moveGroups), which never rides as a passenger. Kept so a redo built
+     * from the step classes its passengers by the same roots.
+     */
+    root?: true;
   };
 
 /** Which tokens the step's player sees now: a pose holds a link only as their copy shows it (docs/design-v1-attach.md 8.3). */
@@ -355,12 +361,25 @@ function samePose(a: Pose, b: Pose): boolean {
   );
 }
 
+/** The tokens an op names, the roots of its groups (docs/design-v1-attach.md 8.2): every other token it moves rides on one of them. */
+export function namedTokens(op: Op): string[] {
+  if (op.t === "token.moveMany") return op.moves.map((m) => m.tokenId);
+  return "tokenId" in op && typeof op.tokenId === "string" ? [op.tokenId] : [];
+}
+
+/** The roots a step's poses name (Pose.root). */
+export function rootsOf(poses: Record<string, Pose> | undefined): Set<string> {
+  return new Set(Object.entries(poses ?? {}).flatMap(([id, pose]) => (pose.root ? [id] : [])));
+}
+
 /**
  * Where each token an op or a restore touched stands in `state`, the state
  * it left, its link as the player's copy shows it, and whether it rode
- * along as a silent passenger.
+ * along as a silent passenger. `roots` are the tokens the op named, which
+ * every passenger rides on: without them, each token's nearest holder in
+ * the step stands for its root.
  */
-export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Shows = () => true): Record<string, Pose> {
+export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Shows = () => true, roots?: ReadonlySet<string>): Record<string, Pose> {
   const restoring = new Set<string>();
   for (const entry of inverse) {
     const parsed = parseKey(entry.key);
@@ -371,19 +390,24 @@ export function posesAfter(state: RoomState, inverse: RestoreEntry[], shows: Sho
     const token = state.tokens[id];
     if (!token) continue;
     const pose = poseOf(token, shows);
-    if (silentPassenger(state, id, restoring)) pose.silent = true;
+    if (roots?.has(id)) pose.root = true;
+    if (silentPassenger(state, id, restoring, roots)) pose.silent = true;
     poses[id] = pose;
   }
   return poses;
 }
 
 /**
- * Whether a token is carried now under a token of the restore by a chain
- * not every player sees (docs/design-v1-attach.md 8.3): a hidden passenger,
- * one only some players see, or a visible one riding a hidden holder. Such
- * a passenger never answers an undo: it rides back silently or stays.
+ * Whether a token is carried now under a root of the step by a chain not
+ * every player sees (docs/design-v1-attach.md 8.3): a hidden passenger,
+ * one only some players see, or a visible one with a hidden token or link
+ * anywhere between it and its root, however deep, so a visible light on a
+ * visible torch on a hidden imp is as silent as the torch. Such a
+ * passenger never answers an undo: it rides back silently or stays. A
+ * root itself never is.
  */
-function silentPassenger(state: RoomState, tokenId: string, restoring: ReadonlySet<string>): boolean {
+function silentPassenger(state: RoomState, tokenId: string, restoring: ReadonlySet<string>, roots?: ReadonlySet<string>): boolean {
+  if (roots?.has(tokenId)) return false;
   let token = state.tokens[tokenId];
   const visited = new Set<string>([tokenId]);
   let open = true;
@@ -392,7 +416,9 @@ function silentPassenger(state: RoomState, tokenId: string, restoring: ReadonlyS
     if (!holder || visited.has(holder.id)) return false;
     visited.add(holder.id);
     if (!inSightOfNonOwners(state, token, {}) || !inSightOfNonOwners(state, state.tokens[holder.id]!, {})) open = false;
-    if (restoring.has(holder.id)) return !open;
+    if (roots ? roots.has(holder.id) : restoring.has(holder.id)) return !open;
+    // Carried by a token the step did not move, it rode on no root of the step.
+    if (!restoring.has(holder.id)) return false;
     token = state.tokens[holder.id];
   }
   return false;
