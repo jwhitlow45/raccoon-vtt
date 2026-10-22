@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type Token } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
+import { actor, effect, token as makeToken } from "#shared/testutil.ts";
+import { dropLanding, dropView } from "../features/movement/drop.ts";
+import { raised, world } from "../features/movement/testing.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
 /** A scene "s1" whose first chunk has these heights, keyed "x,y". */
@@ -90,5 +93,16 @@ describe("token shadows", () => {
     assert.equal(tokenLift(pit, token(3, 3, -5), { x: 6, y: 3 }), 15);
     // A drop where it already stands is no move.
     assert.equal(tokenLift(c, token(6, 3, 30), { x: 6, y: 3 }), 20);
+  });
+});
+
+describe("a dragged token's shadow lands as the drop does (review AT-O-23)", () => {
+  test("a kobold re-seated on the low half of a horse straddling a step keeps the horse's 10 ft, so its shadow shows the lift", () => {
+    const horse = makeToken("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, elevation: 10, ownerIds: ["p1"] });
+    const kobold = makeToken("kobold", { name: "Kobold", size: "small", x: 5, y: 4, elevation: 10, attached: { to: "horse", kind: "carry" }, actor: { inline: actor({ effects: [effect("g", { key: "grappled" })] }) } });
+    const s = world({ blockMovement: false, heights: raised(5, 4, 6, 6, 10), tokens: [horse, kobold] });
+    const at = { x: 4, y: 4 };
+    assert.equal(tokenLift(s.buildChunks, s.tokens.kobold!, at), 0, "by its own footing it would land on the low ground");
+    assert.equal(tokenLift(s.buildChunks, s.tokens.kobold!, at, dropLanding(dropView(s, "player"), s.tokens.kobold!, at)), 10);
   });
 });
