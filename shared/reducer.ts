@@ -158,8 +158,13 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     endSaves(tx);
     const dispatched = plan ? new Set(tx.touched()) : null;
     if (plan) traps = trapStep(tx, op, state, plan);
-    // The Passive Perception hint writes only the DM's (docs/design-v1-traps.md 4.6), and is kept out of a player's undo as the trap step's writes are.
-    if (plan && noticeStep(tx, op, state)) traps = { wrote: true, trapped: traps?.trapped ?? false };
+    // A pit that opened moved what stood on its lid, so the links it left out of reach come loose (docs/design-v1-traps.md 13.2).
+    if (traps?.pit && attaches(env.opVersion)) {
+      linkPass(tx);
+      settleMounts(tx);
+    }
+    // The Passive Perception hint, where the walk ended up, writes only the DM's (4.6), and is kept out of a player's undo as the trap step's writes are.
+    if (plan && noticeStep(tx, op, state)) traps = { ...traps, wrote: true, trapped: traps?.trapped ?? false };
     if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
     if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
     remindAfter(tx, state, moved);

@@ -1,9 +1,11 @@
 import { keys } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import type { LogEntry, LogEvent, Token, Trap, TrapAction, TrapDue, TrapRig } from "../model.ts";
+import { MIN_HEIGHT_FT, type LogEntry, type LogEvent, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
+import { groundAt } from "../rules/heights.ts";
 import { doorExists, isPlainId } from "../rules/traps.ts";
+import { buildHeight } from "./heights.ts";
 import { doorSet } from "./map.ts";
 import { gone, invalid, Refuse, type Tx } from "./tx.ts";
 
@@ -179,17 +181,60 @@ export function writeSettled(tx: Tx, trap: Trap, dueId: string, sprung: boolean)
 /** One action's outcome, by its index in the trap's list (-1 the pit), as the DM's line keeps it. */
 export type Did = { action: number; ok: boolean };
 
+/** The pit's place among a line's outcomes (6.3): after the listed actions, as -1. */
+export const PIT_ACTION = -1;
+
 /**
  * A trap's actions in their listed order (5.7): a door set, a light put
- * out or lit, a hidden creature or stamp shown. A target gone since, or
- * moved to another scene, is skipped and named on the card. None of them
- * can refuse the op: a door's change is the door op's own, and a reveal of
- * a lit token passes the lit token cap as a reveal on a turn does.
+ * out or lit, a hidden creature or stamp shown, and then its pit. A target
+ * gone since, or moved to another scene, is skipped and named on the card.
+ * None of them can refuse the op: a door's change is the door op's own, a
+ * reveal of a lit token passes the lit token cap as a reveal on a turn
+ * does, and a pit's geometry is counted from the moment the trap exists
+ * (6.7). A pit already open changes nothing and has no outcome to name.
  */
 export function runActions(tx: Tx, trap: Trap): Did[] {
   const did: Did[] = [];
   for (const [i, action] of (trap.rig?.actions ?? []).entries()) did.push({ action: i, ok: runAction(tx, trap.sceneId, action) });
+  const pit = openPit(tx, trap);
+  if (pit !== null) did.push({ action: PIT_ACTION, ok: pit });
   return did;
+}
+
+/**
+ * A pit opens (5.7): each of its squares' ground goes to the stored floor
+ * through `buildHeight`, which sets every token standing there on the
+ * ground it leaves by attach's group rules, a holder taking what sits on
+ * it down with it and a dragged creature keeping to its own ground. The
+ * caller runs attach's link pass again. Null when every square is already
+ * at the floor, false when it could not open.
+ */
+function openPit(tx: Tx, trap: Trap): boolean | null {
+  const pit = trap.rig?.pit;
+  if (!pit || !("cells" in trap.zone)) return null;
+  const floor = Math.max(MIN_HEIGHT_FT, pit.floor);
+  const cells: string[] = [];
+  const seen = new Set<string>();
+  let changes = false;
+  for (const r of trap.zone.cells) {
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        const key = `${x},${y}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        cells.push(key);
+        if (groundAt(tx.state.buildChunks, trap.sceneId, x, y) !== floor) changes = true;
+      }
+    }
+  }
+  if (!changes) return null;
+  try {
+    buildHeight(tx, { t: "build.height", sceneId: trap.sceneId, cells, height: floor });
+    return true;
+  } catch (err) {
+    if (err instanceof Refuse) return false;
+    throw err;
+  }
 }
 
 function runAction(tx: Tx, sceneId: string, action: TrapAction): boolean {

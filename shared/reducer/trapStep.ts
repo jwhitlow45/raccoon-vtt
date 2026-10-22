@@ -4,7 +4,7 @@ import type { RoomState, Trap, TrapDoorRef, TrapDue, Viewer } from "../model.ts"
 import type { Op, OpOf } from "../protocol.ts";
 import { planDoor, planHand, planTrapMove, planTurn, walkOp, type Springing, type TrapRoom } from "../rules/traps.ts";
 import { pressChangesNothing } from "./encounter.ts";
-import { addDue, dmLine, orderedBy, plainList, playersLine, runActions } from "./traps.ts";
+import { addDue, dmLine, orderedBy, PIT_ACTION, plainList, playersLine, runActions } from "./traps.ts";
 import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 
 /*
@@ -17,8 +17,12 @@ import { gone, Refuse, type Env, type Tx } from "./tx.ts";
 /** What the trap step planned before dispatch: the op dispatch moves, with its stopped landings, and the springings found so far. */
 export type TrapPlan = { op: Op; before: Springing[] };
 
-/** What the trap step wrote: whether a public springing stopped a token or told its players, which marks a player's undo step (6.5). */
-export type TrapWrites = { wrote: boolean; trapped: boolean };
+/**
+ * What the trap step wrote: whether a public springing stopped a token or
+ * told its players, which marks a player's undo step (6.5), and whether a
+ * pit opened, after which attach's link pass runs again (13.2).
+ */
+export type TrapWrites = { wrote: boolean; trapped: boolean; pit?: true };
 
 /**
  * Before dispatch (13.2 step 1): a walk's both passes, which may rewrite
@@ -162,6 +166,7 @@ function write(tx: Tx, s: Springing, out: TrapWrites): void {
     return;
   }
   const did = runActions(tx, trap);
+  if (did.some((d) => d.action === PIT_ACTION && d.ok)) out.pit = true;
   const perceived = s.pass === "public" && s.perceived;
   const next = sprungOf(tx.state.traps[trap.id] ?? trap);
   if (perceived && rig.foundOnSpring) next.found = true;
