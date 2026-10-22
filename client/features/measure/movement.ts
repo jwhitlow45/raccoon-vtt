@@ -49,10 +49,13 @@ export { spotRect, straightFeet as movedFeet } from "#shared/rules/route.ts";
  * only while it is the turn under way's (design 7.3), but not the turn's
  * start when they could not see where it began, so a path in a player's
  * copy of the active creature with no start to check it against is this
- * turn's.
+ * turn's. So is one on a copy that holds no acting row: its owners get a
+ * creature's path on its own turn when the DM hid its row from them
+ * (project.ts projectPathCtx, review AT-HIDDENPATH).
  */
 export function pathNow(encounter: TurnView | null | undefined, token: Pick<MovingToken, "id" | "path">, role: "dm" | "player"): TokenPath | null {
-  if (!encounter || !token.path || encounter.activeEntryId === null) return null;
+  if (!encounter || !token.path) return null;
+  if (encounter.activeEntryId === null) return role === "player" ? token.path : null;
   const start = encounter.turnStart;
   if (start?.entryId === encounter.activeEntryId) return pathThisTurn(encounter, token);
   if (role === "dm") return null;

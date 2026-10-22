@@ -8,14 +8,14 @@ import { UndoTable } from "#server/rooms/undoTesting.ts";
 import { keys } from "#shared/keys.ts";
 import { CHUNK_CELLS, type AttachKind, type BuildChunk, type EdgeFeature, type RoomState, type Token, type Viewer } from "#shared/model.ts";
 import { canApply, mayMoveToken } from "#shared/permissions.ts";
-import { applyChanges, inSightOfNonOwners, isPartyMember, projectState, type ProjectedState } from "#shared/project.ts";
+import { applyChanges, inSightOfNonOwners, isPartyMember, ownsToken, projectState, type ProjectedState } from "#shared/project.ts";
 import type { Change, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { carriedGroup, getOffSpot, holderOf, seatSpot, walkerFor } from "#shared/rules/attach.ts";
 import { isSqueezed } from "#shared/rules/footprint.ts";
 import { walkEnd, walkStates, type Walker } from "#shared/rules/movement.ts";
 import { encodeHeights, footing, footprintGround } from "#shared/rules/heights.ts";
-import { stopsForOwners } from "#shared/rules/path.ts";
+import { stopsForOwners, turnUnderWay } from "#shared/rules/path.ts";
 import { DM, P1, P2, actor, chance, deepClone, effect, env, int, pick, reveal, rng, room, token } from "#shared/testutil.ts";
 import { dragOf, groupDragOf, type Drag, type GroupDrag } from "../movement/dragTesting.ts";
 import { turnMoverId } from "./turns.ts";
@@ -360,7 +360,8 @@ type Built = {
   b: Op | null;
   frames?: [Frame, Frame];
   /** A group drag's lead and the cost its label reads in each room, which must be what the reducer stores (review AT-ASTRA-15). */
-  costs?: { lead: string; ft: [number | null, number | null] };
+  /** `hiddenRow`: the actor's copy holds no acting row, as on a turn of the player's own creature whose row the DM hid. */
+  costs?: { lead: string; ft: [number | null, number | null]; hiddenRow?: boolean };
   /**
    * The DM's Get off, whose place may differ by what only the DM sees, and
    * by nothing else: it avoids every creature the viewer sees (4.3), and
@@ -396,8 +397,9 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
     return { who, built: { what: "drag", a: (da?.op as Op | null | undefined) ?? null, b: (db?.op as Op | null | undefined) ?? null, ...(da && db ? { frames: [frameOf(da, who), frameOf(db, who)] } : {}) } };
   }
   if (n < 0.58) {
-    // Half the time led by the creature whose turn it is, so its label is checked against what its move stores.
-    const mover = tokens.find((t) => t.id === turnMoverId(copies[0]));
+    // Half the time led by the creature whose turn it is, so its label is checked against what its move stores, its owner's
+    // too on a row the DM hid, whose copy holds no acting row.
+    const mover = tokens.find((t) => t.id === (turnMoverId(copies[0]) ?? (who.role === "player" ? turnUnderWay(a.encounter)?.tokenId : undefined)));
     const first = dragLead(copies[0].tokens, mover && chance(r, 0.5) ? mover : pick(r, tokens));
     const second = dragLead(copies[0].tokens, pick(r, tokens));
     if (first.id === second.id) return null;
@@ -417,9 +419,9 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
         a: (ga?.op as Op | null | undefined) ?? null,
         b: (gb?.op as Op | null | undefined) ?? null,
         ...(ga && gb ? { frames: [groupFrameOf(ga, who), groupFrameOf(gb, who)] as [Frame, Frame] } : {}),
-        // Checked only where the actor's copy holds the lead's whole path: a player gets none of the stops of a turn the DM hid
-        // (docs/design-v1-movement.md 7.2), so its label cannot know the turn's diagonals then.
-        costs: { lead: first.id, ft: [ga && wholePath(copies[0], a, first.id) ? ga.label.dragFt : null, gb && wholePath(copies[1], b, first.id) ? gb.label.dragFt : null] },
+        // Checked where the actor's copy holds the lead's whole path: as its owners get it, on its own turn too when the DM
+        // hid its row from them (review AT-HIDDENPATH), but not as another player who may move it gets it.
+        costs: { lead: first.id, ft: [ga && wholePath(copies[0], a, first.id) ? ga.label.dragFt : null, gb && wholePath(copies[1], b, first.id) ? gb.label.dragFt : null], hiddenRow: who.role === "player" && copies[0].encounter?.activeEntryId === null && copies[0].encounter.started === true },
       },
     };
   }
@@ -515,6 +517,13 @@ function unseenOp(r: () => number, state: RoomState, vision: boolean, focus?: Re
   const target = pick(r, Object.values(state.tokens).filter((t) => t.id !== h.id && t.id !== "lurker"));
   const seat = seatSpot(h, target);
   return seat ? { t: "token.attach", tokenId: h.id, to: target.id, kind: h.size === "tiny" ? "perch" : h.kind === "object" ? "carry" : "ride", x: seat.x, y: seat.y, elevation: target.elevation } : null;
+}
+
+/** Whether the turn under way is a creature's that a player owns. */
+function ownedTurn(state: RoomState): boolean {
+  const turn = turnUnderWay(state.encounter);
+  const token = turn ? state.tokens[turn.tokenId] : undefined;
+  return token !== undefined && [P1, P2].some((p) => ownsToken(state, p, token));
 }
 
 /** Whether a token's own holder is one some player cannot see. */
@@ -790,6 +799,7 @@ type Seen = {
   /** Group drags whose lead's label was checked against the cost the move stored, and those of a player's lead that had moved already this turn. */
   groupCosts: number;
   playerPathCosts: number;
+  hiddenRowCosts: number;
   /** A turn of a creature some player cannot see, riding a mount every player sees under its control. */
   hiddenRiderTurns: number;
   /** Trackers the DM's undo left apart, made alike by hand. */
@@ -799,7 +809,7 @@ type Seen = {
   rejoined: number;
 };
 
-const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, playerPathCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
+const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, playerPathCosts: 0, hiddenRowCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
 
 /** One run: its seed and the steps it took. */
 function run(seed: number, steps = 70): Seen {
@@ -820,6 +830,9 @@ function run(seed: number, steps = 70): Seen {
     if (!op) return null;
     const trial = applyOp(b.state, op, DM, env(b.seq + 1));
     if (!trial.ok || [P1, P2].some((p) => !isSame(copyOf(trial.state, p), copyOf(b.state, p)))) return null;
+    // A creature's owners read its own turn by its path once they walk it, on a row the DM hid too (review AT-HIDDENPATH), so
+    // a turn that passes onto or off a creature a player owns is never unseen.
+    if (b.state.encounter?.activeEntryId !== trial.state.encounter?.activeEntryId && (ownedTurn(b.state) || ownedTurn(trial.state))) return null;
     const before = b.state;
     assert.equal(b.play(DM, op), "ok", `${where}: the unseen ${op.t}`);
     for (const id of new Set([...Object.keys(before.tokens), ...Object.keys(b.state.tokens)])) if (before.tokens[id] !== b.state.tokens[id]) marks.touched.add(id);
@@ -1030,6 +1043,7 @@ function run(seed: number, steps = 70): Seen {
         assert.equal(costs.ft[i], stored, `${where}: ${who.memberId}'s group label reads ${costs.ft[i]} ft where room ${i === 0 ? "a" : "b"} stores ${stored} for ${JSON.stringify(step.a)}`);
         seen.groupCosts++;
         if (who.role === "player" && pathsBefore[i]! > 1) seen.playerPathCosts++;
+        if (costs.hiddenRow) seen.hiddenRowCosts++;
       });
   };
   for (let i = 0; i < steps; i++) {
@@ -1125,7 +1139,7 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
     assert.ok(total.restoresApart * 20 < total.restoresCompared, summary);
     // And the devices' own steps: player attaches and Get offs the room takes, the DM's ops and frames compared, and turns
     // of a hidden rider on a mount every player sees.
-    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.playerPathCosts > 3 * per60 && total.hiddenRiderTurns > 60 * per60, summary);
+    assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.playerPathCosts > 3 * per60 && total.hiddenRowCosts > per60 && total.hiddenRiderTurns > 60 * per60, summary);
     if (process.env.ATTACH_RANDOM_SEEDS) console.log(summary);
   });
 });
@@ -1390,5 +1404,72 @@ describe("a drag's preview reaches a player only where its move leaves the token
   test("Large and Huge creatures that start squeezed in a corridor walked along it, with other ground under their full footprint", () => {
     const { total, per } = sweep(corridorRun);
     assert.ok(total.frames > 1500 * per && total.shown > 100 * per && total.withheld > 100 * per && total.squeezedStarts > 200 * per && total.squeezed > 100 * per, JSON.stringify(total));
+  });
+});
+
+/**
+ * The hidden-turn generator (review AT-HIDDENPATH): a player's own creature
+ * that the DM hid, with its row, walked on its own turn. Its owner's copy
+ * holds no acting row, but gets the creature's path this turn, so each
+ * drag's label, lone or in a group with another of the player's tokens,
+ * counts on from the turn's earlier legs, their 5-10-5 diagonals too, and
+ * reads the cost the move stores. Another player's copy gets no path.
+ */
+describe("a player's own creature on a turn the DM hid reads its turn's earlier legs (review AT-HIDDENPATH)", () => {
+  test("random walks and group walks by its owner under 5-10-5, among walls", () => {
+    let legs = 0;
+    let diagonal = 0;
+    let groups = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const r = rng(seed);
+      const edges: Record<string, EdgeFeature> = {};
+      for (let i = int(r, 0, 4); i > 0; i--) {
+        const at = int(r, 4, 16);
+        const from = int(r, 2, 14);
+        for (let v = from; v < from + int(r, 1, 4); v++) edges[chance(r, 0.5) ? `${at},${v},w` : `${v},${at},n`] = { kind: "wall" };
+      }
+      let state = room({
+        tokens: {
+          dog: token("dog", { name: "Mastiff", kind: "npc", ownerIds: ["p1"], visibility: "dm", x: 10, y: 10, actor: { inline: actor({ speeds: { walk: 60 } }) } }),
+          thorn: token("thorn", { name: "Thorn", kind: "pc", disposition: "ally", ownerIds: ["p1"], x: 3, y: 3, actor: { inline: actor({ speeds: { walk: 30 } }) } }),
+        },
+        buildChunks: built(edges, {}),
+      });
+      state.scenes.s1 = { ...state.scenes.s1!, blockMovement: chance(r, 0.7), autoWalls: "off" };
+      // Not revealed on its turn, which would show its row.
+      state.meta.settings = { ...state.meta.settings, diagonal: "fiveTen", revealHiddenOnTurn: false };
+      let seq = 0;
+      const play = (who: Viewer, op: Op) => {
+        const out = applyOp(state, op, who, env(++seq));
+        assert.ok(out.ok, `seed ${seed}: ${out.ok ? "" : out.message} for ${JSON.stringify(op)}`);
+        state = out.state;
+      };
+      play(DM, { t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 20 }, { id: "ed", tokenId: "dog", value: 10, hidden: true }] });
+      play(DM, { t: "encounter.next" });
+      play(DM, { t: "encounter.next" });
+      assert.equal(state.encounter?.activeEntryId, "ed", "the creature's turn");
+      for (let k = int(r, 2, 5); k > 0; k--) {
+        const copy = copyOf(state, P1);
+        assert.equal(copy.encounter?.activeEntryId, null, `seed ${seed}: the owner's copy holds no acting row`);
+        assert.equal(copyOf(state, P2).tokens.dog, undefined, `seed ${seed}: another player gets nothing of the creature`);
+        const dog = state.tokens.dog!;
+        if (dog.path) assert.deepEqual(copy.tokens.dog?.path, { turn: dog.path.turn, stops: stopsForOwners(dog.path.stops) }, `seed ${seed}: the owner gets the turn's path`);
+        const to = { x: Math.max(1, Math.min(28, dog.x + int(r, -4, 4))), y: Math.max(1, Math.min(28, dog.y + int(r, -4, 4))) };
+        const before = dog.path?.stops.length ?? 0;
+        const group = chance(r, 0.3);
+        const drag = group ? groupDragOf(copy, "player", ["dog", "thorn"], to) : dragOf(copy, "player", "dog", to);
+        if (!drag.op) continue;
+        play(P1, drag.op as Op);
+        const stops = state.tokens.dog!.path?.stops ?? [];
+        if (stops.length <= before) continue;
+        const stored = stops.slice(before).reduce((sum, st) => sum + (st.cost ?? 0), 0);
+        const read = "label" in drag ? drag.label.dragFt : drag.preview.read.dragFt;
+        assert.equal(read, stored, `seed ${seed}: the label reads ${read} ft where the move stores ${stored}, ${JSON.stringify(drag.op)} after ${JSON.stringify(dog.path?.stops)}`);
+        legs++;
+        if (group) groups++;
+        if (before > 1 && stops.slice(0, before).some((st) => st.diag && (st.diag[0] !== 0 || st.diag[1] !== 0))) diagonal++;
+      }
+    }
+    assert.ok(legs > 80 && diagonal > 30 && groups > 15, JSON.stringify({ legs, diagonal, groups }));
   });
 });

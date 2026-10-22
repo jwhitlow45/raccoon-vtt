@@ -89,16 +89,18 @@ function assertPaused(p: ProjectedState, label: string): void {
 
 /**
  * A player gets a creature's path only for the turn under way, of a row
- * they see, without the marks of who could see each stop. A player who
- * does not own it gets only the stops they saw, and a leg's uncounted mark
- * only when they saw both its ends.
+ * they see, or of its own turn for its owners on a row the DM hid from them
+ * (review AT-HIDDENPATH), without the marks of who could see each stop. A
+ * player who does not own it gets only the stops they saw, and a leg's
+ * uncounted mark only when they saw both its ends.
  */
 function assertPathKept(state: RoomState, p: ProjectedState, id: string, owned: boolean, label: string): void {
   const path = p.tokens[id]!.path!;
   const stored = state.tokens[id]!.path!;
   const start = state.encounter?.turnStart;
   assert.ok(start?.seq !== undefined && stored.turn === start.seq && start.tokenId === id && start.entryId === state.encounter!.activeEntryId, `${label}: a path of another turn of ${id} leaked`);
-  assert.equal(p.encounter?.activeEntryId, start.entryId, `${label}: the path of ${id}, whose row is unseen, leaked`);
+  const acting = p.encounter?.activeEntryId ?? null;
+  assert.ok(acting === start.entryId || (owned && acting === null), `${label}: the path of ${id}, whose row is unseen, leaked`);
   for (const stop of path.stops) assert.ok(!("seen" in stop), `${label}: the seen mark of a stop of ${id} leaked`);
   const kept = stored.stops.flatMap((stop, i) => (owned || stop.seen ? [{ stop, i }] : []));
   assert.equal(path.stops.length, kept.length, `${label}: stops of ${id} players could not see leaked`);

@@ -659,15 +659,19 @@ function linkShown(ctx: Ctx, token: Token): Token["attached"] | null {
  * The creature's path this turn, for a player who sees the creature and
  * its initiative row now (design 7.3). A path from an earlier turn, or one
  * of a row the player cannot see, would say whose turn it is or was, so it
- * is not sent at all. Owners get every stop, and other players only those
- * they could see (rules/path.ts). Neither gets the marks of who could see.
+ * is not sent at all. The one exception is the creature's own turn for its
+ * owners, on a row the DM hid from them: they walk it, and its drag's label
+ * reads the turn's earlier legs as the move stores them (review
+ * AT-HIDDENPATH). Owners get every stop, and other players only those they
+ * could see (rules/path.ts). Neither gets the marks of who could see.
  */
 function projectPathCtx(ctx: Ctx, token: Token, owner: boolean): TokenPath | null {
   const encounter = ctx.state.encounter;
   const path = pathThisTurn(encounter, token);
   if (!encounter || !path) return null;
   const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
-  if (!entry || !entryShown(ctx, entry)) return null;
+  const ownTurn = owner && encounter.turnStart?.tokenId === token.id;
+  if (!ownTurn && (!entry || !entryShown(ctx, entry))) return null;
   const stops = owner ? stopsForOwners(path.stops) : stopsForNonOwners(path.stops);
   return stops.length > 0 ? { turn: path.turn, stops } : null;
 }

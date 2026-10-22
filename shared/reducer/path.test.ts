@@ -261,7 +261,7 @@ describe("what players get of a path", () => {
     assert.equal(projectState(owned, P1, { sceneId: "s1" }).tokens.gob!.path?.stops.some((s) => "seen" in s), false);
   });
 
-  test("players get only the path of the turn under way, of a row they see", () => {
+  test("players get only the path of the turn under way, of a row they see, and owners that of its own turn", () => {
     const stale = watched();
     stale.encounter = { ...stale.encounter!, turnStart: { ...stale.encounter!.turnStart!, seq: 8 } };
     assert.equal(pathFor(stale, P2), undefined, "a path of an earlier turn");
@@ -269,7 +269,8 @@ describe("what players get of a path", () => {
     const hidden = watched({ ownerIds: ["p1"] });
     hidden.encounter = { ...hidden.encounter!, entries: hidden.encounter!.entries.map((e) => (e.id === "n1" ? { ...e, hidden: true } : e)) };
     assert.equal(pathFor(hidden, P2), undefined, "a row players cannot see, whose path would say whose turn it is");
-    assert.equal(pathFor(hidden, P1), undefined, "its owner included, as for the row");
+    // They walk it, and its drag's label counts on from the turn's earlier legs as the move stores them (review AT-HIDDENPATH).
+    assert.deepEqual(pathFor(hidden, P1)?.stops, stopsForOwners(hidden.tokens.gob!.path!.stops), "its owner gets it on its own turn all the same");
     const other = watched();
     other.encounter = { ...other.encounter!, activeEntryId: "n2" };
     assert.equal(pathFor(other, P2), undefined, "another row's turn");

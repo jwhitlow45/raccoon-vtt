@@ -5,7 +5,7 @@ import { placedOnTrace, routePoints, routeWalkers, type RoutePiece, type RoutePo
 import { halvedAt, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { displayName } from "../../lib/scene.ts";
 import { areaTitle } from "../areas/labels.ts";
-import { dragReading, type DragRead, type Speeds } from "../measure/movement.ts";
+import { dragReading, pathNow, type DragRead, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
 import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
@@ -55,12 +55,26 @@ export function groupReading(view: DropView, token: Token, to: Point, role: Role
     to,
     landing,
     encounter: view.encounter,
-    activeTokenId: turnMoverId(view) ?? null,
+    activeTokenId: turnMover(view, token, role),
     speeds: speedsOf(view, token),
     rules: { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal },
     role,
     ...(dismount ? { dismount, build: view } : {}),
   });
+}
+
+/**
+ * The token whose turn a drag's label reads as under way: the turn's mover
+ * (attach/turns.ts turnMoverId), or, on a player's copy that holds no acting
+ * row, the dragged token when its path this turn came with it, as its owners
+ * get it on its own turn when the DM hid its row (measure/movement.ts
+ * pathNow, review AT-HIDDENPATH). So the label counts on from the turn's
+ * earlier legs, its diagonals too, as the move stores the leg.
+ */
+function turnMover(view: RoomState, token: Token, role: Role): string | null {
+  const mover = turnMoverId(view);
+  if (mover !== undefined) return mover;
+  return role === "player" && view.encounter?.activeEntryId === null && pathNow(view.encounter, token, role) ? token.id : null;
 }
 
 export function speedsOf(view: RoomState, token: Token): Speeds | undefined {
@@ -137,7 +151,7 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
       ];
   const encounter = view.encounter;
   // A controlled mount sharing its rider's turn reads its own path and speeds (docs/design-v1-attach.md 7.2).
-  const activeTokenId = turnMoverId(view) ?? null;
+  const activeTokenId = turnMover(view, token, role);
   const dismount = dismountOf(view, token, points[points.length - 1]!, role);
   const end = points[points.length - 1]!;
   const { squeeze: _squeeze, ...standing } = token;

@@ -377,19 +377,22 @@ describe("a player's move undo and the path of the turn", () => {
   });
 
   test("reads no path the player's copy does not show: the DM's mark on a leg of a row hidden from them refuses nothing (docs/design-v1-attach.md 8.0)", () => {
-    for (const hidden of [false, true]) {
-      let state = room({ tokens: { dog: token("dog", { name: "Mastiff", kind: "npc", ownerIds: ["p1"], x: 5, y: 5, visibility: "dm", actor: { inline: actor({ speeds: { walk: 30 } }) } }) } });
-      state.meta.settings = { ...state.meta.settings, revealHiddenOnTurn: false };
+    // P1 moves a creature they do not own, as the room lets every player move any token, so a row hidden from them hides its path.
+    // Its owners get the path of its own turn on a hidden row too (review AT-HIDDENPATH), so for them a mark refuses as on a shown one.
+    for (const [owners, hidden] of [[[], false], [[], true], [["p1"], true]] as const) {
+      let state = room({ tokens: { dog: token("dog", { name: "Mastiff", kind: "npc", ownerIds: [...owners], x: 5, y: 5, visibility: owners.length > 0 ? "dm" : "all", actor: { inline: actor({ speeds: { walk: 30 } }) } }) } });
+      state.meta.settings = { ...state.meta.settings, revealHiddenOnTurn: false, playersMoveAny: "all" };
       state = apply(state, { t: "encounter.start", entries: [{ id: "ed", tokenId: "dog", value: 20, hidden }, { id: "n2", value: 5 }] }, DM, 1);
       state = apply(state, { t: "encounter.next" }, DM, 2);
       const table = new UndoTable(state);
       table.seq = 10;
       assert.equal(table.play(P1, { t: "token.move", tokenId: "dog", x: 7, y: 5 }), "ok");
       const path = (projectEntity(keys.token("dog"), table.state, P1, { sceneId: "s1" }) as Token).path;
-      assert.equal(path === undefined, hidden, "the path reaches P1 only while the row is shown");
+      const shown = !hidden || owners.length > 0;
+      assert.equal(path !== undefined, shown, "the path reaches P1 only while the row is shown, or on its own turn for its owners");
       assert.equal(table.play(DM, { t: "token.countLeg", tokenId: "dog", counts: false }), "ok");
       // A mark P1 sees refuses the undo, as a move would. One P1 never receives refuses nothing, so the answer tells nothing.
-      assert.equal(table.undo(P1), hidden ? "ok" : MOVED_SINCE);
+      assert.equal(table.undo(P1), shown ? MOVED_SINCE : "ok");
     }
   });
 });
