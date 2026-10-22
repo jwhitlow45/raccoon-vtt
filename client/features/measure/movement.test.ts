@@ -9,6 +9,7 @@ import { DM, P1, P2, room, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
 import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
 import { ownWalk, type Walker } from "#shared/rules/movement.ts";
+import { walkTrace } from "#shared/rules/route.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -434,6 +435,7 @@ describe("a drag along a route (docs/design-v1-movement.md 3.1, 3.2 and 4.2)", (
   const walk = (points: [number, number][], pieces: [number, number, number, 0 | 1][], halved: (x: number) => boolean = () => false, prone = false): DragWalk => ({
     route: { points: flat(points), pieces },
     build: { buildChunks: {} },
+    trace: walkTrace({}, ownWalk(walker), flat(points)),
     halved: (at) => (halved(at.x) ? "Spirit Guardians" : null),
     prone,
   });

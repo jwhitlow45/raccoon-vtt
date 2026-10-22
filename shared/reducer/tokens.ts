@@ -6,7 +6,7 @@ import { MAX_RULER_STOPS, type ActorPatch, type Op, type OpOf, type TokenPatch }
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
-import { onTrace, routeFeet, routePoints, routeWalk, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
+import { onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
@@ -596,10 +596,9 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   if (route && route.length > 1) out.via = route.slice(0, -1).flatMap(([x, y]) => [x, y]);
   // Each spot with the footprint the walk's trace has there, squeezed where it ends as it will be (route.ts onTrace). Ops
   // before version 14 read the full footprint between its ends, squeezed only where it starts.
-  const traced = attaches(tx.env.opVersion);
-  const squeezedAt = ([piece, k, n]: readonly [number, number, number], i: number, count: number): boolean =>
-    traced ? isSqueezed(onTrace(trace, piece, k === n && n > 0, after)) : i === count - 1 ? isSqueezed(after) : i === 0 && isSqueezed(before);
-  const spots = routeWalk(walk, walker, judged.before, undefined, traced ? trace : undefined).map((p, i, all) => ({ ...p, squeezed: squeezedAt(p.progress, i, all.length) }));
+  const spots = attaches(tx.env.opVersion)
+    ? routeWalk(trace, judged.before).map((p) => ({ ...p, squeezed: isSqueezed(onTrace(trace, p.progress[0], p.progress[1] === p.progress[2] && p.progress[2] > 0, after)) }))
+    : routeWalkBeforeV14(walk, walker, judged.before).map((p, i, all) => ({ ...p, squeezed: i === all.length - 1 ? isSqueezed(after) : i === 0 && isSqueezed(before) }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;
 }

@@ -142,8 +142,7 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
   const end = points[points.length - 1]!;
   const { squeeze: _squeeze, ...standing } = token;
   const landed: Token = { ...standing, x: to.x, y: to.y, elevation: end.elevation, ...(to.squeeze === true ? { squeeze: true as const } : {}) };
-  const traced = () => routeWalkers(view.buildChunks, walking, pieces ?? [[to.x, to.y, 0, 0]], end.elevation);
-  let trace: ReturnType<typeof traced> | undefined;
+  const trace = routeWalkers(view.buildChunks, walking, pieces ?? [[to.x, to.y, 0, 0]], end.elevation);
   const read = dragReading({
     token: walking,
     to,
@@ -160,9 +159,10 @@ export function walkPreview(input: { view: RoomState; token: Token; target: Poin
           walk: {
             route: pieces ? { points, pieces } : null,
             build: view,
+            trace,
             // Each spot with the footprint the walk's trace has there, squeezed where it lands as the drop lands it (route.ts onTrace).
             halved: (at: RoutePoint, piece: number, end: boolean) => {
-              const area = halvedAt(world, placedOnTrace((trace ??= traced()), piece, end, landed, at));
+              const area = halvedAt(world, placedOnTrace(trace, piece, end, landed, at));
               return area ? areaTitle(area) : null;
             },
             prone: world.input.prone,

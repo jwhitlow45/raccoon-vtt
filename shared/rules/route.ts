@@ -325,19 +325,33 @@ export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
  * contract 4.3): `n = ceil(max(|dx|, |dy|) / step)` per piece, exactly along
  * the lattice for an eight-direction piece and snapped as a stopped walk's
  * spots are (movement.ts `lastClearSpot`) for any other, a repeat dropped.
- * A walker's spots take the ground under them, any other token's rise and
- * fall evenly between its pieces' ends. With its `trace`, the ground under
- * a spot is under the footprint the walk has there (`WalkTrace`), else
- * under the full one, as ops before version 14 replay it.
+ * The walk is its trace (`WalkTrace`), its walker at every point: a walker
+ * on the ground takes the ground under the footprint the walk has at each
+ * spot, any other token rises and falls evenly between its pieces' ends.
  */
-export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pick<BuildState, "buildChunks">, step?: number, trace?: WalkTrace): WalkSpot[] {
+export function routeWalk(trace: WalkTrace, build: Pick<BuildState, "buildChunks">, step?: number): WalkSpot[] {
+  const first = trace[0];
+  if (!first) return [];
+  return walkSpots(trace, first, build, step, (piece) => trace[piece]!);
+}
+
+/**
+ * `routeWalk` as ops before version 14 replay it, which carry no trace:
+ * every spot past the start on the ground under the full footprint, as
+ * those ops were stored. Only that replay reads it (reducer/tokens.ts
+ * walkedStop), so no walk of today's ops can sample without its trace.
+ */
+export function routeWalkBeforeV14(route: readonly RoutePoint[], token: Walker, build: Pick<BuildState, "buildChunks">): WalkSpot[] {
+  const start = walkFrom(build.buildChunks, token);
+  const full = walkOn(build.buildChunks, start, start);
+  return walkSpots(route, token, build, undefined, () => full);
+}
+
+function walkSpots(route: readonly RoutePoint[], token: Walker, build: Pick<BuildState, "buildChunks">, step: number | undefined, walkerOn: (piece: number) => Walker): WalkSpot[] {
   const first = route[0];
   if (!first) return [];
   const lattice = step ?? routeLattice(token);
-  const start = walkFrom(build.buildChunks, token);
-  const grounded = start.grounded;
-  // Before version 14 every spot read the ground under the full footprint: the walker past its start, standing where it starts.
-  const full = trace ? null : walkOn(build.buildChunks, start, start);
+  const grounded = walkFrom(build.buildChunks, token).grounded;
   const stepsOf = (a: RoutePoint, b: RoutePoint) => Math.max(1, Math.ceil(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / lattice - SLACK));
   const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, route.length > 1 ? stepsOf(first, route[1]!) : 0] }];
   const snap = (v: number) => Math.round(v / lattice) * lattice + 0;
@@ -354,7 +368,7 @@ export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pi
       const y = end ? b.y : exact ? a.y + (dy * k) / n : a.y + snap((dy * k) / n);
       const prev = spots[spots.length - 1]!;
       if (!end && x === prev.x && y === prev.y) continue;
-      const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, full ?? trace![i - 1]!, { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
+      const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, walkerOn(i - 1), { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
       spots.push({ x, y, elevation, progress: [i - 1, k, n] });
     }
   }
@@ -377,7 +391,7 @@ export function routeWalk(route: readonly RoutePoint[], token: Walker, build: Pi
 export function routeSpots(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}): RouteSpot[] {
   // The walker where each piece starts, as the walk carries it (`WalkTrace`): ledges, the squeeze and the leg test count from here.
   const trace = walkTrace(build.buildChunks, token, route);
-  const walk = routeWalk(route, token, build, step, trace);
+  const walk = routeWalk(trace, build, step);
   if (walk.length === 0) return [];
   const lattice = step ?? routeLattice(token);
   const grid = snapStep(token);

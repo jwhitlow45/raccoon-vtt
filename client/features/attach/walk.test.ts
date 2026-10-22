@@ -630,3 +630,22 @@ describe("every reader of a walk reads its walker from the walk's trace (reviews
     assert.equal(legBlocker(view, lead, cut.at), null);
   });
 });
+
+describe("every sample of a walk reads the walk's trace (review AT-ASTRA-27)", () => {
+  test("a squeezed walk down a corridor reads a Half Speed area on its floor at the floor's height, not the ground under its full footprint", () => {
+    // A Large brute squeezed in a one-cell corridor, with 10 ft raised ground beside it under the full footprint it does not
+    // use, walks to the corridor's far end past a 5 ft high Half Speed cylinder on the corridor floor. Squeezed all the way, it
+    // stands on the floor, inside the cylinder short of the end: 45 ft there against its halved Speed is 15 ft past Dash. Read
+    // on the ground under its full footprint, 10 ft up, it would pass over the cylinder and end in Dash with nothing left.
+    let state = world({ edges: { ...line("w", 10, 0, 30), ...line("w", 11, 0, 30) }, heights: raised(11, 0, 12, 30, 10), tokens: [token("brute", { name: "Brute", size: "large", x: 9.5, y: 4.5, squeeze: true, actor: { inline: actor({ speeds: { walk: 30 } }) } })] });
+    state = onTurn(state, "brute");
+    state.templates.sg = template("sg", { shape: "cylinder", size: 5, height: 5, origin: { x: 10.5, y: 9.5, z: 0 }, slows: { kind: "halfSpeed" } });
+    const drag = dragOf(state, "dm", "brute", { x: 9.7, y: 10.8 });
+    const op = drag.op as Op & { t: "token.move" };
+    assert.deepEqual([op.x, op.y, op.squeeze], [9.5, 10.5, true]);
+    const r = applyOp(state, op, DM, env(9));
+    assert.ok(r.ok);
+    assert.equal(r.state.tokens.brute!.path!.stops.at(-1)!.cost, 60);
+    assert.deepEqual(drag.preview.read.left, { kind: "walk", speed: 15, leftFt: 15, band: "over" });
+  });
+});

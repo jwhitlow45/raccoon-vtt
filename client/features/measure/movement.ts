@@ -5,8 +5,8 @@ import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footpri
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
-import type { Walker } from "#shared/rules/movement.ts";
-import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot } from "#shared/rules/route.ts";
+import { ownWalk, type Walker } from "#shared/rules/movement.ts";
+import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 
 /**
@@ -270,6 +270,8 @@ export type DragWalk = {
   route: { points: readonly RoutePoint[]; pieces: readonly RoutePiece[] } | null;
   /** The map, for the ground under each spot of the walk. */
   build: Pick<BuildState, "buildChunks">;
+  /** The walk's trace along its route, or along the straight leg (route.ts WalkTrace): each spot of it reads the walker it has there. */
+  trace: WalkTrace;
   /** The name of the Half Speed area the creature would stand in at a spot of the walk's piece `piece` (0 the first), at its end where `end`, or null (4.2). */
   halved(at: RoutePoint, piece: number, end: boolean): string | null;
   /** Crawling: the creature is Prone as players see it. */
@@ -362,7 +364,7 @@ export function dragReading(input: {
   if (!atEnd) return out;
   let band = atEnd.band;
   // The last spot inside a Half Speed area before the end, if the leg leaves one: its band may be worse than the end's.
-  const inside = walk && !endHalved ? lastHalvedSpot(points, token, walk) : null;
+  const inside = walk && !endHalved ? lastHalvedSpot(walk) : null;
   if (inside) {
     const prefix = [...points.slice(0, inside.piece + 1), inside.at];
     const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost + surcharge).find((s) => s.kind === atEnd.kind);
@@ -385,14 +387,15 @@ export function remoteWalk(token: MovingToken, to: Point, corners: readonly Poin
   return {
     route: { points: [{ x: token.x, y: token.y, elevation: token.elevation }, ...all.map((p) => ({ x: p.x, y: p.y, elevation: token.elevation }))], pieces: all.map((p): RoutePiece => [p.x, p.y, 0, 0]) },
     build: { buildChunks: {} },
+    trace: walkTrace({}, ownWalk(token), [{ x: token.x, y: token.y, elevation: token.elevation }, ...all.map((p) => ({ x: p.x, y: p.y, elevation: token.elevation }))]),
     halved: () => null,
     prone: false,
   };
 }
 
-/** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on. */
-function lastHalvedSpot(points: readonly RoutePoint[], token: MovingToken & Walker, walk: DragWalk): { piece: number; at: RoutePoint } | null {
-  const spots = routeWalk(points, token, walk.build);
+/** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on: each spot read from the walk's trace (review AT-ASTRA-27). */
+function lastHalvedSpot(walk: DragWalk): { piece: number; at: RoutePoint } | null {
+  const spots = routeWalk(walk.trace, walk.build);
   for (let i = spots.length - 2; i > 0; i--) {
     const s = spots[i]!;
     const at = { x: s.x, y: s.y, elevation: s.elevation };

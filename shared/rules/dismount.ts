@@ -4,7 +4,7 @@ import { snapStep } from "./footprint.ts";
 import { overlaps } from "./attach.ts";
 import type { BuildState } from "../ruleHooks.ts";
 import { walkFrom, walkOn, type Walker } from "./movement.ts";
-import { routeFeet, routePoints, routeWalk, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
+import { routeFeet, routePoints, routeWalk, routeWalkers, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
 
 /**
  * Getting off a ride on the rider's own turn (docs/design-v1-attach.md
@@ -30,7 +30,7 @@ export type DismountSplit = { off: RoutePoint; prefix: readonly RoutePiece[] | u
  * true when the first clear spot is the walk's end, so there is no rest.
  */
 export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: Walker, mount: PlacedToken, points: readonly RoutePoint[], route?: readonly RoutePiece[]): DismountSplit {
-  const walk = routeWalk(points, rider, build, snapStep(rider));
+  const walk = routeWalk(walkTrace(build.buildChunks, rider, points), build, snapStep(rider));
   const at = walk.findIndex((p, i) => i > 0 && !overlaps({ ...rider, x: p.x, y: p.y }, mount));
   const clear = walk[at] ?? walk[walk.length - 1]!;
   const end = points[points.length - 1]!;

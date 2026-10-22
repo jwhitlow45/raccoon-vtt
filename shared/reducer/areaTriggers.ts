@@ -238,7 +238,7 @@ const MAX_ROUTE_SWEEP = 664;
  * 14 take it, and they replay with the footprint the move left: later ones
  * sweep their walks in `alongGroups`.
  */
-function alongWalk(after: RoomState, walk: Walked): RoomState[] {
+function alongWalkBeforeV14(after: RoomState, walk: Walked): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
   const token = after.tokens[walk.tokenId]!;
   const out: RoomState[] = [];
@@ -313,6 +313,11 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
   return out;
 }
 
+/** A token at a spot of its leg as ops before version 14 replay it, which describe no walk: with the footprint the move left. */
+function placedBeforeV14(to: Token, spot: RoutePoint): Token {
+  return { ...to, ...spot };
+}
+
 function lerpPoint(a: RoutePoint, b: RoutePoint, f: number): RoutePoint {
   return { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f), elevation: lerp(a.elevation, b.elevation, f) };
 }
@@ -324,7 +329,8 @@ function lerpPoint(a: RoutePoint, b: RoutePoint, f: number): RoutePoint {
  * which describe no walks, replay with the footprint the move left.
  */
 function alongLeg(before: RoomState, after: RoomState, moved: Moved): RoomState[] {
-  const traces = new Map((moved.walks?.all ?? []).map((w) => [w.tokenId, w.trace]));
+  // Since op version 14 every moved token has its walk's trace, and each spot reads it. Older ops replay with the footprint the move left.
+  const traces = moved.walks ? new Map(moved.walks.all.map((w) => [w.tokenId, w.trace])) : null;
   const fpc = after.meta.settings.feetPerCell;
   let reach = 0;
   const tokens: [Token, Token][] = [];
@@ -349,8 +355,7 @@ function alongLeg(before: RoomState, after: RoomState, moved: Moved): RoomState[
     const placed = { ...after.tokens };
     for (const [from, to] of tokens) {
       const spot = lerpPoint(from, to, f);
-      const trace = traces.get(to.id);
-      placed[to.id] = trace ? placedOnTrace(trace, 0, false, to, spot) : { ...to, ...spot };
+      placed[to.id] = traces ? placedOnTrace(traces.get(to.id)!, 0, false, to, spot) : placedBeforeV14(to, spot);
     }
     let templates = after.templates;
     if (areaLeg) {
@@ -407,7 +412,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
-    const leg = outside.length > 0 ? (swept ??= grouped ? alongGroups(after, grouped, routed) : walk ? alongWalk(after, walk) : alongLeg(before, after, moved)) : [];
+    const leg = outside.length > 0 ? (swept ??= grouped ? alongGroups(after, grouped, routed) : walk ? alongWalkBeforeV14(after, walk) : alongLeg(before, after, moved)) : [];
     for (const at of leg) {
       const area = at.templates[template.id];
       if (!area) continue;

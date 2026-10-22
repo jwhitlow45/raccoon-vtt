@@ -5,7 +5,7 @@ import { MAX_MOVES } from "#shared/protocol.ts";
 import type { DiagonalRule, EdgeFeature, RoomState, TerrainId, Token } from "#shared/model.ts";
 import { snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { plainLegCost, routeFeet, routePoints, routeStop, routeWalk, type RoutePiece } from "#shared/rules/route.ts";
+import { plainLegCost, routeFeet, routePoints, routeStop, routeWalk, walkTrace, type RoutePiece } from "#shared/rules/route.ts";
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
@@ -413,7 +413,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
       if (dx > 1e-9 && dy > 1e-9 && Math.abs(dx - dy) > 1e-9) continue;
       walked++;
       // The route along the leg the move walks, one piece a step as the reducer steps it (route.ts routeWalk), each with what that step pays.
-      const spots = routeWalk([{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }], ownWalk(c.mover), c.view);
+      const spots = routeWalk(walkTrace(c.view.buildChunks, ownWalk(c.mover), [{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }]), c.view);
       const each: RoutePiece[] = spots.slice(1).map((q, i) => {
         const p = spots[i]!;
         const node = w.nodeAt(q);
