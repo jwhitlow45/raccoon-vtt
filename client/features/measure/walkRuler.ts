@@ -1,12 +1,16 @@
-import type { Actor, RoomState, Token } from "#shared/model.ts";
+import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
+import { inSightOfNonOwners } from "#shared/project.ts";
+import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
 import { footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { offKey, type Walker } from "#shared/rules/movement.ts";
+import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeFeet, routePoints, straightCost, type LegCost, type RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
 import { publicWorld, type WalkViewer } from "#shared/rules/walkWorld.ts";
-import { dropLanding, droppedIn, dropView, routeTarget, walkerOf } from "../movement/drop.ts";
+import { dropLanding, dropView, keyStep, routeLanding, routeTarget, walkerOf, type DropView } from "../movement/drop.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
 import { extraWords, joinWords } from "./movement.ts";
 import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
@@ -17,7 +21,12 @@ import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
  * stop for one creature, the token the ruler starts on, or a Medium
  * creature on the ground when it starts on empty ground. Each later stop is
  * where that creature would stand if dragged there, and each leg walks the
- * route a drag would, with the 5-10-5 count running on across the stops.
+ * route a drag would, with the 5-10-5 count running on across the stops:
+ * searched from the counters of the stops its legs leave, as a drag's
+ * search reads a turn's stops (walkWorld.ts publicCounters), and costed by
+ * the true count, as the reducer stores a leg. The stops are the ones the
+ * reducer records on the room it simulates, with who saw each leg, while
+ * the creature's turn is under way, else each leg seen whole.
  *
  * A ruler has no turn, so it leaves out other creatures' spaces, which will
  * move before anyone walks there, Speed changes and crawling. It counts
@@ -86,11 +95,13 @@ const MAX_SEARCHES = 32;
 const MAX_LEGS = 4096;
 
 /**
- * A leg's finished answer: the straight leg, the route's pieces, or none.
+ * A leg's finished answer: the straight leg, the route's pieces, or none,
+ * with the straight leg's own route when what it walks over costs (drop.ts
+ * keyStep).
  * Kept by its start, 5-10-5 residue and spot, so a ruler of many legs needs
  * a leg's search only while that leg is searched (review ASTRA-07).
  */
-type LegAnswer = { kind: "open" } | { kind: "route"; pieces: RoutePiece[] } | { kind: "none" };
+type LegAnswer = { kind: "open" } | { kind: "route"; pieces: RoutePiece[] } | { kind: "none"; straight?: RoutePiece[] };
 
 /** A ruler's walk so far: each leg's answer by its place, and the search and open-ground check of the leg still searching. */
 type Progress = { answers: LegAnswer[]; on: { leg: string; search: WalkSearch; check: LegCheck } | null };
@@ -169,7 +180,8 @@ function legAnswer(view: RoomState, walker: Token & Walker, input: WalkInput, co
       progress.on = { leg: legKey, search, check };
       return null;
     }
-    answer = traced ? { kind: "route", pieces: traced.pieces } : { kind: "none" };
+    const straight = traced ? null : keyStep(search.world, target, (units) => budget.charge(units));
+    answer = traced ? { kind: "route", pieces: traced.pieces } : straight?.kind === "route" ? { kind: "none", straight: straight.route.pieces } : { kind: "none" };
   }
   progress.on = null;
   if (kept.legs.size >= MAX_LEGS) kept.legs.delete(kept.legs.keys().next().value!);
@@ -205,10 +217,15 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   let walker = first ? walkerAt(view, input.sceneId, first) : null;
   if (!walker || stops.length < 2) return null;
   const size = footprintSize(walker);
-  // The room as the drops so far leave it: a leg that leaves a holder walks and lands every later one off it, as the token would (review AT-SOL-1).
-  let seen = dropView(view, input.viewer.role);
+  // The room as the drops so far leave it, each applied by the room's own reducer (simulated), so a later leg walks, lands and
+  // is seen as the token would after them (reviews AT-SOL-1, AT-SOL-3, AT-ASTRA-25 and AT-SOL-5).
+  const role = input.viewer.role;
+  let sim: RoomState = view.tokens[walker.id] ? view : { ...view, tokens: { ...view.tokens, [walker.id]: walker } };
+  let seen = dropView(sim, role);
   const rules = { feetPerCell: view.meta.settings.feetPerCell, diagonal: view.meta.settings.diagonal };
   const counter: DiagonalCounter = { h: 0, v: 0 };
+  // The stops the legs leave, as a turn's path holds them (stopLeft), read as a drag's search reads them: by their marks on the DM's room, by `routeSeen` alone on a player's copy.
+  const left: PathStop[] = [{ x: walker.x, y: walker.y, elevation: walker.elevation, seen: true }];
   const legs: WalkLeg[] = [];
   const pieces: [number, number, number, 0 | 1][] = [];
   let totalFt = 0;
@@ -228,31 +245,32 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     let none = false;
     // Past a leg still searching, the walker's later legs start from where it would land, never searched until it is known: they would only push its search out.
     const walking: Token & Walker = walkerOf(seen, walker);
-    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walking, input, counter, target, budget, progress));
+    const answer = progress.answers[k] ?? (searching ? null : legAnswer(view, walking, input, publicCounters(walker, left, rules, role === "dm"), target, budget, progress));
     if (answer) progress.answers[k] = answer;
     if (!answer) {
       searching = true;
       legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: 0, none, searching: true });
-      seen = droppedIn(seen, input.viewer.role, walker, target, landing);
-      walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
+      ({ sim, seen, walker } = simulated(view, sim, role, walker, target, landing, undefined));
       continue;
     }
-    if (answer.kind === "route") {
-      const points = routePoints(view.buildChunks, walking, answer.pieces, landing);
-      taken = routeFeet(points, answer.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
+    // A leg no route reaches goes as the drop's straight leg, which still counts what it walks over by its own route, unless
+    // that route is cut or refused (drop.ts planWalk, review ASTRA-15).
+    const straight = answer.kind === "none" && answer.straight ? routeLanding(seen, walker, target, answer.straight, rules.feetPerCell) : null;
+    const along = answer.kind === "route" ? answer.pieces : straight && !straight.cut ? straight.pieces : undefined;
+    none = answer.kind === "none";
+    if (along) {
+      const points = routePoints(view.buildChunks, walking, along, landing);
+      taken = routeFeet(points, along.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(walker) });
       corners = points.slice(1, -1).map((p) => ({ x: p.x, y: p.y }));
-      pieces.push(...answer.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
+      pieces.push(...along.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]));
       extraFt += taken.cost - taken.moved;
-    } else {
-      none = answer.kind === "none";
-      taken = straightCost(walker, walker, end, rules, counter);
-    }
+    } else taken = straightCost(walker, walker, end, rules, counter);
     counter.h += taken.diag[0];
     counter.v += taken.diag[1];
     totalFt += taken.cost;
     legs.push({ from, to: { x: target.x, y: target.y }, corners, ft: taken.cost, none });
-    seen = droppedIn(seen, input.viewer.role, walker, target, landing);
-    walker = { ...walker, x: target.x, y: target.y, elevation: landing, ...(target.squeeze ? { squeeze: true as const } : { squeeze: undefined }) };
+    ({ sim, seen, walker } = simulated(view, sim, role, walker, target, landing, along));
+    left.push(stopLeft(sim, walker.id, left, { x: target.x, y: target.y, elevation: landing, ...(corners.length > 0 ? { via: corners.flatMap((c) => [c.x, c.y]) } : {}) }));
   }
   const words = extraWords(pieces, false, false);
   const walk: WalkMeasure = { legs, totalFt, extra: extraFt > 0 && words.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(words)}` : null, size, searching };
@@ -262,6 +280,71 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     memo.set(stops, byViewer);
   }
   return walk;
+}
+
+/**
+ * The stop a leg leaves at `drawn`: the one the reducer recorded on the
+ * simulated room, which marks who saw the leg, the stop before it marked
+ * so too, while the creature's turn is under way there. Else, as off a
+ * turn or on a copy that cannot tell this turn's path, `drawn` seen whole,
+ * since every device draws the whole ruler.
+ */
+function stopLeft(sim: RoomState, id: string, left: PathStop[], drawn: PathStop): PathStop {
+  const token = sim.tokens[id];
+  const stops = token ? pathThisTurn(sim.encounter, token)?.stops : undefined;
+  const at = stops?.[stops.length - 1];
+  const from = stops?.[stops.length - 2];
+  const start = left[left.length - 1]!;
+  if (!at || !from || at.x !== drawn.x || at.y !== drawn.y || from.x !== start.x || from.y !== start.y) return { ...drawn, seen: true, routeSeen: true };
+  left[left.length - 1] = from;
+  return at;
+}
+
+/** The ruler's actor and clock for the moves it simulates: no op is sent, so neither is anyone's. */
+const RULER_ACTOR = (role: WalkViewer["role"]): Viewer => ({ memberId: "ruler", role });
+const RULER_ENV = { seq: 1, at: "1970-01-01T00:00:00.000Z" };
+
+/**
+ * The room after the drag a ruler's leg reads (the move to `to`, landing at
+ * `elevation`, along `route`), applied by the room's own reducer to this
+ * device's copy, as the client predicts an op: the token's group moves with
+ * it and a link that no longer holds comes loose by the link pass. Who sees
+ * a token it moved is judged where it now stands by the rule the server
+ * judges every player's sight by (project.ts inSightOfNonOwners), any
+ * other as this view's drops read it. A copy the reducer cannot apply it to,
+ * as a projection can lack what the reducer assumes, moves the token there
+ * and no more.
+ */
+function simulated(view: RoomState, sim: RoomState, role: WalkViewer["role"], walker: Token, to: Point & { squeeze: boolean }, elevation: number, route: readonly RoutePiece[] | undefined): { sim: RoomState; seen: DropView; walker: Token } {
+  const op: Op = { t: "token.move", tokenId: walker.id, x: to.x, y: to.y, elevation, ...(to.squeeze ? { squeeze: true as const } : {}), ...(route ? { route: route.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) } : {}) };
+  let next: RoomState | null = null;
+  try {
+    const out = applyOp(sim, op, RULER_ACTOR(role), RULER_ENV);
+    if (out.ok) next = out.state;
+  } catch {
+    next = null;
+  }
+  if (!next?.tokens[walker.id]) {
+    const { squeeze: _squeeze, ...rest } = walker;
+    const moved: Token = { ...rest, x: to.x, y: to.y, elevation, ...(to.squeeze ? { squeeze: true as const } : {}) };
+    next = { ...sim, tokens: { ...sim.tokens, [walker.id]: moved } };
+  }
+  const room = next;
+  const drops = dropView(view, role);
+  const moved = (id: string) => !samePose(room.tokens[id], view.tokens[id]);
+  const seen: DropView = {
+    ...room,
+    seen: (t) => {
+      const token = room.tokens[t.id];
+      return token !== undefined && (moved(t.id) ? inSightOfNonOwners(room, token, {}) : drops.seen(t));
+    },
+  };
+  return { sim: room, seen, walker: room.tokens[walker.id]! };
+}
+
+function samePose(a: Token | undefined, b: Token | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.sceneId === b.sceneId && a.x === b.x && a.y === b.y && a.elevation === b.elevation && a.squeeze === b.squeeze && a.attached?.to === b.attached?.to && a.attached?.kind === b.attached?.kind;
 }
 
 /**

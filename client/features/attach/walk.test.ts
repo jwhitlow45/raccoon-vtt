@@ -486,17 +486,53 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), [10, 5]);
   });
 
-  test("a walking ruler's later legs judge who sees the token where its earlier legs left it (review AT-SOL-3)", () => {
-    // Fog lifted only over the cart's north east corner, where an imp rides it. Its first leg keeps it on the cart, in the fog,
-    // where no player sees it, so its next leg west off the cart walks as a token with no holder: 10 ft up, over low ground.
+  /**
+   * The gap's cart with fog lifted only over its north east corner, where an imp rides it, and the ogre out of the way: a
+   * ruler leaves out other creatures' spaces, which a drag does not.
+   */
+  function fogged(): RoomState {
     const state = gap();
     state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
     reveal(state, "s1", { x: 11, y: 6, w: 2, h: 2 });
     state.tokens.imp = token("imp", { name: "Imp", x: 11, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" } });
-    // The ogre out of the way: a ruler leaves out other creatures' spaces, which a drag does not. The DM's own ruler reads the
-    // fogged ground, as the DM's drag does.
     const { attached: _link, ...ogre } = state.tokens.ogre!;
     state.tokens.ogre = { ...ogre, x: 20, y: 20, elevation: 0 };
+    return state;
+  }
+
+  /** The DM's drags of the imp to each spot in turn, each from where the one before left it: what each label read. */
+  function dragsOf(state: RoomState, spots: readonly { x: number; y: number }[]): number[] {
+    let room = state;
+    return spots.map((spot, i) => {
+      const drag = dragOf(room, "dm", "imp", spot);
+      const r = applyOp(room, drag.op as Op, DM, env(9 + i));
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      room = r.state;
+      return drag.preview.read.dragFt;
+    });
+  }
+
+  test("a walking ruler's legs read as the drags they stand for when one leaves its passenger hidden off its holder (review AT-ASTRA-25)", () => {
+    // On the cart into the fog, off it west, back onto its revealed corner, which no seat there holds, and one more step.
+    const state = fogged();
+    const spots = [{ x: 9, y: 8 }, { x: 8, y: 8 }, { x: 11, y: 6 }, { x: 10, y: 6 }];
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.imp!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: true })!;
+    assert.deepEqual(ruler.legs.map((leg) => leg.ft), dragsOf(state, spots));
+  });
+
+  test("a shared walking ruler reads the same on a player's copy as on the DM's, a token it moves into the fog seen by neither (review AT-SOL-5)", () => {
+    const state = fogged();
+    const stops = [tokenStop(state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }];
+    const dm = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false })!;
+    const player = measureWalk({ view: copyFor(state, P1), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!;
+    assert.deepEqual(player.legs.map((leg) => leg.ft), dm.legs.map((leg) => leg.ft));
+    assert.equal(dm.legs[1]!.ft, 5);
+  });
+
+  test("a walking ruler's later legs judge who sees the token where its earlier legs left it (review AT-SOL-3)", () => {
+    // Its first leg keeps the imp on the cart, in the fog, where no player sees it, so its next leg west off the cart walks as a
+    // token with no holder: 10 ft up, over low ground. The DM's own ruler reads the fogged ground, as the DM's drag does.
+    const state = fogged();
     const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }], viewer: { role: "dm" }, everything: true })!;
     const along = dragOf(state, "dm", "imp", { x: 9, y: 8 });
     const r = applyOp(state, along.op as Op, DM, env(9));
