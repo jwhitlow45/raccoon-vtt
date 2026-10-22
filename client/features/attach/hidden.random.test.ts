@@ -647,10 +647,15 @@ function compare(a: { before: RoomState; after: RoomState }, b: { before: RoomSt
       }
     }
     // A drag's frames go out only for a token the player may move: no hidden holder lends that right (8.0). A mount whose
-    // rider is apart is steered or not as each room has the rider.
+    // rider is apart is steered or not as each room has the rider, and a token whose holder, or one of its holders, is apart
+    // in either room moves with that holder or not as each room has it (review AT-O-30).
     const ridden = new Set([a.after, b.after].flatMap((s) => [...apart].flatMap((x) => (s.tokens[x]?.attached ? [s.tokens[x]!.attached!.to] : []))));
+    const heldApart = (s: RoomState, id: string): boolean => {
+      for (let at = s.tokens[id]?.attached?.to, n = 0; at !== undefined && n < 16; at = s.tokens[at]?.attached?.to, n++) if (apart.has(at)) return true;
+      return false;
+    };
     for (const id of Object.keys(ca.tokens)) {
-      if (apart.has(id) || ridden.has(id) || !cb.tokens[id]) continue;
+      if (apart.has(id) || ridden.has(id) || heldApart(a.after, id) || heldApart(b.after, id) || !cb.tokens[id]) continue;
       assert.equal(mayMoveToken(a.after, who, id).ok, mayMoveToken(b.after, who, id).ok, `${where}: ${who.memberId} may drag ${id} in one room alone`);
     }
     const rest = (c: RoomState) => {
