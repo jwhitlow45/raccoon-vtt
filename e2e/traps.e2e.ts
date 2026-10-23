@@ -781,4 +781,31 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pane(dm).waitFor({ state: "detached" });
     await pickTool(dm, "Select");
   });
+
+  test("lp2-1b-3. Save and damage reads as the group save it fills: a DC row, On a pass with Half and None, and dice that do not read say why under their row (docs/design-v1-look-pass-2.md D12)", async () => {
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    await unfold(dm, "Save and damage");
+    await pane(dm).getByText("DC", { exact: true }).waitFor();
+    const onPass = pane(dm).getByRole("radiogroup", { name: "On a pass" });
+    await onPass.getByRole("radio", { name: "None", exact: true }).click();
+    await waitFor("none on a pass", () => (trap(dmSocket)?.rig?.save?.onPass === "none" ? true : null));
+    await onPass.getByRole("radio", { name: "Half", exact: true }).click();
+    await waitFor("half on a pass", () => (trap(dmSocket)?.rig?.save?.onPass === "half" ? true : null));
+    const dice = pane(dm).getByRole("textbox", { name: "Damage dice" });
+    await dice.fill("2dx");
+    await dice.press("Tab");
+    const why = pane(dm).getByRole("alert").filter({ hasText: "Not a dice formula, such as 2d10 or 1d6+2." });
+    await why.waitFor();
+    assert.equal(await dice.getAttribute("aria-invalid"), "true");
+    assert.deepEqual(trap(dmSocket)?.rig?.damage, [{ formula: "1d6", type: "bludgeoning" }], "dice that do not read were sent");
+    await shots.take(dm, "traps-lp2-1b-save-and-damage");
+    await dice.fill("1d6");
+    await dice.press("Tab");
+    await why.waitFor({ state: "detached" });
+    await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
 });

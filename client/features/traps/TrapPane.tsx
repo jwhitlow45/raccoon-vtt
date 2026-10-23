@@ -9,7 +9,7 @@ import { pitOpen, trapCreature } from "#shared/rules/traps.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { FieldRow, Input, Select, TextArea } from "../../components/Field.tsx";
+import { ErrorText, FieldRow, Input, Select, TextArea } from "../../components/Field.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Group, Help, Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -647,36 +647,34 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
             </option>
           ))}
         </Select>
-        {rig.save ? (
-          <>
-            <span style={{ color: theme.color.textMuted }}>DC</span>
-            <NumberInput label="Save DC" value={rig.save.dc} min={LIMITS.rollDcMin} max={LIMITS.rollDcMax} onChange={(dc) => setRig({ save: { ...rig.save!, dc } })} />
-          </>
-        ) : null}
       </div>
+      {/* The group save's own rows, which these fields fill (features/dice/groupSave/GroupSave.tsx). */}
+      {rig.save ? (
+        <FieldRow label="DC">
+          <NumberInput label="Save DC" value={rig.save.dc} min={LIMITS.rollDcMin} max={LIMITS.rollDcMax} onChange={(dc) => setRig({ save: { ...rig.save!, dc } })} />
+        </FieldRow>
+      ) : null}
       {rig.save && damage.length > 0 ? (
-        <Segmented<"half" | "none">
-          label="On a pass"
-          value={rig.save.onPass}
-          options={[
-            { value: "half", label: "Half on a pass" },
-            { value: "none", label: "None on a pass" },
-          ]}
-          onChange={(onPass) => setRig({ save: { ...rig.save!, onPass } })}
-        />
+        <FieldRow label="On a pass">
+          <Segmented<"half" | "none">
+            label="On a pass"
+            value={rig.save.onPass}
+            options={[
+              { value: "half", label: "Half" },
+              { value: "none", label: "None" },
+            ]}
+            onChange={(onPass) => setRig({ save: { ...rig.save!, onPass } })}
+          />
+        </FieldRow>
       ) : null}
       {damage.map((part, i) => (
-        <div key={i} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-          <FormulaField value={part.formula} onSave={(formula) => setDamage(damage.map((p, j) => (j === i ? { ...p, formula } : p)))} />
-          <Select aria-label="Damage type" value={part.type} onChange={(e) => setDamage(damage.map((p, j) => (j === i ? { ...p, type: e.target.value as DamageType } : p)))}>
-            {DAMAGE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {damageTypeName(t)}
-              </option>
-            ))}
-          </Select>
-          <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this damage" onClick={() => setDamage(damage.filter((_, j) => j !== i))} />
-        </div>
+        <DamagePart
+          key={i}
+          part={part}
+          onFormula={(formula) => setDamage(damage.map((p, j) => (j === i ? { ...p, formula } : p)))}
+          onType={(type) => setDamage(damage.map((p, j) => (j === i ? { ...p, type } : p)))}
+          onRemove={() => setDamage(damage.filter((_, j) => j !== i))}
+        />
       ))}
       {damage.length < LIMITS.trapDamageParts ? (
         <Button size="sm" icon="plus" onClick={() => setDamage([...damage, { formula: "1d6", type: "bludgeoning" }])}>
@@ -721,18 +719,29 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
               </option>
             ))}
           </Select>
-          {rig.lasts?.mode === "rounds" ? <NumberInput label="Rounds" value={rig.lasts.rounds ?? 1} min={1} max={1000} onChange={(rounds) => setRig({ lasts: { mode: "rounds", rounds } })} /> : null}
+          {rig.lasts?.mode === "rounds" ? (
+            <>
+              <NumberInput label="Rounds" value={rig.lasts.rounds ?? 1} min={1} max={1000} onChange={(rounds) => setRig({ lasts: { mode: "rounds", rounds } })} />
+              <span style={{ color: theme.color.textMuted }}>rounds</span>
+            </>
+          ) : null}
         </div>
       ) : null}
     </>
   );
 }
 
-/** A damage formula, sent when it reads as dice. One that does not shows why and keeps the last good one. */
-function FormulaField(props: { value: string; onSave(value: string): void }) {
-  const [text, setText] = useState(props.value);
+/**
+ * One part of the damage: its dice, sent when they read as a formula, its
+ * type and its remove. Dice that do not read keep the last good ones, and
+ * say why in a line under the row, as every field's error does
+ * (docs/design-v1-look-pass-2.md 2.9), not only in an outline and a title.
+ */
+function DamagePart(props: { part: { formula: string; type: DamageType }; onFormula(formula: string): void; onType(type: DamageType): void; onRemove(): void }) {
+  const [text, setText] = useState(props.part.formula);
   const [bad, setBad] = useState(false);
-  useEffect(() => setText(props.value), [props.value]);
+  const errorId = useId();
+  useEffect(() => setText(props.part.formula), [props.part.formula]);
   const save = () => {
     const clean = cleanLine(text, LIMITS.diceFormulaChars);
     if (!clean || !parseFormula(clean).ok) {
@@ -740,23 +749,40 @@ function FormulaField(props: { value: string; onSave(value: string): void }) {
       return;
     }
     setBad(false);
-    if (clean !== props.value) props.onSave(clean);
+    if (clean !== props.part.formula) props.onFormula(clean);
   };
   return (
-    <Input
-      type="text"
-      aria-label="Damage dice"
-      aria-invalid={bad || undefined}
-      error={bad}
-      title={bad ? "Not a dice formula, such as 2d10 or 1d6+2" : undefined}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={save}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") save();
-      }}
-      style={{ width: 112 }}
-    />
+    <div style={{ display: "grid", gap: theme.space(1) }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+        <Input
+          type="text"
+          aria-label="Damage dice"
+          aria-invalid={bad || undefined}
+          aria-describedby={bad ? errorId : undefined}
+          error={bad}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+          }}
+          style={{ width: theme.layout.options.field }}
+        />
+        <Select aria-label="Damage type" value={props.part.type} onChange={(e) => props.onType(e.target.value as DamageType)}>
+          {DAMAGE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {damageTypeName(t)}
+            </option>
+          ))}
+        </Select>
+        <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this damage" onClick={props.onRemove} />
+      </div>
+      {bad ? (
+        <div id={errorId}>
+          <ErrorText>Not a dice formula, such as 2d10 or 1d6+2.</ErrorText>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
