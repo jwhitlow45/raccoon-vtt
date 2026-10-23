@@ -396,7 +396,6 @@ const encounter = z.strictObject({
   // Backups from before the turn-start marker have none.
   turnStart: turnStart.optional(),
   startSeq: z.number().int().min(0).optional(),
-  turnSeq: z.number().int().min(0).optional(),
 });
 
 const effectStored = effectSchema;

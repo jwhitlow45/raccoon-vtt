@@ -41,9 +41,8 @@ export function writeEncounter(tx: Tx, encounter: Encounter): void {
  */
 function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): Encounter {
   tx.startTurn();
-  const { turnStart: _previous, turnSeq: _turnSeq, ...rest } = encounter;
+  const { turnStart: _previous, ...rest } = encounter;
   const next: Encounter = { ...rest, activeEntryId };
-  if (activeEntryId !== null && logsByAudience(tx.env.opVersion)) next.turnSeq = tx.env.seq;
   const entry = activeEntryId === null ? undefined : encounter.entries.find((e) => e.id === activeEntryId);
   if (entry && !entry.hadTurn && marksHadTurn(tx.env.opVersion)) next.entries = encounter.entries.map((e) => (e === entry ? { ...e, hadTurn: true } : e));
   const token = entry?.tokenId !== undefined ? tx.state.tokens[entry.tokenId] : undefined;

@@ -370,7 +370,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const kept = enc.entries.filter((e) => entries.has(e.id)).map(entry);
     const active = enc.activeEntryId !== null && entries.has(enc.activeEntryId) ? entries.of(enc.activeEntryId) : null;
     // The seqs that name the fight and its turn count ops of the old room, so they go as the turn's own does below.
-    const { turnStart, startSeq: _startSeq, turnSeq: _turnSeq, ...rest } = enc;
+    const { turnStart, startSeq: _startSeq, ...rest } = enc;
     const next: Encounter = { ...rest, activeEntryId: active, entries: kept };
     // The spot belongs to its row and token, so it goes with either of them.
     if (turnStart && entries.has(turnStart.entryId) && tokens.has(turnStart.tokenId) && scenes.has(turnStart.sceneId)) {

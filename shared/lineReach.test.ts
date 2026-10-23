@@ -317,12 +317,12 @@ describe("the reducer reads the log one line per event (eventLines)", () => {
     assert.deepEqual(back, [["area"], ["area"]], "the goblin's turn reminds the hero again, the turn line held or not");
   });
 
-  test("a player's projection of the fight leaves out the seqs that started it and its turn", () => {
+  test("a player's projection of the fight leaves out the seq that started it", () => {
     const started = run(room({ tokens: { hero: token("hero", { kind: "pc", ownerIds: ["p1"] }) } }), { t: "encounter.start", entries: [{ id: "e-hero", tokenId: "hero", value: 15 }] }, DM, 3);
     const turned = run(started.state, { t: "encounter.next" }, DM, 4).state;
-    assert.deepEqual([turned.encounter?.startSeq, turned.encounter?.turnSeq], [3, 4]);
+    assert.equal(turned.encounter?.startSeq, 3);
     const mine = projectState(turned, P1, { sceneId: "s1" }).encounter!;
-    assert.deepEqual(["startSeq" in mine, "turnSeq" in mine], [false, false]);
+    assert.equal("startSeq" in mine, false);
   });
 
   test("a line of an op that writes more DM lines than the ring holds is read once, from its copy, once its own DM line leaves", () => {
