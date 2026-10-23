@@ -821,6 +821,15 @@ export function spanRoomAtWorst(free: Box): number {
 }
 
 /**
+ * An upright span crosses the whole map, so it always meets the column:
+ * it keeps below the first card, or moves beside the lane, and never
+ * covers its token either way. `floor` is the highest it may reach.
+ */
+function spanLane(free: Box, column: ColumnFacts | null): { lane: Lane; floor: number } {
+  return laneChoice({ laneTop: free.top, laneHeight: free.height, column, besideRoom: free.width - LANE_WIDTH });
+}
+
+/**
  * Where the bar hangs, before a drag: by its token when it spans, at its
  * spot when it docks, and the overlay's place when compact, then shared
  * with the column when they meet across. The one rule for the bar drawn
@@ -850,8 +859,7 @@ export function placeBar(input: {
   const mode = barMode(input.layout, free.height);
   if (mode === "span") {
     if (!input.anchor) return null;
-    // An upright span crosses the whole map, so it always meets the column: it keeps below the first card, or moves beside the lane, and never covers its token either way.
-    const { lane, floor } = laneChoice({ laneTop: free.top, laneHeight: free.height, column: input.column, besideRoom: free.width - LANE_WIDTH });
+    const { lane, floor } = spanLane(free, input.column);
     const hang = spanHang(input.anchor, free, input.height, floor);
     if (lane !== "beside") return { mode, free, hang, lane, resizable: false, room: free };
     const width = Math.min(barWidth, free.width - LANE_WIDTH);
@@ -909,6 +917,100 @@ export function restingBar(input: {
   const placed = placeBar({ ...input, foot: input.foot ?? 0, anchor: null });
   if (!placed || placed.mode === "span") return null;
   return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free), freeRight: placed.free.left + placed.free.width };
+}
+
+// ------------------------------------------------------------ an upright phone's larger bar
+
+/*
+ * An upright phone's bar comes in two sizes, picked by the button left of
+ * its Close (design 1.5). It has no resize handle, and where its token
+ * stands decides its room. Smaller is the bar as it has always hung: as
+ * tall as its content, up to the room on its token's side. Larger asks for
+ * two thirds of the screen, and since the bar never covers the creature it
+ * acts on, the map moves to make that room by the token. Smaller moves the
+ * map back. This device remembers the choice for the next token, stored as
+ * "1" for Larger and as no key for Smaller.
+ */
+export const LARGER_KEY = "rvtt.tokenBarLarger";
+
+/** Whether this device chose Larger. Storage can throw, which reads as Smaller. */
+export function readLarger(storage?: Pick<Storage, "getItem">): boolean {
+  try {
+    const from = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
+    return from?.getItem(LARGER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeLarger(larger: boolean, storage?: Pick<Storage, "setItem" | "removeItem">): void {
+  try {
+    const to = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
+    if (larger) to?.setItem(LARGER_KEY, "1");
+    else to?.removeItem(LARGER_KEY);
+  } catch {
+    // The choice then lasts as long as the page.
+  }
+}
+
+/**
+ * Two thirds of the layout's height. At 390 x 844 that leaves the top bars,
+ * the toolbar and a strip of map for the token, and at 440 x 956 it holds
+ * a player's whole bar.
+ */
+const LARGER_SHARE = 2 / 3;
+/** What a larger bar leaves of the free area beside it: its token's 34 px label gap, the token and some map around it. */
+export const LARGER_LEAVES = 120;
+
+/** What decides where an upright phone's bar hangs, and its content's height. */
+export type SpanRoom = { layout: Size; viewport: Size; chrome: Chrome; foot: number; anchor: Point; column: ColumnFacts | null; height: number };
+
+/** The free area and the highest the bar may reach, while it spans. Null for a bar that docks or opens compact. */
+function spanRoom(input: SpanRoom): { free: Box; top: number } | null {
+  const free = freeArea(input.viewport, input.chrome, input.foot);
+  if (barMode(input.layout, free.height) !== "span") return null;
+  return { free, top: Math.max(free.top, spanLane(free, input.column).floor) };
+}
+
+/** The room a larger bar asks for: two thirds of the layout's height, but never so much that it leaves its token less than LARGER_LEAVES of the free area under `top`. */
+export function largerRoom(layout: Size, free: Box, top: number): number {
+  const most = free.top + free.height - Math.max(free.top, top) - LARGER_LEAVES;
+  return Math.max(0, Math.min(Math.round(layout.height * LARGER_SHARE), most));
+}
+
+/**
+ * How far Larger moves the map, in the chrome's pixels: up (negative) for a
+ * bar under its token, or down for one over it, by what its side lacks of
+ * the larger room or of its content, whichever is less. The bar keeps its
+ * side, and the token stays in view beside it. Zero where its side has that
+ * room already, and where the bar does not span.
+ */
+export function largerShift(input: SpanRoom): number {
+  const room = spanRoom(input);
+  if (!room) return 0;
+  const { free, top } = room;
+  const want = Math.min(input.height, largerRoom(input.layout, free, top));
+  const hang = spanHang(input.anchor, free, want, top);
+  if (hang.anchor === "top") {
+    const below = free.top + free.height - Math.max(top, input.anchor.y + OFFSET_Y);
+    return below < want ? -(want - below) : 0;
+  }
+  const above = Math.min(free.top + free.height, input.anchor.y - OFFSET_Y - FLIP_CLEARANCE) - top;
+  return above < want ? want - above : 0;
+}
+
+/**
+ * How far Smaller moves the map back: the shift Larger made, undone, but
+ * never so far that the token's label runs under the free area's foot, or
+ * the token over its top, should the map have moved since.
+ */
+export function smallerShift(input: Omit<SpanRoom, "height"> & { moved: number }): number {
+  const room = spanRoom({ ...input, height: 0 });
+  if (!room || input.moved === 0) return 0;
+  const { free, top } = room;
+  if (input.moved < 0) return Math.min(-input.moved, Math.max(0, free.top + free.height - OFFSET_Y - input.anchor.y));
+  const back = Math.min(input.moved, Math.max(0, input.anchor.y - FLIP_CLEARANCE - top));
+  return back > 0 ? -back : 0;
 }
 
 // ------------------------------------------------------------ notices
@@ -1292,6 +1394,15 @@ type BarDockState = {
   lastHeight: number;
   /** Set by Actions: the next bar to show takes focus on its frame. */
   focusFrame: boolean;
+  /** An upright phone's bar opens Larger (LARGER_KEY), read with the spot, and kept to itself by a preview as the spot is. */
+  larger: boolean;
+  /**
+   * The tokens of the bar's latest opening, and how far Larger moved the
+   * map for it, which Smaller undoes. A token drag hides the bar and keeps
+   * them, so the bar that shows again after the drop moves the map no more.
+   */
+  largerFor: string | null;
+  largerMoved: number;
   /**
    * The height of a roll card standing on a narrow screen's toolbar and options bar
    * (features/rolls/PlayerRolls.tsx), or 0: a docked or spanning bar keeps
@@ -1316,7 +1427,7 @@ type BarDockState = {
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, larger: readLarger(), largerFor: null, largerMoved: 0, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
 );
 
 /**
