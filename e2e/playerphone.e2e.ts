@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, reopenRoom, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, readCamera, reopenRoom, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -1319,6 +1319,47 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       }
     });
   }
+
+  test("bs-2. at 390 x 844 with Larger on, a drag of Thorn one cell down hides his bar and shows it again where the drop leaves it, a cell shorter, and the map does not move a second time (review BS-O2)", async () => {
+    const view = { width: 390, height: 844 };
+    const KEY = "rvtt.tokenBarLarger";
+    const target = { characterId: run.thorn.characterId };
+    const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+    for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
+    await player.evaluate((key) => localStorage.removeItem(key), KEY);
+    await setUp({ ...view, scale: 1 });
+    let bar = player.getByRole("dialog", { name: "Thorn actions" });
+    try {
+      bar = await openThornAtMiddle(view);
+      await bar.getByRole("button", { name: "Larger", exact: true }).tap();
+      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await player.waitForTimeout(300);
+      const cam = await readCamera(player);
+      assert.ok(cam, "the map has no camera");
+      const before = await barFacts(bar);
+
+      // Down, so the bar under him loses a cell of room, which a second move of the map would give back.
+      await touch(along(await cellPoint({ x: 8, y: 6 }), await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 7.5 }), 10));
+      await waitFor("Thorn one cell down", () => playerSocket.state?.tokens[run.thorn.id]?.y === 7 || null);
+      await bar.waitFor();
+      await player.waitForTimeout(500);
+      // The map stays where the drop left it, and the bar hangs a cell lower under Thorn, still Larger.
+      const now = await readCamera(player);
+      assert.ok(now && Math.abs(now.x - cam.x) <= 0.5 && Math.abs(now.y - cam.y) <= 0.5 && now.scale === cam.scale, `the map moved after the drop: ${JSON.stringify({ cam, now })}`);
+      const dropped = await barFacts(bar);
+      assert.ok(Math.abs(dropped.top - (before.top + cam.scale)) <= 1.5, `the bar's top went from ${before.top} to ${dropped.top}, not a cell of ${cam.scale} px down`);
+      assert.ok(Math.abs(dropped.height - (before.height - cam.scale)) <= 1.5, `the bar went from ${before.height} to ${dropped.height} px tall, not a cell shorter`);
+      assert.equal(await bar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, "the bar came back Smaller-labelled no more");
+      await player.waitForTimeout(500);
+      const later = await readCamera(player);
+      assert.ok(later && later.y === now.y && Math.abs((await barFacts(bar)).top - dropped.top) <= 0.5, "the map or the bar moved after the drop settled");
+    } finally {
+      await player.evaluate((key) => localStorage.removeItem(key), KEY);
+      if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
+      for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
+      await ops.send({ t: "token.move", tokenId: run.thorn.id, x: 8, y: 6 });
+    }
+  });
 
   test("bc-a1. a reload whose sheet mark sits on the room's own history entry, with Home behind it, keeps the room and shows Connected, and the mark is gone (lib/backClose.ts)", async () => {
     // The race on purpose: a sheet's Back entry written over the room's own entry as a reload begins.

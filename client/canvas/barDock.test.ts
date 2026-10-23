@@ -1382,13 +1382,17 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
   const chrome = phone({ band: true, options: false, safe: { top: 0, side: 0, bottom: 0 } });
   const free = freeArea(view, chrome);
   const room = (y: number, height: number, column: { top: number; content: number; first: number } | null = null, tokenHeight = FLIP_CLEARANCE) => ({ layout: view, viewport: view, chrome, foot: 0, anchor: { x: 200, y }, column, height, tokenHeight });
-  /** Where the bar hangs once the map has moved by `dy`, and whether its token, in the 74 px above the anchor and its label in the 34 below, stays clear of it and inside the free area. */
-  const after = (y: number, height: number, dy: number, column: { top: number; content: number; first: number } | null = null) => {
-    const placed = placeBar({ ...room(y + dy, height, column), spot: DEFAULT_SPOT });
+  /**
+   * Where the bar hangs once the map has moved by `dy`, and whether the
+   * token, `tokenHeight` tall above the anchor, and its label in the
+   * OFFSET_Y below, stay clear of it and inside the free area.
+   */
+  const after = (y: number, height: number, dy: number, column: { top: number; content: number; first: number } | null = null, tokenHeight = FLIP_CLEARANCE) => {
+    const placed = placeBar({ ...room(y + dy, height, column, tokenHeight), spot: DEFAULT_SPOT });
     assert.ok(placed && placed.mode === "span");
     const box = hangBox(placed.hang, height);
-    const token = { top: y + dy - 74, bottom: y + dy + 34 };
-    const clear = box.top + box.height <= token.top + 40 + 0.5 || box.top >= token.bottom - 0.5;
+    const token = { top: y + dy - tokenHeight, bottom: y + dy + OFFSET_Y };
+    const clear = box.top + box.height <= token.top + 0.5 || box.top >= token.bottom - 0.5;
     const inside = token.top >= free.top - 0.5 && token.bottom <= free.top + free.height + 0.5;
     return { box, room: placed.hang.room, clear, inside };
   };
@@ -1506,9 +1510,9 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     const dy = largerShift(room(391, 586, null, tall));
     assert.equal(dy, -(494 - 351));
     assert.ok(391 + dy - tall >= free.top, `the token's top went to ${391 + dy - tall}, over the free area's top at ${free.top}`);
-    const placed = placeBar({ ...room(391 + dy, 586, null, tall), spot: DEFAULT_SPOT });
-    assert.equal(placed?.hang.room, 494);
-    assert.ok(placed && hangBox(placed.hang, 586).top >= 391 + dy + OFFSET_Y, "the bar reached over the token's label");
+    const moved = after(391, 586, dy, null, tall);
+    assert.equal(moved.room, 494);
+    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
     // Smaller after the viewer panned Thorn up to 200: a 64 px token's top stops at the free area's top, 28 px back rather than 52.
     const back = smallerShift({ layout: view, viewport: view, chrome, foot: 0, column: null, anchor: { x: 200, y: 200 }, moved: 90, tokenHeight: 64 });
     assert.equal(back, -(200 - 64 - free.top));
