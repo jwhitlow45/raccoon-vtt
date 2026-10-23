@@ -40,6 +40,15 @@ export const FULL_NOTE_ROOM = Math.ceil(
 );
 
 /**
+ * The least room in which the compact note keeps Close beside its body
+ * and Teleport here under them: Close's touch target over the action's,
+ * and the card's padding, borders and gap. In less, as at 480 x 320 at
+ * 130% over a phone's home bar, Close would run over Teleport here, so the
+ * two stand side by side in one row under the body (review LP2L2-ASTRA-3).
+ */
+export const COMPACT_NOTE_ROOM = Math.ceil(2 * theme.touch + GAP + PAD_TOP + PAD_FOOT + 2 * theme.line.border);
+
+/**
  * The note after a stopped drop (docs/design-v1-maps-vision.md 4.1), beside
  * the ghost that marks where the player dropped the token: what stopped the
  * walk, and "Teleport here" for Misty Step and anything else that passes
@@ -94,10 +103,12 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
    * under Teleport here is what scrolls. Where they cannot, the note is
    * compact: the sentence and the help scroll together as its body, with
    * Close beside them and Teleport here under them, both always in view
-   * (reviews LP2L2-ASTRA-2 and LP2L2-OPUS-10).
+   * (reviews LP2L2-ASTRA-2 and LP2L2-OPUS-10). Under COMPACT_NOTE_ROOM,
+   * Close and Teleport here share one row under the body.
    */
   const room = Math.max(0, props.viewport.height - props.insets.top - props.insets.bottom - 2 * theme.space(2));
   const compact = room < FULL_NOTE_ROOM;
+  const oneRow = room < COMPACT_NOTE_ROOM;
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: Math.min(height, room), gap: theme.space(3), prefer: "below" });
   const close = () => slot.setState({ note: null, busy: false });
   const teleport = () => {
@@ -123,9 +134,18 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   );
   // The note's one action, so the primary (docs/design-v1-visual.md 2.3). The help is its description, read with it.
   const action = (
-    <Button variant="primary" size="sm" busy={busy} onClick={teleport} aria-describedby={helpId}>
+    <Button variant="primary" size="sm" busy={busy} onClick={teleport} aria-describedby={helpId} style={oneRow ? { flex: 1, minWidth: 0 } : undefined}>
       {busy ? "Teleporting…" : "Teleport here"}
     </Button>
+  );
+  const closeButton = <IconButton icon="close" label="Close" onClick={close} style={oneRow ? undefined : { alignSelf: "flex-start" }} />;
+  const body = (
+    <div data-stop-note-body="" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", paddingTop: oneRow ? theme.space(2) : theme.space(3) }}>
+      <strong style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{status}</strong>
+      <Help id={helpId} style={{ marginTop: theme.space(1) }}>
+        {HELP}
+      </Help>
+    </div>
   );
 
   return (
@@ -151,16 +171,19 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
         fontSize: theme.font.body14,
       }}
     >
-      {compact ? (
+      {oneRow ? (
+        <>
+          {body}
+          <div data-stop-note-actions="" style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+            {action}
+            {closeButton}
+          </div>
+        </>
+      ) : compact ? (
         <>
           <div style={{ display: "flex", alignItems: "stretch", gap: theme.space(1), minHeight: 0 }}>
-            <div data-stop-note-body="" style={{ flex: 1, minWidth: 0, overflowY: "auto", overscrollBehavior: "contain", paddingTop: theme.space(3) }}>
-              <strong style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{status}</strong>
-              <Help id={helpId} style={{ marginTop: theme.space(1) }}>
-                {HELP}
-              </Help>
-            </div>
-            <IconButton icon="close" label="Close" onClick={close} style={{ alignSelf: "flex-start" }} />
+            {body}
+            {closeButton}
           </div>
           {action}
         </>

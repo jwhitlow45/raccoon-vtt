@@ -379,9 +379,9 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       assert.equal(groundAt(ground, run.sceneId, x, y), -10, `the pit open at ${x},${y} on Pat's copy`);
     const line = await waitFor("the players' line", () => state(patSocket)?.trapSeen?.find((e) => e.data?.type === "trapSeen") ?? null);
     assert.deepEqual(line.data, { type: "trapSeen", by: [run.thorn], message: "The floor gives way!", sound: "crash" });
-    await pat.locator('[role="status"]').filter({ hasText: "Thorn: The floor gives way!" }).first().waitFor();
+    await pat.locator("[data-toast]").filter({ hasText: "Thorn: The floor gives way!" }).first().waitFor();
     // The DM's toast, with Save and damage, since the pit's springing waits with a save and damage.
-    const dmToast = dm.locator('[role="status"]').filter({ hasText: "Hidden Pit went off: Thorn." }).first();
+    const dmToast = dm.locator("[data-toast]").filter({ hasText: "Hidden Pit went off: Thorn." }).first();
     await dmToast.getByRole("button", { name: "Save and damage", exact: true }).waitFor();
     await shots.take(pat, "traps-pat-stopped");
     assert.equal(trap(patSocket), undefined, "Pat holds no unfound trap");
@@ -956,6 +956,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await unfold(dm, "Name");
     const name = pane(dm).getByRole("textbox", { name: "Name", exact: true });
     await name.fill("");
+    // The note comes once typing rests, never on the blur (LP17-TR-2), and stays through it.
+    await pane(dm).getByText("A trap needs a name.").waitFor();
     await name.press("Tab");
     await pane(dm).getByText("A trap needs a name.").waitFor();
     assert.equal(await name.inputValue(), "Hidden Pit", "the cleared name stayed empty");
@@ -1000,8 +1002,9 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await waitFor("half on a pass", () => (trap(dmSocket)?.rig?.save?.onPass === "half" ? true : null));
     const dice = pane(dm).getByRole("textbox", { name: "Damage dice" });
     await dice.fill("2dx");
-    await dice.press("Tab");
     const why = pane(dm).getByRole("alert").filter({ hasText: "Not a dice formula, such as 2d10 or 1d6+2." });
+    await why.waitFor();
+    await dice.press("Tab");
     await why.waitFor();
     assert.equal(await dice.getAttribute("aria-invalid"), "true");
     assert.deepEqual(trap(dmSocket)?.rig?.damage, [{ formula: "1d6", type: "bludgeoning" }], "dice that do not read were sent");
@@ -1015,14 +1018,69 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await waitFor("two damage parts", () => (trap(dmSocket)?.rig?.damage?.length === 2 ? true : null));
     const first = pane(dm).getByRole("textbox", { name: "Damage dice" }).first();
     await first.fill("2dx");
-    await first.press("Tab");
     await why.waitFor();
+    await first.press("Tab");
     await pane(dm).getByRole("button", { name: "Remove this damage", exact: true }).first().click();
     await waitFor("one damage part", () => (trap(dmSocket)?.rig?.damage?.length === 1 ? true : null));
     await dm.waitForTimeout(200);
     assert.equal(await why.count(), 0, "the removed part's error moved to the next part");
     assert.equal(await pane(dm).getByRole("textbox", { name: "Damage dice" }).inputValue(), "1d6");
     assert.deepEqual(trap(dmSocket)?.rig?.damage, [{ formula: "1d6", type: "bludgeoning" }]);
+    await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
+
+  test("fu22b-tr. dice that do not read, left by a press on Add damage below them, say nothing on the blur, so the press lands: before typing rests they go back to the last good dice in silence, and after, their error stays put (LP17-TR-2)", async () => {
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    await unfold(dm, "Save and damage");
+    const dice = pane(dm).getByRole("textbox", { name: "Damage dice" });
+    const why = pane(dm).getByRole("alert").filter({ hasText: "Not a dice formula, such as 2d10 or 1d6+2." });
+    const add = pane(dm).getByRole("button", { name: "Add damage", exact: true });
+    await add.scrollIntoViewIfNeeded();
+    // A held press, as a finger's: the blur comes on the press down, and the click only if the button is still under it when it lifts.
+    const press = async () => {
+      const box = await add.boundingBox();
+      assert.ok(box);
+      await dm.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await dm.mouse.down();
+      await dm.waitForTimeout(150);
+      await dm.mouse.up();
+    };
+
+    // Left before typing rests on any machine: the page's rest is held long for this press.
+    await dm.evaluate(() => ((globalThis as unknown as { rvttNoteRestMs?: number }).rvttNoteRestMs = 600_000));
+    try {
+      await dice.first().fill("2dx");
+      // Past the app's own rest, so the press below cannot beat it by luck.
+      await dm.waitForTimeout(800);
+      assert.equal(await why.count(), 0, "the note came while the rest was held");
+      await press();
+    } finally {
+      await dm.evaluate(() => delete (globalThis as unknown as { rvttNoteRestMs?: number }).rvttNoteRestMs);
+    }
+    await waitFor("the press on Add damage landed", () => (trap(dmSocket)?.rig?.damage?.length === 2 ? true : null));
+    assert.equal(await dice.first().inputValue(), "1d6", "dice left before typing rested kept what was typed");
+    assert.equal(await why.count(), 0, "the blur showed the dice's error");
+    assert.equal(await dice.first().getAttribute("aria-invalid"), null);
+
+    await dice.first().fill("2dx");
+    await why.waitFor();
+    await shots.take(dm, "traps-fu22b-tr-dice-rested");
+    await press();
+    await waitFor("the press on Add damage landed with the error showing", () => (trap(dmSocket)?.rig?.damage?.length === 3 ? true : null));
+    await why.waitFor();
+    assert.equal(await dice.first().inputValue(), "2dx");
+    assert.deepEqual(trap(dmSocket)?.rig?.damage?.[0], { formula: "1d6", type: "bludgeoning" }, "dice that do not read were sent");
+
+    const remove = pane(dm).getByRole("button", { name: "Remove this damage", exact: true });
+    await remove.nth(2).click();
+    await remove.nth(1).click();
+    await waitFor("one damage part", () => (trap(dmSocket)?.rig?.damage?.length === 1 ? true : null));
+    await dice.first().fill("1d6");
+    await why.waitFor({ state: "detached" });
     await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
     await pane(dm).waitFor({ state: "detached" });
     await pickTool(dm, "Select");

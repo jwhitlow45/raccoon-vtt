@@ -1279,7 +1279,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
         const far = dmSocket.state?.tokens[run.far.id];
         await ops.send({ t: "token.update", tokenId: run.far.id, patch: { x: (far?.x ?? run.far.x) === run.far.x ? run.far.x - 1 : run.far.x } });
         await dm.getByRole("button", { name: "Undo", exact: true }).click();
-        const toast = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+        const toast = dm.locator("[data-toast]").filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
         await toast.waitFor();
         const t = await rectOf(toast);
         await shots.take(dm, `bardock-pl2-b-toast-under-card-${view.width}-${Math.round(view.scale * 100)}`);
@@ -1298,7 +1298,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
       await dm.waitForTimeout(300);
       await ops.send({ t: "token.update", tokenId: run.far.id, patch: { x: (dmSocket.state?.tokens[run.far.id]?.x ?? run.far.x) === run.far.x ? run.far.x - 1 : run.far.x } });
       await dm.getByRole("button", { name: "Undo", exact: true }).click();
-      const live = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+      const live = dm.locator("[data-toast]").filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
       await live.waitFor();
       const upright = await rectOf(live);
       await dm.setViewportSize({ width: 844, height: 390 });
@@ -1311,6 +1311,29 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
       assert.ok(Math.abs(turned.left - card.left) <= 1, `turned, the toast's left edge is ${(turned.left - card.left).toFixed(1)} px off the card's`);
       assert.ok(Math.abs(turned.right - card.right) <= 1, `turned, the toast's right edge is ${(turned.right - card.right).toFixed(1)} px off the card's`);
       await live.click();
+
+      // Sideways first: the toast shows at the notices' top, beside the lane, and turned upright it is placed again under the column's first card, never over its buttons (review LP17-AW-1).
+      await setUp(dm, { width: 844, height: 390, scale: 1 });
+      await damageGoblins();
+      await dm.locator('[data-alert="concentration"]').first().waitFor();
+      await dm.waitForTimeout(300);
+      await ops.send({ t: "token.update", tokenId: run.far.id, patch: { x: (dmSocket.state?.tokens[run.far.id]?.x ?? run.far.x) === run.far.x ? run.far.x - 1 : run.far.x } });
+      await dm.getByRole("button", { name: "Undo", exact: true }).click();
+      const side = dm.locator("[data-toast]").filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+      await side.waitFor();
+      const before = await rectOf(side);
+      const firstCard = dm.locator('[data-alert="concentration"]').first();
+      const sideCard = await rectOf(firstCard);
+      assert.ok(before.top < sideCard.bottom, "sideways, the toast stood under the card already, so this case shows nothing");
+      await dm.setViewportSize({ width: 390, height: 844 });
+      await dm.waitForTimeout(600);
+      assert.ok(await side.isVisible(), "the toast went before the turn could be read");
+      const after = await rectOf(side);
+      const under = await rectOf(firstCard);
+      await shots.take(dm, "bardock-pl2-b-toast-sideways-first-390");
+      assert.ok(Math.abs(after.top - (under.bottom + 8)) < 1.5, `turned upright, the toast starts at ${after.top}, not 8 px under the card's foot at ${under.bottom}`);
+      assert.ok(Math.abs(after.left - under.left) <= 1 && Math.abs(after.right - under.right) <= 1, `turned upright, the toast's edges are off the card's: ${JSON.stringify({ after, under })}`);
+      await side.click();
     } finally {
       await ops.send({ t: "encounter.end" });
       await setUp(dm, { ...DESK, scale: 1 });

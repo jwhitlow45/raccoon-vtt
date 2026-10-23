@@ -10,7 +10,7 @@ import { parseRoomId } from "../auth/roomId.ts";
 import type { GrantContext } from "../auth/types.ts";
 import type { Config } from "../config.ts";
 import type { RoomActor } from "./actor.ts";
-import { SlidingWindow, SocketRegistry, SustainedViolation, type SocketCaps } from "./budgets.ts";
+import { SlidingWindow, SocketRegistry, SustainedViolation, type Clock, type SocketCaps } from "./budgets.ts";
 import { CLOSE, Connection } from "./connection.ts";
 import { TooBusyError } from "./errors.ts";
 import { RoomNotFoundError } from "./gateway.ts";
@@ -50,6 +50,8 @@ export type WsOptions = {
   pendingFrames?: number;
   /** How long a socket may take to answer the shutdown's close before it is cut off: 2 s. */
   closeGraceMs?: number;
+  /** The clock each socket's frame, op and ephemeral budgets read. It exists for tests, so a burst can be judged with no refill between its frames. */
+  now?: Clock;
 };
 
 export const MAX_FRAME_BYTES = 64 * 1024;
@@ -138,7 +140,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
         socket.close(CLOSE.authFailure, "no grant");
         return;
       }
-      const conn = new Connection(socket, grant, ip);
+      const conn = new Connection(socket, grant, ip, { now: opts.now });
       const release = registry.open(grant.sessionId, grant.roomId, ip);
       if (conn.display) displaySockets.set(conn.sessionId, (displaySockets.get(conn.sessionId) ?? 0) + 1);
       let actor: RoomActor | null = null;

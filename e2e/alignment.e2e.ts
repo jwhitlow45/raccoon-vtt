@@ -28,7 +28,10 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * holder's, rider's and group windows: their headers, play rows and group
  * lines (the windows' older rows are not this sweep's). Pat measures the
  * Ruler's options, readings and kept list, a drag's stop note, and the
- * toast of his own walk.
+ * toast of his own walk. Three older screens the trap flows open are
+ * measured too, as live play 17 found them: Pat's ask card and Request a
+ * roll from the needle trap's Ask to disarm at 390 and 320, and the group
+ * save page a trap card's Save and damage opens there and at 1440.
  *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
@@ -71,6 +74,9 @@ const SIZES: Size[] = [
   { name: "1440x900", width: 1440, height: 900, touch: false },
 ];
 const SCALES = [1, 1.3];
+/** The sizes where the sweep also measures the older screens a trap's flows open (live play 17): Pat's ask card and Request a roll on phones, and the group save page there and on a computer. */
+const PHONE_ROOTS = new Set(["390x844", "320x568"]);
+const GROUP_SAVE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
 let server: Server;
 let browser: Browser;
@@ -150,6 +156,10 @@ const SOME_SIZES: Record<string, number> = {
   "board points at Poisoned Needle": 9,
   "board points at Hidden Pit": 9,
   "pat-board points at Poisoned Needle": 9,
+  "pat-ask": 4,
+  "request-roll": 4,
+  "group-save": 6,
+  "group-save-row": 6,
 };
 
 /**
@@ -304,14 +314,14 @@ async function setWall(long: boolean): Promise<void> {
   await ops.send({ t: "build.edge", sceneId: run.sceneId, edges });
 }
 
-/** The page's own toasts with these words, not the hidden live regions. */
+/** The page's own toasts with these words, by their mark: the live region that speaks them is hidden and holds the same words. */
 function toasts(page: Page, words: RegExp): Locator {
-  return page.locator('[role="status"]').filter({ hasText: words }).filter({ visible: true });
+  return page.locator("[data-toast]").filter({ hasText: words }).filter({ visible: true });
 }
 
 async function dismissToasts(page: Page): Promise<void> {
   for (let i = 0; i < 8; i++) {
-    const t = page.locator('button[role="status"], div[role="status"] > button').filter({ visible: true });
+    const t = page.locator("button[data-toast], div[data-toast] > button").filter({ visible: true });
     if ((await t.count()) === 0) return;
     await t.first().click({ timeout: 1000 }).catch(() => {});
   }
@@ -443,9 +453,12 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     }
     await unfoldAll(pane);
     await sweep.measure(page, `trap-pane-${which}`, pane);
-    await dismissToasts(page);
-    await pane.getByRole("button", { name: "Done", exact: true }).click();
-    await pane.waitFor({ state: "detached" });
+    if (which === "needle" && PHONE_ROOTS.has(size.name)) await requestScreen(sweep, page, pane);
+    if (await visible(pane)) {
+      await dismissToasts(page);
+      await pane.getByRole("button", { name: "Done", exact: true }).click();
+      await pane.waitFor({ state: "detached" });
+    }
   }
 
   // A toast under the open pane, as a trap goes off on Pat's walk.
@@ -508,6 +521,12 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await escapeAll(page);
   }
   if (!column && !(await visible(summary))) await sweep.missing(page, "alerts-column", "neither the column nor its summary row showed");
+  // The needle trap's page holds its outcome's fields. Its cone caught no one, so the door trap, which hits the creature that set it off, is set off again for a page that holds Thorn's row, its card new at the column's top.
+  if (GROUP_SAVE_AT.has(size.name)) {
+    await groupSaveScreen(sweep, page, "group-save", "Poisoned Needle Gauntlet of the Sunless Citadel");
+    await spring(run.traps.door);
+    await groupSaveScreen(sweep, page, "group-save-row", "Scything Door");
+  }
 
   // The Passive Perception hint as Thorn walks near the needle trap, unfound again.
   const needle = dmSocket.state?.traps?.[run.traps.needle];
@@ -568,8 +587,84 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await sweep.add(page, "headers", headerLines(headers, `${sweep.at} headers`));
 }
 
-/** Pat's screens at one size: the Ruler, a drag's stop note, and the toast of his own walk. */
-async function patScreens(sweep: Sweep, page: Page): Promise<void> {
+/** Request a roll as the needle trap's Ask to disarm opens it over its pane, closed again by Cancel. */
+async function requestScreen(sweep: Sweep, page: Page, pane: Locator): Promise<void> {
+  const ask = pane.getByRole("button", { name: "Ask to disarm", exact: true });
+  if (!(await visible(ask))) return sweep.missing(page, "request-roll", "the needle trap's pane has no Ask to disarm");
+  await ask.scrollIntoViewIfNeeded();
+  await ask.click();
+  const sheet = page.getByRole("dialog", { name: "Request a roll" });
+  if (!(await showsWithin(sheet, 3_000))) return sweep.missing(page, "request-roll", "Ask to disarm opened no request");
+  await sweep.measure(page, "request-roll", sheet);
+  await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+  await sheet.waitFor({ state: "detached" });
+}
+
+/**
+ * The group save page a trap card's Save and damage opens, from the
+ * trap's card in the column or over the screen: the Dice sheet on a
+ * phone, the Dice tab panel on a computer. Discard closes it again, and
+ * the card's springing waits on for settleTraps. `trap` is the trap's
+ * name, which starts the card's name and the page's first line.
+ */
+async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: string): Promise<void> {
+  const name = new RegExp(`^${trap} went off`);
+  // The card in the column, or over the screen where the column's summary row stands in for its cards.
+  const findCard = async (): Promise<Locator | null> => {
+    const inColumn = page.getByRole("group", { name }).filter({ visible: true }).first();
+    if (await showsWithin(inColumn, 2_000)) return inColumn;
+    const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
+    if (!(await visible(summary))) return null;
+    await summary.first().click();
+    const overlay = page.getByRole("dialog", { name: "Alerts" });
+    if (!(await showsWithin(overlay, 2_500))) return null;
+    const over = overlay.getByRole("group", { name }).first();
+    return (await visible(over)) ? over : null;
+  };
+  let card = await findCard();
+  const fold = card?.locator("button[aria-expanded=false]");
+  if (card && fold && (await visible(fold))) {
+    // Opened, a card on a short phone can leave the column too short for it, and the cards then move over the screen, so it is found again once it holds still or has gone. The element itself is watched: a locator would wait on for another card once it hides.
+    const opened = await card.elementHandle();
+    await fold.first().click();
+    let last = "";
+    let still = 0;
+    await waitFor("the opened card to hold still or go", async () => {
+      const box = JSON.stringify(await opened?.boundingBox().catch(() => null));
+      still = box === last ? still + 1 : 0;
+      last = box;
+      return still >= 2 ? true : null;
+    }, 3_000);
+    await opened?.dispose();
+    card = await findCard();
+  }
+  if (!card) return sweep.missing(page, screen, `no card showed for ${trap}'s springing`);
+  await card.getByRole("button", { name: "Save and damage", exact: true }).click();
+  const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
+  if (!(await showsWithin(host.getByText(new RegExp(`^From ${trap}`)).first(), 4_000))) return sweep.missing(page, screen, "Save and damage opened no group save page");
+  await sweep.measure(page, screen, host);
+  await host.getByRole("button", { name: "Discard", exact: true }).first().click();
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+  if (await visible(sheet)) {
+    await sheet.getByRole("button", { name: "Close Dice", exact: true }).click();
+    await sheet.waitFor({ state: "hidden" });
+  }
+}
+
+/** Pat's ask card, as the DM asks for Thorn's save: Thorn has no stat block, so the card's roll row holds the bonus field and the extra dice. */
+async function askScreen(sweep: Sweep, page: Page): Promise<void> {
+  const id = randomUUID();
+  await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
+  const card = page.locator('[aria-label="The DM asks for a roll"]');
+  if (await showsWithin(card.filter({ visible: true }).first(), 4_000)) await sweep.measure(page, "pat-ask", card);
+  else await sweep.missing(page, "pat-ask", "the DM's ask showed no card");
+  await ops.send({ t: "roll.close", rollIds: [id] });
+  await card.first().waitFor({ state: "detached" });
+}
+
+/** Pat's screens at one size: his ask card on a phone, the Ruler, a drag's stop note, and the toast of his own walk. */
+async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
+  if (PHONE_ROOTS.has(size.name)) await askScreen(sweep, page);
   // A player's board at a small zoom may show no name, so only its stage is required.
   await sweep.pills(page, "pat-board", { points: await trapPoints(page, false) });
   await resetThorn();
@@ -649,9 +744,12 @@ async function patScreens(sweep: Sweep, page: Page): Promise<void> {
  * Drawn cases for the helper itself: each shape the polish pass found
  * (docs/design-v1-polish.md 1), and the shape its fix gives (section 2),
  * so the helper is shown to catch the one and pass the other without the
- * app. Each case is a root of its own, named by `data-case`.
+ * app. Each case is a root of its own, named by `data-case`. The doctype
+ * lays them out in standards mode, as the app is: in quirks mode a line
+ * that holds only a lowered span does not grow, so its words never move.
  */
 const CASES = `
+<!doctype html>
 <style>
   body { margin: 0; font: 14px/1.4 sans-serif; color: #eee; background: #222; }
   * { box-sizing: border-box; }
@@ -737,6 +835,8 @@ const CASES = `
 <div data-case="cards-box-drift"><div class="card">Card one</div><div class="card">Card two</div><div class="card" style="padding: 8px 7px; margin-left: 3px">Card three</div></div>
 <div data-case="notice-lone"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px">A notice set in</div><div>Plain four</div></div>
 <div data-case="notice-lone-drift"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px; margin-left: 3px">A notice set in</div><div>Plain four</div></div>
+<div data-case="notice-inner-6"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px"><span style="margin-left: 6px">A notice set in</span></div><div>Plain four</div></div>
+<div data-case="notice-pad-18"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 18px">A notice set in</div><div>Plain four</div></div>
 <div data-case="ul-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><ul style="padding-left: 14px; margin: 0; list-style: none"><li>Item</li></ul></div>
 <div data-case="group-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><div role="group" aria-label="Grouped" style="padding-left: 16px"><span>Grouped</span></div></div>
 <div data-case="group-step"><div>Row one</div><div>Row two</div><div role="group" aria-label="Grouped" style="padding-left: 12px"><span>Grouped</span></div><div>Row four</div></div>
@@ -755,6 +855,8 @@ const CASES = `
 <div data-case="nudge-up"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: -1.5px">Nudged words</span></div></div></div>
 <div data-case="nudge-1-4"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: 1.4px">Nudged words</span></div></div></div>
 <div data-case="nudge-transform"><div class="nudge"><div style="flex: 1"><span style="transform: translateY(3px)">Nudged words</span></div></div></div>
+<div data-case="valign-down-3"><div class="nudge"><div style="flex: 1"><span style="vertical-align: -3px">Nudged words</span></div></div></div>
+<div data-case="valign-up-1-4"><div class="nudge"><div style="flex: 1"><span style="vertical-align: 1.4px">Nudged words</span></div></div></div>
 <div data-case="font-rounding">
   <div class="box" style="height: 54.96px; padding: 15px 10px; font-size: 20.8px; line-height: 24.96px"><span><span>A zoomed title</span></span></div>
 </div>
@@ -806,6 +908,18 @@ const CASES = `
     <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A creature steps onto it</span><span style="font-size: 13px; line-height: 1.4">A trap on squares goes off at least one way.</span></span>
   </label>
 </div>
+<div data-case="tick-wrapped" style="width: 250px">
+  <label style="display: flex; align-items: flex-start; gap: 12px; padding: 4px 0">
+    <span style="display: flex; align-items: center; height: 19.6px; flex: none"><input type="checkbox" style="width: 22px; height: 22px; margin: 0"></span>
+    <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A Dexterity save at the end of each of its turns ends it</span><span style="font-size: 13px; line-height: 1.4">Rolled for each creature it holds.</span></span>
+  </label>
+</div>
+<div data-case="tick-wrapped-middle" style="width: 250px">
+  <label style="display: flex; align-items: flex-start; gap: 12px; padding: 4px 0">
+    <span style="display: flex; align-items: center; height: 39.2px; flex: none"><input type="checkbox" style="width: 22px; height: 22px; margin: 0"></span>
+    <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A Dexterity save at the end of each of its turns ends it</span><span style="font-size: 13px; line-height: 1.4">Rolled for each creature it holds.</span></span>
+  </label>
+</div>
 <div data-case="zoom-narrow" style="zoom: 1.3"><div role="button" style="display: flex; align-items: center; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; background: #eee"></span></div></div>
 <div data-case="zoom-narrow-off" style="zoom: 1.3"><div role="button" style="display: flex; align-items: flex-start; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; margin-top: 5px; background: #eee"></span></div></div>
 <div data-case="hidden-row"><div data-bar-row="play" style="display: none"><button>Attach</button></div></div>
@@ -819,6 +933,18 @@ const CASES = `
   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
     <label style="flex: 1 1 110px; min-width: 0">DC</label>
     <div style="flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-end"><input style="width: 96px"></div>
+  </div>
+</div>
+<div data-case="label-stacked" style="width: 250px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
+    <label style="flex: 1 1 min(110px, 40%); min-width: 0">It lasts</label>
+    <div style="flex: 1 1 160px; min-width: 0; display: flex; justify-content: flex-end"><div style="min-width: 100%; max-width: 160px; display: flex; gap: 8px; align-items: center; justify-content: flex-end"><select style="flex: 1; min-width: 0; width: 100%"><option>Until the start of the next turn</option></select></div></div>
+  </div>
+</div>
+<div data-case="label-room" style="width: 250px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
+    <label style="flex: 1 1 120px; min-width: 0">Rounds</label>
+    <input style="flex: none; width: 140px">
   </div>
 </div>
 <div data-case="remove-alone" style="width: 300px">
@@ -872,9 +998,17 @@ const CASES = `
     <div style="display: flex; align-items: center; min-height: 48px"><strong id="w3" style="flex: 1; line-height: 1.2">Hidden Pit</strong><button aria-label="Close">x</button></div>
   </div>
 </div>
+<div data-case="windows-two-line" style="width: 220px">
+  <div role="dialog" aria-label="Lizard actions" aria-labelledby="w4" style="border: 1px solid #888; padding: 4px 12px">
+    <div style="display: flex; align-items: center; min-height: 48px"><strong id="w4" style="flex: 1; line-height: 1.2">Gigantic Armored Riding Lizard</strong><button aria-label="Close">x</button></div>
+  </div>
+  <div role="dialog" aria-label="Lizard actions, title set high" aria-labelledby="w5" style="border: 1px solid #888; padding: 4px 12px; margin-top: 8px">
+    <div style="display: flex; align-items: center; min-height: 48px"><strong id="w5" style="flex: 1; align-self: flex-start; line-height: 1.2">Gigantic Armored Riding Lizard</strong><button aria-label="Close">x</button></div>
+  </div>
+</div>
 <div data-case="toasts" style="position: relative; width: 390px; height: 300px">
   <div style="position: absolute; left: 82px; right: 8px; top: 0; display: flex; flex-direction: column; gap: 8px"><div data-alert="rolls" style="display: contents"><section style="height: 60px; background: #333">Trip Wire went off</section></div></div>
-  <div style="position: absolute; top: 72px; left: 12px; right: 12px"><div role="status" style="background: #444; height: 44px">Trip Wire went off: Thorn.</div></div>
+  <div style="position: absolute; top: 72px; left: 12px; right: 12px"><div data-toast="" style="background: #444; height: 44px">Trip Wire went off: Thorn.</div></div>
 </div>
 `;
 
@@ -924,8 +1058,14 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       const passes = async (name: string) => assert.deepEqual(await lines(name), [], `${name} should pass`);
       await caught("tick-dropped", "row");
       await passes("tick-on-first-line");
+      // A label wrapped onto two lines over its help is met at its first line, so a box there passes and a box centered on both lines is caught.
+      await passes("tick-wrapped");
+      await caught("tick-wrapped-middle", "row");
       await caught("label-alone", "wrap-label");
       await passes("label-beside");
+      // A FieldRow's label stacked over a field that fills the line is a heading over it. A label above a field that leaves its words room beside it is alone.
+      await passes("label-stacked");
+      await caught("label-room", "wrap-label");
       await caught("remove-alone", "wrap-orphan");
       await passes("remove-held");
       await caught("hint-high", "center");
@@ -982,9 +1122,11 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await passes("cards-even");
       await caught("cards-words-drift", "edge");
       await caught("cards-box-drift", "edge");
-      // A lone notice may start at its fill, its words set in. Its fill moved, it has drifted.
+      // A lone notice may start at its fill, its words set in. Its fill moved, it has drifted. On the edge by its fill, its words start at its padding: set in 6 px further by a margin, they have drifted, where a wider padding is the notice's own.
       await passes("notice-lone");
       await caught("notice-lone-drift", "edge");
+      await caught("notice-inner-6", "edge");
+      await passes("notice-pad-18");
       // A nested list or group set in by less than an indent step has drifted. Set in by a step, it is a column of its own.
       await caught("ul-pad", "edge");
       await caught("group-pad", "edge");
@@ -1000,6 +1142,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await caught("nudge-up", "center");
       await caught("nudge-1-4", "center");
       await passes("nudge-transform");
+      // A vertical alignment by a length moves the words' box in its line and grows the line, which its block centers: lowered 3 px, the words move 1.5 px, and raised 1.4 px, 0.7 px. Only the font's rounding is put right.
+      await caught("valign-down-3", "center");
+      await passes("valign-up-1-4");
       // A control's only content placed absolutely is measured. A badge beside content in the flow is not.
       await caught("placed-sole", "center");
       await passes("placed-badge");
@@ -1019,6 +1164,10 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       const headers = headerLines(await headerPlaces(page.locator('[data-case="windows"] [role="dialog"]')), "windows");
       assert.equal(headers.length, 1, `only the window whose header pads 4 above and 0 below stands apart: ${JSON.stringify(headers)}`);
       assert.match(headers[0]!, /"Thorn actions" has its Close 5 px/);
+      // A long name's title on two lines is read by its lines together, so centered on Close it passes, and set at its row's top it is caught.
+      const wrapped = headerLines(await headerPlaces(page.locator('[data-case="windows-two-line"] [role="dialog"]')), "windows-two-line");
+      assert.equal(wrapped.length, 1, `only the two-line title set at its row's top stands apart: ${JSON.stringify(wrapped)}`);
+      assert.match(wrapped[0]!, /"Lizard actions, title set high" has its Close 7 px and its title's middle/);
       // A target that is not there is a line, never a pass.
       const drawn = new Sweep("drawn", false);
       await drawn.measure(page, "renamed", page.locator('[data-bar-row="plays"]'));
@@ -1066,7 +1215,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
 
       const lanes = await toastLaneLines(page, "toasts");
       assert.equal(lanes.length, 1, `the toast spanning the map under the card is caught: ${JSON.stringify(lanes)}`);
-      await page.locator('[data-case="toasts"] [role="status"]').evaluate((el) => {
+      await page.locator('[data-case="toasts"] [data-toast]').evaluate((el) => {
         (el.parentElement as unknown as { style: { left: string; right: string } }).style.left = "82px";
         (el.parentElement as unknown as { style: { left: string; right: string } }).style.right = "8px";
       });
@@ -1205,7 +1354,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
           await restartFight();
           pat.setDefaultTimeout(10_000);
           await openAt(pat, size, scale);
-          await patScreens(sweep, pat);
+          await patScreens(sweep, pat, size);
           await pat.goto("about:blank");
           const page = await dmPageFor(size);
           page.setDefaultTimeout(10_000);

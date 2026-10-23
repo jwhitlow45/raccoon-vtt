@@ -749,7 +749,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await dm.waitForTimeout(300);
     consoles.dm.allow = [/net::ERR_INTERNET_DISCONNECTED/];
     fourth.release();
-    await dm.getByText("The PDF upload paused at page 4. Open Handouts in the DM panel to go on.").waitFor();
+    await dm.locator("[data-toast]").getByText("The PDF upload paused at page 4. Open Handouts in the DM panel to go on.").waitFor();
     await waitFor("the DM panel's badge", async () => /1 upload waiting/.test(await dmCount()));
     await shots.take(dm, "pdf-job-paused-toast");
 

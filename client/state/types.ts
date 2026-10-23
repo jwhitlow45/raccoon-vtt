@@ -83,7 +83,16 @@ export const EMPTY_EPHEMERAL: Ephemeral = Object.freeze({
   focus: null,
 });
 
-export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction };
+/**
+ * A refusal or notice on screen for a few seconds (store.ts toastsLeft).
+ * `shownAt` is when it first showed, by `Date.now()`, kept on the toast
+ * rather than by whatever draws it, so a blackout that takes the toasts
+ * off screen and back never restarts its time (review LP16-R1-1).
+ * `logged` marks one whose words the log keeps, as a whisper's or a roll's,
+ * the only kind a stack too tall for its room may drop (review
+ * FU22B-OP-4): a refusal or an error that the log never sees stays.
+ */
+export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction; shownAt: number; logged?: true };
 
 /**
  * A toast's one button, beside its words, such as the falling off

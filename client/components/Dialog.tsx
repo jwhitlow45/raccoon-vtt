@@ -23,6 +23,14 @@ export type DialogProps = {
   footer?: ReactNode;
   /** A short line at the footer's left: what the main button will do, or why it cannot yet. */
   status?: ReactNode;
+  /**
+   * The footer's buttons grow to share the line they stand on
+   * (docs/design-v1-polish.md R6), so the status takes the line's spare
+   * room ahead of them: a button beside it keeps its own width, and one
+   * that wraps under it fills its line. Off, the status and the buttons
+   * share spare room as they always have.
+   */
+  statusGrow?: boolean;
   /** The card's width on a computer: `layout.dialog.sm`, `md` or `lg`. */
   width?: DialogWidth;
   /**
@@ -62,6 +70,9 @@ export type DialogProps = {
 
 /** The scrolling body's padding, which `PINNED_FOOT` reaches into. */
 const BODY_PAD = theme.space(4);
+
+/** The footer status's share of its line's spare room under `statusGrow`, so far over a button's 1 that a button beside it grows by less than a pixel. */
+const STATUS_GROW = 999;
 
 /**
  * A row at the end of a dialog's body that stays in view while the body
@@ -236,7 +247,7 @@ export function Dialog(props: DialogProps) {
             }}
           >
             {props.status ? (
-              <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted, lineHeight: theme.leading.body }}>{props.status}</span>
+              <span style={{ flex: `${props.statusGrow ? STATUS_GROW : 1} 1 160px`, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted, lineHeight: theme.leading.body }}>{props.status}</span>
             ) : null}
             {props.footer}
           </footer>

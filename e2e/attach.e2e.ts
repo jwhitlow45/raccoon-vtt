@@ -402,6 +402,41 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await waitFor("the horse on the turn's list", () => (patSocket.state!.encounter!.turnStart?.mounts?.includes(run.horse) ? true : null));
   });
 
+  test("fu22b-at. with a creature on every spot beside the warhorse, Thorn's Get off is unavailable but keeps its focus, and Enter on it sends nothing (review LP2L3)", async () => {
+    const horse = token(patSocket, run.horse)!;
+    // The ring of cells around the horse's 2 x 2, each taken by a goblin, so Thorn has nowhere to get off to.
+    const ring: { x: number; y: number }[] = [];
+    for (let x = horse.x - 1; x <= horse.x + 2; x++) for (let y = horse.y - 1; y <= horse.y + 2; y++) if (x < horse.x || x > horse.x + 1 || y < horse.y || y > horse.y + 1) ring.push({ x, y });
+    const crowd = ring.map(() => randomUUID());
+    for (const [i, at] of ring.entries()) await ops.send(tokenOp(crowd[i]!, { kind: "monster", name: `Crowd ${i + 1}`, x: at.x, y: at.y, disposition: "hostile", actor: { inline: actor() } }));
+    try {
+      await waitFor("the crowd on Pat's phone", () => (crowd.every((id) => token(patSocket, id)) ? true : null));
+      const rider = token(patSocket, run.thorn)!;
+      const thorn = await select(pat, "Thorn", { x: rider.x, y: rider.y });
+      const getOff = thorn.getByRole("button", { name: "Get off", exact: true });
+      await waitFor("Get off unavailable", async () => ((await getOff.getAttribute("aria-disabled")) === "true" ? true : null));
+      await thorn.getByText("No room to get off.", { exact: true }).waitFor();
+      // Unavailable, not disabled: it takes focus and keeps its place in the keys' order.
+      await getOff.focus();
+      assert.equal(await getOff.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "Get off does not take focus");
+      // An unguarded press would send a get off the server refuses, with no spot to stand on.
+      const heard = patSocket.received.length;
+      await pat.keyboard.press("Enter");
+      await pat.waitForTimeout(500);
+      assert.equal(token(patSocket, run.thorn)?.attached?.to, run.horse, "Enter on an unavailable Get off took Thorn off the horse");
+      assert.deepEqual(
+        patSocket.received.slice(heard).filter((f) => f.includes('"rejects"')),
+        [],
+        "Enter on an unavailable Get off sent a get off",
+      );
+      assert.equal(await getOff.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "Enter took Get off's focus away");
+      await shots.take(pat, "attach-fu22b-no-room-to-get-off");
+    } finally {
+      for (const id of crowd) await ops.send({ t: "token.delete", tokenId: id });
+      await waitFor("the crowd gone", () => (crowd.every((id) => !token(patSocket, id)) ? true : null));
+    }
+  });
+
   test("at-4. the DM perches the hidden imp on the cult fanatic from the Attach popover and moves the fanatic: the imp follows, and no frame to Pat or Sam names it", async () => {
     await select(dm, "Imp", { x: 14, y: 3 }, true);
     await bar(dm, "Imp").getByRole("button", { name: "Attach", exact: true }).click();

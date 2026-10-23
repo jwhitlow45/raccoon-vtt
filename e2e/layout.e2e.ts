@@ -1003,15 +1003,18 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     } finally {
       pat.close();
     }
-    const toast = dialog.locator('[data-rvtt-modal-slot="toasts"] button[role="status"]');
+    const toast = dialog.locator('[data-rvtt-modal-slot="toasts"] [data-toast]');
     await toast.first().waitFor({ timeout: 10_000 });
     assert.equal(await reachable(toast.first()), true, "the toast takes a tap inside the sheet");
+    // Read out from the toasts' status region, which speaks from inside the sheet while it shows (review FU22B-OP-3).
+    await dialog.locator('[data-rvtt-modal-slot="status"] [data-rvtt-toast-status]').filter({ hasText: "Behind you!" }).waitFor({ state: "attached" });
     await shots.take(phone, "layout-very-short-toast-in-sheet");
     const text = (await toast.first().textContent()) ?? "";
     await dialog.getByRole("button", { name: "Close Initiative" }).tap();
     await dialog.waitFor({ state: "detached" });
     await phone.waitForTimeout(300);
-    assert.equal(await phone.getByRole("status").filter({ hasText: text }).count(), 0, "the toast went with the sheet, never shown again over the map");
+    assert.equal(await phone.locator("[data-toast]").filter({ hasText: text }).count(), 0, "the toast went with the sheet, never shown again over the map");
+    assert.equal(await phone.getByRole("status").filter({ hasText: text }).count(), 0, "the toast was said again over the map");
     await phone.unrouteAll();
     // The height marks' failed import stays failed for this page, so the next steps start from a fresh one.
     await reloadAt(phone, 1.3);
@@ -1099,7 +1102,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
     // A whisper's notice, which goes through the same toasts as a refusal does.
     await ops.send({ t: "log.whisper", to: [run.patId], text: "Behind you!" });
-    const toast = dialog.locator('[data-rvtt-modal-slot="toasts"] button[role="status"]');
+    const toast = dialog.locator('[data-rvtt-modal-slot="toasts"] [data-toast]');
     await toast.first().waitFor({ timeout: 10_000 });
     await scrollToEnd();
     await bothShow(toast.first(), "the toast");

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
@@ -162,6 +162,23 @@ async function rectOf(locator: Locator): Promise<Rect> {
   const b = await locator.boundingBox();
   assert.ok(b, "nothing on screen to measure");
   return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+}
+
+/** What shows of an element: its box cut by every box around it that clips, as a stack of toasts that scrolls cuts a toast. */
+function shownRect(locator: Locator): Promise<Rect> {
+  return locator.evaluate((el) => {
+    type Node = { parentElement: Node | null; getBoundingClientRect(): Rect };
+    const g = globalThis as unknown as { getComputedStyle(n: Node): { overflowX: string; overflowY: string } };
+    const own = (el as unknown as Node).getBoundingClientRect();
+    let out: Rect = { left: own.left, top: own.top, right: own.right, bottom: own.bottom };
+    for (let n = (el as unknown as Node).parentElement; n; n = n.parentElement) {
+      const cs = g.getComputedStyle(n);
+      if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+      const c = n.getBoundingClientRect();
+      out = { left: Math.max(out.left, c.left), top: Math.max(out.top, c.top), right: Math.min(out.right, c.right), bottom: Math.min(out.bottom, c.bottom) };
+    }
+    return out;
+  });
 }
 
 /** The token bar's frame, whichever token or group it is for. */
@@ -482,7 +499,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const before = await rectOf(check);
     // Undo and Redo each say what they took back, in a toast.
     await dm.getByRole("button", { name: "Undo", exact: true }).tap();
-    await dm.locator('button[role="status"]').first().waitFor();
+    await dm.locator("[data-toast]").first().waitFor();
     await dm.waitForTimeout(150);
     const during = await rectOf(check);
     assert.ok(Math.abs(during.top - before.top) < 0.5, `a toast moved the column: ${JSON.stringify({ before, during })}`);
@@ -514,7 +531,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const card = await rectOf(check);
     // Undo says what it took back in a toast.
     await dm.getByRole("button", { name: "Undo", exact: true }).tap();
-    const toast = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+    const toast = dm.locator("[data-toast]").filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
     await toast.waitFor();
     const t = await rectOf(toast);
     assert.ok(!intersects(t, card), `the toast covers the check: ${JSON.stringify({ t, card })}`);
@@ -885,7 +902,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.waitForTimeout(300);
       // Not the DM's own Set it off, which toasts nothing: the scout walks onto the plate.
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-      const toast = dm.locator('[role="status"]').filter({ hasText: "Needle Plate went off: Scout." }).first();
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Needle Plate went off: Scout." }).first();
       await toast.waitFor();
       const t = await rectOf(toast);
       const head = await rectOf(pane.locator("[data-sheet-grab]").first());
@@ -955,11 +972,12 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
         assert.ok(await wholeInReach(head.locator("strong").first()), `${label}: the pane's title is covered`);
         // A toast still shows over the pane, under its header.
         await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
-        const toast = dm.locator('[role="status"]').filter({ hasText: "Tripwire went off: Scout." }).first();
+        const toast = dm.locator("[data-toast]").filter({ hasText: "Tripwire went off: Scout." }).first();
         await toast.waitFor();
         await dm.waitForTimeout(200);
         assert.ok(await wholeInReach(toast.getByRole("button", { name: "Save and damage", exact: true })), `${label}: the toast's Save and damage is covered`);
-        assert.ok(!intersects(await rectOf(toast), await rectOf(head)), `${label}: the toast covers the pane's header`);
+        // What shows of it: a stack too tall for its room scrolls there, its newest in view (review LP16-PT-2).
+        assert.ok(!intersects(await shownRect(toast), await rectOf(head)), `${label}: the toast covers the pane's header`);
         assert.ok(await wholeInReach(close), `${label}: the toast took the pane's Close out of reach`);
         await shots.take(dm, `dmphone-fu21b-pane-480${view.side ? "-insets" : ""}`);
         await close.tap();
@@ -972,7 +990,184 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await setUp({ width: 390, height: 844, scale: 1 });
     }
   });
+
+  test("fu22b-1. at 390 x 844 a whisper at the top of the notices moves under a trap pane's header as the pane opens, the same toast, never drawn anew (review FU21B-OP-7)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await waitFor("the trap in the DM's view", () => dmSocket.state?.traps[trapId] ?? null);
+    try {
+      await pickTool(dm, "Trap");
+      await whisperFromPat("Behind you!");
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Behind you!" }).first();
+      await toast.waitFor();
+      // Marked on the element itself: a toast drawn anew is a new element, without the mark.
+      const inLayer = () => toast.evaluate((el) => (el as unknown as { closest(s: string): unknown }).closest("[data-rvtt-toast-layer]") !== null);
+      await toast.evaluate((el) => Object.assign(el, { fu22bMark: true }));
+      assert.equal(await inLayer(), false, "the whisper did not start at the top of the notices, so this step shows nothing");
+      // Said once by the toasts' one status region, and the toast itself is no live region, so moving it can say nothing (review FU22B-OP-3).
+      const region = dm.locator("[data-rvtt-toast-status]");
+      const said = () => region.evaluate((el) => (el.textContent ?? "").split("Behind you!").length - 1);
+      await waitFor("the whisper said", async () => ((await said()) === 1 ? true : null));
+      await region.locator("span").evaluate((el) => Object.assign(el, { fu22bSaid: true }));
+      assert.equal(await toast.evaluate((el) => (el as unknown as { closest(s: string): unknown }).closest('[role="status"], [role="alert"], [aria-live]:not([aria-live="off"])') === null), true, "the toast is a live region of its own");
+      const pane = dm.getByRole("dialog", { name: "Edit trap" });
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.getByText("Needle Plate", { exact: true }).first().waitFor();
+      const head = pane.locator("[data-sheet-grab]").first();
+      await waitFor("the whisper 8 px under the pane's header", async () => {
+        const t = await rectOf(toast);
+        const h = await rectOf(head);
+        return Math.abs(t.top - (h.bottom + 8)) < 1.5 ? true : null;
+      }, 3_000);
+      assert.equal(await inLayer(), true, "the whisper is not in the toasts' layer");
+      assert.equal(await toast.evaluate((el) => (el as unknown as { fu22bMark?: boolean }).fu22bMark === true), true, "the whisper was drawn anew as it moved");
+      assert.equal(await said(), 1, "the whisper was said again as it moved");
+      assert.equal(await region.locator("span").evaluate((el) => (el as unknown as { fu22bSaid?: boolean }).fu22bSaid === true), true, "the status region spoke again as the whisper moved");
+      assert.ok(!intersects(await rectOf(toast), await rectOf(head)), "the whisper covers the pane's header");
+      assert.ok(await wholeInReach(pane.getByRole("button", { name: "Close", exact: true })), "the pane's Close is out of reach");
+      await shots.take(dm, "dmphone-fu22b-whisper-under-pane");
+      await pane.getByRole("button", { name: "Close", exact: true }).tap();
+      await pane.waitFor({ state: "detached" });
+    } finally {
+      await ops.send({ t: "trap.delete", trapId });
+      await waitFor("the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] ? true : null));
+      await pickTool(dm, "Select");
+    }
+  });
+
+  test("fu22b-2. at 480 x 320 at 130% with a label's pane open, a whisper and then a trap's toast run past the room above the tool's options: the whisper goes, and the trap's Save and damage stays on screen and takes a tap (review LP16-PT-2)", async () => {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const spot = { x: 6, y: Math.floor(bounds.h / 2) };
+    const labelId = randomUUID();
+    const trapId = randomUUID();
+    const walker = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "build.label", sceneId: run.sceneId, labelId, label: { x: spot.x + 0.5, y: spot.y + 0.5, text: "Gate", size: 1 } });
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Tripwire", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
+    try {
+      await setUp({ width: 480, height: 320, scale: 1.3 });
+      await pickTool(dm, "Map builder");
+      await pickOption(dm, "Map builder", "Builder mode", "Label");
+      const pane = dm.getByRole("dialog", { name: "Edit label" });
+      const p = await pagePoint(dm, bounds, { x: spot.x + 0.5, y: spot.y + 0.5 });
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.waitFor();
+      await dm.waitForTimeout(300);
+      await whisperFromPat("Behind you!");
+      const whisper = dm.locator("[data-toast]").filter({ hasText: "Behind you!" });
+      await whisper.first().waitFor();
+      await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Tripwire went off: Scout." }).first();
+      await toast.waitFor();
+      await dm.waitForTimeout(200);
+      const save = toast.getByRole("button", { name: "Save and damage", exact: true });
+      const b = await rectOf(save);
+      const screen = await dm.evaluate(() => (globalThis as unknown as { innerHeight: number }).innerHeight);
+      assert.ok(b.top >= 0 && b.bottom <= screen + 0.5, `the trap's Save and damage runs off the screen: ${JSON.stringify(b)} on a ${screen} px screen`);
+      assert.ok(await wholeInReach(save), "the trap's Save and damage is covered");
+      assert.equal(await whisper.count(), 0, "the whisper, logged and with no button, stayed while the trap's toast ran past its room");
+      // The stack keeps above the tool's controls, scrolling where it runs past them, so Label and its field stay in reach too. Their hint line may be covered.
+      const controls = await dm
+        .getByRole("toolbar", { name: "Map builder options" })
+        .evaluate((el) => Math.min(...Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<{ getBoundingClientRect(): { top: number; height: number } }> }).querySelectorAll("[data-options-row] button, [data-options-row] input")).map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top)));
+      const shown = await shownRect(toast);
+      assert.ok(shown.bottom <= controls + 0.5, `the toast runs down to ${shown.bottom}, over the tool's controls at ${controls}`);
+      await shots.take(dm, "dmphone-fu22b-trap-toast-480");
+      // The room shrinks with no scroll of the stack's own: following its newest, it stays at its foot, Save and damage whole (review FU22B-ASTRA-02).
+      await dm.setViewportSize({ width: 480, height: 306 });
+      await dm.waitForTimeout(400);
+      assert.ok(await wholeInReach(save), "with the room shrunk, the trap's Save and damage is cut");
+      await save.tap();
+      await toast.waitFor({ state: "detached" });
+    } finally {
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await ops.send({ t: "token.delete", tokenId: walker });
+      await ops.send({ t: "build.label", sceneId: run.sceneId, labelId, label: null });
+      await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
+      await setUp({ width: 390, height: 844, scale: 1 });
+      await pickTool(dm, "Select");
+    }
+  });
+
+  test("fu22b-3. at 390 x 844 under a trap pane, a whisper, then the trap's toast: with the trap's Save and damage focused, the whisper's going moves nothing, and Enter on it still works (review FU22B-ASTRA-01)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const walker = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Snare", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
+    try {
+      await pickTool(dm, "Trap");
+      const pane = dm.getByRole("dialog", { name: "Edit trap" });
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.getByText("Snare", { exact: true }).first().waitFor();
+      await dm.waitForTimeout(300);
+      await whisperFromPat("Over here!");
+      const whisper = dm.locator("[data-toast]").filter({ hasText: "Over here!" });
+      await whisper.waitFor();
+      await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Snare went off: Scout." }).first();
+      await toast.waitFor();
+      const save = toast.getByRole("button", { name: "Save and damage", exact: true });
+      await save.focus();
+      const focused = () => save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement);
+      assert.equal(await focused(), true, "Save and damage did not take focus, so this step shows nothing");
+      // The whisper's 5 s run out before the trap's 12 s.
+      await whisper.waitFor({ state: "detached", timeout: 8_000 });
+      await dm.waitForTimeout(200);
+      assert.equal(await focused(), true, "Save and damage lost its focus as the whisper above it went");
+      await dm.keyboard.press("Enter");
+      await toast.waitFor({ state: "detached" });
+      await shots.take(dm, "dmphone-fu22b-focus-kept");
+    } finally {
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await ops.send({ t: "token.delete", tokenId: walker });
+      await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
+      await setUp({ width: 390, height: 844, scale: 1 });
+      await pickTool(dm, "Select");
+    }
+  });
 });
+
+/** Pat, joined once from a device of their own, whose cookies send a whisper to the DM. */
+let patCookie = "";
+
+async function whisperFromPat(text: string): Promise<void> {
+  if (!patCookie) {
+    const context = await browser.newContext();
+    try {
+      const headers = { Origin: server.origin, "content-type": "application/json" };
+      const joined = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/join`, { headers, data: { password: run.password } });
+      assert.ok(joined.ok(), `joining answered ${joined.status()}`);
+      const { ticket } = (await joined.json()) as { ticket: string };
+      const done = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name: "Pat", color: "#30a46c" } });
+      assert.ok(done.ok(), `completing the join answered ${done.status()}`);
+      patCookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    } finally {
+      await context.close();
+    }
+  }
+  const pat = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: patCookie });
+  try {
+    await pat.send({ t: "log.whisper", to: [dmSocket.you!.memberId], text });
+  } finally {
+    pat.close();
+  }
+}
 
 function goblin() {
   return {

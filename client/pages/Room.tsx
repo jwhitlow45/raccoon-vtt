@@ -2,8 +2,9 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, columnEdges, DEFAULT_CHROME, EDGE, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, toastLayerPlace, toastTop, type Chrome, type ToastEdges, type ToastPlaces } from "../canvas/barDock.ts";
+import { barDockSlot, columnEdges, DEFAULT_CHROME, EDGE, fitToasts, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, TOAST_MIN, toastLayerPlace, toastTop, type Chrome, type ToastEdges, type ToastPlaces } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
+import { SCROLL_FOR_MORE_PX, ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
@@ -58,7 +59,7 @@ import { roomPath } from "../lib/roomId.ts";
 import { sceneGate, selectionScene } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
-import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
+import { RoomScope, RoomScopeProvider, scopeSlot, useRoomScope, useScoped } from "../state/scope.ts";
 import { toastsLeft } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -920,9 +921,9 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} />
+          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} foot={chrome ? height - chrome.controls : null} />
         </div>
-        <div ref={setToastLayer} {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
+        <div ref={setToastLayer} data-rvtt-toast-layer="" {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
           <Sheet
             // Each panel gets a sheet of its own, so one that replaces another in place, as the turn strip's Initiative replaces Token, never opens at the other's scroll (features/panels.ts usePanelScroll).
@@ -1504,60 +1505,127 @@ function Banner() {
  * barDock.ts toastTop), in `layer`, and joins any toast already there,
  * below it, so their stack keeps the top its first took, and across the
  * cards' edges as they stand now (`edges`, barDock.ts columnEdges). A toast
- * never moves from the notices, the layer or the sheet to another of them,
- * so it is never announced again: one shown in the sheet goes with the
- * sheet.
+ * shown in the sheet goes with the sheet.
  *
  * While a map pane stands as a bottom sheet (`paneStands`), a new toast
  * starts under the pane's header instead (`pane`, barDock.ts
  * paneToastTop), and the layer's one stack keeps under the header: a
- * column stack moves there once, as the pane opens. The pane moves the
+ * column stack moves there once, as the pane opens, and so do the toasts
+ * at the top of the notices (review FU21B-OP-7). The pane moves the
  * header as it grows, shrinks and makes room for the alerts row on its
  * edge, which a trap going off brings in the same moment as its toast, and
  * a toast left where it showed would then cover the header and Close.
  * Once the pane goes away, the stack stays where the header last stood,
  * until another pane stands (barDock.ts nextToastPlaces).
+ *
+ * When the screen turns, a toast at the top of the notices that now
+ * meets the column's first card is placed again as if it came now, under
+ * that card, and again as the column measures the card anew while the
+ * turn lasts (review LP17-AW-1), so it never covers the card's buttons.
+ *
+ * Each toast over the map renders through a portal into a host of its
+ * own, an element with no box, which this moves into the notices' stack
+ * or the layer's. So a toast that moves from the notices to the layer is
+ * the same toast, never mounted again. No toast is a live region: one
+ * hidden status region here says each toast once, as it is pushed
+ * (review FU22B-OP-3), so neither a move nor a blackout makes one speak
+ * again.
+ *
+ * A stack that runs past its room, down to the highest of the tool's
+ * controls at the screen's foot (`foot`, in the chrome's px, so a hint
+ * under them may be covered, as the alerts' summary row may cover it),
+ * first drops its oldest toasts whose words the log keeps, never one with
+ * a button nor an error the log never sees, and then scrolls there, the
+ * newest in view, with "Scroll for more" on the edge that hides toasts
+ * but never over the newest (barDock.ts fitToasts, reviews LP16-PT-2 and
+ * FU22B-OP-4). `foot` is null until the bars are measured, as on the
+ * first render after a blackout, and nothing is fitted until then.
  */
-function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null }) {
+function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null; foot: number | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
-  const ids = toasts.map((t) => t.id);
+  const zoom = useUiScale();
+  const { width, height } = useLayoutSize();
+  // A toast whose time ran out while play was paused goes with its timer, and is never drawn for a frame first (review FU22B-OP-6).
+  const left = new Map(toastsLeft(toasts, Date.now()).map((t) => [t.id, t.ms]));
+  const showing = toasts.filter((t) => (left.get(t.id) ?? 0) > 0);
+  const ids = showing.map((t) => t.id);
+  const upright = width <= height;
+  const turn = useRef({ upright, at: -Infinity });
+  if (turn.current.upright !== upright) turn.current = { upright, at: Date.now() };
+  // The column measures its cards a render or two after the turn, so the turn counts for a moment, not one render.
+  const turned = Date.now() - turn.current.at < TURN_MS;
   // The places from the render before, the same again when a render repeats, so this stays pure.
   const placed = useRef<ToastPlaces>(NO_TOAST_PLACES);
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null });
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;
     for (const [id, place] of placed.current.places) if (place === "sheet") ui.dismissToast(id);
   }, [slot, ui]);
-  // When each toast showed, so one that comes or goes never restarts the others' time (store.ts toastsLeft).
-  const shownAt = useRef(new Map<number, number>());
+  // Each toast's time counts from when it first showed (store.ts toastsLeft), so one that comes or goes, or a blackout that takes them all off screen, never restarts it.
   useEffect(() => {
-    const timers = toastsLeft(toasts, shownAt.current, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
+    const timers = toastsLeft(toasts, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
-  if (toasts.length === 0) return null;
-  const overMap = toasts.filter((t) => places.get(t.id) === "map");
-  const inSheet = slot ? toasts.filter((t) => places.get(t.id) === "sheet") : [];
-  const low = toasts.filter((t) => inToastLayer(places.get(t.id)));
+  const hosts = useRef(new Map<number, HTMLElement>());
+  const hostOf = (id: number): HTMLElement => {
+    let host = hosts.current.get(id);
+    if (!host) {
+      host = document.createElement("div");
+      host.style.display = "contents";
+      hosts.current.set(id, host);
+    }
+    return host;
+  };
+  const stacks = { notices: useToastStack(), layer: useToastStack() };
+  const overMap = showing.filter((t) => places.get(t.id) === "map");
+  const inSheet = slot ? showing.filter((t) => places.get(t.id) === "sheet") : [];
+  const low = showing.filter((t) => inToastLayer(places.get(t.id)));
   const lowAt = toastLayerPlace(placed.current, ids, props.edges);
+  const drawn = showing.filter((t) => places.get(t.id) === "map" || inToastLayer(places.get(t.id)));
+  useLayoutEffect(() => {
+    // The hosts of toasts that went come out first, so the ones after them are already in order and stay put: moving a host that holds focus would blur it (review FU22B-ASTRA-01).
+    const kept = new Set(drawn.map((t) => t.id));
+    for (const [id, host] of hosts.current) {
+      if (kept.has(id)) continue;
+      host.remove();
+      hosts.current.delete(id);
+    }
+    const put = (stack: HTMLElement | null, list: readonly Toast[]) => {
+      if (!stack) return;
+      let at: ChildNode | null = stack.firstChild;
+      for (const t of list) {
+        const host = hosts.current.get(t.id);
+        if (!host) continue;
+        if (host !== at) stack.insertBefore(host, at);
+        at = host.nextSibling;
+      }
+    };
+    put(stacks.notices.stack.current, overMap);
+    put(stacks.layer.stack.current, low);
+    const height = (t: Toast) => hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect().height ?? 0;
+    for (const [stack, list] of [
+      [stacks.notices, overMap],
+      [stacks.layer, low],
+    ] as const) {
+      const drop = stack.fit(list, height, props.foot, zoom);
+      for (const id of drop) ui.dismissToast(id);
+    }
+  });
   return (
     <>
-      {overMap.map((t) => (
-        <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
-      ))}
+      <ToastVoice toasts={toasts} />
+      {overMap.length > 0 ? <ToastStack stack={stacks.notices} style={{ width: "100%" }} /> : null}
       {props.layer && lowAt !== null
         ? createPortal(
             // Under the column's first card, the card's edges, so the toast lines up with it. Under a pane's header, across the map as the notices are.
-            <div style={{ position: "absolute", top: lowAt.top, ...(lowAt.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }), display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }}>
-              {low.map((t) => (
-                <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
-              ))}
-            </div>,
+            <ToastStack stack={stacks.layer} style={{ position: "absolute", top: lowAt.top, ...(lowAt.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }) }} />,
             props.layer,
           )
         : null}
+      {drawn.map((t) => createPortal(<ToastNote toast={t} onDismiss={() => ui.dismissToast(t.id)} />, hostOf(t.id), `toast-${t.id}`))}
       {slot && inSheet.length > 0
         ? createPortal(
             inSheet.map((t) => <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />),
@@ -1568,13 +1636,164 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   );
 }
 
+/** How long after the screen turns a toast at the top of the notices may still be placed again under the column's card. */
+const TURN_MS = 600;
+
+/** The widest a toast stands, and a stack that scrolls with it, so the map either side still takes a tap. */
+const TOAST_MAX_PX = 520;
+
+/** Which toasts this Room has said, by the newest id said: ids only grow, and the record outlives Toasts through a blackout. */
+const toastVoiceSlot = scopeSlot(() => ({ through: 0 }));
+
+/** What a toast says: its words, a die's verdict, and its button's name, as its own box read out before it stopped being a live region. */
+function toastWords(t: Toast): string {
+  return [t.text, t.die?.verdict ? `${t.die.verdict}.` : null, t.action ? `${t.action.label}.` : null].filter((w): w is string => w !== null).join(" ");
+}
+
+/**
+ * The toasts' one status region (review FU22B-OP-3), always on the page
+ * and visually hidden, as FoldStatus is for the folded alerts: each toast
+ * is said once, as it is pushed, whatever moves its box. Inside a very
+ * short sheet while one shows, where the modal leaves the room's region
+ * out of reach, it speaks from the sheet's status slot instead. Its
+ * record of what it has said stays in the Room's scope, and its region
+ * starts empty in a new place, so a move or a blackout says nothing again.
+ */
+function ToastVoice(props: { toasts: readonly Toast[] }) {
+  const voice = useScoped(toastVoiceSlot);
+  const slot = useModalSlot("status");
+  const [said, setSaid] = useState({ key: 0, text: "" });
+  const [speaksIn, setSpeaksIn] = useState(slot);
+  if (speaksIn !== slot) {
+    setSpeaksIn(slot);
+    setSaid((was) => ({ key: was.key + 1, text: "" }));
+  }
+  useEffect(() => {
+    const now = Date.now();
+    const left = new Map(toastsLeft(props.toasts, now).map((t) => [t.id, t.ms]));
+    const fresh = props.toasts.filter((t) => t.id > voice.through);
+    if (fresh.length === 0) return;
+    voice.through = Math.max(...fresh.map((t) => t.id));
+    // A toast whose time ran out unseen, while play was paused, is not news any more.
+    const words = fresh.filter((t) => (left.get(t.id) ?? 0) > 0).map(toastWords);
+    // A new node each time, so words that repeat, as a second "Undid moving Thorn.", are said again.
+    if (words.length > 0) setSaid((was) => ({ key: was.key + 1, text: words.join(" ") }));
+  }, [props.toasts, voice]);
+  return inModal(
+    <div role="status" data-rvtt-toast-status="" style={VISUALLY_HIDDEN}>
+      <span key={said.key}>{said.text}</span>
+    </div>,
+    slot,
+  );
+}
+
+/** How a stack of toasts over the map fits its room: the height it scrolls in, in the chrome's px, or none while it fits, and whether toasts hide above and below. */
+type StackFit = { max: number | null; above: boolean; below: boolean };
+
+const FITS: StackFit = { max: null, above: false, below: false };
+
+/** One stack's scroller and the stack inside it, which Toasts fills with the toasts' hosts, and how it fits its room. */
+function useToastStack() {
+  const box = useRef<HTMLDivElement>(null);
+  const stack = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<StackFit>(FITS);
+  const newest = useRef<number | null>(null);
+  /*
+   * Whether the box stands at its foot, the newest in view. A resize, the
+   * pane's header moving or the tool's options changing shrinks the room
+   * with no scroll of its own, so a stack that followed its newest is put
+   * back at its foot then (review FU22B-ASTRA-02). A scroll toward older
+   * toasts is the reader's, and is left alone until a newer toast comes.
+   */
+  const following = useRef(true);
+  const zoomAt = useRef(1);
+  const update = (next: StackFit) => setShown((was) => (was.max === next.max && was.above === next.above && was.below === next.below ? was : next));
+  /*
+   * "Scroll for more" on the edge that hides toasts. The top's lies only
+   * over toasts above the newest, never over the newest kept in view,
+   * whose button it would hide: a newest taller than the room shows its
+   * foot, cut at the top. The foot's stands where the box holds it over a
+   * whole touch target, as on a short screen the newest's button would
+   * sit under it.
+   */
+  const edges = () => {
+    const el = box.current;
+    if (!el) return;
+    following.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+    const fade = SCROLL_FOR_MORE_PX * zoomAt.current;
+    const last = stack.current?.lastElementChild?.firstElementChild?.getBoundingClientRect();
+    const above = el.scrollTop > 1 && (last === undefined || last.top - el.getBoundingClientRect().top >= fade);
+    const below = !following.current;
+    setShown((was) => {
+      if (was.max === null) return was;
+      const foot = below && was.max >= SCROLL_FOR_MORE_PX + TOAST_MIN;
+      return was.above === above && was.below === foot ? was : { ...was, above, below: foot };
+    });
+  };
+  const fits = () => {
+    newest.current = null;
+    following.current = true;
+    if (shown.max !== null) update(FITS);
+  };
+  /** After the hosts are placed: what to drop from `list` (barDock.ts fitToasts), and otherwise the room it scrolls in and its fades, the newest kept in view. */
+  const fit = (list: readonly Toast[], height: (t: Toast) => number, foot: number | null, zoom: number): number[] => {
+    const el = box.current;
+    if (!el || list.length === 0 || foot === null) {
+      fits();
+      return [];
+    }
+    zoomAt.current = zoom;
+    const room = foot * zoom - el.getBoundingClientRect().top;
+    const { drop, scrolls } = fitToasts(
+      list.map((t) => ({ id: t.id, height: height(t), action: t.action !== undefined, logged: t.logged === true })),
+      theme.space(2) * zoom,
+      room,
+    );
+    if (drop.length > 0) return drop;
+    if (!scrolls) {
+      fits();
+      return [];
+    }
+    // At least a toast's least height, so a stack on too short a room still shows one whole touch target.
+    const max = Math.round((Math.max(room, TOAST_MIN * zoom) / zoom) * 2) / 2;
+    if (shown.max !== max) {
+      update({ ...shown, max });
+      return [];
+    }
+    const last = list[list.length - 1]!.id;
+    if (newest.current !== last) {
+      newest.current = last;
+      following.current = true;
+    }
+    if (following.current) el.scrollTop = el.scrollHeight;
+    edges();
+    return [];
+  };
+  return { box, stack, shown, fit, edges };
+}
+
+/** A stack of toasts over the map: a box that scrolls while it runs past its room, its fades, and the stack the toasts' hosts go into. */
+function ToastStack(props: { stack: ReturnType<typeof useToastStack>; style: CSSProperties }) {
+  const { box, stack, shown, edges } = props.stack;
+  const scrolls = shown.max !== null;
+  // Scrolling, the box takes taps and scroll gestures, so it is no wider than its toasts, centered as they are, and the map either side still takes a tap (review FU22B-OP-5).
+  const pad = props.style.padding !== undefined ? 2 * theme.space(3) : 0;
+  return (
+    <div ref={box} onScroll={edges} style={{ ...props.style, ...(scrolls ? { maxHeight: shown.max!, maxWidth: TOAST_MAX_PX + pad, marginLeft: "auto", marginRight: "auto", overflowY: "auto", overscrollBehavior: "contain", pointerEvents: "auto" } : null) }}>
+      {scrolls && shown.above ? <ScrollForMore edge="top" /> : null}
+      <div ref={stack} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }} />
+      {scrolls && shown.below ? <ScrollForMore /> : null}
+    </div>
+  );
+}
+
 function ToastNote(props: { toast: Toast; onDismiss(): void }) {
   const t = props.toast;
   const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
   const look: CSSProperties = {
     pointerEvents: "auto",
     width: "100%",
-    maxWidth: 520,
+    maxWidth: TOAST_MAX_PX,
     minHeight: theme.touch,
     borderRadius: theme.radius.md,
     background: tone.fill,
@@ -1590,7 +1809,7 @@ function ToastNote(props: { toast: Toast; onDismiss(): void }) {
   if (action) {
     // A button cannot hold another, so the words dismiss as a button of their own beside the action's.
     return (
-      <div role="status" style={{ ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }}>
+      <div data-toast="" style={{ ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }}>
         <button type="button" onClick={props.onDismiss} style={{ flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, padding: 0, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }}>
           {t.text}
         </button>
@@ -1608,7 +1827,7 @@ function ToastNote(props: { toast: Toast; onDismiss(): void }) {
     );
   }
   return (
-    <button type="button" role="status" onClick={props.onDismiss} style={{ ...look, padding: `${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" }}>
+    <button type="button" data-toast="" onClick={props.onDismiss} style={{ ...look, padding: `${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" }}>
       {t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
     </button>
   );

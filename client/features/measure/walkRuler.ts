@@ -565,6 +565,22 @@ export function walkShown(m: WalkMeasure, held: WalkMeasure | null, slow: boolea
   return { reading: held, finding: false };
 }
 
+/**
+ * The leg whose cost a walking ruler's leg `i` labels, as walkShown keeps
+ * its total: a found leg its own, and a leg still searching the held
+ * walk's leg of the same index (review LP2L2-P3-4), so a multi-leg
+ * ruler's last label never blinks while its stop is dragged. Past the
+ * loading delay (`finding`) the leg waits grey with no label, as does a
+ * leg the held walk did not have. `held` is a finished walk (nextHeld),
+ * so its legs are all found.
+ */
+export function legReading(m: WalkMeasure, i: number, held: WalkMeasure | null, finding: boolean): WalkLeg | null {
+  const leg = m.legs[i];
+  if (!leg) return null;
+  if (leg.searching !== true) return leg;
+  return finding ? null : (held?.legs[i] ?? null);
+}
+
 const STORE_KEY = "rvtt.ruler.measure";
 
 /** The ruler's Measure choice as this device remembers it, Straight when it remembers nothing or cannot (3.3). */

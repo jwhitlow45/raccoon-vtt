@@ -157,6 +157,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
       title="Request a roll"
       onClose={close}
       width={theme.layout.dialog.md}
+      statusGrow
       status={
         error ? (
           <span role="alert" style={{ color: theme.color.dangerText }}>
@@ -168,9 +169,12 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
       }
       footer={
         <>
-          <Button onClick={close}>{sending ? "Close" : "Cancel"}</Button>
+          {/* Both grow to share the line they stand on (docs/design-v1-polish.md R6): Send wrapped under Cancel fills its line rather than standing short at its end, and the status takes a line of its own only where no button fits beside it. */}
+          <Button onClick={close} style={{ flex: "1 1 auto" }}>
+            {sending ? "Close" : "Cancel"}
+          </Button>
           {/* The form's submit, so Enter in the DC or the note sends (section 8). */}
-          <Button variant="primary" type="submit" form={formId} busy={sending}>
+          <Button variant="primary" type="submit" form={formId} busy={sending} style={{ flex: "1 1 auto" }}>
             {sendLabel(sending, connected)}
           </Button>
         </>

@@ -462,7 +462,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await sheet.getByRole("button", { name: "Deleting…", exact: true }).waitFor();
     await ops.send({ t: "character.update", characterId: run.wren, patch: { ownerIds: [run.patId, run.quinId] } });
     await patContext.setOffline(false);
-    await pat.getByText("Someone else plays that character too. Ask the DM to delete it.", { exact: true }).waitFor({ timeout: 30_000 });
+    await pat.locator("[data-toast]").getByText("Someone else plays that character too. Ask the DM to delete it.", { exact: true }).waitFor({ timeout: 30_000 });
     await focusStartsWith(pat, "h3 [] Wren", "focus on Wren's heading after the refusal");
     await sheet.getByText("You and Quin both play Wren, so only the DM can delete it.", { exact: true }).waitFor();
     assert.ok(dmSocket.state!.characters[run.wren], "Wren stays");

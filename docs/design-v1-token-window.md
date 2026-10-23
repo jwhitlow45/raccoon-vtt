@@ -192,8 +192,8 @@ The handle is a `<button>`, "Resize window", described (a visually hidden `aria-
 ### 5.6 Limits
 
 - **Narrowest: the default width** (3.3). Below it, Conditions, Hidden and Multi-select would leave their line, which the project owner asked to keep stable, and the header's whole row (265 px, 7.1) fits it anyway.
-- **Shortest: 148 px** (`MIN_BAR_HEIGHT`, the header and two 44 px rows, the least a docked bar needs). In the short layout Apply ends 131 px below the window's top, inside.
-- **Smallest**: the default width by 148 px, 316 x 148 on macOS.
+- **Shortest: 152 px** (`MIN_WINDOW_HEIGHT`, the 52 px header and two rows of buttons whole, 4 px over a docked bar's 148). In the short layout Apply ends 131 px below the window's top, inside.
+- **Smallest**: the default width by 152 px, 316 x 152 on macOS.
 - **Widest and tallest**: the window's room (5.3), measured from the anchored edges. The stored size may say more: it is clamped for each opening (section 7).
 - A stored value is an integer from 1 to 4096, clamped to these limits where it is drawn.
 
@@ -493,15 +493,15 @@ The DM's goblin, about 548 px of content at the default width. "Shown" and "hidd
 
 | Size and interface size | Layout | Free area | Default window | Stored 600 x 400 | Stored 4096 x 4096 | Smallest |
 |---|---|---|---|---|---|---|
-| 1280 x 800, 100% | 1280 x 800, wide | 904 x 671 shown, 1264 x 671 hidden | 316 x 548, full layout | 600 x 400, full, scrolls | 900 x 548 shown, 1260 x 548 hidden | 316 x 148, short |
-| 1280 x 800, 130% | 985 x 615, wide | 609 x 486, 969 x 486 | 316 x 482, scrolls | 600 x 400 | 605 x 482, 965 x 482 | 316 x 148 |
-| 1920 x 1080, 100% | wide | 1544 x 951, 1904 x 951 | 316 x 548 | 600 x 400 | 1540 x 548, 1900 x 548 | 316 x 148 |
-| 1920 x 1080, 130% | 1477 x 831, wide | 1101 x 702, 1461 x 702 | 316 x 548 | 600 x 400 | 1097 x 548, 1457 x 548 | 316 x 148 |
-| 1024 x 768, 100% | wide | 648 x 639, 1008 x 639 | 316 x 548 | 600 x 400 | 644 x 548, 1004 x 548 | 316 x 148 |
-| 1024 x 768, 130% | 788 x 591, phone layout, panels as a sheet on the right | 772 x 462, or 414 with the turn band. With a sheet, 432 wide | 316 x 458 (410), scrolls | 600 x 400, or 428 x 400 beside a sheet | 768 x 458, or 428 beside a sheet | 316 x 148 |
-| 900 x 600, 100% | wide | 524 x 471, 884 x 471 | 316 x 467, scrolls | 520 x 400 shown (clamped), 600 x 400 hidden | 520 x 467, 880 x 467 | 316 x 148 |
-| 900 x 600, 130% | 692 x 461, phone layout, short | 676 x 332, or 284 if the strip needs a band. With a sheet, 336 wide | 316 x 328 full, or 280 short | 600 x 328, or 280 short | 672 x 328, or 332 beside a sheet | 316 x 148 |
-| 1280 x 480 window, 100% | wide, short: the side panel starts hidden | 1264 x 351, 904 x 351 shown | 316 x 347, scrolls | 600 x 347 | 1260 x 347 | 316 x 148 |
+| 1280 x 800, 100% | 1280 x 800, wide | 904 x 671 shown, 1264 x 671 hidden | 316 x 548, full layout | 600 x 400, full, scrolls | 900 x 548 shown, 1260 x 548 hidden | 316 x 152, short |
+| 1280 x 800, 130% | 985 x 615, wide | 609 x 486, 969 x 486 | 316 x 482, scrolls | 600 x 400 | 605 x 482, 965 x 482 | 316 x 152 |
+| 1920 x 1080, 100% | wide | 1544 x 951, 1904 x 951 | 316 x 548 | 600 x 400 | 1540 x 548, 1900 x 548 | 316 x 152 |
+| 1920 x 1080, 130% | 1477 x 831, wide | 1101 x 702, 1461 x 702 | 316 x 548 | 600 x 400 | 1097 x 548, 1457 x 548 | 316 x 152 |
+| 1024 x 768, 100% | wide | 648 x 639, 1008 x 639 | 316 x 548 | 600 x 400 | 644 x 548, 1004 x 548 | 316 x 152 |
+| 1024 x 768, 130% | 788 x 591, phone layout, panels as a sheet on the right | 772 x 462, or 414 with the turn band. With a sheet, 432 wide | 316 x 458 (410), scrolls | 600 x 400, or 428 x 400 beside a sheet | 768 x 458, or 428 beside a sheet | 316 x 152 |
+| 900 x 600, 100% | wide | 524 x 471, 884 x 471 | 316 x 467, scrolls | 520 x 400 shown (clamped), 600 x 400 hidden | 520 x 467, 880 x 467 | 316 x 152 |
+| 900 x 600, 130% | 692 x 461, phone layout, short | 676 x 332, or 284 if the strip needs a band. With a sheet, 336 wide | 316 x 328 full, or 280 short | 600 x 328, or 280 short | 672 x 328, or 332 beside a sheet | 316 x 152 |
+| 1280 x 480 window, 100% | wide, short: the side panel starts hidden | 1264 x 351, 904 x 351 shown | 316 x 347, scrolls | 600 x 347 | 1260 x 347 | 316 x 152 |
 | 844 x 390, 100%, touch, 47 px sides and 21 px foot | phone on its side | 734 x 241. With a sheet, 441 wide | 316 x 241, short. No handle, size not applied | not applied | not applied | none |
 | 844 x 390, 130%, touch | 649 x 300 | 539 x 151, or 99 with today's Multi-select bar. With a sheet, 246 wide | 316 x 151, short. Compact with today's Multi-select bar, 316 wide, over it. Docked once the options merge (section 12). Beside a sheet, 246 wide: one-row header, the badge under the name (7.1) | not applied | not applied | none |
 | 667 x 375, 100%, touch | phone on its side | 651 x 246. With a sheet, 311 wide | 316 x 246, short. Beside a sheet, 311 wide: one-row header, the steady line wraps (7.1) | not applied | not applied | none |
@@ -657,7 +657,7 @@ Unit tests, `node:test`:
   - `defaultWidth` from given button widths: 304 for narrow ones, 316 for the macOS widths, 321 for Tahoma's, rounding up plus one.
   - The size key: valid, width only, height only, missing, bad JSON, `{}`, a fraction, a negative, zero, over 4096 and a string. The default stored as no key. A throwing storage.
   - `placeBar` with a width, cap and resizable flag: the width clamped from the default width to the room, the cap after the spot and after the lane (stacked, beside, summary), a bottom-anchored window moved down by the lane keeping `min(content, cap)`, compact ignoring both. The handle's reach: a resizable window's free sides 12 px from the free area's edges and from a stacked first card, its anchored sides 8, and none of it for a touch device. `restingBar` with them.
-  - `resizeBox` for each corner, by the handle and by each band: the anchored edges fixed, the limits (the default width, 148, the room, the content).
+  - `resizeBox` for each corner, by the handle and by each band: the anchored edges fixed, the limits (the default width, 152, the room, the content).
   - The release: an unchanged dimension keeping its stored value (a clamped stored width included), the default width snap at 24 and not at 25, the height snap to no cap, the spot from the drawn box keeping its corner, both defaults stored as no key.
   - Key steps: 8 and 64 px, clamped, unsnapped, the nearest corner for a move and the kept corner for a resize.
   - The spot's words at a corner, an edge and neither, and the size's words with each limit.
@@ -812,7 +812,7 @@ None. The project owner's answers of 2026-10-16 settle every question round 1 ra
 
 Every row of section 13 that these changes touch was worked again:
 
-- **Widths.** The largest windows lose 4 px on each free side to the handle's reach (13.1). The smallest is the default width by 148. The side-sheet rows give each phone's narrow window its band (one row at 311, stacked at 246 and 189, folded at 129), all with Reset and a badge counted.
+- **Widths.** The largest windows lose 4 px on each free side to the handle's reach (13.1). The smallest is the default width by 152. The side-sheet rows give each phone's narrow window its band (one row at 311, stacked at 246 and 189, folded at 129), all with Reset and a badge counted.
 - **Rows.** Every viewer and token of 3.4 keeps the three on one line at the default width, and only a phone beside a sheet wraps them.
 - **Size.** The corner, both short-wall cases, the corridors, the free wall and the crafted patches each have one outcome by 8.3 and 8.6, the same on the device and the server. With growth bound to the old footprint, the corner and round 1's short wall keep their spots, since for a one-square creature "covers its square" and "holds its middle" pick the same spots, and round 2's two Large cases change from a shift to "No room to grow here". The DM's resize is never refused. A shrink finds a spot on the creature's side except where walls inside its footprint cut every candidate off, and then says "A wall is in the way.". A remembered return and an undo of any allowed growth always pass rule 4.
 - **Fight and undo.** A resize after any moves keeps the turn's feet and diagonals, the trail and its feet read every stop at its own size for owners and others alike, after a reconnect and at the stop limit, and an undo keeps damage dealt since. An undo or redo that changes a size needs the token's owner, as a resize does.

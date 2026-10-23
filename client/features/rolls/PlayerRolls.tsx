@@ -13,7 +13,7 @@ import type { Rect } from "../../components/popoverPlace.ts";
 import { popoverSlot } from "../../components/popoverRules.ts";
 import { Input } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
-import { SheetGrabber } from "../../components/SheetGrabber.tsx";
+import { GRABBER_ROOM, SheetGrabber } from "../../components/SheetGrabber.tsx";
 import { dockSummaryButton, RETURN_RANK, sheetFocusSlot, useAlertsSummary, useSheetReturnFocus } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -483,8 +483,8 @@ function RollCard(props: {
     const measure = () => {
       // Folded, the card has no size: the last measures stand.
       if (card.offsetHeight === 0) return;
-      // Measured as a sticking header stands, its fill taking in the card's top padding, which every header at the foot reaches over, and a little under it, so whether it sticks never changes the answer.
-      const lift = sticks ? 0 : theme.space(1);
+      // Measured as a sticking header stands, its fill taking in the card's top padding, which every header at the foot reaches over, and as much under it, so whether it sticks never changes the answer.
+      const lift = sticks ? 0 : HEADER_PAD;
       const head = header.offsetHeight + lift;
       const edges = 2 * theme.line.border;
       // The answer block (5.7): from "Fail (Stunned)" or the roll row down to the total and Send.
@@ -535,25 +535,26 @@ function RollCard(props: {
           display: "flex",
           alignItems: "flex-start",
           gap: theme.space(2),
-          // At the foot it reaches over the card's top padding, taken back from its margin, so the pill drawn there is on the grab area, stuck or not. Its content stays where it was.
-          ...(props.sheet ? { ...GRAB_STYLE, position: "relative", margin: `-${theme.space(4)}px 0 0`, padding: `${theme.space(4)}px 0 0` } : null),
+          // At the foot it reaches over the card's top padding, taken back from its margin, so the pill drawn there is on the grab area, stuck or not. Its content stands the pill's room under the card's top edge, as a sheet header's buttons do.
+          ...(props.sheet ? { ...GRAB_STYLE, position: "relative", margin: `-${theme.space(4)}px 0 0`, padding: `${HEADER_PAD}px 0 0` } : null),
           ...(sticks
             ? {
                 position: "sticky",
                 // A sticky box keeps inside its scroller's padding, so at 0 the header stood a padding's height below its place and its fill covered the top of the row under it.
                 top: -theme.space(4),
                 zIndex: 1,
-                // The card's top and side padding, taken back so the fill covers what scrolls under it.
+                // The card's top and side padding, taken back so the fill covers what scrolls under it. The fill pads its content the same above and below.
                 margin: `-${theme.space(4)}px calc(-1 * (${theme.safe.right} + ${theme.space(4)}px)) 0 calc(-1 * (${theme.safe.left} + ${theme.space(4)}px))`,
-                padding: `${theme.space(4)}px calc(${theme.safe.right} + ${theme.space(4)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(4)}px)`,
+                padding: `${HEADER_PAD}px calc(${theme.safe.right} + ${theme.space(4)}px) ${HEADER_PAD}px calc(${theme.safe.left} + ${theme.space(4)}px)`,
                 background: theme.color.surface,
               }
             : null),
         }}
       >
-        {/* In the card's 16 px top padding, which the header takes into its own box: room enough for the pill with no growth. */}
+        {/* In the header's top padding, the pill's room. */}
         {props.sheet ? <SheetGrabber /> : null}
-        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
+        {/* Set down so its first line's middle meets Later's, as a checkbox meets its label's first line (docs/design-v1-polish.md R1): a question on several lines starts beside Later rather than centering on it. */}
+        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), paddingTop: QUESTION_DROP }}>
           {/* The DC joins the question's line (5.1), one line less on every card. */}
           <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{askLine(request)}</div>
         </div>
@@ -897,11 +898,19 @@ function CreatureAnswer(props: {
                 }}
                 style={{ display: "grid", gap: theme.space(1) }}
               >
-                {/* Roll, Adv and Dis share the first line at every supported size. Each field follows on it while it fits whole, else starts the next (Appendix A). */}
+                {/*
+                 * Roll, Adv and Dis share the first line at every supported
+                 * size. The bonus and extra fields follow on it together while
+                 * both fit whole, else start the next line together, so the
+                 * extra field never stands alone under the rest (Appendix A).
+                 * Roll and the fields grow to share the line they stand on, as
+                 * a window's buttons do (docs/design-v1-polish.md R6).
+                 */}
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
                   <Button
                     type="submit"
                     size="sm"
+                    style={{ flex: "1 1 auto" }}
                     variant={failsFirst || (typeTotals && text.trim() !== "") ? "secondary" : "primary"}
                     aria-label={`${roll.label} for ${name}`}
                     aria-describedby={[waitsFor ? whyId : null, roll.reading ? readingId : null].filter((d) => d !== null).join(" ") || undefined}
@@ -918,33 +927,35 @@ function CreatureAnswer(props: {
                       Dis
                     </Chip>
                   </span>
-                  {bonus === null ? (
+                  <span style={{ flex: "1 1 auto", display: "flex", gap: theme.space(2) }}>
+                    {bonus === null ? (
+                      <Input
+                        aria-label={`Your bonus for ${name}`}
+                        value={inputs.bonus}
+                        placeholder="+0"
+                        enterKeyHint="go"
+                        autoComplete="off"
+                        maxLength={3}
+                        disabled={busy !== null}
+                        error={typedBonus?.ok === false}
+                        onChange={(e) => setInput({ bonus: e.target.value })}
+                        style={{ width: BONUS_FIELD_WIDTH, flex: "1 1 auto", textAlign: "center" }}
+                      />
+                    ) : null}
                     <Input
-                      aria-label={`Your bonus for ${name}`}
-                      value={inputs.bonus}
-                      placeholder="+0"
+                      aria-label={`Extra dice for ${name}`}
+                      value={inputs.extra}
+                      placeholder="+1d4"
                       enterKeyHint="go"
                       autoComplete="off"
-                      maxLength={3}
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      maxLength={roll.extraRoom}
                       disabled={busy !== null}
-                      error={typedBonus?.ok === false}
-                      onChange={(e) => setInput({ bonus: e.target.value })}
-                      style={{ width: BONUS_FIELD_WIDTH, flex: "none", textAlign: "center" }}
+                      onChange={(e) => setInput({ extra: e.target.value })}
+                      style={{ width: EXTRA_FIELD_WIDTH, flex: "1 1 auto" }}
                     />
-                  ) : null}
-                  <Input
-                    aria-label={`Extra dice for ${name}`}
-                    value={inputs.extra}
-                    placeholder="+1d4"
-                    enterKeyHint="go"
-                    autoComplete="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    maxLength={roll.extraRoom}
-                    disabled={busy !== null}
-                    onChange={(e) => setInput({ extra: e.target.value })}
-                    style={{ width: EXTRA_FIELD_WIDTH, flex: "none" }}
-                  />
+                  </span>
                 </div>
                 {waitsFor ? (
                   <span id={whyId} style={VISUALLY_HIDDEN}>
@@ -1023,6 +1034,16 @@ function CreatureAnswer(props: {
     </div>
   );
 }
+
+/**
+ * The card's header at a phone's foot pads its content the pill's room
+ * above and, once its fill sticks, the same below, so its question and
+ * Later stand in the middle of the fill that covers what scrolls under it.
+ */
+const HEADER_PAD = GRABBER_ROOM;
+
+/** How far the question stands under Later's top: its first line, 16 px at tight leading, centered on Later's 44 px. */
+const QUESTION_DROP = (theme.touch - theme.font.input * theme.leading.tight) / 2;
 
 /** The bonus field, as wide as "-20" in the 16 px field (Appendix A: 64 px). */
 const BONUS_FIELD_WIDTH = 64;
