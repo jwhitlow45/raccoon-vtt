@@ -19,7 +19,7 @@ import { dragLabel, remoteReading, type DragRead, type SpeedLeft, type Speeds } 
 import { Pill, PillStack } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
-import { heldKey, walkShown, walkText, type WalkInput } from "./walkRuler.ts";
+import { heldKey, legReading, walkShown, walkText, type WalkInput } from "./walkRuler.ts";
 import { useTrapCrossing } from "../traps/Crossing.tsx";
 
 /**
@@ -173,9 +173,10 @@ function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rul
  * route the creature would walk, between its footprint's centers, with a
  * dot at each stop, each leg's cost, and "Walking 40 ft" at the end with
  * what terrain added. A leg with no route runs straight in red, "No way
- * through". While a leg's search runs it is drawn straight, and the total
- * keeps the last walk (walkShown). Past the shared loading delay the leg
- * waits grey and the label says "Finding the way…", as a drag's does.
+ * through". While a leg's search runs it is drawn straight, and its cost
+ * and the total keep the last walk's (legReading, walkShown). Past the
+ * shared loading delay the leg waits grey with no cost, and the label says
+ * "Finding the way…", as a drag's does.
  */
 function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean; live?: boolean }) {
   const { stops, walk, scale, color } = props;
@@ -195,12 +196,13 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
         const stroke = leg.searching && shown.finding ? theme.color.textMuted : leg.none ? theme.color.danger : color;
         const a = pts[0]!;
         const b = pts[pts.length - 1]!;
-        const labelled = !leg.searching && (leg.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX));
+        const read = legReading(m, i, held, shown.finding);
+        const labelled = read !== null && (read.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX));
         return (
           <Group key={i}>
             <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
             <Line points={flat} stroke={stroke} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={props.kept ? undefined : [10, 6]} perfectDrawEnabled={false} />
-            {labelled ? <Pill x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} scale={scale} value={leg.none ? "No way through" : formatFeet(leg.ft)} size="screen" color={stroke} small /> : null}
+            {labelled ? <Pill x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} scale={scale} value={read.none ? "No way through" : formatFeet(read.ft)} size="screen" color={read.none ? theme.color.danger : stroke} small /> : null}
           </Group>
         );
       })}

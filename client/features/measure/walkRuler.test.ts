@@ -7,7 +7,7 @@ import { P1, reveal, template, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
 import { keptDrawing, keptStops, tokenStop, type RulerStop } from "./ruler.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
-import { heldKey, measureWalk, nextHeld, saveWalk, savedWalk, walkShown, walkText, type HeldWalk, type WalkMeasure } from "./walkRuler.ts";
+import { heldKey, legReading, measureWalk, nextHeld, saveWalk, savedWalk, walkShown, walkText, type HeldWalk, type WalkMeasure } from "./walkRuler.ts";
 
 /** The ruler's walking mode (docs/design-v1-movement.md 3.3). */
 
@@ -337,6 +337,29 @@ describe("a walking ruler while its walk is searched", () => {
       assert.equal(shown.finding, m.searching && slow, `frame ${frame} waits at the wrong time`);
       if (shown.reading) assert.equal(shown.reading.searching, false, "a reading is always a finished walk");
     }
+  });
+});
+
+describe("a walking ruler's leg costs while a stop is dragged (review LP2L2-P3-4)", () => {
+  const leg = (ft: number, extra: { searching?: true; none?: boolean } = {}) => ({ from: { x: 0, y: 0 }, to: { x: 4, y: 0 }, corners: [], ft, none: extra.none ?? false, ...(extra.searching ? { searching: true as const } : {}) });
+  const held: WalkMeasure = { legs: [leg(20), leg(15), leg(10, { none: true })], totalFt: 45, extra: null, size: { w: 1, h: 1 }, searching: false };
+  const dragging: WalkMeasure = { legs: [leg(20), leg(0, { searching: true }), leg(0, { searching: true }), leg(0, { searching: true })], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: true };
+
+  test("a found leg reads its own cost", () => {
+    assert.equal(legReading(dragging, 0, held, false), dragging.legs[0]);
+    assert.equal(legReading(dragging, 0, held, true), dragging.legs[0], "and still once the search is slow");
+  });
+
+  test("a leg still searching keeps the held walk's leg of the same index, its \"No way through\" too, until the delay passes", () => {
+    assert.equal(legReading(dragging, 1, held, false)?.ft, 15);
+    assert.equal(legReading(dragging, 2, held, false)?.none, true);
+    assert.equal(legReading(dragging, 1, held, true), null, "past the delay it waits with no cost");
+  });
+
+  test("a searching leg the held walk did not have, or a first search, reads nothing", () => {
+    assert.equal(legReading(dragging, 3, held, false), null);
+    assert.equal(legReading(dragging, 1, null, false), null);
+    assert.equal(legReading(dragging, 9, held, false), null);
   });
 });
 
