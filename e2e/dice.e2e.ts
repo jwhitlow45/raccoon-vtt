@@ -543,7 +543,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.equal((third.rolls[0] as DiceRoll).faces.length, 1);
   });
 
-  test("6. at 375 x 667, at 100% and 130%, the sticky line, the field, Roll, the quick dice with the d20 first and the choices are in view", async () => {
+  test("6. at 375 x 667, at 100% and 130%, the sticky line, the field, Roll, the quick dice with the d20 first and the Next roll group's Adv, Dis and Secret are in view", async () => {
     for (const scale of [1, 1.3]) {
       await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
       await player.goto(`${server.origin}/r/${run.roomId}`);
@@ -551,9 +551,22 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await openDicePhone(player);
       await rollWithEnter(player, playerSocket, "1d20+3");
       await settled(player);
-      for (const selector of ["[data-dice-last]", 'input[aria-label="Dice formula"]', 'button:has-text("Roll")', '[aria-label="Quick dice"]', 'button[aria-label="Add a d20"]', '[role="group"][aria-label="For the next roll"]']) {
+      const modes = '[role="group"][aria-label="For the next roll"]';
+      const secret = `${modes} button[aria-label="Only the DM sees it"]`;
+      const sheetView = await player.locator('dialog[data-rvtt-sheet][aria-label="Dice"] [data-pane-body]').boundingBox();
+      assert.ok(sheetView, "the Dice sheet's body");
+      for (const selector of ["[data-dice-last]", 'input[aria-label="Dice formula"]', 'button:has-text("Roll")', '[aria-label="Quick dice"]', 'button[aria-label="Add a d20"]', `${modes} button[aria-label="Advantage"]`, `${modes} button[aria-label="Disadvantage"]`, secret]) {
         assert.ok(await inView(player, selector), `${selector} in view at ${Math.round(scale * 100)}%`);
+        // Inside the sheet's first screen too, where nothing covers it. At 130% the row has no room for Secret beside the pair, so it wraps under them, one short scroll down (docs/design-v1-dice-pass.md 4).
+        if (scale !== 1 && selector === secret) continue;
+        const box = (await player.locator(selector).first().boundingBox())!;
+        assert.ok(box.y >= sheetView.y - 1 && box.y + box.height <= sheetView.y + sheetView.height + 1, `${selector} inside the sheet's view at ${Math.round(scale * 100)}%: ${box.y}-${box.y + box.height} in ${sheetView.y}-${sheetView.y + sheetView.height}`);
       }
+      const pair = (await player.locator(`${modes} button[aria-label="Advantage"]`).boundingBox())!;
+      const own = (await player.locator(secret).boundingBox())!;
+      const row = (await player.locator(modes).boundingBox())!;
+      if (scale === 1) assert.ok(Math.abs(own.y - pair.y) <= 1, "at 100% Secret shares the pair's line");
+      else assert.ok(own.y >= pair.y + pair.height && Math.abs(own.width - row.width) <= 1, `at 130% Secret wraps under the pair and fills its line: ${JSON.stringify({ own, row })}`);
       await shots.take(player, `dice-phone-${Math.round(scale * 100)}`);
     }
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
@@ -628,6 +641,36 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       return line && head && head.y >= line.y + line.height - 1 && head.y < line.y + line.height + 40 ? true : null;
     });
     await shots.take(player, "dice-sticky-opens-row");
+  });
+
+  test("dp-9b. a tap on the sticky line opens a folded Recent rolls for the page with the row in view, writing nothing, and again after Pat folds it once more", async () => {
+    const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+    const sticky = player.locator("[data-dice-last]");
+    const fold = sheet.locator("[data-dice-recent] [data-group-fold]");
+    const stored = () => player.evaluate(() => (JSON.parse(localStorage.getItem("rvtt.diceFolds") ?? "{}") as Record<string, boolean>).recent);
+    for (const round of [1, 2]) {
+      await fold.scrollIntoViewIfNeeded();
+      await fold.tap();
+      await waitFor(`Recent rolls folded (${round})`, async () => ((await fold.getAttribute("aria-expanded")) === "false" ? true : null));
+      assert.equal(await sheet.locator("[data-roll-row]").count(), 0, "folded, no row is drawn");
+      assert.equal(await stored(), false, "Pat's own fold is stored");
+      await sheet.locator("[data-pane-body]").evaluate((el) => (el.scrollTop = 0));
+      await sticky.getByRole("button", { name: "Show this roll in Recent rolls" }).tap();
+      await waitFor(`Recent rolls open again (${round})`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null));
+      const row = sheet.locator("[data-roll-row]").first();
+      // Its head under the sticky line and in sight, or the whole row in view where it fits.
+      await waitFor(`the row in view (${round})`, async () => {
+        const line = await sticky.boundingBox();
+        const head = await row.boundingBox();
+        const body = await sheet.locator("[data-pane-body]").boundingBox();
+        if (!line || !head || !body) return null;
+        const under = head.y >= line.y + line.height - 1;
+        const shows = head.y + head.height <= body.y + body.height + 1 || head.y < line.y + line.height + 40;
+        return under && shows ? true : null;
+      });
+      assert.equal(await stored(), false, "the app's opening writes nothing");
+      await shots.take(player, `dp-dice-sticky-opens-folded-${round}`);
+    }
   });
 
   test("10. viewing as Pat, Roll waits and says a preview sends no rolls, as the options do, not that it needs a connection (LP7-DICE-7)", async () => {

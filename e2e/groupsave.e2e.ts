@@ -24,6 +24,12 @@ import { ConsoleWatch, diceFoldsOpen, OpSocket, reopenRoom, Shots, SocketWatch, 
  * The player's card has no Roll of its own in this tree, so Bree's player
  * types her total, the card's other way to answer.
  *
+ * The dice pass's part (docs/design-v1-dice-pass.md 5.3, steps `dp-`):
+ * three goblins selected show one card with their names and cells that say
+ * "DEX" under "Saves for 3", and their shared Scimitar keeps its hits and
+ * Roll damage through folds and selection changes that keep two or more,
+ * and loses them once fewer than two are selected.
+ *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-two, one file
  * after another as the others. The other environment variables are the
  * smoke run's (smoke.e2e.ts).
@@ -114,6 +120,71 @@ function sheetView(page: Page): Promise<{ top: number; bottom: number }> {
     const r = body.getBoundingClientRect();
     return { top: r.top, bottom: r.bottom };
   });
+}
+
+/** The DM's selection made exactly these goblins, by Multi-select, from none. */
+async function selectGoblins(which: readonly number[]): Promise<void> {
+  if (await diceSheet(dm).isVisible()) await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
+  const none = dm.getByRole("button", { name: "Deselect all" }).first();
+  if (await none.isVisible()) {
+    await none.tap();
+    await waitFor("the selection let go", async () => ((await dm.getByRole("button", { name: "Deselect all" }).count()) === 0 ? true : null));
+  }
+  const done = dm.getByRole("button", { name: "Done", exact: true });
+  if (await done.isVisible()) await done.tap();
+  // A toast from the steps before, such as Fire Breath's applied damage, may stand over the goblins' cells.
+  await dismissToasts(dm);
+  const first = run.goblins[which[0]!]!;
+  await tapCell(dm, run.bounds, first);
+  const bar = dm.getByRole("dialog", { name: `${first.name} actions` });
+  await bar.waitFor();
+  await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+  for (const i of which.slice(1)) await tapCell(dm, run.bounds, run.goblins[i]!);
+}
+
+/** Taps away the toasts the steps before left over the map, such as Fire Breath's applied damage. */
+async function dismissToasts(page: Page): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    const toast = page.locator("button[data-toast], div[data-toast] > button").filter({ visible: true });
+    if ((await toast.count()) === 0) return;
+    await toast.first().tap({ timeout: 1000 }).catch(() => {});
+  }
+}
+
+/** Taps these goblins on the map in Multi-select, each in or out of the selection, with the Dice sheet closed, since on a phone it stands over them. */
+async function pickOnMap(which: readonly number[]): Promise<void> {
+  if (await diceSheet(dm).isVisible()) {
+    await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
+    await diceSheet(dm).waitFor({ state: "hidden" });
+  }
+  await dismissToasts(dm);
+  for (const i of which) await tapCell(dm, run.bounds, run.goblins[i]!);
+}
+
+/** How many tokens the DM's page has selected: the group window's "N selected", else 1 for one token's window, else 0. */
+function dmSelection(): Promise<number> {
+  return dm.evaluate(() => {
+    type El = { getAttribute(n: string): string | null; textContent: string | null };
+    const d = (globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<El> } }).document;
+    const bars = Array.from(d.querySelectorAll('[role="dialog"][data-bar-mode]'));
+    for (const bar of bars) {
+      const count = /(\d+) selected/.exec(bar.textContent ?? "");
+      if (count) return Number(count[1]);
+    }
+    return bars.some((e) => / actions$/.test(e.getAttribute("aria-label") ?? "")) ? 1 : 0;
+  });
+}
+
+/** The Dice sheet's several-selected options, from the group bar's Roll unless the sheet already shows them. */
+async function openGroupRolls(): Promise<Locator> {
+  const sheet = diceSheet(dm);
+  if (!(await sheet.isVisible())) {
+    await dm.locator('[role="dialog"][data-bar-mode]').getByRole("button", { name: "Roll", exact: true }).tap();
+    await sheet.waitFor();
+  }
+  const rolls = sheet.locator('section[aria-label="Group rolls"]');
+  await rolls.waitFor();
+  return rolls;
 }
 
 /** The damage a creature takes from this save's parts: each part halved on its own on a pass, as 5.4 has it. */
@@ -466,10 +537,107 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const sheet = diceSheet(player);
     await sheet.waitFor();
     const options = sheet.locator("[data-roll-options]");
-    await options.getByText(`Rolls for ${run.wolf.name}`).waitFor();
+    await sheet.getByRole("region", { name: `Rolls for ${run.wolf.name}` }).waitFor();
     await options.getByRole("button", { name: /^Bite/ }).first().waitFor();
     await shots.take(player, "groupsave-player-wolf-options");
     await sheet.getByRole("button", { name: "Close Dice" }).tap();
+  });
+
+  test("dp-gs1. three goblins selected: the card says 3 selected with their names, and a save's cell reads DEX under Saves for 3, named DEX save for 3, on one line at 130%", async () => {
+    await selectGoblins([0, 1, 2]);
+    const rolls = await openGroupRolls();
+    const card = rolls.locator("[data-dice-card]");
+    await card.getByRole("heading", { name: "3 selected" }).waitFor();
+    await card.getByText(run.goblins.map((g) => g.name).join(", "), { exact: true }).waitFor();
+    await rolls.getByText("Saves for 3", { exact: true }).waitFor();
+    for (const [kind, a] of [["save", "DEX"], ["save", "CHA"], ["check", "STR"]] as const) {
+      const cell = rolls.getByRole("button", { name: `${a} ${kind} for 3`, exact: true });
+      assert.equal((await cell.textContent())?.trim(), a, `${a} ${kind}'s words`);
+      const box = await cell.boundingBox();
+      // One line: the 44 px floor at 130%, and a pixel for rounding.
+      assert.ok(box && box.height <= 44 * 1.3 + 1, `${a} ${kind} for 3 is ${box?.height} px tall`);
+    }
+    await shots.take(dm, "dp-groupsave-several-card-130");
+  });
+
+  test("dp-gs2. Shared attacks keep their hits and Roll damage through a fold before the answer, a fold between Attack and Damage, and each again across a selection change that keeps two or more", async () => {
+    const rolls = await openGroupRolls();
+    const fold = rolls.locator("[data-group-fold]", { hasText: "Shared attacks" });
+    const attack = (n: number) => rolls.getByRole("button", { name: `Scimitar for ${n}`, exact: true });
+    await attack(3).scrollIntoViewIfNeeded();
+    const ac = attack(3).locator("xpath=../..").getByLabel("Target's AC");
+    await ac.fill("1");
+    await ac.press("Enter");
+
+    /** Taps the attack and folds Shared attacks in one task, so the fold lands before any answer can. */
+    const attackThenFold = async (n: number): Promise<DiceRoll[]> => {
+      const before = diceLines(dmSocket.state?.log).length;
+      await attack(n).evaluate((button, foldName) => {
+        type El = { click(): void; textContent: string | null; closest(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
+        const root = (button as unknown as El).closest('section[aria-label="Group rolls"]')!;
+        const folds = Array.from(root.querySelectorAll("[data-group-fold]"));
+        (button as unknown as El).click();
+        folds.find((f) => f.textContent?.startsWith(foldName))!.click();
+      }, "Shared attacks");
+      assert.equal(await fold.getAttribute("aria-expanded"), "false", "folded in the attack's own task");
+      const line = await waitFor("the shared attack's line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.length === 3 && l.rolls.every((r) => r.label === "Scimitar")) ?? null);
+      return line.rolls;
+    };
+    const hitsOf = (rolls: DiceRoll[]) => rolls.filter((r) => r.faces[0] !== 1).length;
+    const hitWords = (n: number) => `Roll damage for ${n} hit${n === 1 ? "" : "s"}`;
+    /** Folded, the row says the hits that wait. Opened, the results and Roll damage are back. */
+    const reopened = async (hits: number, why: string) => {
+      if (hits > 0) await fold.getByText(`Scimitar: ${hits} hit${hits === 1 ? "" : "s"}`, { exact: false }).waitFor();
+      await fold.tap();
+      await waitFor(`Shared attacks open (${why})`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null));
+      await rolls.getByText(/^\d+ (hit|miss|Critical Hit)(, \d+ (hit|miss|Critical Hit)){2}$/).waitFor();
+      if (hits > 0) await rolls.getByRole("button", { name: hitWords(hits), exact: true }).waitFor();
+    };
+
+    // Folded before the answer.
+    let sent = await attackThenFold(3);
+    let hits = hitsOf(sent);
+    await reopened(hits, "before the answer");
+    await shots.take(dm, "dp-groupsave-shared-before-answer-130");
+    // Folded between Attack and Damage.
+    await fold.tap();
+    await reopened(hits, "between Attack and Damage");
+
+    // Again before the answer, with Goblin 3 let go while it is folded: two stay selected, and the hits stay the three sent.
+    // The sheet stands over the goblins on a phone, so the DM closes it to pick on the map and opens it again, which keeps the attack too.
+    sent = await attackThenFold(3);
+    hits = hitsOf(sent);
+    await pickOnMap([2]);
+    await openGroupRolls();
+    await rolls.locator("[data-dice-card]").getByRole("heading", { name: "2 selected" }).waitFor();
+    await reopened(hits, "after a selection change, before the answer");
+    await attack(2).waitFor();
+    await shots.take(dm, "dp-groupsave-shared-selection-change-130");
+
+    // Between Attack and Damage, with Goblin 3 taken back.
+    await fold.tap();
+    await pickOnMap([2]);
+    await openGroupRolls();
+    await rolls.locator("[data-dice-card]").getByRole("heading", { name: "3 selected" }).waitFor();
+    await reopened(hits, "after a selection change, between Attack and Damage");
+    await attack(3).waitFor();
+    if (hits > 0) {
+      const before = diceLines(dmSocket.state?.log).length;
+      await rolls.getByRole("button", { name: hitWords(hits), exact: true }).tap();
+      await waitFor("the hits' damage line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.every((r) => r.label?.startsWith(`Scimitar damage for ${hits} hits`))) ?? null);
+      await rolls.getByText(/^\d+ damage\. Every HP entry offers it as a chip\.$/).waitFor();
+    }
+
+    // Fewer than two selected ends the view of several, and its hits go with it.
+    await pickOnMap([2, 1]);
+    await waitFor("one goblin selected", async () => ((await dmSelection()) === 1 ? true : null));
+    await pickOnMap([1, 2]);
+    await openGroupRolls();
+    await rolls.locator("[data-dice-card]").getByRole("heading", { name: "3 selected" }).waitFor();
+    await attack(3).waitFor();
+    assert.equal(await rolls.getByRole("button", { name: /^Roll damage for/ }).count(), 0, "the old hits are gone");
+    assert.equal(await rolls.getByText(/^\d+ (hit|miss|Critical Hit),/).count(), 0, "the old results are gone");
+    await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
   });
 
   test("8. nothing went wrong in the browsers", () => {

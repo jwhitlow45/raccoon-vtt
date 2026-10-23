@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page } from "playwright-core";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -79,6 +79,8 @@ const SCALES = [1, 1.3];
 /** The sizes where the sweep also measures the older screens a trap's flows open (live play 17): Pat's ask card and Request a roll on phones, and the group save page there and on a computer. */
 const PHONE_ROOTS = new Set(["390x844", "320x568"]);
 const GROUP_SAVE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
+/** The sizes where the sweep measures the Dice panel's pass (docs/design-v1-dice-pass.md 11.3). */
+const DICE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
 let server: Server;
 let browser: Browser;
@@ -110,6 +112,8 @@ const run = {
     prisoner: randomUUID(),
     boss: randomUUID(),
     mule: randomUUID(),
+    dragon: randomUUID(),
+    wolf: randomUUID(),
   },
   traps: { pit: randomUUID(), needle: randomUUID(), door: randomUUID(), wire: randomUUID() },
 };
@@ -168,6 +172,17 @@ const SOME_SIZES: Record<string, number> = {
   // The token bar's Larger, on the upright phones, where the bar spans, and the group's.
   "window-larger": 6,
   "group-larger": 6,
+  // The dice pass's roots (docs/design-v1-dice-pass.md 11.3), at the three dice sizes at 100% and 130%.
+  "dp-modes": 6,
+  "dp-card-dragon": 6,
+  "dp-groups-dragon": 6,
+  "dp-recent": 6,
+  "dp-last": 6,
+  "dp-several": 6,
+  "dp-open-save": 6,
+  "dp-card-tabs": 6,
+  "dp-card-wolf": 6,
+  "dp-groups-wolf": 6,
 };
 
 /**
@@ -698,6 +713,134 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
 
   if (headers.length === 0) await sweep.missing(page, "headers", "no header place was read");
   await sweep.add(page, "headers", headerLines(headers, `${sweep.at} headers`));
+}
+
+/** Where the Adult Black Dragon stands while the dice screens measure it: a huge token's corner, its cells free of the traps and walls. */
+const DRAGON_AT = { x: 5, y: 10 };
+
+/** The Dice panel: the side panel's tab where the page has one, else the Panels sheet's Dice. */
+async function openDice(page: Page): Promise<Locator> {
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+  if (await visible(sheet)) return sheet;
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if (await visible(tabs)) {
+    await openSideTab(page, "Dice");
+    return page.getByRole("tabpanel", { name: sideTabName("Dice") });
+  }
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Dice/ }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/** Closes the Dice sheet where it stands over the map, so the map takes taps again. */
+async function closeDiceSheet(page: Page): Promise<void> {
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+  if (!(await visible(sheet))) return;
+  await sheet.getByRole("button", { name: "Close Dice", exact: true }).click();
+  await sheet.waitFor({ state: "hidden" });
+}
+
+/**
+ * The dice pass's roots on Pat's page (docs/design-v1-dice-pass.md 11.3):
+ * his creatures' tabs across the card, Thorn's wolf picked, its card, and
+ * every group of its options unfolded. The wolf joins Pat's creatures for
+ * these screens only, so no other screen meets it.
+ */
+async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
+  await ops.send({ t: "token.create", token: { id: run.ids.wolf, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Wolf", x: 2, y: 2, disposition: "ally", ownerIds: [run.patId], companion: { of: run.ids.thornChar, turn: "shared" }, actor: { inline: actor({ srdId: "wolf" }) } } });
+  await waitFor("the wolf on Pat's page", () => (dmSocket.state?.tokens[run.ids.wolf] ? true : null));
+  try {
+    const host = await openDice(page);
+    const tabs = host.getByRole("tablist", { name: "Roll for" });
+    if (!(await showsWithin(tabs, 4_000))) return sweep.missing(page, "dp-card-tabs", "Pat's creatures showed no tabs");
+    await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
+    await host.getByRole("region", { name: "Rolls for Thorn" }).waitFor();
+    await sweep.measure(page, "dp-card-tabs", host.locator("[data-dice-card]"));
+    await tabs.getByRole("tab", { name: "Wolf", exact: true }).click();
+    await host.getByRole("region", { name: "Rolls for Wolf" }).waitFor();
+    await host.getByRole("button", { name: /^Bite/ }).first().waitFor();
+    await unfoldAll(host.locator("[data-roll-options]"));
+    await sweep.measure(page, "dp-card-wolf", host.locator("[data-dice-card]"));
+    await sweep.measure(page, "dp-groups-wolf", host.locator("[data-roll-options] [data-panel-group]"));
+    await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
+    await closeDiceSheet(page);
+  } finally {
+    await ops.send({ t: "token.delete", tokenId: run.ids.wolf });
+  }
+}
+
+/**
+ * The dice pass's roots on the DM's page (docs/design-v1-dice-pass.md 11.3):
+ * an Adult Black Dragon's roll modes, card and every group unfolded,
+ * Recent rolls, the sticky line after a roll, three selected with their
+ * card and groups, and the notice of a group save left open. The dragon
+ * stands on the map for these screens only.
+ */
+async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
+  await ops.send({ t: "token.create", token: { id: run.ids.dragon, sceneId: run.sceneId, size: "huge", visibility: "all", kind: "monster", name: "Adult Black Dragon", ...DRAGON_AT, disposition: "hostile", actor: { inline: actor({ srdId: "adult-black-dragon" }) } } });
+  await waitFor("the dragon on the DM's page", () => (dmSocket.state?.tokens[run.ids.dragon] ? true : null));
+  try {
+    // The goblin's group window before this left Multi-select on, where a tap adds to the selection and Multi-select's own button turns it off.
+    await escapeAll(page);
+    const none = page.getByRole("button", { name: "Deselect all" }).first();
+    if (await visible(none)) await none.click();
+    const done = page.getByRole("button", { name: "Done", exact: true });
+    if (await visible(done)) await done.click();
+    const bar = await selectToken(page, "Adult Black Dragon", { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+    if (!bar) return sweep.missing(page, "dp-card-dragon", "a tap on the dragon opened no window");
+    await bar.getByRole("button", { name: "Roll", exact: true }).click();
+    const host = await openDice(page);
+    await host.getByRole("region", { name: "Rolls for Adult Black Dragon" }).waitFor();
+    await host.getByRole("button", { name: /^Rend/ }).first().waitFor();
+    await unfoldAll(host.locator("[data-roll-options]"));
+    await unfoldAll(host.locator("[data-dice-recent]"));
+    await sweep.measure(page, "dp-modes", host.locator("[data-dice-modes]"));
+    await sweep.measure(page, "dp-card-dragon", host.locator("[data-dice-card]"));
+    await sweep.measure(page, "dp-groups-dragon", host.locator("[data-roll-options] [data-panel-group]"));
+    await sweep.measure(page, "dp-recent", host.locator("[data-dice-recent]"));
+    const field = host.getByLabel("Dice formula", { exact: true });
+    await field.fill("1d20+5 Stealth");
+    await field.press("Enter");
+    await host.locator('[data-dice-last] [aria-label="Show this roll in Recent rolls"]').waitFor();
+    await sweep.measure(page, "dp-last", host.locator("[data-dice-last]"));
+
+    // Three selected: the dragon, still selected with its window open, the goblin and the kobold. A second tap on the dragon would let it go.
+    await closeDiceSheet(page);
+    const again = page.getByRole("dialog", { name: "Adult Black Dragon actions" });
+    if (!(await showsWithin(again, 3_000))) return sweep.missing(page, "dp-several", "the dragon's window closed with the Dice sheet");
+    await again.getByRole("button", { name: "Multi-select", exact: true }).click();
+    // Two more creatures where the map shows them: the dragon's window covers some cells at some sizes.
+    let added = 0;
+    for (const cell of [{ x: 4, y: 4 }, { x: 9, y: 3 }, { x: 8, y: 8 }, { x: 15, y: 11 }, { x: 3, y: 7 }]) {
+      if (added === 2) break;
+      if (!(await canvasAt(page, cell))) continue;
+      await tapCell(page, BOUNDS, cell);
+      added++;
+    }
+    const group = page.locator('[role="dialog"][data-bar-mode]').filter({ hasText: /\d+ selected/ }).first();
+    if (!(await showsWithin(group, 3_000))) return sweep.missing(page, "dp-several", `Multi-select and ${added} taps opened no group window`);
+    await group.getByRole("button", { name: "Roll", exact: true }).click();
+    const several = await openDice(page);
+    const rolls = several.locator('section[aria-label="Group rolls"]');
+    if (!(await showsWithin(rolls.getByRole("heading", { name: /^\d+ selected$/ }), 5_000))) return sweep.missing(page, "dp-several", "the group window's Roll showed no several-selected card");
+    await unfoldAll(rolls);
+    await sweep.measure(page, "dp-several", rolls);
+
+    // A group save set up and left open: the notice above the card.
+    await rolls.getByRole("button", { name: "Set up a group save", exact: true }).click();
+    // The page's back button, in the sheet's header on a phone and in the side panel's header on a computer.
+    await page.getByRole("button", { name: "Back to Dice" }).filter({ visible: true }).first().click();
+    await sweep.measure(page, "dp-open-save", several.locator("[data-open-group-save]"));
+    await several.locator("[data-open-group-save]").getByRole("button", { name: "Open", exact: true }).click();
+    await several.getByRole("button", { name: "Discard", exact: true }).first().click();
+    await several.locator("[data-open-group-save]").waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Deselect all" }).first().click();
+    await closeDiceSheet(page);
+    await escapeAll(page);
+  } finally {
+    await ops.send({ t: "token.delete", tokenId: run.ids.dragon });
+  }
 }
 
 /** Request a roll as the needle trap's Ask to disarm opens it over its pane, closed again by Cancel. */
@@ -1507,12 +1650,14 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
           pat.setDefaultTimeout(10_000);
           await openAt(pat, size, scale);
           await patScreens(sweep, pat, size);
+          if (DICE_AT.has(size.name)) await patDiceScreens(sweep, pat);
           await pat.goto("about:blank");
           const page = await dmPageFor(size);
           page.setDefaultTimeout(10_000);
           await openAt(page, size, scale);
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
+          if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
         } finally {
           sweep.tally();
