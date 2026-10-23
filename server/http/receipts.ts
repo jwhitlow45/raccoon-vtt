@@ -43,7 +43,7 @@ export function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, deps: 
           parts.push({ part: row.part, state: "refused", code: row.code ?? "invalid", message: row.message ?? "" });
           continue;
         }
-        const entries = actor.committedLines(row.seq) ?? (await readLogLines(kit.pool, roomId, row.seq));
+        const entries = actor.committedLines(row.seq, viewer) ?? (await readLogLines(kit.pool, roomId, row.seq));
         parts.push({ part: row.part, state: "committed", seq: row.seq, lines: actor.projectLog(entries, viewer, scene) });
       }
       reply.header("cache-control", "no-store");

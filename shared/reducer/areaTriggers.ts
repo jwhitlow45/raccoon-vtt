@@ -1,4 +1,4 @@
-import { countedApart } from "../logRings.ts";
+import { eventLines } from "../logRings.ts";
 import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
@@ -82,27 +82,38 @@ function inside(state: RoomState, template: AreaTemplate, candidates: readonly T
 
 /**
  * Whether the log already reminded about this creature and area in the turn
- * that is running, since the newest turn line: for any trigger when the area
- * hits once a turn, else for this one.
+ * that is running: for any trigger when the area hits once a turn, else for
+ * this one.
  *
- * A reminder only the DM or only some players get counts past the shared
- * lines of its op (Tx.addLog), so it may sort after the turn line its op
- * wrote. The only one an op writes before its turn line is a turn end's
- * (remindTurnEnd), for the turn that ended there, so that one is left to
- * the turn before. An op
- * stored before op version 19 numbered every line in order (`apart`
- * false), so it replays without that rule, as the build that stored it ran.
+ * The turn runs from the op that wrote the newest turn line, read one line
+ * per event (eventLines) and by op, since a line only the DM or only some
+ * players get counts past the shared lines of its op (Tx.addLog) and may
+ * sort before or after the turn line. The only reminder an op writes before
+ * its turn line is a turn end's (remindTurnEnd), for the turn that ended
+ * there, so that one is left to the turn before. An op stored before op
+ * version 19 numbered every line in order (`apart` false), so it replays
+ * from the newest turn line's place, as the build that stored it ran.
  */
 function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, tokenId: string, trigger: AreaTrigger, apart: boolean): boolean {
-  let start = log.length - 1;
-  while (start >= 0 && log[start]!.data?.type !== "turn") start--;
-  const turnSeq = start >= 0 ? seqOf(log[start]!.id) : null;
-  for (let i = log.length - 1; i > start; i--) {
-    const line = log[i]!;
-    const data = line.data;
-    if (data?.type !== "area" || data.templateId !== template.id || data.tokenId !== tokenId) continue;
-    if (apart && data.trigger === "turnEnd" && seqOf(line.id) === turnSeq && countedApart(line.id)) continue;
-    if (template.oncePerTurn === true || data.trigger === trigger) return true;
+  const reminded = (data: LogEntry["data"]) => data?.type === "area" && data.templateId === template.id && data.tokenId === tokenId && (template.oncePerTurn === true || data.trigger === trigger);
+  if (!apart) {
+    for (let i = log.length - 1; i >= 0; i--) {
+      const data = log[i]!.data;
+      if (data?.type === "turn") return false;
+      if (reminded(data)) return true;
+    }
+    return false;
+  }
+  const lines = eventLines(log);
+  let turn = lines.length - 1;
+  while (turn >= 0 && lines[turn]!.data?.type !== "turn") turn--;
+  const turnSeq = turn >= 0 ? Number(seqOf(lines[turn]!.id)) : null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    const seq = Number(seqOf(line.id));
+    if (turnSeq !== null && seq < turnSeq) break;
+    if (seq === turnSeq && line.data?.type === "area" && line.data.trigger === "turnEnd") continue;
+    if (reminded(line.data)) return true;
   }
   return false;
 }

@@ -1,5 +1,6 @@
 import { parseFormula } from "../dice/formula.ts";
 import { keys } from "../keys.ts";
+import { eventLines } from "../logRings.ts";
 import type { CastAsk, CastEnd, CastRolled, LogEvent, Token } from "../model.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
@@ -64,7 +65,9 @@ function castLine(ask: CastAsk): Extract<LogEvent, { type: "cast" }> {
 
 /**
  * The caster's damage roll, read from the log the op meets (5.3), which
- * replay rebuilds the same. Every line under the roll's tag in `part`
+ * replay rebuilds the same, one line per roll (eventLines), so a roll that
+ * only its caster's players read counts once, however many hold a copy of
+ * it. Every line under the roll's tag in `part`
  * order, a line without one being part 0 as the receipts read it, when the
  * lines hold each part from 0 to `parts` less one exactly once and none
  * past it, since the splitter puts a roll past 100 dice into several
@@ -78,7 +81,7 @@ function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[]
   const damage = ask.damage;
   if (!damage || !caster) return undefined;
   const parts = new Map<number, Extract<LogEvent, { type: "dice" }>>();
-  for (const entry of tx.state.log) {
+  for (const entry of eventLines(tx.state.log)) {
     const data = entry.data;
     if (data?.type !== "dice" || data.tag !== damage.tag) continue;
     const part = data.part ?? 0;

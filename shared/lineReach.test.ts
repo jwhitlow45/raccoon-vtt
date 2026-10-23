@@ -7,13 +7,14 @@ import { projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp, type Applied } from "./reducer.ts";
 import { Tx } from "./reducer/tx.ts";
-import { AT, DM, P1, P2, entry, env, room, template, token } from "./testutil.ts";
+import { AT, DM, P1, P2, castTable, entry, env, room, template, token } from "./testutil.ts";
 
 /**
- * A log line's readers and its parts' readers, fixed when its op is done
- * by the real projection of the room (shared/project.ts lineReach). Every
- * case runs real ops, paired with the same room where the one rule that
- * decides it is the other way.
+ * A log line's readers and its parts' readers, fixed when it is written by
+ * the real projection of the room (shared/project.ts lineReach), and the
+ * reducer's reads of the log, one line per event (shared/logRings.ts
+ * eventLines). Every case runs real ops, paired with the same room where
+ * the one rule that decides it is the other way.
  */
 
 function run(state: RoomState, op: Op, who: Viewer = DM, seq = 2, opVersion?: number): Applied {
@@ -156,5 +157,54 @@ describe("a party line's copy is the line as its reader read it", () => {
     assert.equal(copy.data?.type === "turn" && copy.data.toSeen, undefined, "the copy holds what P2 read, which names no mark");
     const read = live(tx.state, P2).find((e) => e.id === copy.id)!.data as Extract<LogEvent, { type: "turn" }>;
     assert.equal(read.to, "e-hero", "and still names the row every player saw resume");
+  });
+});
+
+describe("the reducer reads the log one line per event (eventLines)", () => {
+  test("a damage roll for a caster two players play, which only they see, is read once, so the ask keeps it", () => {
+    const state = castTable();
+    state.characters["thorn-c"] = { ...state.characters["thorn-c"]!, ownerIds: ["p1", "p2"] };
+    state.tokens.thorn = { ...state.tokens.thorn!, visibility: "dm" };
+    const roll = rolled(state, { t: "dice.roll", tag: "dmg", to: "all", rolls: [{ formula: "8d6", label: "Fireball damage, Fire", creature: { tokenId: "thorn" } }] }, P1, 2);
+    assert.deepEqual(roll.log.filter((e) => lineAudience(e) === "party").map((e) => e.to), [["p1"], ["p2"]], "a copy for each player");
+    const askOp: Op = { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", damage: { tag: "dmg", parts: 1 } } };
+    const ask = run(roll.state, askOp, P1, 3);
+    assert.deepEqual(ask.state.casts.k1!.rolled, [{ formula: "8d6", total: 48, type: "fire" }]);
+    // The client replays the ask on Thorn's player's own projection (design 7.4), which holds their copy and no DM line.
+    const mine = projectState(roll.state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    assert.deepEqual(run(mine, askOp, P1, 3).state.casts.k1!.rolled, [{ formula: "8d6", total: 48, type: "fire" }]);
+  });
+
+  /**
+   * A goblin everyone sees inside a glyph that hits once a turn, at its
+   * turn's start and on entering, whose row is hidden from players and stays
+   * so on its turn: its turn line is the DM's, and the turn's start reminder
+   * is everyone's, numbered before it in the op.
+   */
+  function glyph(): RoomState {
+    const state = room();
+    state.meta = { ...state.meta, settings: { ...state.meta.settings, revealHiddenOnTurn: false } };
+    state.tokens.ogre = token("ogre", { name: "Ogre", x: 20, y: 5 });
+    state.tokens.g1 = token("g1", { name: "Goblin", number: 1, x: 5, y: 5 });
+    state.templates.glyph = template("glyph", { shape: "sphere", size: 10, origin: { x: 5.5, y: 5.5, z: 0 }, spell: "Glyph", ownerId: "dm1", triggers: ["turnStart", "enter"], oncePerTurn: true });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-ogre", entries: [entry("e-ogre", { tokenId: "ogre", value: 15 }), entry("e-g1", { tokenId: "g1", value: 10, tieOrder: 1, hidden: true })] };
+    return state;
+  }
+
+  test("an area that hits once a turn reminds once in a turn whose line sorts after the reminder, as before op version 19", () => {
+    for (const opVersion of [18, undefined]) {
+      let state = glyph();
+      const reminders: string[] = [];
+      for (const [i, op] of ([{ t: "encounter.next" }, { t: "token.move", tokenId: "g1", x: 12, y: 5 }, { t: "token.move", tokenId: "g1", x: 5, y: 5 }] as Op[]).entries()) {
+        const r = run(state, op, DM, 2 + i, opVersion);
+        state = r.state;
+        for (const e of eventLines(r.log)) if (e.data?.type === "area") reminders.push(e.data.trigger);
+      }
+      assert.deepEqual(reminders, ["turnStart"], `op version ${opVersion ?? "now"}`);
+      if (opVersion === undefined) {
+        const [area, turn] = eventLines(state.log).filter((e) => e.id.startsWith("2:"));
+        assert.deepEqual([area?.data?.type, turn?.data?.type, dmNumbered(turn!.id)], ["area", "turn", true], "the turn line sorts after the reminder");
+      }
+    }
   });
 });

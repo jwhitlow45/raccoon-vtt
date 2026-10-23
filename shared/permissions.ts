@@ -1,5 +1,6 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
+import { eventLines } from "./logRings.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
@@ -1028,9 +1029,10 @@ function typedInitiative(c: Check, row: InitEntry, value: number | null, roll: s
  */
 function rolledInitiative(state: RoomState, memberId: string, row: InitEntry, value: number, roll: string | undefined): boolean {
   if (roll === undefined) return false;
-  // Newest first, so the fight's start line ends the search: anything older is another fight's. A start the log no longer holds is older than every line it holds.
-  for (let i = state.log.length - 1; i >= 0; i--) {
-    const data = state.log[i]!.data;
+  // Newest first, one line per event, so the fight's start line ends the search: anything older is another fight's. A start the log no longer holds is older than every line it holds.
+  const lines = eventLines(state.log);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const data = lines[i]!.data;
     if (data?.type === "encounter" && data.action === "start") return false;
     if (data?.type !== "dice" || data.tag !== roll || data.by !== memberId) continue;
     const ok = data.rolls.some((r) => {

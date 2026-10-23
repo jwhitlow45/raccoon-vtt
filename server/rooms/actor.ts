@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
+import { holdsOp } from "#shared/logRings.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
@@ -718,11 +719,12 @@ export class RoomActor {
 
   /**
    * The lines a committed op of this seq wrote, `<seq>:<index>`, while the
-   * in-memory log still holds them, for the receipt lookup
-   * (docs/design-v1-dice.md 1.2). Null once they left it: the archive has
-   * them, or pruned them.
+   * in-memory log still holds every one the viewer reads (holdsOp), for the
+   * receipt lookup (docs/design-v1-dice.md 1.2). Null once some may have
+   * left it: the archive has them, or pruned them.
    */
-  committedLines(seq: number): LogEntry[] | null {
+  committedLines(seq: number, viewer: Viewer): LogEntry[] | null {
+    if (!holdsOp(this.#committed.state, viewer, seq)) return null;
     const prefix = `${seq}:`;
     const lines = this.#committed.state.log.filter((e) => e.id.startsWith(prefix));
     return lines.length > 0 ? lines : null;

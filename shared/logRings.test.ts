@@ -8,6 +8,7 @@ import {
   DM_LINE_BASE,
   dmNumbered,
   droppedLines,
+  holdsOp,
   lineAudience,
   linesPastStart,
   liveStart,
@@ -354,6 +355,20 @@ describe("the log's rings (shared/logRings.ts)", () => {
     // Text no event line uses goes first, as from a hand-made file.
     const stray = cutLine({ id: "4:900000", at: AT, kind: "event", text: "x".repeat(9000), data: { type: "teleport", tokenId: "gob", past: "wall" } });
     assert.deepEqual(stray, { id: "4:900000", at: AT, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } });
+  });
+
+  test("an op's lines leave memory a ring at a time, so a lookup of them reads the archive once one the viewer reads may have gone", () => {
+    const pet: Line = { kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 1 } };
+    let state = write(base(), [{ kind: "chat", from: "dm1", text: "first" }], 1).state;
+    state = write(state, [{ kind: "chat", from: "dm1", text: "a" }, pet], 2).state;
+    const keep = partyLinesKept(Object.keys(state.members).length);
+    for (let i = 0; i < keep; i++) state = write(state, [pet], 3 + i).state;
+    assert.ok(state.log.some((e) => e.id === "2:0"), "the op's chat line is still here");
+    assert.ok(!state.log.some((e) => e.to?.[0] === "p1" && e.id.startsWith("2:")), "P1's copy of its line went");
+    assert.equal(holdsOp(state, P1, 2), false);
+    assert.equal(holdsOp(state, P2, 2), true, "P2 reads only the chat line, which is here");
+    assert.equal(holdsOp(state, P1, 2 + keep), true);
+    assert.equal(holdsOp(state, P2, 1), false, "the oldest op the log holds may have lost lines to the shared lines' floor");
   });
 
   test("dmNumbered and countedApart tell the DM's count and the party lines' from the shared one", () => {

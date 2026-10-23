@@ -368,6 +368,19 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   return start;
 }
 
+/**
+ * Whether the log in memory still holds every line of op `seq` the viewer
+ * reads. Each ring drops its own oldest, so an op's lines leave memory a
+ * ring at a time: they are all here while the op is newer than the log's
+ * oldest line, which the shared lines' floor keeps, and than where the
+ * viewer's live log starts (liveStart). Otherwise the archive has them.
+ */
+export function holdsOp(room: LogRoom, viewer: Viewer, seq: number): boolean {
+  const oldest = room.log[0];
+  const start = liveStart(room, viewer);
+  return oldest !== undefined && seqOf(oldest.id) < seq && (start === null || seqOf(start) < seq);
+}
+
 /** Whether a line is in a viewer's live log by where it starts (liveStart). Each line's own rules still apply. */
 export function inLiveLog(room: LogRoom, viewer: Viewer, id: string): boolean {
   const start = liveStart(room, viewer);
