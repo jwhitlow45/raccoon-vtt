@@ -645,6 +645,36 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   });
 
   test("lp2-1b. the pane's choices fit its card: Afterwards and Hits unfold with no sideways scroll at 1280 x 800 and 844 x 390, Afterwards is one switch, Who's three words share a row, and arrow keys through Hits change what it hits and start no pick, while Add squares and Place the area still start theirs (docs/design-v1-look-pass-2.md 2.7)", async () => {
+    // A 320 px phone at 130%, where the pane is a sheet about 214 px inside: each of Hits' names, chosen and so with its check, fits without a sideways scroll (LP2L1-ASTRA-01).
+    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => trap(dmSocket));
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 5 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    await unfold(dm, "Hits");
+    for (const name of ["The creature that set it off", "Everyone on the trap", "Everyone in these squares", "Everyone in an area"]) {
+      await pane(dm).getByRole("radiogroup", { name: "Hits" }).getByRole("radio", { name }).click();
+      await dm.waitForTimeout(150);
+      const widths = await pane(dm).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      assert.ok(widths.scroll <= widths.client, `320 x 568 at 130%, ${name} chosen: the pane scrolls sideways: ${JSON.stringify(widths)}`);
+      // Every row inside the pane's body, short of its side padding, which a scroll width alone does not show.
+      const rows = await pane(dm).evaluate((el) => {
+        const body = el.getBoundingClientRect().right - parseFloat(el.ownerDocument.defaultView!.getComputedStyle(el).paddingRight) - parseFloat(el.ownerDocument.defaultView!.getComputedStyle(el).borderRightWidth);
+        return Array.from(el.querySelectorAll('[role="radiogroup"][aria-label="Hits"] label')).map((l) => ({ right: (l as { getBoundingClientRect(): { right: number } }).getBoundingClientRect().right, body }));
+      });
+      for (const r of rows) assert.ok(r.right <= r.body + 0.5, `320 x 568 at 130%, ${name} chosen: a row runs past the pane's body: ${JSON.stringify(r)}`);
+    }
+    await shots.take(dm, "traps-lp2-1b-320x568-130-hits");
+    await pane(dm).getByRole("radiogroup", { name: "Hits" }).getByRole("radio", { name: "The creature that set it off" }).click();
+    await waitFor("back to the creature that set it off", () => (trap(dmSocket)?.rig?.hits === "trigger" ? true : null));
+    await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+
     for (const size of [{ width: 844, height: 390 }, DESKTOP]) {
       const label = `${size.width} x ${size.height}`;
       await dm.setViewportSize(size);

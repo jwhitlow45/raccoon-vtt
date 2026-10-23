@@ -1085,16 +1085,18 @@ export type RowOption<T extends string> = { value: T; label: string; title?: str
  * Rows (7.2): a choice as 44 px rows with a check mark on the chosen one,
  * for values with longer names (a blank token kind, an edge, a light, a
  * creature an area is cast from). Native radios, as ChoiceTiles. Wrap it
- * in PickCloses.
+ * in PickCloses. `wrap` lets a long name break onto a second line, for
+ * rows in a narrow pane, where one line ran past its edge (the trap
+ * pane's Hits at 320 px and 130%), each row still 44 px at least.
  */
-export function ChoiceRows<T extends string>(props: { label: string; value: T; options: readonly RowOption<T>[]; onChange(value: NoInfer<T>): void }) {
+export function ChoiceRows<T extends string>(props: { label: string; value: T; options: readonly RowOption<T>[]; onChange(value: NoInfer<T>): void; wrap?: boolean }) {
   const name = useId();
   return (
     <div role="radiogroup" aria-label={props.label} style={{ display: "grid", gap: theme.space(0.5) }}>
       {props.options.map((o) => {
         const chosen = o.value === props.value;
         return (
-          <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...CHOICE_ROW, ...buttonLook("quiet", { pressed: chosen }) }}>
+          <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...CHOICE_ROW, ...(props.wrap ? CHOICE_ROW_WRAP : null), ...buttonLook("quiet", { pressed: chosen }) }}>
             <input type="radio" name={name} value={o.value} checked={chosen} aria-label={accessibleName(o.label, o.title)} onChange={() => props.onChange(o.value)} style={RADIO_COVER} />
             {o.swatch !== undefined ? <ChipSwatch color={o.swatch} /> : null}
             {o.picture !== undefined ? (
@@ -1102,11 +1104,11 @@ export function ChoiceRows<T extends string>(props: { label: string; value: T; o
                 {o.picture}
               </span>
             ) : null}
-            <span style={{ flex: 1 }}>
+            <span style={{ flex: 1, minWidth: props.wrap ? 0 : undefined }}>
               {o.label}
               {o.detail !== undefined ? <span style={{ fontWeight: theme.weight.regular, color: theme.color.textMuted }}> {o.detail}</span> : null}
             </span>
-            {chosen ? <Icon name="check" size="sm" /> : null}
+            {chosen ? <Icon name="check" size="sm" style={props.wrap ? { flex: "none" } : undefined} /> : null}
           </label>
         );
       })}
@@ -1127,6 +1129,8 @@ const CHOICE_ROW: CSSProperties = {
   whiteSpace: "nowrap",
   cursor: "pointer",
 };
+
+const CHOICE_ROW_WRAP: CSSProperties = { whiteSpace: "normal", paddingTop: theme.space(1), paddingBottom: theme.space(1) };
 
 /**
  * The parts of a control made of kit controls, such as a stepper's − and

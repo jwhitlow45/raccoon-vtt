@@ -590,7 +590,8 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
   ];
   return (
     <>
-      <ChoiceRows<HitsKind> label="Hits" value={shown} options={options} onChange={choose} />
+      {/* Its names wrap, so a narrow pane never scrolls sideways for them (docs/design-v1-look-pass-2.md D2). */}
+      <ChoiceRows<HitsKind> label="Hits" value={shown} options={options} onChange={choose} wrap />
       {shown === "cells" ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
           <Button size="sm" onClick={() => props.pick("hits", true)}>
