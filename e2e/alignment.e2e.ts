@@ -28,7 +28,10 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * holder's, rider's and group windows: their headers, play rows and group
  * lines (the windows' older rows are not this sweep's). Pat measures the
  * Ruler's options, readings and kept list, a drag's stop note, and the
- * toast of his own walk.
+ * toast of his own walk. Three older screens the trap flows open are
+ * measured too, as live play 17 found them: Pat's ask card and Request a
+ * roll from the needle trap's Ask to disarm at 390 and 320, and the group
+ * save page a trap card's Save and damage opens there and at 1440.
  *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
@@ -71,6 +74,9 @@ const SIZES: Size[] = [
   { name: "1440x900", width: 1440, height: 900, touch: false },
 ];
 const SCALES = [1, 1.3];
+/** The sizes where the sweep also measures the older screens a trap's flows open (live play 17): Pat's ask card and Request a roll on phones, and the group save page there and on a computer. */
+const PHONE_ROOTS = new Set(["390x844", "320x568"]);
+const GROUP_SAVE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
 let server: Server;
 let browser: Browser;
@@ -150,6 +156,10 @@ const SOME_SIZES: Record<string, number> = {
   "board points at Poisoned Needle": 9,
   "board points at Hidden Pit": 9,
   "pat-board points at Poisoned Needle": 9,
+  "pat-ask": 4,
+  "request-roll": 4,
+  "group-save": 6,
+  "group-save-row": 6,
 };
 
 /**
@@ -443,9 +453,12 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     }
     await unfoldAll(pane);
     await sweep.measure(page, `trap-pane-${which}`, pane);
-    await dismissToasts(page);
-    await pane.getByRole("button", { name: "Done", exact: true }).click();
-    await pane.waitFor({ state: "detached" });
+    if (which === "needle" && PHONE_ROOTS.has(size.name)) await requestScreen(sweep, page, pane);
+    if (await visible(pane)) {
+      await dismissToasts(page);
+      await pane.getByRole("button", { name: "Done", exact: true }).click();
+      await pane.waitFor({ state: "detached" });
+    }
   }
 
   // A toast under the open pane, as a trap goes off on Pat's walk.
@@ -508,6 +521,12 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await escapeAll(page);
   }
   if (!column && !(await visible(summary))) await sweep.missing(page, "alerts-column", "neither the column nor its summary row showed");
+  // The needle trap's page holds its outcome's fields. Its cone caught no one, so the door trap, which hits the creature that set it off, is set off again for a page that holds Thorn's row, its card new at the column's top.
+  if (GROUP_SAVE_AT.has(size.name)) {
+    await groupSaveScreen(sweep, page, "group-save", "Poisoned Needle Gauntlet of the Sunless Citadel");
+    await spring(run.traps.door);
+    await groupSaveScreen(sweep, page, "group-save-row", "Scything Door");
+  }
 
   // The Passive Perception hint as Thorn walks near the needle trap, unfound again.
   const needle = dmSocket.state?.traps?.[run.traps.needle];
@@ -568,8 +587,84 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await sweep.add(page, "headers", headerLines(headers, `${sweep.at} headers`));
 }
 
-/** Pat's screens at one size: the Ruler, a drag's stop note, and the toast of his own walk. */
-async function patScreens(sweep: Sweep, page: Page): Promise<void> {
+/** Request a roll as the needle trap's Ask to disarm opens it over its pane, closed again by Cancel. */
+async function requestScreen(sweep: Sweep, page: Page, pane: Locator): Promise<void> {
+  const ask = pane.getByRole("button", { name: "Ask to disarm", exact: true });
+  if (!(await visible(ask))) return sweep.missing(page, "request-roll", "the needle trap's pane has no Ask to disarm");
+  await ask.scrollIntoViewIfNeeded();
+  await ask.click();
+  const sheet = page.getByRole("dialog", { name: "Request a roll" });
+  if (!(await showsWithin(sheet, 3_000))) return sweep.missing(page, "request-roll", "Ask to disarm opened no request");
+  await sweep.measure(page, "request-roll", sheet);
+  await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+  await sheet.waitFor({ state: "detached" });
+}
+
+/**
+ * The group save page a trap card's Save and damage opens, from the
+ * trap's card in the column or over the screen: the Dice sheet on a
+ * phone, the Dice tab panel on a computer. Discard closes it again, and
+ * the card's springing waits on for settleTraps. `trap` is the trap's
+ * name, which starts the card's name and the page's first line.
+ */
+async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: string): Promise<void> {
+  const name = new RegExp(`^${trap} went off`);
+  // The card in the column, or over the screen where the column's summary row stands in for its cards.
+  const findCard = async (): Promise<Locator | null> => {
+    const inColumn = page.getByRole("group", { name }).filter({ visible: true }).first();
+    if (await showsWithin(inColumn, 2_000)) return inColumn;
+    const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
+    if (!(await visible(summary))) return null;
+    await summary.first().click();
+    const overlay = page.getByRole("dialog", { name: "Alerts" });
+    if (!(await showsWithin(overlay, 2_500))) return null;
+    const over = overlay.getByRole("group", { name }).first();
+    return (await visible(over)) ? over : null;
+  };
+  let card = await findCard();
+  const fold = card?.locator("button[aria-expanded=false]");
+  if (card && fold && (await visible(fold))) {
+    // Opened, a card on a short phone can leave the column too short for it, and the cards then move over the screen, so it is found again once it holds still or has gone. The element itself is watched: a locator would wait on for another card once it hides.
+    const opened = await card.elementHandle();
+    await fold.first().click();
+    let last = "";
+    let still = 0;
+    await waitFor("the opened card to hold still or go", async () => {
+      const box = JSON.stringify(await opened?.boundingBox().catch(() => null));
+      still = box === last ? still + 1 : 0;
+      last = box;
+      return still >= 2 ? true : null;
+    }, 3_000);
+    await opened?.dispose();
+    card = await findCard();
+  }
+  if (!card) return sweep.missing(page, screen, `no card showed for ${trap}'s springing`);
+  await card.getByRole("button", { name: "Save and damage", exact: true }).click();
+  const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
+  if (!(await showsWithin(host.getByText(new RegExp(`^From ${trap}`)).first(), 4_000))) return sweep.missing(page, screen, "Save and damage opened no group save page");
+  await sweep.measure(page, screen, host);
+  await host.getByRole("button", { name: "Discard", exact: true }).first().click();
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+  if (await visible(sheet)) {
+    await sheet.getByRole("button", { name: "Close Dice", exact: true }).click();
+    await sheet.waitFor({ state: "hidden" });
+  }
+}
+
+/** Pat's ask card, as the DM asks for Thorn's save: Thorn has no stat block, so the card's roll row holds the bonus field and the extra dice. */
+async function askScreen(sweep: Sweep, page: Page): Promise<void> {
+  const id = randomUUID();
+  await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
+  const card = page.locator('[aria-label="The DM asks for a roll"]');
+  if (await showsWithin(card.filter({ visible: true }).first(), 4_000)) await sweep.measure(page, "pat-ask", card);
+  else await sweep.missing(page, "pat-ask", "the DM's ask showed no card");
+  await ops.send({ t: "roll.close", rollIds: [id] });
+  await card.first().waitFor({ state: "detached" });
+}
+
+/** Pat's screens at one size: his ask card on a phone, the Ruler, a drag's stop note, and the toast of his own walk. */
+async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
+  if (PHONE_ROOTS.has(size.name)) await askScreen(sweep, page);
   // A player's board at a small zoom may show no name, so only its stage is required.
   await sweep.pills(page, "pat-board", { points: await trapPoints(page, false) });
   await resetThorn();
@@ -1259,7 +1354,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
           await restartFight();
           pat.setDefaultTimeout(10_000);
           await openAt(pat, size, scale);
-          await patScreens(sweep, pat);
+          await patScreens(sweep, pat, size);
           await pat.goto("about:blank");
           const page = await dmPageFor(size);
           page.setDefaultTimeout(10_000);
