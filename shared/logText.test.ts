@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { describeEvent, rollText, type LogNames } from "./logText.ts";
-import type { LogEvent, RollTest } from "./model.ts";
+import { describeEvent, mergeLog, olderCursor, rollText, trimmedOff, type LogNames } from "./logText.ts";
+import type { LogEntry, LogEvent, RollTest } from "./model.ts";
 import { character, room, token } from "./testutil.ts";
 
 const DEX: RollTest = { kind: "save", choices: [{ ability: "dex" }] };
@@ -27,3 +27,26 @@ describe("roll lines (docs/design-v1-dm-tools.md 3.3)", () => {
     assert.equal(describeEvent({ ...line, characterId: "gone" }, names), "A creature rolled 9 on a Dexterity saving throw.");
   });
 });
+
+describe("Show older beside the trap logs (client/panels/LogPanel.tsx)", () => {
+  const line = (id: string, type: "chat" | "trap" | "trapSeen"): LogEntry =>
+    type === "chat"
+      ? { id, at: "", kind: "chat", text: id }
+      : { id, at: "", kind: "event", data: type === "trap" ? { type, trapId: "t1", sceneId: "s1", name: "Pit", how: "enter", by: [], hits: 0, did: [] } : { type, by: [], message: "Click." } };
+
+  test("pages from the room log's oldest line, never an older trap line, and keeps every line an update trims", () => {
+    // A trap went off at 1:0, ten chat lines followed, then the room log's own ring moved its start to 12:0.
+    const trapLog = [line("1:900000", "trap")];
+    const trapSeen = [line("1:0", "trapSeen")];
+    const mainLog = [line("12:0", "chat"), line("13:0", "chat")];
+    const shown = mergeLog(mergeLog(trapLog, trapSeen), mainLog);
+    assert.equal(shown[0]!.id, "1:0", "the merged log starts with the trap's line");
+    assert.equal(olderCursor(mainLog, undefined), "12:0", "so the chat lines 2 to 11 come on the first page");
+    assert.equal(olderCursor(mainLog, "5:0"), "5:0", "a later page starts where the last one said");
+    // The next update trims 12:0 off the front of the room log, and the trap lines stay where they were.
+    const next = [line("13:0", "chat"), line("14:0", "chat")];
+    assert.deepEqual(trimmedOff(shown, next).map((e) => e.id), ["1:0", "1:900000", "12:0"]);
+    assert.deepEqual(olderCursor(next, undefined), "13:0");
+  });
+});
+

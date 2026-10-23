@@ -668,3 +668,25 @@ export function mergeLog(older: readonly LogEntry[], live: readonly LogEntry[]):
   const kept = older.filter((e) => !liveIds.has(e.id));
   return [...kept, ...live].sort((a, b) => compareLogIds(a.id, b.id));
 }
+
+/**
+ * Where the next older page starts (design 10.8): where the last page said,
+ * else the oldest line of the room log the viewer holds (`mainLog`). Never a
+ * trap line: the trap logs reach no archive, and an old trap line as the
+ * cursor would skip every room log line between it and the room log's
+ * oldest.
+ */
+export function olderCursor(mainLog: readonly LogEntry[], nextBefore: string | null | undefined): string | undefined {
+  return nextBefore ?? mainLog[0]?.id;
+}
+
+/**
+ * The lines an update took off the front of the room log, out of those a
+ * panel showed (`shown`, the trap logs' lines among them): every one older
+ * than the room log's oldest now, so they stay beside the older pages and no
+ * gap opens between the archive and the live log.
+ */
+export function trimmedOff(shown: readonly LogEntry[], mainLog: readonly LogEntry[]): LogEntry[] {
+  const oldest = mainLog[0]?.id;
+  return shown.filter((e) => oldest === undefined || compareLogIds(e.id, oldest) < 0);
+}

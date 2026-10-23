@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import type { LogEntry } from "#shared/model.ts";
-import { compareLogIds } from "#shared/keys.ts";
 import { MAX_CHAT } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
@@ -14,7 +13,9 @@ import {
   memberName,
   mergeLog,
   messageOp,
+  olderCursor,
   targetKey,
+  trimmedOff,
   whisperHeading,
   type LogNames,
 } from "../features/log/format.ts";
@@ -48,8 +49,9 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 /**
  * The log (features section 16): chat, whispers, and the room's events in
  * one list, each event rendered with this viewer's own names. The live
- * view holds the latest 200 entries. Older ones come a page at a time from
- * the archive, projected for this viewer by the server.
+ * view holds the newest lines the room keeps for this viewer
+ * (shared/logRings.ts). Older ones come a page at a time from the archive,
+ * projected for this viewer by the server.
  */
 export default function LogPanel(_props: PanelProps) {
   const actions = useRoomActions();
@@ -81,16 +83,15 @@ export default function LogPanel(_props: PanelProps) {
   const preview = usePreview();
 
   // Once older pages are loaded, entries trimmed off the front of the live
-  // 200 are kept, so no gap opens between the archive and the live tail.
+  // log are kept, so no gap opens between the archive and the live tail.
   const prevLog = useRef(log);
   useEffect(() => {
     const prev = prevLog.current;
     prevLog.current = log;
     if (older.length === 0 || prev === log) return;
-    const oldestLive = log[0]?.id;
-    const trimmed = prev.filter((e) => oldestLive === undefined || compareLogIds(e.id, oldestLive) < 0);
+    const trimmed = trimmedOff(prev, mainLog);
     if (trimmed.length > 0) setOlder((list) => mergeLog(list, trimmed));
-  }, [log, older.length]);
+  }, [log, mainLog, older.length]);
 
   // Only the log the room holds in memory can be taken back from, so archived pages offer no Undo.
   const undoable = (entry: LogEntry): boolean => entry.data?.type === "hp" && log.includes(entry) && canTakeBack(names, log, { entry, data: entry.data });
@@ -132,7 +133,7 @@ export default function LogPanel(_props: PanelProps) {
   }, [lastId, entries.length]);
 
   const loadOlder = async () => {
-    const before = ("nextBefore" in paging ? paging.nextBefore : undefined) ?? entries[0]?.id;
+    const before = olderCursor(mainLog, "nextBefore" in paging ? paging.nextBefore : undefined);
     if (!before) return;
     setPaging({ status: "loading", nextBefore: before });
     try {
