@@ -1034,12 +1034,73 @@ export function toastTop(input: { spanning: boolean; column: ColumnFacts | null;
  * header measured yet, or under 44 px left above the tool's options
  * (`optionsTop`). In the chrome's own px from the page's top. Unlike
  * toastTop's place, a stack placed here keeps under the header while the
- * pane stands (pages/Room.tsx Toasts), since the pane moves its header.
+ * pane stands (nextToastPlaces), since the pane moves its header.
  */
 export function paneToastTop(input: { head: number | null; optionsTop: number }): number | null {
   if (input.head === null) return null;
   const top = input.head + EDGE;
   return input.optionsTop - top >= TOAST_MIN ? top : null;
+}
+
+/** Where a toast stands: at the top of the map's notices, in the toasts' own layer under the column's first card (`low`, in the chrome's px) or under a map pane's header ("pane"), or in the very short sheet. */
+export type ToastPlace = "map" | "sheet" | "pane" | { low: number };
+
+/** The toasts' places by id, the pane header's last place, and whether a pane stood on the render before. */
+export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean };
+
+export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false };
+
+/** A place in the toasts' own layer, rather than in the notices' stack or the sheet. */
+export function inToastLayer(place: ToastPlace | undefined): boolean {
+  return place === "pane" || typeof place === "object";
+}
+
+/**
+ * The toasts' places on this render (docs/design-v1-bar-dock.md 1.3),
+ * from the last render's (`was`) and what stands now: the toasts showing
+ * (`ids`, oldest first), toastTop's place (`low`), paneToastTop's
+ * (`pane`), whether a map pane stands as a bottom sheet (`paneStands`),
+ * the layer and the very short sheet's slot.
+ *
+ * The layer keeps one stack. A new toast joins it, or starts one under
+ * the column's first card or the pane's header. While a pane stands, the
+ * whole stack goes under its header on any render that has the header's
+ * place, and follows it: a column stack moves there once, as the pane
+ * opens, and a stack a closed pane left joins the next pane's header.
+ * When the pane goes away, the stack freezes at the header's last place.
+ * A pane can stand for a render with no header place (`pane` null), its
+ * first or one with too little room, so the stack neither moves nor
+ * freezes on those. A toast never leaves the place it first took for
+ * another of the notices, the layer or the sheet, so it is announced once.
+ */
+export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean }): ToastPlaces {
+  const freeze = was.paneStood && !now.paneStands;
+  const paneLast = now.pane ?? was.paneLast;
+  const places = new Map<number, ToastPlace>();
+  for (const id of now.ids) {
+    const place = was.places.get(id);
+    if (place === undefined) continue;
+    if (now.pane !== null && inToastLayer(place)) places.set(id, "pane");
+    else if (freeze && place === "pane") places.set(id, paneLast !== null ? { low: paneLast } : "map");
+    else places.set(id, place);
+  }
+  for (const id of now.ids) {
+    if (places.has(id)) continue;
+    const fresh: ToastPlace = now.slot ? "sheet" : !now.layer ? "map" : now.pane !== null ? "pane" : now.low !== null ? { low: now.low } : "map";
+    const below = fresh === "sheet" || !now.layer ? undefined : [...places.values()].find(inToastLayer);
+    places.set(id, below !== undefined && (inToastLayer(fresh) || now.paneStands) ? below : fresh);
+  }
+  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands };
+}
+
+/** Where the toasts' layer stack stands, in the chrome's px from the page's top, or null with none in the layer. */
+export function toastLayerTop(state: ToastPlaces, ids: readonly number[]): number | null {
+  for (const id of ids) {
+    const place = state.places.get(id);
+    if (place === "pane") return state.paneLast;
+    if (typeof place === "object") return place.low;
+  }
+  return null;
 }
 
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
