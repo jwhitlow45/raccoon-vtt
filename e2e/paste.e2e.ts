@@ -636,6 +636,8 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await shots.take(dm, "paste-narrow-stamp-chosen");
     await pickTool(dm, "Select");
     await dm.setViewportSize({ width: 1280, height: 800 });
+    // The room lays the wider window out a moment after the resize (50 to 150 ms, longer on a busy runner), and pickTool goes by the toolbar as it stands: a toolbar that turns wide between its checks sends it down the narrow or the pair path. So the next test starts once the wide toolbar shows each tool's own button.
+    await dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: "Map builder", exact: true }).waitFor();
   });
 
   test("lp4-stamp-tabs. the stamp picker's paste box and its note stay with Paste an image on the Stamps tab: a tab change closes them, and a read still waiting no longer counts", async () => {
