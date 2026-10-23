@@ -199,20 +199,6 @@ export function routedTest(route: Route, test: D20Test): D20Test {
   return route.kind === "answer" ? testOf(route.request, route.choice) : test;
 }
 
-/**
- * The open requests a tap on one of this creature's skills answers, by id.
- * Each draws as an Asked button in the Skills group, which is folded until
- * one comes.
- */
-export function skillAsks(state: Pick<RoomState, "tokens" | "rolls">, creature: ActorTarget): string[] {
-  const ids = new Set<string>();
-  for (const skill of SKILL_KEYS) {
-    const route = routeOf({ state, creature, test: { kind: "check", ability: SKILLS[skill].ability, skill }, dm: false, played: false, ask: false });
-    if (route.kind === "answer") ids.add(route.request.id);
-  }
-  return [...ids];
-}
-
 // ------------------------------------------------------------ no numbers
 
 /** What the bonus field of a creature with no numbers reads, by parseBonus: null while empty. */

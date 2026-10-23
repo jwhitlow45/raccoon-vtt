@@ -11,7 +11,7 @@ import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
 import { creatureRolls } from "./creature.ts";
-import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, foldSummary, groupAsks, groupNote, initiativeOp, initiativeRow, initiativeTag, noNumbersNote, openForAsks, playerCreatures, presetLine, resultWords, routedTest, routeOf, sameSpell, scoreOf, skillAsks, spellLevels, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
+import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, foldSummary, groupAsks, groupNote, initiativeOp, initiativeRow, initiativeTag, noNumbersNote, openForAsks, playerCreatures, presetLine, resultWords, routedTest, routeOf, sameSpell, scoreOf, spellLevels, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
@@ -61,13 +61,6 @@ describe("where a save or check tap goes", () => {
     const check = table({ r1: request({ test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] } }) });
     assert.equal(routeOf({ state: check, creature: { characterId: "bree" }, test: { kind: "check", ability: "wis", skill: "perception" }, dm: false, played: false, ask: false }).kind, "answer");
     assert.equal(routeOf({ state: check, creature: { characterId: "bree" }, test: { kind: "check", ability: "wis" }, dm: false, played: false, ask: false }).kind, "roll");
-  });
-
-  test("the requests a skill button answers: an open check of a skill, never a save, a bare check or an answered one", () => {
-    const perception = { kind: "check" as const, choices: [{ ability: "wis" as const, skill: "perception" as const }] };
-    const open = table({ r1: request({ test: perception }), r2: request({ id: "r2" }), r3: request({ id: "r3", test: { kind: "check", choices: [{ ability: "wis" }] } }) });
-    assert.deepEqual(skillAsks(open, { tokenId: "breeTok" }), ["r1"]);
-    assert.deepEqual(skillAsks(table({ r1: request({ test: perception, targets: [{ characterId: "bree", total: 12 }] }) }), { characterId: "bree" }), []);
   });
 
   test("the DM's Ask switch on a creature a player plays: on asks, off rolls, and attacks always roll", () => {
@@ -433,6 +426,8 @@ describe("what waits in a creature's groups (docs/design-v1-dice-pass.md 6.4)", 
     assert.deepEqual(Object.keys(asks).sort(), ["saves", "skills"]);
     assert.deepEqual(groupAsks({ state: state(rolls), creature: { tokenId: "gob" }, named, cast: null }), { saves: { ids: ["r4"], asked: ["INT save"], casts: [] } }, "the goblin's own ask, a monster's");
     assert.deepEqual(groupAsks({ state: state(), creature: { tokenId: "breeTok" }, named, cast: null }), {});
+    const perception = request({ id: "r5", test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }, targets: [{ characterId: "bree", total: 12 }] });
+    assert.deepEqual(groupAsks({ state: state({ r5: perception }), creature: { characterId: "bree" }, named, cast: null }), {}, "an answered skill check opens nothing");
   });
 
   test("an open block opens the group of its row, by the row's key or its spell's name, by its stamp and its send", () => {
