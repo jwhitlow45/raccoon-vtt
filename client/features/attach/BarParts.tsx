@@ -86,6 +86,11 @@ const HOLDS: Record<"carrying" | "dragging", string> = { carrying: "Carrying", d
  * drags or carries, Let go, and beside each object, Put down, for whoever
  * may undo the link. The name beside it already says which token, so they
  * show the short words, named in full for a reader ("Put down Torch").
+ *
+ * Each kind of link is a row of its own (docs/design-v1-polish.md R5): its
+ * word in a first column as wide as the longer word, its names and actions
+ * wrapping beside it. One wrapping row for both kinds ended a line on
+ * "Dragging" with its names on the next, under the carried ones.
  */
 export function GroupLine(props: { token: Token }) {
   const { token } = props;
@@ -98,32 +103,35 @@ export function GroupLine(props: { token: Token }) {
   if (!line.holder && line.carried.length === 0) return null;
   const holds = (["carrying", "dragging"] as const).map((key) => ({ key, tokens: line.carried.filter((c) => c.dragged === (key === "dragging")) })).filter((h) => h.tokens.length > 0);
   return (
-    <div role="group" aria-label="Attached tokens" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+    <div role="group" aria-label="Attached tokens" style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "start", gap: theme.space(1) }}>
       {line.holder ? (
-        <Button size="sm" onClick={() => ui.select(line.holder!.id)} style={{ flex: "none" }}>
+        <Button size="sm" onClick={() => ui.select(line.holder!.id)} style={{ gridColumn: "1 / -1", justifySelf: "start" }}>
           {line.holder.text}
         </Button>
       ) : null}
       {holds.map((h) => (
         <Fragment key={h.key}>
-          <span aria-hidden style={{ color: theme.color.textMuted }}>
+          {/* As tall as a button, so the word stands on its row's first line. */}
+          <span aria-hidden data-hold-word={h.key} style={{ display: "flex", alignItems: "center", minHeight: theme.touch, color: theme.color.textMuted }}>
             {HOLDS[h.key]}
           </span>
-          {h.tokens.map((c) => {
-            const action = holderAction(c.token);
-            return (
-              <Fragment key={c.id}>
-                <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => ui.select(c.id)} style={{ flex: "none" }}>
-                  {c.name}
-                </Button>
-                {action && detachAllowed(view, viewer, c.token) ? (
-                  <Button size="sm" aria-label={action.words} onClick={() => actions.dispatch(detachOp(c.id, null))} style={{ flex: "none" }}>
-                    {DETACH_WORDS[action.choice]}
+          <div data-hold-names={h.key} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+            {h.tokens.map((c) => {
+              const action = holderAction(c.token);
+              return (
+                <Fragment key={c.id}>
+                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => ui.select(c.id)} style={{ flex: "none" }}>
+                    {c.name}
                   </Button>
-                ) : null}
-              </Fragment>
-            );
-          })}
+                  {action && detachAllowed(view, viewer, c.token) ? (
+                    <Button size="sm" aria-label={action.words} onClick={() => actions.dispatch(detachOp(c.id, null))} style={{ flex: "none" }}>
+                      {DETACH_WORDS[action.choice]}
+                    </Button>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </div>
         </Fragment>
       ))}
     </div>

@@ -535,4 +535,71 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await shots.take(dm, "attach-lp2-3c-keys");
     await dm.keyboard.press("Escape");
   });
+
+  test("pl2-a. on the DM's phone at 390 and 360 px, and 390 at 130%, a hobgoblin carrying a lantern and dragging a prisoner: its window's line gives each kind a row, the word first and its names beside it on the word's line (docs/design-v1-polish.md R5)", async () => {
+    const hobgoblin = randomUUID();
+    const lantern = randomUUID();
+    const prisoner = randomUUID();
+    await ops.send(tokenOp(hobgoblin, { kind: "monster", name: "Hobgoblin", x: 9, y: 1, disposition: "hostile", actor: { inline: actor() } }));
+    await ops.send(tokenOp(lantern, { kind: "object", name: "Lantern", size: "tiny", x: 9, y: 1.5, actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
+    await ops.send(tokenOp(prisoner, { kind: "npc", name: "Prisoner", x: 10, y: 1, disposition: "neutral", actor: { inline: actor() } }));
+    await ops.send({ t: "actor.effect.add", target: { tokenId: prisoner }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "token.attach", tokenId: lantern, to: hobgoblin, kind: "carry", x: 9, y: 1.5, elevation: 0 });
+    await ops.send({ t: "token.attach", tokenId: prisoner, to: hobgoblin, kind: "drag", x: 10, y: 1, elevation: 0 });
+    await waitFor("the hobgoblin's load", () => (token(dmSocket, lantern)?.attached?.to === hobgoblin && token(dmSocket, prisoner)?.attached?.to === hobgoblin) || null);
+    for (const [viewport, scale] of [
+      [PHONE, 1],
+      [{ width: 360, height: 740 }, 1],
+      [PHONE, 1.3],
+    ] as const) {
+      const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+      try {
+        await context.addCookies(await dmContext.cookies(server.origin));
+        const page = await context.newPage();
+        if (scale !== 1) {
+          await page.goto(`${server.origin}/`);
+          await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        }
+        await page.goto(`${server.origin}/r/${run.roomId}`);
+        await page.locator(".konvajs-content").first().waitFor();
+        // The hobgoblin's top-right quarter, clear of the lantern in its bottom-left one.
+        const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
+        const line = b.getByRole("group", { name: "Attached tokens" });
+        await line.scrollIntoViewIfNeeded();
+        const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        await shots.take(page, `attach-pl2-a-holder-line-${viewport.width}-${Math.round(scale * 100)}`);
+        const rows = await line.evaluate((el) => {
+          const box = (e: Element) => {
+            const r = e.getBoundingClientRect();
+            return { left: r.left, top: r.top, bottom: r.bottom, middle: (r.top + r.bottom) / 2 };
+          };
+          return (["carrying", "dragging"] as const).map((kind) => {
+            const word = el.querySelector(`[data-hold-word="${kind}"]`);
+            const names = el.querySelector(`[data-hold-names="${kind}"]`);
+            return {
+              kind,
+              word: word ? { ...box(word), text: word.textContent } : null,
+              names: names ? box(names) : null,
+              items: names ? Array.from(names.children).map((c) => ({ ...box(c), text: c.textContent })) : [],
+            };
+          });
+        });
+        const [carrying, dragging] = rows;
+        for (const row of rows) {
+          assert.ok(row.word && row.names && row.items.length > 0, `${where}: the ${row.kind} row is missing`);
+          // The word starts its row, and its first name stands on the word's line.
+          assert.ok(Math.abs(row.word.middle - row.items[0]!.middle) <= 1, `${where}: "${row.word.text}" stands ${(row.word.middle - row.items[0]!.middle).toFixed(1)} px off its first name's middle`);
+          assert.ok(row.items[0]!.left > row.word.left, `${where}: "${row.items[0]!.text}" is not beside "${row.word.text}"`);
+        }
+        assert.ok(Math.abs(carrying!.word!.left - dragging!.word!.left) <= 1, `${where}: the words start at ${carrying!.word!.left} and ${dragging!.word!.left}`);
+        assert.ok(Math.abs(carrying!.names!.left - dragging!.names!.left) <= 1, `${where}: the names start at ${carrying!.names!.left} and ${dragging!.names!.left}`);
+        assert.deepEqual(carrying!.items.map((i) => i.text), ["Lantern", "Put down"], `${where}: the carrying row`);
+        assert.deepEqual(dragging!.items.map((i) => i.text), ["Prisoner", "Let go"], `${where}: the dragging row`);
+        const carriedFoot = Math.max(...carrying!.items.map((i) => i.bottom));
+        assert.ok(dragging!.word!.top >= carriedFoot - 0.5, `${where}: "Dragging" starts at ${dragging!.word!.top}, inside the carrying row (foot ${carriedFoot})`);
+      } finally {
+        await context.close();
+      }
+    }
+  });
 });
