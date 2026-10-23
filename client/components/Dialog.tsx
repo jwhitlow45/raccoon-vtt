@@ -63,6 +63,9 @@ export type DialogProps = {
 /** The scrolling body's padding, which `PINNED_FOOT` reaches into. */
 const BODY_PAD = theme.space(4);
 
+/** The footer status's share of its line's spare room, so far over a button's 1 that a button beside it grows by less than a pixel. */
+const STATUS_GROW = 999;
+
 /**
  * A row at the end of a dialog's body that stays in view while the body
  * scrolls, such as a picker's chosen picture and its Use, which a phone
@@ -236,7 +239,8 @@ export function Dialog(props: DialogProps) {
             }}
           >
             {props.status ? (
-              <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted, lineHeight: theme.leading.body }}>{props.status}</span>
+              // The status takes its line's spare room ahead of any button that grows, so a button beside it keeps its own width and one that wraps under it still fills its line (Request a roll's, docs/design-v1-polish.md R6).
+              <span style={{ flex: `${STATUS_GROW} 1 160px`, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted, lineHeight: theme.leading.body }}>{props.status}</span>
             ) : null}
             {props.footer}
           </footer>
