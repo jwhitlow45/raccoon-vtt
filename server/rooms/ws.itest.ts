@@ -428,22 +428,31 @@ describe("websocket: commit failures", () => {
 
 describe("websocket: rates", () => {
   let t: Engine;
+  /** Where the sockets' budget clock stands still, or null for the real one. */
+  let frozenAt: number | null = null;
   before(async () => {
-    t = await startEngine();
+    t = await startEngine({ ws: { now: () => frozenAt ?? Date.now() } });
   });
   after(() => t.close());
 
   test("a burst over the op rate gets busy, then gap for everything behind the refused op", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Burst");
-    const s = await t.connect(roomId, dm);
-    await s.snapshot("c1");
-    for (let i = 0; i < 80; i++) s.op({ t: "log.chat", text: `b${i}` });
-    const busy = await s.next("retry", (m) => m.code === "busy");
-    assert.equal(busy.n, 61);
-    const gap = await s.next("retry", (m) => m.code === "gap");
-    assert.equal(gap.n, 62);
-    s.close();
+    // The socket's clock stands still from before it opens, so however slowly a loaded runner
+    // carries the 80 ops, the 60-op burst refills nothing and the 61st is the one refused (review WS-RATE-FLAKE).
+    frozenAt = Date.now();
+    try {
+      const s = await t.connect(roomId, dm);
+      await s.snapshot("c1");
+      for (let i = 0; i < 80; i++) s.op({ t: "log.chat", text: `b${i}` });
+      const busy = await s.next("retry", (m) => m.code === "busy");
+      assert.equal(busy.n, 61);
+      const gap = await s.next("retry", (m) => m.code === "gap");
+      assert.equal(gap.n, 62);
+      s.close();
+    } finally {
+      frozenAt = null;
+    }
   });
 
   test("frames over the frame budget are dropped before parsing, and sustained abuse closes with 4008", async () => {
