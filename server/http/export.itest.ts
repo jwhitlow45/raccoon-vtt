@@ -996,6 +996,17 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
     assert.equal(rows[0]!.n, 20);
     socket.close();
   });
+
+  test("a load writes no seq-0 line again once the archive holds the import's, so rows a snapshot pruned stay pruned", async () => {
+    const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 20);
+    // As a snapshot's prune takes the oldest rows past the stored cap.
+    await t.pool.query("delete from room_log where room_id = $1 and id = any($2::text[])", [roomId, ["0:0", "0:1", "0:2"]]);
+    const socket = await t.connect(roomId, importer);
+    await socket.snapshot("i");
+    const { rows } = await t.pool.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1 and split_part(id, ':', 1) = '0'", [roomId]);
+    assert.equal(rows[0]!.n, 17);
+    socket.close();
+  });
 });
 
 describe("room import with Turnstile", () => {

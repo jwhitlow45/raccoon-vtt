@@ -69,9 +69,18 @@ export async function loadRoom(
   const snapshotSeq = Number(row.seq);
   let state = migrateSnapshot(row.state, row.schema_version);
   // An import's lines are numbered at seq 0. One made before imports wrote them to the archive has none there, so its
-  // lines still in the log are written now, and Show older reaches them once the live log moves past them.
+  // lines still in the log are written now, and Show older reaches them once the live log moves past them. An import
+  // writes them all in its transaction, so one of them in the archive means they came. An archive at its stored cap
+  // would prune them first, as older than every line it holds. Either way they are not written.
   const imported = state.log.filter((e) => e.id.startsWith("0:"));
-  if (imported.length > 0) await archiveLines(pool, roomId, imported);
+  if (imported.length > 0) {
+    const { rows } = await pool.query<{ held: boolean }>(
+      `select exists (select 1 from room_log where room_id = $1 and id = any($2::text[]))
+           or exists (select 1 from room_log where room_id = $1 offset $3) as held`,
+      [roomId, imported.map((e) => e.id), LIMITS.logStored - 1],
+    );
+    if (!rows[0]?.held) await archiveLines(pool, roomId, imported);
+  }
   let seq = snapshotSeq;
   let replayFailed = false;
   let replayed = 0;
