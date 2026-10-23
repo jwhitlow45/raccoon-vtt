@@ -31,7 +31,7 @@ import { PaneFooter } from "../builder/PaneFooter.tsx";
 import { findDoor } from "../doors/doors.ts";
 import { playTrapSound } from "../encounter/alerts.ts";
 import { requestPan } from "../encounter/pan.ts";
-import { ConfirmButton } from "../measure/controls.tsx";
+import { ChoiceRows, ConfirmButton, type RowOption } from "../measure/controls.tsx";
 import { openAsk } from "../rolls/open.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { trapScreenBox } from "./paneBox.ts";
@@ -52,7 +52,6 @@ import {
   tokensOn,
   TRIGGER_ORDER,
   triggerSummary,
-  WHO_WORDS,
   zoneBox,
   zoneGround,
   zoneKind,
@@ -219,7 +218,8 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
   const disarm = disarmFill(rig);
 
   return (
-    <div style={{ display: "grid", gap: theme.space(2) }}>
+    // One column that never grows past the card, whatever a line inside asks for (LabelPane.tsx, PinPane.tsx).
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <PaneHeader title={trap.name} onClose={props.onClose} grab={props.sheet} />
       {from ? <Help>{from}</Help> : null}
       {doorGone ? <Help>Its door is gone, so it cannot go off. Delete it, or put a door back.</Help> : null}
@@ -249,22 +249,21 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
         ) : (
           <Help>{zoneKind(trap.zone) === "wire" ? "A creature crosses it." : "A creature opens it."}</Help>
         )}
-        <Segmented<TrapRig["who"]> label="Who" value={rig.who} grow options={(["party", "others", "any"] as const).map((w) => ({ value: w, label: WHO_WORDS[w] }))} onChange={(who) => setRig({ who })} />
+        <Segmented<TrapRig["who"]>
+          label="Who"
+          value={rig.who}
+          even
+          options={(["party", "others", "any"] as const).map((w) => ({ value: w, label: WHO_CHOICES[w] }))}
+          description={WHO_HELP[rig.who]}
+          onChange={(who) => setRig({ who })}
+        />
         <Checkbox label="Small or larger only" checked={rig.minSize === "small"} onChange={(on) => setRig({ minSize: on ? "small" : null })} />
         <Checkbox label="Only creatures on the floor" help="Leaves out fliers, burrowers and riders." checked={rig.floor} onChange={(floor) => setRig({ floor })} />
       </Group>
 
       <Group label="Afterwards" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
-        <Segmented<TrapRig["resets"]>
-          label="After it goes off"
-          value={rig.resets}
-          grow
-          options={[
-            { value: "never", label: "Goes off once" },
-            { value: "nextTurn", label: "Arms again at the start of the next turn" },
-          ]}
-          onChange={(resets) => setRig({ resets })}
-        />
+        {/* Off is the plain case, a trap that goes off once (docs/design-v1-look-pass-2.md 2.7). */}
+        <Switch label="Arms again at the start of the next turn" checked={rig.resets === "nextTurn"} onChange={(on) => setRig({ resets: on ? "nextTurn" : "never" })} />
         <UsesField value={rig.usesLeft ?? null} onChange={(usesLeft) => setRig({ usesLeft })} />
         <Switch label="Stops the creature where it goes off" help="A silent trap should not stop the creature: its player would notice." checked={rig.stops} onChange={(stops) => setRig({ stops })} />
         <Switch label="Marks itself found when players see it go off" checked={rig.foundOnSpring} onChange={(foundOnSpring) => setRig({ foundOnSpring })} />
@@ -378,6 +377,16 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
     </div>
   );
 }
+
+/** Who's options in a word each, so the three share a row at any width. The summaries keep rules.ts WHO_WORDS, as they are sentences. */
+const WHO_CHOICES: Record<TrapRig["who"], string> = { party: "Party", others: "Others", any: "Any" };
+
+/** What the chosen Who means, the choice's description. */
+const WHO_HELP: Record<TrapRig["who"], string> = {
+  party: "Only creatures a player owns set it off.",
+  others: "Only creatures no player owns set it off.",
+  any: "Any creature sets it off.",
+};
 
 const TRIGGER_LABELS: Record<TrapRig["on"][number], string> = {
   enter: "A creature steps onto it",
@@ -500,8 +509,12 @@ function hitsKind(hits: TrapRig["hits"]): HitsKind {
 /**
  * Who it hits (4.1): the creature that set it off, everyone on the trap
  * (squares only), everyone in squares drawn on the map, or everyone in an
- * area aimed with the area tool. Picking drawn squares or an area starts
- * from the trap's own place, then the map's pick or the area tool moves it.
+ * area aimed with the area tool. A choice of longer names, so rows with a
+ * check (docs/design-v1-look-pass-2.md 2.7). An arrow key both moves and
+ * chooses in a radio group, so choosing writes only what needs no map:
+ * drawn squares start as the trap's own, and an area is written once
+ * "Place the area" saves one, the choice held here until then. The map's
+ * pick and the area tool start from the buttons that follow the choice.
  */
 function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; setRig(patch: RigPatch): void; pick(what: "hits", fresh?: boolean): void }) {
   const { trap, rig, chunks } = props;
@@ -509,19 +522,21 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
   const ui = useRoomUi();
   const view = useRoomView((s) => s.view);
   const kind = hitsKind(rig.hits);
+  // A choice that wrote nothing yet: an area before it is placed, or squares for a trap with no place of its own.
+  const [held, setHeld] = useState<HitsKind | null>(null);
+  useEffect(() => setHeld(null), [kind]);
+  const shown = held ?? kind;
   const squares = "cells" in trap.zone;
   const box = zoneBox(trap, chunks);
   const center = box ? boxCenter(box) : { x: 0, y: 0 };
-  const start = (next: HitsKind) => {
-    if (next === kind) return;
+  const choose = (next: HitsKind) => {
+    if (next === kind) return setHeld(null);
     if (next === "trigger" || next === "zone") return props.setRig({ hits: next });
     if (next === "cells") {
       const own = "cells" in trap.zone ? trap.zone.cells : box ? [{ x: Math.floor(box.x0), y: Math.floor(box.y0), w: Math.max(1, Math.min(LIMITS.trapRectSide, Math.ceil(box.x1) - Math.floor(box.x0))), h: Math.max(1, Math.min(LIMITS.trapRectSide, Math.ceil(box.y1) - Math.floor(box.y0))) }] : [];
-      if (own.length > 0) props.setRig({ hits: { cells: own.map((r) => ({ ...r })) } });
-      props.pick("hits", true);
-      return;
+      if (own.length > 0) return props.setRig({ hits: { cells: own.map((r) => ({ ...r })) } });
     }
-    aim();
+    setHeld(next);
   };
   // The area tool aims it, starting from the trap's area or a 15 ft cone at the trap's middle.
   const aim = () => {
@@ -534,7 +549,7 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
       : { ...newDraft(id, "cone", theme.color.danger), point: { x: center.x, y: center.y, z: zoneGroundAt(chunks, trap.sceneId, center) } };
     aimTrapArea(scope, ui, trap.id, draft);
   };
-  const options: { value: HitsKind; label: string }[] = [
+  const options: RowOption<HitsKind>[] = [
     { value: "trigger", label: "The creature that set it off" },
     ...(squares ? [{ value: "zone" as const, label: "Everyone on the trap" }] : []),
     { value: "cells", label: "Everyone in these squares" },
@@ -542,22 +557,18 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
   ];
   return (
     <>
-      <div role="radiogroup" aria-label="Hits" style={{ display: "grid", gap: theme.space(1) }}>
-        {options.map((o) => (
-          <Checkbox key={o.value} label={o.label} checked={kind === o.value} disabled={kind === o.value} onChange={() => start(o.value)} />
-        ))}
-      </div>
-      {kind === "cells" ? (
+      <ChoiceRows<HitsKind> label="Hits" value={shown} options={options} onChange={choose} />
+      {shown === "cells" ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
           <Button size="sm" onClick={() => props.pick("hits", true)}>
             Draw them again
           </Button>
-          <Button size="sm" onClick={() => props.pick("hits")}>
+          <Button size="sm" icon="plus" onClick={() => props.pick("hits")}>
             Add squares
           </Button>
         </div>
       ) : null}
-      {kind === "area" ? (
+      {shown === "area" ? (
         <Button size="sm" onClick={aim}>
           Place the area
         </Button>

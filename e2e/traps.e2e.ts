@@ -636,4 +636,80 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.setViewportSize(DESKTOP);
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
   });
+
+  test("lp2-1b. the pane's choices fit its card: Afterwards and Hits unfold with no sideways scroll at 1280 x 800 and 844 x 390, Afterwards is one switch, Who's three words share a row, and arrow keys through Hits change what it hits and start no pick, while Add squares and Place the area still start theirs (docs/design-v1-look-pass-2.md 2.7)", async () => {
+    for (const size of [{ width: 844, height: 390 }, DESKTOP]) {
+      const label = `${size.width} x ${size.height}`;
+      await dm.setViewportSize(size);
+      await reopenRoom(dm);
+      await waitFor("the DM's snapshot again", () => trap(dmSocket));
+      await dm.locator(".konvajs-content").first().waitFor();
+      await pickTool(dm, "Trap");
+      await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+      await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+      await unfold(dm, "Goes off when");
+      await unfold(dm, "Afterwards");
+      await unfold(dm, "Hits");
+      await dm.waitForTimeout(200);
+      const widths = await pane(dm).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      assert.ok(widths.scroll <= widths.client, `${label}: the pane scrolls sideways: ${JSON.stringify(widths)}`);
+      const who = await Promise.all(["Party", "Others", "Any"].map(async (name) => (await rectOf(pane(dm).getByRole("radio", { name, exact: true }).locator(".."))).top));
+      assert.ok(Math.max(...who) - Math.min(...who) < 1, `${label}: Who's options do not share a row: ${JSON.stringify(who)}`);
+      await shots.take(dm, `traps-lp2-1b-${size.width}x${size.height}-choices`);
+      await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+      await pane(dm).waitFor({ state: "detached" });
+    }
+
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    await unfold(dm, "Afterwards");
+    const again = pane(dm).getByRole("switch", { name: "Arms again at the start of the next turn" });
+    assert.equal(await again.getAttribute("aria-checked"), trap(dmSocket)?.rig?.resets === "nextTurn" ? "true" : "false");
+    await again.click();
+    await waitFor("it arms again", () => (trap(dmSocket)?.rig?.resets === "nextTurn" ? true : null));
+    await again.click();
+    await waitFor("it goes off once", () => (trap(dmSocket)?.rig?.resets === "never" ? true : null));
+
+    // From the creature that set it off, the arrow keys walk the choices: each writes what needs no map, and the pane never steps aside for a pick.
+    await unfold(dm, "Hits");
+    const hits = pane(dm).getByRole("radiogroup", { name: "Hits" });
+    await hits.getByRole("radio", { name: "The creature that set it off" }).click();
+    await waitFor("it hits the creature that set it off", () => (trap(dmSocket)?.rig?.hits === "trigger" ? true : null));
+    await hits.getByRole("radio", { name: "The creature that set it off" }).focus();
+    await dm.keyboard.press("ArrowDown");
+    await waitFor("it hits everyone on the trap", () => (trap(dmSocket)?.rig?.hits === "zone" ? true : null));
+    await dm.keyboard.press("ArrowDown");
+    const cells = await waitFor("it hits its own squares", () => {
+      const h = trap(dmSocket)?.rig?.hits;
+      return typeof h === "object" && "cells" in h ? h.cells : null;
+    });
+    assert.deepEqual(cells, [{ x: 6, y: 4, w: 2, h: 2 }]);
+    assert.equal(await pane(dm).isVisible(), true, "choosing drawn squares started the map's pick");
+    await dm.keyboard.press("ArrowDown");
+    await pane(dm).getByRole("button", { name: "Place the area", exact: true }).waitFor();
+    assert.equal(await hits.getByRole("radio", { name: "Everyone in an area" }).isChecked(), true, "the area's choice did not hold");
+    assert.ok(typeof trap(dmSocket)?.rig?.hits === "object", "choosing an area wrote something before one was placed");
+    assert.equal(await pane(dm).isVisible(), true, "choosing an area started the area tool");
+    assert.equal(await dm.getByRole("toolbar", { name: "Trap options" }).count(), 1, "choosing an area left the Trap tool");
+    await shots.take(dm, "traps-lp2-1b-hits-area-held");
+    await dm.keyboard.press("ArrowDown");
+    await waitFor("back to the creature that set it off", () => (trap(dmSocket)?.rig?.hits === "trigger" ? true : null));
+
+    // The buttons that follow the choice still start the map's pick and the area tool.
+    await hits.getByRole("radio", { name: "Everyone in these squares" }).click();
+    // The last one is Hits': the trap's own squares have an Add squares of their own above.
+    await pane(dm).getByRole("button", { name: "Add squares", exact: true }).last().click();
+    await waitFor("the pane steps aside for the pick", async () => ((await pane(dm).isVisible()) ? null : true));
+    const options = dm.getByRole("toolbar", { name: "Trap options" });
+    await options.getByText("Drag across the squares Hidden Pit hits, or tap one square.").waitFor();
+    await options.getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor();
+    await hits.getByRole("radio", { name: "Everyone in an area" }).click();
+    await pane(dm).getByRole("button", { name: "Place the area", exact: true }).click();
+    await dm.getByRole("toolbar", { name: "Area options" }).waitFor();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { hits: "trigger" } } });
+  });
 });
