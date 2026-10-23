@@ -136,7 +136,30 @@ export type RoomState = {
   trapLog: LogEntry[];
   /** The last 20 players' trap lines (6.3), each one every player and table display receives. */
   trapSeen: LogEntry[];
+  /**
+   * Which areas reminded about which creatures in the turn that is running,
+   * by who read each reminder (shared/reducer/reminded.ts). The DM's alone,
+   * in no projection and no undo. Absent in rooms from before op version 19,
+   * and once a turn starts until its first reminder.
+   */
+  reminded?: Reminded;
 };
+
+/**
+ * A turn's reminders by audience, as the log keeps its rings: the lines
+ * every player read, each player's own copies, and the lines only the DM
+ * read. Each audience keeps its own pairs under its own cap
+ * (LIMITS.remindedShared, remindedPerPlayer and remindedDm).
+ */
+export type Reminded = {
+  shared?: RemindedPairs;
+  /** By player: the copies they read, the reminders only some players could. */
+  players?: Record<MemberId, RemindedPairs>;
+  dm?: RemindedPairs;
+};
+
+/** Each area's creatures it reminded about, by id, with the triggers as a mask: 1 enter, 2 turn start, 4 turn end. */
+export type RemindedPairs = Record<TemplateId, Record<TokenId, number>>;
 
 export type RoomMeta = {
   name: string;

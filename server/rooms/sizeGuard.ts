@@ -443,22 +443,31 @@ function trapsMeasure(state: RoomState): number {
   return bytes + collectionBytes(state.trapLog ?? []) - 2 + collectionBytes(state.trapSeen ?? []) - 2;
 }
 
-/** The room's own bytes as the guard counts them: everything exactly, the traps by their measures and reserves. */
+/**
+ * The room's own bytes as the guard counts them: everything exactly, the
+ * traps by their measures and reserves. The log's lines only some viewers
+ * or none read and the record of a turn's reminders (RoomState.reminded)
+ * ride outside, under bounds of their own, so no player's op ever passes
+ * or fails by what they cannot read.
+ */
 export function measuredStateBytes(state: RoomState): number {
-  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [] }) + trapsMeasure(state);
+  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined }) + trapsMeasure(state);
 }
 
 /**
  * The measure of a state already serialized to `bytes`, such as a snapshot
  * just written, without serializing it again: its traps and their logs
- * swapped for their measures.
+ * swapped for their measures, and the lines and the record outside them
+ * taken out.
  */
 export function measuredFromStored(bytes: number, state: RoomState): number {
   const traps = state.traps ?? {};
   const log = state.trapLog ?? [];
   const seen = state.trapSeen ?? [];
   const roomLog = measuredLog(state.log);
-  const outside = roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog);
+  // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
+  const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
+  const outside = reminded + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog));
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }

@@ -715,6 +715,20 @@ const logEntry = z.strictObject({
 
 const record = <T extends z.ZodType>(value: T) => z.record(z.string().min(1).max(120), value);
 
+/** One audience's pairs of the record of a turn's reminders (RoomState.reminded), each under its cap. */
+const remindedPairs = (cap: number) =>
+  z
+    .record(id, z.record(id, z.number().int().min(1).max(7)))
+    .refine((pairs) => Object.values(pairs).reduce((n, tokens) => n + Object.keys(tokens).length, 0) <= cap, `at most ${cap} reminders`);
+const reminded = z.strictObject({
+  shared: remindedPairs(LIMITS.remindedShared).optional(),
+  players: z
+    .record(id, remindedPairs(LIMITS.remindedPerPlayer))
+    .refine((players) => Object.keys(players).length <= LIMITS.membersPerRoom, `at most ${LIMITS.membersPerRoom} players`)
+    .optional(),
+  dm: remindedPairs(LIMITS.remindedDm).optional(),
+});
+
 export const roomStateSchema = z.strictObject({
   meta,
   members: record(member),
@@ -752,6 +766,8 @@ export const roomStateSchema = z.strictObject({
   traps: record(trap),
   trapLog: z.array(trapLogEntry).max(LIMITS.trapLogLines),
   trapSeen: z.array(trapLogEntry).max(LIMITS.trapSeenLines),
+  // The record of the running turn's reminders, which an export may carry and the import leaves behind (remap.ts).
+  reminded: reminded.optional(),
 });
 
 /**

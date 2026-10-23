@@ -5,7 +5,8 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, changedSightKeys, hashValue, heldOf, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, P1, P2, actor, effect, entry, env, randomOp, randomState, reveal, rng, room, scene, token } from "#shared/testutil.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { DM, P1, P2, actor, effect, entry, env, randomOp, randomState, reveal, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch } from "./fanout.ts";
@@ -150,6 +151,74 @@ describe("what hidden work leaves in a player's message", () => {
   test("a hit on a hidden creature beside one on the hero leaves each player's whole message as the hero's alone does", () => {
     const hit = (ids: string[]): Op => ({ t: "actor.damageMany", hits: ids.map((tokenId) => ({ target: { tokenId }, amount: 2 })) });
     assert.deepEqual(messages(hit(["gob", "hero"]), false), messages(hit(["hero"]), false));
+  });
+
+  /** Plays the DM's ops in order from seq 2, each published to both players, and returns every message each one got, and the room. */
+  function played(state: RoomState, ops: readonly Op[]): { inboxes: string[]; state: RoomState } {
+    const viewers = [open(state, P1, "s1"), open(state, P2, "s1")];
+    let before = state;
+    ops.forEach((op, i) => {
+      const result = applyOp(before, op, DM, env(2 + i));
+      assert.ok(result.ok, result.ok ? "" : `${op.t}: ${result.message}`);
+      publishBatch({ seq: 2 + i, before, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      before = result.state;
+    });
+    return { inboxes: viewers.map((v) => JSON.stringify(v.inbox)), state: before };
+  }
+
+  /** P1's hero on its turn beside a glyph only the DM knows of, and a goblin no player sees. */
+  function heroTurn(): RoomState {
+    const state = room({
+      tokens: {
+        hero: token("hero", { name: "Ayla", kind: "pc", ownerIds: ["p1"], disposition: "ally", x: 2, y: 5 }),
+        gob: token("gob", { name: "Goblin", visibility: "dm", x: 30, y: 25, actor: { inline: actor({ hp: { cur: 1_000, max: 1_000, temp: 0 } }) } }),
+      },
+    });
+    state.templates.glyph = template("glyph", { shape: "sphere", size: 10, origin: { x: 6.5, y: 5.5, z: 0 }, spell: "Glyph", visibility: "dm", ownerId: "dm1", triggers: ["enter"], oncePerTurn: true });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-hero", entries: [entry("e-hero", { tokenId: "hero", value: 15 })] };
+    return state;
+  }
+
+  const walk = (x: number): Op => ({ t: "token.move", tokenId: "hero", x, y: 5 });
+
+  test("a reminder only the DM read holds back none a player reads later in the turn, whatever the DM's ring dropped since", () => {
+    // The hero walks through the glyph unseen, the DM works on the hidden goblin, then shows the glyph, and the hero walks back in.
+    const run = (busy: boolean) => {
+      const work: Op[] = Array.from({ length: LIMITS.dmLogLines }, (_, i) =>
+        busy ? { t: "actor.damageMany", hits: [{ target: { tokenId: "gob" }, amount: 1 }] } : { t: "token.update", tokenId: "gob", patch: { x: 30 + (i % 2), y: 25 } },
+      );
+      return played(heroTurn(), [walk(6), walk(15), ...work, { t: "template.update", templateId: "glyph", patch: { visibility: "all" } }, walk(6)]);
+    };
+    const quiet = run(false);
+    const busy = run(true);
+    const first = "2:900000";
+    assert.ok(quiet.state.log.some((e) => e.id === first) && !busy.state.log.some((e) => e.id === first), "only the busy room's DM ring dropped the first reminder");
+    assert.deepEqual(busy.inboxes, quiet.inboxes);
+    const reentry = `"log:${5 + LIMITS.dmLogLines}:0"`;
+    assert.ok(quiet.inboxes.every((m) => m.includes(reentry) && m.includes('"type":"area"')), "both players read the reminder of the hero walking back in");
+  });
+
+  test("the DM's record past its cap changes no player's message, and the players' reminders still come once", () => {
+    // A hundred goblins no player sees, in one room only, and ten glyphs only the DM knows of moved onto where they stand.
+    const run = (crowd: boolean) => {
+      const state = heroTurn();
+      state.templates.glyph = { ...state.templates.glyph!, visibility: "all", ownerId: "dm1" };
+      for (let i = 0; i < (crowd ? 100 : 0); i++) state.tokens[`g${100 + i}`] = token(`g${100 + i}`, { visibility: "dm", x: 20 + (i % 10), y: 15 + Math.floor(i / 10) });
+      const ops: Op[] = [];
+      for (let k = 0; k < 11; k++) {
+        const id = `h${10 + k}`;
+        state.templates[id] = template(id, { shape: "sphere", size: 40, origin: { x: 38, y: 2, z: 0 }, visibility: "dm", ownerId: "dm1", triggers: ["enter"] });
+        ops.push({ t: "template.update", templateId: id, patch: { origin: { x: 25, y: 20, z: 0 } } });
+      }
+      return played(state, [...ops, walk(6), walk(15), walk(6)]);
+    };
+    const crowded = run(true);
+    const empty = run(false);
+    const dmPairs = Object.values(crowded.state.reminded!.dm!).reduce((n, tokens) => n + Object.keys(tokens).length, 0);
+    assert.equal(dmPairs, LIMITS.remindedDm, "the eleventh glyph's goblins are past the DM's cap");
+    assert.deepEqual(crowded.state.reminded!.shared, { glyph: { hero: 1 } });
+    assert.deepEqual(crowded.inboxes, empty.inboxes);
+    assert.equal(empty.inboxes[0]!.split('"type":"area"').length - 1, 1, "the hero's player reads the glyph's reminder once");
   });
 });
 

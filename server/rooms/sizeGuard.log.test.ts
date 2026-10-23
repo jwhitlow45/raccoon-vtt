@@ -4,7 +4,7 @@ import { lineAudience } from "#shared/logRings.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { entry, P1, room, template, token } from "#shared/testutil.ts";
+import { entry, P1, room, template, token, trap } from "#shared/testutil.ts";
 import { growthBound, measuredFromStored, measuredStateBytes, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { serializedBytes } from "#shared/limits.ts";
 
@@ -82,6 +82,10 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
     assert.equal(measuredStateBytes(into.after), measuredStateBytes(away.after));
     assert.equal(roomLevelBytes(into.after), roomLevelBytes(away.after));
     assert.equal(measuredFromStored(serializedBytes(into.after), into.after), measuredStateBytes(into.after));
+    // The record of the turn's reminders holds it too, and rides outside the measures as the line does, in a room with traps as well.
+    assert.deepEqual([away.after.reminded, into.after.reminded], [undefined, { dm: { glyph: { hero: 1 } } }]);
+    const trapped = { ...into.after, traps: { plate: trap("plate") } };
+    assert.equal(measuredFromStored(serializedBytes(trapped), trapped), measuredStateBytes(trapped));
   });
 
   test("a player's move near either limit gets the same answer with and without another player's area they cannot see", () => {

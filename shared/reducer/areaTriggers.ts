@@ -1,6 +1,5 @@
-import { eventLines } from "../logRings.ts";
 import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
-import type { AreaTemplate, AreaTrigger, Encounter, LogEntry, RoomState, Token } from "../model.ts";
+import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
@@ -31,8 +30,10 @@ import type { Tx } from "./tx.ts";
  * Web and Sleet Storm hit "the first time" a creature enters on a turn and
  * again when it starts a turn there, and a creature that enters Grease and
  * ends its turn there saves twice. So without the mark each trigger reminds
- * about a creature once a turn. A turn is everything since the last `turn`
- * line in the log.
+ * about a creature once a turn. Since op version 19 the room keeps which
+ * reminders each audience read this turn (reminded.ts), and a turn runs
+ * from Next, the removal of the acting row or Previous. Ops stored before
+ * then read the log back to its newest `turn` line, as they did.
  *
  * The reminders are log events, so the projection decides who reads them
  * (design 7.3): the DM always, a player only while they can see both the
@@ -81,60 +82,19 @@ function inside(state: RoomState, template: AreaTemplate, candidates: readonly T
 }
 
 /**
- * Whether the log already reminded about this creature and area in the turn
- * that is running: for any trigger when the area hits once a turn, else for
- * this one.
- *
- * The turn runs from the op that started it (Encounter.turnSeq), read one
- * line per event (eventLines) and by op, since a line only the DM or only
- * some players get counts past the shared lines of its op (Tx.addLog) and
- * may sort before or after the turn line. The seq is kept in the encounter,
- * so a turn whose line only the DM got still bounds the read once the DM's
- * ring has dropped that line. A fight from before it reads the newest turn
- * line instead. The only reminder an op writes before its turn starts is a
- * turn end's (remindTurnEnd), for the turn that ended there, so that one is
- * left to the turn before. An op stored before op version 19 numbered every
- * line in order (`apart` false), so it replays from the newest turn line's
- * place, as the build that stored it ran.
+ * Whether the log already reminded about this creature and area since its
+ * newest turn line, for any trigger when the area hits once a turn, else
+ * for this one: the rule of ops stored before op version 19, which kept
+ * every line in one ring in order. Later ops keep a record instead
+ * (Tx.addReminder, reminded.ts).
  */
-function remindedThisTurn(state: RoomState, template: AreaTemplate, tokenId: string, trigger: AreaTrigger, apart: boolean): boolean {
-  const log = state.log;
-  const reminded = (data: LogEntry["data"]) => data?.type === "area" && data.templateId === template.id && data.tokenId === tokenId && (template.oncePerTurn === true || data.trigger === trigger);
-  if (!apart) {
-    for (let i = log.length - 1; i >= 0; i--) {
-      const data = log[i]!.data;
-      if (data?.type === "turn") return false;
-      if (reminded(data)) return true;
-    }
-    return false;
-  }
-  const lines = eventLines(log);
-  const turnSeq = turnSeqOf(state.encounter) ?? newestTurnSeq(lines);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!;
-    const seq = Number(seqOf(line.id));
-    if (turnSeq !== null && seq < turnSeq) break;
-    if (seq === turnSeq && line.data?.type === "area" && line.data.trigger === "turnEnd") continue;
-    if (reminded(line.data)) return true;
+function remindedInLog(log: readonly LogEntry[], template: AreaTemplate, tokenId: string, trigger: AreaTrigger): boolean {
+  for (let i = log.length - 1; i >= 0; i--) {
+    const data = log[i]!.data;
+    if (data?.type === "turn") return false;
+    if (data?.type === "area" && data.templateId === template.id && data.tokenId === tokenId && (template.oncePerTurn === true || data.trigger === trigger)) return true;
   }
   return false;
-}
-
-/** The seq of the op that started the acting row's turn, as the encounter keeps it, or null in a fight from before op version 19. */
-function turnSeqOf(encounter: Encounter | null): number | null {
-  if (!encounter || encounter.activeEntryId === null) return null;
-  if (encounter.turnSeq !== undefined) return encounter.turnSeq;
-  return encounter.turnStart?.entryId === encounter.activeEntryId ? (encounter.turnStart.seq ?? null) : null;
-}
-
-/** The seq of the newest turn line among these, or null for none. */
-function newestTurnSeq(lines: readonly LogEntry[]): number | null {
-  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.data?.type === "turn") return Number(seqOf(lines[i]!.id));
-  return null;
-}
-
-function seqOf(id: string): string {
-  return id.slice(0, id.indexOf(":"));
 }
 
 /** "Spirit Guardians", or "20 ft sphere" for an area with no name, as the area tool titles it. */
@@ -152,11 +112,12 @@ function areaName(t: AreaTemplate): string {
  * the dark.
  */
 function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigger, areaMoved: boolean, at: RoomState = tx.state): void {
-  if (remindedThisTurn(tx.state, template, token.id, trigger, logsByAudience(tx.env.opVersion))) return;
+  const recorded = logsByAudience(tx.env.opVersion);
+  if (!recorded && remindedInLog(tx.state.log, template, token.id, trigger)) return;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
   const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env));
   const there = at.tokens[token.id] ?? token;
-  tx.addEvent({
+  const line: Extract<LogEvent, { type: "area" }> = {
     type: "area",
     templateId: template.id,
     tokenId: token.id,
@@ -165,7 +126,9 @@ function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigg
     ...(areaMoved ? { moved: true as const } : {}),
     ...(seenByNonOwners(at, there, tx.env) ? { seen: true as const } : {}),
     ...(hidden ? { hidden: true as const } : {}),
-  });
+  };
+  if (recorded) tx.addReminder(line, template.oncePerTurn === true);
+  else tx.addEvent(line);
 }
 
 /** The token whose turn is the encounter's active one, if it is a creature an area can hit. */

@@ -1,5 +1,5 @@
 import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
-import { cutLine, DM_LINE_BASE, droppedLines, MAX_LOG, neverRead, PARTY_LINE_BASE, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
+import { cutLine, DM_LINE_BASE, dmNumbered, droppedLines, MAX_LOG, neverRead, PARTY_LINE_BASE, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
 import { logsByAudience } from "../migrate.ts";
 import type {
   Actor,
@@ -14,12 +14,13 @@ import type {
   TokenKind,
   Viewer,
 } from "../model.ts";
-import { hashValue, lineReader, seenByNonOwners } from "../project.ts";
+import { hashValue, lineReader, seenByNonOwners, type LineReach } from "../project.ts";
 import type { ActorTarget, RefusalCode, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { decodeTile } from "../rules/fog.ts";
 import type { ActorEvent } from "../rules/hp.ts";
 import { markFinished, markWritable } from "../writable.ts";
+import { Book, type Reminder } from "./reminded.ts";
 
 /**
  * The envelope the server stamps on every op: the only source of time and
@@ -104,6 +105,10 @@ export class Tx {
    */
   private readonly unsettled: ({ line: LogEntry; dmIndex: number } | { trapSeen: LogEntry })[] = [];
   private settled = false;
+  /** The record of the running turn's reminders as the op has it so far (reminded.ts), read from the room when first needed. */
+  private book: Book | null = null;
+  /** The reminders the op wrote, each with the record of the turn it belongs to. */
+  private readonly reminders = new Map<LogEntry, { book: Book; reminder: Reminder }>();
 
   constructor(state: RoomState, actor: Viewer, env: Env) {
     this.state = { ...state };
@@ -268,6 +273,9 @@ export class Tx {
    *   PARTY_SLOT is full in this op gets no more copies, a cap only an op
    *   ending thousands of effects on creatures they alone see comes near,
    *   and each other reader's copies and the DM line stay as they are.
+   * - An area's reminder reaches only the readers who have not read a
+   *   matching one this turn, as a party line when that leaves some players
+   *   out, and is not written when it leaves nobody (reminded.ts).
    *
    * Each ring then drops only its own oldest, once, so a line never pushes
    * out one a viewer holds who could not read it.
@@ -276,8 +284,13 @@ export class Tx {
     if (this.settled || !logsByAudience(this.env.opVersion)) return;
     this.settled = true;
     const reachOf = lineReader(this.state);
-    const reaches = this.unsettled.map((u) => ("line" in u && u.line.kind === "event" ? reachOf(u.line) : null));
-    if (reaches.some((r) => r !== null && (r.audience !== "shared" || r.parts !== undefined))) {
+    const reaches = this.unsettled.map((u): LineReach | null => {
+      if (!("line" in u) || u.line.kind !== "event") return null;
+      if (!this.reminders.has(u.line)) return reachOf(u.line);
+      return dmNumbered(u.line.id) ? { audience: "dm" } : reachOf(u.line, true);
+    });
+    // A reminder settles here even when every reader gets it, so the record learns who read it.
+    if (this.reminders.size > 0 || reaches.some((r) => r !== null && (r.audience !== "shared" || r.parts !== undefined))) {
       // Only an op whose trap step wrote a players' line meets their log, which a room from before traps lacks.
       const held = new Set<LogEntry>(this.unsettled.some((u) => "trapSeen" in u) ? this.collection("trapSeen") : []);
       const writes: LogWrite[] = [];
@@ -302,22 +315,31 @@ export class Tx {
           return;
         }
         const { id: _id, at: _at, ...entry } = u.line;
-        const reach = reaches[i] ?? { audience: "shared" };
+        const reminded = this.reminders.get(u.line);
+        const reach = reminded ? reminded.book.narrow(reminded.reminder, reaches[i]!) : (reaches[i] ?? { audience: "shared" });
+        if (reach === null) {
+          settled.set(u.line, []);
+          return;
+        }
         if (reach.audience === "shared") {
           settled.set(u.line, [write(reach.parts ? { ...entry, parts: reach.parts } : entry, index++)]);
+          reminded?.book.record(reminded.reminder, "shared");
           return;
         }
         const dmLine = write(entry, u.dmIndex, cutLine);
         const lines = [dmLine];
+        const readers: string[] = [];
         if (reach.audience === "party") {
           for (const [reader, view] of reach.views) {
             const count = copies.get(reader) ?? 0;
             if (count >= PARTY_SLOT) continue;
             copies.set(reader, count + 1);
             lines.push(write({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id }, partyIndex(ranks.get(reader)!, count), cutLine));
+            readers.push(reader);
           }
         }
         settled.set(u.line, lines);
+        reminded?.book.record(reminded.reminder, reach.audience === "dm" ? "dm" : readers);
       });
       this.writeLog(writes);
       this.log = this.log.flatMap((e) => settled.get(e) ?? [e]);
@@ -337,6 +359,20 @@ export class Tx {
       }
     }
     this.writeLog(droppedLines(this.collection("log"), this.state.members).map((id) => [id, null]));
+    this.keepReminders();
+  }
+
+  /**
+   * Keeps the record of the turn running as the op leaves it (reminded.ts)
+   * in the room. It is no entity: no key names it, so no projection, undo
+   * guard or size measure ever reads it, and replay rebuilds it from the
+   * snapshot it was stored in.
+   */
+  private keepReminders(): void {
+    if (!this.book?.changed) return;
+    const value = this.book.value(this.state.members);
+    if (value) this.state.reminded = value;
+    else delete this.state.reminded;
   }
 
   /**
@@ -405,6 +441,27 @@ export class Tx {
 
   addEvent(data: LogEvent): LogEntry {
     return this.addLog({ kind: "event", data });
+  }
+
+  /**
+   * Writes an area's reminder (areaTriggers.ts) for the turn running now,
+   * so a turn's end written before Next starts the next turn is the ending
+   * turn's. The op's end holds it back from each reader who already read a
+   * matching one this turn (settleLog, reminded.ts). Only ops from op
+   * version 19 keep the record. Older ones read the log before writing.
+   */
+  addReminder(data: Extract<LogEvent, { type: "area" }>, once: boolean): void {
+    const line = this.addEvent(data);
+    if (!logsByAudience(this.env.opVersion)) return;
+    this.book ??= new Book(this.state.reminded);
+    this.reminders.set(line, { book: this.book, reminder: { templateId: data.templateId, tokenId: data.tokenId, trigger: data.trigger, once } });
+    // A reminder no player could ever read took the DM's number at once (addLog), and settles with the rest, as the DM's.
+    if (dmNumbered(line.id)) this.unsettled.push({ line, dmIndex: Number(line.id.slice(line.id.indexOf(":") + 1)) });
+  }
+
+  /** A turn starts: Next, the removal of the acting row, or Previous. Its reminders start an empty record (reminded.ts). */
+  startTurn(): void {
+    if (logsByAudience(this.env.opVersion)) this.book = new Book(undefined, true);
   }
 
   /**

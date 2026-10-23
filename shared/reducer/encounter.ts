@@ -36,9 +36,11 @@ export function writeEncounter(tx: Tx, encounter: Encounter): void {
  * stands on as where its turn began (features section 10). A row without a
  * token, or whose token is gone, has no spot. The row is marked as having
  * had its turn, so its place in the order stays in players' view for the
- * rest of the fight (docs/design-v1-combat-flow.md 11.2).
+ * rest of the fight (docs/design-v1-combat-flow.md 11.2). The turn's areas
+ * remind anew (Tx.startTurn).
  */
 function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): Encounter {
+  tx.startTurn();
   const { turnStart: _previous, turnSeq: _turnSeq, ...rest } = encounter;
   const next: Encounter = { ...rest, activeEntryId };
   if (activeEntryId !== null && logsByAudience(tx.env.opVersion)) next.turnSeq = tx.env.seq;
@@ -484,6 +486,8 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
   const taken = encounter.entries.find((e) => e.id === encounter.activeEntryId);
   const takenSeen = taken !== undefined && rowSeenByNonOwners(tx.state, taken, tx.env);
   writeEncounter(tx, snapshot.encounter);
+  // The turn put back reminds anew, as the turn line it got did before op version 19: no record of it is kept to restore.
+  tx.startTurn();
   for (const [id, effects] of Object.entries(snapshot.effects).sort(([a], [b]) => (a < b ? -1 : 1))) {
     restoreEffects(tx, id, effects);
   }

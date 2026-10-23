@@ -1499,14 +1499,19 @@ const ANY_PLAYER: Viewer = { memberId: "", role: "player" };
  *
  * - "shared" when every player reads it, and so would any player who owns
  *   nothing, one who joins later included. `parts` names who read each part
- *   of it that not all of them did (LineParts).
+ *   of it that not all of them did (LineParts). Asked for `views`, it lists
+ *   each player's read as "party" does, so an area's reminder can go to
+ *   only those who still need it (shared/reducer/reminded.ts).
  * - "party" when only some do: each reader, in id order, with the line as
  *   they read it then.
  * - "dm" when none does.
  *
  * A chat line reaches all. A whisper is its parties' (whisperParties).
  */
-export type LineReach = { audience: "shared"; parts?: LineParts } | { audience: "party"; views: [string, LogEvent][] } | { audience: "dm" };
+export type LineReach =
+  | { audience: "shared"; parts?: LineParts; views?: [string, LogEvent][] }
+  | { audience: "party"; views: [string, LogEvent][] }
+  | { audience: "dm" };
 
 type Read = { id: string; ctx: Ctx; view: LogEvent | null };
 
@@ -1519,7 +1524,7 @@ export function lineReach(state: RoomState, entry: Pick<LogEntry, "kind" | "data
  * and sight reader and one context each, so an op of many lines judges
  * them all against the same room for about the cost of reading each.
  */
-export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "data">) => LineReach {
+export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "data">, views?: boolean) => LineReach {
   const fogged = fogReader(state);
   const sight = sightReader(state);
   // Any player stands for a member who owns nothing, so it reads a dice line as members do.
@@ -1530,7 +1535,7 @@ export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "d
     .sort()
     .map((id) => ctxOfReader({ memberId: id, role: "player" }));
   const anyPlayer = ctxOfReader(ANY_PLAYER);
-  return (entry) => {
+  return (entry, views = false) => {
     if (entry.kind !== "event" || !entry.data) return { audience: "shared" };
     const data = entry.data;
     const read = (ctx: Ctx): Read => ({ id: ctx.viewer.memberId, ctx, view: projectEventCtx(ctx, data) });
@@ -1541,7 +1546,8 @@ export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "d
       return readers.length === 0 ? { audience: "dm" } : { audience: "party", views: readers.map((r) => [r.id, r.view!]) };
     }
     const parts = partsOf(data, anyone, reads);
-    return parts ? { audience: "shared", parts } : { audience: "shared" };
+    const shared: LineReach = parts ? { audience: "shared", parts } : { audience: "shared" };
+    return views ? { ...shared, views: readers.map((r) => [r.id, r.view!]) } : shared;
   };
 }
 

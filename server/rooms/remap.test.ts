@@ -9,7 +9,7 @@ import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { Tx } from "#shared/reducer/tx.ts";
 import { projectArchivedLog, projectState, stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { AT, DM, P1, actor, apply, env, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, apply, env, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, template, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { exportableState } from "./exportRoom.ts";
 import { assertWithinLimits } from "./importRoom.ts";
@@ -181,6 +181,18 @@ describe("remapState", () => {
     const kept = Object.values(out.drawings);
     assert.equal(kept.length, 1, "a ruler on a token that did not come through goes with it");
     assert.deepEqual(kept[0]!.anchors, [pip.id, goblin.id]);
+  });
+
+  test("the record of the running turn's reminders comes in the file and stays behind", () => {
+    let state = room();
+    state.tokens.gob = token("gob", { x: 12, y: 5 });
+    state.templates.sg = template("sg", { shape: "sphere", size: 10, origin: { x: 6.5, y: 5.5, z: 0 }, ownerId: "dm1", triggers: ["enter"] });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-gob", entries: [entry("e-gob", { tokenId: "gob", value: 15 })] };
+    state = apply(state, { t: "token.move", tokenId: "gob", x: 6, y: 5 }, DM, 2);
+    assert.deepEqual(state.reminded, { shared: { sg: { gob: 1 } } });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(exportableState(state, DM))));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal("reminded" in remapState(parsed.state, { assets: new Map() }), false);
   });
 
   test("a take-back line names the row it resumed by its new id", () => {

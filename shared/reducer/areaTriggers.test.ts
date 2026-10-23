@@ -259,7 +259,7 @@ describe("area reminders", () => {
     assert.deepEqual(stored.log.filter((e) => e.data?.type === "area"), [], "the build before op 19 had no rule for a line sorted after its turn line");
     const live = applyOp(state, enter, DM, env(6));
     assert.ok(live.ok);
-    assert.equal(live.log.filter((e) => e.data?.type === "area").length, 1, "today the turn-end line is the turn before's");
+    assert.equal(live.log.filter((e) => e.data?.type === "area").length, 1, "today the room's record of this turn holds no reminder yet");
   });
 });
 

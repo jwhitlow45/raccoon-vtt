@@ -216,6 +216,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     traps: {},
     trapLog: [],
     trapSeen: [],
+    // No record of the running turn's reminders (RoomState.reminded): it belongs to that turn, and names old member ids.
   };
 
   const moveAny = state.meta.settings.playersMoveAny;

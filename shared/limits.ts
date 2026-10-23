@@ -432,6 +432,23 @@ export const LIMITS = {
   partyLinesKept: 50,
   partyLinesPerRoom: 400,
   partyLineBytesPerRoom: 640 * 1024,
+  /**
+   * The pairs of area and creature the record of a turn's reminders keeps
+   * (shared/reducer/reminded.ts), each audience under a cap of its own, so
+   * no audience's reminders decide whether another's repeat. A real turn
+   * reminds about a few pairs, and a heavy one about tens: a horde of 30
+   * the DM moves on one count through Spirit Guardians and a Web makes 60.
+   * Each cap is well past that, and past it an audience records no more new
+   * pairs that turn, so only its own readers can be reminded twice. With
+   * the longest ids a pair takes about 140 bytes, so a room of 49 players
+   * holds at most about 1.6 MiB of it, outside the measures as DM lines are.
+   *
+   * They decide which reminders a logged op writes, so changing one needs a
+   * new op version (shared/migrate.ts).
+   */
+  remindedShared: 1_000,
+  remindedPerPlayer: 200,
+  remindedDm: 1_000,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };
