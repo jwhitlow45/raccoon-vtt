@@ -7,11 +7,13 @@ import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#share
 import type { ActorTarget } from "#shared/protocol.ts";
 import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
+import { loadedMonsters } from "#shared/srd/monsters.ts";
 import { Group, sectionLabelLook } from "../../../components/Panel.tsx";
 import { displayName } from "../../../lib/scene.ts";
 import { useUnsavedInput } from "../../../lib/sheetSwipe.ts";
 import { theme } from "../../../lib/theme.ts";
 import { scopeSlot, useScoped } from "../../../state/scope.ts";
+import type { RoomView } from "../../../state/types.ts";
 import { useRoomStore, useRoomView, type RoomViewStore } from "../../../state/view.ts";
 import { FieldRow, Note, NumberField } from "../../tokens/ui.tsx";
 import { CARD_PICTURES, CreatureCard } from "../CreatureCard.tsx";
@@ -22,7 +24,7 @@ import { rollsOf } from "../logic.ts";
 import { cutLabel, damageRolls, withExtra } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { useDicePanel, type PanelRoll } from "../useDicePanel.ts";
-import { useDiceView } from "../useDiceView.ts";
+import { loadedSrdRolls, useDiceView } from "../useDiceView.ts";
 import { useReceipt, useReceipts, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
 import { attackResults } from "./outcome.ts";
@@ -63,7 +65,7 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
   useUnsavedInput(dc !== null || shared.some((s) => unsentAc(attackState[s.name])));
   // The attacks' state belongs to the view of several, which goes once fewer than two are selected. A phone's Dice sheet closed to pick on the map is not that, so the watch outlives this view.
   useEffect(() => {
-    slot.stop ??= clearBelowTwo(attacks, room);
+    slot.stop ??= watchSelection(attacks, room, () => ({ monsters: loadedMonsters(), rolls: loadedSrdRolls() }));
   }, [slot, attacks, room]);
   const sharedNames = shared.map((s) => s.name).join("\n");
   useEffect(() => {
@@ -247,7 +249,7 @@ export const NO_ATTACK: SharedAttackState = { ac: null, acSent: null, sent: null
  * Keyed by the attack's name within the view of several, never by the
  * selection, so an attack that stays shared as the selection changes keeps
  * what it sent. Per Room page, as every option the panel keeps. `stop`
- * ends the watch on the selection (clearBelowTwo), once one is running.
+ * ends the watch on the selection (watchSelection), once one is running.
  */
 export const sharedAttacksSlot = scopeSlot(
   (): { store: StoreApi<SharedAttacks>; stop: (() => void) | null } => ({ store: createStore<SharedAttacks>(() => ({ byName: {} })), stop: null }),
@@ -263,15 +265,39 @@ function useSharedAttacksStore() {
 }
 
 /**
- * Clears every attack's state once fewer than two creatures are selected
- * (docs/design-v1-dice-pass.md 5.3), whether the view of several is drawn
- * then or not, so a selection that goes to one and back never shows the
- * old hits. Hands back the end of the watch.
+ * Watches the selection for the attacks' state, whether the view of
+ * several is drawn then or not (docs/design-v1-dice-pass.md 5.3): fewer
+ * than two selected clears every attack, so a selection that goes to one
+ * and back never shows the old hits, and a selection that no longer shares
+ * an attack drops that one, so a phone's Dice sheet closed while the DM
+ * selects others never brings back hits a selection in between lost.
+ * Where a selected creature's block has yet to load, its selection says
+ * nothing of sharing, and the view's own check settles it once drawn.
+ * `srd` is the SRD as loaded so far. Hands back the end of the watch.
  */
-export function clearBelowTwo(attacks: StoreApi<SharedAttacks>, room: Pick<RoomViewStore, "subscribe">): () => void {
+export function watchSelection(attacks: StoreApi<SharedAttacks>, room: Pick<RoomViewStore, "subscribe">, srd: () => DiceView["srd"]): () => void {
+  let seen: readonly string[] | null = null;
   return room.subscribe((s) => {
-    if (s.local.selectedIds.length < 2 && Object.keys(attacks.getState().byName).length > 0) attacks.setState({ byName: {} });
+    const ids = s.local.selectedIds;
+    if (ids === seen) return;
+    seen = ids;
+    if (Object.keys(attacks.getState().byName).length === 0) return;
+    if (ids.length < 2) {
+      attacks.setState({ byName: {} });
+      return;
+    }
+    const names = sharedNow(s, ids, srd());
+    if (names !== null) attacks.setState((a) => keepShared(a, names));
   });
+}
+
+/** The attacks these selected creatures share by name, or null while any of their blocks has yet to load. */
+function sharedNow(s: Pick<RoomView, "view" | "you">, ids: readonly string[], srd: DiceView["srd"]): string[] | null {
+  if (!s.view || !s.you) return null;
+  const dice: DiceView = { you: s.you, view: s.view, srd };
+  const creatures = ids.map((tokenId): ActorTarget => ({ tokenId }));
+  if (creatures.some((c) => creatureRolls(dice, c) === null)) return null;
+  return sharedAttacksOf(dice, creatures).map((a) => a.name);
 }
 
 /** One attack's state changed, the others as they were. */

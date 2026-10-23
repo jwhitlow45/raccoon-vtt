@@ -24,6 +24,8 @@ function subscribeRolls(listener: () => void): () => void {
   return () => rollsChunk.listeners.delete(listener);
 }
 const rollsValue = () => rollsChunk.value;
+/** The SRD's rolls table as loaded so far, for a reader outside React, as shared/srd/monsters.ts loadedMonsters is for the stat blocks. */
+export const loadedSrdRolls = (): SrdRolls | null => rollsChunk.value;
 const rollsFailed = () => rollsChunk.failed;
 
 function useRollsChunk(wanted: boolean): { value: SrdRolls | null; failed: boolean } {

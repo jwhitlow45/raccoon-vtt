@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { LogEntry, PcStats, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { character, DM, room, token } from "#shared/testutil.ts";
+import { actor, character, DM, room, token } from "#shared/testutil.ts";
 import { theme } from "../../../lib/theme.ts";
 import type { DiceView } from "../creature.ts";
 import { diceFoldsSlot, severalKey } from "../diceFolds.ts";
@@ -22,7 +22,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../../state/scope.ts");
-const { attackSummary, clearBelowTwo, GroupOptions, keepShared, NO_ATTACK, patchShared, sharedAttacksOf, sharedAttacksSlot, unsentAc } = await import("./GroupOptions.tsx");
+const { attackSummary, GroupOptions, keepShared, NO_ATTACK, patchShared, sharedAttacksOf, sharedAttacksSlot, unsentAc, watchSelection } = await import("./GroupOptions.tsx");
 
 const STATS: PcStats = {
   abilities: { str: 10, dex: 18, con: 12, int: 10, wis: 12, cha: 10 },
@@ -246,10 +246,17 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     assert.equal(attackSummary("Rapier", state, (tag) => s.scope.get(receiptsSlot).state(tag)), "Rapier: 1 hit");
   });
 
-  test("fewer than two selected clears every attack's state, drawn or not, and a selection of two or more keeps it", () => {
+  /** The DM's room store over `state`, its selection as given, and the watch on it, the SRD never loaded. */
+  function watched(state: RoomState, selectedIds: string[]) {
+    const view = projectState(state, DM, { sceneId: "s1" }) as unknown as RoomState;
     const attacks = createStore(() => patchShared({ byName: {} }, "Rapier", { ac: 12 }));
-    const room = createStore(() => ({ local: { selectedIds: ["ta", "tb"] as string[] } }));
-    const stop = clearBelowTwo(attacks, room as never);
+    const room = createStore(() => ({ view, you: DM, local: { selectedIds } }));
+    const stop = watchSelection(attacks, room as never, () => ({ monsters: null, rolls: null }));
+    return { attacks, room, stop };
+  }
+
+  test("fewer than two selected clears every attack's state, drawn or not, and a selection of two or more keeps it", () => {
+    const { attacks, room, stop } = watched(table(), ["ta", "tb"]);
     room.setState({ local: { selectedIds: ["ta", "tb", "tc"] } });
     assert.ok(attacks.getState().byName.Rapier, "three selected keep it");
     room.setState({ local: { selectedIds: ["ta", "tb"] } });
@@ -263,6 +270,34 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     attacks.setState(patchShared({ byName: {} }, "Rapier", { ac: 15 }));
     room.setState({ local: { selectedIds: ["ta"] } });
     assert.ok(attacks.getState().byName.Rapier, "the watch ended");
+  });
+
+  test("a selection that stops sharing the attack drops its state, even while the view of several is away, and one sharing it all along keeps it", () => {
+    // Dara and Eli carry a club, not a rapier. Fen carries a rapier.
+    const state = table();
+    const CLUB: PcStats = { ...STATS, rolls: [{ id: "c1", name: "Club", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d4", mod: true, type: "bludgeoning" }] }] };
+    for (const [id, name, stats] of [["d", "Dara", CLUB], ["e", "Eli", CLUB], ["f", "Fen", STATS]] as const) {
+      state.characters[id] = { ...character(id, { name, ownerIds: ["p1"], level: 5 }), stats };
+      state.tokens[`t${id}`] = token(`t${id}`, { kind: "pc", name, ownerIds: ["p1"], actor: { ref: id } });
+    }
+    const through = watched(state, ["ta", "tb"]);
+    through.room.setState({ local: { selectedIds: ["td", "te"] } });
+    assert.deepEqual(through.attacks.getState().byName, {}, "Dara and Eli share no rapier");
+    through.room.setState({ local: { selectedIds: ["tc", "tf"] } });
+    assert.deepEqual(through.attacks.getState().byName, {}, "Vex and Fen's rapier starts afresh");
+    through.stop();
+
+    const along = watched(state, ["ta", "tb"]);
+    along.room.setState({ local: { selectedIds: ["tc", "tf"] } });
+    assert.ok(along.attacks.getState().byName.Rapier, "Vex and Fen share the rapier, so its state stays");
+    along.stop();
+
+    // A goblin's block waits for the SRD, so a selection with it says nothing of sharing yet.
+    state.tokens.gob = token("gob", { actor: { inline: { ...actor(), srdId: "goblin-warrior" } } });
+    const waiting = watched(state, ["ta", "tb"]);
+    waiting.room.setState({ local: { selectedIds: ["ta", "gob"] } });
+    assert.ok(waiting.attacks.getState().byName.Rapier, "kept until the view of several reads the goblin's block");
+    waiting.stop();
   });
 
   test("the slot's watch ends with its Room, and a Room used again after that watches anew", () => {
