@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { Token } from "#shared/model.ts";
+import { SCROLL_FOR_MORE_PX } from "../../canvas/TokenActionBar.tsx";
 import { Button } from "../../components/Button.tsx";
 import { useDelayed } from "../../components/Loading.tsx";
 import { menuAction } from "../../components/menuKeys.ts";
@@ -196,7 +197,7 @@ function AttachList(props: { token: Token; onDone(): void }) {
         </button>
         {open ? (
           // The margin keeps Ride clear of the fade that says "Scroll for more" where more rows follow.
-          <div ref={askRef} style={{ display: "grid", gap: theme.space(1), paddingLeft: theme.space(2), scrollMarginBottom: theme.space(12) }}>
+          <div ref={askRef} style={{ display: "grid", gap: theme.space(1), paddingLeft: theme.space(2), scrollMarginBottom: SCROLL_FOR_MORE_PX }}>
             <Segmented<"controlled" | "independent">
               label={`How ${holderName(row)} moves`}
               value={steer}
