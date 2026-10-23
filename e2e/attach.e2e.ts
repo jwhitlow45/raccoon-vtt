@@ -663,4 +663,62 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       }
     }
   });
+
+  test("pl2-d. an ogre carrying a chest with a long name and dragging a creature named in one long word, on the DM's phone at 320 px at 130% and at 360 px: each name and action keeps inside its cell, its words wrapping there, and each word stands on its first name's first line (PL2-ASTRA-03)", async () => {
+    const ogre = randomUUID();
+    const chest = randomUUID();
+    const captive = randomUUID();
+    await ops.send(tokenOp(ogre, { kind: "monster", name: "Ogre", size: "large", x: 12, y: 0, disposition: "hostile", actor: { inline: actor() } }));
+    await ops.send(tokenOp(chest, { kind: "object", name: "Chest of the Drowned Archduke", size: "tiny", x: 12, y: 1.5, actor: { inline: actor({ hp: { cur: 5, max: 5, temp: 0 } }) } }));
+    await ops.send(tokenOp(captive, { kind: "npc", name: "Bogglethwaitesonofgrimblethorn", x: 14, y: 0, disposition: "neutral", actor: { inline: actor() } }));
+    await ops.send({ t: "actor.effect.add", target: { tokenId: captive }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "token.attach", tokenId: chest, to: ogre, kind: "carry", x: 12, y: 1.5, elevation: 0 });
+    await ops.send({ t: "token.attach", tokenId: captive, to: ogre, kind: "drag", x: 14, y: 0, elevation: 0 });
+    await waitFor("the ogre's load", () => (token(dmSocket, chest)?.attached?.to === ogre && token(dmSocket, captive)?.attached?.to === ogre) || null);
+    for (const [viewport, scale] of [
+      [{ width: 320, height: 568 }, 1.3],
+      [{ width: 360, height: 740 }, 1],
+    ] as const) {
+      const { context, page } = await dmPhone(viewport, scale);
+      try {
+        // The ogre's top-right square, clear of the chest in its bottom-left corner.
+        const b = await select(page, "Ogre", { x: 13, y: 0 });
+        const line = b.getByRole("group", { name: "Attached tokens" });
+        await line.scrollIntoViewIfNeeded();
+        const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        await shots.take(page, `attach-pl2-d-long-names-${viewport.width}-${Math.round(scale * 100)}`);
+        const rows = await line.evaluate((node) => {
+          type Rect = { left: number; top: number; right: number; bottom: number };
+          type Range = { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<Rect> };
+          const doc = (globalThis as unknown as { document: { createRange(): Range } }).document;
+          const el = node as unknown as Elem;
+          return (["carrying", "dragging"] as const).map((kind) => {
+            const word = el.querySelector(`[data-hold-word="${kind}"]`)!;
+            const cell = el.querySelector(`[data-hold-names="${kind}"]`)!;
+            const items = Array.from(cell.children).map((c) => {
+              const r = c.getBoundingClientRect();
+              return { text: c.textContent, left: r.left, right: r.right };
+            });
+            // The first name's first line of words.
+            const range = doc.createRange();
+            range.selectNodeContents(cell.children[0]);
+            const first = range.getClientRects()[0]!;
+            const w = word.getBoundingClientRect();
+            const c = cell.getBoundingClientRect();
+            return { kind, cell: { left: c.left, right: c.right }, items, wordMiddle: (w.top + w.bottom) / 2, firstLineMiddle: (first.top + first.bottom) / 2, lines: range.getClientRects().length };
+          });
+        });
+        for (const row of rows) {
+          for (const item of row.items) {
+            assert.ok(item.left >= row.cell.left - 0.5 && item.right <= row.cell.right + 0.5, `${where}: "${item.text}" (${item.left.toFixed(1)} to ${item.right.toFixed(1)}) runs out of its cell (${row.cell.left.toFixed(1)} to ${row.cell.right.toFixed(1)})`);
+          }
+          assert.ok(Math.abs(row.wordMiddle - row.firstLineMiddle) <= 1, `${where}: the ${row.kind} word stands ${(row.wordMiddle - row.firstLineMiddle).toFixed(1)} px off its first name's first line`);
+        }
+        // At 320 px at 130% the names wrap. At 360 px they fit, and the check is that they still sit as before.
+        if (viewport.width === 320) assert.ok(rows.some((r) => r.lines > 1), `${where}: no name wrapped, so this tests nothing`);
+      } finally {
+        await context.close();
+      }
+    }
+  });
 });

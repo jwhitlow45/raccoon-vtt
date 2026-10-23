@@ -64,6 +64,15 @@ describe("the bar's group line", () => {
     ]);
   });
 
+  test("keeps each name and action to its cell, its words wrapping there, and the word on its first name's first line (PL2-ASTRA-03)", () => {
+    const view = stable();
+    const markup = render(view, createElement(GroupLine, { token: view.tokens.horse! }));
+    assert.match(markup, /^<div role="group" aria-label="Attached tokens" style="[^"]*align-items:baseline/);
+    const found = buttons(markup);
+    assert.equal(found.length, 5);
+    for (const b of found) assert.match(b.attrs, /style="[^"]*flex:0 1 auto;max-width:100%;overflow-wrap:anywhere/, `${b.text} may run past its cell`);
+  });
+
   test("a rider's line names its mount as the panel does", () => {
     const view = stable();
     const markup = render(view, createElement(GroupLine, { token: view.tokens.bree! }));
