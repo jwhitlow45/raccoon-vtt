@@ -1050,8 +1050,17 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       await dm.mouse.up();
     };
 
-    await dice.first().fill("2dx");
-    await press();
+    // Left before typing rests on any machine: the page's rest is held long for this press.
+    await dm.evaluate(() => ((globalThis as unknown as { rvttNoteRestMs?: number }).rvttNoteRestMs = 600_000));
+    try {
+      await dice.first().fill("2dx");
+      // Past the app's own rest, so the press below cannot beat it by luck.
+      await dm.waitForTimeout(800);
+      assert.equal(await why.count(), 0, "the note came while the rest was held");
+      await press();
+    } finally {
+      await dm.evaluate(() => delete (globalThis as unknown as { rvttNoteRestMs?: number }).rvttNoteRestMs);
+    }
     await waitFor("the press on Add damage landed", () => (trap(dmSocket)?.rig?.damage?.length === 2 ? true : null));
     assert.equal(await dice.first().inputValue(), "1d6", "dice left before typing rested kept what was typed");
     assert.equal(await why.count(), 0, "the blur showed the dice's error");

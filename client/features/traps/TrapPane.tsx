@@ -826,7 +826,10 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
 /**
  * The rest after a field's last keystroke, after which it says what is
  * wrong (fieldNote.ts NOTE_REST_MS). Each keystroke starts it again, and
- * leaving the field stops it, so no note comes on or after a blur.
+ * leaving the field stops it, so no note comes on or after a blur. The
+ * page's `rvttNoteRestMs`, where a run sets it, stands in for the rest: a
+ * test hook, so e2e/traps.e2e.ts can leave a field before the rest on any
+ * machine (review FU22B-OP-11). Nothing in the app sets it.
  */
 function useRest(): { start(then: () => void): void; stop(): void } {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -838,10 +841,14 @@ function useRest(): { start(then: () => void): void; stop(): void } {
   return {
     start(then) {
       stop();
-      timer.current = setTimeout(() => {
-        timer.current = null;
-        then();
-      }, NOTE_REST_MS);
+      const hook = (globalThis as { rvttNoteRestMs?: unknown }).rvttNoteRestMs;
+      timer.current = setTimeout(
+        () => {
+          timer.current = null;
+          then();
+        },
+        typeof hook === "number" && hook > 0 ? hook : NOTE_REST_MS,
+      );
     },
     stop,
   };
