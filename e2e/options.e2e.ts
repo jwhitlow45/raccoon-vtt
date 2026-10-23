@@ -92,6 +92,13 @@ function overlap(a: BoardBox, b: BoardBox): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
+/** The pills drawn now that were not in `before`: what a gesture added, such as a ruler's total beside the kept rulers' own. */
+async function newPills(page: Page, before: readonly BoardBox[]): Promise<BoardBox[]> {
+  const key = (b: BoardBox) => `${b.text}@${Math.round(b.left)},${Math.round(b.top)}`;
+  const had = new Set(before.map(key));
+  return (await boardBoxes(page)).pills.filter((p) => !had.has(key(p)));
+}
+
 describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
   before(openBrowsers);
   after(closeAll);
@@ -815,6 +822,65 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.equal(await measure.getAttribute("aria-label"), shows === "Line" ? "Measure: Line (Straight)" : "Measure: Walking");
     await shots.take(dm, "lp8-ruler-360-measure");
     await key(dm, "v");
+  });
+
+  test("lp2-2a. at 390 x 844 the ruler's total and a drag's label grow 1.3 times at 130%, and slide under the top bar", async () => {
+    const heights: Record<string, number> = {};
+    // A straight ruler, whatever this browser last measured with, so its total reads "N ft".
+    await player.evaluate(() => localStorage.setItem("rvtt.ruler.measure", "straight"));
+    for (const ui of [1, 1.3]) {
+      await reloadAt(player, ui);
+      await view(player, playerCdp, { width: 390, height: 844, insets: {} });
+      const bar = (await player.locator("header").first().boundingBox())!;
+      const barFoot = bar.y + bar.height;
+      // Closer in, over Thorn, so the map runs on under the top bar.
+      await key(player, "v");
+      const thorn = await pagePoint(player, { w: 0, h: 0 }, { x: 8.5, y: 8.5 });
+      await player.mouse.move(thorn.x, thorn.y);
+      for (let i = 0; i < 3; i++) {
+        await player.mouse.wheel(0, -200);
+        await player.waitForTimeout(100);
+      }
+      const pct = Math.round(ui * 100);
+
+      // A ruler measured up under the top bar: its total, 18 px down and right of its end, would stand under the bar.
+      await selectTool(player, "r");
+      const start = await pagePoint(player, { w: 0, h: 0 }, { x: 11.5, y: 8.5 });
+      const beforeRuler = (await boardBoxes(player)).pills;
+      await player.mouse.move(start.x, start.y);
+      await player.mouse.down();
+      await player.mouse.move(start.x, bar.y + bar.height / 2, { steps: 10 });
+      await player.mouse.up();
+      const reading = ((await options(player).locator("[data-options-line]").innerText()).split(" · ")[0] ?? "").trim();
+      assert.match(reading, /^\d+ ft$/, `the line reads the ruler (${reading})`);
+      const total = await waitFor("the ruler's total", async () => (await newPills(player, beforeRuler)).find((p) => p.text === reading));
+      assert.ok(total.top >= barFoot - 0.5, `the total's top ${total.top} stands under the top bar's foot ${barFoot} at ${pct}%`);
+      heights[`total${pct}`] = total.height;
+      await shots.take(player, `lp2-2a-ruler-390-${pct}`);
+      await key(player, "v");
+
+      // Thorn dragged up under the top bar: the drag's label, 4 px down and right of the token, would stand under it too.
+      const from = await pagePoint(player, { w: 0, h: 0 }, { x: 8.5, y: 8.5 });
+      const beforeDrag = (await boardBoxes(player)).pills;
+      await player.mouse.move(from.x, from.y);
+      await player.mouse.down();
+      await player.mouse.move(from.x, bar.y + 4, { steps: 12 });
+      const label = await waitFor("the drag's label", async () => (await newPills(player, beforeDrag)).find((p) => /^\d+ ft/.test(p.text)));
+      assert.ok(label.top >= barFoot - 0.5, `the drag's label's top ${label.top} stands under the top bar's foot ${barFoot} at ${pct}%`);
+      heights[`drag${pct}`] = label.height;
+      await shots.take(player, `lp2-2a-drag-390-${pct}`);
+      await player.mouse.up();
+      await ops.send({ t: "token.move", tokenId: run.thorn.id, x: 8, y: 8, elevation: 0 });
+      await waitFor("Thorn back at (8, 8)", () => {
+        const t = playerSocket.state?.tokens[run.thorn.id];
+        return t?.x === 8 && t.y === 8 ? true : null;
+      });
+    }
+    for (const what of ["total", "drag"]) {
+      const ratio = heights[`${what}130`]! / heights[`${what}100`]!;
+      assert.ok(ratio > 1.25 && ratio < 1.35, `the ${what === "total" ? "ruler's total" : "drag's label"} at 130% is ${ratio.toFixed(3)} times its 100% height`);
+    }
+    await reloadAt(player, 1);
   });
 
   test("lp2-2c. a creature's label keeps off the name of a trap beside it", async () => {

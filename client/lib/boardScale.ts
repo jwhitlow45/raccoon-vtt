@@ -13,7 +13,9 @@
  *
  * Strokes and icon-only marks have their own, lower floors so they stay
  * visible. Touch targets, handles and the bars over the map stay in screen
- * pixels, since fingers do not zoom.
+ * pixels, since fingers do not zoom. So do the readouts of a ruler or a
+ * move in progress, which keep one size at every zoom, though they follow
+ * the interface size as the rest of the board's text does (`screenPx`).
  *
  * Font sizes are rounded to half pixels, and the measure caches by the size
  * it is given, so what placement measures is exactly what Konva draws. The
@@ -95,6 +97,15 @@ let interfaceScale = 1;
 
 export function setBoardInterfaceScale(scale: number): void {
   interfaceScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+/**
+ * A size that keeps one size on screen at every zoom, such as a ruler's
+ * reading, at this device's interface size: its design size scaled, to
+ * half pixels as the board's text sizes are.
+ */
+export function screenPx(designPx: number, ui: number = interfaceScale): number {
+  return half(designPx * ui);
 }
 
 export function boardSizes(cellPx: number, ui: number = interfaceScale): BoardSizes {
