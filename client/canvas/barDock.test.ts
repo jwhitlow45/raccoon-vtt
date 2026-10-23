@@ -1156,6 +1156,25 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.equal(s.turning.size, 0);
   });
 
+  test("a toast that comes while the turn lasts, between the card's stale place and its measured one, moves with the turned stack, and holds no place of its own (review FU22B-ASTRA-03)", () => {
+    // astra's case: the turned toast at the stale 193, a second joins it, and then the column measures 240.
+    let s = step(NO_TOAST_PLACES, [1]);
+    s = step(s, [1], { turned: true, low: 193 });
+    s = step(s, [1, 2], { turned: true, low: 193 });
+    assert.deepEqual(s.places.get(2), { low: 193, column: true });
+    s = step(s, [1, 2], { turned: true, low: 240 });
+    assert.deepEqual(s.places.get(1), { low: 240, column: true });
+    assert.deepEqual(s.places.get(2), { low: 240, column: true });
+    // One that comes alone at the stale place moves too.
+    let t = step(NO_TOAST_PLACES, []);
+    t = step(t, [3], { turned: true, low: 193 });
+    t = step(t, [3], { turned: true, low: 240 });
+    assert.deepEqual(t.places.get(3), { low: 240, column: true });
+    // The turn over, they keep it.
+    s = step(s, [1, 2], { low: 300 });
+    assert.deepEqual(s.places.get(2), { low: 240, column: true });
+  });
+
   test("a card that arrives with no turn moves no toast, so nothing jumps under a finger", () => {
     let s = step(NO_TOAST_PLACES, [1]);
     s = step(s, [1], { low: 250 });
