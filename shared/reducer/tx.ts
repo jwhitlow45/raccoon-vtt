@@ -1,5 +1,5 @@
 import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
-import { cutLine, DM_LINE_BASE, droppedLines, MAX_LOG, neverRead, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
+import { cutLine, DM_LINE_BASE, droppedLines, MAX_LOG, neverRead, PARTY_LINE_BASE, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
 import { logsByAudience } from "../migrate.ts";
 import type {
   Actor,
@@ -57,6 +57,12 @@ export function gone(what: string): Refuse {
 export function invalid(message: string): Refuse {
   return new Refuse("invalid", message);
 }
+
+/** The refusal of an op that would write more log lines than a line's number can count (Tx.sharedIndex, Tx.dmIndex). */
+export const TOO_MANY_LINES = "That step writes too many log lines at once.";
+
+/** The largest number a log line takes within its op: six digits, as a line id's schema allows. */
+const MAX_LINE_INDEX = 999_999;
 
 export type ResolvedActor = {
   holder: "token" | "character";
@@ -230,15 +236,15 @@ export class Tx {
    */
   addLog(entry: Omit<LogEntry, "id" | "at">): LogEntry {
     if (!logsByAudience(this.env.opVersion)) {
-      const full = this.appendLine(entry, this.logIndex++);
+      const full = this.appendLine(entry, this.sharedIndex());
       const log = this.collection("log");
       for (const old of log.slice(0, Math.max(0, log.length - MAX_LOG))) this.write(keys.log(old.id), null);
       return full;
     }
     const event = entry.kind === "event" && entry.data !== undefined;
-    if (event && neverRead(entry.data!)) return this.appendLine(entry, DM_LINE_BASE + this.dmLineIndex++, cutLine);
-    const line = this.appendLine(entry, this.logIndex++);
-    this.unsettled.push({ line, dmIndex: event ? DM_LINE_BASE + this.dmLineIndex++ : -1 });
+    if (event && neverRead(entry.data!)) return this.appendLine(entry, this.dmIndex(), cutLine);
+    const line = this.appendLine(entry, this.sharedIndex());
+    this.unsettled.push({ line, dmIndex: event ? this.dmIndex() : -1 });
     return line;
   }
 
@@ -365,6 +371,25 @@ export class Tx {
     this.state.log = next;
   }
 
+  /**
+   * The number of the op's next line counted with the shared lines, which
+   * stay below PARTY_LINE_BASE, where the copies' runs start. An op that
+   * would write more is refused: the most an op writes in play is about
+   * one a removed effect, some 80,000 in the largest room (logRings.ts).
+   * Ops stored before op version 19 numbered every line this way, and
+   * replay as they were.
+   */
+  private sharedIndex(): number {
+    if (this.logIndex >= PARTY_LINE_BASE && logsByAudience(this.env.opVersion)) throw invalid(TOO_MANY_LINES);
+    return this.logIndex++;
+  }
+
+  /** The number of the op's next DM line, from DM_LINE_BASE, refused past the six digits a line's number may have. */
+  private dmIndex(): number {
+    if (DM_LINE_BASE + this.dmLineIndex > MAX_LINE_INDEX) throw invalid(TOO_MANY_LINES);
+    return DM_LINE_BASE + this.dmLineIndex++;
+  }
+
   /** Writes a log line numbered `index` in this op, as `fit` makes it, and keeps it for the archive. */
   private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit?: (line: LogEntry) => LogEntry): LogEntry {
     const full = this.lineOf(entry, index, fit);
@@ -397,7 +422,7 @@ export class Tx {
    * elsewhere, as an occurrence names its line.
    */
   addTrapLine(ring: "trapLog" | "trapSeen", data: LogEvent, keep: number): LogEntry {
-    const index = ring === "trapLog" ? DM_LINE_BASE + this.dmLineIndex++ : this.logIndex++;
+    const index = ring === "trapLog" ? this.dmIndex() : this.sharedIndex();
     const line: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, kind: "event", data };
     const key = ring === "trapLog" ? keys.trapLog : keys.trapSeen;
     this.write(key(line.id), line);

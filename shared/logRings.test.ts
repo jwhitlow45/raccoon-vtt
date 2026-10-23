@@ -25,7 +25,7 @@ import type { LogEntry, LogEvent, RoomState, Viewer } from "./model.ts";
 import { applyChanges, dependents, diffProjection, heldOf, lineReach, projectArchivedLog, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
 import { MAX_CHAT, MAX_OWNERS, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
-import { Tx } from "./reducer/tx.ts";
+import { TOO_MANY_LINES, Tx } from "./reducer/tx.ts";
 import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, token } from "./testutil.ts";
 
 /**
@@ -442,6 +442,21 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.equal(dmNumbered("12:899999"), false);
     assert.equal(dmNumbered("12:900000"), true);
     assert.equal(PARTY_SLOT * LIMITS.membersPerRoom, DM_LINE_BASE - PARTY_LINE_BASE, "every member's run fits below the DM's lines");
+  });
+
+  test("an op whose lines would count past their numbers' room is refused, by either count", () => {
+    const state = base();
+    const shared = new Tx(state, DM, { seq: 3, at: AT });
+    for (let i = 0; i < PARTY_LINE_BASE; i++) shared.addLog({ kind: "chat", from: "dm1", text: "x" });
+    assert.throws(() => shared.addLog({ kind: "chat", from: "dm1", text: "x" }), (err: Error) => err.message === TOO_MANY_LINES, "the shared count stops short of the copies' runs");
+    const dm = new Tx(state, DM, { seq: 3, at: AT });
+    const teleport: LogEvent = { type: "teleport", tokenId: "gob", past: "wall" };
+    for (let i = DM_LINE_BASE; i <= 999_999; i++) dm.addEvent(teleport);
+    assert.equal(dm.state.log.at(-1)!.id, "3:999999", "the DM's count runs to six digits");
+    assert.throws(() => dm.addEvent(teleport), (err: Error) => err.message === TOO_MANY_LINES);
+    const old = new Tx(state, DM, { seq: 3, at: AT, opVersion: 18 });
+    for (let i = 0; i <= PARTY_LINE_BASE; i++) old.addLog({ kind: "chat", from: "dm1", text: "x" });
+    assert.equal(old.state.log.length, MAX_LOG, "an op stored before op version 19 replays as it was");
   });
 });
 
