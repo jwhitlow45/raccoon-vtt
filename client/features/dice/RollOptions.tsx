@@ -41,6 +41,7 @@ import {
   groupAsks,
   groupNote,
   initiativeRow,
+  initiativeTag,
   namedRoll,
   noNumbersNote,
   openForAsks,
@@ -431,7 +432,7 @@ function OptionGroups(props: Shown) {
           asks.skills,
         )}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: theme.space(1) }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
           {SKILL_KEYS.map((s: SkillKey) => {
             const ability: AbilityKey = SKILLS[s].ability;
             if (unknown || !numbers) return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={0} unknown={{ typed }} text={typedText(SKILLS[s].name, typed)} />;
@@ -563,6 +564,18 @@ function GroupLabel(props: { children: ReactNode; note?: string | undefined }) {
   );
 }
 
+/**
+ * One part of a named row's controls line, grown to share each line it
+ * stands on at every size (docs/design-v1-dice-pass.md 7.2), so Hunter's
+ * Mark or a slot stepper never stands alone at the end of a wrapped line.
+ * A grid, so the control inside stretches to the part's width. The row's
+ * own option cells grow by themselves (OptionCell `fill`), and this holds
+ * what takes no such style: a chip, a stepper, another file's button.
+ */
+function Fill(props: { children: ReactNode }) {
+  return <span style={{ display: "grid", flex: "1 1 auto", minWidth: 0 }}>{props.children}</span>;
+}
+
 /** A named roll's rows sit between 1 px lines with `space(2)` above and below (3.2). */
 const ROW = { paddingBlock: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}` } as const;
 
@@ -570,7 +583,8 @@ function Grid(props: { label: string; note?: string; children: ReactNode }) {
   return (
     <div role="group" aria-label={props.label} style={{ display: "grid" }}>
       <GroupLabel note={props.note || undefined}>{props.label}</GroupLabel>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>{props.children}</div>
+      {/* Rows of one height, so a cell whose tag wraps under its words at 130% never leaves its neighbors in the next row shorter. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>{props.children}</div>
     </div>
   );
 }
@@ -580,7 +594,7 @@ function Grid(props: { label: string; note?: string; children: ReactNode }) {
  * until its line lands. Its result shows in the panel's newest-roll line at the top (the project owner,
  * 2026-10-17: "it should just be in the header"), so a row never grows when a roll lands.
  */
-function OptionCell(props: { text: string; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean }) {
+function OptionCell(props: { text: string; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean; fill?: boolean }) {
   const { waiting } = useRowResult(props.row);
   return (
     <button
@@ -601,11 +615,12 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
         flexWrap: "wrap",
         alignItems: "center",
         alignContent: "center",
-        justifyContent: "space-between",
+        // In a row's controls line the cell grows with its line, and its words stay in its middle (docs/design-v1-dice-pass.md 7.2).
+        justifyContent: props.fill ? "center" : "space-between",
         columnGap: theme.space(1),
         rowGap: 0,
         // A named row's cell keeps its own width, and wraps its words rather than run past the panel's edge.
-        flex: props.grow ? "1 1 auto" : "0 1 auto",
+        flex: props.grow || props.fill ? "1 1 auto" : "0 1 auto",
         maxWidth: "100%",
         borderRadius: theme.radius.md,
         border: `${theme.line.border}px solid ${theme.color.controlBorder}`,
@@ -614,11 +629,11 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
         fontFamily: theme.font.body,
         cursor: props.disabled !== null || waiting ? "default" : "pointer",
         minWidth: 0,
-        width: props.grow === false ? undefined : "100%",
+        width: props.grow === false || props.fill ? undefined : "100%",
       }}
     >
       {/* Its words wrap inside the cell, which grows a line, and never run out of it or end in "…" (the project owner, 2026-10-17). */}
-      <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: "left", overflowWrap: "anywhere" }}>
+      <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: props.fill ? "center" : "left", overflowWrap: "anywhere" }}>
         {waiting ? `${props.text}…` : props.text}
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
@@ -631,7 +646,7 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
  * where its tap goes. With `unknown` the creature has no numbers here, and
  * the tap goes by the bonus typed (options.ts typedTap).
  */
-function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; grow?: boolean; common?: readonly string[]; onLanded?(critical: boolean): void }) {
+function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; grow?: boolean; fill?: boolean; common?: readonly string[]; onLanded?(critical: boolean): void }) {
   const { ctx, test } = props;
   const option = useRollOption("dice");
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
@@ -659,6 +674,7 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
       row={row}
       disabled={ctx.blocked ?? tap.waits}
       grow={props.grow}
+      fill={props.fill}
       onTap={() =>
         option.d20({
           creature: ctx.creature,
@@ -688,7 +704,7 @@ const TESTS: readonly D20Test[] = [
 
 /**
  * Initiative (4.2, 4.3): "Initiative +2" with what its tap does to the
- * tracker as its tag ("sets row", "replaces 15"), across the card
+ * tracker as its tag ("sets row", "replaces 15 · −4"), across the card
  * (docs/design-v1-dice-pass.md 5.1), and a monster in a room that uses
  * scores "Score 12" beside "Roll instead". The value is written only to a row that still holds what
  * it held at the tap, by the room's listener, so the cell may close first.
@@ -714,7 +730,7 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   const bonus = props.bonusText;
   const scored = score !== null && entry !== undefined;
   const does = scored ? "replaces the score" : entry ? (entry.value === null ? "sets its row" : `replaces ${entry.value}`) : "";
-  const tag = [scored ? "" : entry ? (entry.value === null ? "sets row" : `replaces ${entry.value}`) : "", presetTag(preset)].filter(Boolean).join(" ");
+  const tag = initiativeTag(scored ? null : (entry ?? null), preset);
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "grid", gridTemplateColumns: scored ? "repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)", gap: theme.space(1) }}>
@@ -836,7 +852,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
             text="Attack"
             label={named.name}
             rowKey={`${props.named.key}|attack`}
-            grow={false}
+            fill
             {...(named.critOn ? { critOn: named.critOn } : {})}
             onLanded={(isCrit) => {
               if (isCrit) setCrit(true);
@@ -844,14 +860,18 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           />
         ) : null}
         {named.save && ctx.dice.you.role === "dm" ? <GroupSaveButton ctx={ctx} named={named} /> : null}
-        {named.save && player ? <AskForSavesButton ref={askRef} spec={{ key: ctx.key, creature: ctx.creature, spell: props.named.name, roll: props.named.key }} /> : null}
+        {named.save && player ? (
+          <Fill>
+            <AskForSavesButton ref={askRef} spec={{ key: ctx.key, creature: ctx.creature, spell: props.named.name, roll: props.named.key }} />
+          </Fill>
+        ) : null}
         {hasDamage ? (
           <OptionCell
             text="Damage"
             name={`${named.name} damage${canCrit && crit ? `, ${CRIT_WORDS[critRule]}` : ""}`}
             row={damageRow}
             disabled={ctx.blocked}
-            grow={false}
+            fill
             onTap={() => {
               const rolls = damageRolls(named, { on, critical: canCrit && crit, creature: ctx.creature });
               if (option.rolls(rolls, damageRow) !== null) {
@@ -862,15 +882,19 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           />
         ) : null}
         {hasDamage && canCrit ? (
-          <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical Hit for ${named.name}'s next damage`} title={CRIT_WORDS[critRule]}>
-            Critical
-          </Chip>
+          <Fill>
+            <Chip pressed={crit} onClick={() => setCrit(!crit)} aria-label={`Critical Hit for ${named.name}'s next damage`} title={CRIT_WORDS[critRule]}>
+              Critical
+            </Chip>
+          </Fill>
         ) : null}
         {named.damage.map((part, i) =>
           part.optional ? (
-            <Chip key={i} wrap pressed={on.has(i)} onClick={() => toggleRider(i)} aria-label={riderToggleName(part)}>
-              {cutLabel(riderText(part))}
-            </Chip>
+            <Fill key={i}>
+              <Chip wrap pressed={on.has(i)} onClick={() => toggleRider(i)} aria-label={riderToggleName(part)}>
+                {cutLabel(riderText(part))}
+              </Chip>
+            </Fill>
           ) : null,
         )}
         {named.heal ? (
@@ -879,17 +903,21 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
             name={`${named.name} healing`}
             row={healRow}
             disabled={ctx.blocked}
-            grow={false}
+            fill
             onTap={() => option.rolls([namedRoll(named.heal!.formula, `${named.name} healing`, ctx.creature)], healRow)}
           />
         ) : null}
         {named.dice ? (
-          <OptionCell text="Roll" name={`${named.name}, ${named.dice}`} row={diceRow} disabled={ctx.blocked} grow={false} onTap={() => option.rolls([namedRoll(named.dice!, named.name, ctx.creature)], diceRow)} />
+          <OptionCell text="Roll" name={`${named.name}, ${named.dice}`} row={diceRow} disabled={ctx.blocked} fill onTap={() => option.rolls([namedRoll(named.dice!, named.name, ctx.creature)], diceRow)} />
         ) : null}
         {named.recharge !== undefined ? (
-          <OptionCell text="Recharge" name={`${named.name} recharge, 1d6`} row={rechargeRow} disabled={ctx.blocked} grow={false} onTap={() => option.rolls([namedRoll("1d6", `${named.name} recharge`, ctx.creature)], rechargeRow)} />
+          <OptionCell text="Recharge" name={`${named.name} recharge, 1d6`} row={rechargeRow} disabled={ctx.blocked} fill onTap={() => option.rolls([namedRoll("1d6", `${named.name} recharge`, ctx.creature)], rechargeRow)} />
         ) : null}
-        {slots && slot !== null ? <SlotStepper name={named.name} value={slot} min={slots.from} onChange={(n) => store.setState((s) => ({ slots: { ...s.slots, [rowKey]: n } }))} /> : null}
+        {slots && slot !== null ? (
+          <Fill>
+            <SlotStepper name={named.name} value={slot} min={slots.from} onChange={(n) => store.setState((s) => ({ slots: { ...s.slots, [rowKey]: n } }))} />
+          </Fill>
+        ) : null}
       </div>
       {player ? (
         <RowCast
@@ -920,9 +948,9 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
 function SlotStepper(props: { name: string; value: number; min: number; onChange(n: number): void }) {
   const set = (n: number) => props.onChange(Math.max(props.min, Math.min(9, n)));
   return (
-    <span role="group" aria-label={`Slot level for ${props.name}`} style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
+    <span role="group" aria-label={`Slot level for ${props.name}`} style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
       <SmallButton icon="minus" label={`Slot level for ${props.name}, lower`} disabled={props.value <= props.min} onClick={() => set(props.value - 1)} />
-      <span aria-live="polite" style={{ minWidth: 48, textAlign: "center", fontSize: theme.font.body14, fontWeight: theme.weight.strong, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+      <span aria-live="polite" style={{ flex: 1, minWidth: 48, textAlign: "center", fontSize: theme.font.body14, fontWeight: theme.weight.strong, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
         Level {props.value}
       </span>
       <SmallButton icon="plus" label={`Slot level for ${props.name}, higher`} disabled={props.value >= 9} onClick={() => set(props.value + 1)} />
@@ -952,9 +980,11 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), named.recharge !== undefined ? () => writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true)) : null);
   return (
     <>
-      <SmallButton wrap disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)} label={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}>
-        Group save
-      </SmallButton>
+      <Fill>
+        <SmallButton wrap disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)} label={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}>
+          Group save
+        </SmallButton>
+      </Fill>
       {pending ? (
         <div style={{ flexBasis: "100%" }}>
           <ReplaceConfirm onDiscard={() => go(true) && setPending(false)} onKeep={() => setPending(false)} />
