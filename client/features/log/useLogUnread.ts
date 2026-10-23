@@ -70,7 +70,7 @@ export function useLogUnread(logVisible: boolean): number {
     const fresh = newWhispersTo(log, checked.current, me);
     checked.current = latestLogId(log);
     if (logVisible) return;
-    for (const entry of fresh) ui.notify(whisperToastText(entry, members ?? {}));
+    for (const entry of fresh) ui.notify(whisperToastText(entry, members ?? {}), "info", undefined, undefined, true);
   }, [log]);
 
   return seen && me && !logVisible ? unreadCount(log, seen.id, me) : 0;

@@ -628,6 +628,34 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await bar.getByRole("button", { name: "Close", exact: true }).tap();
   });
 
+  test("fu22b-pp. two whispers are said once, the DM's blackout drops them as it drops every toast, and back from it nothing is said again while a new whisper is said once (reviews FU22B-OP-3, FU22B-OP-8)", async () => {
+    await setUp({ ...PORTRAIT, scale: 1 });
+    for (const text of ["First whisper.", "Second whisper."]) await ops.send({ t: "log.whisper", to: [run.patId], text });
+    const toasts = player.locator("[data-toast]").filter({ hasText: /First whisper\.|Second whisper\.|After the pause\./ });
+    await waitFor("both whispers", async () => ((await toasts.count()) === 2 ? true : null));
+    const region = player.locator("[data-rvtt-toast-status]");
+    const said = () => region.evaluate((el) => el.textContent ?? "");
+    await waitFor("both whispers said", async () => ((await said()).includes("Second whisper.") ? true : null));
+    const times = (text: string, words: string) => text.split(words).length - 1;
+    const both = await said();
+    assert.ok(times(both, "First whisper.") <= 1 && times(both, "Second whisper.") === 1, `a whisper was said twice: "${both}"`);
+    await ops.send({ t: "view.blackout", blackout: true });
+    await player.getByText("The DM has paused the game.").waitFor();
+    await ops.send({ t: "view.blackout", blackout: false });
+    await player.locator(".konvajs-content").first().waitFor();
+    await player.waitForTimeout(400);
+    // The pause screen drops every toast, so nothing from before the pause shows after it (docs/design-v1-dm-tools.md 3.11).
+    assert.equal(await toasts.count(), 0, "a whisper from before the pause came back");
+    assert.equal(await said(), "", "the toasts' status region said something again after the blackout");
+    await ops.send({ t: "log.whisper", to: [run.patId], text: "After the pause." });
+    // Said as its toast reads, with who whispered it.
+    await waitFor("the new whisper said", async () => ((await said()).includes("After the pause.") ? true : null));
+    assert.equal(times(await said(), "After the pause."), 1, `the new whisper was said more than once: "${await said()}"`);
+    assert.equal(await toasts.count(), 1);
+    await shots.take(player, "playerphone-fu22b-whisper-after-blackout");
+    await toasts.first().tap();
+  });
+
   test("7. on its side the bar docks at the bottom right, left of an open sheet, and the roll card never meets it, on its side or upright after Show (LPD-PLAYER-2)", async () => {
     await setUp({ ...LANDSCAPE, scale: 1 });
     const bounds = playerSocket.state!.scenes[run.sceneId]!.bounds;

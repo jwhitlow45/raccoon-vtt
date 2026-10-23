@@ -1109,10 +1109,10 @@ export function paneToastTop(input: { head: number | null; optionsTop: number })
  */
 export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean };
 
-/** The toasts' places by id, the pane header's last place, and whether a pane stood on the render before. */
-export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean };
+/** The toasts' places by id, the pane header's last place, whether a pane stood on the render before, and the toasts a turn of the screen is placing under the column's card. */
+export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean; turning: ReadonlySet<number> };
 
-export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false };
+export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false, turning: new Set() };
 
 /** A place in the toasts' own layer, rather than in the notices' stack or the sheet. */
 export function inToastLayer(place: ToastPlace | undefined): boolean {
@@ -1137,17 +1137,31 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * Toasts), so none is announced again. When the pane goes away, the
  * stack freezes at the header's last place. A pane can stand for a render
  * with no header place (`pane` null), its first or one with too little
- * room, so the stack neither moves nor freezes on those. A toast never
- * leaves the layer or the sheet, and leaves the notices only for a pane's
- * header.
+ * room, so the stack neither moves nor freezes on those. Just after the
+ * screen turns (`turned`), a toast at the top of the notices that now
+ * meets the column's first card, which a place under that card (`low`)
+ * says, takes its place again as if it came now (review LP17-AW-1). It
+ * goes on taking it while the turn lasts (`turning`), since the first
+ * place after a turn may come from the card as it stood before, until
+ * the column measures it again. A card that arrives at another time moves
+ * no toast, so nothing jumps under a finger. A toast never leaves the layer or the sheet, and leaves the
+ * notices only for a pane's header or a turned screen's card.
  */
-export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean }): ToastPlaces {
+export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean }): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
   const paneLast = now.pane ?? was.paneLast;
   const places = new Map<number, ToastPlace>();
+  const turned = now.turned === true;
+  const turning = new Set(turned ? now.ids.filter((id) => was.turning.has(id)) : []);
+  const underCard = turned && now.low !== null && now.layer && !now.slot && !now.paneStands;
   for (const id of now.ids) {
     const place = was.places.get(id);
     if (place === undefined) continue;
+    // Left without a place, so the loop below places it as a new toast.
+    if (underCard && (place === "map" || turning.has(id))) {
+      turning.add(id);
+      continue;
+    }
     if (now.pane !== null && (inToastLayer(place) || (place === "map" && now.layer))) places.set(id, "pane");
     else if (freeze && place === "pane") places.set(id, paneLast !== null ? { low: paneLast, column: false } : "map");
     else places.set(id, place);
@@ -1158,7 +1172,7 @@ export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[];
     const below = fresh === "sheet" || !now.layer ? undefined : [...places.values()].find(inToastLayer);
     places.set(id, below !== undefined && (inToastLayer(fresh) || now.paneStands) ? below : fresh);
   }
-  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands };
+  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands, turning };
 }
 
 /**
@@ -1182,20 +1196,22 @@ export function toastLayerPlace(state: ToastPlaces, ids: readonly number[], colu
 /**
  * What a stack of toasts does when it runs past its room
  * (docs/design-v1-bar-dock.md 1.3, decided for review LP16-PT-2), the room
- * running from the stack's top down to the tool's options, which stand
- * over the screen's foot. First the oldest toasts with no button go,
- * never the newest: their words stay in the log, and stale ones would
- * stand between a toast with a button and its tap. If the rest still runs
- * past, the stack scrolls in its room, the newest in view. `stack` is the
+ * running from the stack's top down to the tool's highest control, which
+ * stands over the screen's foot. First the oldest toasts whose words the
+ * log keeps (`logged`, as a whisper's) and that have no button go, never
+ * the newest, since stale ones would stand between a toast with a button
+ * and its tap. A refusal or an error the log never sees stays, as does a
+ * toast with a button (review FU22B-OP-4). If the rest still runs past,
+ * the stack scrolls in its room, the newest in view. `stack` is the
  * toasts oldest first with their heights, and `gap` the space between
  * two, in the unit of `room`. Half a pixel of rounding still fits.
  */
-export function fitToasts(stack: readonly { id: number; height: number; action: boolean }[], gap: number, room: number): { drop: number[]; scrolls: boolean } {
+export function fitToasts(stack: readonly { id: number; height: number; action: boolean; logged: boolean }[], gap: number, room: number): { drop: number[]; scrolls: boolean } {
   let total = stack.reduce((sum, t) => sum + t.height, 0) + gap * Math.max(0, stack.length - 1);
   const drop: number[] = [];
   for (const t of stack.slice(0, -1)) {
     if (total <= room + 0.5) break;
-    if (t.action) continue;
+    if (t.action || !t.logged) continue;
     drop.push(t.id);
     total -= t.height + gap;
   }

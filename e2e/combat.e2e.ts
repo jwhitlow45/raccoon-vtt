@@ -616,7 +616,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       } finally {
         anaOps.close();
       }
-      await modal(dm).locator('[data-rvtt-modal-slot="toasts"] [role="status"]').first().waitFor();
+      await modal(dm).locator('[data-rvtt-modal-slot="toasts"] [data-toast]').first().waitFor();
       keeps(await stuck(dm, "Next", "the DM, as a toast shows"), dmRest, "the DM, as a toast shows");
       await shots.take(dm, "combat-header-480-130-toast-scrolled");
       await dm.keyboard.press("Escape");

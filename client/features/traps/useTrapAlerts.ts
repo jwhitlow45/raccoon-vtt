@@ -65,7 +65,7 @@ export function useTrapAlerts(): void {
       const now = store.getState();
       const line = (now.confirmed ?? now.view)?.trapLog?.find((e) => e.id === to.line);
       const a = line && now.view ? shownAlert(line, now.view, now.sceneId) : null;
-      if (a) ui.notify(a.text, "info", undefined, saveAction(a));
+      if (a) ui.notify(a.text, "info", undefined, saveAction(a), true);
     };
     const show = (to: { sceneId: string; line: string }) => ({
       label: "Show",
@@ -106,7 +106,8 @@ export function useTrapAlerts(): void {
       const alerts = you.role === "dm" ? dmAlerts(freshLog, view, now.sceneId) : playerAlerts(freshSeen, view, { memberId: you.memberId, role: you.role });
       for (const a of alerts) {
         const action = you.role !== "dm" ? undefined : a.show ? show(a.show) : saveAction(a);
-        ui.notify(a.text, "info", undefined, action);
+        // Each is a line of the trap log, the DM's or the players', which the Log shows too.
+        ui.notify(a.text, "info", undefined, action, true);
         if (a.sound) playTrapSound(a.sound);
       }
       if (you.role === "player") moves(now);

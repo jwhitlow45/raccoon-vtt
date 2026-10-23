@@ -470,7 +470,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.deepEqual(theirs.rolls[0]?.faces, mine.rolls[0]?.faces);
     assert.equal(theirs.rolls[0]?.total, mine.rolls[0]?.total);
     const total = mine.rolls[0]!.total;
-    await dm.getByText(`Pat rolled ${total} for fire.`).waitFor();
+    await dm.locator("[data-toast]").getByText(`Pat rolled ${total} for fire.`).waitFor();
     await shots.take(dm, "dice-toast-on-dm");
     const sticky = player.locator("[data-dice-last]");
     await sticky.getByText(String(total), { exact: true }).waitFor();
@@ -579,13 +579,13 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await waitFor("the DM's line", () => diceLines(dmSocket.state?.log).find((l) => l.data.tag === quiet.tag) ?? null);
     await below.getByText("Quiet", { exact: true }).first().waitFor();
     await dm.waitForTimeout(1_000);
-    assert.equal(await dm.getByText(`Pat rolled ${quiet.rolls[0]!.total} for Quiet.`).count(), 0, "no toast while Dice shows below");
+    assert.equal(await dm.locator("[data-toast]").getByText(`Pat rolled ${quiet.rolls[0]!.total} for Quiet.`).count(), 0, "no toast while Dice shows below");
 
     // With the split closed and Initiative on top, Dice is off screen again, so the next roll toasts.
     await bar.getByRole("button", { name: "Close Dice", exact: true }).click();
     await bar.waitFor({ state: "detached" });
     const loud = await rollWithEnter(player, playerSocket, "1d6 Loud");
-    await dm.getByText(`Pat rolled ${loud.rolls[0]!.total} for Loud.`).waitFor();
+    await dm.locator("[data-toast]").getByText(`Pat rolled ${loud.rolls[0]!.total} for Loud.`).waitFor();
     assert.deepEqual(dmConsole.errors, []);
     assert.deepEqual(playerConsole.errors, []);
   });
@@ -1110,7 +1110,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     await attack.tap();
     const line = await waitFor("Longsword's roll", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.rolls[0]?.label === "Longsword")?.data ?? null);
     const face = String(keptD20(line.rolls[0]!)!.face);
-    const toast = dm.locator('button[role="status"]').filter({ hasText: `Pat rolled ${line.rolls[0]!.total} for` }).filter({ hasText: "Longsword" });
+    const toast = dm.locator("[data-toast]").filter({ hasText: `Pat rolled ${line.rolls[0]!.total} for` }).filter({ hasText: "Longsword" });
     await toast.waitFor();
     const die = toast.locator("[data-toast-die]");
     assert.equal(await die.getAttribute("data-toast-die"), face);
@@ -1185,7 +1185,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     const w = await seen(player, "the close", (w) => w.downAt !== null);
     assert.ok(w.downAt! - w.canvasAt! < LAND_MS, "the sheet closed while the dice flew");
     await sheet.waitFor({ state: "detached" });
-    await player.getByText(`Rolled ${line.rolls[0]!.total}: ra-9.`).waitFor();
+    await player.locator("[data-toast]").getByText(`Rolled ${line.rolls[0]!.total}: ra-9.`).waitFor();
     await shots.take(player, "ra-closed-mid-throw-toast");
   });
 
@@ -1209,7 +1209,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await player.keyboard.press("Escape");
       await sheet.waitFor({ state: "detached" });
       total = line.rolls[0]!.total;
-      await player.getByText(`Rolled ${total}: ra-10 ${attempt}.`).waitFor();
+      await player.locator("[data-toast]").getByText(`Rolled ${total}: ra-10 ${attempt}.`).waitFor();
     }
     assert.ok(total !== null, "Escape never came while the dice flew");
     await shots.take(player, "ra-escape-mid-throw-toast");

@@ -140,9 +140,10 @@ export type RoomUi = {
    * A short note from this page rather than the server, for this device
    * only: why a drag did nothing, or a whisper that arrived while the Log
    * is closed. Someone else's D20 Test leads with its die, and a reminder
-   * may carry one button.
+   * may carry one button. `logged` says the log keeps its words too
+   * (types.ts Toast).
    */
-  notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction): void;
+  notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction, logged?: boolean): void;
   dismissToast(id: number): void;
   /** Hides the X-card with this id on this device (features/xcard). */
   dismissXcard(id: number): void;
@@ -402,10 +403,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     });
   }
 
-  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction): void {
+  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction, logged = false): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), shownAt: Date.now() }].slice(-MAX_TOASTS) });
+    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), shownAt: Date.now(), ...(logged ? { logged: true as const } : {}) }].slice(-MAX_TOASTS) });
   }
 
   // ------------------------------------------------------------ sending
@@ -510,8 +511,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     crossWide(wide) {
       setLocal(crossWide(get().local, wide));
     },
-    notify(text, tone = "info", die, action) {
-      pushToast(text, tone, die, action);
+    notify(text, tone = "info", die, action, logged) {
+      pushToast(text, tone, die, action, logged);
     },
     dismissToast(id) {
       const toasts = get().toasts;

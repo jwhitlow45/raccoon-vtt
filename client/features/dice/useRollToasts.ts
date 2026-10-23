@@ -112,12 +112,13 @@ export function useRollToasts(diceShown: boolean): void {
     // Remembered even when not toasted, so a later part of a group seen in the panel stays quiet once it closes.
     const groups = unseenGroups(othersRolls(fresh, me), batches.current, Date.now());
     if (!on || diceShown) return;
-    for (const lines of groups) ui.notify(rollToastText(lines, names), "info", toastDie(lines) ?? undefined);
+    for (const lines of groups) ui.notify(rollToastText(lines, names), "info", toastDie(lines) ?? undefined, undefined, true);
   }, [loaded, log, on, diceShown, me, names, ui]);
 
   const tracker = useReceipts();
   const version = useSyncExternalStore(tracker.subscribe, tracker.version);
   useEffect(() => {
-    for (const { state } of tracker.unannounced()) ui.notify(ownResultText(state), state.state === "refused" ? "error" : "info");
+    // Only a roll the server took is in the log: a refusal or an unknown answer is not.
+    for (const { state } of tracker.unannounced()) ui.notify(ownResultText(state), state.state === "refused" ? "error" : "info", undefined, undefined, state.state === "committed");
   }, [tracker, version, ui]);
 }

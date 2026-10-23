@@ -379,9 +379,9 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       assert.equal(groundAt(ground, run.sceneId, x, y), -10, `the pit open at ${x},${y} on Pat's copy`);
     const line = await waitFor("the players' line", () => state(patSocket)?.trapSeen?.find((e) => e.data?.type === "trapSeen") ?? null);
     assert.deepEqual(line.data, { type: "trapSeen", by: [run.thorn], message: "The floor gives way!", sound: "crash" });
-    await pat.locator('[role="status"]').filter({ hasText: "Thorn: The floor gives way!" }).first().waitFor();
+    await pat.locator("[data-toast]").filter({ hasText: "Thorn: The floor gives way!" }).first().waitFor();
     // The DM's toast, with Save and damage, since the pit's springing waits with a save and damage.
-    const dmToast = dm.locator('[role="status"]').filter({ hasText: "Hidden Pit went off: Thorn." }).first();
+    const dmToast = dm.locator("[data-toast]").filter({ hasText: "Hidden Pit went off: Thorn." }).first();
     await dmToast.getByRole("button", { name: "Save and damage", exact: true }).waitFor();
     await shots.take(pat, "traps-pat-stopped");
     assert.equal(trap(patSocket), undefined, "Pat holds no unfound trap");

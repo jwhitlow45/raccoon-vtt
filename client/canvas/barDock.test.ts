@@ -968,8 +968,10 @@ describe("a toast while a map pane stands as a bottom sheet (LP15-FU-8)", () => 
 });
 
 describe("a stack of toasts that runs past its room (review LP16-PT-2)", () => {
-  const whisper = (id: number, height = 44) => ({ id, height, action: false });
-  const trap = (id: number, height = 100) => ({ id, height, action: true });
+  const whisper = (id: number, height = 44) => ({ id, height, action: false, logged: true });
+  const trap = (id: number, height = 100) => ({ id, height, action: true, logged: true });
+  /** A refusal the log never sees, as "That change could not be sent.". */
+  const refusal = (id: number, height = 44) => ({ id, height, action: false, logged: false });
 
   test("a stack that fits keeps every toast and does not scroll", () => {
     assert.deepEqual(fitToasts([whisper(1), trap(2)], 8, 152), { drop: [], scrolls: false });
@@ -987,6 +989,11 @@ describe("a stack of toasts that runs past its room (review LP16-PT-2)", () => {
     assert.deepEqual(fitToasts([trap(1, 130)], 8, 120), { drop: [], scrolls: true }, "one toast taller than its room scrolls");
   });
 
+  test("an error the log never sees is never dropped, and what still runs past scrolls (review FU22B-OP-4)", () => {
+    assert.deepEqual(fitToasts([refusal(1), whisper(2), trap(3)], 8, 150), { drop: [2], scrolls: true });
+    assert.deepEqual(fitToasts([refusal(1), refusal(2), trap(3)], 8, 60), { drop: [], scrolls: true });
+  });
+
   test("the newest never goes, though it has no button", () => {
     assert.deepEqual(fitToasts([trap(1), whisper(2)], 8, 100), { drop: [], scrolls: true });
     assert.deepEqual(fitToasts([whisper(1), whisper(2)], 8, 50), { drop: [1], scrolls: false });
@@ -996,16 +1003,20 @@ describe("a stack of toasts that runs past its room (review LP16-PT-2)", () => {
     let seed = 11;
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
     for (let run = 0; run < 2000; run++) {
-      const stack = Array.from({ length: 1 + Math.floor(random() * 3) }, (_, i) => (random() < 0.5 ? whisper(i, 44 + Math.floor(random() * 60)) : trap(i, 60 + Math.floor(random() * 80))));
+      const stack = Array.from({ length: 1 + Math.floor(random() * 3) }, (_, i) => {
+        const kind = random();
+        return kind < 0.4 ? whisper(i, 44 + Math.floor(random() * 60)) : kind < 0.7 ? refusal(i, 44 + Math.floor(random() * 60)) : trap(i, 60 + Math.floor(random() * 80));
+      });
       const room = 40 + Math.floor(random() * 300);
       const { drop, scrolls } = fitToasts(stack, 8, room);
       const kept = stack.filter((t) => !drop.includes(t.id));
       const total = kept.reduce((n, t) => n + t.height, 0) + 8 * (kept.length - 1);
       const label = `run ${run}: ${JSON.stringify(stack)} in ${room}`;
-      // Invariants: no toast with a button and never the newest goes, what goes is the oldest without one, and the rest fits exactly when it does not scroll.
+      // Invariants: no toast with a button, no toast the log never sees and never the newest goes, what goes is the oldest of the rest, and the rest fits exactly when it does not scroll.
       assert.ok(drop.every((id) => !stack.find((t) => t.id === id)!.action), `${label}: a toast with a button went`);
+      assert.ok(drop.every((id) => stack.find((t) => t.id === id)!.logged), `${label}: a toast the log never sees went`);
       assert.ok(!drop.includes(stack.at(-1)!.id), `${label}: the newest went`);
-      const plain = stack.slice(0, -1).filter((t) => !t.action).map((t) => t.id);
+      const plain = stack.slice(0, -1).filter((t) => !t.action && t.logged).map((t) => t.id);
       assert.deepEqual(drop, plain.slice(0, drop.length), `${label}: a newer toast went before an older one`);
       assert.equal(scrolls, total > room + 0.5, `${label}: scrolls ${scrolls} with ${total} px`);
       if (drop.length > 0) {
@@ -1107,6 +1118,48 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.equal(top(s, [1, 2]), 182);
     s = step(s, [1, 2]);
     assert.deepEqual(s.places.get(1), { low: 182, column: false }, "frozen where the header last stood");
+  });
+
+  test("just after the screen turns, a toast at the notices' top that now meets the column's first card takes its place under it, and joins a stack there (review LP17-AW-1)", () => {
+    // Sideways, beside the lane: the toast at the notices' top.
+    let s = step(NO_TOAST_PLACES, [1]);
+    assert.equal(s.places.get(1), "map");
+    // Turned upright, the column's card is not measured yet: it stays.
+    s = step(s, [1], { turned: true });
+    assert.equal(s.places.get(1), "map");
+    s = step(s, [1], { turned: true, low: 250 });
+    assert.deepEqual(s.places.get(1), { low: 250, column: true });
+    // With a stack already under the card, it joins that stack.
+    let t = step(NO_TOAST_PLACES, [1]);
+    t = step(t, [1, 2], { low: 250 });
+    t = step(t, [1, 2], { turned: true, low: 300 });
+    assert.deepEqual(t.places.get(1), { low: 250, column: true });
+  });
+
+  test("while the turn lasts, a toast placed under the card as it stood before the turn takes the card's place again once the column measures it, and then keeps it (review LP17-AW-1)", () => {
+    let s = step(NO_TOAST_PLACES, [1]);
+    // The first render upright reads the card where it stood sideways.
+    s = step(s, [1], { turned: true, low: 193 });
+    assert.deepEqual(s.places.get(1), { low: 193, column: true });
+    s = step(s, [1], { turned: true, low: 240 });
+    assert.deepEqual(s.places.get(1), { low: 240, column: true });
+    // A whisper under the card that was there before the turn keeps its place, and the turned toast joins it.
+    let t = step(NO_TOAST_PLACES, [1]);
+    t = step(t, [1, 2], { low: 250 });
+    t = step(t, [1, 2], { turned: true, low: 193 });
+    t = step(t, [1, 2], { turned: true, low: 240 });
+    assert.deepEqual(t.places.get(1), { low: 250, column: true });
+    assert.deepEqual(t.places.get(2), { low: 250, column: true });
+    // The turn over, a card that moves moves the toast no more.
+    s = step(s, [1], { low: 300 });
+    assert.deepEqual(s.places.get(1), { low: 240, column: true });
+    assert.equal(s.turning.size, 0);
+  });
+
+  test("a card that arrives with no turn moves no toast, so nothing jumps under a finger", () => {
+    let s = step(NO_TOAST_PLACES, [1]);
+    s = step(s, [1], { low: 250 });
+    assert.equal(s.places.get(1), "map");
   });
 
   test("with no layer to go to, a toast at the notices' top stays there under a pane", () => {
