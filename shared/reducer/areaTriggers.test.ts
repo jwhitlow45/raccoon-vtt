@@ -242,6 +242,25 @@ describe("area reminders", () => {
     // The turn-end line was written first, yet its id counts past the turn line's.
     assert.deepEqual(after.log.map((e) => e.data?.type), ["turn", "area", "area"]);
   });
+
+  test("an op stored before op version 19 reads a DM's turn-end line after the turn line as this turn's, as it did then", () => {
+    const state = room();
+    state.tokens.g1 = token("g1", { name: "Goblin", number: 1, x: 12, y: 5 });
+    state.templates.glyph = template("glyph", { shape: "sphere", size: 10, origin: { x: 5.5, y: 5.5, z: 0 }, spell: "Glyph", visibility: "dm", ownerId: "dm1", triggers: ["enter", "turnEnd"], oncePerTurn: true });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 15 })] };
+    // A ring-era log: the turn line, then the DM's turn-end line its op wrote first.
+    state.log = [
+      { id: "5:0", at: "2026-01-01T00:00:00.000Z", kind: "event", data: { type: "turn", entryId: "e-g1", round: 1, seen: true } },
+      { id: "5:900000", at: "2026-01-01T00:00:00.000Z", kind: "event", data: { type: "area", templateId: "glyph", tokenId: "g1", trigger: "turnEnd", area: "Glyph", hidden: true } },
+    ];
+    const enter = move("g1", 5);
+    const stored = applyOp(state, enter, DM, { ...env(6), opVersion: 18 });
+    assert.ok(stored.ok);
+    assert.deepEqual(stored.log.filter((e) => e.data?.type === "area"), [], "the build before op 19 had no rule for a line sorted after its turn line");
+    const live = applyOp(state, enter, DM, env(6));
+    assert.ok(live.ok);
+    assert.equal(live.log.filter((e) => e.data?.type === "area").length, 1, "today the turn-end line is the turn before's");
+  });
 });
 
 describe("a move that is a leg of the turn's path and an entry into an area", () => {

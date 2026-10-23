@@ -1,5 +1,5 @@
 import { dmNumbered } from "../logRings.ts";
-import { attaches, trapsGoOff, walksRoutes } from "../migrate.ts";
+import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
@@ -88,9 +88,11 @@ function inside(state: RoomState, template: AreaTemplate, candidates: readonly T
  * A reminder only the DM gets counts past the shared lines of its op
  * (Tx.addLog), so it sorts after the turn line its op wrote. The only one
  * an op writes before its turn line is a turn end's (remindTurnEnd), for the
- * turn that ended there, so that one is left to the turn before.
+ * turn that ended there, so that one is left to the turn before. An op
+ * stored before op version 19 numbered every line in order (`apart`
+ * false), so it replays without that rule, as the build that stored it ran.
  */
-function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, tokenId: string, trigger: AreaTrigger): boolean {
+function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, tokenId: string, trigger: AreaTrigger, apart: boolean): boolean {
   let start = log.length - 1;
   while (start >= 0 && log[start]!.data?.type !== "turn") start--;
   const turnSeq = start >= 0 ? seqOf(log[start]!.id) : null;
@@ -98,7 +100,7 @@ function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, toke
     const line = log[i]!;
     const data = line.data;
     if (data?.type !== "area" || data.templateId !== template.id || data.tokenId !== tokenId) continue;
-    if (data.trigger === "turnEnd" && seqOf(line.id) === turnSeq && dmNumbered(line.id)) continue;
+    if (apart && data.trigger === "turnEnd" && seqOf(line.id) === turnSeq && dmNumbered(line.id)) continue;
     if (template.oncePerTurn === true || data.trigger === trigger) return true;
   }
   return false;
@@ -123,7 +125,7 @@ function areaName(t: AreaTemplate): string {
  * the dark.
  */
 function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigger, areaMoved: boolean, at: RoomState = tx.state): void {
-  if (remindedThisTurn(tx.state.log, template, token.id, trigger)) return;
+  if (remindedThisTurn(tx.state.log, template, token.id, trigger, logsByAudience(tx.env.opVersion))) return;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
   const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env));
   const there = at.tokens[token.id] ?? token;
