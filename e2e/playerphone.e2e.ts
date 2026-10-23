@@ -1223,6 +1223,103 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
+  /** The token bar as drawn: its mode, box, whether it cuts its content short, and how many of its buttons show whole in its scroller. */
+  function barFacts(bar: Locator): Promise<{ mode: string | null; top: number; height: number; clipped: boolean; whole: number }> {
+    return bar.evaluate((el) => {
+      type Box = { top: number; bottom: number; height: number };
+      type Node = { getBoundingClientRect(): Box; scrollHeight: number; clientHeight: number; scrollTop: number };
+      const frame = el as unknown as Node & { getAttribute(name: string): string | null; querySelector(s: string): Node; querySelectorAll(s: string): ArrayLike<Node> };
+      const scroller = frame.querySelector("[data-bar-scroll]");
+      const view = scroller.getBoundingClientRect();
+      const whole = Array.from(frame.querySelectorAll("button")).filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.height > 0 && r.top >= view.top - 0.5 && r.bottom <= view.bottom + 0.5;
+      }).length;
+      const r = frame.getBoundingClientRect();
+      return { mode: frame.getAttribute("data-bar-mode"), top: r.top, height: r.height, clipped: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 4, whole };
+    });
+  }
+
+  /** Conditions enough to make Thorn's bar taller than its smaller size anywhere on a phone. */
+  const MANY = ["blinded", "charmed", "deafened", "frightened", "poisoned", "prone", "restrained", "stunned"] as const;
+
+  /**
+   * Pans the map so Thorn stands at the window's middle, where his bar gets
+   * the least room on either side, and opens it.
+   */
+  async function openThornAtMiddle(view: { width: number; height: number }): Promise<Locator> {
+    const thorn = await cellPoint({ x: 8, y: 6 });
+    const from = await emptyPoint(player);
+    await touch(along(from, { x: from.x, y: from.y + (view.height / 2 - thorn.y) }, 20));
+    await touch([await cellPoint({ x: 8, y: 6 })]);
+    const bar = player.getByRole("dialog", { name: "Thorn actions" });
+    await bar.waitFor();
+    await player.waitForTimeout(300);
+    return bar;
+  }
+
+  for (const view of [
+    { width: 390, height: 844 },
+    { width: 440, height: 956 },
+  ]) {
+    const label = `${view.width} x ${view.height}`;
+    test(`bs-1. at ${label} Larger, just left of Close, grows the bar under Thorn to show more of it with Thorn still on the map, Smaller puts it back, and a reload keeps Larger (docs/design-v1-bar-dock.md 1.5)`, async () => {
+      const KEY = "rvtt.tokenBarLarger";
+      const target = { characterId: run.thorn.characterId };
+      const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+      for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
+      await player.evaluate((key) => localStorage.removeItem(key), KEY);
+      await setUp({ ...view, scale: 1 });
+      let bar = player.getByRole("dialog", { name: "Thorn actions" });
+      try {
+        bar = await openThornAtMiddle(view);
+        const before = await barFacts(bar);
+        assert.equal(before.mode, "span", `${label}: the bar does not span`);
+        assert.ok(before.clipped, `${label}: the bar shows all it holds already (${before.height} px), so Larger has nothing to show`);
+
+        // Its button keeps the 44 px target and stands just left of Close, in its row.
+        const larger = bar.getByRole("button", { name: "Larger", exact: true });
+        const close = bar.getByRole("button", { name: "Close", exact: true });
+        const [l, c] = [await rectOf(larger), await rectOf(close)];
+        assert.ok(l.right - l.left >= 44 - 0.5 && l.bottom - l.top >= 44 - 0.5, `${label}: Larger is under 44 px: ${JSON.stringify(l)}`);
+        assert.ok(l.right <= c.left + 0.5 && c.left - l.right <= 8.5, `${label}: Larger is not just left of Close: ${JSON.stringify({ l, c })}`);
+        assert.ok(Math.abs(l.top - c.top) <= 1 && Math.abs(l.bottom - c.bottom) <= 1, `${label}: Larger is out of Close's row`);
+
+        await larger.tap();
+        await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+        await player.waitForTimeout(300);
+        const grown = await barFacts(bar);
+        assert.ok(grown.height >= before.height + 80, `${label}: Larger grew the bar from ${before.height} to only ${grown.height} px`);
+        assert.ok(grown.whole > before.whole, `${label}: Larger shows no more of the bar: ${before.whole} buttons whole, then ${grown.whole}`);
+        assert.ok(grown.height <= (view.height * 2) / 3 + 2, `${label}: the bar took more than two thirds of the screen: ${grown.height} px`);
+        // Thorn stays on the map, clear of the bar, the top bars and the toolbar.
+        assert.equal(await hit(await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 6.5 })), "CANVAS", `${label}: Thorn is out of view`);
+        await shots.take(player, `playerphone-bs1-larger-${view.width}`);
+
+        await bar.getByRole("button", { name: "Smaller", exact: true }).tap();
+        await bar.getByRole("button", { name: "Larger", exact: true }).waitFor();
+        await player.waitForTimeout(300);
+        const back = await barFacts(bar);
+        assert.ok(Math.abs(back.top - before.top) <= 1 && Math.abs(back.height - before.height) <= 1, `${label}: Smaller left the bar at ${back.top} + ${back.height}, not ${before.top} + ${before.height}`);
+
+        // The device keeps Larger for the next bar, through a reload.
+        await bar.getByRole("button", { name: "Larger", exact: true }).tap();
+        await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+        assert.equal(await player.evaluate((key) => localStorage.getItem(key), KEY), "1");
+        await setUp({ ...view, scale: 1 });
+        bar = await openThornAtMiddle(view);
+        assert.equal(await bar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, `${label}: after the reload the bar offers Larger again`);
+        const reloaded = await barFacts(bar);
+        assert.ok(Math.abs(reloaded.height - grown.height) <= 1, `${label}: after the reload the bar opened at ${reloaded.height} px, not its larger ${grown.height}`);
+        await shots.take(player, `playerphone-bs1-reloaded-${view.width}`);
+      } finally {
+        await player.evaluate((key) => localStorage.removeItem(key), KEY);
+        if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
+        for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
+      }
+    });
+  }
+
   test("bc-a1. a reload whose sheet mark sits on the room's own history entry, with Home behind it, keeps the room and shows Connected, and the mark is gone (lib/backClose.ts)", async () => {
     // The race on purpose: a sheet's Back entry written over the room's own entry as a reload begins.
     const room = `${server.origin}/r/${run.roomId}`;

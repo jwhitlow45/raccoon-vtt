@@ -27,7 +27,8 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * column, a toast under its first card, the summary row and the alerts
  * over the screen), the board's pills, the Attach list and Ride, and the
  * holder's, rider's and group windows: their headers, play rows and group
- * lines (the windows' older rows are not this sweep's). Pat measures the
+ * lines (the windows' older rows are not this sweep's), and on an upright
+ * phone Thorn's whole bar in its larger size. Pat measures the
  * Ruler's options, readings and kept list, a drag's stop note, and the
  * toast of his own walk. Three older screens the trap flows open are
  * measured too, as live play 17 found them: Pat's ask card and Request a
@@ -164,6 +165,8 @@ const SOME_SIZES: Record<string, number> = {
   // Setup on the phone layout (the upright phones, the tablet and 844 x 390 at 100%), Tools in the pair (844 x 390 at 130%).
   "setup-menu": 9,
   "tools-menu": 1,
+  // The token bar's Larger, on the upright phones, where the bar spans.
+  "window-larger": 6,
 };
 
 /**
@@ -637,6 +640,15 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
     await measureWindow(sweep, page, "window-thorn", thorn, headers, false);
+    // An upright phone's bar in its larger size, whole (docs/design-v1-bar-dock.md 1.5), then Smaller again, which moves the map back.
+    const larger = thorn.getByRole("button", { name: "Larger", exact: true });
+    if (await visible(larger)) {
+      await larger.click();
+      await thorn.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await sweep.measure(page, "window-larger", thorn);
+      await thorn.getByRole("button", { name: "Smaller", exact: true }).click();
+      await thorn.getByRole("button", { name: "Larger", exact: true }).waitFor();
+    }
     const attach = thorn.getByRole("button", { name: "Attach", exact: true });
     await attach.click();
     const sheet = page.getByRole("dialog", { name: "Attach Thorn" });
