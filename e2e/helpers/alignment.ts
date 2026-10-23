@@ -138,6 +138,8 @@ type DomElement = DomNode & {
   children: ArrayLike<DomElement>;
   offsetWidth: number;
   offsetHeight: number;
+  /** The zoom the element is drawn at, every zoomed ancestor's taken together. */
+  currentCSSZoom?: number;
   innerText?: string;
   ownerDocument: DomDocument;
   getAttribute(name: string): string | null;
@@ -217,8 +219,9 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     return sides >= 3;
   }
 
+  // The zoom the browser reports, not the drawn height over offsetHeight: offsetHeight is a whole number, which sets that ratio 2% off on a 20 px line at 130% and moves its line box half a pixel.
   const zoomOf = (el: DomElement) => {
-    const z = el.offsetHeight > 0 ? el.getBoundingClientRect().height / el.offsetHeight : 1;
+    const z = el.currentCSSZoom ?? (el.offsetHeight > 0 ? el.getBoundingClientRect().height / el.offsetHeight : 1);
     return Number.isFinite(z) && z > 0 ? z : 1;
   };
 
@@ -273,7 +276,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   function boxes(el: DomElement) {
     const r = el.getBoundingClientRect();
     const cs = style(el);
-    const zoom = r.width > 0 && el.offsetWidth > 0 ? r.width / el.offsetWidth : 1;
+    const zoom = zoomOf(el);
     const side = (prop: string) => num(cs, prop) * zoom;
     const border = { l: r.left, r: r.right, t: r.top, b: r.bottom };
     const inner = { l: r.left + side("border-left-width"), r: r.right - side("border-right-width"), t: r.top + side("border-top-width"), b: r.bottom - side("border-bottom-width") };
@@ -810,12 +813,17 @@ const PANE_ROW_PX = 48;
 
 function headerInPage(frames: DomElement[], rowPx: number): HeaderPlace[] {
   const out: HeaderPlace[] = [];
+  // As in measureInPage, the zoom the browser reports. This function goes to the page whole, so it keeps its own copy.
+  const zoomOf = (el: DomElement) => {
+    const z = el.currentCSSZoom ?? (el.offsetHeight > 0 ? el.getBoundingClientRect().height / el.offsetHeight : 1);
+    return Number.isFinite(z) && z > 0 ? z : 1;
+  };
   const round = (n: number) => Math.round(n * 10) / 10;
   for (const frame of frames) {
     const doc = frame.ownerDocument;
     const style = (el: DomElement) => doc.defaultView.getComputedStyle(el);
     const box = frame.getBoundingClientRect();
-    const zoom = frame.offsetHeight > 0 ? box.height / frame.offsetHeight : 1;
+    const zoom = zoomOf(frame);
     const named = frame.getAttribute("aria-labelledby");
     const title = (named ? doc.getElementById(named) : null) ?? frame.querySelector("strong");
     if (!title || !frame.contains(title)) continue;
@@ -830,11 +838,11 @@ function headerInPage(frames: DomElement[], rowPx: number): HeaderPlace[] {
     const r = Array.from(range.getClientRects())[0];
     if (!r) continue;
     const lh = parseFloat(style(title).lineHeight);
-    const titleZoom = title.offsetHeight > 0 ? title.getBoundingClientRect().height / title.offsetHeight : zoom;
+    const titleZoom = zoomOf(title);
     const half = Number.isFinite(lh) ? (lh * titleZoom - r.height) / 2 : 0;
     // The frame's top padding is the padding of the box the header row stands in, the frame or a scroller inside it, which a sticky header takes back with its margin.
     const holder = row.parentElement ?? frame;
-    const holderZoom = holder.offsetHeight > 0 ? holder.getBoundingClientRect().height / holder.offsetHeight : zoom;
+    const holderZoom = zoomOf(holder);
     const inset = holder.getBoundingClientRect().top - box.top + ((parseFloat(style(holder).getPropertyValue("border-top-width")) || 0) + (parseFloat(style(holder).getPropertyValue("padding-top")) || 0)) * holderZoom;
     const c = close.getBoundingClientRect();
     out.push({

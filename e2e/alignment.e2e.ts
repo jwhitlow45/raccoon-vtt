@@ -771,6 +771,14 @@ const CASES = `
     <span style="display: grid; gap: 2px"><span style="line-height: 1.4">AC 12, now 15</span><span style="font-size: 13px; line-height: 1.4">Worked out from the armor. Check it against the sheet before you apply it.</span></span>
   </label>
 </div>
+<div data-case="tick-zoomed" style="zoom: 1.3; width: 250px">
+  <label style="display: flex; align-items: flex-start; gap: 12px; padding: 4px 0">
+    <span style="display: flex; align-items: center; height: 19.6px; flex: none"><input type="checkbox" style="width: 22px; height: 22px; margin: 0"></span>
+    <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A creature steps onto it</span><span style="font-size: 13px; line-height: 1.4">A trap on squares goes off at least one way.</span></span>
+  </label>
+</div>
+<div data-case="zoom-narrow" style="zoom: 1.3"><div role="button" style="display: flex; align-items: center; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; background: #eee"></span></div></div>
+<div data-case="zoom-narrow-off" style="zoom: 1.3"><div role="button" style="display: flex; align-items: flex-start; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; margin-top: 5px; background: #eee"></span></div></div>
 <div data-case="label-alone" style="width: 250px">
   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
     <label style="flex: 1 1 110px; min-width: 0">DC</label>
@@ -923,6 +931,10 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await passes("edge-centered");
       await caught("edge-centered-drift", "edge");
       await passes("edge-end");
+      // At 130% a box's zoom is read as the browser reports it. Its drawn size over its whole-pixel offset size reads a 10.5 px box as 10 or 11, which moves a 40 px border's inside by 2.4 px and a 20 px line's box by half a pixel.
+      await passes("tick-zoomed");
+      await passes("zoom-narrow");
+      await caught("zoom-narrow-off", "center");
       await passes("edge-group");
       await caught("edge-indent", "edge");
       await passes("edge-disclosure");
