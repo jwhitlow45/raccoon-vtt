@@ -1040,14 +1040,29 @@ export const CARD_MAX = 300;
  * features/encounter/InitiativeStrip.tsx writes the same rule as CSS,
  * where the map's width is the column's 100%.
  */
-export function columnCards(input: { mapWidth: number; sheet: number; safe: Pick<Sides, "left" | "right"> }): { card: number; shadowLeft: number } {
+export function columnCards(input: ColumnWidth): { card: number; shadowLeft: number } {
   const rightPad = EDGE + (input.sheet > 0 ? 0 : input.safe.right);
   const card = Math.min(CARD_MAX, input.mapWidth - input.sheet - 2 * EDGE - input.safe.left - (input.sheet > 0 ? 0 : input.safe.right));
   return { card, shadowLeft: Math.min(SHADOW_ROOM, input.mapWidth - card - rightPad) };
 }
 
+/** What the alerts column's width follows: the map's width, a phone's sideways sheet beside it, and the safe areas. */
+export type ColumnWidth = { mapWidth: number; sheet: number; safe: Pick<Sides, "left" | "right"> };
+
+/** A stack's left and right edges, in the chrome's px in from the map's own left and right edges. */
+export type ToastEdges = { left: number; right: number };
+
+/** The alerts column's cards' left and right edges (columnCards), which stand in from the map's right by the sheet and the column's right padding. */
+export function columnEdges(input: ColumnWidth): ToastEdges {
+  const right = input.sheet + EDGE + (input.sheet > 0 ? 0 : input.safe.right);
+  return { left: input.mapWidth - right - columnCards(input).card, right };
+}
+
 /** A toast's least height, a touch target's: the room it needs under the column's first card. */
 export const TOAST_MIN = 44;
+
+/** Where a toast under the alerts column's first card starts: its top, in the chrome's px from the page's top, and the cards' edges. */
+export type ToastLow = { top: number; edges: ToastEdges };
 
 /**
  * Where a toast that shows now starts on a phone (docs/design-v1-bar-dock.md
@@ -1059,12 +1074,16 @@ export const TOAST_MIN = 44;
  * under 44 px left above the tool's options (`optionsTop`). In the chrome's
  * own px from the page's top, read once as each toast shows, so a toast
  * never moves.
+ *
+ * It takes the cards' left and right edges too (`width`, columnEdges), so
+ * it lines up with the card above it rather than spanning the map past
+ * the column (docs/design-v1-polish.md R9).
  */
-export function toastTop(input: { spanning: boolean; column: ColumnFacts | null; cards: boolean; optionsTop: number }): number | null {
+export function toastTop(input: { spanning: boolean; column: ColumnFacts | null; cards: boolean; optionsTop: number; width: ColumnWidth }): ToastLow | null {
   const { column } = input;
   if (!input.spanning || !input.cards || !column || column.first <= 0) return null;
   const top = column.top + column.first + EDGE;
-  return input.optionsTop - top >= TOAST_MIN ? top : null;
+  return input.optionsTop - top >= TOAST_MIN ? { top, edges: columnEdges(input.width) } : null;
 }
 
 /**
@@ -1083,8 +1102,14 @@ export function paneToastTop(input: { head: number | null; optionsTop: number })
   return input.optionsTop - top >= TOAST_MIN ? top : null;
 }
 
-/** Where a toast stands: at the top of the map's notices, in the toasts' own layer under the column's first card (`low`, in the chrome's px) or under a map pane's header ("pane"), or in the very short sheet. */
-export type ToastPlace = "map" | "sheet" | "pane" | { low: number };
+/**
+ * Where a toast stands: at the top of the map's notices, in the toasts' own
+ * layer under the column's first card (`low`, in the chrome's px, with the
+ * cards' `edges`) or where a map pane's header last stood (`edges` null,
+ * across the map), or under that header while the pane stands ("pane"),
+ * or in the very short sheet.
+ */
+export type ToastPlace = "map" | "sheet" | "pane" | { low: number; edges: ToastEdges | null };
 
 /** The toasts' places by id, the pane header's last place, and whether a pane stood on the render before. */
 export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean };
@@ -1114,7 +1139,7 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * freezes on those. A toast never leaves the place it first took for
  * another of the notices, the layer or the sheet, so it is announced once.
  */
-export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean }): ToastPlaces {
+export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: ToastLow | null; layer: boolean; slot: boolean }): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
   const paneLast = now.pane ?? was.paneLast;
   const places = new Map<number, ToastPlace>();
@@ -1122,24 +1147,24 @@ export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[];
     const place = was.places.get(id);
     if (place === undefined) continue;
     if (now.pane !== null && inToastLayer(place)) places.set(id, "pane");
-    else if (freeze && place === "pane") places.set(id, paneLast !== null ? { low: paneLast } : "map");
+    else if (freeze && place === "pane") places.set(id, paneLast !== null ? { low: paneLast, edges: null } : "map");
     else places.set(id, place);
   }
   for (const id of now.ids) {
     if (places.has(id)) continue;
-    const fresh: ToastPlace = now.slot ? "sheet" : !now.layer ? "map" : now.pane !== null ? "pane" : now.low !== null ? { low: now.low } : "map";
+    const fresh: ToastPlace = now.slot ? "sheet" : !now.layer ? "map" : now.pane !== null ? "pane" : now.low !== null ? { low: now.low.top, edges: now.low.edges } : "map";
     const below = fresh === "sheet" || !now.layer ? undefined : [...places.values()].find(inToastLayer);
     places.set(id, below !== undefined && (inToastLayer(fresh) || now.paneStands) ? below : fresh);
   }
   return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands };
 }
 
-/** Where the toasts' layer stack stands, in the chrome's px from the page's top, or null with none in the layer. */
-export function toastLayerTop(state: ToastPlaces, ids: readonly number[]): number | null {
+/** Where the toasts' layer stack stands: its top, in the chrome's px from the page's top, and its edges, null across the map. Null with none in the layer. */
+export function toastLayerPlace(state: ToastPlaces, ids: readonly number[]): { top: number; edges: ToastEdges | null } | null {
   for (const id of ids) {
     const place = state.places.get(id);
-    if (place === "pane") return state.paneLast;
-    if (typeof place === "object") return place.low;
+    if (place === "pane") return state.paneLast === null ? null : { top: state.paneLast, edges: null };
+    if (typeof place === "object") return { top: place.low, edges: place.edges };
   }
   return null;
 }

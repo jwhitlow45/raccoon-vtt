@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, toastLayerTop, toastTop, type Chrome, type ToastPlaces } from "../canvas/barDock.ts";
+import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, toastLayerPlace, toastTop, type Chrome, type ToastLow, type ToastPlaces } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
@@ -788,7 +788,10 @@ function RoomPage() {
   const paneHead = useStore(dockStore, (s) => s.paneHead);
   const cardsShow = !folded && !underPane && !columnSummary && !alertsOverlay;
   const optionsTop = chrome ? height - chrome.bottom : 0;
-  const toastLow = chrome && !underPane ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop }) : null;
+  // The alerts column's width as it works it out (features/encounter/InitiativeStrip.tsx): it steps left of a phone's sideways sheet, and beside the side panel no right safe area is the map's.
+  const columnSheet = !wide && width > height && sheetOpen ? sideWidth : 0;
+  const columnWidth = { mapWidth, sheet: columnSheet, safe: { left: safe.left, right: sideShown ? 0 : safe.right } };
+  const toastLow = chrome && !underPane ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop, width: columnWidth }) : null;
   const toastUnderPane = chrome && underPane ? paneToastTop({ head: paneHead, optionsTop }) : null;
   const [toastLayer, setToastLayer] = useState<HTMLDivElement | null>(null);
   // Where the row and its line would stand above the last lasting notice's foot, they stand over it, so the tool's controls stay in reach (8).
@@ -1512,7 +1515,7 @@ function Banner() {
  * Once the pane goes away, the stack stays where the header last stood,
  * until another pane stands (barDock.ts nextToastPlaces).
  */
-function Toasts(props: { low: number | null; pane: number | null; paneStands: boolean; layer: HTMLElement | null }) {
+function Toasts(props: { low: ToastLow | null; pane: number | null; paneStands: boolean; layer: HTMLElement | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
@@ -1535,7 +1538,7 @@ function Toasts(props: { low: number | null; pane: number | null; paneStands: bo
   const overMap = toasts.filter((t) => places.get(t.id) === "map");
   const inSheet = slot ? toasts.filter((t) => places.get(t.id) === "sheet") : [];
   const low = toasts.filter((t) => inToastLayer(places.get(t.id)));
-  const lowAt = toastLayerTop(placed.current, ids);
+  const lowAt = toastLayerPlace(placed.current, ids);
   return (
     <>
       {overMap.map((t) => (
@@ -1543,7 +1546,8 @@ function Toasts(props: { low: number | null; pane: number | null; paneStands: bo
       ))}
       {props.layer && lowAt !== null
         ? createPortal(
-            <div style={{ position: "absolute", top: lowAt, left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }}>
+            // Under the column's first card, the card's edges, so the toast lines up with it. Under a pane's header, across the map as the notices are.
+            <div style={{ position: "absolute", top: lowAt.top, ...(lowAt.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }), display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }}>
               {low.map((t) => (
                 <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
               ))}
