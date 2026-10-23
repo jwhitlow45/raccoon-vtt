@@ -9,12 +9,12 @@ import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
-import { planMove } from "./rules/moveLeg.ts";
+import { checkSetReach, planMove } from "./rules/moveLeg.ts";
 import { footprintSize } from "./rules/footprint.ts";
 import { groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from "./rules/movement.ts";
-import { onRouteLattice, routeBlocker, routePoints, routeReach, routeWalkers, type RoutePiece } from "./rules/route.ts";
+import { onRouteLattice, routeBlocker, routePoints, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
 import { turnUnderWay } from "./rules/path.ts";
@@ -290,7 +290,9 @@ export const ROUTE_TOO_LONG = `a route reaches at most ${MAX_ROUTE_REACH} square
  * lattice from where the token stands, its footprint inside the scene,
  * consecutive points apart, and at most 300 squares of reach in all, each
  * piece's change of elevation by the walk's own rule (route.ts
- * `routePoints`). The DM's routes are checked this far and no further.
+ * `routePoints`), and each piece's reach the largest over the token and the
+ * group's public members it takes along (moveLeg.ts checkSetReach, review
+ * R7-OPUS-1). The DM's routes are checked this far and no further.
  */
 function routeFits(op: Op, c: Check): Decision {
   if (op.t !== "token.move" || !op.route) return OK;
@@ -304,8 +306,9 @@ function routeFits(op: Op, c: Check): Decision {
     if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
     prev = { x, y };
   }
-  const points = routePoints(c.state.buildChunks, walkerFor(c.state, token, seenAllIn(c), { to: op }), op.route, op.elevation ?? token.elevation);
-  return routeReach(points, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
+  const seen = seenAllIn(c);
+  const trace = routeWalkers(c.state.buildChunks, walkerFor(c.state, token, seen, { to: op }), op.route, op.elevation ?? token.elevation);
+  return checkSetReach(c.state, token, trace, seen, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
 /** The refusal of a player's op that names an effect's save or its occurrence (docs/design-v1-roll-options.md 6.1). */

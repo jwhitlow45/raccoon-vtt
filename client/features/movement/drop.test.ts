@@ -313,6 +313,30 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     assert.equal(long.moves[0]!.route, undefined, "over 300 squares of reach: the drop goes without a route");
   });
 
+  test("a route whose dragged creature climbs and drops past 300 squares of reach on its own ground goes without its route, as the server refuses it (review R7-OPUS-1)", () => {
+    // Thorn's row is flat, and the goblin he drags beside it walks a row that rises to 200 ft and falls to -100 ft a square.
+    const heights: Record<string, number> = {};
+    for (let x = 3; x <= 8; x++) heights[`${x},3`] = x % 2 === 1 ? 200 : -100;
+    const east = [3, 4, 5, 6, 7, 8].map((x): [number, number, number, 0 | 1] => [x, 2, 0, 0]);
+    const drop = (goblin: Partial<Token>, pieces = east) => {
+      const state = world({ blockMovement: false, heights, tokens: [thorn({ x: 2, y: 2 }), token("gob", { name: "Goblin", x: 2, y: 3, attached: { to: "thorn", kind: "drag" }, ...goblin })] });
+      const at = pieces.at(-1)!;
+      const plan = planWalk(seenRoom(state), state.tokens.thorn!, { x: at[0], y: at[1] }, "free", { kind: "route", route: { pieces } }, 5);
+      const route = plan.moves[0]!.route;
+      // The server takes what the client sends, and refuses the route the client leaves off.
+      assert.ok(canApply(moveOpsOf(plan.moves)[0]!, P1, state, { canUseAsset: () => true }).ok);
+      const sent = canApply({ t: "token.move", tokenId: "thorn", x: at[0], y: at[1], route: pieces }, P1, state, { canUseAsset: () => true });
+      return { route, refused: sent.ok ? null : sent.message };
+    };
+    // 40 squares up, then five falls and climbs of 60 squares: 340, though Thorn's own walk reaches 6.
+    assert.deepEqual(drop({}), { route: undefined, refused: "a route reaches at most 300 squares" });
+    // Four pieces reach 220: the route goes.
+    assert.deepEqual(drop({}, east.slice(0, 4)), { route: east.slice(0, 4), refused: null });
+    // A goblin he does not drag, and one no player sees, are not counted.
+    assert.deepEqual(drop({ attached: undefined }), { route: east, refused: null });
+    assert.deepEqual(drop({ visibility: "dm" }), { route: east, refused: null });
+  });
+
   test("an arrow key steps one square, stops at a wall as before, never goes round it, and counts the square's terrain", () => {
     const state = divided();
     const press = (from: { x: number; y: number }, to: { x: number; y: number }, cells: Record<string, "rubble"> = {}) => {

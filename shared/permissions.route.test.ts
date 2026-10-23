@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey } from "./keys.ts";
-import type { EdgeFeature, RoomState, Token } from "./model.ts";
+import { CHUNK_CELLS, type EdgeFeature, type RoomState, type Token } from "./model.ts";
 import { ROUTE_OFF_LATTICE, ROUTE_TOO_LONG, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, canApply, type PermissionDeps } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
+import { encodeHeights } from "./rules/heights.ts";
 import { DM, P1, room, token } from "./testutil.ts";
 
 /**
@@ -66,6 +67,36 @@ describe("a move's route (7.1)", () => {
     state.tokens.own = { ...state.tokens.own!, x: 1.3 };
     assert.equal(decide({ t: "token.move", tokenId: "own", x: 3.3, y: 2, route: [[2.3, 2, 0, 0], [3.3, 2, 0, 0]] }, P1, state), "ok");
     assert.equal(decide({ t: "token.move", tokenId: "own", x: 3, y: 2, route: [[2, 2, 0, 0], [3, 2, 0, 0]] }, P1, state), `invalid: ${ROUTE_OFF_LATTICE}`);
+  });
+});
+
+describe("the 300-square cap reads the public members a walk takes along (section 10, review R7-OPUS-1)", () => {
+  /** Thorn (P1's) at 2, 2 on flat ground, dragging a goblin at 2, 3 whose row rises to 200 ft and falls to -100 ft a square east of it. */
+  function dragging(thorn: Partial<Token> = {}, goblin: Partial<Token> = {}): RoomState {
+    const state = room();
+    const feet = new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0);
+    for (let x = 3; x <= 8; x++) feet[3 * CHUNK_CELLS + x] = x % 2 === 1 ? 200 : -100;
+    state.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, heights: encodeHeights(feet) };
+    state.tokens.thorn = token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"], x: 2, y: 2, ...thorn });
+    state.tokens.gob = token("gob", { name: "Goblin", x: 2, y: 3, attached: { to: "thorn", kind: "drag" }, ...goblin });
+    return state;
+  }
+  const east = (to: number): Op => ({ t: "token.move", tokenId: "thorn", x: to, y: 2, route: Array.from({ length: to - 2 }, (_, i): [number, number, number, 0 | 1] => [3 + i, 2, 0, 0]) });
+
+  test("a goblin dragged over its own climbs and falls past 300 squares refuses the route for every role, though the holder's own walk reaches 6", () => {
+    for (const who of [DM, P1]) {
+      // 40 squares up, then five falls and climbs of 60.
+      assert.equal(decide(east(8), who, dragging()), `invalid: ${ROUTE_TOO_LONG}`);
+      // Four pieces reach 220.
+      assert.equal(decide(east(6), who, dragging()), "ok");
+    }
+  });
+
+  test("a creature no player sees, or one on a holder no player sees, never decides the cap (L3-SOL-39)", () => {
+    for (const who of [DM, P1]) {
+      assert.equal(decide(east(8), who, dragging({}, { visibility: "dm" })), "ok", "a hidden goblin");
+      assert.equal(decide(east(8), who, dragging({ visibility: "dm" })), "ok", "a visible goblin dragged by a hidden Thorn");
+    }
   });
 });
 

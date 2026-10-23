@@ -1,11 +1,12 @@
 import type { BuildChunk, RoomState, Scene, Token } from "#shared/model.ts";
 import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorRef, type OpOf } from "#shared/protocol.ts";
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
-import { holderOf, linkHolds, onHolder, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
+import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { footing, footprintGround } from "#shared/rules/heights.ts";
 import { groundUnder, landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
-import { followerTrace, routeLattice, routePoints, routeReach, routeStop, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
 import { publicToken } from "#shared/rules/walkWorld.ts";
 import { displayName, snapPosition } from "../../lib/scene.ts";
@@ -319,7 +320,7 @@ export function cutRoute(state: DropView, token: DropToken, pieces: readonly Rou
  * once.
  */
 export function routeLanding(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
-  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell},${holderKey(state, token)}`;
+  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell},${holderKey(state, token)},${membersKey(state, token)}`;
   const known = landings.get(pieces);
   if (known && known.key === key && known.chunks === state.buildChunks && known.scene === state.scenes[token.sceneId]) return known.landing;
   const landing = landingOf(state, token, target, pieces, feetPerCell);
@@ -366,6 +367,17 @@ function holderKey(state: DropState, token: DropToken): string {
   return `${link.kind},${holder.id},${holder.size},${holder.w},${holder.h},${holder.x},${holder.y},${holder.elevation}`;
 }
 
+/** What a landing kept per route reads of what the token takes along (checkSetReach): each public member's link and place. */
+function membersKey(state: DropView, token: DropToken): string {
+  return publicMembers(state.tokens, token.id, state.seen, new Set([token.id]))
+    .slice(1)
+    .map((id) => {
+      const t = state.tokens[id]!;
+      return `${id},${t.attached?.kind},${t.attached?.to},${t.size},${t.w},${t.h},${t.x},${t.y},${t.elevation}`;
+    })
+    .join(";");
+}
+
 function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
   const cut = cutRoute(state, token, pieces);
   if (pieces.length === 0 || (pieces.length > MAX_ROUTE_PIECES && !cut)) return null;
@@ -375,10 +387,12 @@ function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?
   const walking = walkerOf(state, token, at);
   const kept = passing(state, walking, cut ? cut.pieces : [...pieces], elevation);
   if (!kept) return null;
-  const points = routePoints(state.buildChunks, walking, kept, elevation);
+  const trace = routeWalkers(state.buildChunks, walking, kept, elevation);
+  const points = trace.map(({ x, y, elevation }) => ({ x, y, elevation }));
   // A squeeze at the walk's end is judged as the end of the walk, as the server judges it (permissions.ts squeezeFits).
   if (at.squeeze && !squeezeFits(state, walkEnd(state, walking, at, points.slice(1, -1)))) return null;
-  return routeReach(points, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
+  // The cap reads what the token takes along too, each on its own ground, as the server's does (moveLeg.ts checkSetReach).
+  return checkSetReach(state, token, trace, state.seen, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
 }
 
 /**

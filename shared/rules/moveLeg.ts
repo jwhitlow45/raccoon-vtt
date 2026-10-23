@@ -3,10 +3,10 @@ import type { RoomState, Token, Viewer } from "../model.ts";
 import { inSightOfNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { movementRules } from "../ruleHooks.ts";
-import { carriedGroup, moveGroups, onHolder, publicMembers, walkerFor } from "./attach.ts";
+import { carriedGroup, moveGroups, onHolder, publicMembers, walkerFor, type SeenByAll } from "./attach.ts";
 import { footing } from "./heights.ts";
 import { groundUnder, landing } from "./movement.ts";
-import { followerTrace, routeWalkers, type RoutePoint, type WalkTrace } from "./route.ts";
+import { followerTrace, pieceReach, routeWalkers, type RoutePoint, type WalkTrace } from "./route.ts";
 
 /**
  * One description of a move (contract section 1, docs/design-v1-attach.md
@@ -46,7 +46,7 @@ export type MovedToken = {
 /** The op's envelope as the plan reads it: the version it was stored at, if any. */
 type Versioned = { opVersion?: number };
 
-function poseOf(token: Token): Pose {
+function poseOf(token: Pick<Token, "sceneId" | "x" | "y" | "elevation">): Pose {
   return { sceneId: token.sceneId, x: token.x, y: token.y, elevation: token.elevation };
 }
 
@@ -144,7 +144,7 @@ export function planMove(op: Op, before: RoomState, actor: Viewer, env: Versione
       const member = before.tokens[id]!;
       const holderMove = walked.get(member.attached!.to);
       if (!holderMove) continue;
-      const moved = follow(before, actor, member, holderMove, shown.has(id) && shown.has(holderMove.tokenId));
+      const moved = follow(before, member, holderMove, shown.has(id) && shown.has(holderMove.tokenId), actor.role !== "dm");
       if (!moved) continue;
       walked.set(id, moved);
       if (!samePose(moved.from, moved.to)) out.push(moved);
@@ -157,8 +157,12 @@ function samePose(a: Pose, b: Pose): boolean {
   return a.sceneId === b.sceneId && a.x === b.x && a.y === b.y && a.elevation === b.elevation;
 }
 
-/** How a carried token follows its holder's actual walk, or null when it stays (a dragged creature a teleport leaves). */
-function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedToken, isPublic: boolean): MovedToken | null {
+/**
+ * How a carried token follows its holder's actual walk, or null when it
+ * stays (a dragged creature a teleport leaves). On a player's walk
+ * (`byPlayer`) a dragged creature outside the public members stops at walls.
+ */
+function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: boolean, byPlayer: boolean): MovedToken | null {
   const kind = member.attached!.kind;
   const from = poseOf(member);
   const pass = isPublic ? "public" : "private";
@@ -185,9 +189,38 @@ function follow(before: RoomState, actor: Viewer, member: Token, holder: MovedTo
   };
   let route: RoutePoint[] = [{ x: member.x, y: member.y, elevation: member.elevation }];
   for (const p of holder.route.slice(1)) route.push({ x: p.x + ox, y: p.y + oy, elevation: elevationAt(p.x + ox, p.y + oy, p.elevation) });
-  if (!isPublic && actor.role !== "dm" && holder.how === "walk") route = stoppedAtWalls(before, member, route, holder.route, elevationAt);
+  if (!isPublic && byPlayer && holder.how === "walk") route = stoppedAtWalls(before, member, route, holder.route, elevationAt);
   const last = route[route.length - 1]!;
   return { tokenId: member.id, from, to: { sceneId: member.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass };
+}
+
+/**
+ * A routed walk's reach as the 300-square cap reads it (docs/design-v1-movement.md
+ * 10, review R7-OPUS-1): piece by piece, the largest over the walker and
+ * its public members, each on its own elevation path as the move takes it
+ * along (`follow`), so a creature it drags over ground that rises and falls
+ * counts its climbs, which the walker's own path never shows. A token on a
+ * holder some player cannot see is not among them (L3-SOL-39), so no hidden
+ * path decides the cap. The server's check (permissions.ts routeFits) and
+ * the client's, of a route before it sends it (drop.ts landingOf), are this
+ * one rule.
+ */
+export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "sceneId" | "x" | "y" | "elevation">, trace: WalkTrace, seen: SeenByAll, feetPerCell: number): number {
+  const route = trace.map(({ x, y, elevation }) => ({ x, y, elevation }));
+  const lead: MovedToken = { tokenId: token.id, from: poseOf(token), to: { sceneId: token.sceneId, ...route[route.length - 1]! }, route, trace, how: "walk", pass: "public" };
+  const walks = [lead];
+  const walked = new Map<string, MovedToken>([[token.id, lead]]);
+  for (const id of publicMembers(before.tokens, token.id, seen, new Set([token.id])).slice(1)) {
+    const member = before.tokens[id];
+    const holder = member?.attached ? walked.get(member.attached.to) : undefined;
+    const moved = member && holder ? follow(before, member, holder, true, false) : null;
+    if (!moved) continue;
+    walked.set(id, moved);
+    walks.push(moved);
+  }
+  let reach = 0;
+  for (let i = 1; i < route.length; i++) reach += Math.max(...walks.map((w) => pieceReach(w.route[i - 1]!, w.route[i]!, feetPerCell)));
+  return reach;
 }
 
 /**
