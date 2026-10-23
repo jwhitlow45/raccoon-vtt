@@ -61,19 +61,20 @@ export type DiceFolds = Readonly<Record<DiceFoldKey, boolean>>;
 export const DICE_FOLDS_KEY = "rvtt.diceFolds";
 
 /**
- * A creature's fold kind: a character, picked by a player or on its token,
- * is `pc`, a companion's token `companion`, and every other creature
- * `monster`, NPCs and objects included. So a DM's NPC or a beast lent to a
- * player folds with the monsters, as its options read like a monster's. A
- * player character's token with no character of its own is still a `pc`,
- * as the rest of the app treats it.
+ * A creature's fold kind: a character a player picks, or a player
+ * character's token, is `pc`, a companion's token `companion`, and every
+ * other creature `monster`, NPCs and objects included. So the DM's NPC
+ * lent to a player folds with the monsters, as its options read like a
+ * monster's, whether it is a token of its own or of a character the DM
+ * keeps for it (options.ts playerCreatures), and so does a beast a player
+ * owns.
  */
 export function foldKind(view: Pick<RoomState, "tokens">, creature: ActorTarget): FoldKind {
   if ("characterId" in creature) return "pc";
   const token = view.tokens[creature.tokenId];
   if (!token) return "monster";
   if (token.companion !== undefined) return "companion";
-  return token.kind === "pc" || "ref" in token.actor ? "pc" : "monster";
+  return token.kind === "pc" ? "pc" : "monster";
 }
 
 /** The token panel's "computer" (panelFolds.ts foldDefaults): at least 900 px wide and 600 tall. A phone held sideways is a phone. */

@@ -100,19 +100,18 @@ describe("a creature's fold kind (6.3)", () => {
     },
   };
 
-  test("a character is a pc, picked or on any token of it, and a pc token with no character too", () => {
+  test("a character a player picks is a pc, and a player character's token, with a character or without", () => {
     assert.equal(foldKind(view, { characterId: "c1" }), "pc");
     assert.equal(foldKind(view, { tokenId: "thorn" }), "pc");
     assert.equal(foldKind(view, { tokenId: "loose" }), "pc");
-    assert.equal(foldKind(view, { tokenId: "kept" }), "pc", "a character's token, whatever kind it was given");
   });
 
   test("a companion's token is a companion, whatever its kind", () => {
     assert.equal(foldKind(view, { tokenId: "wolf" }), "companion");
   });
 
-  test("monsters, NPCs, objects, an NPC or beast a player owns, and a token gone, all fold with the monsters", () => {
-    for (const id of ["ogre", "npc", "beast", "crate", "gone"]) assert.equal(foldKind(view, { tokenId: id }), "monster", id);
+  test("monsters, NPCs, objects, an NPC or beast a player owns, the DM's NPC kept as a character, and a token gone, all fold with the monsters", () => {
+    for (const id of ["ogre", "npc", "beast", "crate", "kept", "gone"]) assert.equal(foldKind(view, { tokenId: id }), "monster", id);
   });
 });
 

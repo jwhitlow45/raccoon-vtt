@@ -104,7 +104,7 @@ export function AskForSavesButton(props: { spec: CastBlock; ref?: RefObject<HTML
   const open = () => {
     // A send of this row's that has not settled well comes back with its block, so it offers Ask again, never a second roll.
     const pending = pendingSend({ spec: props.spec, sends: sendStore.getState().sends, casts: room.getState().view?.casts ?? {}, state: (id) => tracker.state(id) });
-    store.setState(openedBlock(props.spec, pending?.id));
+    store.setState((s) => openedBlock(s, props.spec, pending?.id));
   };
   return (
     <Button ref={props.ref} size="sm" aria-label={`Ask the DM for saves against ${props.spec.spell}`} onClick={open}>

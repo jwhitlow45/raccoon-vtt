@@ -4,14 +4,15 @@ import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { createStore } from "zustand/vanilla";
 import type { DiceRoll, LogEntry, RollRequest, RoomState } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { actor, character, entry, room, token } from "#shared/testutil.ts";
+import { actor, castAsk, character, entry, room, token } from "#shared/testutil.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
 import type { OptionState } from "./optionState.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
 import { creatureRolls } from "./creature.ts";
-import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, groupNote, initiativeOp, initiativeRow, noNumbersNote, playerCreatures, presetLine, resultWords, routedTest, routeOf, scoreOf, skillAsks, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
+import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, foldSummary, groupAsks, groupNote, initiativeOp, initiativeRow, initiativeTag, noNumbersNote, openForAsks, playerCreatures, presetLine, resultWords, routedTest, routeOf, sameSpell, scoreOf, skillAsks, spellLevels, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
+import type { RollPreset } from "#shared/rules/rollReminders.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
 
@@ -237,7 +238,7 @@ describe("initiative written by the room, not the surface that rolled (ASTRA-08)
     const log: LogEntry[] = [];
     const tracker = new ReceiptTracker();
     tracker.env = { lookup: () => Promise.resolve({ parts: [] }), log: () => log };
-    const store = createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null }));
+    const store = createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, bonus: {} }));
     const sent: ClientOp[] = [];
     const env: InitiativeEnv = { tracker, store, view: () => view, dispatch: (op) => sent.push(op), dm: true };
     const land = (tag: string, total: number) => {
@@ -335,5 +336,134 @@ describe("a group's shared tags, said once in its label (docs/design-v1-dice-ui.
     assert.equal(groupNote([plain, plain]), "");
     assert.deepEqual(commonTags([blessed, plain]), [], "the plain save does not carry +1d4, so the Blessed ones keep their tag");
     assert.deepEqual(commonTags([]), []);
+  });
+});
+
+describe("the folds' lines and openings (docs/design-v1-dice-pass.md 6)", () => {
+  const preset = (extra: string[] = [], adv = false): RollPreset => ({ sources: adv ? [{ kind: "adv", from: "hasted" }] : [], extra, notes: [] });
+
+  test("Saves and checks: its notes, then the six saves, each named as a word and signed with the true minus", () => {
+    const saves = { str: 4, dex: 1, con: 3, int: 0, wis: 5, cha: -1 };
+    assert.equal(foldSummary({ group: "saves", note: "asks Thorn. +1d4: Blessed", saves }), "asks Thorn. +1d4: Blessed · Str +4, Dex +1, Con +3, Int +0, Wis +5, Cha −1");
+    assert.equal(foldSummary({ group: "saves", note: "", saves }), "Str +4, Dex +1, Con +3, Int +0, Wis +5, Cha −1");
+    assert.equal(foldSummary({ group: "saves", note: "asks Bree", saves: null }), "asks Bree", "no numbers for a creature without them");
+    assert.equal(foldSummary({ group: "saves", note: "", saves: null }), "");
+  });
+
+  test("Skills: only those above their ability's check, the trained ones", () => {
+    const skills = [
+      { name: "Athletics", bonus: 6, check: 3 },
+      { name: "Acrobatics", bonus: 1, check: 1 },
+      { name: "Insight", bonus: 4, check: 1 },
+      { name: "Stealth", bonus: -2, check: 1 },
+    ];
+    assert.equal(foldSummary({ group: "skills", skills }), "Athletics +6, Insight +4");
+    assert.equal(foldSummary({ group: "skills", skills: [{ name: "Acrobatics", bonus: 1, check: 1 }] }), "", "none trained, no line");
+  });
+
+  test("an action group names its rows, a used recharge as used, and Spells counts them after the DC and the attack", () => {
+    assert.equal(foldSummary({ group: "rows", rows: [{ name: "Rend" }, { name: "Acid Breath", used: true }, { name: "Tail", used: false }] }), "Rend, Acid Breath (used), Tail");
+    assert.equal(foldSummary({ group: "spells", dc: 14, attack: 6, count: 13 }), "DC 14 · +6 to hit · 13 spells");
+    assert.equal(foldSummary({ group: "spells", dc: 14, count: 1 }), "DC 14 · 1 spell");
+    assert.equal(foldSummary({ group: "spells", attack: -1, count: 0 }), "−1 to hit");
+  });
+
+  test("what waits in a folded group leads its line: the asks, then the asks for saves", () => {
+    const saves = { str: 0, dex: 2, con: 0, int: 0, wis: 0, cha: 0 };
+    assert.equal(foldSummary({ group: "saves", note: "", saves }, { asked: ["DEX save", "WIS save"], casts: [] }), "Asked: DEX save, WIS save · Str +0, Dex +2, Con +0, Int +0, Wis +0, Cha +0");
+    assert.equal(foldSummary({ group: "spells", dc: 14, count: 2 }, { asked: [], casts: ["Fireball"] }), "Ask for saves waiting: Fireball · DC 14 · 2 spells");
+    assert.equal(foldSummary({ group: "rows", rows: [{ name: "Rend" }] }, { asked: ["STR check"], casts: ["Acid Breath", "Rend"] }), "Asked: STR check · Ask for saves waiting: Acid Breath, Rend · Rend");
+    assert.equal(foldSummary({ group: "rows", rows: [{ name: "Rend" }] }, { asked: [], casts: [] }), "Rend");
+  });
+
+  test("spells by level: cantrips, each level up, then those with none, each in its order", () => {
+    const spell = (name: string, level?: number) => ({ name, ...(level !== undefined ? { level } : {}) });
+    const levels = spellLevels([spell("Bless", 1), spell("Fireball", 3), spell("Sacred Flame", 0), spell("Darkness"), spell("Cure Wounds", 1), spell("Light", 0)]);
+    assert.deepEqual(
+      levels.map((l) => [l.label, l.rows.map((r) => r.name)]),
+      [
+        ["Cantrips", ["Sacred Flame", "Light"]],
+        ["Level 1", ["Bless", "Cure Wounds"]],
+        ["Level 3", ["Fireball"]],
+        ["Other", ["Darkness"]],
+      ],
+    );
+    assert.deepEqual(spellLevels([spell("Bless", 1), spell("Shield", 1)]).map((l) => l.label), [null], "one level needs no label");
+    assert.deepEqual(spellLevels([spell("Darkness"), spell("Hold Person")]).map((l) => l.label), [null], "a monster's spells with no level take none");
+    assert.deepEqual(spellLevels([spell("Fireball", 3), spell("Darkness")]).map((l) => l.label), ["Level 3", "Other"]);
+    assert.deepEqual(spellLevels([spell("Fireball", 3), spell("Bless", 1)]).map((l) => l.label), ["Level 1", "Level 3"], "levels in order whatever the rows' order");
+    assert.deepEqual(spellLevels([]), []);
+  });
+
+  test("Initiative's tag: what its tap does to the tracker, then its preset, parted, with the true minus", () => {
+    assert.equal(initiativeTag({ value: 12 }, preset(["-4"])), "replaces 12 · −4");
+    assert.equal(initiativeTag({ value: -3 }, preset()), "replaces −3");
+    assert.equal(initiativeTag({ value: null }, preset(["+1d4"], true)), "sets row · Adv +1d4");
+    assert.equal(initiativeTag(null, preset(["-2", "+1d4"])), "−2 +1d4", "no row, or a score's");
+    assert.equal(initiativeTag(null, preset()), "");
+  });
+
+  test("a spell's name matches whatever its case and spaces", () => {
+    assert.equal(sameSpell(" Fireball", "fireball "), true);
+    assert.equal(sameSpell("Fireball", "Fire Bolt"), false);
+  });
+});
+
+describe("what waits in a creature's groups (docs/design-v1-dice-pass.md 6.4)", () => {
+  const named = [
+    { key: "a:rend", name: "Rend", section: "actions" as const },
+    { key: "s:fireball", name: "Fireball", section: "spells" as const },
+    { key: "s:hold", name: "Hold Person", section: "spells" as const },
+    { key: "b:breath", name: "Breath", section: "bonusActions" as const },
+  ];
+  function state(rolls: Record<string, RollRequest> = {}, casts: RoomState["casts"] = {}): RoomState {
+    return { ...table(rolls), casts };
+  }
+
+  test("a request opens Saves and checks for a save or a plain check, and Skills for a skill, by its id, and an answered one opens nothing", () => {
+    const rolls = {
+      r1: request(),
+      r2: request({ id: "r2", test: { kind: "check", choices: [{ ability: "str" }, { ability: "wis", skill: "perception" }] } }),
+      r3: request({ id: "r3", test: { kind: "save", choices: [{ ability: "con" }] }, targets: [{ characterId: "bree", total: 9 }] }),
+      r4: request({ id: "r4", test: { kind: "save", choices: [{ ability: "int" }] }, targets: [{ tokenId: "gob" }] }),
+    };
+    const asks = groupAsks({ state: state(rolls), creature: { tokenId: "breeTok" }, named, cast: null });
+    assert.deepEqual(asks.saves, { ids: ["r1", "r2"], asked: ["WIS save", "DEX save", "STR check"], casts: [] }, "in each request's order");
+    assert.deepEqual(asks.skills, { ids: ["r2"], asked: ["Perception check"], casts: [] });
+    assert.deepEqual(Object.keys(asks).sort(), ["saves", "skills"]);
+    assert.deepEqual(groupAsks({ state: state(rolls), creature: { tokenId: "gob" }, named, cast: null }), { saves: { ids: ["r4"], asked: ["INT save"], casts: [] } }, "the goblin's own ask, a monster's");
+    assert.deepEqual(groupAsks({ state: state(), creature: { tokenId: "breeTok" }, named, cast: null }), {});
+  });
+
+  test("an open block opens the group of its row, by the row's key or its spell's name, by its stamp and its send", () => {
+    const base = { key: "c:bree", creature: { characterId: "bree" } };
+    const byRoll = groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "Old name", roll: "s:hold", opened: 3 } });
+    assert.deepEqual(byRoll, { spells: { ids: ["open:3"], asked: [], casts: ["Old name"] } });
+    const byName = groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "breath", opened: 4, sent: "ask-9" } });
+    assert.deepEqual(byName, { bonusActions: { ids: ["open:4", "ask-9"], asked: [], casts: ["breath"] } });
+    assert.deepEqual(groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "Fireball", area: "a1" } }).spells?.ids, ["open:0"], "a block opened before the stamps");
+    assert.deepEqual(groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "Gone", roll: "s:gone", opened: 5 } }), {}, "with no row it draws at the top, in no group");
+    assert.deepEqual(groupAsks({ state: state(), creature: { tokenId: "gob" }, named, cast: { ...base, spell: "Fireball", opened: 6 } }), {}, "another creature's block");
+  });
+
+  test("an ask for saves waiting in the view opens its row's group by its id, once with its block's send", () => {
+    const casts = {
+      k1: castAsk("k1", { caster: "breeTok", spell: "Fireball", area: "a1" }),
+      k2: castAsk("k2", { caster: "breeTok", spell: "Hold Person", roll: "s:hold", area: undefined }),
+      k3: castAsk("k3", { caster: "gob", spell: "Rend" }),
+      k4: castAsk("k4", { caster: "breeTok", spell: "Unknown" }),
+    };
+    const asks = groupAsks({ state: state({}, casts), creature: { characterId: "bree" }, named, cast: { key: "c:bree", creature: { characterId: "bree" }, spell: "Fireball", opened: 2, sent: "k1" } });
+    assert.deepEqual(asks, { spells: { ids: ["open:2", "k1", "k2"], asked: [], casts: ["Fireball", "Hold Person"] } });
+  });
+
+  test("each group opens in the creature's own kind, once per id it has not seen", () => {
+    const calls: [string, readonly string[]][] = [];
+    const store = { openForNew: (key: string, ids: readonly string[]) => (calls.push([key, ids]), true) };
+    openForAsks(store, "monster", { saves: { ids: ["r1"], asked: ["DEX save"], casts: [] }, spells: { ids: ["open:1", "k1"], asked: [], casts: ["Fireball"] } });
+    assert.deepEqual(calls, [
+      ["monster.saves", ["r1"]],
+      ["monster.spells", ["open:1", "k1"]],
+    ]);
   });
 });

@@ -100,9 +100,9 @@ describe("the block", () => {
 
   test("opening it pins the panel's pick to its creature, and takes back a send of its own that has not settled well", () => {
     const spec = { key: "c:thorn-c", creature: { characterId: "thorn-c" }, spell: "Hold Person", roll: "spells:hold-person" };
-    assert.deepEqual(openedBlock(spec), { cast: spec, picked: "c:thorn-c" });
-    assert.deepEqual(openedBlock({ ...spec, sent: "old" }), { cast: spec, picked: "c:thorn-c" }, "a fresh block drops a stale send");
-    assert.deepEqual(openedBlock(spec, "ask-1"), { cast: { ...spec, sent: "ask-1" }, picked: "c:thorn-c" });
+    assert.deepEqual(openedBlock({ openings: 0 }, spec), { cast: { ...spec, opened: 1 }, picked: "c:thorn-c", openings: 1 });
+    assert.deepEqual(openedBlock({ openings: 4 }, { ...spec, sent: "old", opened: 2 }), { cast: { ...spec, opened: 5 }, picked: "c:thorn-c", openings: 5 }, "a fresh block drops a stale send and its old stamp");
+    assert.deepEqual(openedBlock({ openings: 1 }, spec, "ask-1"), { cast: { ...spec, opened: 2, sent: "ask-1" }, picked: "c:thorn-c", openings: 2 });
     const send = (id: string, over: Record<string, unknown>) => ({ id, key: "c:thorn-c", spell: "Fireball", ask: { caster: "thorn", sceneId: "s1", spell: "Fireball", area: "a1" }, area: "a1", ...over });
     const sends = { r: send("r", {}), x: send("x", { area: "a2" }), t: send("t", { area: undefined, roll: "spells:hold-person", spell: "Hold Person" }) };
     const refused = { state: "refused" as const, code: "quota" as const, message: ASKS_WAITING, text: ASKS_WAITING, parts: [] };

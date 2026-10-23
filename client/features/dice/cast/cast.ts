@@ -14,7 +14,7 @@ import type { OnAnswer } from "../../../state/types.ts";
 import type { AreaCreature } from "../../areas/caster.ts";
 import { areaTitle } from "../../areas/labels.ts";
 import { rollsOf } from "../logic.ts";
-import { creatureKey, cutLabel } from "../options.ts";
+import { creatureKey, cutLabel, sameSpell } from "../options.ts";
 import { ReceiptTracker, type ReceiptState } from "../useReceipt.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import type { FillInput } from "../groupSave/fills.ts";
@@ -77,10 +77,17 @@ export function areaAskSpec(input: {
  * creature, so selecting targets never moves it. `sent` is a send of the
  * same block that has not settled well, which the block shows again, so it
  * offers Ask again rather than a second roll.
+ *
+ * Each opening takes the next stamp from the option store's count, so the
+ * Dice panel's folds tell a reopened block of the same spell from the one
+ * before it and open its group again (docs/design-v1-dice-pass.md 6.4).
+ * The count comes from the caller's state, which is why every opener
+ * passes it.
  */
-export function openedBlock(spec: CastBlock, sent?: string): Pick<OptionState, "cast" | "picked"> {
-  const { sent: _old, ...rest } = spec;
-  return { cast: sent !== undefined ? { ...rest, sent } : rest, picked: spec.key };
+export function openedBlock(state: Pick<OptionState, "openings">, spec: CastBlock, sent?: string): Pick<OptionState, "cast" | "picked" | "openings"> {
+  const { sent: _old, opened: _stamp, ...rest } = spec;
+  const opened = state.openings + 1;
+  return { cast: sent !== undefined ? { ...rest, opened, sent } : { ...rest, opened }, picked: spec.key, openings: opened };
 }
 
 /** The send a reopened block takes back: one for the same creature and the same area, or the same row, still sending, refused or unknown. */
@@ -94,10 +101,8 @@ export function pendingSend(input: { spec: Pick<CastBlock, "key" | "spell" | "ro
   });
 }
 
-/** Whether a row's name is the spell's, as the group save finds a caster's own spell by name (groupSave/fills.ts ownSpell). */
-export function sameSpell(a: string, b: string): boolean {
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
+// The panel's folds find a cast's row by its spell's name too, so the rule lives with the options (options.ts).
+export { sameSpell };
 
 /**
  * The block's casting level (3.1): every leveled spell gets one, from its

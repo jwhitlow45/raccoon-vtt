@@ -4,12 +4,14 @@ import { damageTypeName } from "#shared/rules/damage.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
-import { SKILL_KEYS, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId } from "#shared/model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
+import type { CastBlock } from "./optionState.ts";
+import { foldKey, type CreatureGroup, type DiceFoldsStore, type FoldKind } from "./diceFolds.ts";
 import { d20Text, parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 
 /**
@@ -582,4 +584,146 @@ export function riderToggleName(part: DamagePart): string {
 function shortRider(name: string): string {
   if (/^if the attack roll (had|has) advantage$/i.test(name)) return "with Advantage";
   return name.length > 22 ? `${name.slice(0, 21).trimEnd()}…` : name;
+}
+
+// ------------------------------------------------------------ the folds (docs/design-v1-dice-pass.md 6)
+
+/** Whether a row's name is the spell's, as the group save finds a caster's own spell by name (groupSave/fills.ts ownSpell). */
+export function sameSpell(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** "Str", "Dex": an ability as a folded line names it, quieter than a cell's "STR". */
+const ABILITY_WORD: Record<string, string> = Object.fromEntries(ABILITY_KEYS.map((a) => [a, ABILITY_ABBR[a].charAt(0) + ABILITY_ABBR[a].slice(1).toLowerCase()]));
+
+/** What one of a creature's groups holds, as its folded line reads it (6.5). */
+export type FoldSummaryInput =
+  /** Saves and checks: the shared notes, then the six saves, or none for a creature whose numbers this viewer lacks. */
+  | { group: "saves"; note: string; saves: Readonly<Record<string, number>> | null }
+  /** Skills: each with its bonus and its ability's plain check. */
+  | { group: "skills"; skills: readonly { name: string; bonus: number; check: number }[] }
+  /** Traits and the action groups: their rows. */
+  | { group: "rows"; rows: readonly { name: string; used?: boolean }[] }
+  | { group: "spells"; dc?: number | undefined; attack?: number | undefined; count: number };
+
+/** What waits in a group (6.4): the requests it answers, "DEX save", and the asks for saves, by spell. */
+export type GroupWaiting = { asked: readonly string[]; casts: readonly string[] };
+
+/**
+ * A group's one line while folded (6.5): "asks Thorn · Str +4, Dex +1, …",
+ * "Athletics +6, Insight +4", "Rend, Acid Breath (used)", "DC 14 · +6 to
+ * hit · 13 spells". What waits in it comes first, so a folded group still
+ * says it was asked: "Asked: DEX save", "Ask for saves waiting: Fireball".
+ */
+export function foldSummary(input: FoldSummaryInput, waiting?: GroupWaiting): string {
+  const parts = [waiting && waiting.asked.length > 0 ? `Asked: ${waiting.asked.join(", ")}` : "", waiting && waiting.casts.length > 0 ? `Ask for saves waiting: ${waiting.casts.join(", ")}` : ""];
+  switch (input.group) {
+    case "saves": {
+      const saves = input.saves;
+      parts.push(input.note, saves ? ABILITY_KEYS.map((a) => `${ABILITY_WORD[a]} ${signedText(saves[a] ?? 0)}`).join(", ") : "");
+      break;
+    }
+    case "skills":
+      // A skill above its ability's check is one the creature is trained in, or better: the rest read as the check does.
+      parts.push(input.skills.filter((s) => s.bonus > s.check).map((s) => `${s.name} ${signedText(s.bonus)}`).join(", "));
+      break;
+    case "rows":
+      parts.push(input.rows.map((r) => (r.used ? `${r.name} (used)` : r.name)).join(", "));
+      break;
+    case "spells":
+      parts.push(input.dc !== undefined ? `DC ${input.dc}` : "", input.attack !== undefined ? `${signedText(input.attack)} to hit` : "", input.count > 0 ? `${input.count} ${input.count === 1 ? "spell" : "spells"}` : "");
+      break;
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+/** One level of a creature's spells: its label, or null where the spells take none. */
+export type SpellLevel<T> = { label: string | null; rows: T[] };
+
+/**
+ * A creature's spells by level, as a sheet groups them (6.1): "Cantrips",
+ * "Level 1" and up, then "Other" for a spell with no level, such as a
+ * monster's "1/Day" spells. Spells of one level, or none with a level,
+ * take no label, since it would only repeat itself.
+ */
+export function spellLevels<T extends Pick<NamedRoll, "level">>(spells: readonly T[]): SpellLevel<T>[] {
+  const levels = new Map<number | null, T[]>();
+  for (const spell of spells) {
+    const level = spell.level ?? null;
+    levels.set(level, [...(levels.get(level) ?? []), spell]);
+  }
+  if (levels.size < 2) return spells.length > 0 ? [{ label: null, rows: [...spells] }] : [];
+  const order = [...levels.keys()].sort((a, b) => (a === null ? 1 : b === null ? -1 : a - b));
+  return order.map((level) => ({ label: level === null ? "Other" : level === 0 ? "Cantrips" : `Level ${level}`, rows: levels.get(level)! }));
+}
+
+/** A number with the typographic minus the cells use: "12", "−3". */
+function minusText(n: number): string {
+  return n < 0 ? `−${-n}` : `${n}`;
+}
+
+/**
+ * Initiative's tag (7.5): what its tap does to the tracker, then the
+ * preset, parted so the two never read as one: "replaces 12 · −4". A
+ * score's row says what it does in its own buttons, so it passes null.
+ */
+export function initiativeTag(row: { value: number | null } | null, preset: RollPreset): string {
+  const does = row === null ? "" : row.value === null ? "sets row" : `replaces ${minusText(row.value)}`;
+  return [does, presetTag(preset).replace(/-(?=\d)/g, "−")].filter(Boolean).join(" · ");
+}
+
+/** What waits in each of a creature's groups: the ids that open it once (6.4), and the words its folded line leads with. */
+export type GroupAsks = Partial<Record<CreatureGroup, { ids: string[] } & GroupWaiting>>;
+
+/**
+ * What waits in each of a creature's groups (6.4): an open request it can
+ * answer opens Saves and checks for a save or a plain check, and Skills
+ * for a skill, by the request's id. A player's open ask for saves opens
+ * the group that holds its row, by the opening's stamp, as does an ask
+ * waiting in the view, by its id. The block's own sent ask counts as the
+ * block, so an ask sent from it opens nothing again once it waits, and
+ * one first seen after a reload opens its group once.
+ */
+export function groupAsks(input: {
+  state: Pick<RoomState, "tokens" | "rolls" | "casts">;
+  creature: ActorTarget;
+  named: readonly Pick<NamedRoll, "key" | "name" | "section">[];
+  cast: CastBlock | null;
+}): GroupAsks {
+  const { state, creature } = input;
+  const out: GroupAsks = {};
+  const add = (group: CreatureGroup, id: string, words: { asked?: string; cast?: string }) => {
+    const at = (out[group] ??= { ids: [], asked: [], casts: [] });
+    if (!at.ids.includes(id)) at.ids.push(id);
+    if (words.asked !== undefined && !at.asked.includes(words.asked)) (at.asked as string[]).push(words.asked);
+    if (words.cast !== undefined && !at.casts.some((c) => sameSpell(c, words.cast!))) (at.casts as string[]).push(words.cast);
+  };
+  const key = creatureKey(state, creature);
+  // Every open request this creature has not answered, as a tap answers one (routeOf), so a second ask for the same save opens its group too.
+  for (const request of Object.values(state.rolls)) {
+    const target = request.targets.find((t) => creatureKey(state, t) === key);
+    if (!target || target.total !== undefined || target.result !== undefined) continue;
+    for (const choice of request.test.choices) {
+      if (request.test.kind === "check" && choice.skill) add("skills", request.id, { asked: `${SKILLS[choice.skill].name} check` });
+      else add("saves", request.id, { asked: `${ABILITY_ABBR[choice.ability]} ${request.test.kind}` });
+    }
+  }
+  const rowOf = (ask: { roll?: string | undefined; spell: string }) => (ask.roll !== undefined ? input.named.find((r) => r.key === ask.roll) : undefined) ?? input.named.find((r) => sameSpell(r.name, ask.spell));
+  const cast = input.cast?.key === key ? input.cast : null;
+  const castRow = cast ? rowOf(cast) : undefined;
+  if (cast && castRow) {
+    add(castRow.section, `open:${cast.opened ?? 0}`, { cast: cast.spell });
+    if (cast.sent !== undefined) add(castRow.section, cast.sent, {});
+  }
+  for (const ask of Object.values(state.casts ?? {})) {
+    if (creatureKey(state, { tokenId: ask.caster }) !== key) continue;
+    const row = rowOf(ask);
+    if (row) add(row.section, ask.id, { cast: ask.spell });
+  }
+  return out;
+}
+
+/** Opens each of a creature's groups once for what newly waits in it (6.4), in the creature's own fold kind. */
+export function openForAsks(store: Pick<DiceFoldsStore, "openForNew">, kind: FoldKind, asks: GroupAsks): void {
+  for (const [group, at] of Object.entries(asks) as [CreatureGroup, { ids: string[] }][]) store.openForNew(foldKey(kind, group), at.ids);
 }

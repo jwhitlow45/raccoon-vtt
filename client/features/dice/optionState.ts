@@ -42,6 +42,14 @@ export type OptionState = {
    * `picked` to its creature.
    */
   cast: CastBlock | null;
+  /** How many blocks this page has opened, each opening's stamp (cast.ts openedBlock). */
+  openings: number;
+  /**
+   * The bonus typed for a creature whose numbers this viewer lacks, by its
+   * key. The field stands in the creature's card and its cells in the
+   * groups below, which fold, so the text lives here and not in either.
+   */
+  bonus: Record<string, string>;
 };
 
 /** What a player's ask for saves is for, as its block opened. */
@@ -59,10 +67,12 @@ export type CastBlock = {
   slot?: number;
   /** The ask this block sent last, whose answer it shows until it waits in the view. */
   sent?: string;
+  /** The opening's stamp, new each time a block opens, even on the same spell (cast.ts openedBlock). */
+  opened?: number;
 };
 
 export const optionSlot = scopeSlot(() =>
-  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null })),
+  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, bonus: {} })),
 );
 
 export function useOptionStore() {

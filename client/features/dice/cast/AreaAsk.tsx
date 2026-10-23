@@ -35,7 +35,7 @@ export function useAreaAsk(template: Pick<AreaTemplate, "id" | "casterId" | "spe
     // A send of this area's that has not settled well comes back with its block, so the block offers Ask again, never a second roll.
     const pending = pendingSend({ spec, sends: sendStore.getState().sends, casts: view.casts, state: (id) => tracker.state(id) });
     // A bar's Roll asks the panel to scroll to the options the same way (dice/optionState.ts focus). A new block brings itself into view instead (CastBlock.tsx).
-    options.setState((s) => (asked ? { picked: spec.key, focus: s.focus + 1 } : openedBlock(spec, pending?.id)));
+    options.setState((s) => (asked ? { picked: spec.key, focus: s.focus + 1 } : openedBlock(s, spec, pending?.id)));
     ui.openPanel("dice");
   };
   const spell = areaSpellName(template);
