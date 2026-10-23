@@ -4,10 +4,9 @@ import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { bulkIds, bulkPressed, bulkToggle, SYNC_GROUPS, type AlsoItem, type SyncGroup, type SyncItem, type SyncPlan, type SyncResult, type SyncSection } from "#shared/rules/pcSync.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { Icon } from "../../components/Icon.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { SectionLabel } from "../../components/Panel.tsx";
-import { Row, RowList } from "../../components/Row.tsx";
+import { Row, RowChevron, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { alsoLine, changeLine, checkLines, differentIntro, groupSummary, keptRow, lossesText, NOTHING_NEW, ownRollsLine, replacesLine, syncReadLine, type ReadingBlocks } from "./resync.ts";
@@ -32,6 +31,19 @@ export type ReviewSection = "checks" | "changes" | "also" | "kept" | "different"
 const FOLD_PAST = 10;
 
 const LINE = { margin: 0, lineHeight: theme.leading.body, overflowWrap: "anywhere" } as const;
+
+/**
+ * A section of the review, spaced as a panel's `Section` inside a group
+ * (components/Panel.tsx): one column no wider than the dialog, its rows
+ * `space(2)` apart, and `space(4)` between sections. The review draws its
+ * own, since its labels take an id, `tabIndex` and focus that the
+ * re-sync's focus rule needs (docs/design-v1-resync.md 3.6), which
+ * `Section` does not offer (docs/design-v1-look-pass-2.md 3, lane 3).
+ */
+const SECTION = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 } as const;
+
+/** A row of a section that holds a line and its checkbox: kept, different and "Replaces your changes" rows alike. */
+const TICK_ROW = { display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, minWidth: 0 } as const;
 
 function groupsOf(items: readonly SyncItem[]): { group: SyncGroup; items: SyncItem[] }[] {
   return SYNC_GROUPS.map((group) => ({ group, items: items.filter((i) => i.group === group) })).filter((g) => g.items.length > 0);
@@ -69,7 +81,7 @@ export function SyncReview(props: {
   const overwrite = [...bulkIds(plan, "kept"), ...bulkIds(plan, "different")];
   const overwriteAll = overwrite.length > 0 ? <BulkButton ids={overwrite} ticks={ticks} onBulk={props.onBulk} disabled={props.disabled} words="Overwrite all" /> : null;
   const section = (key: ReviewSection, label: string, body: ReactNode, action?: ReactNode) => (
-    <section style={{ display: "grid", gap: theme.space(1), minWidth: 0 }} onFocusCapture={() => props.onFocusSection?.(key)}>
+    <section style={SECTION} onFocusCapture={() => props.onFocusSection?.(key)}>
       <SectionLabel id={props.labelId(key)} tabIndex={-1} action={action}>
         {label}
       </SectionLabel>
@@ -78,7 +90,7 @@ export function SyncReview(props: {
   );
 
   return (
-    <div style={{ display: "grid", gap: theme.space(3), fontSize: theme.font.body14, minWidth: 0 }}>
+    <div style={{ display: "grid", gap: theme.space(4), fontSize: theme.font.body14, minWidth: 0 }}>
       <p ref={props.firstRef} tabIndex={-1} style={{ ...LINE, outline: "none" }}>
         {syncReadLine(plan)}
       </p>
@@ -197,7 +209,7 @@ function KeptRowView(props: { item: SyncItem; blocks: ReadingBlocks; ticked: boo
   const id = useId();
   const row = keptRow(props.item, props.blocks);
   return (
-    <div role="group" aria-labelledby={id} data-sync-row={props.item.id} style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, minWidth: 0 }}>
+    <div role="group" aria-labelledby={id} data-sync-row={props.item.id} style={TICK_ROW}>
       <p id={id} style={{ ...LINE, fontWeight: theme.weight.strong }}>
         {row.first}
       </p>
@@ -223,7 +235,7 @@ function KeptRowView(props: { item: SyncItem; blocks: ReadingBlocks; ticked: boo
 function ReplacesRow(props: { item: SyncItem; blocks: ReadingBlocks; ticked: boolean; onTick(id: string): void; disabled?: boolean }) {
   const id = useId();
   return (
-    <div role="group" aria-labelledby={id} data-sync-row={props.item.id} style={{ display: "grid", gap: 0, minWidth: 0 }}>
+    <div role="group" aria-labelledby={id} data-sync-row={props.item.id} style={TICK_ROW}>
       <p id={id} style={LINE}>
         {replacesLine(props.item, props.blocks)}
       </p>
@@ -264,7 +276,7 @@ function Groups(props: {
                   detail={groupSummary(items, props.blocks, props.first)}
                   fullDetail
                   expanded={shown}
-                  trailing={<Icon name={shown ? "chevronDown" : "chevronRight"} size="sm" />}
+                  trailing={<RowChevron open={shown} />}
                   onClick={() => setOpen((o) => ({ ...o, [group]: !shown }))}
                 />
               </div>

@@ -408,6 +408,8 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const review = ana.getByRole("dialog", { name: "Check what was read" });
     assert.equal(await readLine(review), "Read from D&D Beyond: Bree Tallow, level 5.");
     assert.equal(anaDdb.last(), NUMBER);
+    // Its header's Back says where it goes, as the re-sync's review does (docs/design-v1-look-pass-2.md 3, lane 3).
+    await review.getByRole("button", { name: "Back to the D&D Beyond link", exact: true }).waitFor();
     // With no record the editor fills, and lists each value of the block it would replace.
     await review.getByRole("heading", { name: "Replaces your changes (1)", exact: true }).waitFor();
     const spell = row(review, "Spellcasting ability: Charisma, becomes Wisdom");
@@ -494,7 +496,10 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const review = ana.getByRole("dialog", { name: "Check what changes" });
     await review.getByRole("button", { name: "Apply", exact: true }).click();
     const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
-    await done.getByRole("status").filter({ hasText: "4 changes came in, and 5 of your changes stayed." }).waitFor();
+    const line = done.getByRole("status").filter({ hasText: "4 changes came in, and 5 of your changes stayed." });
+    await line.waitFor();
+    // A plain status line: the check mark means chosen, never done (docs/design-v1-look-pass-2.md 2.3).
+    assert.equal(await line.locator("svg").count(), 0, "the done line wears the check");
     await shots.take(ana, "resync-done");
     const bree = await waitFor("level 6 in Ana's view", () => (breeIn(anaSocket)?.level === 6 ? breeIn(anaSocket)! : null));
     assert.equal(bree.stats!.spellAbility, "cha");
@@ -611,6 +616,17 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
 
     await dialog.getByRole("button", { name: "Paste its JSON instead", exact: true }).click();
     await dialog.locator("textarea").fill(JSON.stringify(fixtureB()));
+    // With the JSON box open, the footer's Get it stays the one primary, and Read it is secondary (docs/design-v1-look-pass-2.md 2.2).
+    const looks = await dialog.getByRole("button").evaluateAll((buttons) =>
+      buttons.map((b) => {
+        const el = b as unknown as { textContent: string | null };
+        const view = (globalThis as unknown as { getComputedStyle(e: unknown): { backgroundColor: string } }).getComputedStyle(b);
+        return { text: (el.textContent ?? "").trim(), background: view.backgroundColor };
+      }),
+    );
+    const primary = looks.find((l) => l.text === "Get it")?.background;
+    assert.ok(primary);
+    assert.deepEqual(looks.filter((l) => l.background === primary).map((l) => l.text), ["Get it"], "one primary in the step");
     await dialog.getByRole("button", { name: "Read it", exact: true }).click();
     const review = ana.getByRole("dialog", { name: "Check what changes" });
     assert.match(await readLine(review), /^Read from D&D Beyond: Bree Tallow, level 6\./);
