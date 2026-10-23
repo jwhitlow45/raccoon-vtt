@@ -327,6 +327,50 @@ async function dismissToasts(page: Page): Promise<void> {
   }
 }
 
+/** Measures the toast `cause` brings, by its words, as `screen`, alone on the page, and dismisses it. */
+async function toastScreen(sweep: Sweep, page: Page, screen: string, words: RegExp, cause: () => Promise<unknown>): Promise<void> {
+  await dismissToasts(page);
+  await cause();
+  const toast = toasts(page, words);
+  if (await showsWithin(toast.first(), 3_000)) await sweep.measure(page, screen, toast);
+  else await sweep.missing(page, screen, `no toast read ${words}`);
+  await dismissToasts(page);
+}
+
+/** An undo another's change overtook, and so refused, as `page` presses Ctrl+Z: `mine` moves Thorn, and `theirs` moves him after. */
+async function refusedUndo(page: Page, mine: OpSocket, theirs: OpSocket): Promise<void> {
+  // From his place on the ground, so neither move meets the pit or a ledge.
+  await resetThorn();
+  await mine.send({ t: "token.move", tokenId: run.ids.thorn, x: 5, y: 6 });
+  await theirs.send({ t: "token.move", tokenId: run.ids.thorn, x: 5, y: 5 });
+  await escapeAll(page);
+  await page.keyboard.press("Control+z");
+}
+
+/** A roll of Perception with its d20, by `who`'s token, which every viewer sees. */
+function rollFor(socket: OpSocket, who: string): Promise<unknown> {
+  return socket.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [{ formula: "1d20+3", label: "Perception", creature: { tokenId: who } }] });
+}
+
+/** A pane's fields' notes as they show for a cleared name and dice that do not read, each left by Enter, and then those fields as they were. */
+async function notesScreen(sweep: Sweep, page: Page, pane: Locator): Promise<void> {
+  const name = pane.locator('input[aria-label="Name"]');
+  const dice = pane.locator('input[aria-label="Damage dice"]').first();
+  if (!(await visible(name)) || !(await visible(dice))) return sweep.missing(page, "trap-pane-notes", "the pit's pane has no Name or Damage dice field");
+  const was = { name: await name.inputValue(), dice: await dice.inputValue() };
+  await name.fill("");
+  await name.press("Enter");
+  await dice.fill("2d");
+  await dice.press("Enter");
+  const notes = (await showsWithin(pane.getByText("A trap needs a name."), 2_000)) && (await showsWithin(pane.getByText(/^Not a dice formula/), 2_000));
+  if (notes) await sweep.measure(page, "trap-pane-notes", pane);
+  else await sweep.missing(page, "trap-pane-notes", "Enter on a cleared name and on 2d gave no notes");
+  await name.fill(was.name);
+  await name.press("Enter");
+  await dice.fill(was.dice);
+  await dice.press("Enter");
+}
+
 /** Unfolds every group of a pane, each fold once. Menus and pop-ups are not folds. */
 async function unfoldAll(root: Locator): Promise<void> {
   const done = new Set<string>();
@@ -453,6 +497,8 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     }
     await unfoldAll(pane);
     await sweep.measure(page, `trap-pane-${which}`, pane);
+    // Its fields' notes too, which push the groups under them down (live play 18).
+    if (which === "pit") await notesScreen(sweep, page, pane);
     if (which === "needle" && PHONE_ROOTS.has(size.name)) await requestScreen(sweep, page, pane);
     if (await visible(pane)) {
       await dismissToasts(page);
@@ -483,6 +529,14 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await pane.waitFor({ state: "detached" });
   await pickTool(page, "Select");
   await dismissToasts(page);
+
+  // The DM's other toasts (live play 18): Pat's whisper, an undo Pat's move overtook, and Pat's roll with its die. They come before the group save pages, which leave a computer's Dice tab open, and a roll shows there with no toast.
+  const dmId = dmSocket.you?.memberId;
+  if (dmId) await toastScreen(sweep, page, "toast-whisper", /altar hums/, () => patOps.send({ t: "log.whisper", to: [dmId], text: "The altar hums." }));
+  else await sweep.missing(page, "toast-whisper", "the DM's member id was not known");
+  await toastScreen(sweep, page, "toast-refusal", /^Could not undo/, () => refusedUndo(page, ops, patOps));
+  await toastScreen(sweep, page, "toast-roll", /Perception/, () => rollFor(patOps, run.ids.thorn));
+  await resetThorn();
 
   // The column full, and a toast under its first card.
   await spring(run.traps.door);
@@ -740,6 +794,20 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await escapeAll(page);
   await setWall(false);
   await resetThorn();
+
+  // Pat's other toasts (live play 18): the DM's whisper, an undo the DM's move overtook, and the DM's roll with its die.
+  await toastScreen(sweep, page, "pat-toast-whisper", /hear chanting/, () => ops.send({ t: "log.whisper", to: [run.patId], text: "You hear chanting." }));
+  await toastScreen(sweep, page, "pat-toast-refusal", /^Could not undo/, () => refusedUndo(page, patOps, ops));
+  await toastScreen(sweep, page, "pat-toast-roll", /Perception/, () => rollFor(ops, run.ids.goblin));
+  await resetThorn();
+
+  // Pat's pause screen while the DM blacks out the players' view (live play 18).
+  await ops.send({ t: "view.blackout", blackout: true });
+  const paused = page.getByText("The DM has paused the game.");
+  if (await showsWithin(paused, 3_000)) await sweep.measure(page, "pat-blackout", page.locator("body"));
+  else await sweep.missing(page, "pat-blackout", "the blackout showed no pause screen");
+  await ops.send({ t: "view.blackout", blackout: false });
+  await paused.waitFor({ state: "detached" });
 }
 
 /**
