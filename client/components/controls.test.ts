@@ -171,9 +171,26 @@ describe("Checkbox", () => {
     assert.match(markup, new RegExp(`font-size:${theme.font.body14}px;line-height:${theme.leading.body}">A creature steps onto it<`));
   });
 
-  test("with no help, the box sits on the row's middle with no slot", () => {
+  test("with no help, the box sits on the row's middle in a slot of its own height", () => {
     const markup = html(createElement(Checkbox, { label: "Secret", checked: false, onChange() {} }));
-    assert.match(markup, /^<label[^>]*align-items:center[^>]*><input/);
+    assert.match(markup, /^<label[^>]*align-items:center[^>]*><span style="[^"]*"><input/);
+    const slot = /<span style="([^"]*)"><input[^>]*><\/span>/.exec(markup)?.[1] ?? "";
+    assert.doesNotMatch(slot, /(^|;)height:/, "the slot sets a height with no help to fit");
+  });
+
+  /*
+   * Another device can leave a focused tick the last one, which gives it
+   * help (TrapPane.tsx). The input keeps its place in the tree either way,
+   * so React keeps the element and its focus. The page's own rerender of
+   * the focused tick is e2e/traps.e2e.ts pl1-c's.
+   */
+  test("the input stands at the same place in the tree with help and without, so help that comes or goes keeps the element", () => {
+    const shape = (markup: string) => markup.replace(/ [a-z-]+="[^"]*"/g, "").replace(/>[^<]+</g, "><");
+    const path = (markup: string) => /^<label><span><input\/?>/.test(shape(markup));
+    const without = html(createElement(Checkbox, { label: "A creature steps onto it", checked: true, onChange() {} }));
+    const withHelp = html(createElement(Checkbox, { label: "A creature steps onto it", help: "A trap on squares goes off at least one way.", checked: true, onChange() {} }));
+    assert.ok(path(without), shape(without));
+    assert.ok(path(withHelp), shape(withHelp));
   });
 });
 

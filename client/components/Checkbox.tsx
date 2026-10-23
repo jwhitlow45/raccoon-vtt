@@ -96,17 +96,16 @@ export function Checkbox(props: {
         cursor: off ? "default" : "pointer",
       }}
     >
-      {props.help ? (
-        /*
-         * With help under it, the box marks the label's first line, not the
-         * middle of the label and help together. It stands centered in a slot
-         * as tall as that line, so the two share a middle with no offset of
-         * its own to keep in step with the line's height.
-         */
-        <span style={{ flex: "none", display: "flex", alignItems: "center", height: FIRST_LINE }}>{input}</span>
-      ) : (
-        input
-      )}
+      {/*
+       * With help under it, the box marks the label's first line, not the
+       * middle of the label and help together. It stands centered in a slot
+       * as tall as that line, so the two share a middle with no offset of
+       * its own to keep in step with the line's height. With no help the
+       * slot takes the box's own height and the row centers it. The slot
+       * stays either way, so help that comes or goes, as when another
+       * device leaves this the last tick, keeps the same input and its focus.
+       */}
+      <span style={{ flex: "none", display: "flex", alignItems: "center", height: props.help ? FIRST_LINE : undefined }}>{input}</span>
       <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
         <span id={labelId} style={{ fontSize: theme.font.body14, lineHeight: theme.leading.body }}>
           {props.label}
