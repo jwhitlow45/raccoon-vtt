@@ -72,6 +72,14 @@ export type PopoverKind = "dialog" | "menu";
 
 type FocusInside = (from: "first" | "last") => void;
 
+/**
+ * Lays the content out for the width the box may take, as the box is
+ * placed and before it measures the content: a menu's tiles choose their
+ * rows there (Menu.tsx), so the box takes the width of the rows they
+ * settle into rather than the widest the bound allows.
+ */
+type FitContent = () => void;
+
 export type PopoverHandle = {
   readonly kind: PopoverKind;
   /** The id of what the anchor controls while open: the dialog's box, or the menu. */
@@ -209,7 +217,7 @@ export function usePopover(options: {
   };
 }
 
-type PopoverContextValue = { handle: PopoverHandle; setInsideFocus(focus: FocusInside | null): void };
+type PopoverContextValue = { handle: PopoverHandle; setInsideFocus(focus: FocusInside | null): void; setFitContent(fit: FitContent | null): void };
 
 const PopoverContext = createContext<PopoverContextValue | null>(null);
 
@@ -277,7 +285,11 @@ function OpenPopover(props: PopoverProps) {
   latest.current = props;
   const frame = useRef<PlaceFrame | null>(null);
   const menuFocus = useRef<FocusInside | null>(null);
-  const context = useMemo<PopoverContextValue>(() => ({ handle, setInsideFocus: (focus) => void (menuFocus.current = focus) }), [handle]);
+  const fitContent = useRef<FitContent | null>(null);
+  const context = useMemo<PopoverContextValue>(
+    () => ({ handle, setInsideFocus: (focus) => void (menuFocus.current = focus), setFitContent: (fit) => void (fitContent.current = fit) }),
+    [handle],
+  );
 
   const updateMore = useCallback(() => {
     const box = latest.current.handle.box.current;
@@ -312,6 +324,7 @@ function OpenPopover(props: PopoverProps) {
       const scrolled = box.scrollTop;
       // The content's natural size, wrapped at the widest the bound allows and at least the anchor's width.
       Object.assign(box.style, { left: "0px", top: "0px", height: "auto", width: "max-content", maxWidth: `${widest}px`, minWidth: `${Math.min(a.width / scale, widest)}px` });
+      fitContent.current?.();
       const natural = box.getBoundingClientRect();
       const at = popoverPlace({
         ...next,
