@@ -653,7 +653,112 @@ const CASES = `
   button { font: inherit; height: 44px; min-width: 44px; padding: 0 12px; border: 1px solid #888; background: #333; color: inherit; border-radius: 10px; }
   input, select { font: inherit; height: 44px; box-sizing: border-box; border: 1px solid #888; background: #111; color: inherit; }
   .chip { border-radius: 999px; }
+  /* Fixed widths, so a wider fallback font cannot move a part to another line. */
+  .fixed { flex: none; width: 60px; overflow: hidden; white-space: nowrap; padding: 0; }
+  .box { background: #333; }
 </style>
+<!-- First, so the board stays inside the window for the pill cases. -->
+<div id="board" style="width: 300px; height: 160px; background: #111"></div>
+<div data-case="kin-tall">
+  <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button style="height: 52px">Three</button></div>
+</div>
+<div data-case="kin-even">
+  <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button>Three</button></div>
+</div>
+<div data-case="kin-icon">
+  <div style="display: grid; gap: 4px"><button><svg width="16" height="16"></svg> One</button><button><svg width="16" height="16"></svg> Two</button><button style="height: 52px">Three</button></div>
+</div>
+<div data-case="kin-subgroup">
+  <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button>Three</button><button style="height: 70px">Four<br>more</button><button style="height: 60px">Five<br>more</button></div>
+</div>
+<div data-case="kin-lines">
+  <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button style="height: 64px">Three<br>more</button></div>
+</div>
+<div data-case="kin-padding">
+  <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button style="padding-left: 20px">Three</button></div>
+</div>
+<div data-case="kin-gap">
+  <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button>Three</button><button style="margin-top: 6px">Four</button></div>
+</div>
+<div data-case="pad-uneven">
+  <div class="box" style="padding: 8px 10px 3px">Uneven room</div>
+</div>
+<div data-case="pad-even">
+  <div class="box" style="padding: 6px 10px">Even room</div>
+</div>
+<div data-case="row-heights">
+  <div style="display: flex; align-items: center; gap: 4px"><button>Tall</button><button style="height: 40px">Short</button></div>
+</div>
+<div data-case="row-even-heights">
+  <div style="display: flex; align-items: center; gap: 4px"><button>One</button><button>Two</button></div>
+</div>
+<div data-case="mixed-start">
+  <div style="display: flex; align-items: flex-start; gap: 8px"><span style="width: 90px">Two lines of words</span><div class="box" style="width: 40px; height: 39.2px"></div><span style="align-self: center">Mid</span></div>
+</div>
+<div data-case="mixed-center">
+  <div style="display: flex; align-items: center; gap: 8px"><span style="width: 90px">Two lines of words</span><span>Mid</span><div class="box" style="align-self: flex-start; width: 40px; height: 39.2px"></div></div>
+</div>
+<div data-case="lone-short" style="width: 280px">
+  <div style="display: flex; flex-wrap: wrap; gap: 4px"><button style="flex: 1 1 auto">Ask to search</button><button style="flex: 1 1 auto">Ask to disarm</button><button style="width: calc(100% - 2px)">Set it off</button></div>
+</div>
+<div data-case="squares-25">
+  <div style="display: flex; flex-wrap: wrap; gap: 4px; width: 100px"><button style="width: 44px; border-radius: 25%">A</button><button style="width: 44px; border-radius: 25%">B</button><button style="width: 44px; border-radius: 25%">C</button></div>
+</div>
+<div data-case="circles-50">
+  <div style="display: flex; flex-wrap: wrap; gap: 4px; width: 100px"><button style="width: 44px; border-radius: 50%">A</button><button style="width: 44px; border-radius: 50%">B</button><button style="width: 44px; border-radius: 50%">C</button></div>
+</div>
+<div data-case="edge-far"><div>First row</div><div>Second row</div><div style="padding-left: 25px">Third row</div></div>
+<div data-case="edge-near"><div>First row</div><div>Second row</div><div style="padding-left: 4px">Third row</div></div>
+<div data-case="edge-apart"><div>First row</div><div style="padding-left: 10px">Second row</div><div style="padding-left: 30px">Third row</div></div>
+<div data-case="edge-notice"><div>First row</div><div>Second row</div><div class="box" style="padding: 8px 12px">A notice in its own box</div></div>
+<div data-case="edge-centered"><div>First row</div><div>Second row</div><div style="text-align: center">Centered words</div><button style="width: 100%">Full width</button><div>Last row</div></div>
+<div data-case="edge-centered-drift"><div>First row</div><div>Second row</div><button style="width: 100%">Full width</button><div style="padding-left: 2px">Last row</div></div>
+<div data-case="edge-end"><div>First row</div><div>Second row</div><div style="display: flex; justify-content: flex-end"><input style="width: 96px"></div><div>Last row</div></div>
+<div data-case="edge-group"><div>First row</div><div>Second row</div><ul style="margin: 0; padding-left: 24px"><li>A nested item</li></ul><div>Last row</div></div>
+<div data-case="edge-indent"><div>First row</div><div>Second row</div><div style="padding-left: 24px">An indented row</div><div>Last row</div></div>
+<div data-case="edge-disclosure"><div>First row</div><div>Second row</div><div><button aria-expanded="true" style="border: none; background: none; padding: 0 0 0 20px">Folded group</button></div><div>Last row</div></div>
+<div data-case="shift-outer">
+  <div class="box" style="height: 44px; padding: 12px 10px; line-height: 20px"><span style="position: relative; top: 3px"><span>Shifted words</span></span></div>
+</div>
+<div data-case="shift-two">
+  <div class="box" style="height: 44px; padding: 12px 10px; line-height: 20px"><span style="position: relative; top: 2px"><b>Shifted two</b></span></div>
+</div>
+<div data-case="shift-valign">
+  <div class="box" style="height: 44px; padding: 12px 10px; line-height: 20px">Plain words <span style="vertical-align: 4px">raised</span></div>
+</div>
+<div data-case="font-rounding">
+  <div class="box" style="height: 54.96px; padding: 15px 10px; font-size: 20.8px; line-height: 24.96px"><span><span>A zoomed title</span></span></div>
+</div>
+<div data-case="placed-sole">
+  <button style="position: relative; width: 120px"><span style="position: absolute; left: 10px; top: 2px; height: 20px">Placed</span></button>
+</div>
+<div data-case="placed-badge">
+  <button style="position: relative; width: 120px">Words<span style="position: absolute; right: 0; top: 0; width: 10px; height: 10px; background: red"></span></button>
+</div>
+<div data-case="baseline-row">
+  <div style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 24px">30</span><span>of 38 HP</span></div>
+</div>
+<div data-case="picture">
+  <button style="display: flex; align-items: center; justify-content: center"><span role="img" aria-label="Armor Class 12" style="display: block; height: 30px; padding-top: 2px; line-height: 12px">12</span></button>
+</div>
+<div data-case="open-disclosure">
+  <ul style="margin: 0; padding: 0; list-style: none"><li class="box" style="padding: 4px 8px 20px"><button aria-expanded="true" style="border: none">Ability scores</button><p style="margin: 0">Wisdom 18</p></li></ul>
+</div>
+<div data-case="own-line" style="width: 250px">
+  <div style="display: flex; flex-wrap: wrap; gap: 8px"><input style="width: 100px"><input style="width: 100px"><div style="flex-basis: 100%">A hint under the row</div></div>
+</div>
+<div data-case="radio-wrap" style="width: 200px">
+  <div role="radiogroup" aria-label="Zone" style="display: flex; flex-wrap: wrap; gap: 4px"><label class="box" style="padding: 12px">Squares</label><label class="box" style="padding: 12px">Trip wire</label><label class="box" style="padding: 12px">Door</label></div>
+</div>
+<div data-case="heading-above" style="width: 200px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><h3 style="flex: 1 1 auto; margin: 0; font-size: 13px">DIFFERENT FROM D&amp;D BEYOND (1)</h3><button>Overwrite all</button></div>
+</div>
+<div data-case="sentence-above" style="width: 200px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><p style="margin: 0">D&amp;D Beyond says 16.</p><button>Overwrite with Wisdom 16</button></div>
+</div>
+<div data-case="scrolled-hidden">
+  <div class="box" style="height: 44px; padding: 12px 10px; line-height: 20px"><div style="height: 20px; overflow: hidden">The first line shows<br>a second line is cut<br>and a third</div></div>
+</div>
 <div data-case="tick-dropped">
   <label style="display: flex; align-items: flex-start; gap: 12px; padding: 4px 0">
     <input type="checkbox" style="width: 22px; height: 22px; margin: 2px 0 0; flex: none">
@@ -706,7 +811,7 @@ const CASES = `
 </div>
 <div data-case="kind-dragging" style="width: 280px">
   <div role="group" aria-label="Attached tokens" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px">
-    <span>Carrying</span><button>Lantern</button><button>Put down</button><span>Dragging</span><button>Prisoner</button><button>Let go</button>
+    <span class="fixed">Carrying</span><button class="fixed">Lantern</button><button class="fixed">Put down</button><span class="fixed">Dragging</span><button class="fixed">Prisoner</button><button class="fixed">Let go</button>
   </div>
 </div>
 <div data-case="kind-rows" style="width: 280px">
@@ -718,7 +823,6 @@ const CASES = `
 <div data-case="kind-carrying-only" style="width: 280px">
   <div role="group" aria-label="Attached tokens" style="display: flex; align-items: center; gap: 4px"><span>Carrying</span><button>Lantern</button></div>
 </div>
-<div id="board" style="width: 300px; height: 160px; background: #111"></div>
 <div data-case="windows">
   <div role="dialog" aria-label="Thorn actions" aria-labelledby="w1" style="border: 1px solid #888; height: 120px; overflow: hidden"><div style="padding: 4px 12px; height: 100%; overflow: auto">
     <div data-sticky-header style="display: flex; align-items: center; margin: -4px -12px 0; padding: 4px 12px 0; min-height: 48px"><strong id="w1" style="flex: 1; line-height: 1.2">Thorn</strong><button aria-label="Close">x</button></div>
@@ -791,6 +895,55 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await passes("chips-wrap");
       await caught("buttons-wrap", "wrap-orphan");
       await passes("buttons-share");
+      // A lone part counts as filling its line only when it does, within the limit.
+      await caught("lone-short", "wrap-orphan");
+      // Kin: a taller one is caught, among plain ones, beside ones with an icon, and within a smaller group of two-line kin. Kin of other lines are not compared.
+      await caught("kin-tall", "kind-height");
+      await passes("kin-even");
+      await caught("kin-icon", "kind-height");
+      await caught("kin-subgroup", "kind-height");
+      await passes("kin-lines");
+      await caught("kin-padding", "kind-padding");
+      await caught("kin-gap", "kind-gap");
+      await caught("pad-uneven", "pad");
+      await passes("pad-even");
+      await caught("row-heights", "row-height");
+      await passes("row-even-heights");
+      // A mixed row is judged by the alignment most of its parts take.
+      await caught("mixed-start", "row");
+      await passes("mixed-center");
+      // A part rounded only a quarter is no chip, so a row of them is no set of choices. Circles are.
+      await caught("squares-25", "wrap-orphan");
+      await passes("circles-50");
+      // Edges: drift caught at any size, three rows apart pass, a painted notice lines up by its box, centered words and a full-width button are no edge but a start-set row beside them still is, and a nested list's inset passes where a plain row's does not.
+      await caught("edge-far", "edge");
+      await caught("edge-near", "edge");
+      await passes("edge-apart");
+      await passes("edge-notice");
+      await passes("edge-centered");
+      await caught("edge-centered-drift", "edge");
+      await passes("edge-end");
+      await passes("edge-group");
+      await caught("edge-indent", "edge");
+      await passes("edge-disclosure");
+      // Words moved on purpose, on an outer span or by a vertical alignment, are never snapped back to their line. A font's rounding is.
+      await caught("shift-outer", "center");
+      await caught("shift-two", "center");
+      await caught("shift-valign", "center");
+      await passes("font-rounding");
+      // A control's only content placed absolutely is measured. A badge beside content in the flow is not.
+      await caught("placed-sole", "center");
+      await passes("placed-badge");
+      // The other exceptions, each passing.
+      await passes("baseline-row");
+      await passes("picture");
+      await passes("open-disclosure");
+      await passes("own-line");
+      await passes("radio-wrap");
+      await passes("heading-above");
+      await passes("sentence-above");
+      await passes("scrolled-hidden");
+      await passes("windows");
       const holder = (name: string) => page.locator(`[data-case="${name}"]`).getByRole("group", { name: "Attached tokens" });
       assert.equal((await leadLines(holder("kind-dragging"), ["Carrying", "Dragging"], "kind-dragging")).length, 1, "Dragging ending a line is caught");
       assert.deepEqual(await leadLines(holder("kind-rows"), ["Carrying", "Dragging"], "kind-rows"), [], "each kind on a row of its own passes");

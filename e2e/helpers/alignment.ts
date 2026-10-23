@@ -19,31 +19,44 @@ import type { Locator, Page } from "playwright-core";
  * 5. Wrapping: a name alone on its line above its control, or one part
  *    alone on a wrapped row's last line.
  *
- * A line of text is measured by its line box, as CSS lays it out: in a
- * block, the block's own line, and elsewhere the text's Range rect grown
- * by half the leading above and below. So a line of 14 px words reads the
- * same whatever font drew it. What a scroller inside the measured part
- * hides is not seen. What takes a tap is one box to the eye, painted or
- * not, and what it holds is centered in it.
+ * A line of text is measured by its line box, as CSS lays it out: the
+ * text's Range rect grown by half the leading above and below. In a
+ * block that lays its lines from its top, a line within a pixel of the
+ * block's own line is put on it, since the browser rounds a font's ascent
+ * and descent to whole pixels. Words moved on purpose (a relative offset,
+ * a transform or a vertical alignment on any element between them and
+ * their block) are never put back. What a scroller inside the measured
+ * part hides is not seen. What takes a tap is one box to the eye, painted
+ * or not, and what it holds is centered in it.
  *
- * What the checks leave out, each for a reason:
+ * What the checks leave out, each for a reason, each with a drawn case
+ * in e2e/alignment.e2e.ts (pl3-0):
  * - A row set on its baseline means its words to share a baseline, not a
  *   middle (hit points).
  * - A row set at its start means each part to meet the first line beside
  *   it, so its parts are compared by their first lines: a checkbox's box
  *   against its label's first line, a remove against its fields' first
- *   line. A row set in its middle compares middles, which is how a switch
- *   stands against its name and help together.
+ *   line. A part that lays out its own row has the first line it lays
+ *   out, controls included. A row set in its middle compares middles,
+ *   which is how a switch stands against its name and help together. In
+ *   a mixed row the alignment most parts take decides, and a tie is
+ *   judged both ways. A row whose parts all stretch places none of them,
+ *   so it passes when they share either their middles or their first
+ *   lines.
  * - A `role="img"` is one picture, its insides drawn on purpose (the AC
  *   shield sets its number above its middle).
+ * - Content placed absolutely beside content in the flow (a badge, a
+ *   ring around a die) is placed against its containing block on purpose.
+ *   A control whose only content is placed so is measured by it.
  * - A disclosure's body starts under its chevron, not its title, and an
  *   open one lays its body from the top, so its box keeps no middle.
  * - A part that asks for a line of its own (`flex-basis: 100%`, as a
- *   row's hint), or grows to fill the line it wrapped onto (a window's
- *   buttons share each line), never counts as alone.
- * - A set of choices, chips or a radio group, wraps any of them alone:
- *   it is one list, not a line of different parts. A grid of tiles is not
- *   a wrapping row at all.
+ *   row's hint), or grows to fill the line it wrapped onto within the
+ *   limit (a window's buttons share each line), never counts as alone.
+ * - A set of choices wraps any of them alone: a radio group, or parts
+ *   each rounded down half their height at both ends (chips' pills, and
+ *   circles). It is one list, not a line of different parts. A part
+ *   rounded less is no chip. A grid of tiles is not a wrapping row at all.
  * - A heading or a paragraph above what follows is a title or a
  *   sentence, not a field's name (a section label puts its action under
  *   itself when both do not fit, components/Panel.tsx).
@@ -51,10 +64,16 @@ import type { Locator, Page } from "playwright-core";
  *   the header check instead, since the band's room above its row is
  *   set by the frame (components/SheetHeader.tsx).
  * - Kin that hold different lines of words, in number or in height (a
- *   name on two lines over one line of help), are left out of the same
- *   kind check, since the one is meant to be taller.
- * - An edge is where two rows or more start: three rows that each start
- *   apart share none.
+ *   name on two lines over one line of help), or different rows of
+ *   boxes, are compared only among themselves, since the one is meant to
+ *   be taller. An icon beside the words changes nothing.
+ * - An edge is where two rows or more start. A row that is itself a box
+ *   (a control, a notice, a chosen option) starts at its box's edge, not
+ *   at the words it holds (a stacked foot's full-width buttons center
+ *   theirs). What is set centered or at the end, as a field row's field
+ *   at its right, is no edge. Three rows that each start apart share
+ *   none. A nested list or group inset by its own padding or margin is a
+ *   column of its own.
  *
  * Three named checks cover what the five cannot see: pillLines (board
  * pills drawn by Konva inside the canvas's visible part, a pointed one
@@ -160,7 +179,8 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   const FIELD = ["input", "select", "textarea"];
   const PICTURE = ["svg", "img", "canvas"];
 
-  type Atom = Box & { kind: "text" | "icon" | "box"; what: string };
+  /** A part of what the eye reads. `start` marks a part set at its line's start, not centered or at the end, the only kind an edge follows. */
+  type Atom = Box & { kind: "text" | "icon" | "box"; what: string; start?: boolean };
   type Item = { node: DomNode; v: Box; first: Box; box: Box; boxed: boolean; mode: "center" | "start" | "baseline" | "other"; what: string };
 
   const style = (el: DomElement) => win.getComputedStyle(el);
@@ -216,15 +236,32 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     const lhPx = lh * zoomOf(parent);
     const half = (lhPx - (r.bottom - r.top)) / 2;
     const own = { t: r.top - half, b: r.bottom + half };
+    // The block the line belongs to, and whether anything between the words and it moves them on purpose: a relative offset, a transform or a vertical alignment. Words moved on purpose are never snapped back.
     let block: DomElement | null = parent;
-    while (block && ["inline", "contents"].includes(style(block).display)) block = block.parentElement;
-    if (!block || !["block", "flow-root", "list-item", "inline-block"].includes(style(block).display) || parseFloat(style(block).lineHeight) !== lh) return own;
+    let moved = false;
+    while (block && ["inline", "contents"].includes(style(block).display)) {
+      if (placedOff(block)) moved = true;
+      block = block.parentElement;
+    }
+    if (moved || !block || !["block", "flow-root", "list-item", "inline-block"].includes(style(block).display) || parseFloat(style(block).lineHeight) !== lh) return own;
     const bs = style(block);
     const top = block.getBoundingClientRect().top + ((parseFloat(bs.getPropertyValue("border-top-width")) || 0) + (parseFloat(bs.getPropertyValue("padding-top")) || 0)) * zoomOf(block);
     const i = Math.round((own.t - top) / lhPx);
     const t = top + i * lhPx;
-    // A line taller than its text, as beside an inline control, is off the block's grid: the text's own estimate stands then.
-    return i >= 0 && Math.abs(t - own.t) <= 1.5 ? { t, b: t + lhPx } : own;
+    // Only the rounding of a font's metrics, at most a pixel, is put back. A line further off the grid, as beside a taller inline control, keeps the text's own estimate.
+    return i >= 0 && Math.abs(t - own.t) <= 1 ? { t, b: t + lhPx } : own;
+  }
+
+  /** Whether an inline element moves its words off their line on purpose. */
+  function placedOff(el: DomElement): boolean {
+    const cs = style(el);
+    const offset = (side: string) => {
+      const v = cs.getPropertyValue(side);
+      return v !== "auto" && v !== "" && parseFloat(v) !== 0;
+    };
+    if (cs.position === "relative" && (offset("top") || offset("bottom"))) return true;
+    if (cs.getPropertyValue("transform") !== "none") return true;
+    return cs.getPropertyValue("vertical-align") !== "baseline";
   }
 
   function rectOf(el: DomElement): Box {
@@ -273,7 +310,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
    * around `container` are left alone, so a row scrolled out of view is
    * still measured.
    */
-  function atomsOf(container: DomElement): Atom[] {
+  function atomsOf(container: DomElement, placed = false): Atom[] {
     const out: Atom[] = [];
     const add = (a: Atom, clip: Box | null) => {
       if (!clip) return out.push(a);
@@ -291,21 +328,32 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           for (const r of Array.from(range.getClientRects())) {
             if (r.width <= 1 || r.height <= 1) continue;
             const lb = lineBox(r, parent);
-            const line: Atom = { kind: "text", l: r.left, r: r.right, t: lb.t, b: lb.b, what: `"${words.slice(0, 32)}"` };
+            const line: Atom = { kind: "text", l: r.left, r: r.right, t: lb.t, b: lb.b, what: `"${words.slice(0, 32)}"`, start: setAtStart(parent, container) };
             // A line whose glyphs all show is seen whole, its leading too, though the leading runs past a cut.
             if (clip && r.top >= clip.t - 1 && r.bottom <= clip.b + 1) add(line, null);
             else add(line, clip);
           }
         } else if (isEl(ch)) {
-          if (!shown(ch) || placedApart(ch)) continue;
-          if (isPicture(ch)) add({ kind: "icon", ...rectOf(ch), what: ch.getAttribute("role") === "img" ? `img "${ch.getAttribute("aria-label") ?? ""}"` : tag(ch) }, clip);
-          else if (FIELD.includes(tag(ch)) || ch.matches(INTERACTIVE) || paints(ch)) add({ kind: "box", ...rectOf(ch), what: say(ch) }, clip);
+          if (!shown(ch) || (placedApart(ch) && !(placed && style(ch).position === "absolute"))) continue;
+          const start = setAtStart(node, container);
+          if (isPicture(ch)) add({ kind: "icon", ...rectOf(ch), what: ch.getAttribute("role") === "img" ? `img "${ch.getAttribute("aria-label") ?? ""}"` : tag(ch), start }, clip);
+          else if (FIELD.includes(tag(ch)) || ch.matches(INTERACTIVE) || paints(ch)) add({ kind: "box", ...rectOf(ch), what: say(ch), start }, clip);
           else walk(ch, clips(ch) ? cutBy(clip, rectOf(ch)) : clip);
         }
       }
     };
     walk(container, clips(container) ? rectOf(container) : null);
     return out;
+  }
+
+  /** Whether what `parent` holds is set at its line's start: no centered or end text alignment, and no flex row between it and `top` that centers or ends its parts. */
+  function setAtStart(parent: DomElement, top: DomElement): boolean {
+    if (/center|right|end/.test(style(parent).getPropertyValue("text-align"))) return false;
+    for (let n: DomElement | null = parent; n && n !== top.parentElement; n = n.parentElement) {
+      const cs = style(n);
+      if ((cs.display === "flex" || cs.display === "inline-flex") && !cs.flexDirection.startsWith("column") && /center|end|space-around|space-evenly/.test(cs.getPropertyValue("justify-content"))) return false;
+    }
+    return true;
   }
 
   function cutBy(clip: Box | null, r: Box): Box {
@@ -394,11 +442,44 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     return union(parts.filter((p) => mid(p) >= top.t && mid(p) <= top.b));
   }
 
+  /** A box's top left corner, how far it rounds down its side: a percent of its height, or px. A part rounded down half its height at both ends is a chip's pill, or a circle. */
+  function cornerDown(el: DomElement, height: number): number {
+    const values = style(el).borderTopLeftRadius.trim().split(/\s+/);
+    const down = values[1] ?? values[0] ?? "0";
+    return down.endsWith("%") ? (parseFloat(down) / 100) * height : parseFloat(down) || 0;
+  }
+
   function modeOf(align: string): Item["mode"] {
     if (align.includes("baseline")) return "baseline";
     if (/(^|\s)center$/.test(align)) return "center";
     if (/(^|\s)(flex-start|start|self-start)$/.test(align)) return "start";
     return "other";
+  }
+
+  /**
+   * Where a row of a column starts, for the edge check, as the eye follows
+   * it down: a row that is itself a box (a control, or a painted box such
+   * as a notice or a chosen option) by its box's edge, never by the words
+   * it holds (a stacked foot's full-width buttons center theirs), and any
+   * other row by the left of what it holds (boxes, pictures and words) set
+   * at its line's start. What is centered or set at the end, as a field
+   * row's field at its right, is no edge. Null for a
+   * disclosure, whose body starts under its chevron, for a nested list or
+   * group inset by its own padding or margin, whose rows make a column of
+   * their own, and for a row with nothing to start.
+   */
+  function edgeOf(row: DomElement): number | null {
+    if (row.matches("[aria-expanded]") || row.querySelector(":scope > [aria-expanded], :scope > * > [aria-expanded]")) return null;
+    if (row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]')) {
+      const b = boxes(row);
+      const own = b.inner.l + b.pad.l;
+      const parts = atomsOf(row);
+      const start = parts.length ? Math.min(...parts.map((a) => a.l)) : own;
+      if (Math.abs(start - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT)) return null;
+    }
+    if (row.matches(CONTROL) || row.matches(INTERACTIVE) || paints(row)) return round(rectOf(row).l);
+    const parts = atomsOf(row).filter((a) => a.start);
+    return parts.length ? round(Math.min(...parts.map((a) => a.l))) : null;
   }
 
   const spread = (xs: readonly number[]) => Math.max(...xs) - Math.min(...xs);
@@ -425,7 +506,9 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       // An open disclosure lays its body under its header from the top, so the box holding it has no middle to keep.
       const open = el.querySelector('[aria-expanded="true"]') !== null;
       if (!container && !band && !open && !FIELD.includes(t) && ((control && height <= 200) || (painted && height <= 120))) {
-        const atoms = atomsOf(el);
+        // A control whose only content is placed absolutely is measured by that content. Beside content in the flow, such a part (a badge, a ring) is placed against its containing block on purpose.
+        const flowing = atomsOf(el);
+        const atoms = flowing.length ? flowing : atomsOf(el, true);
         if (atoms.length) {
           const stacks = stacksOf(atoms);
           // Where a stack runs over several lines, the stacks beside it are placed against it by the row check, so the content is centered as one.
@@ -482,7 +565,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             return !atomsOf(it.node).some((a) => a.kind !== "text");
           };
           const prose = (it: Item) => isEl(it.node) && /^(h[1-6]|p)$/.test(tag(it.node));
-          const pill = (it: Item) => isEl(it.node) && parseFloat(style(it.node).borderTopLeftRadius) >= (it.box.b - it.box.t) / 2 - 0.5;
+          const pill = (it: Item) => isEl(it.node) && cornerDown(it.node, it.box.b - it.box.t) >= (it.box.b - it.box.t) / 2 - 0.5;
           const choices = el.getAttribute("role") === "radiogroup" || items.every(pill);
           // A part that grows to fill its line is a line of its own, as a window's buttons share each line they wrap onto.
           const content = { l: b.inner.l + b.pad.l, r: b.inner.r - b.pad.r };
@@ -506,7 +589,10 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           if (!modes.includes("baseline")) {
             const middles = spread(ln.items.map((it) => mid(it.v)));
             const firsts = spread(ln.items.map((it) => mid(it.first)));
-            const by = modes.every((m) => m === "center") ? "middles" : modes.every((m) => m === "start") ? "first lines" : middles <= firsts ? "middles" : "first lines";
+            // Parts set in the middle vote for middles, parts set at the start for first lines, and the most votes decide. A tie is judged both ways. A row whose parts all stretch places none of them, so it passes when they share either.
+            const centers = modes.filter((m) => m === "center").length;
+            const starts = modes.filter((m) => m === "start").length;
+            const by = centers + starts === 0 ? (middles <= firsts ? "middles" : "first lines") : centers > starts ? "middles" : starts > centers ? "first lines" : middles >= firsts ? "middles" : "first lines";
             const off = by === "middles" ? middles : firsts;
             if (round(off) > LIMIT) {
               const base = Math.min(...ln.items.map((it) => mid(by === "middles" ? it.v : it.first)));
@@ -543,37 +629,38 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         }
         for (const list of kin.values()) {
           if (list.length < 2) continue;
-          // Kin are compared with kin that hold the same: lines of words as tall (a name over two lines and its help on one is not a name on one over two lines of help), and as many rows of boxes, such as an open group's fields.
+          // Kin are compared with kin that hold the same: lines of words as tall (a name over two lines and its help on one is not a name on one over two lines of help), and as many rows of boxes, such as an open group's fields. An icon beside the words changes neither. Every such group of two or more is checked.
           const byLines = new Map<string, DomElement[]>();
           for (const c of list) {
             const atoms = atomsOf(c);
             const words = linesOf(atoms.filter((a) => a.kind === "text")).map((ln) => Math.round((ln.box.b - ln.box.t) * 2) / 2);
-            const n = `${words.join(",")}|${linesOf(atoms.filter((a) => a.kind !== "text")).length}`;
+            const n = `${words.join(",")}|${linesOf(atoms.filter((a) => a.kind === "box")).length}`;
             byLines.set(n, [...(byLines.get(n) ?? []), c]);
           }
-          const same = [...byLines.values()].sort((a, c) => c.length - a.length)[0]!;
-          if (same.length < 2) continue;
-          const bs = same.map((c) => ({ c, b: boxes(c), worded: atomsOf(c).some((a) => a.kind === "text") }));
-          const box = union(bs.map((x) => x.b.border));
-          const hs = bs.map((x) => x.b.border.b - x.b.border.t);
-          if (round(spread(hs)) > LIMIT) {
-            push({ check: "kind-height", role: roleOf(el), name: nameOf(el), offset: round(spread(hs)), box, what: bs.map((x) => `${say(x.c)} ${round(x.b.border.b - x.b.border.t)} px`).join(" | "), detail: "" });
+          for (const same of byLines.values()) {
+            if (same.length < 2) continue;
+            const bs = same.map((c) => ({ c, b: boxes(c), worded: atomsOf(c).some((a) => a.kind === "text") }));
+            const box = union(bs.map((x) => x.b.border));
+            const hs = bs.map((x) => x.b.border.b - x.b.border.t);
+            if (round(spread(hs)) > LIMIT) {
+              push({ check: "kind-height", role: roleOf(el), name: nameOf(el), offset: round(spread(hs)), box, what: bs.map((x) => `${say(x.c)} ${round(x.b.border.b - x.b.border.t)} px`).join(" | "), detail: "" });
+            }
+            const worded = bs.filter((x) => x.worded);
+            if (worded.length >= 2 && round(spread(worded.map((x) => x.b.pad.l))) > LIMIT) {
+              push({ check: "kind-padding", role: roleOf(el), name: nameOf(el), offset: round(spread(worded.map((x) => x.b.pad.l))), box, what: worded.map((x) => `${say(x.c)} ${round(x.b.pad.l)} px`).join(" | "), detail: "left padding" });
+            }
+            const order = (c: DomElement) => kids.indexOf(c);
+            const sorted = [...bs].sort((x, y) => order(x.c) - order(y.c));
+            const gaps: number[] = [];
+            for (let i = 1; i < sorted.length; i++) {
+              if (order(sorted[i]!.c) !== order(sorted[i - 1]!.c) + 1) continue;
+              const p = sorted[i - 1]!.b.border;
+              const c = sorted[i]!.b.border;
+              if (c.t >= p.b - 1) gaps.push(round(c.t - p.b));
+              else if (c.l >= p.r - 1) gaps.push(round(c.l - p.r));
+            }
+            if (gaps.length >= 2 && round(spread(gaps)) > LIMIT) push({ check: "kind-gap", role: roleOf(el), name: nameOf(el), offset: round(spread(gaps)), box, what: `gaps ${gaps.join(", ")}`, detail: "" });
           }
-          const worded = bs.filter((x) => x.worded);
-          if (worded.length >= 2 && round(spread(worded.map((x) => x.b.pad.l))) > LIMIT) {
-            push({ check: "kind-padding", role: roleOf(el), name: nameOf(el), offset: round(spread(worded.map((x) => x.b.pad.l))), box, what: worded.map((x) => `${say(x.c)} ${round(x.b.pad.l)} px`).join(" | "), detail: "left padding" });
-          }
-          const order = (c: DomElement) => kids.indexOf(c);
-          const sorted = [...bs].sort((x, y) => order(x.c) - order(y.c));
-          const gaps: number[] = [];
-          for (let i = 1; i < sorted.length; i++) {
-            if (order(sorted[i]!.c) !== order(sorted[i - 1]!.c) + 1) continue;
-            const p = sorted[i - 1]!.b.border;
-            const c = sorted[i]!.b.border;
-            if (c.t >= p.b - 1) gaps.push(round(c.t - p.b));
-            else if (c.l >= p.r - 1) gaps.push(round(c.l - p.r));
-          }
-          if (gaps.length >= 2 && round(spread(gaps)) > LIMIT) push({ check: "kind-gap", role: roleOf(el), name: nameOf(el), offset: round(spread(gaps)), box, what: `gaps ${gaps.join(", ")}`, detail: "" });
         }
       }
 
@@ -583,20 +670,17 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         let stacked = true;
         for (let i = 1; i < rs.length; i++) if (rs[i]!.t < rs[i - 1]!.b - 1) stacked = false;
         if (stacked) {
-          const lefts = kids.map((c) => {
-            if (c.matches("[aria-expanded]") || c.querySelector(":scope > [aria-expanded], :scope > * > [aria-expanded]")) return null;
-            const atoms = atomsOf(c);
-            return atoms.length ? round(Math.min(...atoms.map((a) => a.l))) : null;
-          });
-          const known = lefts.filter((x): x is number => x !== null);
+          const rows = kids.map((c) => ({ c, left: edgeOf(c) }));
+          const known = rows.filter((x): x is { c: DomElement; left: number } => x.left !== null);
           if (known.length >= 3) {
-            const counts = new Map<number, number>();
-            for (const x of known) counts.set(Math.round(x), (counts.get(Math.round(x)) ?? 0) + 1);
-            const [mode, shared] = [...counts.entries()].sort((a, c) => c[1] - a[1])[0]!;
-            const odd = kids.map((c, i) => ({ c, left: lefts[i] ?? null })).filter((x): x is { c: DomElement; left: number } => x.left !== null && Math.abs(x.left - mode) > LIMIT && Math.abs(x.left - mode) <= 24);
+            // The edge is where the most rows start, each within the limit of it.
+            const near = (a: number, b: number) => Math.abs(a - b) <= LIMIT;
+            const mode = known.map((x) => x.left).sort((a, b) => known.filter((y) => near(y.left, b)).length - known.filter((y) => near(y.left, a)).length)[0]!;
+            const shared = known.filter((x) => near(x.left, mode)).length;
+            const odd = known.filter((x) => !near(x.left, mode));
             // An edge is where two rows or more start: three rows that each start apart, as a dialog's header, body and foot, share none.
-            if (shared >= 2 && odd.length && odd.length < known.length) {
-              push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: round(Math.max(...odd.map((x) => Math.abs(x.left - mode)))), box: union(odd.map((x) => rectOf(x.c))), what: odd.map((x) => `${say(x.c)} at ${round(x.left - mode)}`).join(" | "), detail: `most start at ${mode}` });
+            if (shared >= 2 && odd.length) {
+              push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: round(Math.max(...odd.map((x) => Math.abs(x.left - mode)))), box: union(odd.map((x) => rectOf(x.c))), what: odd.map((x) => `${say(x.c)} at ${round(x.left - mode)}`).join(" | "), detail: `most start at ${round(mode)}` });
             }
           }
         }
