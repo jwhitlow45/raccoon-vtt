@@ -143,3 +143,13 @@ describe("the sends leading the options", () => {
     assert.equal(count(markup, REFUSED), 2);
   });
 });
+
+describe("Ask for saves in its row (docs/design-v1-dice-pass.md 7.3)", () => {
+  test("wears the option buttons' outline, as it acts beside Attack and Damage", async () => {
+    const { theme } = await import("../../../lib/theme.ts");
+    const markup = render({ picked: "c:thorn-c", cast: null });
+    const button = /<button[^>]*aria-label="Ask the DM for saves against Hold Person"[^>]*>/.exec(markup)?.[0];
+    assert.ok(button, "the row's Ask for saves");
+    assert.match(button, new RegExp(`border:${theme.line.border}px solid ${theme.color.controlBorder}`));
+  });
+});

@@ -95,6 +95,9 @@ function useSends(): Record<string, CastSend> {
   return useStore(useScoped(castSendsSlot), (s) => s.sends);
 }
 
+/** The roll options' button outline (RollOptions.tsx OptionCell). */
+const OPTION_OUTLINE = `${theme.line.border}px solid ${theme.color.controlBorder}`;
+
 /** The row's own Ask for saves (3.1), where the DM's Group save stands. */
 export function AskForSavesButton(props: { spec: CastBlock; ref?: RefObject<HTMLButtonElement | null> }) {
   const store = useOptionStore();
@@ -107,7 +110,8 @@ export function AskForSavesButton(props: { spec: CastBlock; ref?: RefObject<HTML
     store.setState((s) => openedBlock(s, props.spec, pending?.id));
   };
   return (
-    <Button ref={props.ref} size="sm" aria-label={`Ask the DM for saves against ${props.spec.spell}`} onClick={open}>
+    // It acts beside Attack and Damage, so it wears their outline, not the raised look's dim one (docs/design-v1-dice-pass.md 7.3).
+    <Button ref={props.ref} size="sm" aria-label={`Ask the DM for saves against ${props.spec.spell}`} onClick={open} style={{ border: OPTION_OUTLINE }}>
       Ask for saves
     </Button>
   );

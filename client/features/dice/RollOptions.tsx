@@ -8,6 +8,7 @@ import type { ActorTarget } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
+import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -564,6 +565,9 @@ function GroupLabel(props: { children: ReactNode; note?: string | undefined }) {
   );
 }
 
+/** The option buttons' outline (OptionCell), which a row's other actions share (docs/design-v1-dice-pass.md 7.3). */
+const OPTION_OUTLINE = `${theme.line.border}px solid ${theme.color.controlBorder}`;
+
 /**
  * One part of a named row's controls line, grown to share each line it
  * stands on at every size (docs/design-v1-dice-pass.md 7.2), so Hunter's
@@ -623,7 +627,7 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
         flex: props.grow || props.fill ? "1 1 auto" : "0 1 auto",
         maxWidth: "100%",
         borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${theme.color.controlBorder}`,
+        border: OPTION_OUTLINE,
         background: theme.color.surfaceRaised,
         color: props.disabled !== null ? theme.color.textDisabled : theme.color.text,
         fontFamily: theme.font.body,
@@ -981,9 +985,17 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
   return (
     <>
       <Fill>
-        <SmallButton wrap disabled={ctx.blocked !== null} onClick={() => !go(false) && setPending(true)} label={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}>
+        <Button
+          size="sm"
+          disabled={ctx.blocked !== null}
+          onClick={() => !go(false) && setPending(true)}
+          aria-label={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}
+          title={`Group save, DC ${save.dc} ${ABILITY_SHORT[save.ability]}`}
+          // It acts beside Attack and Damage, so it wears their outline, not the raised look's dim one (docs/design-v1-dice-pass.md 7.3).
+          style={{ border: OPTION_OUTLINE, minWidth: 0, maxWidth: "100%", whiteSpace: "normal", textAlign: "center" }}
+        >
           Group save
-        </SmallButton>
+        </Button>
       </Fill>
       {pending ? (
         <div style={{ flexBasis: "100%" }}>
