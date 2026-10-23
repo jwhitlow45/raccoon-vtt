@@ -791,6 +791,8 @@ export const BEHAVIORS: readonly Behavior[] = [
   },
   // The group save's damage field: features/dice/groupSave/GroupSave.tsx (docs/design-v1-roll-options.md 14).
   { id: "groupDamageEnter", input: "Enter", does: "Roll the parts, or take the typed numbers", roles: DM, when: "in the group save's damage field", device: "keys", surface: "Dice" },
+  // A player's creature tabs: features/dice/RollOptions.tsx CreatureTabs, lib/a11y.ts tabKeyIndex (docs/design-v1-dice-pass.md 6.6).
+  { id: "diceTabs", input: "Left, Right, Home, End", does: "Pick another creature to roll for", roles: EVERYONE, when: "in the Dice panel's creature tabs", device: "keys", surface: "Dice" },
 
   // Request a roll's fields: features/rolls/RequestSheet.tsx, one form whose submit is Send (docs/design-v1-roll-request.md 8).
   { id: "rollAskEnter", input: "Enter", does: "Send the request", roles: DM, when: "in Request a roll's DC or note field", device: "keys", surface: "Roll requests" },
