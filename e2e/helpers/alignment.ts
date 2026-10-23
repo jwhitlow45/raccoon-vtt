@@ -73,13 +73,15 @@ import type { Locator, Page } from "playwright-core";
  *   name on two lines over one line of help), or different rows of
  *   boxes, are compared only among themselves, since the one is meant to
  *   be taller. An icon beside the words changes nothing.
- * - An edge is where two rows or more start. A row starts where what it
- *   holds starts. A row that draws a box (a notice, a chosen option, a
- *   full-width button) may start at its box's edge instead: a stacked
- *   foot's full-width buttons center their words, and a chosen option's
- *   fill stands its padding outside words that line up with its unchosen
- *   kin. A label, list item or group that draws nothing starts only where
- *   what it holds starts. What is set centered or at the end, as a
+ * - An edge is where two rows or more start. A row starts where the
+ *   words it sets at its start start, painted or not, so a chosen
+ *   option's fill, which stands its padding outside words that line up
+ *   with its unchosen kin, places nothing. A row that draws a box around
+ *   words it centers (a stacked foot's full-width button) starts at its
+ *   box. A lone painted notice, its fill on the column's edge and its
+ *   words set in, may start at its box or its words. Painted rows
+ *   stacked together also share their fills' edge and their words' edge.
+ *   What is set centered or at the end, as a
  *   field row's field at its right, is no edge. Three rows that each
  *   start apart share none. A nested list or group set in by its own
  *   padding or margin is a column of its own when it sits an indent step
@@ -487,34 +489,35 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   }
 
   /**
-   * Where a row of a column may start, for the edge check, as the eye
-   * follows it down. Any row starts at the left of what it holds (boxes,
-   * pictures and words) set at its line's start. What is centered or set
-   * at the end, as a field row's field at its right, is no start. A row
-   * that draws a box (a painted notice, a chosen option, a full-width
-   * button) may start at its box's edge as well: a stacked foot's
-   * full-width buttons center their words, and a chosen option's fill
-   * stands its padding outside words that line up with its unchosen kin.
-   * A label, list item or group that draws nothing starts only at what it
-   * holds, since its box is not seen. `inset` marks a nested list or
-   * group whose content starts at its own padding or margin, which the
+   * Where a row of a column starts, for the edge check, as the eye
+   * follows it down: `words`, the left of what it holds (boxes, pictures
+   * and words) set at its line's start, and `box`, its box's edge when it
+   * draws one. What is centered or set at the end, as a field row's field
+   * at its right, is no start. `notice` marks a painted row that is
+   * neither tapped nor picked, so neither an option nor a chosen one
+   * (`aria-checked`, `aria-selected` or `aria-pressed`, or a label holding
+   * a checked input), whose fill shows the choice and so never places it.
+   * `inset` marks a nested list
+   * or group whose content starts at its own padding or margin, which the
    * column takes as a column of its own only when it sits an indent step
    * past the column's edge. Null for a disclosure, whose body starts under
    * its chevron, and for a row with nothing to start.
    */
-  function edgeOf(row: DomElement): { lefts: number[]; inset: boolean } | null {
+  function edgeOf(row: DomElement): { words: number | null; box: number | null; notice: boolean; inset: boolean } | null {
     if (row.matches("[aria-expanded]") || row.querySelector(":scope > [aria-expanded], :scope > * > [aria-expanded]")) return null;
     const parts = atomsOf(row).filter((a) => a.start);
-    const left = parts.length ? Math.min(...parts.map((a) => a.l)) : null;
-    if (paints(row)) return { lefts: [round(rectOf(row).l), ...(left === null ? [] : [round(left)])], inset: false };
-    if (left === null) return null;
+    const words = parts.length ? round(Math.min(...parts.map((a) => a.l))) : null;
+    const box = paints(row) ? round(rectOf(row).l) : null;
+    if (words === null && box === null) return null;
+    const chosen = row.matches('[aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]') || (tag(row) === "label" && row.querySelector("input:checked") !== null);
+    const notice = box !== null && !chosen && !row.matches(INTERACTIVE) && !row.matches("label, li, summary");
     let inset = false;
-    if (row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]')) {
+    if (words !== null && row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]')) {
       const b = boxes(row);
       const own = b.inner.l + b.pad.l;
-      inset = Math.abs(left - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT);
+      inset = Math.abs(words - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT);
     }
-    return { lefts: [round(left)], inset };
+    return { words, box, notice, inset };
   }
 
   const spread = (xs: readonly number[]) => Math.max(...xs) - Math.min(...xs);
@@ -699,8 +702,8 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         }
       }
 
-      // 4. Edges: a column of three rows or more starts each row's words at one left edge.
-      if (kids.length >= 3) {
+      // 4. Edges: a column of rows starts each row at one left edge.
+      if (kids.length >= 2) {
         const rs = kids.map(rectOf);
         let stacked = true;
         for (let i = 1; i < rs.length; i++) if (rs[i]!.t < rs[i - 1]!.b - 1) stacked = false;
@@ -709,23 +712,39 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const edge = edgeOf(c);
             return edge ? [{ c, ...edge }] : [];
           });
-          if (known.length >= 3) {
-            // The edge is where the most rows may start, each within the limit of it, read from the rows that are no nested list or group when two or more are.
-            const near = (a: number, b: number) => Math.abs(a - b) <= LIMIT;
-            const meets = (x: { lefts: number[] }, at: number) => x.lefts.some((l) => near(l, at));
-            const plain = known.filter((x) => !x.inset);
-            const voters = plain.length >= 2 ? plain : known;
+          const near = (a: number, b: number) => Math.abs(a - b) <= LIMIT;
+          const reported = new Set<DomElement>();
+          // Lines for the rows of `at` that start apart from the most, each row meeting at any of its lefts. `least` is how many must share the edge.
+          const judge = (at: { c: DomElement; lefts: number[] }[], least: number, label: string) => {
+            const meets = (x: { lefts: number[] }, v: number) => x.lefts.some((l) => near(l, v));
+            const mode = at.flatMap((x) => x.lefts).sort((a, b) => at.filter((y) => meets(y, b)).length - at.filter((y) => meets(y, a)).length)[0]!;
+            const shared = at.filter((x) => meets(x, mode)).length;
+            const off = (x: { lefts: number[] }) => x.lefts.reduce((a, l) => (Math.abs(l - mode) < Math.abs(a - mode) ? l : a)) - mode;
+            const odd = at.filter((x) => !meets(x, mode) && !reported.has(x.c)).map((x) => ({ c: x.c, left: mode + off(x) }));
+            if (shared < least || !odd.length) return;
+            for (const x of odd) reported.add(x.c);
+            push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: round(Math.max(...odd.map((x) => Math.abs(x.left - mode)))), box: union(odd.map((x) => rectOf(x.c))), what: odd.map((x) => `${say(x.c)} at ${round(x.left - mode)}`).join(" | "), detail: `${label} start at ${round(mode)}` });
+          };
+          // Each row is read by its words, and a row that draws a box around words it centers by its box. A lone painted notice, its fill on the column's edge and its words set in, may start at either. A chosen option's fill shows the choice, so it meets by its words.
+          const painted = known.filter((x) => x.box !== null);
+          const lone = painted.length === 1 && painted[0]!.notice ? painted[0]! : null;
+          const rows = known.map((x) => ({ c: x.c, inset: x.inset, lefts: x.words === null ? [x.box!] : x === lone ? [x.box!, x.words] : [x.words] }));
+          if (rows.length >= 3) {
+            // The edge is read from the rows that are no nested list or group when two or more are.
+            const plain = rows.filter((x) => !x.inset);
+            const voters = plain.length >= 2 ? plain : rows;
+            const meets = (x: { lefts: number[] }, v: number) => x.lefts.some((l) => near(l, v));
             const mode = voters.flatMap((x) => x.lefts).sort((a, b) => voters.filter((y) => meets(y, b)).length - voters.filter((y) => meets(y, a)).length)[0]!;
             // A nested list or group an indent step or more past the edge is a column of its own. Set in by less, it has drifted.
             const step = INDENT_PX * zoomOf(el) - LIMIT;
-            const counted = known.filter((x) => !(x.inset && x.lefts[0]! - mode >= step));
-            const shared = counted.filter((x) => meets(x, mode)).length;
-            const off = (x: { lefts: number[] }) => x.lefts.reduce((a, l) => (Math.abs(l - mode) < Math.abs(a - mode) ? l : a)) - mode;
-            const odd = counted.filter((x) => !meets(x, mode)).map((x) => ({ c: x.c, left: mode + off(x) }));
             // An edge is where two rows or more start: three rows that each start apart, as a dialog's header, body and foot, share none.
-            if (shared >= 2 && odd.length) {
-              push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: round(Math.max(...odd.map((x) => Math.abs(x.left - mode)))), box: union(odd.map((x) => rectOf(x.c))), what: odd.map((x) => `${say(x.c)} at ${round(x.left - mode)}`).join(" | "), detail: `most start at ${round(mode)}` });
-            }
+            judge(rows.filter((x) => !(x.inset && x.lefts[0]! - mode >= step)), 2, "most");
+          }
+          // Painted rows stacked in a column are boxes the eye lays side by side, so their fills share an edge, and so do their words.
+          if (painted.length >= 2) {
+            judge(painted.map((x) => ({ c: x.c, lefts: [x.box!] })), painted.length === 2 ? 1 : 2, "most fills");
+            const worded = painted.filter((x) => x.words !== null);
+            if (worded.length >= 2) judge(worded.map((x) => ({ c: x.c, lefts: [x.words!] })), worded.length === 2 ? 1 : 2, "most fills' words");
           }
         }
       }

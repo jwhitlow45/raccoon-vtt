@@ -660,6 +660,7 @@ const CASES = `
   input, select { font: inherit; height: 44px; box-sizing: border-box; border: 1px solid #888; background: #111; color: inherit; }
   .chip { border-radius: 999px; }
   /* Fixed widths, so a wider fallback font cannot move a part to another line. */
+  .card { background: #333; padding: 8px 10px; margin-bottom: 4px; }
   .nudge { background: #333; height: 44px; padding: 0 10px; display: flex; align-items: center; }
   .fixed { flex: none; width: 60px; overflow: hidden; white-space: nowrap; padding: 0; }
   .box { background: #333; }
@@ -728,6 +729,14 @@ const CASES = `
 <div data-case="mixed-rows"><div>Plain one</div><label style="display: flex"><span style="margin-left: 6px">Label two</span></label><div>Plain three</div></div>
 <div data-case="chosen-option" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="padding: 0 12px">The creature that set it off</label><label style="padding: 0 12px; background: #445">Everyone in an area</label><label style="padding: 0 12px">No one</label></div>
 <div data-case="chosen-option-drift" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="padding: 0 12px">The creature that set it off</label><label style="padding: 0 12px; margin-left: 3px; background: #445">Everyone in an area</label><label style="padding: 0 12px">No one</label></div>
+<div data-case="chosen-in-12" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="padding: 0 12px">The creature that set it off</label><label style="padding: 0 12px; margin-left: 12px; background: #445">Everyone in an area</label><label style="padding: 0 12px">No one</label></div>
+<div data-case="chosen-in-13" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="padding: 0 12px">The creature that set it off</label><label style="padding: 0 12px; margin-left: 13px; background: #445">Everyone in an area</label><label style="padding: 0 12px">No one</label></div>
+<div data-case="chosen-checked" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="position: relative; padding: 0 12px"><input type="radio" name="hits-c" style="position: absolute; inset: 0; opacity: 0; margin: 0">The creature that set it off</label><label style="position: relative; padding: 0 12px; background: #445"><input type="radio" name="hits-c" checked style="position: absolute; inset: 0; opacity: 0; margin: 0">Everyone in an area</label><label style="position: relative; padding: 0 12px"><input type="radio" name="hits-c" style="position: absolute; inset: 0; opacity: 0; margin: 0">No one</label></div>
+<div data-case="cards-even"><div class="card">Card one</div><div class="card">Card two</div><div class="card">Card three</div></div>
+<div data-case="cards-words-drift"><div class="card">Card one</div><div class="card">Card two</div><div class="card" style="padding: 8px 13px">Card three</div></div>
+<div data-case="cards-box-drift"><div class="card">Card one</div><div class="card">Card two</div><div class="card" style="padding: 8px 7px; margin-left: 3px">Card three</div></div>
+<div data-case="notice-lone"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px">A notice set in</div><div>Plain four</div></div>
+<div data-case="notice-lone-drift"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px; margin-left: 3px">A notice set in</div><div>Plain four</div></div>
 <div data-case="ul-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><ul style="padding-left: 14px; margin: 0; list-style: none"><li>Item</li></ul></div>
 <div data-case="group-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><div role="group" aria-label="Grouped" style="padding-left: 16px"><span>Grouped</span></div></div>
 <div data-case="group-step"><div>Row one</div><div>Row two</div><div role="group" aria-label="Grouped" style="padding-left: 12px"><span>Grouped</span></div><div>Row four</div></div>
@@ -963,9 +972,19 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await caught("labels-inner", "edge");
       await caught("li-inner", "edge");
       await caught("mixed-rows", "edge");
-      // A chosen option's fill may stand outside words that meet its kin's. Moved with its words, it has drifted.
+      // An option meets its kin by its words, so a chosen option's fill places nothing: moved by 3, 12 or 13 px, its words have drifted, even where its fill lands on its kin's words.
       await passes("chosen-option");
+      await passes("chosen-checked");
       await caught("chosen-option-drift", "edge");
+      await caught("chosen-in-12", "edge");
+      await caught("chosen-in-13", "edge");
+      // Painted rows stacked together share their fills' edge and their words' edge.
+      await passes("cards-even");
+      await caught("cards-words-drift", "edge");
+      await caught("cards-box-drift", "edge");
+      // A lone notice may start at its fill, its words set in. Its fill moved, it has drifted.
+      await passes("notice-lone");
+      await caught("notice-lone-drift", "edge");
       // A nested list or group set in by less than an indent step has drifted. Set in by a step, it is a column of its own.
       await caught("ul-pad", "edge");
       await caught("group-pad", "edge");
