@@ -36,6 +36,7 @@ import { ChoiceRows, ConfirmButton, type RowOption } from "../measure/controls.t
 import { openAsk } from "../rolls/open.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { trapScreenBox } from "./paneBox.ts";
+import { Pair, PartRow, Words } from "./PartRow.tsx";
 import {
   afterSummary,
   alsoSummary,
@@ -308,15 +309,8 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
 
         <Group label="Players read" summary={readSummary(rig)} holds="rows" {...fold("read")}>
           <TextField label="What players read" placeholder="The floor gives way!" value={rig.message ?? ""} max={LIMITS.trapMessageChars} onSave={(message) => setRig({ message })} />
-          <PartRow
-            end={
-              rig.sound ? (
-                <Button size="sm" onClick={() => playTrapSound(rig.sound!, true)}>
-                  Play
-                </Button>
-              ) : null
-            }
-          >
+          {/* Play acts on the sound it follows, so it stands beside it rather than at the row's end, where a remove stands. */}
+          <PartRow>
             <Select aria-label="Sound" value={rig.sound ?? ""} onChange={(e) => setRig({ sound: e.target.value === "" ? null : (e.target.value as TrapSound) })}>
               <option value="">No sound</option>
               {TRAP_SOUNDS.map((s) => (
@@ -325,6 +319,11 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
                 </option>
               ))}
             </Select>
+            {rig.sound ? (
+              <Button size="sm" onClick={() => playTrapSound(rig.sound!, true)}>
+                Play
+              </Button>
+            ) : null}
           </PartRow>
           <Help>Players read the line, and hear the sound where their sound is on, when they see it go off.</Help>
         </Group>
@@ -946,34 +945,4 @@ function FindFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
       {rig.find.length > 0 || disarm?.check ? <Help>{[...rig.find.map(checkText), ...(disarm?.check ? [`Disarm: ${checkText(disarm.check)}`] : [])].join(". ")}.</Help> : null}
     </>
   );
-}
-
-/**
- * One row of a part's fields (docs/design-v1-polish.md R3): the fields
- * wrap inside the first cell, and the row's remove, or the one action
- * that ends it, holds the second, level with the first line. A remove so
- * never wraps alone under the fields it takes away. `under` takes the
- * row's whole width below both, for a choice too wide to share a line
- * with the remove on a narrow sheet.
- */
-function PartRow(props: { children: ReactNode; end?: ReactNode; under?: ReactNode }) {
-  const fields = <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>{props.children}</div>;
-  if (!props.end && !props.under) return fields;
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "start", gap: theme.space(2) }}>
-      {fields}
-      {props.end ?? <span />}
-      {props.under ? <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>{props.under}</div> : null}
-    </div>
-  );
-}
-
-/** Parts that belong together, as one part a row never parts: a field and its word, its unit after or its name before ("3 rounds", "DC 15"), or buttons that go together. */
-function Pair(props: { children: ReactNode }) {
-  return <span style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>{props.children}</span>;
-}
-
-/** A pair's word, in the muted text a unit takes. */
-function Words(props: { children: ReactNode }) {
-  return <span style={{ color: theme.color.textMuted }}>{props.children}</span>;
 }

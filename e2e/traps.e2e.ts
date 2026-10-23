@@ -1156,4 +1156,47 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
     await reopenRoom(dm);
   });
+
+  test("pl1-c. a focused control keeps its element and its focus when its row changes around it: a tick that another device leaves the last way the pit goes off, which gains the help that says why and loses it again, and the Sound field as Play comes and goes beside it (PL1-ASTRA-01, PL1-ASTRA-02)", async () => {
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter", "leave"] } } });
+    await waitFor("two ways it goes off", () => (trap(dmSocket)?.rig?.on?.length === 2 ? true : null));
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    await unfold(dm, "Goes off when");
+    const onto = pane(dm).getByRole("checkbox", { name: "A creature steps onto it" });
+    // A mark on the element itself, which a new element in its place would not carry.
+    const mark = (l: Locator) => l.evaluate((el) => ((el as unknown as { pl1Mark: boolean }).pl1Mark = true));
+    const keeps = (l: Locator) => l.evaluate((el) => (el as unknown as { pl1Mark?: boolean }).pl1Mark === true && el.ownerDocument.activeElement === el);
+    await onto.focus();
+    await mark(onto);
+    const why = pane(dm).getByText("A trap on squares goes off at least one way.");
+    // Another device takes the other way away: this tick becomes the last, with its help.
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter"] } } });
+    await why.waitFor();
+    assert.equal(await keeps(onto), true, "the tick was replaced, or lost focus, as its help came");
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter", "leave"] } } });
+    await why.waitFor({ state: "detached" });
+    assert.equal(await keeps(onto), true, "the tick was replaced, or lost focus, as its help went");
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter"] } } });
+    await why.waitFor();
+
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { sound: null } } });
+    await waitFor("no sound", () => (trap(dmSocket)?.rig?.sound ? null : true));
+    await unfold(dm, "Players read");
+    const sound = pane(dm).getByRole("combobox", { name: "Sound", exact: true });
+    const play = pane(dm).getByRole("button", { name: "Play", exact: true });
+    await sound.focus();
+    await mark(sound);
+    await sound.selectOption("click");
+    await play.waitFor();
+    assert.equal(await keeps(sound), true, "the Sound field was replaced, or lost focus, as Play came");
+    await sound.selectOption("");
+    await play.waitFor({ state: "detached" });
+    assert.equal(await keeps(sound), true, "the Sound field was replaced, or lost focus, as Play went");
+    await waitFor("no sound again", () => (trap(dmSocket)?.rig?.sound ? null : true));
+    await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
 });
