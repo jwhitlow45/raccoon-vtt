@@ -263,10 +263,16 @@ async function stopNoteAt(size: { width: number; height: number }, shot: string,
     );
   const inReach = async (when: string) => {
     const box = (await note.boundingBox())!;
+    const buttons: { name: string; b: { x: number; y: number; width: number; height: number } }[] = [];
     for (const name of ["Close", "Teleport here"]) {
       const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
       assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle${when}`);
+      buttons.push({ name, b });
     }
+    // Their whole touch areas, not only their middles, stay apart, so a tap at Close's edge never lands on Teleport here (review LP2L2-ASTRA-3).
+    const [c, t] = buttons.map((x) => x.b);
+    const apart = c!.x + c!.width <= t!.x + 0.5 || t!.x + t!.width <= c!.x + 0.5 || c!.y + c!.height <= t!.y + 0.5 || t!.y + t!.height <= c!.y + 0.5;
+    assert.ok(apart, `Close ${JSON.stringify(c)} and Teleport here ${JSON.stringify(t)} overlap${when}`);
     // Its top and its foot are the note's own, not under the top bar or the toolbar.
     assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), `the note's top is in reach${when}`);
     assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), `the note's foot is in reach, not under the toolbar${when}`);
@@ -709,8 +715,8 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await stopNoteAt({ width: 844, height: 390 }, "lp2-2e-stop-note-844x390-130");
   });
 
-  test("lp2-2f. at 480 x 320 at 130%, too short for the note's usual rows, its sentence and help scroll as its body, and the capped search's sentence too", async () => {
-    await stopNoteAt({ width: 480, height: 320 }, "lp2-2f-stop-note-480x320-130", async (note) => {
+  test("lp2-2f. at 480 x 320 at 130%, too short for the note's usual rows, its sentence and help scroll as its body, and the capped search's sentence too, and over a 21 px home bar Close and Teleport here share a row", async () => {
+    const scrolls = async (note: Locator) => {
       const body = note.locator("[data-stop-note-body]");
       await body.waitFor();
       /** The help's height in view inside the body once the body is scrolled to its end, and whether the body scrolls at all. */
@@ -733,7 +739,20 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
       });
       const capped = await helpInView();
       assert.ok(capped.scrolls && capped.shown > 0, `with the longer sentence the help shows ${capped.shown} px once scrolled to`);
-    });
+    };
+    await stopNoteAt({ width: 480, height: 320 }, "lp2-2f-stop-note-480x320-130", scrolls);
+    // Over a phone held sideways with its 21 px home bar, too short for Close over Teleport here: they share one row under the body.
+    const cdp = await playerContext.newCDPSession(player);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 21, left: 0, right: 0 } });
+    try {
+      await stopNoteAt({ width: 480, height: 320 }, "lp2-2f-stop-note-480x320-130-home-bar", async (note) => {
+        await note.locator("[data-stop-note-actions]").getByRole("button", { name: "Close", exact: true }).waitFor();
+        await scrolls(note);
+      });
+    } finally {
+      await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+      await cdp.detach();
+    }
   });
 
   test("mv-1. on Thorn's turn the player's drag walks round a wall's end, and the trail bends there", async () => {
