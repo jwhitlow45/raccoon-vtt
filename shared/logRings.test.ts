@@ -142,15 +142,8 @@ function churn(state: RoomState, step: { join: string } | { leave: string }, seq
   return { state: r.state, touched: [...r.touched, ...("join" in step ? [keys.token(`pet-${step.join}`)] : [])], written: r.log };
 }
 
-/**
- * Whether a viewer receives a line: the real projection for them of the
- * room the op left carries one of its copies. A table display is no member,
- * so it gets no dice line, which every member gets, and its live log counts
- * those among the shared lines as every member's does: a line every member
- * reads tells no one at the table anything.
- */
+/** Whether a viewer receives a line: the real projection for them of the room the op left carries one of its copies. */
 function receives(viewer: Viewer, copies: readonly LogEntry[], after: RoomState): boolean {
-  if (viewer === DISPLAY && copies.some((c) => lineAudience(c) === "shared")) return true;
   return copies.some((c) => projectArchivedLog(after, [c], viewer, { sceneId: "s1" }).length > 0);
 }
 
@@ -186,6 +179,18 @@ describe("the log's rings (shared/logRings.ts)", () => {
         for (const viewer of [P1, P2, DISPLAY]) assert.deepEqual(projectArchivedLog(state, [line], viewer, { sceneId: "s1" }), [], `seed ${seed}: ${line.data?.type} reached ${viewer.memberId}`);
       }
     }
+  });
+
+  test("a table display, which shows no log, gets no line of it, live or from the archive", () => {
+    const lines: Line[] = [
+      { kind: "chat", from: "p1", text: "hi" },
+      { kind: "event", data: { type: "hp", tokenId: "hero", change: "damage", amount: 1, seen: true } },
+      { kind: "event", data: { type: "dice", by: "p2", to: "all", rolls: [die()] } },
+    ];
+    const state = write(base(), lines, 3).state;
+    assert.equal(liveLog(state, P1).length, lines.length, "every member reads each line");
+    assert.deepEqual(liveLog(state, DISPLAY), []);
+    assert.deepEqual(projectArchivedLog(state, state.log, DISPLAY, { sceneId: "s1" }), []);
   });
 
   test("random runs of mixed lines, while members come and go, keep every ring's invariants", () => {
@@ -229,8 +234,6 @@ describe("the log's rings (shared/logRings.ts)", () => {
         assert.deepEqual(ids, [...ids].sort(compareLogIds), `${where}: in id order`);
         assert.equal(new Set(ids).size, ids.length, `${where}: unique`);
         for (const viewer of VIEWERS) {
-          // A display gets no dice line, which every member reads, so its count may pass one (receives).
-          if (viewer === DISPLAY) continue;
           const got = out.written.filter((e) => projectArchivedLog(state, [e], viewer, { sceneId: "s1" }).length > 0).map((e) => index(e.id));
           const shared = got.filter((i) => i < PARTY_LINE_BASE);
           assert.deepEqual(shared, shared.map((_, i) => i), `${where}: ${viewer.memberId}'s ids in the op count on from 0`);

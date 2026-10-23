@@ -1862,9 +1862,13 @@ export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[],
  * alone, and a party line's copy by its one reader. A player then reads an
  * event by its own rules (projectEventCtx), a shared line's without the
  * parts they were not among the readers of when it was written (LineParts),
- * and never the DM's own fields, `parts` and a copy's `copyOf`.
+ * and never the DM's own fields, `parts` and a copy's `copyOf`. A viewer
+ * who is no member, a table display, reads no line: it shows no log
+ * (docs/design-v1-dm-tools.md 3.1), so no line one gets and another does
+ * not can tell anyone at the table anything there.
  */
 function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
+  if (!ctx.member && ctx.viewer.role !== "dm") return null;
   const me = ctx.viewer.memberId;
   if (entry.kind === "whisper") return entry.from === me || entry.to?.includes(me) ? entry : null;
   const audience = lineAudience(entry);
