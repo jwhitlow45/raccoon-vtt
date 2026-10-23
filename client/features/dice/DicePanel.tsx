@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
 import { usePanelHere, type PanelProps } from "../panels.ts";
+import { GROUP_BOX } from "../../components/Panel.tsx";
+import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
+import { useDiceFolds } from "./diceFolds.ts";
 import { RecentRolls } from "./RecentRolls.tsx";
 import { RollOptions } from "./RollOptions.tsx";
 import { LastResult, Roller } from "./Roller.tsx";
@@ -62,6 +65,55 @@ function useThrowPanel(throws: ThrowStore) {
 }
 
 /**
+ * Brings a Recent rolls row into view as scrollIntoView's "nearest" would,
+ * moving only the panel's own scroller, with the row's head clear of the
+ * sticky line: a row above the view, or taller than the room under the
+ * line, starts right under it, and one below shows its foot. The line's
+ * height is measured, since at 130% it is a fraction of a pixel more than
+ * any fixed margin (docs/design-v1-dice.md 8.3, LP7-DICE-5).
+ */
+function revealUnderLine(row: HTMLElement, line: HTMLElement | null): void {
+  const node = row as unknown as Parameters<typeof scrollBox>[0];
+  const box = scrollBox(node);
+  if (!box) return;
+  const b = box.getBoundingClientRect();
+  const zoom = box.offsetHeight > 0 ? (b.bottom - b.top) / box.offsetHeight : 1;
+  const r = row.getBoundingClientRect();
+  // Once stuck, the line covers this much of the scroller's head: it takes back the pane's top padding.
+  const covered = line ? line.getBoundingClientRect().height / zoom : 0;
+  const top = (r.top - b.top) / zoom;
+  const bottom = (r.bottom - b.top) / zoom;
+  if (top < covered || bottom - top > box.clientHeight - covered) startInScrollBox(node, covered);
+  else if (bottom > box.clientHeight) box.scrollTop += bottom - box.clientHeight;
+}
+
+/**
+ * Whether the options above Recent rolls end on a group's fold, which
+ * Recent rolls then follows with no gap, as the groups follow each other
+ * (docs/design-v1-dice-pass.md 6.1). Ending on the creature card, as with
+ * nobody selected or while the options load, the gap stays, as between
+ * the card and its first group.
+ */
+function useEndsOnGroup() {
+  const recent = useRef<HTMLDivElement>(null);
+  const [joined, setJoined] = useState(false);
+  useLayoutEffect(() => {
+    const before = recent.current?.previousElementSibling;
+    if (!before || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const groups = before.querySelectorAll(GROUP_BOX);
+      const last = groups[groups.length - 1];
+      setJoined(last !== undefined && Math.abs(last.getBoundingClientRect().bottom - before.getBoundingClientRect().bottom) < 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(before);
+    return () => observer.disconnect();
+  }, []);
+  return { ref: recent, joined };
+}
+
+/**
  * The Dice panel (docs/design-v1-dice.md 8), for everyone: the newest
  * panel roll stuck at the top, the formula field with its quick dice and
  * one-roll choices, a creature's roll options, then Recent rolls. Every
@@ -86,13 +138,33 @@ export default function DicePanel(props: PanelProps) {
   useRestoreGroupSave();
   // The line a tap on the sticky result opened, unfolded in Recent rolls and scrolled into view.
   const [open, setOpen] = useState<string | null>(null);
+  const folds = useDiceFolds();
+  /*
+   * A tap on the sticky line opens a folded Recent rolls for the page,
+   * writing nothing (docs/design-v1-dice-pass.md 6.4), and its row comes
+   * into view once it has rendered. The opening reaches the folds a render
+   * later, so the scroll waits for the commit that has Recent rolls open.
+   * Each tap counts anew, so a second tap after the viewer folds the list
+   * again opens it and scrolls once more.
+   */
+  const reveal = useRef<string | null>(null);
+  const [asked, setAsked] = useState(0);
   const show = (lineId: string) => {
     setOpen(lineId);
-    requestAnimationFrame(() => {
-      const row = document.querySelector<HTMLElement>(`[data-roll-row~="${CSS.escape(lineId)}"]`);
-      row?.scrollIntoView({ block: "nearest" });
-    });
+    folds.store.open("recent");
+    reveal.current = lineId;
+    setAsked((n) => n + 1);
   };
+  const recentOpen = folds.folds.recent;
+  const root = throwPanel.ref;
+  useEffect(() => {
+    const lineId = reveal.current;
+    if (lineId === null || !recentOpen) return;
+    reveal.current = null;
+    const row = root.current?.querySelector<HTMLElement>(`[data-roll-row~="${CSS.escape(lineId)}"]`);
+    if (row) revealUnderLine(row, root.current?.querySelector<HTMLElement>("[data-dice-last]") ?? null);
+  }, [asked, recentOpen, root]);
+  const recent = useEndsOnGroup();
   if (groupShown && group) {
     return (
       // The page shows its own results, and its rolls never become the panel's last roll, so the sticky line would only take room.
@@ -108,19 +180,24 @@ export default function DicePanel(props: PanelProps) {
     <div {...throwPanel} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <LastResult onOpen={show} />
       <Roller />
-      {group && role === "dm" ? (
-        <OpenGroupSave
-          page={group}
-          onOpen={() => {
-            // An area's page reads its creatures from the area, which the Areas panel holds. With two panels it opens beside this one (docs/design-v1-split-panel.md 5.1).
-            const panel = group.source.kind === "area" ? "areas" : "dice";
-            groupStore.setState({ shownIn: panel });
-            if (panel === "areas") ui.openPanel("areas", here ? { from: here } : undefined);
-          }}
-        />
-      ) : null}
-      <RollOptions {...props} />
-      <RecentRolls names={names} me={me} open={open} again={(rolls, to, origin) => void panel.again(rolls, to, origin)} />
+      {/* The roller and what it rolls for part by the panel's section line, 16 px each side, the grid's gap and this margin making the 16 above (docs/design-v1-dice-pass.md 7.1). */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), marginTop: theme.space(2), paddingTop: theme.space(4), borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+        {group && role === "dm" ? (
+          <OpenGroupSave
+            page={group}
+            onOpen={() => {
+              // An area's page reads its creatures from the area, which the Areas panel holds. With two panels it opens beside this one (docs/design-v1-split-panel.md 5.1).
+              const panel = group.source.kind === "area" ? "areas" : "dice";
+              groupStore.setState({ shownIn: panel });
+              if (panel === "areas") ui.openPanel("areas", here ? { from: here } : undefined);
+            }}
+          />
+        ) : null}
+        <RollOptions {...props} />
+        <div ref={recent.ref} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", marginTop: recent.joined ? -theme.space(2) : 0 }}>
+          <RecentRolls names={names} me={me} open={open} again={(rolls, to, origin) => void panel.again(rolls, to, origin)} />
+        </div>
+      </div>
     </div>
   );
 }
