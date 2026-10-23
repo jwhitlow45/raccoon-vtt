@@ -587,9 +587,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           <Button onClick={() => (rolledAny ? setConfirmDiscard(true) : close())}>Discard</Button>
         )
       ) : null}
-      {/* Apply alone in the foot, so the count, the first row and Apply share a 130% phone's sheet with no scroll (5.8, Appendix D). */}
+      {/* Apply alone in the foot, so the count, the first row and Apply share a 130% phone's sheet with no scroll (5.8, Appendix D). Its own room is even above and below Apply, as the Log's composer's is, under the pane's inset at its foot (review LP17-HP-1). */}
       {page.phase !== "setup" || page.test.kind === "none" ? (
-        <div style={{ ...stickyPaneFoot(theme.space(2)), background: theme.color.surface, paddingTop: theme.space(1), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
+        <div style={{ ...stickyPaneFoot(theme.space(2)), background: theme.color.surface, paddingTop: theme.space(2), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
       ) : null}
       {page.apply === "taken" ? <AppliedToast page={page} ui={ui} /> : null}
     </div>

@@ -582,6 +582,10 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       const b = boxes(el);
       const height = b.border.b - b.border.t;
       const band = el.matches(opts.stickyHeader);
+      // A pane's sticky foot takes the pane's bottom padding back with a negative margin and gives it back as its own (components/Sheet.tsx stickyPaneFoot), so its fill meets the pane's edge. That much of its padding is the pane's inset, which every other part keeps from the edge too, so the foot's room is judged without it.
+      const inset = cs.position === "sticky" ? Math.max(0, -num(cs, "margin-bottom")) * zoomOf(el) : 0;
+      b.inner.b -= inset;
+      b.pad.b -= inset;
       const frame = el.getAttribute("role") === "dialog" || t === "dialog";
 
       // 1. Centering, for controls and painted boxes up to a card's size.
@@ -622,6 +626,8 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       // 2. One row: the parts of a flex or grid row share a middle, or a first line where the row is set at its start.
       const flexRow = (cs.display === "flex" || cs.display === "inline-flex") && !cs.flexDirection.startsWith("column");
       const grid = cs.display === "grid" || cs.display === "inline-grid";
+      // A grid of one column holds no row, so a sticky part of it that overlaps others, as a pane's foot stuck over what scrolls under it, is in no row with them.
+      const oneColumn = grid && cs.getPropertyValue("grid-template-columns").replace(/\[[^\]]*\]/g, " ").trim().split(/\s+/).length === 1;
       if (flexRow || grid) {
         const items: Item[] = [];
         for (const ch of Array.from(el.childNodes)) {
@@ -629,7 +635,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const words = (ch.textContent ?? "").trim();
             const s = words ? seen(ch) : null;
             if (s) items.push({ node: ch, ...s, box: s.v, boxed: false, mode: modeOf(cs.alignItems), what: `"${words.slice(0, 24)}"` });
-          } else if (isEl(ch) && shown(ch) && !placedApart(ch)) {
+          } else if (isEl(ch) && shown(ch) && !placedApart(ch) && !(oneColumn && style(ch).position === "sticky")) {
             const s = seen(ch);
             if (!s) continue;
             const self = style(ch).alignSelf;

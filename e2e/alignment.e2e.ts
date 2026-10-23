@@ -526,6 +526,8 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await groupSaveScreen(sweep, page, "group-save", "Poisoned Needle Gauntlet of the Sunless Citadel");
     await spring(run.traps.door);
     await groupSaveScreen(sweep, page, "group-save-row", "Scything Door");
+    // The Hidden Pit has no save, so its page holds Apply in its sticky foot from the start (review LP17-HP-1). On a phone its card is folded among the others.
+    if (size.name === "1440x900") await groupSaveScreen(sweep, page, "group-save-no-save", "Hidden Pit");
   }
 
   // The Passive Perception hint as Thorn walks near the needle trap, unfound again.
@@ -791,6 +793,28 @@ const CASES = `
 </div>
 <div data-case="pad-even">
   <div class="box" style="padding: 6px 10px">Even room</div>
+</div>
+<div data-case="foot-uneven" style="height: 220px; overflow-y: auto; padding: 4px 12px 16px; --pane-pad-bottom: 16px">
+  <div style="display: grid; gap: 12px">
+    <div class="card">First row</div>
+    <div class="card">Second row</div>
+    <div class="card">Third row</div>
+    <div class="card">Fourth row</div>
+    <div class="card">Fifth row</div>
+    <button>Discard</button>
+    <div style="position: sticky; bottom: calc(-1 * var(--pane-pad-bottom)); margin-bottom: calc(-1 * var(--pane-pad-bottom)); padding-top: 4px; padding-bottom: calc(8px + var(--pane-pad-bottom)); background: #444; display: grid"><button>Apply</button></div>
+  </div>
+</div>
+<div data-case="foot-even" style="height: 220px; overflow-y: auto; padding: 4px 12px 16px; --pane-pad-bottom: 16px">
+  <div style="display: grid; gap: 12px">
+    <div class="card">First row</div>
+    <div class="card">Second row</div>
+    <div class="card">Third row</div>
+    <div class="card">Fourth row</div>
+    <div class="card">Fifth row</div>
+    <button>Discard</button>
+    <div style="position: sticky; bottom: calc(-1 * var(--pane-pad-bottom)); margin-bottom: calc(-1 * var(--pane-pad-bottom)); padding-top: 8px; padding-bottom: calc(8px + var(--pane-pad-bottom)); background: #444; display: grid"><button>Apply</button></div>
+  </div>
 </div>
 <div data-case="row-heights">
   <div style="display: flex; align-items: center; gap: 4px"><button>Tall</button><button style="height: 40px">Short</button></div>
@@ -1085,6 +1109,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await caught("kin-gap", "kind-gap");
       await caught("pad-uneven", "pad");
       await passes("pad-even");
+      // A pane's sticky foot, stuck over the rows that scroll under it, is judged without the pane's inset it takes back, and stands in no row with those rows (review LP17-HP-1).
+      await caught("foot-uneven", "pad");
+      await passes("foot-even");
       await caught("row-heights", "row-height");
       await passes("row-even-heights");
       // A mixed row is judged by the alignment most of its parts take.
