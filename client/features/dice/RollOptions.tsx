@@ -16,7 +16,7 @@ import { Group, Help, sectionLabelLook } from "../../components/Panel.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { tabKeyIndex } from "../../lib/a11y.ts";
-import { startInScrollBox } from "../../lib/reveal.ts";
+import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -28,7 +28,7 @@ import { d20Text, parseBonus } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
 import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
-import { CreatureCard } from "./CreatureCard.tsx";
+import { CreatureCard, DICE_CARD } from "./CreatureCard.tsx";
 import { creatureLook } from "./creatureLook.ts";
 import { foldKey, foldKind, useDiceFolds, type CreatureGroup } from "./diceFolds.ts";
 import {
@@ -78,8 +78,9 @@ import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, WaitingAsks } from "./cast/CastBlock.tsx";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
-/** Room above the options when the panel opens on them: the sticky line's height and a little. */
-const OPTIONS_MARGIN = 48;
+/** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design-v1-dice-pass.md 8). */
+const DICE_MODES = "[data-dice-modes]";
+const DICE_LAST = "[data-dice-last]";
 
 /**
  * A creature's roll options, between the roller and Recent rolls
@@ -97,14 +98,13 @@ export function RollOptions(_props: PanelProps) {
   const focus = useOption((s) => s.focus);
   const options = useOptionStore();
   const ref = useRef<HTMLDivElement>(null);
-  // A bar's Roll opens the panel on its tokens and scrolls to here (4.1), after the render that lists them, once per tap.
-  // Only the panel's own scroller moves, just under the sticky line: scrollIntoView also scrolled the sheet's frame and hid its header (LP7-DICE-6).
+  // A bar's Roll opens the panel on its tokens and scrolls it, after the render that lists them, once per tap (4.1).
   useEffect(() => {
     if (focus === 0 || options.getState().focused === focus) return;
     options.setState({ focused: focus });
     requestAnimationFrame(() => {
       const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (ref.current) startInScrollBox(ref.current, OPTIONS_MARGIN, !still);
+      if (ref.current) landOnModes(ref.current, !still);
     });
   }, [focus, options]);
   if (!view || !role) return null;
@@ -117,10 +117,35 @@ export function RollOptions(_props: PanelProps) {
     else body = <CreatureOptions creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token)} />;
   } else body = <PlayerOptions view={view} selected={selected} />;
   return (
-    <div ref={ref} data-roll-options="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), scrollMarginTop: OPTIONS_MARGIN }}>
+    <div ref={ref} data-roll-options="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       {body}
     </div>
   );
+}
+
+/**
+ * Lands the panel for a token's Roll (docs/design-v1-dice-pass.md 8): the
+ * roll mode row at the scroller's top, just under the sticky line where it
+ * shows, so Adv, Dis and Secret are whole and the card follows them, as
+ * Advantage is the choice most often made just before an attack. Where the
+ * row and the card already show whole, nothing moves. Only the panel's own
+ * scroller moves: scrollIntoView also scrolled the sheet's frame and hid its
+ * header (LP7-DICE-6).
+ */
+function landOnModes(options: HTMLElement, smooth: boolean): void {
+  const panel = options.parentElement;
+  const modes = panel?.querySelector<HTMLElement>(DICE_MODES) ?? options;
+  const box = scrollBox(modes as unknown as Parameters<typeof scrollBox>[0]);
+  if (!box) return;
+  const last = panel?.querySelector<HTMLElement>(DICE_LAST) ?? null;
+  const card = options.querySelector<HTMLElement>(DICE_CARD) ?? options;
+  const b = box.getBoundingClientRect();
+  // The sticky line covers the scroller's top once it sticks, and it sticks from its first pixel of scroll.
+  const covered = last ? Math.max(b.top, last.getBoundingClientRect().bottom) : b.top;
+  if (modes.getBoundingClientRect().top >= covered - 0.5 && card.getBoundingClientRect().bottom <= b.bottom + 0.5) return;
+  const below = theme.space(2);
+  const margin = last ? last.offsetHeight + below : parseFloat(getComputedStyle(box as unknown as Element).paddingTop) || 0;
+  startInScrollBox(modes, margin, smooth);
 }
 
 /**
