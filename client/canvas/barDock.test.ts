@@ -16,6 +16,7 @@ import {
   EDGE,
   FLIP_CLEARANCE,
   LANE_WIDTH,
+  carriedMove,
   clampBox,
   clearAnchor,
   columnFacts,
@@ -1501,6 +1502,29 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     const back = smallerShift({ ...base, anchor: { x: 200, y: 391 + dy }, moved: dy });
     assert.equal(back, -dy);
     assert.deepEqual(after(391, 586, dy + back).box, after(391, 586, 0).box);
+  });
+
+  test("a bar that opens while another is still open keeps that one's move on its side, so Smaller puts the map back past both, and a move for the other side stays (review LP19-BS-1)", () => {
+    const base = { layout: view, viewport: view, chrome, foot: 0, column: null, tokenHeight: FLIP_CLEARANCE };
+    // Thorn's bar under him moved the map up 197. Kira, a cell below him, then opens under her with 520 px below: her own move is 28.
+    const first = largerShift(room(391, 586));
+    const kira = 391 + first + 28;
+    const own = largerShift(room(kira, 586));
+    assert.equal(own, -(548 - 520));
+    const carried = carriedMove(room(kira, 586), first);
+    assert.equal(carried, first);
+    // Smaller on her bar moves the map back by both, to where it stood before Thorn's Larger.
+    const back = smallerShift({ ...base, anchor: { x: 200, y: kira + own }, moved: carried + own });
+    assert.equal(kira + own + back, 391 + 28);
+    assert.deepEqual(after(391 + 28, 586, own + first + back).box, after(391 + 28, 586, 0).box);
+    // The same token's bar over it, as the group's takes over from the single bar, keeps the move down.
+    const down = largerShift(room(640, 586));
+    assert.equal(carriedMove(room(640 + down, 586), down), down);
+    // A bar over its token keeps none of a move up, which undone would grow it, nor a bar that docks, nor a closed bar's.
+    assert.equal(carriedMove(room(700, 586), first), 0);
+    const side = { width: 844, height: 390 };
+    assert.equal(carriedMove({ ...room(200, 586), layout: side, viewport: side }, first), 0);
+    assert.equal(carriedMove(room(kira, 586), 0), 0);
   });
 
   test("a tall or zoomed token keeps its top in the free area: Larger asks for less under a 128 px token, Smaller moves back less over a 64 px one, and a token too tall for more room moves nothing (review BS-ASTRA-01)", () => {

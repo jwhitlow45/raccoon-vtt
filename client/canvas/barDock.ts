@@ -1000,17 +1000,42 @@ export function largerRoom(layout: Size, free: Box, top: number, tokenHeight: nu
  * room already, and where the bar does not span.
  */
 export function largerShift(input: SpanRoom): number {
-  const room = spanRoom(input);
-  if (!room) return 0;
-  const { free, top } = room;
-  const want = Math.min(input.height, largerRoom(input.layout, free, top, input.tokenHeight));
-  const hang = spanHang(input.anchor, free, want, top);
+  const larger = largerHang(input);
+  if (!larger) return 0;
+  const { free, top, want, hang } = larger;
   if (hang.anchor === "top") {
     const below = free.top + free.height - Math.max(top, input.anchor.y + OFFSET_Y);
     return below < want ? -(want - below) : 0;
   }
   const above = Math.min(free.top + free.height, input.anchor.y - OFFSET_Y - FLIP_CLEARANCE) - top;
   return above < want ? want - above : 0;
+}
+
+/** Where a larger bar hangs, and the room it asks for, while it spans. */
+function largerHang(input: SpanRoom): { free: Box; top: number; want: number; hang: Hang } | null {
+  const room = spanRoom(input);
+  if (!room) return null;
+  const { free, top } = room;
+  const want = Math.min(input.height, largerRoom(input.layout, free, top, input.tokenHeight));
+  return { free, top, want, hang: spanHang(input.anchor, free, want, top) };
+}
+
+/**
+ * The move an earlier opening made that a bar taking over from it keeps
+ * for Smaller to undo. A bar that opens while another is still open, for
+ * another token tapped or as Select several gathers or lets go of tokens,
+ * opens on a map that Larger already moved, so its own move is little or
+ * nothing. Undoing only that would leave Smaller nothing to put back
+ * (review LP19-BS-1). The earlier move counts where it was for the same
+ * side of the token as this bar takes: up for a bar under it, down for one
+ * over it. A move for the other side stays, since undoing it would grow
+ * this bar. `carried` is 0 once the bar has closed.
+ */
+export function carriedMove(input: SpanRoom, carried: number): number {
+  const larger = carried === 0 ? null : largerHang(input);
+  if (!larger) return 0;
+  const under = larger.hang.anchor === "top";
+  return (under ? carried < 0 : carried > 0) ? carried : 0;
 }
 
 /**

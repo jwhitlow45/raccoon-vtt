@@ -75,6 +75,7 @@ import {
   arrowStep,
   barDockSlot,
   barChrome,
+  carriedMove,
   clampMove,
   DEFAULT_SPOT,
   handleCorner,
@@ -959,7 +960,8 @@ function BarFrame(props: {
    * Larger moves the map once as the bar opens, after its content is
    * measured, and once at the press. A map the viewer pans meanwhile is
    * left alone, so the bar never fights a pan. Smaller moves the map back
-   * by what Larger moved it for this opening.
+   * by what Larger moved it for this opening, and for the bar it took over
+   * from without closing.
    */
   const larger = useStore(dockStore, (s) => s.larger);
   const roomStore = useRoomStore();
@@ -989,7 +991,9 @@ function BarFrame(props: {
     // Back after a token drag, which hides the bar, the map stays where the drop left it.
     if (dock.largerFor === props.opening) return;
     const dy = dock.larger && !folded ? largerShift({ ...spanRoom, height: barHeight }) : 0;
-    dockStore.setState({ largerFor: props.opening, largerMoved: dy });
+    // Taking over from a bar still open, this opening keeps that one's move on its side for Smaller.
+    const carried = dock.largerFor === null ? 0 : carriedMove({ ...spanRoom, height: barHeight }, dock.largerMoved);
+    dockStore.setState({ largerFor: props.opening, largerMoved: carried + dy });
     shift(dy);
     // Once per opening, on the first render with the content measured.
   }, [contentMeasured]);

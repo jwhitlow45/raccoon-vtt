@@ -1361,6 +1361,56 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
+  test("bs-3. at 390 x 844 with Larger on, a tap on another token while Thorn's bar is open opens its bar larger, and its Smaller puts the bar and the map back as they were before Thorn's Larger (review LP19-BS-1)", async () => {
+    const view = { width: 390, height: 844 };
+    const KEY = "rvtt.tokenBarLarger";
+    const target = { characterId: run.thorn.characterId };
+    const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+    // A second token of Thorn's, a cell east of him, with his conditions and so his tall bar.
+    const echo = randomUUID();
+    for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
+    await ops.send({ t: "token.create", token: { id: echo, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Echo", x: 9, y: 6, disposition: "ally", actor: { ref: run.thorn.characterId } } });
+    await player.evaluate((key) => localStorage.removeItem(key), KEY);
+    await setUp({ ...view, scale: 1 });
+    let bar = player.getByRole("dialog", { name: "Thorn actions" });
+    const echoBar = player.getByRole("dialog", { name: "Echo actions" });
+    try {
+      bar = await openThornAtMiddle(view);
+      const cam = await readCamera(player);
+      assert.ok(cam, "the map has no camera");
+      const before = await barFacts(bar);
+      await bar.getByRole("button", { name: "Larger", exact: true }).tap();
+      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await player.waitForTimeout(300);
+      const grown = await barFacts(bar);
+      assert.ok(grown.height >= before.height + 80, `Larger grew Thorn's bar from ${before.height} to only ${grown.height} px`);
+
+      // Echo, beside him, opens on the map Thorn's Larger moved, as large as his bar was.
+      await touch([await cellPoint({ x: 9, y: 6 })]);
+      await echoBar.waitFor();
+      await player.waitForTimeout(500);
+      assert.equal(await echoBar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, "Echo's bar did not open Larger");
+      const opened = await barFacts(echoBar);
+      assert.ok(Math.abs(opened.height - grown.height) <= 1, `Echo's bar opened at ${opened.height} px, not Thorn's larger ${grown.height}`);
+      await shots.take(player, "playerphone-bs3-echo-larger");
+
+      // Its Smaller undoes Thorn's move too: the bar and the map are back as they were before Larger.
+      await echoBar.getByRole("button", { name: "Smaller", exact: true }).tap();
+      await echoBar.getByRole("button", { name: "Larger", exact: true }).waitFor();
+      await player.waitForTimeout(300);
+      const now = await readCamera(player);
+      assert.ok(now && Math.abs(now.y - cam.y) <= 0.5, `Smaller on Echo's bar left the map at ${now?.y}, not ${cam.y} where it stood before Thorn's Larger`);
+      const back = await barFacts(echoBar);
+      assert.ok(Math.abs(back.height - before.height) <= 1, `Smaller left Echo's bar at ${back.height} px, not ${before.height}`);
+      await shots.take(player, "playerphone-bs3-echo-smaller");
+    } finally {
+      await player.evaluate((key) => localStorage.removeItem(key), KEY);
+      for (const b of [bar, echoBar]) if (await b.isVisible()) await b.getByRole("button", { name: "Close", exact: true }).tap();
+      await ops.send({ t: "token.delete", tokenId: echo });
+      for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
+    }
+  });
+
   test("bc-a1. a reload whose sheet mark sits on the room's own history entry, with Home behind it, keeps the room and shows Connected, and the mark is gone (lib/backClose.ts)", async () => {
     // The race on purpose: a sheet's Back entry written over the room's own entry as a reload begins.
     const room = `${server.origin}/r/${run.roomId}`;
