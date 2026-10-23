@@ -375,7 +375,7 @@ export function Roller() {
           </Button>
         ))}
       </ScrollStrip>
-      <div role="group" aria-label="For the next roll" style={{ display: "flex", gap: theme.space(1), flexWrap: "wrap" }}>
+      <div role="group" aria-label="For the next roll" data-dice-modes="" style={{ display: "flex", gap: theme.space(1), flexWrap: "wrap" }}>
         <Chip pressed={panel.adv} aria-label="Advantage" onClick={() => panel.press("adv")}>
           Adv
         </Chip>

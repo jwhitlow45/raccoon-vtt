@@ -217,6 +217,40 @@ export async function openPage(page: Page, url: string): Promise<void> {
   }
 }
 
+/**
+ * Every fold of the Dice panel (client/features/dice/diceFolds.ts). That
+ * module reads the window, which the e2e files are built without, so the
+ * keys are listed here and diceFolds.test.ts checks the two lists match.
+ */
+const DICE_FOLD_KEYS = [
+  "pc.saves", "pc.skills", "pc.traits", "pc.actions", "pc.bonusActions", "pc.reactions", "pc.legendaryActions", "pc.spells",
+  "companion.saves", "companion.skills", "companion.traits", "companion.actions", "companion.bonusActions", "companion.reactions", "companion.legendaryActions", "companion.spells",
+  "monster.saves", "monster.skills", "monster.traits", "monster.actions", "monster.bonusActions", "monster.reactions", "monster.legendaryActions", "monster.spells",
+  "group.saves", "group.skills", "group.sharedAttacks",
+  "recent",
+] as const;
+
+/**
+ * Stores every Dice panel fold open on each page the context opens, before
+ * the page's own scripts run (docs/design-v1-dice-pass.md 11.1). A suite
+ * that taps the roll options and is not about folds calls it once, so
+ * the starts on a phone, such as Saves and checks folded, never hide what
+ * it taps.
+ */
+export async function diceFoldsOpen(context: BrowserContext): Promise<void> {
+  const value = JSON.stringify(Object.fromEntries(DICE_FOLD_KEYS.map((key) => [key, true])));
+  await context.addInitScript(
+    ({ key, value }) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // A page with no storage, such as about:blank, has no folds to open.
+      }
+    },
+    { key: "rvtt.diceFolds", value },
+  );
+}
+
 type Json = Record<string, unknown>;
 
 /**

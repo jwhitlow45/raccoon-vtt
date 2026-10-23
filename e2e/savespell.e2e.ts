@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { AreaTemplate, LogEntry, LogEvent } from "../shared/model.ts";
-import { ConsoleWatch, dragCells, LoadWatch, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, dragCells, LoadWatch, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player's save spell end to end (docs/design-v1-player-save-spell.md 8),
@@ -217,6 +217,7 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     patContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    for (const context of [dmContext, patContext]) await diceFoldsOpen(context);
     dm = await dmContext.newPage();
     pat = await patContext.newPage();
     consoles.dm.attach(dm);

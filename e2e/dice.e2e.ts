@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
@@ -402,6 +402,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1", args: WEBGL_ARGS });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     playerContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    for (const context of [dmContext, playerContext]) await diceFoldsOpen(context);
     dm = await dmContext.newPage();
     player = await playerContext.newPage();
     dmConsole.attach(dm);

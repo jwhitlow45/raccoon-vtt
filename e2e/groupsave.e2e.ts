@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll options and the group save (docs/design-v1-roll-options.md 11), on
@@ -127,6 +127,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     playerContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    for (const context of [dmContext, playerContext]) await diceFoldsOpen(context);
     dm = await dmContext.newPage();
     player = await playerContext.newPage();
     dmConsole.attach(dm);

@@ -192,7 +192,7 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
   const { held } = useThrowView();
   const rows = useMemo(() => recentRolls(log, held), [log, held]);
   return (
-    <section aria-labelledby="dice-recent" style={{ display: "grid", gap: theme.space(1) }}>
+    <section aria-labelledby="dice-recent" data-dice-recent="" style={{ display: "grid", gap: theme.space(1) }}>
       <h3 id="dice-recent" style={{ margin: 0, fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted, textTransform: "uppercase", letterSpacing: theme.caps }}>
         Recent rolls
       </h3>
