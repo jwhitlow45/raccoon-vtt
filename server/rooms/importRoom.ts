@@ -8,6 +8,7 @@ import yauzl from "yauzl";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
 import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE } from "#shared/limits.ts";
+import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { migrateSnapshot } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
@@ -30,6 +31,7 @@ import { withTx } from "../auth/tx.ts";
 import type { Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
+import { archiveLines } from "./persistence.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { checkWholeScenes, measuredStateBytes } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -240,7 +242,10 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // Members get their new ids first, because asset uploader rows are written during image processing.
       const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, uuidv7()]));
       const assetIds = await importImages(deps, zip, entries, manifest, roomId, counter, memberIds);
-      const state = finishState(remapState(parsed.state, { assets: assetIds, memberIds }), dmMember, roomName);
+      const remapped = finishState(remapState(parsed.state, { assets: assetIds, memberIds }), dmMember, roomName);
+      // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
+      // the whole log, so Show older and a session's export reach every imported line.
+      const state = { ...remapped, log: ringed(remapped.log, remapped.members) };
       // What is stored is checked as it is stored, not only as it arrived:
       // the remap and the importer's member change it.
       const final = parseRoomState(state);
@@ -256,6 +261,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       });
       await withTx(deps.pool, async (tx) => {
         await deps.gateway.createRoom(roomId, state, tx);
+        await archiveLines(tx, roomId, remapped.log);
         await markDmMembers(tx, roomId, oldDms);
         if (hooks.afterImages) await hooks.afterImages(tx, room);
       });

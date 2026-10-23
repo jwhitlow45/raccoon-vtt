@@ -1,7 +1,7 @@
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
-import { DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
+import { cutDmLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type {
   AreaTemplate,
   Character,
@@ -571,7 +571,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (!data) continue;
       next.data = data;
     }
-    out.log.push(next);
+    // Each DM line is cut to its bound, as the reducer cuts them, so the size measures may leave every one out.
+    out.log.push(dmLineIds.has(e.id) ? cutDmLine(next) : next);
   }
   out.log.sort((a, b) => compareLogIds(a.id, b.id));
   remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId, dmLineIds, sharedLines: shared });

@@ -68,6 +68,10 @@ export async function loadRoom(
   if (!row) return null;
   const snapshotSeq = Number(row.seq);
   let state = migrateSnapshot(row.state, row.schema_version);
+  // An import's lines are numbered at seq 0. One made before imports wrote them to the archive has none there, so its
+  // lines still in the log are written now, and Show older reaches them once the live log moves past them.
+  const imported = state.log.filter((e) => e.id.startsWith("0:"));
+  if (imported.length > 0) await archiveLines(pool, roomId, imported);
   let seq = snapshotSeq;
   let replayFailed = false;
   let replayed = 0;
@@ -190,24 +194,7 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
          from unnest($2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[]) as t(s, a, m, r, o)`,
         [roomId, seqs, ats, members, roles, ops, OP_VERSION],
       );
-      const logIds: string[] = [];
-      const logAts: string[] = [];
-      const entries: string[] = [];
-      for (const r of batch.ops) {
-        for (const e of r.log) {
-          logIds.push(e.id);
-          logAts.push(e.at);
-          entries.push(JSON.stringify(e));
-        }
-      }
-      if (logIds.length > 0) {
-        await client.query(
-          `insert into room_log (room_id, id, at, entry)
-           select $1, i, a::timestamptz, e::jsonb from unnest($2::text[], $3::text[], $4::text[]) as t(i, a, e)
-           on conflict do nothing`,
-          [roomId, logIds, logAts, entries],
-        );
-      }
+      await archiveLines(client, roomId, batch.ops.flatMap((r) => r.log));
       if (batch.name === undefined) await client.query("update rooms set last_active_at = now() where id = $1", [roomId]);
       else await client.query("update rooms set last_active_at = now(), name = $2 where id = $1", [roomId, batch.name]);
     }
@@ -329,6 +316,17 @@ export async function readReceipts(pool: Pool, roomId: string, memberId: string,
     [roomId, memberId, tag],
   );
   return rows.map((r) => ({ memberId, tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString() }));
+}
+
+/** Writes log lines to the archive (`room_log`), `on conflict do nothing`, so a replay or a second load never writes one twice. */
+export async function archiveLines(q: Queryable, roomId: string, lines: readonly LogEntry[]): Promise<void> {
+  if (lines.length === 0) return;
+  await q.query(
+    `insert into room_log (room_id, id, at, entry)
+     select $1, i, a::timestamptz, e::jsonb from unnest($2::text[], $3::text[], $4::text[]) as t(i, a, e)
+     on conflict do nothing`,
+    [roomId, lines.map((e) => e.id), lines.map((e) => e.at), lines.map((e) => JSON.stringify(e))],
+  );
 }
 
 /** The log rows one op wrote, `<seq>:<index>`, in order. The archive may have pruned them. */

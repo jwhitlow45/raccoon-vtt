@@ -269,6 +269,12 @@ export function droppedLines(log: readonly LogEntry[], members: Roster): string[
   return [...drop];
 }
 
+/** The log with every line its rings drop left out (droppedLines): what an import keeps in memory of the log it brings. */
+export function ringed(log: readonly LogEntry[], members: Roster): LogEntry[] {
+  const drop = new Set(droppedLines(log, members));
+  return log.filter((e) => !drop.has(e.id));
+}
+
 /**
  * The whispers among no current member's newest: for each member it reaches,
  * at least `whispersKept` newer ones reach them too. A member no longer on

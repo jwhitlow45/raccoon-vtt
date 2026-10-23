@@ -5,7 +5,7 @@ import yauzl from "yauzl";
 import yazl from "yazl";
 import { uuidv7 } from "#shared/ids.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import type { CustomMonster, RoomState, SrdImage } from "#shared/model.ts";
+import type { CustomMonster, LogEntry, RoomState, SrdImage } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { blockOf, customMonster } from "#shared/testutil.ts";
 import { variantPath } from "../assets/store.ts";
@@ -937,6 +937,64 @@ describe("room export and import", () => {
     const listed = (await pip.get(`/api/rooms/${newId}/assets`)).json<{ assets: Array<{ id: string; kind: string }> }>().assets;
     assert.deepEqual(listed.map((a) => a.kind), ["token"]);
     assert.equal((await pip.get(`/api/assets/${listed[0]!.id}/full`)).statusCode, 200);
+  });
+});
+
+describe("an imported log in the archive (shared/logRings.ts)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine();
+  });
+  after(() => t.close());
+
+  /** An export of a new room whose log is `lines`, imported, as its new id and its importer. */
+  async function importWithLog(lines: (i: number) => LogEntry, count: number): Promise<{ roomId: string; importer: TestClient }> {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Long log");
+    const res = await dm.get(`/api/rooms/${roomId}/export`);
+    assert.equal(res.statusCode, 200, res.body);
+    const room = JSON.parse((await unzip(res.rawPayload)).get("room.json")!.toString()) as RoomExport;
+    const dmId = Object.values(room.state.members).find((m) => m.kind === "dm")!.id;
+    room.state.log = Array.from({ length: count }, (_, i) => ({ ...lines(i), from: dmId }));
+    const importer = t.client();
+    const imported = await importZip(importer, await zipOf({ "room.json": JSON.stringify(room) }));
+    assert.equal(imported.statusCode, 201, imported.body);
+    const { roomId: newId } = imported.json<{ roomId: string }>();
+    t.track(newId);
+    return { roomId: newId, importer };
+  }
+
+  /** Every line the archive's pages hold for a member, oldest first. */
+  async function pages(client: TestClient, roomId: string): Promise<LogEntry[]> {
+    const out: LogEntry[] = [];
+    let before: string | null = null;
+    for (let n = 0; n < 50; n++) {
+      const res = await client.get(`/api/rooms/${roomId}/log?limit=100${before ? `&before=${before}` : ""}`);
+      assert.equal(res.statusCode, 200, res.body);
+      const page = res.json<{ entries: LogEntry[]; nextBefore: string | null }>();
+      out.unshift(...page.entries);
+      before = page.nextBefore;
+      if (before === null) break;
+    }
+    return out;
+  }
+
+  test("an import writes its whole log to the archive with the room, so Show older reaches every line past the live log's 200", async () => {
+    const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 250);
+    const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
+    assert.equal(rows[0]!.state.log.length, 200, "the room holds its newest 200");
+    const archived = await pages(importer, roomId);
+    assert.deepEqual(archived.map((e) => e.text), Array.from({ length: 250 }, (_, i) => `line ${i}`));
+  });
+
+  test("a room imported before imports wrote the archive gets its seq-0 lines there when it loads", async () => {
+    const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 20);
+    await t.pool.query("delete from room_log where room_id = $1", [roomId]);
+    const socket = await t.connect(roomId, importer);
+    await socket.snapshot("i");
+    const { rows } = await t.pool.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1 and split_part(id, ':', 1) = '0'", [roomId]);
+    assert.equal(rows[0]!.n, 20);
+    socket.close();
   });
 });
 

@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds } from "#shared/keys.ts";
-import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, partyIndex, rosterRanks, whispersKept } from "#shared/logRings.ts";
+import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, partyIndex, ringed, rosterRanks, whispersKept } from "#shared/logRings.ts";
+import { compareLogIds as byId } from "#shared/keys.ts";
+import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import type { LogEntry, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { projectState, stableStringify, visibleAssetIds } from "#shared/project.ts";
+import { projectArchivedLog, projectState, stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { AT, DM, P1, actor, apply, env, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { exportableState } from "./exportRoom.ts";
 import { assertWithinLimits } from "./importRoom.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
+import { measuredStateBytes } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
 
@@ -714,6 +718,83 @@ describe("party lines in an import (shared/logRings.ts)", () => {
     assert.deepEqual(dm.map((e) => e.id), ["0:0", `0:${run("m-p1")}`, `0:${run("m-p1") + 1}`, `0:${DM_LINE_BASE}`], "the DM reads each line once");
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+});
+
+describe("an imported log (importRoom)", () => {
+  /** As importRoom keeps it: the log's rings in memory, and the whole log in the archive. */
+  function imported(state: RoomState): { room: RoomState; archive: LogEntry[] } {
+    const out = remapState(state, { assets: new Map(), memberIds: new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]) });
+    return { room: { ...out, log: ringed(out.log, out.members) }, archive: out.log };
+  }
+
+  /** Every line a viewer may read is in their live log or on an archive page before its oldest line. */
+  function reachable(room: RoomState, archive: readonly LogEntry[], memberId: string, role: "dm" | "player", name: string): void {
+    const viewer = { memberId, role };
+    const live = projectState(room, viewer, { sceneId: null }).log;
+    const readable = projectArchivedLog(room, archive, viewer, { sceneId: null }).sort((a, b) => byId(a.id, b.id));
+    const first = live[0]?.id;
+    const pages = first === undefined ? readable : readable.filter((e) => byId(e.id, first) < 0);
+    assert.deepEqual([...pages, ...live].map((e) => e.id), readable.map((e) => e.id), `${name}: ${memberId}`);
+  }
+
+  const teleport = (id: string): LogEntry => ({ id, at: AT, kind: "event", data: { type: "teleport", tokenId: "t1", past: "wall" } });
+  const chat = (id: string): LogEntry => ({ id, at: AT, kind: "chat", from: "p1", text: id });
+
+  test("an old room's 200 lines, half the DM's: the DM reaches every chat line, live or on Show older's pages", () => {
+    const state = room();
+    state.tokens.t1 = token("t1");
+    state.log = Array.from({ length: 200 }, (_, i) => (i % 2 === 0 ? chat(`${i + 1}:0`) : teleport(`${i + 1}:0`)));
+    const { room: out, archive } = imported(state);
+    assert.equal(archive.length, 200);
+    reachable(out, archive, "m-dm", "dm", "old room");
+    reachable(out, archive, "m-p1", "player", "old room");
+  });
+
+  test("100 of the DM's lines then 10 chat lines: none of the chat is out of reach", () => {
+    const state = room();
+    state.tokens.t1 = token("t1");
+    state.log = [...Array.from({ length: 100 }, (_, i) => teleport(`${i + 1}:900000`)), ...Array.from({ length: 10 }, (_, i) => chat(`${101 + i}:0`))];
+    const { room: out, archive } = imported(state);
+    reachable(out, archive, "m-dm", "dm", "notes then chat");
+    reachable(out, archive, "m-p1", "player", "notes then chat");
+  });
+
+  test("each ring's own bounds hold, the DM line's bytes included, however the file filled them", () => {
+    const state = room();
+    state.tokens.t1 = token("t1");
+    const roll = { formula: "5d1000-1000", faces: [1000, 1000, 1000, 1000, 1000], total: 4000, label: "x".repeat(LIMITS.diceLabelChars), tokenId: "t1", critOn: 19 as const, save: "dex" as const, hidden: true as const };
+    // The DM's dice lines of 20 hidden rolls, each with text no event line uses.
+    state.log = Array.from({ length: MAX_LOG_LINES }, (_, i) => ({
+      id: `${i + 1}:900000`,
+      at: AT,
+      kind: "event" as const,
+      text: "\u{1F600}".repeat(1_000),
+      data: { type: "dice" as const, by: "dm1", to: "dm" as const, rolls: Array.from({ length: LIMITS.diceRollsPerOp }, () => roll) },
+    }));
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.ok(serializedBytes(parsed.state.log[0]) > LIMITS.dmLogLineBytes);
+    const { room: out, archive } = imported(parsed.state);
+    assert.equal(archive.length, MAX_LOG_LINES, "the archive takes them all");
+    assert.equal(out.log.length, LIMITS.dmLogLines);
+    for (const e of out.log) {
+      assert.ok(serializedBytes(e) <= LIMITS.dmLogLineBytes);
+      assert.equal(e.data?.type === "dice" && e.data.rolls.length, LIMITS.diceRollsPerOp, "the text went, and every roll stays");
+    }
+    // So the lines the measures leave out are bounded as in any room.
+    assert.ok(serializedBytes(out) - measuredStateBytes(out) <= LIMITS.dmLogLines * LIMITS.dmLogLineBytes);
+    reachable(out, archive, "m-dm", "dm", "full of notes");
+  });
+
+  test("a member's whispers past their bound keep their newest, and the rest are on Show older's pages", () => {
+    const state = room();
+    state.log = Array.from({ length: 120 }, (_, i) => (i % 3 === 0 ? chat(`${i + 1}:0`) : { id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: "p1", to: ["dm1"], text: `w${i}` }));
+    const { room: out, archive } = imported(state);
+    assert.equal(out.log.filter((e) => e.kind === "whisper").length, whispersKept(Object.keys(out.members).length));
+    reachable(out, archive, "m-dm", "dm", "whispers");
+    reachable(out, archive, "m-p1", "player", "whispers");
+    reachable(out, archive, "m-p2", "player", "whispers");
   });
 });
 
