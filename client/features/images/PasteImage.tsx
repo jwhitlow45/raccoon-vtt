@@ -108,7 +108,6 @@ export function PasteButton(props: { paste: PasteHandle; label?: string; size?: 
   );
 }
 
-
 /**
  * What a paste left under its entry: its note, and the paste box while it
  * is open. `only` shows one of the two, for a dialog that shows its notes

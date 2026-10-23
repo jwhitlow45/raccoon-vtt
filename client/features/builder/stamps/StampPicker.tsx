@@ -278,7 +278,7 @@ function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): v
         <PasteButton paste={props.paste} />
       </div>
       <PasteStatus paste={props.paste} only="box" />
-      <Loading text="Loading this room's images…" active={library.rows === null && !library.failed} />
+      <Loading text="Loading this room’s images…" active={library.rows === null && !library.failed} />
       {library.failed ? (
         <LoadFailed retry={library.retry} focusTo={() => section.current}>
           The room’s library did not load. Images already on the map are below.
