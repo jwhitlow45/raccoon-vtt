@@ -20,6 +20,7 @@ import {
   syncsFromDdb,
   stopsOnTrap,
   walksOffFromGround,
+  hiddenRowsShareNoMount,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -938,8 +939,8 @@ describe("re-sync from D&D Beyond: op version 16 and snapshot version 20 (docs/d
 });
 
 describe("follow-up batch 20: op version 17, snapshot version 20 (docs/design-v1-traps.md 6.6, docs/design-v1-attach.md 8.6)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 17);
+  test("came before follow-up batch 21's op version", () => {
+    assert.ok(OP_VERSION >= 17);
     assert.equal(SNAPSHOT_VERSION, 20);
   });
 
@@ -958,5 +959,31 @@ describe("follow-up batch 20: op version 17, snapshot version 20 (docs/design-v1
 
   test("a version 17 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 17, 16, opMigrations), /down/);
+  });
+});
+
+describe("follow-up batch 21: op version 18, snapshot version 20 (docs/design-v1-attach.md 7.1 and 8.6)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 18);
+    assert.equal(SNAPSHOT_VERSION, 20);
+  });
+
+  test("the op step is the identity", () => {
+    const ops: unknown[] = [
+      { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 4, y: 4, elevation: 0 },
+      { t: "encounter.next" },
+      { t: "sys.restore", entries: [], from: "undo", deps: true, rides: [{ seq: 3, mount: "horse", rider: "bree" }] },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 17, 18, opMigrations), op);
+  });
+
+  test("only ops stored before version 18 let a rider's row some player cannot see lead its mount", () => {
+    assert.equal(hiddenRowsShareNoMount(17), false);
+    assert.equal(hiddenRowsShareNoMount(18), true);
+    assert.equal(hiddenRowsShareNoMount(undefined), true);
+  });
+
+  test("a version 18 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 18, 17, opMigrations), /down/);
   });
 });

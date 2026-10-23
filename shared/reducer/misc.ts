@@ -8,6 +8,7 @@ import { holderOf, linkHolds } from "../rules/attach.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { turnUnderWay } from "../rules/path.ts";
 import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
+import { rowLeadsMounts } from "./encounter.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
@@ -173,14 +174,16 @@ function companionsAfterRestore(tx: Tx, entries: RestoreEntry[]): void {
  * on the turn's list (docs/design-v1-attach.md 8.3): only for the turn the
  * step was made on, the same seq, and only while the restored ride is the
  * one it names, a mount the turn's creature rides by controlled rides that
- * hold, up the whole chain as the turn's start lists them. It never adds a
- * mount the turn did not have and never touches `markRound`.
+ * hold, up the whole chain as the turn's start lists them, on an acting row
+ * every player sees (rowLeadsMounts). It never adds a mount the turn did
+ * not have and never touches `markRound`.
  */
 function ridesBack(tx: Tx, rides: NonNullable<OpOf<"sys.restore">["rides"]>): void {
   for (const ride of rides) {
     const encounter = tx.state.encounter;
     const turn = turnUnderWay(encounter);
     if (!encounter || !turn || turn.seq !== ride.seq || turn.tokenId !== ride.rider) continue;
+    if (!rowLeadsMounts(tx, encounter, encounter.entries.find((e) => e.id === turn.entryId))) continue;
     const mount = tx.state.tokens[ride.mount];
     if (!mount || !ridesUpTo(tx.state, ride.rider, mount.id)) continue;
     const mounts = turn.mounts ?? [];

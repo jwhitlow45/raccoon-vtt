@@ -8,7 +8,7 @@ import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefus
 import { footprintSize } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
-import { sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
+import { rowLeadsMounts, sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
 import { carriedAlong, dismounted, hiddenTurnOf, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, withPath } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
@@ -90,14 +90,23 @@ function rowOf(tx: Tx, tokenId: string): InitEntry | undefined {
 /**
  * A controlled ride taken during a fight (7.1). "The Initiative of a
  * controlled mount changes to match yours when you mount it": for a ride
- * every player sees, the mount's row takes its rider's value and goes right
- * after its rider's, unless it is the acting row, which no row moves
- * around. A ride some player cannot see leaves the rows as they stand. One that had its turn this
- * round already is passed over for the rest of it (`skipRound`). Taken on
- * the chain of controlled rides the acting creature directs, each pair
- * seen by every player (sharedMounts), the mount and any mount above it
- * join the turn's `mounts` and their rows mark time this round
- * (`markRound`), as they would at the turn's start.
+ * every player sees, the mount's row takes its rider's value and goes
+ * right after its rider's, unless it is the acting row, which no row moves
+ * around. One that had its turn this round already is passed over for the
+ * rest of it (`skipRound`). Taken on the chain of controlled rides the
+ * acting creature directs, each pair seen by every player (sharedMounts),
+ * the mount and any mount above it join the turn's `mounts` and their rows
+ * mark time this round (`markRound`), as they would at the turn's start.
+ *
+ * Every player sees the mount's row, its value, place, `skipRound` and
+ * `markRound`, so from op version 18 two rows decide (rowLeadsMounts,
+ * reviews FU21A-OP-1 and FU21A-OP-6). The rider's own row gives the value
+ * and the place, and `skipRound` reads where the acting row stands, so the
+ * rows move only while every player sees both. The acting row, the turn
+ * creature's, decides the sharing. On a chain the two differ: a controlled
+ * horse Bree rides, getting on an elephant, gives the elephant the horse's
+ * value and joins Bree's turn. A ride, or a row, some player cannot see
+ * leaves the rows as they stand.
  */
 function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   const encounter = tx.state.encounter;
@@ -105,8 +114,10 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   let entries = encounter.entries;
   const riderRow = rowOf(tx, riderId);
   const mountRow = rowOf(tx, mountId);
+  const actingRow = encounter.entries.find((e) => e.id === encounter.activeEntryId);
+  const turnShown = encounter.activeEntryId === null || rowLeadsMounts(tx, encounter, actingRow);
   // The rows move only for a ride every player sees, both tokens and so the link, since the tracker shows the move to all (section 10).
-  const shown = seenByAll(tx, riderId) && seenByAll(tx, mountId);
+  const shown = seenByAll(tx, riderId) && seenByAll(tx, mountId) && rowLeadsMounts(tx, encounter, riderRow) && turnShown;
   if (shown && riderRow && mountRow && riderRow.id !== mountRow.id && mountRow.id !== encounter.activeEntryId) {
     const sorted = sortEntries(entries);
     const acting = sorted.findIndex((e) => e.id === encounter.activeEntryId);
@@ -119,7 +130,7 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   let turnStart = encounter.turnStart;
   const turn = turnUnderWay(encounter);
   // The new ride joins the turn when it is on the chain the turn's creature directs, with every mount above it there.
-  const chain = turn ? sharedMounts(tx, turn.tokenId) : [];
+  const chain = turn && turnShown ? sharedMounts(tx, turn.tokenId) : [];
   if (turn && chain.includes(mountId)) {
     const mounts = [...(turn.mounts ?? [])];
     const marked = new Set([mountId]);

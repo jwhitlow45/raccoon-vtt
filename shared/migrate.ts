@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 20;
-export const OP_VERSION = 17;
+export const OP_VERSION = 18;
 
 export type MigrationStep = {
   from: number;
@@ -514,6 +514,30 @@ export const opMigrations: MigrationStep[] = [
     to: 17,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 21 (docs/design-v1-attach.md 7.1 and 8.6, reviews
+    // FU21A-OP-1 and FU21A-OP-2): no op changes shape, so the step is the
+    // identity. Two rules the reducer replays an op by change from this
+    // version: a rider whose initiative row some player cannot see shares
+    // no turn with its mount and leads no mount's row, at a controlled ride,
+    // at a turn's start and at an undo that puts a ride back
+    // (`hiddenRowsShareNoMount`), and a Next that reveals a hidden row
+    // writes a new row, so Previous puts back the hidden one
+    // (`revealsRowAnew`). Older ops replay by the rules they were written
+    // under, so a stored restore's hash guards still match.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 18, and the shutdown writes version 20 snapshots, as
+    // before. Rollback: an older build refuses to migrate a version 18 op
+    // down (runMigrations), so a room whose log holds one after its last
+    // snapshot would not load there. A clean shutdown writes a snapshot
+    // after the last op, and an older build loads it, since nothing stored
+    // changed shape. So only a room with version 18 ops after its last
+    // snapshot needs the backup from before the deploy.
+    from: 17,
+    to: 18,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -860,6 +884,30 @@ export function stopsOnTrap(opVersion: number | undefined): boolean {
  */
 export function walksOffFromGround(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 17);
+}
+
+/**
+ * Whether a controlled mount shares its rider's turn, and follows its
+ * rider's row, only while every player's tracker shows that row
+ * (docs/design-v1-attach.md 7.1, reviews FU21A-OP-1 and FU21A-OP-2), so a
+ * row the DM hid never reaches players through the mount's row. Ops stored
+ * before version 18 read the two tokens alone and replay by that rule. Live
+ * ops carry no stored version and take today's rule.
+ */
+export function hiddenRowsShareNoMount(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 18);
+}
+
+/**
+ * Whether a Next that reveals a hidden row on its turn writes the row anew
+ * (review FU21A-OP-8). Ops stored before version 18 changed it in place,
+ * and a row that kept its spent Reaction was then the very row the state
+ * before held and Previous's snapshot kept, so Previous put it back
+ * revealed. They replay by that rule. Live ops carry no stored version and
+ * take today's rule.
+ */
+export function revealsRowAnew(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 18);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

@@ -5,7 +5,8 @@ import { canApply, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { DEPENDED_ON, PARENT_GONE } from "#shared/reducer/misc.ts";
-import { DM, P1, P2, actor, effect, member, room, token } from "#shared/testutil.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { DM, P1, P2, actor, effect, env, member, room, token } from "#shared/testutil.ts";
 import { MOVED_SINCE } from "./undo.ts";
 import { UndoTable } from "./undoTesting.ts";
 
@@ -102,6 +103,22 @@ describe("a player's attach and detach undo as moves (8.3)", () => {
     assert.deepEqual(t.mounts(), ["horse"]);
     assert.equal(t.play(P1, { t: "token.move", tokenId: "horse", x: 8, y: 4 }), "ok");
     assert.equal(t.t("horse").path!.stops.length, 2);
+  });
+
+  test("undoing a Get off once the DM has hidden the rider's row puts the ride back without sharing the turn, where an older restore shared it (op version 18, review FU21A-OP-1)", () => {
+    const t = thornsTurn(table());
+    assert.equal(t.play(P1, ride), "ok");
+    assert.equal(t.play(P1, getOff), "ok");
+    assert.equal(t.play(DM, { t: "encounter.update", entryId: "et", patch: { hidden: true } }), "ok");
+    const seen = projectState(t.state, P2, { sceneId: "s1" }).encounter;
+    assert.equal(t.undo(), "ok");
+    assert.deepEqual(t.t("thorn").attached, { to: "horse", kind: "ride", steer: true });
+    assert.equal(t.mounts(), undefined);
+    assert.deepEqual(projectState(t.state, P2, { sceneId: "s1" }).encounter, seen, "the other player's tracker");
+    // The same restore stored at op version 17 replays as it applied: the horse back on Thorn's turn.
+    const old = applyOp(t.last!.before, t.last!.op, P1, { ...env(99), opVersion: 17 });
+    assert.ok(old.ok);
+    assert.deepEqual(old.state.encounter?.turnStart?.mounts, ["horse"]);
   });
 
   test("undoing a Get off off a chain of controlled mounts puts every mount of the chain back on the turn's list", () => {

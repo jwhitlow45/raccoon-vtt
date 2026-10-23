@@ -10,7 +10,7 @@ import {
   tickEffects,
   unbindFromEntry,
 } from "../rules/durations.ts";
-import { attaches, marksHadTurn } from "../migrate.ts";
+import { attaches, hiddenRowsShareNoMount, marksHadTurn, revealsRowAnew } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
@@ -69,7 +69,9 @@ export function tokenRow(entries: readonly InitEntry[], state: RoomState, tokenI
 /**
  * The mounts a creature's turn shares (docs/design-v1-attach.md 7.1): up
  * its chain of controlled rides, each mount whose rider and itself every
- * player sees now, so the link is seen too, at most a turn's limit.
+ * player sees now, so the link is seen too, at most a turn's limit. Every
+ * caller first asks whether the turn's row leads mounts at all
+ * (rowLeadsMounts), since the tokens alone cannot say.
  */
 export function sharedMounts(tx: Tx, creatureId: string): string[] {
   const mounts: string[] = [];
@@ -87,16 +89,33 @@ export function sharedMounts(tx: Tx, creatureId: string): string[] {
 }
 
 /**
+ * Whether a rider's row may lead its controlled mount (docs/design-v1-attach.md
+ * 7.1): share its turn with the mount, or give the mount's row its value and
+ * place. From op version 18 only a row every player's tracker shows does,
+ * by the encounter projection's own rule (project.ts rowSeenByNonOwners),
+ * since the mount's row, its value, place and `markRound`, reaches players
+ * who cannot see the rider's, and would tell them its value and whose turn
+ * it is (reviews FU21A-OP-1 and FU21A-OP-2). `encounter` is the one the
+ * row stands in, which a turn's start has not written yet. Older ops read
+ * the tokens alone, as they did.
+ */
+export function rowLeadsMounts(tx: Tx, encounter: Encounter, row: InitEntry | undefined): boolean {
+  if (!hiddenRowsShareNoMount(tx.env.opVersion)) return true;
+  return row !== undefined && rowSeenByNonOwners({ ...tx.state, encounter }, row, tx.env);
+}
+
+/**
  * The turn that starts with the controlled mounts its creature rides
  * (docs/design-v1-attach.md 7.1): up the creature's chain of controlled
  * rides, each mount whose rider and itself every player sees now, so the
- * link is seen too. Each joins `TurnStart.mounts`, and its row, if it has
- * one, marks time this round (`markRound`). On Next the row's Reaction
- * comes back with its rider's (`reactions`).
+ * link is seen too, on a row every player sees (rowLeadsMounts). Each joins
+ * `TurnStart.mounts`, and its row, if it has one, marks time this round
+ * (`markRound`). On Next the row's Reaction comes back with its rider's
+ * (`reactions`).
  */
 function withMounts(tx: Tx, encounter: Encounter, reactions: boolean): Encounter {
   const start = encounter.turnStart;
-  if (!start) return encounter;
+  if (!start || !rowLeadsMounts(tx, encounter, encounter.entries.find((e) => e.id === start.entryId))) return encounter;
   const mounts = sharedMounts(tx, start.tokenId);
   if (mounts.length === 0) return encounter;
   const rows = new Set(mounts.flatMap((id) => tokenRow(encounter.entries, tx.state, id)?.id ?? []));
@@ -342,14 +361,17 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   // A row that marks time this round keeps its spent Reaction: it came back on its rider's turn (docs/design-v1-attach.md 7.1).
   const keepsReaction = (e: InitEntry) => mounted && e.markRound === round;
   let entries = encounter.entries.map((e) => (e.id === step.landing && !keepsReaction(e) ? { ...e, reactionUsed: false } : e));
+  const reveals = settings.revealHiddenOnTurn && entries.find((e) => e.id === step.landing)!.hidden;
+  if (reveals && revealsRowAnew(tx.env.opVersion)) entries = entries.map((e) => (e.id === step.landing ? { ...e, hidden: false } : e));
   const landing = entries.find((e) => e.id === step.landing)!;
 
   // The reveal comes before the durations tick: expiry lines are stamped
   // seen or not from the state when they are written, and a creature this
   // turn reveals has its expiries marked as its turn line is, seen where
   // players see it stand.
-  if (landing.hidden && settings.revealHiddenOnTurn) {
-    landing.hidden = false;
+  if (reveals) {
+    // Older ops changed the row in place, the state's own when it kept its Reaction, and replay so (revealsRowAnew).
+    if (!revealsRowAnew(tx.env.opVersion)) landing.hidden = false;
     if (landing.tokenId !== undefined) {
       const token = tx.state.tokens[landing.tokenId];
       if (token) {
