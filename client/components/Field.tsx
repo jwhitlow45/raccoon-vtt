@@ -146,11 +146,25 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
   const hintId = useId();
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
-      <label htmlFor={props.htmlFor} style={{ flex: "1 1 110px", minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}>
+      {/*
+       * A row wraps only where its label and its controls really do not fit
+       * (docs/design-v1-polish.md R2). The controls ask for their own width,
+       * up to 160 px: a text field or select would ask for its 213 px default,
+       * so the inner box caps what it asks, and its least width of the whole
+       * cell, which wins over the cap, still lets it fill the cell once the
+       * line is laid out. The label asks for 110 px, or 40% of a row narrower
+       * than 275. Next to 160 px of controls 110 fits only from 278 up, where
+       * 40% is more than 110, so those rows lay out and wrap as they did, and
+       * a narrow control takes the room: "DC" and its field share a 214 px
+       * line, as "On a pass" and its 119 px choice do.
+       */}
+      <label htmlFor={props.htmlFor} style={{ flex: `1 1 min(${LABEL_BASIS}px, 40%)`, minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}>
         {props.label}
       </label>
-      <div style={{ flex: "1 1 160px", minWidth: 0, display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
-        <RowHint.Provider value={props.hint ? hintId : undefined}>{props.children}</RowHint.Provider>
+      <div style={{ flex: "1 1 auto", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ minWidth: "100%", maxWidth: CONTROLS_BASIS, display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
+          <RowHint.Provider value={props.hint ? hintId : undefined}>{props.children}</RowHint.Provider>
+        </div>
       </div>
       {props.hint ? (
         // 4 px under the controls, as Field's hint sits under its input, where the row's wrap gap is 8.
@@ -161,6 +175,10 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
     </div>
   );
 }
+
+/** What a FieldRow's label and, at most, its controls ask for on one line before the row wraps. */
+const LABEL_BASIS = 110;
+const CONTROLS_BASIS = 160;
 
 /**
  * A page's card under its heading. `titleRef` makes the heading one that
