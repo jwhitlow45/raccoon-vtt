@@ -224,9 +224,9 @@ async function thornAt(at: { x: number; y: number; elevation?: number }): Promis
   }
 }
 
-/** The stopped walk's note on the player's screen. */
+/** The stopped walk's note on the player's screen: the card, whose sentence alone is its status. */
 function stopNote(text: string) {
-  return player.getByRole("status").filter({ hasText: text });
+  return player.locator("[data-stop-note]").filter({ has: player.getByRole("status").filter({ hasText: text }) });
 }
 
 async function closeNote(text: string): Promise<void> {
@@ -645,6 +645,49 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.equal(tokenOf(playerSocket.state, run.goblinId), undefined);
     await shots.take(player, "vision-player-explored-behind");
     await shots.take(dm, "vision-dm-explored-outline");
+  });
+
+  test("lp2-2e. at 844 x 390 at 130% the stopped walk's note keeps between the bars, its Close and Teleport here in reach", async () => {
+    // A phone held sideways at the largest interface size, where the note with its help is taller than the map between the bars.
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await player.setViewportSize({ width: 844, height: 390 });
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await player.locator(".konvajs-content").first().waitFor();
+    // Back west of the platform's wall, then the walk of step 9 again.
+    await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
+    await thornAt({ x: 7, y: 14, elevation: 10 });
+    await player.waitForTimeout(500);
+    await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
+    await thornAt({ x: 8, y: 14, elevation: 10 });
+    const note = player.locator("[data-stop-note]");
+    await note.getByRole("button", { name: "Teleport here" }).waitFor();
+    await player.waitForTimeout(300);
+    const box = (await note.boundingBox())!;
+    /** Whether a tap at a point lands inside `target`, as a finger's would. */
+    const lands = (target: string, x: number, y: number) =>
+      player.evaluate(
+        ([sel, px, py]) => {
+          const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
+          return doc.elementFromPoint(px, py)?.closest(sel) != null;
+        },
+        [target, x, y] as const,
+      );
+    for (const name of ["Close", "Teleport here"]) {
+      const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
+      assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle`);
+    }
+    // Its top and its foot are the note's own, not under the top bar or the toolbar.
+    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), "the note's top is in reach");
+    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), "the note's foot is in reach, not under the toolbar");
+    await shots.take(player, "lp2-2e-stop-note-844x390-130");
+    await note.getByRole("button", { name: "Close" }).click();
+    await note.waitFor({ state: "detached" });
+    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await player.setViewportSize({ width: 390, height: 844 });
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    await player.locator(".konvajs-content").first().waitFor();
   });
 
   test("mv-1. on Thorn's turn the player's drag walks round a wall's end, and the trail bends there", async () => {

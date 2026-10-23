@@ -51,14 +51,14 @@ describe("the hold mark (D30)", () => {
 describe("the stopped walk's note (D31)", () => {
   const view = world({ tokens: [thorn({ x: 4, y: 4 })] });
   const note = { tokenId: "thorn", sceneId: "s1", blocker: "wall" as const, door: null, ghost: { x: 7, y: 4 }, aim: { x: 7.5, y: 4.5 }, at: { x: 4, y: 4 }, searched: true as const, capped: true as const, n: null };
-  function render(width: number): string {
+  function render(width: number, height = 800, bottom = 60): string {
     const scope = new RoomScope();
     const slot = scope.get(stopNoteSlot);
     slot.setState({ note });
     // A static render reads a store's first state (useSyncExternalStore's server snapshot), so the note is made the first.
     Object.assign(slot, { getInitialState: slot.getState });
     const scene = view.scenes.s1!;
-    return inRoom(view, createElement(StopNoteHost, { scene, camera: { x: 0, y: 0, scale: 40 }, viewport: { width, height: 800 }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
+    return inRoom(view, createElement(StopNoteHost, { scene, camera: { x: 0, y: 0, scale: 40 }, viewport: { width, height }, insets: { top: 52, right: 0, bottom, left: 0 } }), scope);
   }
 
   test("is a map pane's width inside the canvas's margins", () => {
@@ -80,6 +80,58 @@ describe("the stopped walk's note (D31)", () => {
     assert.ok(described, `the button is described: ${button}`);
     assert.doesNotMatch(button, /title="For Misty Step/);
     assert.match(markup, new RegExp(`<p id="${described.replace(/[:]/g, "\\$&")}"[^>]*>For Misty Step and anything else that passes walls\\. The walk to the wall is taken back, and the teleport does not count against Speed\\.</p>`));
+  });
+});
+
+describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () => {
+  const view = world({ tokens: [thorn({ x: 4, y: 4 })] });
+  // The capped search's note, the longest sentence there is.
+  const note = { tokenId: "thorn", sceneId: "s1", blocker: "wall" as const, door: null, ghost: { x: 7, y: 4 }, aim: { x: 7.5, y: 4.5 }, at: { x: 4, y: 4 }, searched: true as const, capped: true as const, n: null };
+  // 844 x 390 at 130%, in the chrome's own px: 649 x 300, the top bar 52 and the toolbar 60 over the map.
+  function render(height = 300): string {
+    const scope = new RoomScope();
+    const slot = scope.get(stopNoteSlot);
+    slot.setState({ note });
+    Object.assign(slot, { getInitialState: slot.getState });
+    return inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, camera: { x: 0, y: 0, scale: 12 }, viewport: { width: 649, height }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
+  }
+  const topOf = (markup: string) => Number(/top:(\d+(?:\.\d+)?)px/.exec(markup)?.[1]);
+
+  test("is no taller than the map between the bars, inside its margins", () => {
+    const markup = render();
+    assert.match(markup, /max-height:172px/);
+    const top = topOf(markup);
+    // Placed by its first frame's guess, 156 px, under the 172 px the bars leave.
+    assert.ok(top >= 52 + 8 && top + 156 <= 300 - 60 - 8, `the note's top ${top} keeps it between the bars`);
+  });
+
+  test("on a screen shorter than its first guess, the guess is capped too, so its first frame keeps between the bars", () => {
+    const markup = render(260);
+    assert.match(markup, /max-height:132px/);
+    assert.equal(topOf(markup), 52 + 8, "its top at the top bar's margin, its foot at the toolbar's");
+  });
+
+  test("the help under Teleport here is the part that scrolls, so the sentence, Close and the action stay in view", () => {
+    const markup = render();
+    assert.match(markup, /grid-template-rows:auto auto minmax\(0, 1fr\)/);
+    assert.match(markup, /<div style="min-height:0;overflow-y:auto;overscroll-behavior:contain"><p id="[^"]+"[^>]*>For Misty Step/);
+  });
+});
+
+describe("what the stopped walk's note says aloud (review P3-7)", () => {
+  const view = world({ tokens: [thorn({ x: 4, y: 4 })] });
+  const note = { tokenId: "thorn", sceneId: "s1", blocker: "wall" as const, door: null, ghost: { x: 7, y: 4 }, aim: { x: 7.5, y: 4.5 }, at: { x: 4, y: 4 }, searched: true as const, n: null };
+
+  test("only its sentence is the status, and the help stays on the page as the button's description", () => {
+    const scope = new RoomScope();
+    const slot = scope.get(stopNoteSlot);
+    slot.setState({ note });
+    Object.assign(slot, { getInitialState: slot.getState });
+    const markup = inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, camera: { x: 0, y: 0, scale: 40 }, viewport: { width: 1280, height: 800 }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
+    const statuses = markup.match(/role="status"/g) ?? [];
+    assert.equal(statuses.length, 1, "one status");
+    assert.match(markup, /<span role="status" aria-live="polite">Stopped at a wall\. There is no way around it that you have seen\.<\/span>/);
+    assert.doesNotMatch(markup, /aria-hidden="true"[^>]*>For Misty Step/, "the help is never hidden");
   });
 });
 

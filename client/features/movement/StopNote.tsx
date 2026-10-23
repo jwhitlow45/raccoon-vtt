@@ -70,7 +70,15 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   const anchor = worldToScreen(props.camera, { x: note.ghost.x + fp.w / 2, y: note.ghost.y + fp.h });
   // A card over the map as wide as a map pane, inside the canvas's 8 px margins.
   const width = Math.min(PANE_WIDTH, props.viewport.width - 2 * theme.space(2));
-  const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height, gap: theme.space(3), prefer: "below" });
+  /*
+   * No taller than the map the bars leave, inside the same margins, so on a
+   * short screen (844 x 390 at 130%) its foot never runs under the toolbar.
+   * The help under Teleport here scrolls first, so the sentence, Close and
+   * the action stay in view. cardPlace gets the capped height, its first
+   * frame's guess included, since it only keeps the top in bounds.
+   */
+  const room = Math.max(0, props.viewport.height - props.insets.top - props.insets.bottom - 2 * theme.space(2));
+  const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: Math.min(height, room), gap: theme.space(3), prefer: "below" });
   const close = () => slot.setState({ note: null, busy: false });
   const teleport = () => {
     if (slot.getState().busy) return;
@@ -90,15 +98,16 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   return (
     <div
       ref={ref}
-      role="status"
-      aria-live="polite"
+      data-stop-note=""
       style={{
         position: "absolute",
         left: place.left,
         top: place.top,
         width,
+        maxHeight: room,
         zIndex: theme.z.pane,
         display: "grid",
+        gridTemplateRows: "auto auto minmax(0, 1fr)",
         gap: theme.space(2),
         padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
         background: theme.color.surface,
@@ -110,16 +119,22 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
       }}
     >
       <PaneHeader
-        // The whole sentence, wrapped: it says what stopped the walk.
-        title={stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}
+        // The whole sentence, wrapped: it says what stopped the walk. It alone is the status a screen reader hears when the note comes, not Close or the help.
+        title={
+          <span role="status" aria-live="polite">
+            {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}
+          </span>
+        }
         lines={TITLE_LINES}
         onClose={close}
       />
-      {/* The note's one action, so the primary (docs/design-v1-visual.md 2.3). */}
+      {/* The note's one action, so the primary (docs/design-v1-visual.md 2.3). The help is its description, read with it. */}
       <Button variant="primary" size="sm" busy={busy} onClick={teleport} aria-describedby={helpId}>
         {busy ? "Teleporting…" : "Teleport here"}
       </Button>
-      <Help id={helpId}>For Misty Step and anything else that passes walls. The walk to the wall is taken back, and the teleport does not count against Speed.</Help>
+      <div style={{ minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+        <Help id={helpId}>For Misty Step and anything else that passes walls. The walk to the wall is taken back, and the teleport does not count against Speed.</Help>
+      </div>
     </div>
   );
 }
