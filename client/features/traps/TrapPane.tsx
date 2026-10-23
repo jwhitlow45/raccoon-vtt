@@ -289,10 +289,12 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
             <Switch label="Opens a pit" help={opened && rig.pit ? openedLine(rig.pit) : undefined} checked={rig.pit !== undefined} disabled={opened} onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })} />
           ) : null}
           {squares && pitDepth !== null ? (
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-              <NumberInput label="Pit depth, feet" value={pitDepth} min={1} max={ground - MIN_HEIGHT_FT} onChange={(depth) => setRig({ pit: { floor: pitFloor(ground, depth) } })} />
-              <span style={{ color: theme.color.textMuted }}>ft deep</span>
-            </div>
+            <PartRow>
+              <Pair>
+                <NumberInput label="Pit depth, feet" value={pitDepth} min={1} max={ground - MIN_HEIGHT_FT} onChange={(depth) => setRig({ pit: { floor: pitFloor(ground, depth) } })} />
+                <Words>ft deep</Words>
+              </Pair>
+            </PartRow>
           ) : null}
         </Group>
 
@@ -306,7 +308,15 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
 
         <Group label="Players read" summary={readSummary(rig)} holds="rows" {...fold("read")}>
           <TextField label="What players read" placeholder="The floor gives way!" value={rig.message ?? ""} max={LIMITS.trapMessageChars} onSave={(message) => setRig({ message })} />
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+          <PartRow
+            end={
+              rig.sound ? (
+                <Button size="sm" onClick={() => playTrapSound(rig.sound!, true)}>
+                  Play
+                </Button>
+              ) : null
+            }
+          >
             <Select aria-label="Sound" value={rig.sound ?? ""} onChange={(e) => setRig({ sound: e.target.value === "" ? null : (e.target.value as TrapSound) })}>
               <option value="">No sound</option>
               {TRAP_SOUNDS.map((s) => (
@@ -315,12 +325,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
                 </option>
               ))}
             </Select>
-            {rig.sound ? (
-              <Button size="sm" onClick={() => playTrapSound(rig.sound!, true)}>
-                Play
-              </Button>
-            ) : null}
-          </div>
+          </PartRow>
           <Help>Players read the line, and hear the sound where their sound is on, when they see it go off.</Help>
         </Group>
 
@@ -356,7 +361,8 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
           />
         ) : null}
         <Switch label="Found" help="Players see a found trap's name and where it lies." checked={trap.found} onChange={(found) => update({ found })} />
-        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+        {/* Two to a line in even halves, so Set it off never trails alone at the end of a ragged row. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: theme.space(2) }}>
           {search ? (
             <Button size="sm" onClick={() => ask(search)}>
               Ask to search
@@ -517,18 +523,23 @@ function UsesPrompt(props: { onArm(uses: number | null): void; onCancel(): void 
     // A line and its buttons under Armed, with no box of its own: Done stays the pane's one primary (docs/design-v1-look-pass-2.md 2.2).
     <div role="group" aria-label="Give it uses" style={{ display: "grid", gap: theme.space(2) }}>
       <Help>It has no uses left. How many more times can it go off?</Help>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-        <NumberInput label="Uses" value={uses} min={1} max={99} onChange={setUses} />
-        <Button size="sm" onClick={() => props.onArm(uses)}>
-          Arm
-        </Button>
-        <Button size="sm" onClick={() => props.onArm(null)}>
-          No limit
-        </Button>
-        <Button size="sm" onClick={props.onCancel}>
-          Cancel
-        </Button>
-      </div>
+      {/* Arm beside the number it takes, and No limit with Cancel, so no button trails alone where the row wraps. */}
+      <PartRow>
+        <Pair>
+          <NumberInput label="Uses" value={uses} min={1} max={99} onChange={setUses} />
+          <Button size="sm" onClick={() => props.onArm(uses)}>
+            Arm
+          </Button>
+        </Pair>
+        <Pair>
+          <Button size="sm" onClick={() => props.onArm(null)}>
+            No limit
+          </Button>
+          <Button size="sm" onClick={props.onCancel}>
+            Cancel
+          </Button>
+        </Pair>
+      </PartRow>
     </div>
   );
 }
@@ -593,7 +604,7 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
       {/* Its names wrap, so a narrow pane never scrolls sideways for them (docs/design-v1-look-pass-2.md D2). */}
       <ChoiceRows<HitsKind> label="Hits" value={shown} options={options} onChange={choose} wrap />
       {shown === "cells" ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+        <PartRow>
           <Button size="sm" onClick={() => props.pick("hits", true)}>
             Draw them again
           </Button>
@@ -601,7 +612,7 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
           <Button size="sm" icon="plus" aria-label="Add squares it hits" onClick={() => props.pick("hits")}>
             Add squares
           </Button>
-        </div>
+        </PartRow>
       ) : null}
       {shown === "area" ? (
         <Button size="sm" onClick={aim}>
@@ -643,7 +654,7 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
   const setConditions = (next: ConditionKey[]) => setRig(next.length > 0 ? { conditions: next } : { conditions: null, lasts: null });
   return (
     <>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+      <PartRow>
         <Select
           aria-label="Save"
           value={rig.save?.ability ?? ""}
@@ -659,7 +670,7 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
             </option>
           ))}
         </Select>
-      </div>
+      </PartRow>
       {/* The group save's own rows, which these fields fill (features/dice/groupSave/GroupSave.tsx). */}
       {rig.save ? (
         <FieldRow label="DC">
@@ -706,7 +717,7 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
           ))}
         </ChipRow>
       ) : null}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+      <PartRow>
         {conditions.length < LIMITS.trapConditions ? (
           <Select aria-label="Add a condition on a fail" value="" onChange={(e) => e.target.value && setConditions([...conditions, e.target.value as ConditionKey])}>
             <option value="">{conditions.length === 0 ? "A condition on a fail…" : "Another condition…"}</option>
@@ -717,9 +728,9 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
             ))}
           </Select>
         ) : null}
-      </div>
+      </PartRow>
       {conditions.length > 0 ? (
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+        <PartRow>
           <Select
             aria-label="How long the conditions last"
             value={rig.lasts?.mode ?? ""}
@@ -735,12 +746,12 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
             ))}
           </Select>
           {rig.lasts?.mode === "rounds" ? (
-            <>
+            <Pair>
               <NumberInput label="Rounds" value={rig.lasts.rounds ?? 1} min={1} max={1000} onChange={(rounds) => setRig({ lasts: { mode: "rounds", rounds } })} />
-              <span style={{ color: theme.color.textMuted }}>rounds</span>
-            </>
+              <Words>rounds</Words>
+            </Pair>
           ) : null}
-        </div>
+        </PartRow>
       ) : null}
     </>
   );
@@ -772,7 +783,7 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
   };
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+      <PartRow end={<Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this damage" onClick={props.onRemove} />}>
         <Input
           type="text"
           aria-label="Damage dice"
@@ -794,8 +805,7 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
             </option>
           ))}
         </Select>
-        <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this damage" onClick={props.onRemove} />
-      </div>
+      </PartRow>
       {bad ? (
         <div id={errorId}>
           <ErrorText>Not a dice formula, such as 2d10 or 1d6+2.</ErrorText>
@@ -852,11 +862,10 @@ function ActionList(props: { trap: Trap; rig: TrapRig; setRig(patch: RigPatch): 
           what = view?.stamps[a.show.stampId] ? "Show a hidden stamp" : "Show a stamp that is gone";
         }
         return (
-          <div key={i} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-            <span style={{ flex: "1 1 120px" }}>{what}</span>
-            {choice}
-            <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this effect" onClick={() => put(i, null)} />
-          </div>
+          // What it acts on heads the row beside its remove, and its choice takes the row's whole width under them, so the two never share a line at one width and part at another.
+          <PartRow key={i} end={<Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this effect" onClick={() => put(i, null)} />} under={choice}>
+            <span style={{ minWidth: 0, minHeight: theme.touch, display: "flex", alignItems: "center" }}>{what}</span>
+          </PartRow>
         );
       })}
     </div>
@@ -882,7 +891,7 @@ function checkOf(value: string, rest: Pick<TrapCheck, "dc" | "what">): TrapCheck
 function CheckRow(props: { check: TrapCheck; what: boolean; onChange(check: TrapCheck): void; onRemove(): void }) {
   const { check } = props;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+    <PartRow end={<Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this check" onClick={props.onRemove} />}>
       <Select aria-label="Check" value={checkValue(check)} onChange={(e) => props.onChange(checkOf(e.target.value, check))}>
         {CHECK_CHOICES.map((c) => (
           <option key={c.value} value={c.value}>
@@ -890,15 +899,16 @@ function CheckRow(props: { check: TrapCheck; what: boolean; onChange(check: Trap
           </option>
         ))}
       </Select>
-      <span style={{ color: theme.color.textMuted }}>DC</span>
-      <NumberInput label="Check DC" value={check.dc} min={LIMITS.rollDcMin} max={LIMITS.rollDcMax} onChange={(dc) => props.onChange({ ...check, dc })} />
+      <Pair>
+        <Words>DC</Words>
+        <NumberInput label="Check DC" value={check.dc} min={LIMITS.rollDcMin} max={LIMITS.rollDcMax} onChange={(dc) => props.onChange({ ...check, dc })} />
+      </Pair>
       {props.what ? (
         <div style={{ flex: "1 1 140px" }}>
           <TextField label="What it finds" placeholder="the pressure plate" value={check.what ?? ""} max={LIMITS.trapCheckChars} onSave={(what) => props.onChange(checkOf(checkValue(check), { dc: check.dc, ...(what ? { what } : {}) }))} />
         </div>
       ) : null}
-      <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this check" onClick={props.onRemove} />
-    </div>
+    </PartRow>
   );
 }
 
@@ -936,4 +946,34 @@ function FindFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
       {rig.find.length > 0 || disarm?.check ? <Help>{[...rig.find.map(checkText), ...(disarm?.check ? [`Disarm: ${checkText(disarm.check)}`] : [])].join(". ")}.</Help> : null}
     </>
   );
+}
+
+/**
+ * One row of a part's fields (docs/design-v1-polish.md R3): the fields
+ * wrap inside the first cell, and the row's remove, or the one action
+ * that ends it, holds the second, level with the first line. A remove so
+ * never wraps alone under the fields it takes away. `under` takes the
+ * row's whole width below both, for a choice too wide to share a line
+ * with the remove on a narrow sheet.
+ */
+function PartRow(props: { children: ReactNode; end?: ReactNode; under?: ReactNode }) {
+  const fields = <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>{props.children}</div>;
+  if (!props.end && !props.under) return fields;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "start", gap: theme.space(2) }}>
+      {fields}
+      {props.end ?? <span />}
+      {props.under ? <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>{props.under}</div> : null}
+    </div>
+  );
+}
+
+/** Parts that belong together, as one part a row never parts: a field and its word, its unit after or its name before ("3 rounds", "DC 15"), or buttons that go together. */
+function Pair(props: { children: ReactNode }) {
+  return <span style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>{props.children}</span>;
+}
+
+/** A pair's word, in the muted text a unit takes. */
+function Words(props: { children: ReactNode }) {
+  return <span style={{ color: theme.color.textMuted }}>{props.children}</span>;
 }
