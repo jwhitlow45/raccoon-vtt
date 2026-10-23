@@ -20,6 +20,7 @@ import {
   warnsOf,
   disarmFill,
   findSummary,
+  GROUP_SAVE_HELD,
   newTrapInput,
   noteSummary,
   openedLine,
@@ -284,6 +285,11 @@ describe("the pane's lines and its asks for rolls", () => {
     assert.equal(noteSummary(rig({})), "None");
     assert.equal(noteSummary(rig({ note: "Roll 2d6 a dart\nThen check" })), "Roll 2d6 a dart");
     assert.equal(saveSummary(rig({})), "None");
+  });
+
+  test("a toast's Save and damage held back by a group save with rolls says where to go, in short sentences (D26)", () => {
+    assert.equal(GROUP_SAVE_HELD, "A group save with rolls is already open. Use Save and damage on the trap's card, which asks before replacing it.");
+    for (const sentence of GROUP_SAVE_HELD.split(". ")) assert.ok(sentence.split(" ").length <= 20, sentence);
   });
 
   test("the summaries keep Who's long words, which the choice shortens to one word each", () => {

@@ -507,6 +507,8 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     await waitFor("the status region to read the time-up", async () => /Time is up for your turn/.test((await status.textContent()) ?? ""), 15_000);
     const summary = player.getByRole("button", { name: /^Time is up/ });
     await summary.waitFor();
+    // It ends in the chevron Show has beside it (docs/design-v1-look-pass-2.md D28).
+    assert.equal(await summary.locator("svg").count(), 1, "the summary has no chevron");
     assert.equal(await player.locator('[data-alert="timeUp"]').isVisible(), false, "the column did not fold");
     await shots.take(player, "fold-dock-time-up");
 
@@ -520,7 +522,15 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     await openPanelsKeepingFocus(player);
     assert.match((await focused(player)).name, /^Time is up/);
     await player.getByRole("button", { name: "Close Panels" }).click();
-    await player.locator('[data-alert="timeUp"]').click();
+    // Its words are a status and its Dismiss a button of its own, so a tap on the words dismisses nothing (D27).
+    const card = player.locator('[data-alert="timeUp"]');
+    await card.getByRole("status").filter({ hasText: /Time is up for your turn/ }).waitFor();
+    const words = await card.getByRole("status").boundingBox();
+    assert.ok(words);
+    await player.mouse.click(words.x + 4, words.y + words.height / 2);
+    assert.equal(await card.count(), 1, "a tap on the words dismissed the time-up");
+    await card.getByRole("button", { name: /^Dismiss Time is up/ }).click();
+    await card.waitFor({ state: "detached" });
     await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
   });
 
@@ -608,6 +618,8 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     assert.ok(b.sheet.top >= b.bars.bottom - 0.5, "the sheet runs under the top bars");
     assert.ok(b.sheet.bottom <= b.toolbar.top + 1, "the sheet runs under the toolbar");
     await assertHeaderFits(sheet, 1.3, "the Panels list");
+    // The header's buttons are the kit's small buttons, not hand-made pills (docs/design-v1-look-pass-2.md D28).
+    for (const b of [show, summary]) assert.equal(await b.evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el).borderTopLeftRadius), "10px", `${await b.getAttribute("aria-label")} is not a small button`);
     assert.equal(await header.getByRole("button", { name: /^Close/ }).count(), 1, "two closes in the header");
     await shots.take(dm, "fold-header-forced");
 

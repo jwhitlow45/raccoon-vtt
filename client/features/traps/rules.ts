@@ -501,6 +501,13 @@ export function noteSummary(rig: Pick<TrapRig, "note">): string {
   return rig.note ? (rig.note.split("\n")[0] ?? NONE) : NONE;
 }
 
+/**
+ * The toast when a toast's Save and damage cannot start the group save,
+ * since the open one holds rolls: where to go instead, and that nothing is
+ * lost without asking (docs/design-v1-look-pass-2.md D26).
+ */
+export const GROUP_SAVE_HELD = "A group save with rolls is already open. Use Save and damage on the trap's card, which asks before replacing it.";
+
 // ------------------------------------------------------------ asking for rolls
 
 /**

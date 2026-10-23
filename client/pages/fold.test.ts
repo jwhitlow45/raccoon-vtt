@@ -107,13 +107,13 @@ describe("alertsSummary", () => {
     assert.equal(waiting?.name, "Roll asked: the DM asks for a Wisdom check and 1 more roll. Close the sheet to answer.", "a roll to answer still says answer");
   });
 
-  test("for the column's summary row beside the docked bar, each advice says to hide the bar", () => {
+  test("for the column's summary row beside the docked bar, each advice says to hide the window", () => {
     const answer = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1 }, [], "bar");
-    assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Hide the bar to answer.");
+    assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Hide the window to answer.");
     const them = alertsSummary(null, [prompt("p1", "Thorn"), timeUp], "bar");
-    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Hide the bar to see them.");
+    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Hide the window to see them.");
     const it = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")], "bar");
-    assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Hide the bar to see it.");
+    assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Hide the window to see it.");
     // The sheet's three wordings stay as they were.
     assert.match(alertsSummary({ text: "Roll asked", name: "a roll", waiting: true, requests: 1 }, [])?.name ?? "", /Close the sheet to answer\.$/);
     assert.match(alertsSummary(null, [prompt("p1", "Thorn"), timeUp])?.name ?? "", /Close the sheet to see them\.$/);

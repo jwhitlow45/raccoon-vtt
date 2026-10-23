@@ -7,6 +7,7 @@ import { playTrapSound } from "../encounter/alerts.ts";
 import { stopNoteSlot } from "../movement/store.ts";
 import { lastMoveSlot } from "../tokens/undoMove.ts";
 import { dmAlerts, linesAfter, newestId, playerAlerts, shownAlert, trapMoveWatch, type MoveAnswers, type TrapAlert } from "./alerts.ts";
+import { GROUP_SAVE_HELD } from "./rules.ts";
 import { trapStart } from "./TrapSaveStart.tsx";
 
 const NO_LINES: readonly LogEntry[] = [];
@@ -52,7 +53,7 @@ export function useTrapAlerts(): void {
           const now = store.getState().view?.traps[trap.id];
           const due = now?.rig?.due?.find((d) => d.id === a.due);
           if (!now || !due) ui.notify("It was settled meanwhile.", "info");
-          else if (!start.current(trapStart(now, due))) ui.notify("The open group save holds rolls. Its card's Save and damage asks before it is discarded.", "info");
+          else if (!start.current(trapStart(now, due))) ui.notify(GROUP_SAVE_HELD, "info");
         },
       };
     };

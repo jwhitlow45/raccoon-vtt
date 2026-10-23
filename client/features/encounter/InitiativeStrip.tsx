@@ -15,6 +15,7 @@ import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
 import { dockSlot, drawn, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
+import { SheetHeader } from "../../components/SheetHeader.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useUiScale } from "../device/settings.ts";
 import { sheetOpen } from "../../state/types.ts";
@@ -965,24 +966,9 @@ function FightAlerts() {
       }}
     >
       {overlay ? (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: theme.space(2),
-            flex: "none",
-            boxSizing: "border-box",
-            height: OVERLAY_HEAD,
-            padding: `0 calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
-            borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
-          }}
-        >
-          <h2 id={overlayTitle} style={{ flex: 1, margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>
-            Alerts
-          </h2>
-          <Button size="sm" icon="close" iconOnly="always" onClick={closeOverlay}>
-            Close
-          </Button>
+        // Every sheet and dialog's header, in its one-row form, inside the safe areas the screen's edges keep.
+        <div style={{ flex: "none", padding: `0 ${theme.safe.mapRight} 0 ${theme.safe.left}` }}>
+          <SheetHeader title="Alerts" titleId={overlayTitle} compact divider closeLabel="Close" onClose={closeOverlay} />
         </div>
       ) : null}
       {summarized && summary ? (
@@ -1039,29 +1025,9 @@ function FightAlerts() {
         <div data-alert="rolls" style={{ display: "contents" }}>
           <RollAlerts />
         </div>
-        {timeUp.text ? (
-          <button
-            type="button"
-            role="status"
-            data-alert="timeUp"
-            onClick={timeUp.dismiss}
-            style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body, borderColor: theme.color.danger }}
-          >
-            {timeUp.text}
-          </button>
-        ) : null}
+        {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger onDismiss={timeUp.dismiss} /> : null}
         {notices.map((n) => (
-          <button
-            key={n.id}
-            type="button"
-            role="status"
-            data-alert="notice"
-            data-alert-id={n.id}
-            onClick={() => dismissNotice(n.id)}
-            style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body }}
-          >
-            {n.text}
-          </button>
+          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
         ))}
       </div>
       {/* Wherever the column cuts its cards, such as at the toolbar on a phone held sideways. Its foot keeps the shadow's room unless it stands over a docked bar. */}
@@ -1089,9 +1055,36 @@ function firstCardHeight(cards: HTMLElement): number {
   return firstCard(cards)?.getBoundingClientRect().height ?? 0;
 }
 
-/** The alerts over the screen: their header's height, a touch target and a little, with its rule, and the padding above and below their cards. */
-const OVERLAY_HEAD = theme.touch + theme.space(1) + theme.line.border;
+/** The alerts over the screen: their header's height, SheetHeader's one row with its rule, and the padding above and below their cards. */
+const OVERLAY_HEAD = theme.touch + theme.line.border;
 const OVERLAY_PAD = theme.space(2);
+
+/**
+ * A time-up or a notice in the column: its words as a status, read out as
+ * it arrives, and a quiet Dismiss. As a whole card that was a button, a
+ * reader met no button and a tap dismissed it with nothing to say it would
+ * (docs/design-v1-look-pass-2.md D27). Focusable from script, not by Tab,
+ * so a summary's tap can show it (pages/fold.ts focusAlert).
+ */
+function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string; danger?: boolean; onDismiss(): void }) {
+  return (
+    <section
+      role="group"
+      aria-label={props.text}
+      tabIndex={-1}
+      data-alert={props.kind}
+      data-alert-id={props.id}
+      style={{ ...card, display: "flex", alignItems: "center", gap: theme.space(2), minHeight: theme.touch, ...(props.danger ? { borderColor: theme.color.danger } : null) }}
+    >
+      <p role="status" style={{ flex: 1, minWidth: 0, margin: 0, fontSize: theme.font.body14 }}>
+        {props.text}
+      </p>
+      <Button size="sm" variant="quiet" aria-label={`Dismiss ${props.text.replace(/[.!]+$/, "")}`} onClick={props.onDismiss}>
+        Dismiss
+      </Button>
+    </section>
+  );
+}
 
 /** Where the summary row stands against its usual place (FightAlerts `rowPlace`): how far it rose and moved left, and how far in from each edge it stops. */
 type RowPlace = { lift: number; shift: number; insetLeft: number; insetRight: number };

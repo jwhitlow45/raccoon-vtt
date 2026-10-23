@@ -591,6 +591,13 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
     const alerts = dm.getByRole("dialog", { name: "Alerts" });
     assert.equal(await alerts.count(), 1, `${label}: the alerts did not open over the screen`);
+    // Every sheet and dialog's header, in its one-row form: the title a heading, Close its 44 px icon, whole in reach (docs/design-v1-look-pass-2.md D7).
+    const head = alerts.locator("header").first();
+    assert.equal(await head.getByRole("heading", { name: "Alerts", exact: true }).count(), 1, `${label}: the alerts' header is not SheetHeader`);
+    const close = head.getByRole("button", { name: "Close", exact: true });
+    assert.ok(await wholeInReach(close), `${label}: the alerts' Close is out of reach`);
+    const closeBox = await close.boundingBox();
+    assert.ok(closeBox && Math.abs(closeBox.height - 44 * 1.3) < 1.5, `${label}: the alerts' Close is not the 44 px icon: ${JSON.stringify(closeBox)}`);
     await check.getByRole("button", { name: "Passed", exact: true }).tap();
     await waitFor(`one check left, ${label}`, async () => ((await alerts.locator('[data-alert="concentration"]').count()) === 1 ? true : null));
     // Modal: the page behind takes no focus, and Tab and Shift+Tab wrap inside.
