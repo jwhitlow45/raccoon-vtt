@@ -14,6 +14,7 @@ import {
   columnEdges,
   DEFAULT_CHROME,
   EDGE,
+  FLIP_CLEARANCE,
   LANE_WIDTH,
   clampBox,
   clearAnchor,
@@ -59,6 +60,7 @@ import {
   spotWords,
   WINDOW_FOLD_BELOW,
   noticePlace,
+  OFFSET_Y,
   overlapsLane,
   parseSpot,
   placeBar,
@@ -1379,7 +1381,7 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
   const view = { width: 390, height: 844 };
   const chrome = phone({ band: true, options: false, safe: { top: 0, side: 0, bottom: 0 } });
   const free = freeArea(view, chrome);
-  const room = (y: number, height: number, column: { top: number; content: number; first: number } | null = null) => ({ layout: view, viewport: view, chrome, foot: 0, anchor: { x: 200, y }, column, height });
+  const room = (y: number, height: number, column: { top: number; content: number; first: number } | null = null, tokenHeight = FLIP_CLEARANCE) => ({ layout: view, viewport: view, chrome, foot: 0, anchor: { x: 200, y }, column, height, tokenHeight });
   /** Where the bar hangs once the map has moved by `dy`, and whether its token, in the 74 px above the anchor and its label in the 34 below, stays clear of it and inside the free area. */
   const after = (y: number, height: number, dy: number, column: { top: number; content: number; first: number } | null = null) => {
     const placed = placeBar({ ...room(y + dy, height, column), spot: DEFAULT_SPOT });
@@ -1422,16 +1424,16 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
   test("Larger asks for two thirds of the screen, and leaves its token 120 px of the free area under the column's first card", () => {
     assert.deepEqual(free, { left: 8, top: 108, width: 374, height: 668 });
     // Two thirds of 844 is 563, but the band leaves 668, so 548 keeps the token's 120.
-    assert.equal(largerRoom(view, free, free.top), 668 - LARGER_LEAVES);
+    assert.equal(largerRoom(view, free, free.top, FLIP_CLEARANCE), 668 - LARGER_LEAVES);
     // With no band, two thirds.
     const bare = freeArea(view, phone({ band: false, options: false, safe: { top: 0, side: 0, bottom: 0 } }));
-    assert.equal(largerRoom(view, bare, bare.top), 563);
+    assert.equal(largerRoom(view, bare, bare.top, FLIP_CLEARANCE), 563);
     // A 440 x 956 phone.
     const big = { width: 440, height: 956 };
-    assert.equal(largerRoom(big, freeArea(big, chrome), 108), 637);
+    assert.equal(largerRoom(big, freeArea(big, chrome), 108, FLIP_CLEARANCE), 637);
     // Under a check's card, which ends at 230, the bar may reach 238 at the highest.
-    assert.equal(largerRoom(view, free, 238), 776 - 238 - LARGER_LEAVES);
-    assert.equal(largerRoom(view, free, 900), 0);
+    assert.equal(largerRoom(view, free, 238, FLIP_CLEARANCE), 776 - 238 - LARGER_LEAVES);
+    assert.equal(largerRoom(view, free, 900, FLIP_CLEARANCE), 0);
   });
 
   test("a bar under its token moves the map up by what its side lacks, and then has that room with its token clear and in view", () => {
@@ -1475,13 +1477,13 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     assert.equal(largerShift(room(391, 300)), 0);
     // Docked on its side, and compact on a screen too short to span.
     const side = { width: 844, height: 390 };
-    assert.equal(largerShift({ layout: side, viewport: side, chrome, foot: 0, anchor: { x: 200, y: 200 }, column: null, height: 586 }), 0);
+    assert.equal(largerShift({ layout: side, viewport: side, chrome, foot: 0, anchor: { x: 200, y: 200 }, column: null, height: 586, tokenHeight: FLIP_CLEARANCE }), 0);
     const tiny = { width: 246, height: 300 };
-    assert.equal(largerShift({ layout: tiny, viewport: tiny, chrome, foot: 0, anchor: { x: 100, y: 150 }, column: null, height: 586 }), 0);
+    assert.equal(largerShift({ layout: tiny, viewport: tiny, chrome, foot: 0, anchor: { x: 100, y: 150 }, column: null, height: 586, tokenHeight: FLIP_CLEARANCE }), 0);
   });
 
   test("Smaller moves the map back by what Larger moved it, never so far that the token leaves the free area", () => {
-    const base = { layout: view, viewport: view, chrome, foot: 0, column: null };
+    const base = { layout: view, viewport: view, chrome, foot: 0, column: null, tokenHeight: FLIP_CLEARANCE };
     // Back down from a shift up, and back up from a shift down.
     assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 194 }, moved: -197 }), 197);
     assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 730 }, moved: 90 }), -90);
@@ -1495,5 +1497,24 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     const back = smallerShift({ ...base, anchor: { x: 200, y: 391 + dy }, moved: dy });
     assert.equal(back, -dy);
     assert.deepEqual(after(391, 586, dy + back).box, after(391, 586, 0).box);
+  });
+
+  test("a tall or zoomed token keeps its top in the free area: Larger asks for less under a 128 px token, Smaller moves back less over a 64 px one, and a token too tall for more room moves nothing (review BS-ASTRA-01)", () => {
+    // Under a 128 px token Larger leaves its label gap, its height and 12 px: 668 - 174 = 494, so the map moves up 143, not 197.
+    const tall = 128;
+    assert.equal(largerRoom(view, free, free.top, tall), 668 - (OFFSET_Y + tall + 12));
+    const dy = largerShift(room(391, 586, null, tall));
+    assert.equal(dy, -(494 - 351));
+    assert.ok(391 + dy - tall >= free.top, `the token's top went to ${391 + dy - tall}, over the free area's top at ${free.top}`);
+    const placed = placeBar({ ...room(391 + dy, 586, null, tall), spot: DEFAULT_SPOT });
+    assert.equal(placed?.hang.room, 494);
+    assert.ok(placed && hangBox(placed.hang, 586).top >= 391 + dy + OFFSET_Y, "the bar reached over the token's label");
+    // Smaller after the viewer panned Thorn up to 200: a 64 px token's top stops at the free area's top, 28 px back rather than 52.
+    const back = smallerShift({ layout: view, viewport: view, chrome, foot: 0, column: null, anchor: { x: 200, y: 200 }, moved: 90, tokenHeight: 64 });
+    assert.equal(back, -(200 - 64 - free.top));
+    assert.ok(200 + back - 64 >= free.top, `the token's top went to ${200 + back - 64}`);
+    // A token taller than the free area leaves room for leaves the bar as it is.
+    assert.equal(largerRoom(view, free, free.top, 640), 0);
+    assert.equal(largerShift(room(391, 586, null, 640)), 0);
   });
 });

@@ -1362,6 +1362,7 @@ export function MapStage(props: {
               movable={group.filter(canDrag).length}
               anchor={inZoomed(worldAnchor(cam, selected), zoom)}
               viewport={sizeInZoomed(size, zoom)}
+              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected), zoom)}
               onClose={() => ui.select(null)}
               onShift={shiftForBar}
             />
@@ -1372,6 +1373,7 @@ export function MapStage(props: {
               token={selected}
               anchor={inZoomed(belowLabel(worldAnchor(cam, selected), boardText.get(selected.id)), zoom)}
               viewport={sizeInZoomed(size, zoom)}
+              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected), boardText.get(selected.id)), zoom)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
               onShift={shiftForBar}
@@ -1422,4 +1424,9 @@ function belowLabel(anchor: Point, text: TokenText | undefined): Point {
 function worldAnchor(cam: Camera, token: ViewToken): Point {
   const fp = footprint(token);
   return worldToScreen(cam, { x: token.x + fp.w / 2, y: token.y + fp.h });
+}
+
+/** How far a token's top stands above the screen point its bar hangs from, in the chrome's pixels (barDock.ts SpanRoom). */
+function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number): number {
+  return (anchor.y - worldToScreen(cam, { x: token.x, y: token.y }).y) / zoom;
 }

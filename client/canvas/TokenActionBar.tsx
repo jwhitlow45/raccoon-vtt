@@ -172,6 +172,8 @@ export function TokenActionBar(props: {
   fullAccess: boolean;
   onDetails(): void;
   onClose(): void;
+  /** How far the token's top stands above `anchor` as drawn, in the chrome's pixels (barDock.ts SpanRoom). */
+  tokenHeight: number;
   /** Moves the map down by this many of the chrome's pixels, or up when negative, for an upright phone's larger bar (barDock.ts largerShift). */
   onShift?(dy: number): void;
 }) {
@@ -180,6 +182,7 @@ export function TokenActionBar(props: {
     <BarFrame
       anchor={props.anchor}
       viewport={props.viewport}
+      tokenHeight={props.tokenHeight}
       opening={token.id}
       onShift={props.onShift}
       label={`${displayName(token)} actions`}
@@ -494,6 +497,7 @@ export function GroupActionBar(props: {
   movable: number;
   anchor: Point;
   viewport: Size;
+  tokenHeight: number;
   onClose(): void;
   onShift?(dy: number): void;
 }) {
@@ -529,6 +533,7 @@ export function GroupActionBar(props: {
     <BarFrame
       anchor={props.anchor}
       viewport={props.viewport}
+      tokenHeight={props.tokenHeight}
       // One opening while the group grows and shrinks, which keeps this bar mounted.
       opening="group"
       onShift={props.onShift}
@@ -801,6 +806,8 @@ type Drag = { kind: "move" | ResizePart; pointerId: number; el: HTMLElement; x: 
 function BarFrame(props: {
   anchor: Point;
   viewport: Size;
+  /** How far the token's top stands above `anchor` as drawn (barDock.ts SpanRoom). */
+  tokenHeight: number;
   /** What the bar opened for: the token's id, or "group". */
   opening: string;
   onShift?(dy: number): void;
@@ -956,7 +963,7 @@ function BarFrame(props: {
    */
   const larger = useStore(dockStore, (s) => s.larger);
   const roomStore = useRoomStore();
-  const spanRoom = { layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, column };
+  const spanRoom = { layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, column, tokenHeight: props.tokenHeight };
   const shift = (dy: number) => {
     if (dy !== 0) props.onShift?.(dy);
   };
