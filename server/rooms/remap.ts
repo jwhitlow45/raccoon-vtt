@@ -582,6 +582,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   }
   out.log.sort((a, b) => compareLogIds(a.id, b.id));
   remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId, dmLineIds, sharedLines: shared });
+  // A file's trap lines come in its own order, and the reducer finds a line by its id in each log.
+  out.trapLog.sort((a, b) => compareLogIds(a.id, b.id));
+  out.trapSeen.sort((a, b) => compareLogIds(a.id, b.id));
   // A hand-made or older file is brought within the companion rules (docs/design-v1-combat-flow.md 4.7), a character's
   // initiative and Passive Perception follow its stat block, and a Wild Shape mark stands only beside its creature
   // (docs/design-v1-pc-stats.md 3.5 and 3.6).

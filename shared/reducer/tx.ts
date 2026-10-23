@@ -166,7 +166,8 @@ export class Tx {
     const parsed = parseKey(key);
     if (!parsed) throw new Error(`unknown entity key ${key}`);
     const line = parsed.kind === "log" || parsed.kind === "trapLog" || parsed.kind === "trapSeen";
-    const prev = line ? lineIn(this.state[parsed.kind] ?? [], parsed.id) : readEntity(this.state, key);
+    const at = line ? lineAt(this.state[parsed.kind] ?? [], parsed.id, value === null) : -1;
+    const prev = line ? (at >= 0 ? this.state[parsed.kind]![at]! : null) : readEntity(this.state, key);
     if (!this.before.has(key)) {
       this.before.set(key, prev);
       this.order.push(key);
@@ -192,14 +193,12 @@ export class Tx {
         // A DM line counts past its op's shared lines (addLog), so a later shared line of the op goes before it, in id
         // order, as the client's copy keeps it (keys.ts withLine).
         const log = this.collection(parsed.kind);
-        const at = lineSlot(log, parsed.id);
-        const found = log[at]?.id === parsed.id;
         if (next === null) {
-          if (found) log.splice(at, 1);
-        } else if (found) {
+          if (at >= 0) log.splice(at, 1);
+        } else if (at >= 0) {
           log[at] = next as LogEntry;
         } else {
-          log.splice(at, 0, next as LogEntry);
+          log.splice(lineSlot(log, parsed.id), 0, next as LogEntry);
         }
         break;
       }
@@ -233,7 +232,7 @@ export class Tx {
     if (!logsByAudience(this.env.opVersion)) {
       const full = this.appendLine(entry, this.logIndex++);
       const log = this.collection("log");
-      while (log.length > MAX_LOG) this.write(keys.log(log[0]!.id), null);
+      for (const old of log.slice(0, Math.max(0, log.length - MAX_LOG))) this.write(keys.log(old.id), null);
       return full;
     }
     const event = entry.kind === "event" && entry.data !== undefined;
@@ -404,7 +403,7 @@ export class Tx {
     this.write(key(line.id), line);
     if (ring === "trapSeen") this.unsettled.push({ trapSeen: line });
     const lines = this.collection(ring);
-    while (lines.length > keep) this.write(key(lines[0]!.id), null);
+    for (const old of lines.slice(0, Math.max(0, lines.length - keep))) this.write(key(old.id), null);
     return line;
   }
 
@@ -571,6 +570,18 @@ function lineSlot(log: readonly LogEntry[], id: string): number {
 function lineIn(log: readonly LogEntry[], id: string): LogEntry | null {
   const line = log[lineSlot(log, id)];
   return line?.id === id ? line : null;
+}
+
+/**
+ * Where the line `id` is in a log, or -1. A load and an import put each log
+ * in id order (logsInIdOrder), so a line is found by its id. A line to be
+ * removed is looked for in the whole log should that fail, so a log out of
+ * order still loses the lines a trim drops, and no trim can loop.
+ */
+function lineAt(log: readonly LogEntry[], id: string, removing: boolean): number {
+  const at = lineSlot(log, id);
+  if (log[at]?.id === id) return at;
+  return removing ? log.findIndex((e) => e.id === id) : -1;
 }
 
 /** Whether a tile's new bits lack any bit it had. An unreadable tile counts as clearing, which only re-projects more. */

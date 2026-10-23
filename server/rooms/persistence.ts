@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { logsInIdOrder } from "#shared/logRings.ts";
 import { OP_VERSION, SNAPSHOT_VERSION, migrateOp, migrateSnapshot, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
@@ -67,7 +68,8 @@ export async function loadRoom(
   const row = snap.rows[0];
   if (!row) return null;
   const snapshotSeq = Number(row.seq);
-  let state = migrateSnapshot(row.state, row.schema_version);
+  // The reducer finds a line by its id in each log, so a stored log out of order is put in order before any op meets it.
+  let state = logsInIdOrder(migrateSnapshot(row.state, row.schema_version));
   // An import's lines are numbered at seq 0. One made before imports wrote them to the archive has none there, so its
   // lines still in the log are written now, and Show older reaches them once the live log moves past them. An import
   // writes them all in its transaction, so one of them in the archive means they came. An archive at its stored cap

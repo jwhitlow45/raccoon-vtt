@@ -7,6 +7,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { Tx } from "#shared/reducer/tx.ts";
 import { projectArchivedLog, projectState, stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { AT, DM, P1, actor, apply, env, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
@@ -830,6 +831,23 @@ describe("an imported log (importRoom)", () => {
     assert.deepEqual(out.log.find((e) => e.kind === "whisper"), { id: "0:0", at: AT, kind: "whisper", from: "m-p1", to: ["m-dm"], text: "psst" }, "a whisper is who it is from and for and what it says");
     assert.ok(serializedBytes(out) - measuredStateBytes(out) <= (LIMITS.dmLogLines + 2) * LIMITS.apartLineBytes);
     assertWithinLimits(out);
+  });
+
+  test("a file's trap logs out of id order come in order, so the next trap line trims its ring as any room's", () => {
+    const state = room();
+    const seen = (i: number): LogEntry => ({ id: `${i + 1}:0`, at: AT, kind: "event", data: { type: "trapSeen", by: [], message: `seen ${i}` } });
+    const sprung = (i: number): LogEntry => ({ id: `${i + 1}:900000`, at: AT, kind: "event", data: { type: "trap", trapId: "t1", sceneId: "s1", name: "Pit", how: "enter", by: [], hits: 0, did: [] } });
+    state.trapSeen = Array.from({ length: LIMITS.trapSeenLines }, (_, i) => seen(i)).reverse();
+    state.trapLog = Array.from({ length: LIMITS.trapLogLines }, (_, i) => sprung(i)).reverse();
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    for (const lines of [out.trapSeen, out.trapLog]) assert.deepEqual(lines.map((e) => e.id), lines.map((e) => e.id).sort(byId));
+    const tx = new Tx(out, DM, { seq: 5, at: AT });
+    tx.addTrapLine("trapSeen", { type: "trapSeen", by: [], message: "Darts fly." }, LIMITS.trapSeenLines);
+    tx.finish();
+    assert.equal(tx.state.trapSeen.length, LIMITS.trapSeenLines);
+    assert.ok(!tx.state.trapSeen.some((e) => e.id === out.trapSeen[0]!.id), "the oldest went");
   });
 
   test("a member's whispers past their bound keep their newest, and the rest are on Show older's pages", () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, test } from "node:test";
 import { compareLogIds, keys, type EntityKey } from "./keys.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
@@ -12,6 +13,7 @@ import {
   lineAudience,
   linesPastStart,
   liveStart,
+  logsInIdOrder,
   MAX_LOG,
   memberRing,
   PARTY_LINE_BASE,
@@ -399,6 +401,42 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.equal(holdsOp(state, P2, 2), true, "P2 reads only the chat line, which is here");
     assert.equal(holdsOp(state, P1, 2 + keep), true);
     assert.equal(holdsOp(state, P2, 1), false, "the oldest op the log holds may have lost lines to the shared lines' floor");
+  });
+
+  test("each log a room brings out of id order is put in order, and one in order is kept as it is", () => {
+    const line = (id: string): LogEntry => ({ id, at: AT, kind: "event", data: { type: "trapSeen", by: [], message: id } });
+    const state = { log: ["2:0", "1:0", "10:0"].map(line), trapLog: ["3:900001", "3:900000"].map(line), trapSeen: ["1:0", "2:0"].map(line) };
+    const sorted = logsInIdOrder(state);
+    assert.deepEqual(sorted.log.map((e) => e.id), ["1:0", "2:0", "10:0"]);
+    assert.deepEqual(sorted.trapLog.map((e) => e.id), ["3:900000", "3:900001"]);
+    assert.equal(sorted.trapSeen, state.trapSeen);
+  });
+
+  test("a trim of a log out of id order, which no load or import leaves, still ends and drops the lines first in place", () => {
+    // In a process of its own, so a trim that never ends fails this test rather than hanging the run.
+    const tx = new URL("./reducer/tx.ts", import.meta.url).href;
+    const util = new URL("./testutil.ts", import.meta.url).href;
+    const code = `
+      const { Tx } = await import(${JSON.stringify(tx)});
+      const { AT, DM, room } = await import(${JSON.stringify(util)});
+      const line = (id) => ({ id, at: AT, kind: "event", data: { type: "trapSeen", by: [], message: id } });
+      const chat = (id) => ({ id, at: AT, kind: "chat", from: "p1", text: id });
+      const state = room({ trapSeen: Array.from({ length: 20 }, (_, i) => line("1:" + (19 - i))), log: Array.from({ length: 200 }, (_, i) => chat("1:" + (199 - i))) });
+      const seen = new Tx(state, DM, { seq: 2, at: AT });
+      seen.addTrapLine("trapSeen", { type: "trapSeen", by: [], message: "new" }, 20);
+      seen.finish();
+      const old = new Tx(state, DM, { seq: 2, at: AT, opVersion: 18 });
+      old.addLog({ kind: "chat", from: "p1", text: "new" });
+      old.finish();
+      console.log(JSON.stringify({ seen: seen.state.trapSeen.map((e) => e.id), log: old.state.log.length, first: old.state.log[0].id }));
+    `;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { timeout: 20_000, encoding: "utf8" });
+    assert.equal(r.signal, null, "the trims ended");
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout) as { seen: string[]; log: number; first: string };
+    assert.equal(out.seen.length, 20);
+    assert.ok(!out.seen.includes("1:19"), "the line first in place went");
+    assert.deepEqual([out.log, out.first], [MAX_LOG, "1:198"]);
   });
 
   test("dmNumbered and countedApart tell the DM's count and the party lines' from the shared one", () => {

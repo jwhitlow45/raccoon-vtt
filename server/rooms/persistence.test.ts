@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createInitialState } from "#shared/initial.ts";
 import { OP_VERSION, SNAPSHOT_VERSION, opMigrations, type MigrationStep } from "#shared/migrate.ts";
-import type { Member, RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op, RestoreEntry } from "#shared/protocol.ts";
 import { stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -95,6 +95,20 @@ describe("replaying stored ops", () => {
     assert.equal(loaded?.state.meta.settings.playersMoveAny, "all", "the undo put the switch's on back, as every player");
     assert.equal("playersMoveAnyToken" in (loaded?.state.meta.settings ?? {}), false);
     assert.equal(loaded?.state.meta.view.follow, true);
+  });
+
+  test("a snapshot whose logs are out of id order loads with each in order, and the next op's lines land after them", async () => {
+    const chat = (id: string): LogEntry => ({ id, at: "2026-10-12T00:00:00.000Z", kind: "chat", from: "dm", text: id });
+    const line = (id: string): LogEntry => ({ id, at: "2026-10-12T00:00:00.000Z", kind: "event", data: { type: "trapSeen", by: [], message: id } });
+    const stored = { ...createInitialState({ roomName: "Old", dm }), log: ["3:0", "1:0", "2:0"].map(chat), trapLog: ["2:900001", "1:900000"].map(line), trapSeen: ["2:1", "1:1"].map(line) };
+    const op = { t: "log.chat", text: "next" };
+    const row = { seq: "4", at: new Date("2026-10-12T00:00:04.000Z"), actor_member_id: "dm", actor_role: "dm", op, op_version: OP_VERSION };
+    const query = (sql: string) => Promise.resolve({ rows: sql.includes("room_snapshots") ? [{ seq: "3", state: stored, schema_version: SNAPSHOT_VERSION }] : [row] });
+    const loaded = await loadRoom({ query, connect: () => Promise.reject(new Error("not used")) } as unknown as Pool, "R");
+    assert.equal(loaded?.replayFailed, false);
+    assert.deepEqual(loaded?.state.log.map((e) => e.id), ["1:0", "2:0", "3:0", "4:0"]);
+    assert.deepEqual(loaded?.state.trapLog.map((e) => e.id), ["1:900000", "2:900001"]);
+    assert.deepEqual(loaded?.state.trapSeen.map((e) => e.id), ["1:1", "2:1"]);
   });
 
   test("an op with no migration path stops the replay read-only rather than failing the load", async () => {

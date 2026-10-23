@@ -307,6 +307,22 @@ export function droppedLines(log: readonly LogEntry[], members: Roster): string[
   return [...drop];
 }
 
+/**
+ * The room with each of its logs, the room log and both trap logs, in id
+ * order, as the reducer keeps them and finds their lines by (Tx). A room
+ * that comes from storage or a file is put in order once, as it comes in,
+ * and a log already in order is kept as it is.
+ */
+export function logsInIdOrder<S extends Pick<RoomState, "log" | "trapLog" | "trapSeen">>(state: S): S {
+  let out = state;
+  for (const name of ["log", "trapLog", "trapSeen"] as const) {
+    const lines = state[name];
+    if (!lines || lines.every((e, i) => i === 0 || compareLogIds(lines[i - 1]!.id, e.id) < 0)) continue;
+    out = { ...out, [name]: [...lines].sort((a, b) => compareLogIds(a.id, b.id)) };
+  }
+  return out;
+}
+
 /** The log with every line its rings drop left out (droppedLines): what an import keeps in memory of the log it brings. */
 export function ringed(log: readonly LogEntry[], members: Roster): LogEntry[] {
   const drop = new Set(droppedLines(log, members));
