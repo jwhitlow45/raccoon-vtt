@@ -5,11 +5,11 @@ import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientOp, ServerMessage } from "#shared/protocol.ts";
-import { actor, character, companionBlock, DM, entry, P1, P2, room, token } from "#shared/testutil.ts";
+import { actor, character, companionBlock, DM, entry, P1, P2, room, template, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
-import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, type RoomStore } from "./store.ts";
+import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
@@ -61,6 +61,23 @@ function hpOf(view: RoomState | null, tokenId: string): number | undefined {
   const t = view?.tokens[tokenId];
   return t && "inline" in t.actor ? t.actor.inline.hp?.cur : undefined;
 }
+
+describe("a predicted op's log lines are the viewer's own (design 7.4)", () => {
+  test("a party line shows once, as the viewer's projection keeps it, and no area reminder shows ahead", () => {
+    // P1's pet, which no other player sees: its HP line is the DM's, with P1's copy.
+    const state = room({ tokens: { pet: token("pet", { name: "Pet", visibility: "dm", ownerIds: ["p1"] }), hero: token("hero", { kind: "pc", ownerIds: ["p1"], x: 12, y: 5 }) } });
+    state.templates.sg = template("sg", { shape: "sphere", size: 10, origin: { x: 6.5, y: 5.5, z: 0 }, ownerId: "dm1", triggers: ["enter"] });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-hero", entries: [entry("e-hero", { tokenId: "hero", value: 15 })] };
+    const hit: ClientOp = { t: "actor.hp", target: { tokenId: "pet" }, change: { kind: "damage", amount: 2 } };
+    const walk: ClientOp = { t: "token.move", tokenId: "hero", x: 6, y: 5 };
+    const lines = (who: Viewer) => {
+      const { state: predicted } = replayPending({ confirmed: projectState(state, who, { sceneId: "s1" }), seq: 1, pending: [{ n: 1, op: hit, at: 0 }, { n: 2, op: walk, at: 0 }], viewer: who, sceneId: "s1" });
+      return predicted.log.map((e) => [e.id, e.data?.type, e.to, e.copyOf]);
+    };
+    assert.deepEqual(lines(P1), [["2:116000", "hp", ["p1"], undefined]]);
+    assert.deepEqual(lines(DM), [["2:900000", "hp", undefined, undefined]]);
+  });
+});
 
 describe("snapshot and acknowledgment", () => {
   test("relative ops count once: before their ev only in pending, after it only in confirmed", () => {

@@ -1,7 +1,8 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
-import type { RoomState, Viewer } from "#shared/model.ts";
+import { lineAudience } from "#shared/logRings.ts";
+import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import {
   clientOpSchema,
@@ -270,6 +271,42 @@ function readKeys(op: ClientOp, state: RoomState): string[] {
 }
 
 /**
+ * The predicted op's log lines as the viewer's projection keeps them
+ * (shared/project.ts projectLogEntryCtx): a player keeps its shared lines
+ * and their own copies, without part readers or the DM line a copy names,
+ * and the DM keeps every line but the copies. No area reminder is shown
+ * ahead: whether one reaches this viewer rests on the turn's record of who
+ * read what (shared/reducer/reminded.ts), which only the server holds, so
+ * the confirmed log brings it.
+ */
+function predictedLines(state: RoomState, viewer: Viewer, seq: number): RoomState {
+  const prefix = `${seq}:`;
+  if (!state.log.some((e) => e.id.startsWith(prefix))) return state;
+  const log: LogEntry[] = [];
+  for (const entry of state.log) {
+    if (!entry.id.startsWith(prefix)) log.push(entry);
+    else {
+      const kept = keptLine(entry, viewer);
+      if (kept) log.push(kept);
+    }
+  }
+  return { ...state, log };
+}
+
+function keptLine(entry: LogEntry, viewer: Viewer): LogEntry | null {
+  if (entry.data?.type === "area") return null;
+  if (entry.kind === "whisper") return entry;
+  const audience = lineAudience(entry);
+  if (audience === "party") {
+    if (viewer.role === "dm" || entry.to?.[0] !== viewer.memberId) return null;
+  } else if (viewer.role === "dm") return entry;
+  else if (audience === "dm") return null;
+  if (entry.parts === undefined && entry.copyOf === undefined) return entry;
+  const { parts: _parts, copyOf: _copyOf, ...line } = entry;
+  return line;
+}
+
+/**
  * Replays pending ops on top of `confirmed` (design 7.4). An op is replayed
  * only when the view holds everything it reads. An op whose target is gone,
  * or that the reducer refuses for any reason, is skipped: the server's
@@ -291,8 +328,9 @@ export function replayPending(input: {
       try {
         if (satisfies(reads(p.op, state), state as unknown as ProjectedState, viewer, { sceneId: input.sceneId })) {
           predicted = true;
-          const result = applyOp(state, p.op, viewer, { seq: input.seq + 1 + i, at: new Date(p.at).toISOString() });
-          if (result.ok) state = result.state;
+          const seq = input.seq + 1 + i;
+          const result = applyOp(state, p.op, viewer, { seq, at: new Date(p.at).toISOString() });
+          if (result.ok) state = predictedLines(result.state, viewer, seq);
         }
       } catch {
         // A projection can lack fields the reducer assumes. Not predicting is always safe.
