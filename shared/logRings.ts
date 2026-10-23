@@ -200,11 +200,6 @@ export function dmNumbered(id: string): boolean {
   return lineIndex(id) >= DM_LINE_BASE;
 }
 
-/** Whether a line was numbered past its op's shared lines: a party line or a DM line. */
-export function countedApart(id: string): boolean {
-  return lineIndex(id) >= PARTY_LINE_BASE;
-}
-
 /**
  * A line outside the measures cut to `apartLineBytes`, as trap lines are cut
  * when written (shared/reducer/traps.ts), so it keeps its place in the live

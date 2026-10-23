@@ -4,7 +4,6 @@ import { describe, test } from "node:test";
 import { compareLogIds, keys, type EntityKey } from "./keys.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
 import {
-  countedApart,
   cutLine,
   DM_LINE_BASE,
   dmNumbered,
@@ -439,11 +438,9 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.deepEqual([out.log, out.first], [MAX_LOG, "1:198"]);
   });
 
-  test("dmNumbered and countedApart tell the DM's count and the party lines' from the shared one", () => {
+  test("dmNumbered tells the DM's count from the others, and every member's run of copies fits between them", () => {
     assert.equal(dmNumbered("12:899999"), false);
     assert.equal(dmNumbered("12:900000"), true);
-    assert.equal(countedApart("12:99999"), false);
-    assert.equal(countedApart("12:100000"), true);
     assert.equal(PARTY_SLOT * LIMITS.membersPerRoom, DM_LINE_BASE - PARTY_LINE_BASE, "every member's run fits below the DM's lines");
   });
 });
