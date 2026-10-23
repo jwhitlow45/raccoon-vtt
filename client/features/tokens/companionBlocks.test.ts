@@ -156,7 +156,7 @@ describe("current HP when a block is attached (docs/design-v1-companion-stat-blo
     assert.deepEqual(hpOf(cut.after), ["alive", 5, 11, 0]);
     const lower = apply({ hp: { cur: 20, max: 30, temp: 0 } }, { kind: "typed", value: 8 });
     assert.deepEqual(hpOf(lower.after), ["alive", 8, 8, 0]);
-    assert.equal(lower.n.hpLine, "Hoot’s HP is cut to its new maximum: 8 of 8.");
+    assert.equal(lower.n.hpLine, "Hoot's HP is cut to its new maximum: 8 of 8.");
   });
 
   test("the dying, the stable and the dead get the maximum alone and stay so, whatever healing brings back", () => {
@@ -173,7 +173,7 @@ describe("the attach's answer and its words", () => {
   test("taken closes, a refusal keeps the step with the server's words, and unknown says to check the panel", () => {
     assert.deepEqual(afterLinkAnswer("taken", "Hoot"), { phase: "done" });
     assert.deepEqual(afterLinkAnswer("refused", "Hoot", { message: "that is not here" }), { phase: "refused", line: "That is not here." });
-    assert.deepEqual(afterLinkAnswer("unknown", "Hoot"), { phase: "unknown", line: "The connection dropped before the server answered. Check Hoot’s panel before attaching again." });
+    assert.deepEqual(afterLinkAnswer("unknown", "Hoot"), { phase: "unknown", line: "The connection dropped before the server answered. Check Hoot's panel before attaching again." });
   });
 
   test("an answer after the dialog closed: nothing once taken, a toast for a refusal or a lost answer", () => {
@@ -292,7 +292,7 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
     lost.go();
     lost.sent[0]!.answer("unknown");
     assert.equal(lost.sent.length, 1);
-    assert.deepEqual(lost.phases.at(-1), { phase: "unknown", line: "The connection dropped before the server answered. Check Hoot’s panel before attaching again." });
+    assert.deepEqual(lost.phases.at(-1), { phase: "unknown", line: "The connection dropped before the server answered. Check Hoot's panel before attaching again." });
     const fresh = harness(scene());
     fresh.go();
     fresh.setView(scene(corridor()));
@@ -322,7 +322,7 @@ describe("the attach's size, through the token window's resize (docs/design-v1-c
     lost.go();
     lost.sent[0]!.answer("taken");
     lost.sent[1]!.answer("unknown");
-    assert.deepEqual(lost.phases.at(-1), { phase: "sizeStopped", line: "The connection dropped before the server answered. Check Hoot’s size in its panel." });
+    assert.deepEqual(lost.phases.at(-1), { phase: "sizeStopped", line: "The connection dropped before the server answered. Check Hoot's size in its panel." });
   });
 
   test("closed before the link's answer, a late taken sends no resize and says the size stayed, and a late refusal is a toast", () => {
@@ -370,7 +370,7 @@ describe("the companion picker's lists (docs/design-v1-companion-stat-blocks.md 
   test("the character's blocks and the SRD's, the same name from both, and never a room monster, for a player or the DM", () => {
     const lists = pickerLists({ name: "owl", query: "", blocks, characterName: "Bree", srd: SRD });
     assert.deepEqual(lists.own.map((r) => r.link), [{ blockId: "moth" }, { blockId: "owl2" }]);
-    assert.deepEqual(lists.own.map((r) => r.tag), ["Bree’s", "Bree’s"]);
+    assert.deepEqual(lists.own.map((r) => r.tag), ["Bree's", "Bree's"]);
     assert.deepEqual(lists.sameName.map((r) => r.link), [{ blockId: "owl2" }, { srdId: "owl" }]);
     assert.equal(lists.srd.length, SRD.length);
     for (const row of [...lists.own, ...lists.sameName, ...lists.srd]) assert.equal("monsterId" in row.link, false);

@@ -458,7 +458,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await setUp(view);
       await player.getByRole("button", { name: "End turn" }).waitFor();
       // The time past the turn needs room of its own: "Time’s up +0:05" and the like.
-      await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(player)).timerText) || null, 15_000);
+      await waitFor(`time up in the band, ${label}`, async () => /Time's up\s*\+/.test((await band(player)).timerText) || null, 15_000);
       const b = await band(player);
       assert.ok(b.name && b.yourTurn && b.timer && b.endTurn, `${label}: the band is missing a part: ${JSON.stringify(b)}`);
       assert.ok(b.endTurn.right <= b.width + 0.5 && b.endTurn.left >= -0.5, `${label}: End turn runs off the screen: ${JSON.stringify(b)}`);
@@ -487,7 +487,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       }
       await setUp(view);
       await player.getByRole("button", { name: "End turn" }).waitFor();
-      await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(player)).timerText) || null, 15_000);
+      await waitFor(`time up in the band, ${label}`, async () => /Time's up\s*\+/.test((await band(player)).timerText) || null, 15_000);
       playerConsole.expectSocketFailures = true;
       const closesBefore = playerSocket.closes;
       await playerContext.setOffline(true);

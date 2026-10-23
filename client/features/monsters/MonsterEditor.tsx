@@ -638,7 +638,7 @@ function SectionHint(props: { section: SectionKey; draft: StatBlock; companion: 
       <Help>Start with an entry named “Legendary Action Uses: 3”, or “Legendary Action Uses: 3 (4 in Lair)”, so tokens get their uses.</Help>
     );
   }
-  if (props.section === "actions") return <Help>Each line of an entry’s text is a paragraph. Lines starting “At Will:” or “1/Day Each:” are a spell list, and lines starting “• ” are bullets.</Help>;
+  if (props.section === "actions") return <Help>Each line of an entry's text is a paragraph. Lines starting “At Will:” or “1/Day Each:” are a spell list, and lines starting “• ” are bullets.</Help>;
   return null;
 }
 

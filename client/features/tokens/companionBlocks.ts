@@ -24,7 +24,7 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
 
 /** "Bree's", the tag a character's own blocks carry in a list, and the owner the text names them by. */
 export function whose(name: string): string {
-  return `${name}’s`;
+  return `${name}'s`;
 }
 
 /**
@@ -206,7 +206,7 @@ export function blockNumbers(view: StatBlockMonster, token: Pick<Token, "name">,
           : actor?.life === "dying" || actor?.life === "stable"
             ? `${name} is ${actor.life} and stays so: ${cur} of ${max}.`
             : cur < now.cur
-              ? `${name}’s HP is cut to its new maximum: ${cur} of ${max}.`
+              ? `${name}'s HP is cut to its new maximum: ${cur} of ${max}.`
               : `${name} keeps its ${cur} HP, now of ${max}.`;
     }
   }
@@ -236,7 +236,7 @@ export function refusalLine(refusal: Pick<OpRefusal, "message"> | undefined, fal
 
 /** The step's line when the connection dropped before the server answered the attach. */
 export function attachUnknownLine(companion: string): string {
-  return `The connection dropped before the server answered. Check ${companion}’s panel before attaching again.`;
+  return `The connection dropped before the server answered. Check ${companion}'s panel before attaching again.`;
 }
 
 /**
@@ -247,7 +247,7 @@ export function attachUnknownLine(companion: string): string {
  */
 export function lateAttachText(block: string, companion: string, answer: OpAnswer, refusal?: Pick<OpRefusal, "message">, keptSize?: CreatureSize): string | null {
   if (answer === "taken") return keptSize ? `${block} is attached to ${companion}. Its size stayed ${SIZE_WORD_ANY[keptSize]}.` : null;
-  if (answer === "unknown") return `The connection dropped before the server answered, so ${block} may not be attached to ${companion}. Check ${companion}’s panel.`;
+  if (answer === "unknown") return `The connection dropped before the server answered, so ${block} may not be attached to ${companion}. Check ${companion}'s panel.`;
   const why = refusal?.message.trim().replace(/\.$/, "");
   return why ? `${block} was not attached to ${companion}. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${block} was not attached to ${companion}.`;
 }
@@ -284,7 +284,7 @@ export function sizePlan(input: {
   const dm = role === "dm";
   if (!canResize({ dm, owner: input.owner }, token)) {
     if (token.locked) return { kind: "kept", line: `${head}: ${token.name} is locked, so its size stays. Ask the DM.` };
-    return { kind: "kept", line: `${head}: ${token.name}’s size is the DM’s to change, so it stays. Ask the DM.` };
+    return { kind: "kept", line: `${head}: ${token.name}'s size is the DM's to change, so it stays. Ask the DM.` };
   }
   const answer = resizePatch(input.view, token, { size }, role, input.growths);
   if ("refused" in answer) return { kind: "kept", line: `${head}${now}. ${answer.refused.replace(/\.$/, "")}: ${token.name} keeps its size.` };
@@ -320,7 +320,7 @@ export function afterLinkAnswer(answer: OpAnswer, companion: string, refusal?: P
 export function afterResizeAnswer(answer: OpAnswer, companion: string, refusal?: Pick<OpRefusal, "message">): AttachPhase {
   if (answer === "taken") return { phase: "done" };
   if (answer === "refused") return { phase: "sizeStopped", line: refusalLine(refusal, "The server refused the new size.") };
-  return { phase: "sizeStopped", line: `The connection dropped before the server answered. Check ${companion}’s size in its panel.` };
+  return { phase: "sizeStopped", line: `The connection dropped before the server answered. Check ${companion}'s size in its panel.` };
 }
 
 /** What the attach's two ops need from the room and the dialog. */

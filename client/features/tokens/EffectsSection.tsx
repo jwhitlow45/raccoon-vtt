@@ -452,7 +452,7 @@ function EffectDetail(props: {
               checked={hidden}
               onChange={setHidden}
               label="Hidden from players"
-              help="Players never see it, the creature’s owner included, and the log keeps it to the DM."
+              help="Players never see it, the creature's owner included, and the log keeps it to the DM."
             />
           ) : null}
           <DurationFields

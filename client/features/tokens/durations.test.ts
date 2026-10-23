@@ -142,23 +142,23 @@ describe("describing a stored duration", () => {
     const state = fixture(true);
     assert.equal(
       describeDuration(state, { remaining: 1, boundary: "turnStart", anchor: { entryId: "e-g2" } }),
-      "Until the start of Goblin 2’s next turn",
+      "Until the start of Goblin 2's next turn",
     );
     assert.equal(
       describeDuration(state, { remaining: 4, boundary: "turnStart", anchor: { entryId: "e-pc" } }),
-      "4 rounds left, ending at the start of Thorn’s turn",
+      "4 rounds left, ending at the start of Thorn's turn",
     );
     assert.equal(
       describeDuration(state, { remaining: 2, boundary: "turnEnd", anchor: { entryId: "e-g1" } }),
-      "Until the end of Goblin 1’s next turn",
+      "Until the end of Goblin 1's next turn",
     );
     assert.equal(
       describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-g1" } }),
-      "Until the end of Goblin 1’s current turn",
+      "Until the end of Goblin 1's current turn",
     );
     assert.equal(
       describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-g2" } }),
-      "Until the end of Goblin 2’s next turn",
+      "Until the end of Goblin 2's next turn",
     );
   });
 
@@ -166,11 +166,11 @@ describe("describing a stored duration", () => {
     const state = fixture(false);
     assert.equal(
       describeDuration(state, { remaining: 10, boundary: "turnStart", anchor: { tokenId: "g1" } }),
-      "10 rounds left, ending at the start of Goblin 1’s turn, paused (outside combat)",
+      "10 rounds left, ending at the start of Goblin 1's turn, paused (outside combat)",
     );
     assert.equal(
       describeDuration(state, { remaining: 1, boundary: "turnEnd", anchor: { characterId: "hero" } }),
-      "Until the end of Thorn’s next turn, paused (outside combat)",
+      "Until the end of Thorn's next turn, paused (outside combat)",
     );
   });
 
@@ -178,7 +178,7 @@ describe("describing a stored duration", () => {
     const state = fixture(true);
     assert.equal(
       describeDuration(state, { remaining: 1, boundary: "turnStart", anchor: { entryId: "hidden-row" } }),
-      "Until the start of another creature’s next turn",
+      "Until the start of another creature's next turn",
     );
   });
 

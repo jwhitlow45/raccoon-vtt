@@ -222,7 +222,7 @@ function bar(page: Page): Locator {
 }
 
 function editor(page: Page): Locator {
-  return page.getByRole("dialog", { name: "Bree’s stat block" });
+  return page.getByRole("dialog", { name: "Bree's stat block" });
 }
 
 async function reopen(page: Page, size: { width: number; height: number }, scale = 1): Promise<void> {
@@ -488,7 +488,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.deepEqual(kept.slice(1), ["Spellcasting ability: Charisma", "AC 15", "Shortbow: you removed it."]);
     const shillelagh = row(review, /^Shillelagh \(cantrip\), as you changed it: /);
     await shillelagh.getByText("Also changed in D&D Beyond", { exact: true }).waitFor();
-    assert.equal(await shillelagh.getByRole("checkbox", { name: "Overwrite with D&D Beyond’s", exact: true }).isChecked(), false);
+    assert.equal(await shillelagh.getByRole("checkbox", { name: "Overwrite with D&D Beyond's", exact: true }).isChecked(), false);
     await row(review, "Spellcasting ability: Charisma").getByText("D&D Beyond says Wisdom.", { exact: true }).waitFor();
     assert.equal(await row(review, "Spellcasting ability: Charisma").getByRole("checkbox", { name: "Overwrite with Wisdom", exact: true }).isChecked(), false);
     await row(review, "AC 15").getByText("D&D Beyond says 12.", { exact: true }).waitFor();

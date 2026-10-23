@@ -58,7 +58,7 @@ describe("a Druid's known forms", () => {
     const { forms, missing } = knownFormsIn(["wolf", "cave-bear", "owl", "black-bear", "mastiff", "dire-badger"], SRD);
     assert.deepEqual(forms.map((m) => m.name), ["Black Bear", "Wolf", "Mastiff", "Owl"]);
     assert.deepEqual(missing, ["cave-bear", "dire-badger"]);
-    assert.equal(missingFormText("cave-bear"), "cave-bear: not in this app’s SRD list");
+    assert.equal(missingFormText("cave-bear"), "cave-bear: not in this app's SRD list");
     assert.deepEqual(knownFormsIn(undefined, SRD), { forms: [], missing: [] });
   });
 

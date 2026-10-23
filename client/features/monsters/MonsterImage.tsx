@@ -186,7 +186,7 @@ export function MonsterImageSection(props: {
               checked={includeOwn}
               onChange={setIncludeOwn}
               label={optInLabel(plan)}
-              help="Off keeps an image chosen for one token, such as a disguise, and the look of a token a player plays. A token wearing an image this monster had before you opened it here counts as set by hand, unless it is an SRD monster’s default icon."
+              help="Off keeps an image chosen for one token, such as a disguise, and the look of a token a player plays. A token wearing an image this monster had before you opened it here counts as set by hand, unless it is an SRD monster's default icon."
             />
           ) : null}
           <Button variant="primary" size="sm" onClick={apply} disabled={count === 0}>

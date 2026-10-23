@@ -114,7 +114,7 @@ describe("a companion block's save (docs/design-v1-companion-stat-blocks.md 6.2)
       text: "Bree can keep at most 100 stat blocks. Delete one first.",
     });
     assert.deepEqual(blockSaveOutcome("refused", { message: "that is not here" }, "Bree"), { kind: "problem", text: "That is not here." });
-    assert.deepEqual(blockSaveOutcome("unknown", undefined, "Bree"), { kind: "problem", text: "The connection dropped before the server answered. Check Bree’s stat blocks before saving again." });
+    assert.deepEqual(blockSaveOutcome("unknown", undefined, "Bree"), { kind: "problem", text: "The connection dropped before the server answered. Check Bree's stat blocks before saving again." });
   });
 
   test("past the saves budget the draft stays and Save waits out one refill before it is offered again", () => {
@@ -124,7 +124,7 @@ describe("a companion block's save (docs/design-v1-companion-stat-blocks.md 6.2)
   test("an answer after Cancel adds the block and says nothing, and a refusal or a lost answer is a toast", () => {
     assert.equal(lateBlockSaveText("Owl", "Bree", "taken"), null);
     assert.equal(lateBlockSaveText("Owl", "Bree", "refused", { message: "Bree can keep at most 100 stat blocks. Delete one first." }), "Owl was not saved. Bree can keep at most 100 stat blocks. Delete one first.");
-    assert.equal(lateBlockSaveText("Owl", "Bree", "unknown"), "The connection dropped before the server answered, so Owl may not have been saved. Check Bree’s stat blocks.");
+    assert.equal(lateBlockSaveText("Owl", "Bree", "unknown"), "The connection dropped before the server answered, so Owl may not have been saved. Check Bree's stat blocks.");
   });
 });
 

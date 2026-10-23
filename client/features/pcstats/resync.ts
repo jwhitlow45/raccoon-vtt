@@ -119,7 +119,7 @@ export function overwriteWords(item: Pick<FieldItem, "key" | "theirs">): string 
   const { key, theirs } = item;
   const [part, sub] = key.split(".");
   const none = theirs === undefined || theirs === null || theirs === false || theirs === "" || (part === "adjust" && theirs === 0) || (part === "critOn" && theirs === 20);
-  if (key in FLAG_LABELS || none) return "Overwrite with D&D Beyond’s";
+  if (key in FLAG_LABELS || none) return "Overwrite with D&D Beyond's";
   const bare = bareValue(key, theirs);
   switch (part) {
     case "abilities":
@@ -183,11 +183,11 @@ export function keptRow(item: SyncItem, blocks: ReadingBlocks): KeptRow {
     case "deleted":
       return { first: `${rollTitle(theirs!)}: you removed it.`, theirs: `D&D Beyond says ${reading(blocks.after, theirs!)}.`, tick: "Add it back" };
     case "sameName":
-      return { first: `${rollTitle(mine!)}, your own: ${reading(blocks.now, mine!)}`, theirs: `D&D Beyond says ${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond’s" };
+      return { first: `${rollTitle(mine!)}, your own: ${reading(blocks.now, mine!)}`, theirs: `D&D Beyond says ${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond's" };
     default: {
       // A roll renamed here can read just as D&D Beyond's does, so D&D Beyond's line names it whenever the names differ.
       const named = rollTitle(theirs!) === rollTitle(mine!) ? "" : `${rollTitle(theirs!)}: `;
-      return { first: `${rollTitle(mine!)}, as you changed it: ${reading(blocks.now, mine!)}`, ...(tag ? { tag } : {}), theirs: `D&D Beyond says ${named}${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond’s" };
+      return { first: `${rollTitle(mine!)}, as you changed it: ${reading(blocks.now, mine!)}`, ...(tag ? { tag } : {}), theirs: `D&D Beyond says ${named}${reading(blocks.after, theirs!)}.`, tick: "Overwrite with D&D Beyond's" };
     }
   }
 }
@@ -205,9 +205,9 @@ function shortLine(item: SyncItem, blocks: ReadingBlocks, first: boolean): strin
     const roll = (item.mine ?? item.theirs!.roll) as PcRoll;
     return `${item.case === "add" ? "Adds" : item.case === "remove" ? "Removes" : "Updates"} ${rollTitle(item.case === "add" ? item.theirs!.roll : roll)}`;
   }
-  if (item.section === "replaces") return item.type === "field" ? replacesLine(item, blocks) : `${rollTitle(item.mine!)}: yours, becomes D&D Beyond’s`;
+  if (item.section === "replaces") return item.type === "field" ? replacesLine(item, blocks) : `${rollTitle(item.mine!)}: yours, becomes D&D Beyond's`;
   if (item.type === "field") return `${sayValue(item.key, item.now)}, D&D Beyond says ${bareValue(item.key, item.theirs)}`;
-  return `${rollTitle((item.mine ?? item.theirs!.roll) as PcRoll)}, your own, differs from D&D Beyond’s`;
+  return `${rollTitle((item.mine ?? item.theirs!.roll) as PcRoll)}, your own, differs from D&D Beyond's`;
 }
 
 /** A group's summary, "3: Wisdom 16, D&D Beyond says 18, and 2 more", which wraps and is never cut. */

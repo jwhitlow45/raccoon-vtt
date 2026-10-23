@@ -180,12 +180,12 @@ describe("a Save's answer", () => {
     assert.deepEqual(saveOutcome("taken", undefined, "Bree"), { kind: "saved" });
     assert.deepEqual(saveOutcome("refused", { message: BLOCK_SAVES_TOO_FAST }, "Bree"), { kind: "problem", text: BLOCK_SAVES_TOO_FAST, retryInMs: LIMITS.companionBlockWriteRefillMs });
     assert.deepEqual(saveOutcome("refused", { message: "that is not yours" }, "Bree"), { kind: "problem", text: "That is not yours." });
-    assert.deepEqual(saveOutcome("unknown", undefined, "Bree"), { kind: "problem", text: "The connection dropped before the server answered. Check Bree’s stat block before saving again." });
+    assert.deepEqual(saveOutcome("unknown", undefined, "Bree"), { kind: "problem", text: "The connection dropped before the server answered. Check Bree's stat block before saving again." });
   });
 
   test("after the editor closed, a toast for anything but taken", () => {
     assert.equal(lateSaveText("Bree", "taken"), null);
-    assert.equal(lateSaveText("Bree", "refused", { message: "the room is full" }), "Bree’s stat block was not saved. The room is full.");
+    assert.equal(lateSaveText("Bree", "refused", { message: "the room is full" }), "Bree's stat block was not saved. The room is full.");
     assert.match(lateSaveText("Bree", "unknown")!, /may not have been saved/);
   });
 });

@@ -144,11 +144,11 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
       case "notes":
         return (
           <Group key={id} label="Notes" {...fold("page.notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
-            <Labeled label="On the card" hint="The DM and this character’s players read it.">
+            <Labeled label="On the card" hint="The DM and this character's players read it.">
               <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
             </Labeled>
             {access.dm ? (
-              <Labeled label="For DMs only" hint="Never sent to players, this character’s players included.">
+              <Labeled label="For DMs only" hint="Never sent to players, this character's players included.">
                 <TextField label="Note for DMs only" multiline rows={2} value={actor.dmNotes ?? ""} maxLength={4000} placeholder="Only DMs see this" onCommit={(dmNotes) => patchActor({ dmNotes })} />
               </Labeled>
             ) : null}

@@ -215,8 +215,8 @@ describe("adding a companion from a stat block (docs/design-v1-companion-stat-bl
   });
 
   test("HP's help names the average and its dice", () => {
-    assert.equal(blockHpHelp(owlView), "The block’s average, 1 (1d4 − 1). Type another for a higher-level casting.");
-    assert.equal(blockHpHelp(monsterView(companionBlock("x", "bree", { hp: { average: 7, formula: "" } }))), "The block’s average, 7. Type another for a higher-level casting.");
+    assert.equal(blockHpHelp(owlView), "The block's average, 1 (1d4 − 1). Type another for a higher-level casting.");
+    assert.equal(blockHpHelp(monsterView(companionBlock("x", "bree", { hp: { average: 7, formula: "" } }))), "The block's average, 7. Type another for a higher-level casting.");
   });
 });
 

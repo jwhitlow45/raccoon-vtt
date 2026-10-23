@@ -120,7 +120,7 @@ function EncounterList(props: { srd: SrdList; onOpen(id: string | null): void })
       {full ? <Help>This room holds at most {LIMITS.savedEncountersPerRoom} encounters. Delete one to build another.</Help> : null}
       {list.length === 0 ? (
         <Empty>
-          Build a fight ahead from the SRD monsters and this room’s own, see it against the party’s XP budget, and place it on any map when the time comes. Players never see these, only the tokens placed.
+          Build a fight ahead from the SRD monsters and this room's own, see it against the party's XP budget, and place it on any map when the time comes. Players never see these, only the tokens placed.
         </Empty>
       ) : null}
       <SrdStatus srd={props.srd} />
@@ -262,7 +262,7 @@ function Builder(props: { id: string | null; srd: SrdList; close: PanelClose; on
           unknown={xp.unknown}
           unknownWhy={missingRoomMonster ? "a monster of this room was deleted since. Remove its line." : "the SRD monsters are still loading."}
         />
-        <Help>From the SRD 5.2.1 XP Budget per Character table: each character adds its level’s budget, and the monsters’ XP from their stat blocks must stay within it.</Help>
+        <Help>From the SRD 5.2.1 XP Budget per Character table: each character adds its level's budget, and the monsters' XP from their stat blocks must stay within it.</Help>
       </Section>
 
       {saved ? (
@@ -354,7 +354,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
       </div>
       {ready ? (
         <Help>
-          {count === 1 ? "1 creature goes" : `${count} creatures go`} on {sceneName}, the scene you are viewing, with {count === 1 ? "its monster’s image" : "their monsters’ images"}. One undo takes {count === 1 ? "it" : "them"} back off the map.
+          {count === 1 ? "1 creature goes" : `${count} creatures go`} on {sceneName}, the scene you are viewing, with {count === 1 ? "its monster's image" : "their monsters' images"}. One undo takes {count === 1 ? "it" : "them"} back off the map.
         </Help>
       ) : null}
     </Section>
@@ -400,7 +400,7 @@ function MonsterLine(props: {
           Remove
         </Button>
       </div>
-      {view && hasLairValues(view) ? <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help="Uses the lair’s legendary uses and XP." /> : null}
+      {view && hasLairValues(view) ? <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help="Uses the lair's legendary uses and XP." /> : null}
     </div>
   );
 }
@@ -444,7 +444,7 @@ function AddMonsters(props: { srd: SrdList; monsters: Readonly<Record<string, Cu
       </MonsterFilterBar>
       {full ? <Help>An encounter holds at most {MAX_ENCOUNTER_CREATURES} creatures.</Help> : null}
       {searching ? <SrdStatus srd={props.srd} /> : null}
-      {!searching && own.length === 0 ? <Help>Search or filter the 330 SRD monsters and this room’s own.</Help> : null}
+      {!searching && own.length === 0 ? <Help>Search or filter the 330 SRD monsters and this room's own.</Help> : null}
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
         {results.slice(0, MAX_RESULTS).map((c) => {
           const has = props.draft.monsters.some((m) => ("srdId" in c.ref ? "srdId" in m && m.srdId === c.ref.srdId : "monsterId" in m && m.monsterId === c.ref.monsterId) && !m.inLair);
@@ -491,10 +491,10 @@ function PartyEditor(props: { party: PartyGroup[] | null; roomParty: ReturnType<
     const size = partySize(roomParty.groups);
     return (
       <>
-        <Help>The room’s characters{size > 0 ? `: ${groupsText(roomParty.groups)}` : ""}.</Help>
+        <Help>The room's characters{size > 0 ? `: ${groupsText(roomParty.groups)}` : ""}.</Help>
         {roomParty.unleveled.length > 0 ? (
           <Notice>
-            The budget leaves out {listText(roomParty.unleveled)}, who {roomParty.unleveled.length === 1 ? "has" : "have"} no level yet. Set one on {roomParty.unleveled.length === 1 ? "the" : "each"} character’s card, or edit the party here.
+            The budget leaves out {listText(roomParty.unleveled)}, who {roomParty.unleveled.length === 1 ? "has" : "have"} no level yet. Set one on {roomParty.unleveled.length === 1 ? "the" : "each"} character's card, or edit the party here.
           </Notice>
         ) : null}
         {size === 0 && roomParty.unleveled.length === 0 ? <Help>This room has no characters yet. Edit the party to budget for one.</Help> : null}
@@ -534,7 +534,7 @@ function PartyEditor(props: { party: PartyGroup[] | null; roomParty: ReturnType<
           Add a level
         </Button>
         <Button size="sm" onClick={() => props.onChange(null)}>
-          Use the room’s characters
+          Use the room's characters
         </Button>
       </div>
     </>

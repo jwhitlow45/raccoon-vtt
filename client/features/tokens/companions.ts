@@ -100,7 +100,7 @@ export function withBlock(draft: CompanionDraft, chosen: ChosenBlock | null): Co
 /** HP's help while a block is chosen: "The block's average, 1 (1d4 − 1). Type another for a higher-level casting." */
 export function blockHpHelp(view: StatBlockMonster): string {
   const formula = view.hp.formula.trim().replace(/ - /g, " − ");
-  return `The block’s average, ${view.hp.average}${formula ? ` (${formula})` : ""}. Type another for a higher-level casting.`;
+  return `The block's average, ${view.hp.average}${formula ? ` (${formula})` : ""}. Type another for a higher-level casting.`;
 }
 
 /** The turn a companion starts at until the user picks one (3.6.2): a creature listed under its character, an effect not listed. */

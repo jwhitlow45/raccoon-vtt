@@ -192,7 +192,7 @@ export type BlockSaveOutcome =
  */
 export function blockSaveOutcome(answer: OpAnswer, refusal: Pick<OpRefusal, "message"> | undefined, characterName: string): BlockSaveOutcome {
   if (answer === "taken") return { kind: "saved" };
-  if (answer === "unknown") return { kind: "problem", text: `The connection dropped before the server answered. Check ${characterName}’s stat blocks before saving again.` };
+  if (answer === "unknown") return { kind: "problem", text: `The connection dropped before the server answered. Check ${characterName}'s stat blocks before saving again.` };
   const message = refusal?.message.trim() ?? "";
   if (message === BLOCK_SAVES_TOO_FAST) return { kind: "problem", text: message, retryInMs: LIMITS.companionBlockWriteRefillMs };
   return { kind: "problem", text: message ? sentence(message) : "The server refused it." };
@@ -201,7 +201,7 @@ export function blockSaveOutcome(answer: OpAnswer, refusal: Pick<OpRefusal, "mes
 /** The toast for a save answered after its editor closed: nothing once saved, since the block shows in the list. */
 export function lateBlockSaveText(name: string, characterName: string, answer: OpAnswer, refusal?: Pick<OpRefusal, "message">): string | null {
   if (answer === "taken") return null;
-  if (answer === "unknown") return `The connection dropped before the server answered, so ${name} may not have been saved. Check ${characterName}’s stat blocks.`;
+  if (answer === "unknown") return `The connection dropped before the server answered, so ${name} may not have been saved. Check ${characterName}'s stat blocks.`;
   const why = refusal?.message.trim().replace(/\.$/, "");
   return why ? `${name} was not saved. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${name} was not saved.`;
 }

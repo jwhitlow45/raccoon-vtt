@@ -61,7 +61,7 @@ export function MonsterPicker(props: { name: string; onPick(link: BlockLink): vo
         <SearchField value={query} onChange={setQuery} placeholder="Search: goblin, cr 1-5" />
         {own.length > 0 ? (
           <>
-            <ListLabel>{`This room’s monsters ${countLabel(ownResults.length, own.length)}`}</ListLabel>
+            <ListLabel>{`This room's monsters ${countLabel(ownResults.length, own.length)}`}</ListLabel>
             <MonsterList items={ownResults} onPick={pick} />
           </>
         ) : null}

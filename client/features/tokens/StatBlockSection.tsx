@@ -151,7 +151,7 @@ export function StatBlockSection(props: {
             <>
               <StatBlockView view={viewOf(link.monster)} source="room" />
               {keeper ? (
-                <Note>{`${whose(keeper.name)} players do not see this block: it is one of this room’s own monsters. Change it to an SRD block or one of ${whose(keeper.name)} for them to read one.`}</Note>
+                <Note>{`${whose(keeper.name)} players do not see this block: it is one of this room's own monsters. Change it to an SRD block or one of ${whose(keeper.name)} for them to read one.`}</Note>
               ) : null}
               {access.dm ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
@@ -164,7 +164,7 @@ export function StatBlockSection(props: {
           ) : link.kind === "srd" ? (
             <SrdBlock
               srdId={link.srdId}
-              copy={access.dm || keeper !== null ? (keeper ? `Copy to ${whose(keeper.name)} stat blocks and edit` : "Copy to this room’s monsters and edit") : null}
+              copy={access.dm || keeper !== null ? (keeper ? `Copy to ${whose(keeper.name)} stat blocks and edit` : "Copy to this room's monsters and edit") : null}
               buttons={
                 <>
                   {change}
@@ -197,7 +197,7 @@ export function StatBlockSection(props: {
         >
           {link.kind === "deleted" || link.kind === "deletedBlock" ? (
             <>
-              <Note>{link.kind === "deletedBlock" ? "This companion’s stat block was deleted." : "This token’s stat block was deleted from this room."}</Note>
+              <Note>{link.kind === "deletedBlock" ? "This companion's stat block was deleted." : "This token's stat block was deleted from this room."}</Note>
               <div style={{ display: "flex", gap: theme.space(2) }}>{detach}</div>
             </>
           ) : null}

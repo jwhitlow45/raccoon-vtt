@@ -490,7 +490,7 @@ export function CompanionSection(props: {
     .filter((c): c is Character => !!c)
     .sort((a, b) => a.name.localeCompare(b.name));
   // A stored block is its character's, so giving the companion away or letting it go leaves the block behind (docs/design-v1-companion-stat-blocks.md 5.5).
-  const staysLine = stored ? <Help style={{ overflowWrap: "anywhere" }}>{`Its stat block is ${name}’s and stays with ${name}.`}</Help> : null;
+  const staysLine = stored ? <Help style={{ overflowWrap: "anywhere" }}>{`Its stat block is ${name}'s and stays with ${name}.`}</Help> : null;
   return (
     // A group as Owners beside it is, which names its character while folded as Owners names its players.
     <Group label="Companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>

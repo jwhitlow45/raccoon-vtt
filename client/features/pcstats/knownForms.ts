@@ -50,7 +50,7 @@ export function knownFormsIn<M extends StatBlockMonster & { srdId: string }>(ids
 
 /** What an id the SRD list lacks says, such as after a later rename or from a crafted op. */
 export function missingFormText(id: string): string {
-  return `${id}: not in this app’s SRD list`;
+  return `${id}: not in this app's SRD list`;
 }
 
 /** A mark on a known form a Druid of the picked level may not take: the tag's words, short enough for its 88 px, and the reason its row's name adds. */

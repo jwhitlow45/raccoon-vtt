@@ -26,8 +26,8 @@ type View = Pick<RoomState, "tokens" | "characters" | "encounter">;
 
 export const DURATION_MODES: readonly { mode: DurationMode; label: string }[] = [
   { mode: "none", label: "No duration" },
-  { mode: "turnStart", label: "Until the start of X’s next turn" },
-  { mode: "turnEnd", label: "Until the end of X’s next turn" },
+  { mode: "turnStart", label: "Until the start of X's next turn" },
+  { mode: "turnEnd", label: "Until the end of X's next turn" },
   { mode: "rounds", label: "N rounds" },
 ];
 
@@ -146,13 +146,13 @@ export function describeDuration(view: View | null | undefined, duration: NonNul
   const r = duration.remaining;
   let text: string;
   if (duration.boundary === "turnStart") {
-    text = r <= 1 ? `Until the start of ${who}’s next turn` : `${r} rounds left, ending at the start of ${who}’s turn`;
+    text = r <= 1 ? `Until the start of ${who}'s next turn` : `${r} rounds left, ending at the start of ${who}'s turn`;
   } else if (r <= 1) {
-    text = active ? `Until the end of ${who}’s current turn` : `Until the end of ${who}’s next turn`;
+    text = active ? `Until the end of ${who}'s current turn` : `Until the end of ${who}'s next turn`;
   } else if (r === 2 && active) {
-    text = `Until the end of ${who}’s next turn`;
+    text = `Until the end of ${who}'s next turn`;
   } else {
-    text = `Ends after ${r} more of ${who}’s turns`;
+    text = `Ends after ${r} more of ${who}'s turns`;
   }
   return isPaused(duration) ? `${text}, paused (outside combat)` : text;
 }

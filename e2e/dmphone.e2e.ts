@@ -389,7 +389,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
       await reopenRoom(dm);
       await dm.getByRole("status", { name: "Connected" }).first().waitFor();
-      await waitFor(`time up in the band, ${label}`, async () => /Time’s up\s*\+/.test((await band(dm)).timerText) || null, 15_000);
+      await waitFor(`time up in the band, ${label}`, async () => /Time's up\s*\+/.test((await band(dm)).timerText) || null, 15_000);
       const b = await band(dm);
       assert.ok(b.name && b.timer, `${label}: the band is missing a part: ${JSON.stringify(b)}`);
       assert.ok(b.name.right - b.name.left >= BAND_NAME_MIN_PX * view.scale - 0.5, `${label}: the name keeps too little: ${JSON.stringify(b)}`);

@@ -26,7 +26,7 @@ describe("a part whose code did not load", () => {
 
   test("offline, it says the reload waits for the connection", () => {
     const markup = renderToStaticMarkup(createElement(LoadFailureNotice, { failure: "offline", retry: () => {}, subject: "This panel", pending: 0, connection: "offline" }));
-    assert.match(markup, /This panel can(’|'|&#x27;)t open while offline\. Reload once you(’|'|&#x27;)re back online\./);
+    assert.match(markup, /This panel can('|&#x27;)t open while offline\. Reload once you('|&#x27;)re back online\./);
   });
 
   test("a part that threw while rendering keeps Retry, which renders it afresh", () => {

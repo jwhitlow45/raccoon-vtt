@@ -169,7 +169,7 @@ describe("who a request asks", () => {
     assert.deepEqual(
       defaultTargets(state, { kind: "selection", tokenIds: ["far"] }, "s2").map((t) => [t.name, t.ticked, t.blocked ?? false, t.why ?? ""]),
       [
-        ["Owl", false, true, "not on the players’ scene"],
+        ["Owl", false, true, "not on the players' scene"],
         ["Bram", false, false, ""],
         ["Ayla", false, false, ""],
       ],

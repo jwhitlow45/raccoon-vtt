@@ -321,14 +321,14 @@ export function TimerClock(props: { state: TimerState; size?: number; stack?: bo
   if (props.stack && past) {
     return (
       <span role="timer" aria-label={label} style={{ ...style, display: "grid", justifyItems: "end", lineHeight: theme.leading.tight }}>
-        <span>Time’s up</span>
+        <span>Time's up</span>
         <span>{text}</span>
       </span>
     );
   }
   return (
     <span role="timer" aria-label={label} style={style}>
-      {state.over ? `Time’s up${past ? ` ${text}` : ""}` : text}
+      {state.over ? `Time's up${past ? ` ${text}` : ""}` : text}
     </span>
   );
 }

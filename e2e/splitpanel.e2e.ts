@@ -1201,7 +1201,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     assert.equal(await dm.getByRole("heading", { name: "Add a companion for Thorn" }).count(), 0, "the form left for the page");
     // Thorn's stat blocks page holds nothing typed, so it goes at once too.
     await characters.locator(`[data-opener="blocks:${run.thornChar}"]`).click();
-    await dm.getByRole("heading", { name: "Thorn’s stat blocks" }).waitFor();
+    await dm.getByRole("heading", { name: "Thorn's stat blocks" }).waitFor();
     await link.click();
     await thornsPage.waitFor();
 

@@ -93,7 +93,7 @@ function tokenPanel(page: Page): Locator {
 }
 
 function editor(page: Page): Locator {
-  return page.getByRole("dialog", { name: "Bree’s stat block" });
+  return page.getByRole("dialog", { name: "Bree's stat block" });
 }
 
 /** Bree selected and the Token tab open, with the stat block section in view. */
@@ -161,7 +161,7 @@ async function openKnownFormsStep(page: Page): Promise<Locator> {
   const panel = await showBree(page);
   await panel.getByRole("button", { name: "Take a shape" }).click();
   await page.getByRole("dialog", { name: "Take a shape" }).getByRole("button", { name: "Change", exact: true }).click();
-  const step = page.getByRole("dialog", { name: "Bree’s known forms" });
+  const step = page.getByRole("dialog", { name: "Bree's known forms" });
   await step.waitFor();
   return step;
 }
@@ -238,7 +238,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const fold = panel.getByRole("button", { name: "Stat block", exact: true });
     // Open from 900 x 600 up, as the groups design says.
     assert.equal(await fold.getAttribute("aria-expanded"), "true");
-    await panel.getByText("Add this character’s stat block, or take a shape such as Wild Shape.").waitFor();
+    await panel.getByText("Add this character's stat block, or take a shape such as Wild Shape.").waitFor();
     await fold.click();
     await panel.getByText("None yet").first().waitFor();
     assert.equal(await panel.getByRole("button", { name: "Add a stat block" }).count(), 0, "folded, no buttons");
@@ -456,7 +456,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await picker.getByRole("button", { name: "Choose known forms" }).click();
 
     // knownforms-a: the step toggles each form with one op, with the count read against the level picked.
-    const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
+    const step = ana.getByRole("dialog", { name: "Bree's known forms" });
     await step.getByLabel("Druid level").selectOption("4");
     const row = (name: RegExp) => step.getByRole("button", { name }).first();
     const breeForms = () => anaSocket.state?.characters[run.bree.characterId]?.knownForms;
@@ -524,7 +524,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     // Druid level 4 was the last picked on this device, in 4b.
     assert.equal(await picker.getByLabel("Druid level").inputValue(), "4");
     await picker.getByRole("button", { name: "Change", exact: true }).click();
-    const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
+    const step = ana.getByRole("dialog", { name: "Bree's known forms" });
     const row = (name: RegExp) => step.getByRole("button", { name }).first();
     const rowKeys = () => step.locator("li[data-form] > button").evaluateAll((els) => els.map((el) => el.parentElement?.dataset.form ?? ""));
     const focused = () => focusedForm(ana);
@@ -617,7 +617,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await waitFor("Bree as a wolf", () => (breeActor()?.srdId === "wolf" && breeActor()?.wildShape ? true : null));
     const stillWolf = () => assert.ok(breeActor()?.srdId === "wolf" && breeActor()?.wildShape, "the shape ended");
     assert.equal(await panel.getByRole("button", { name: "Take a shape" }).count(), 0, "Take a shape is hidden in a shape");
-    const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
+    const step = ana.getByRole("dialog", { name: "Bree's known forms" });
     const forms = panel.locator("section").filter({ has: ana.getByRole("heading", { name: "Known forms", exact: true }) });
     const noWayBack = async () => {
       assert.equal(await step.getByRole("button", { name: /^Back/ }).count(), 0, "the step offers a Back");
@@ -629,7 +629,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
       await noWayBack();
     };
     const close = async () => {
-      await step.getByRole("button", { name: "Close Bree’s known forms", exact: true }).click();
+      await step.getByRole("button", { name: "Close Bree's known forms", exact: true }).click();
       await step.waitFor({ state: "detached" });
     };
 

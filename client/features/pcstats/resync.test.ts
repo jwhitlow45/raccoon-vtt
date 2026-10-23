@@ -119,13 +119,13 @@ describe("the review's lines (3.3)", () => {
     );
     assert.deepEqual([say("spellAbility", "wis"), say("saves.wis", true), say("skills.stealth", "expert"), say("defenses.fire", "resistant")], ["Overwrite with Wisdom", "Overwrite with Proficient", "Overwrite with Expertise", "Overwrite with Resistant"]);
     for (const [key, theirs] of [["spellAbility", null], ["saves.wis", false], ["skills.stealth", null], ["defenses.fire", null], ["level", undefined], ["senses", ""], ["jack", true]] as const) {
-      assert.equal(say(key, theirs), "Overwrite with D&D Beyond’s", key);
+      assert.equal(say(key, theirs), "Overwrite with D&D Beyond's", key);
     }
   });
 
   test("a 0 bonus and critical hits on a 20 alone are values D&D Beyond does not have, so Overwrite says whose (RS-O-36)", () => {
     const say = (key: string, theirs: unknown) => overwriteWords({ key, theirs } as Parameters<typeof overwriteWords>[0]);
-    assert.deepEqual([say("adjust.init", 0), say("adjust.skills.stealth", 0), say("adjust.saves.dex", 0), say("critOn", 20)], ["Overwrite with D&D Beyond’s", "Overwrite with D&D Beyond’s", "Overwrite with D&D Beyond’s", "Overwrite with D&D Beyond’s"]);
+    assert.deepEqual([say("adjust.init", 0), say("adjust.skills.stealth", 0), say("adjust.saves.dex", 0), say("critOn", 20)], ["Overwrite with D&D Beyond's", "Overwrite with D&D Beyond's", "Overwrite with D&D Beyond's", "Overwrite with D&D Beyond's"]);
     // Any other bonus, a negative one too, and an Improved Critical's range are named.
     assert.deepEqual([say("adjust.init", -1), say("critOn", 18)], ["Overwrite with initiative bonus −1", "Overwrite with critical hits on 18 to 20"]);
   });
@@ -136,7 +136,7 @@ describe("the review's lines (3.3)", () => {
     const p = plan(edited, fillOf({ rolls: [shillelagh({ id: "r3" }), sling({ id: "r4" })] }));
     const rows = p.items.map((i) => keptRow(i, blocks(p)));
     assert.equal(rows[0]!.first, "Shillelagh (cantrip), as you changed it: +4 to hit, 1d8 Bludgeoning");
-    assert.equal(rows[0]!.tick, "Overwrite with D&D Beyond’s");
+    assert.equal(rows[0]!.tick, "Overwrite with D&D Beyond's");
     assert.equal(rows[1]!.first, "Sling: you removed it.");
     assert.equal(rows[1]!.tick, "Add it back");
     const gone = plan(edited, fillOf({ rolls: [sling({ id: "r5" })] }));
@@ -234,7 +234,7 @@ describe("Check these and the warnings (3.3)", () => {
   test("the losses warning", () => {
     const skills = Object.fromEntries(["arcana", "history", "nature", "religion", "insight", "medicine", "perception", "survival", "stealth", "acrobatics", "athletics", "deception", "intimidation", "performance"].map((s) => [s, "prof"])) as PcStats["skills"];
     const first = synced(fillOf({ skills }, { level: 6 }));
-    assert.equal(lossesText(plan(first, fillOf({}, { level: 1 })), "Bree"), "This lowers Bree’s level from 6 to 1 and takes away 14 proficiencies. If that is not what changed in D&D Beyond, its format may have changed. Cancel, and check the character there.");
+    assert.equal(lossesText(plan(first, fillOf({}, { level: 1 })), "Bree"), "This lowers Bree's level from 6 to 1 and takes away 14 proficiencies. If that is not what changed in D&D Beyond, its format may have changed. Cancel, and check the character there.");
   });
 });
 
@@ -247,12 +247,12 @@ describe("the done line, the size refusals and the answers (3.4, 3.5)", () => {
   });
 
   test("too big, refused, and answered after closing", () => {
-    assert.equal(blockTooBigText("Bree", 12.4 * 1024), "This would make Bree’s stat block 12.4 KiB of the 12 KiB it may hold. Remove a few of your own rolls first.");
-    assert.equal(recordTooBigText("Bree"), "Bree’s sync record would be too large to save. Remove a few rolls first.");
+    assert.equal(blockTooBigText("Bree", 12.4 * 1024), "This would make Bree's stat block 12.4 KiB of the 12 KiB it may hold. Remove a few of your own rolls first.");
+    assert.equal(recordTooBigText("Bree"), "Bree's sync record would be too large to save. Remove a few rolls first.");
     assert.equal(refusalText("Not re-synced", "that is not yours"), "Not re-synced: That is not yours.");
     assert.equal(lateApplyText("Bree", "refused", "the room is too full."), "Bree was not re-synced. The room is too full.");
     assert.equal(lateApplyText("Bree", "unknown"), "The connection dropped before the server answered, so Bree may not have been re-synced. Check the stat block.");
     assert.equal(lateApplyText("Bree", "taken"), null);
-    assert.equal(lateUndoText("Bree", "refused", "no"), "Bree’s re-sync was not undone. No.");
+    assert.equal(lateUndoText("Bree", "refused", "no"), "Bree's re-sync was not undone. No.");
   });
 });

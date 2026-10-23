@@ -924,7 +924,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await mire.locator("[data-saves]").count(), 0);
     await mire.getByRole("button", { name: "Details", exact: true }).click();
     const mirePanel = tokenPanel(dm).locator("[data-stat-block]");
-    await mirePanel.getByText("This token’s stat block was deleted from this room.").waitFor();
+    await mirePanel.getByText("This token's stat block was deleted from this room.").waitFor();
     await mirePanel.getByRole("button", { name: "Detach", exact: true }).waitFor();
     await tokenPanel(dm).locator("[data-quick-numbers]").getByRole("img", { name: "Armor Class 13" }).waitFor();
     await dm.keyboard.press("Escape");

@@ -119,7 +119,7 @@ export default function MonstersPanel(props: PanelProps) {
         </Button>
       </div>
       <Section
-        label={own.length === 0 ? "This room’s monsters" : ownResults.length === own.length ? `This room’s monsters (${own.length})` : `This room’s monsters (${ownResults.length} of ${own.length})`}
+        label={own.length === 0 ? "This room's monsters" : ownResults.length === own.length ? `This room's monsters (${own.length})` : `This room's monsters (${ownResults.length} of ${own.length})`}
       >
         {own.length > 0 ? (
           <MonsterList items={ownResults} onPick={setChosen} subpages />
@@ -235,11 +235,11 @@ function MonsterDetail(props: {
               Delete
             </ConfirmButton>
           </div>
-          <Help>This room’s own monster. Players never see its stat block, only the tokens made from it. Deleting it leaves those tokens on the map.</Help>
+          <Help>This room's own monster. Players never see its stat block, only the tokens made from it. Deleting it leaves those tokens on the map.</Help>
         </>
       ) : (
         <Button size="sm" onClick={() => props.onCopy(listed.srd)}>
-          Copy to this room’s monsters and edit
+          Copy to this room's monsters and edit
         </Button>
       )}
       <StatBlockView view={m} source={listed.source} />

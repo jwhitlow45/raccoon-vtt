@@ -197,7 +197,7 @@ export function AttachBlockDialog(props: {
           <CompanionPickerBody
             character={character}
             name={token.name}
-            help={`${whose(character.name)} players and the DM read it. Next you choose whether it sets ${token.name}’s numbers.`}
+            help={`${whose(character.name)} players and the DM read it. Next you choose whether it sets ${token.name}'s numbers.`}
             query={query}
             onQuery={setQuery}
             onPick={choose}
@@ -345,7 +345,7 @@ export function CharacterBlocksPage(props: { character: Pick<Character, "id" | "
         </Button>
       </div>
       {blocks.length === 0 ? (
-        <Empty>{`${whose(character.name)} companions’ stat blocks go here. Paste one from a book, start one, or pick an SRD creature when you add a companion.`}</Empty>
+        <Empty>{`${whose(character.name)} companions' stat blocks go here. Paste one from a book, start one, or pick an SRD creature when you add a companion.`}</Empty>
       ) : (
         <RowList label={`${whose(character.name)} stat blocks`}>
           {blocks.map((block) => (

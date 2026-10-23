@@ -700,7 +700,7 @@ function Abilities(props: StatsProps) {
   const d = pcDerived(stats, level);
   return (
     <Section label="Abilities" divider={false} style={STACKED}>
-      <Help>Each save shows its total. Type a different total to keep a bonus the rules do not know, such as a Cloak of Protection’s.</Help>
+      <Help>Each save shows its total. Type a different total to keep a bonus the rules do not know, such as a Cloak of Protection's.</Help>
       {ABILITY_KEYS.map((a) => {
         const proficient = stats.saves.includes(a);
         return (
@@ -798,7 +798,7 @@ function OtherNumbers(props: StatsProps) {
     <Section label="Other numbers" divider={false} style={STACKED}>
       <NumberRow
         name="Initiative"
-        hint={held.initBonus === d.initiative.total ? partsText(d.initiative) : `${partsText(d.initiative)}. The token’s Initiative stops at ${signed(held.initBonus)}.`}
+        hint={held.initBonus === d.initiative.total ? partsText(d.initiative) : `${partsText(d.initiative)}. The token's Initiative stops at ${signed(held.initBonus)}.`}
         controls={
           <>
             <Checkbox label="Alert: add Proficiency Bonus" checked={stats.alert === true} onChange={(on) => setStats((s) => withFlag(s, "alert", on))} />
@@ -808,7 +808,7 @@ function OtherNumbers(props: StatsProps) {
       />
       <NumberRow
         name="Passive Perception"
-        hint={held.passivePerception === d.passive.total ? partsText(d.passive) : `${partsText(d.passive)}. The token’s Passive Perception stops at ${held.passivePerception}.`}
+        hint={held.passivePerception === d.passive.total ? partsText(d.passive) : `${partsText(d.passive)}. The token's Passive Perception stops at ${held.passivePerception}.`}
         controls={<TotalInput label="Passive Perception" number={d.passive} score onTotal={total({ kind: "passive" })} />}
       />
       <NumberRow
@@ -823,7 +823,7 @@ function OtherNumbers(props: StatsProps) {
       />
       <NumberRow
         name="Critical Hits on"
-        hint="Improved Critical and Superior Critical widen a weapon attack’s range"
+        hint="Improved Critical and Superior Critical widen a weapon attack's range"
         controls={
           <Select
             aria-label="Critical Hits on"

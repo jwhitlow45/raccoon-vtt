@@ -215,7 +215,7 @@ export type SaveOutcome = { kind: "saved" } | { kind: "problem"; text: string; r
 /** A Save's answer in the editor's words (7.2). The budget's refusal keeps Save off for a few seconds. */
 export function saveOutcome(answer: OpAnswer, refusal: Pick<OpRefusal, "message"> | undefined, name: string): SaveOutcome {
   if (answer === "taken") return { kind: "saved" };
-  if (answer === "unknown") return { kind: "problem", text: `The connection dropped before the server answered. Check ${name}’s stat block before saving again.` };
+  if (answer === "unknown") return { kind: "problem", text: `The connection dropped before the server answered. Check ${name}'s stat block before saving again.` };
   const message = refusal?.message.trim() ?? "";
   if (message === BLOCK_SAVES_TOO_FAST) return { kind: "problem", text: message, retryInMs: LIMITS.companionBlockWriteRefillMs };
   return { kind: "problem", text: message ? sentence(message) : "The server refused it." };
@@ -224,9 +224,9 @@ export function saveOutcome(answer: OpAnswer, refusal: Pick<OpRefusal, "message"
 /** The toast for a Save answered after the editor closed: nothing once saved, since the block shows where it was opened. */
 export function lateSaveText(name: string, answer: OpAnswer, refusal?: Pick<OpRefusal, "message">): string | null {
   if (answer === "taken") return null;
-  if (answer === "unknown") return `The connection dropped before the server answered, so ${name}’s stat block may not have been saved. Check it.`;
+  if (answer === "unknown") return `The connection dropped before the server answered, so ${name}'s stat block may not have been saved. Check it.`;
   const why = refusal?.message.trim().replace(/\.$/, "");
-  return why ? `${name}’s stat block was not saved. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${name}’s stat block was not saved.`;
+  return why ? `${name}'s stat block was not saved. ${why[0]!.toUpperCase()}${why.slice(1)}.` : `${name}'s stat block was not saved.`;
 }
 
 function sentence(text: string): string {

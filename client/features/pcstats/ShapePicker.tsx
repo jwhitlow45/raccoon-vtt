@@ -238,7 +238,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
                   ...knownRows.map(rowItem),
                   ...known.missing.map((id) => (
                     <li key={id} data-form={id}>
-                      <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app’s SRD list" />
+                      <Row pressed onClick={() => toggle(id)} title={id} detail="Not in this app's SRD list" />
                     </li>
                   )),
                   ...otherRows.map(rowItem),
@@ -337,7 +337,7 @@ function ShapeChoice(props: { name: string; creature: string; wild: string; valu
   const group = useId();
   const options: { value: ShapeKind; label: string; detail: string }[] = [
     { value: "wild", label: "Wild Shape", detail: props.wild },
-    { value: "other", label: "Polymorph or another shape", detail: `All of ${props.creature}’s numbers.` },
+    { value: "other", label: "Polymorph or another shape", detail: `All of ${props.creature}'s numbers.` },
   ];
   return (
     <div role="radiogroup" aria-label="Which shape" style={{ display: "grid", gap: theme.space(1) }}>

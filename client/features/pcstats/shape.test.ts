@@ -36,9 +36,9 @@ describe("shapes", () => {
 
   test("Wild Shape on a character with no stat block says it takes all of the creature's numbers, and points at adding one where the viewer may (LP7-PC-11)", () => {
     const sage = { name: "Sage", actor: actor({ srdId: "wolf", wildShape: true }) };
-    assert.equal(shapeNote(sage, "Wolf", true), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf’s numbers. Add a stat block to keep Sage’s Intelligence, Wisdom, Charisma and proficiencies.");
-    assert.equal(shapeNote(sage, "Wolf", false), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf’s numbers.");
-    assert.equal(wildShapeDetail(sage, "Wolf", true), "Sage has no stat block, so rolls use all of Wolf’s numbers. Add a stat block to keep Sage’s Intelligence, Wisdom, Charisma and proficiencies.");
+    assert.equal(shapeNote(sage, "Wolf", true), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf's numbers. Add a stat block to keep Sage's Intelligence, Wisdom, Charisma and proficiencies.");
+    assert.equal(shapeNote(sage, "Wolf", false), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf's numbers.");
+    assert.equal(wildShapeDetail(sage, "Wolf", true), "Sage has no stat block, so rolls use all of Wolf's numbers. Add a stat block to keep Sage's Intelligence, Wisdom, Charisma and proficiencies.");
     assert.equal(wildShapeDetail({ ...sage, stats: EMPTY_PC_STATS as PcStats }, "Wolf", true), "Sage keeps Intelligence, Wisdom, Charisma and proficiencies, and each save and skill takes the higher of the two.");
   });
 });

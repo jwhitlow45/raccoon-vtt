@@ -83,7 +83,7 @@ export function PcStatBlock(props: {
           {forms}
           {edits ? (
             <>
-              <Help>Add this character’s stat block, or take a shape such as Wild Shape.</Help>
+              <Help>Add this character's stat block, or take a shape such as Wild Shape.</Help>
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
                 {add()}
                 {take}
@@ -199,12 +199,12 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   if (failed) {
     return (
       <>
-        <SrdLoadFailed what="The creature’s stat block" inline />
+        <SrdLoadFailed what="The creature's stat block" inline />
         {end}
       </>
     );
   }
-  if (!list) return <Loading text="Loading the creature’s stat block…" />;
+  if (!list) return <Loading text="Loading the creature's stat block…" />;
   return (
     <>
       <Note tone="info">{shapeNote(character, monster?.name ?? srdId, props.edits)}</Note>

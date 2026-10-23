@@ -134,7 +134,7 @@ export function askTarget(view: Pick<RoomState, "members" | "characters" | "meta
   const character = "ref" in token.actor ? view.characters[token.actor.ref] : undefined;
   if (character && anyPlayer(view, character.ownerIds)) return { key: `c:${character.id}`, ref: { characterId: character.id }, name: character.name, ticked: true };
   if (token.sceneId === view.meta.playerSceneId) return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: true };
-  return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: false, why: "not on the players’ scene", blocked: true };
+  return { key: `t:${token.id}`, ref: { tokenId: token.id }, name: displayName(token), ticked: false, why: "not on the players' scene", blocked: true };
 }
 
 /** Whether a token action bar offers "Request a roll": some selected creature can be asked, by the rule the sheet ticks them by. */
