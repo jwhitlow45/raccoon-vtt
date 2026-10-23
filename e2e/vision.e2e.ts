@@ -89,6 +89,8 @@ const DOOR = "3,10,n";
 const START = { x: 3, y: 4 };
 const PIN_CELL = { x: 8, y: 16 };
 const CLOSET = { x: 14, y: 19 };
+/** Step lp2-2b's cap on a frame's route work, in units (features/movement/boardWork.ts): a walk across this scene takes several frames at it. */
+const ROUTE_UNITS_PER_FRAME = 40;
 
 const run = {
   roomId: "",
@@ -822,15 +824,12 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     const at = (x: number, y: number) => pagePoint(dm, BOUNDS, { x: x + 0.5, y: y + 0.5 });
     const start = await at(13, 3);
     await dm.mouse.move(start.x, start.y);
-    // For the drag only, the page's clock runs 20 times fast, so a frame's share of route work (features/movement/routeWork.ts) runs out
-    // after a sliver of real work and walks tend to be searched over several frames. That only makes a search likely: the line's
-    // data-finding, asserted below, is what shows one happened.
-    await dm.evaluate(() => {
-      const perf = (globalThis as unknown as { performance: { now(): number } }).performance;
-      const real = perf.now.bind(perf);
-      const t0 = real();
-      perf.now = () => t0 + (real() - t0) * 20;
-    });
+    // For the drag only, each frame's route work (features/movement/boardWork.ts) stops at a few units, so every walk the drag asks for
+    // is searched over several frames, on a fast machine as on a slow one (review LP2L2-E2E-CPU). The line's data-finding, asserted
+    // below, shows that it was.
+    await dm.evaluate((units) => {
+      (globalThis as unknown as { rvttRouteUnitsPerFrame?: number }).rvttRouteUnitsPerFrame = units;
+    }, ROUTE_UNITS_PER_FRAME);
     try {
       await dm.mouse.down();
       // Round the room and through the wall's door, up onto the platform and back, so each stop's walk is searched anew.
@@ -849,8 +848,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
       }
       await dm.mouse.up();
     } finally {
-      // The page's own clock again: the instance's override goes, and the prototype's shows through.
-      await dm.evaluate(() => delete (globalThis as unknown as { performance: { now?: unknown } }).performance.now);
+      await dm.evaluate(() => delete (globalThis as unknown as { rvttRouteUnitsPerFrame?: number }).rvttRouteUnitsPerFrame);
     }
     // The last walk is found, and the line no longer says it is searching.
     await waitFor("the walk found", async () => ((await line.getAttribute("data-finding")) === null ? true : null));
