@@ -778,7 +778,7 @@ If the player withdraws the ask while you have it open, the page says so and car
 
 ## Alerts during a fight
 
-Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders and recharge rolls. Where the screen is short, they fold into one row that names the most pressing one. On a phone, a label's, pin's, light's or trap's pane that opens from the bottom of the screen folds the cards away too, so the pane's header and Close stay in reach, and their row sits on the pane's top edge when the screen has room for it. Tap the row, or close the pane, to bring the cards back.
+Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders and recharge rolls. Where the screen is short, they fold into one row that names the most pressing one. On a phone, a label's, pin's, light's or trap's pane that opens from the bottom of the screen folds the cards away too, so the pane's header and Close stay in reach, and their row sits on the pane's top edge when the screen has room for it. Tap the row, or close the pane, to bring the cards back. A toast that arrives while the pane is open, such as a trap going off, appears just under the pane's header, so it never hides Close.
 
 ![A recharge card at the start of the dragon's turn, "Fire Breath can recharge (5–6)." with Roll and Dismiss, beside its tracker row's legendary pips.](dm-guide/alerts.webp)
 
@@ -926,7 +926,7 @@ An example trap is a good place to start even when you have something else in mi
 
 ### The trap pane
 
-The pane holds everything about the trap, in sections that fold to one line each, so you can read the whole trap at a glance and open only what you want to change. Every change is saved as you make it. On a computer the pane opens over the map, beside the trap. On a phone it slides up from the bottom, and while it is open the fight's alerts fold into a row on its top edge, so the pane's header and Close stay in reach. Tap that row to close the pane and see the alerts.
+The pane holds everything about the trap, in sections that fold to one line each, so you can read the whole trap at a glance and open only what you want to change. Every change is saved as you make it. On a computer the pane opens over the map, beside the trap. On a phone it slides up from the bottom, and while it is open the fight's alerts fold into a row on its top edge, so the pane's header and Close stay in reach. Tap that row to close the pane and see the alerts. If a trap goes off while the pane is open, its toast appears just under the pane's header. On a small phone held sideways at a large interface size, where the pane wouldn't fit under the top bar, it covers the top bar instead until you close it.
 
 1. **Name**: what your players see once they find it.
 2. **Goes off when**: a creature steps onto it, starts or ends its turn on it, or steps off it. **Who** sets it off: party creatures, other creatures or any creature. **Small or larger only** lets the cat walk over the plate, and **Only creatures on the floor** leaves out fliers, burrowers and riders.
