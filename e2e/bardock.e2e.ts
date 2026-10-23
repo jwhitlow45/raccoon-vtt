@@ -1201,7 +1201,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await apart("a resize dropped on the column");
     await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 2000, 2000);
     r = await barRect(dm);
-    assert.ok(Math.abs(r.bottom - r.top - 148) <= 1, `the smallest is not 148 tall: ${r.bottom - r.top}`);
+    assert.ok(Math.abs(r.bottom - r.top - 152) <= 1, `the smallest is not 152 tall: ${r.bottom - r.top}`);
     await apart("the smallest");
     await shots.take(dm, "token-window-smallest-in-a-fight");
     await ops.send({ t: "encounter.end" });

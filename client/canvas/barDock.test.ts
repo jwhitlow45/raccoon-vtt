@@ -453,7 +453,7 @@ describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 
     const largest = placeBar({ ...base, height: 2000, resizable: true, size: { w: 4096, h: 4096 } });
     assert.deepEqual(boxOf(largest, 2000), { left: 12, top: 64, width: 900, height: 668 });
     assert.equal(placeBar({ ...base, height: 548, resizable: true, size: { w: 200 } })!.hang.width, 316, "never under the default width");
-    assert.deepEqual(boxOf(placeBar({ ...base, height: 548, resizable: true, size: { w: 1, h: 1 } }), 548), { left: 912 - 316, top: 732 - 148, width: 316, height: 148 }, "the smallest: the default width by 148");
+    assert.deepEqual(boxOf(placeBar({ ...base, height: 548, resizable: true, size: { w: 1, h: 1 } }), 548), { left: 912 - 316, top: 732 - 152, width: 316, height: 152 }, "the smallest: the default width by 152");
     // At the top left, the far sides are the right and the bottom.
     const topLeft = placeBar({ ...base, spot: { corner: "tl", x: 0, y: 0 }, height: 2000, resizable: true, size: { w: 4096, h: 4096 } });
     assert.deepEqual(boxOf(topLeft, 2000), { left: 8, top: 60, width: 900, height: 668 });
@@ -502,13 +502,13 @@ describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 
     const room = { left: 12, top: 64, width: 900, height: 668 };
     const start = { left: 596, top: 184, width: 316, height: 548 };
     const limits = resizeLimits({ box: start, corner: "br", room, defaultWidth: 316, content: 548 });
-    assert.deepEqual(limits, { minWidth: 316, maxWidth: 900, minHeight: 148, maxHeight: 548 });
+    assert.deepEqual(limits, { minWidth: 316, maxWidth: 900, minHeight: 152, maxHeight: 548 });
     const at = (corner: Corner, part: ResizePart, dx: number, dy: number, box = start, l = limits) => resizeBox({ start: box, corner, part, dx, dy, limits: l });
     assert.deepEqual(at("br", "corner", -100, 200), { left: 496, top: 384, width: 416, height: 348 });
     assert.deepEqual(at("br", "corner", 100, -50), start, "no narrower than the default, no taller than the content");
     assert.deepEqual(at("br", "width", -100, 200), { ...start, left: 496, width: 416 }, "a band changes one dimension");
     assert.deepEqual(at("br", "height", -100, 200), { ...start, top: 384, height: 348 });
-    assert.deepEqual(at("br", "corner", -5000, 5000), { left: 12, top: 732 - 148, width: 900, height: 148 }, "the room and the shortest");
+    assert.deepEqual(at("br", "corner", -5000, 5000), { left: 12, top: 732 - 152, width: 900, height: 152 }, "the room and the shortest");
     const corner = { left: 100, top: 100, width: 316, height: 300 };
     const loose = { minWidth: 316, maxWidth: 800, minHeight: 148, maxHeight: 500 };
     assert.deepEqual(at("tl", "corner", 100, 100, corner, loose), { left: 100, top: 100, width: 416, height: 400 });
@@ -518,7 +518,7 @@ describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 
     assert.equal(handleCorner("tl"), "br");
     assert.equal(handleCorner("tr"), "bl");
     assert.equal(handleCorner("bl"), "tr");
-    // A room narrower than the default leaves the room as the narrowest, and content under 148 px the shortest.
+    // A room narrower than the default leaves the room as the narrowest, and content under 152 px the shortest.
     assert.equal(resizeLimits({ box: start, corner: "br", room: { ...room, left: 912 - 250, width: 250 }, defaultWidth: 316, content: 548 }).minWidth, 250);
     assert.equal(resizeLimits({ box: start, corner: "br", room, defaultWidth: 316, content: 120 }).minHeight, 120);
   });

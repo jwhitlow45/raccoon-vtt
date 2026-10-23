@@ -46,9 +46,13 @@ export const LANE_WIDTH = 312;
 /** The margin the free area keeps from every edge, and the gap between the column and the bar. */
 export const EDGE = 8;
 /**
- * The least height a docked or spanning bar needs: its 48 px header and
- * two 44 px rows of buttons with their gaps, or under the alerts summary
- * row the header and one row. Shorter than this, it opens compact.
+ * The least height a docked or spanning bar needs: its header and two
+ * 44 px rows of buttons with their gaps, or under the alerts summary row
+ * the header and one row. Shorter than this, it opens compact. The sticky
+ * header is 52 px now (components/SheetHeader.tsx), so a bar given just
+ * this much shows its second row up to 4 px under the "Scroll for more"
+ * fade. It stays 148 so 844 x 390 at 130% with a phone's insets, which
+ * leaves 151, still docks (docs/design-v1-bar-dock.md 1.4).
  */
 export const MIN_BAR_HEIGHT = 148;
 /** Below this layout width, a layout no wider than tall spans the bar as a phone does. */
@@ -412,8 +416,8 @@ export function writeSize(size: BarSize, storage?: Pick<Storage, "setItem" | "re
   }
 }
 
-/** The shortest a resized window gets: its header and two rows of buttons, the least a docked bar needs. */
-export const MIN_WINDOW_HEIGHT = MIN_BAR_HEIGHT;
+/** The shortest a resized window gets: its 52 px header and two rows of buttons whole, 4 px over the least a docked bar needs. */
+export const MIN_WINDOW_HEIGHT = MIN_BAR_HEIGHT + 4;
 /**
  * How far the resize handle reaches past the window's corner: half its
  * 24 px disc. The free area's margin and the lane's gap are 8, so a
