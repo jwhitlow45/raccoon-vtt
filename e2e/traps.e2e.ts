@@ -63,6 +63,8 @@ const run = {
   thornChar: randomUUID(),
   thorn: randomUUID(),
   trapId: "",
+  /** The trap in the board's top right corner, under the alerts column (lp2-1a). */
+  cornerId: "",
 };
 
 function actor(over: Record<string, unknown> = {}) {
@@ -561,6 +563,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   test("lp2-1a. a trap goes off while its pane is open as a card: at 1280 x 800, 844 x 390 and 820 x 1180, at 85% and 130%, the pane's header, Close and folds stay in reach and no card covers it, beside the lane or under the column's summary row, whose tap closes the pane and puts focus on the card (docs/design-v1-look-pass-2.md 2.8)", async () => {
     // In the board's top right corner, where the alerts column hangs, so its pane would meet the cards.
     const cornerId = randomUUID().replace(/-/g, "").slice(0, 16);
+    run.cornerId = cornerId;
     const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: cornerId, sceneId: run.sceneId, name: "Corner Darts", zone: { cells: [{ x: 13, y: 1, w: 2, h: 1 }] }, rig } });
     await waitFor("the corner trap on the DM's copy", () => state(dmSocket)?.traps?.[cornerId] ?? null);
@@ -642,6 +645,68 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     assert.deepEqual([...seen].sort(), ["beside", "summary"], "the sizes never put the pane beside the lane and under its row both");
     await dm.setViewportSize(DESKTOP);
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  });
+
+  test("lp2-1a-2. while the trap pane's code loads, and after it failed to, its frame keeps out of the alerts as the pane does: at 820 x 1180 at 130% the column's row stands for the cards, no card meets the frame, its retry is in reach, and the row's tap closes it (LP2L1-ASTRA-02)", async () => {
+    const cornerId = run.cornerId;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // The pane's chunk, held and then refused, from the room's own preload on.
+    await dm.route("**/assets/TrapPane-*.js", async (route) => {
+      await held;
+      await route.abort();
+    });
+    try {
+      await dm.setViewportSize({ width: 820, height: 1180 });
+      await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+      await reopenRoom(dm);
+      await waitFor("the DM's snapshot again", () => state(dmSocket)?.traps?.[cornerId] ?? null);
+      await dm.locator(".konvajs-content").first().waitFor();
+      await pickTool(dm, "Trap");
+      await tapCell(dm, BOUNDS, { x: 13, y: 1 });
+      const loading = dm.getByRole("status").filter({ hasText: "Loading the trap editor…" });
+      await loading.waitFor();
+      await ops.send({ t: "trap.spring", trapId: cornerId, tokenIds: [run.thorn] });
+      const row = dm.getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
+      const card = dm.getByRole("group", { name: "Corner Darts went off" });
+      await row.waitFor();
+      await dm.waitForTimeout(300);
+      assert.equal(await card.isVisible(), false, "the loading frame left the cards over it");
+      await shots.take(dm, "traps-lp2-1a-2-loading-frame");
+
+      release();
+      // Whichever way the app reads the failure (didn't load, offline, updated), its notice has a button to recover.
+      const failed = dm.getByRole("alert").filter({ has: dm.getByRole("button") }).filter({ hasText: /trap editor|RaccoonVTT was updated/ });
+      await failed.waitFor();
+      const frame = failed.locator("..");
+      const retry = failed.getByRole("button").first();
+      assert.ok(await wholeInReach(retry), "the frame's retry is out of reach");
+      assert.equal(await row.count(), 1, "the failure frame let the cards back over it");
+      const frameBox = await rectOf(frame);
+      const cards = await dm.evaluate(() => {
+        const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<{ getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number } }> } };
+        return Array.from(g.document.querySelectorAll('[data-alert]:not([data-alert="rolls"]), [data-alert="rolls"] > *'))
+          .map((el) => el.getBoundingClientRect())
+          .filter((r) => r.width > 0)
+          .map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
+      });
+      for (const c of cards) assert.ok(!intersects(c, frameBox), `a card covers the failure frame: ${JSON.stringify({ c, frameBox })}`);
+      await shots.take(dm, "traps-lp2-1a-2-failed-frame");
+
+      // The row's tap closes the frame, as the host's own close, and the card it stood for shows.
+      await row.click();
+      await failed.waitFor({ state: "detached" });
+      await card.first().waitFor();
+    } finally {
+      release();
+      await dm.unroute("**/assets/TrapPane-*.js");
+    }
+    await pickTool(dm, "Select");
+    for (const due of state(dmSocket)?.traps?.[cornerId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: cornerId, due: due.id });
+    await waitFor("the springing settled", () => (state(dmSocket)?.traps?.[cornerId]?.rig?.due === undefined ? true : null));
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
   });
 
   test("lp2-1b. the pane's choices fit its card: Afterwards and Hits unfold with no sideways scroll at 1280 x 800 and 844 x 390, Afterwards is one switch, Who's three words share a row, and arrow keys through Hits change what it hits and start no pick, while Add squares and Place the area still start theirs (docs/design-v1-look-pass-2.md 2.7)", async () => {

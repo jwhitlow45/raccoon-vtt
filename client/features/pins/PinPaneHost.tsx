@@ -1,17 +1,16 @@
 import { Suspense, useEffect } from "react";
 import { useStore } from "zustand";
-import type { Pin, Scene } from "#shared/model.ts";
-import { Loading } from "../../components/Loading.tsx";
+import type { Scene } from "#shared/model.ts";
 import { LoadBoundary } from "../../components/LoadBoundary.tsx";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
-import { theme } from "../../lib/theme.ts";
 import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { panePlacement } from "../builder/labelEdit.ts";
-import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
+import { PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
+import { PaneFailedFrame, PaneLoadingFrame } from "../builder/PaneFrames.tsx";
 import { pinScreenBox } from "./rules.ts";
 import { pinSlot } from "./store.ts";
 
@@ -30,43 +29,25 @@ export function PinPaneHost(props: { scene: Scene; tool: string; camera: Camera;
   const pin = useRoomView((s) => (paneId ? s.view?.pins[paneId] : undefined));
   const tokenSelected = useRoomView((s) => s.local.selectedId !== null);
   const open = paneId !== null && pin !== undefined && pin.sceneId === props.scene.id && props.tool === "pin" && !tokenSelected;
+  const lane = useAlertsLane(props.viewport);
   useEffect(() => {
     if (paneId !== null && !open) store.setState({ paneId: null });
   }, [paneId, open, store]);
   if (!open || !pin) return null;
+  const close = () => store.setState({ paneId: null });
+  // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in, beside the fight's alerts as the pane will stand.
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: pinScreenBox(pin, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (
-        <div
-          style={{
-            position: "absolute",
-            left: theme.space(2),
-            right: theme.space(2),
-            bottom: props.insets.bottom + theme.space(2),
-            zIndex: theme.z.pane,
-            padding: theme.space(3),
-            background: theme.color.surface,
-            border: `${theme.line.border}px solid ${theme.color.border}`,
-            borderRadius: theme.radius.lg,
-            boxShadow: theme.shadow.pane,
-            color: theme.color.text,
-          }}
-        >
+        <PaneFailedFrame place={place} close={close}>
           <RoomLoadNotice {...f} subject="The pin editor" verb="load" compact reopen={{ tool: props.tool }} />
-        </div>
+        </PaneFailedFrame>
       )}
     >
-      <Suspense fallback={<PaneLoading pin={pin} camera={props.camera} viewport={props.viewport} insets={props.insets} />}>
-        <PinPane pin={pin} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={() => store.setState({ paneId: null })} />
+      <Suspense fallback={<PaneLoadingFrame text="Loading the pin editor…" place={place} close={close} />}>
+        <PinPane pin={pin} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
       </Suspense>
     </LoadBoundary>
   );
-}
-
-/** While the pane's code downloads, the shared loading notice takes the box the pane will appear in, beside the fight's alerts as the pane will stand. */
-function PaneLoading(props: { pin: Pin; camera: Camera; viewport: Size; insets: Insets }) {
-  const lane = useAlertsLane(props.viewport);
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: pinScreenBox(props.pin, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
-  // Even padding: the pane's slight top padding is for its header, which a loading notice does not have.
-  return <Loading text="Loading the pin editor…" style={{ ...labelPaneFrame(place), padding: theme.space(3) }} />;
 }

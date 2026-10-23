@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { barDockSlot, freeArea, paneLaneBox, WINDOW_FOLD_BELOW, type Chrome, type Lane, type PaneLane, type PaneLaneBox } from "../canvas/barDock.ts";
 import { sheetRoom, SHEET_MIN_HEIGHT, type SheetSpace } from "../components/sheetCap.ts";
-import { PANE_MIN_HEIGHT, sheetPaneRoom } from "../features/builder/labelEdit.ts";
+import { PANE_MIN_HEIGHT, sheetPaneRoom, type PanePlacement } from "../features/builder/labelEdit.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
 import type { Insets, Size } from "../lib/camera.ts";
 import { revealAndFocus } from "../lib/reveal.ts";
@@ -146,6 +146,16 @@ export function usePublishPaneLane(lane: PaneLane | null, close: () => void): vo
       if (store.getState().paneLane === mine) store.setState({ paneLane: null });
     };
   }, [store, lane]);
+}
+
+/**
+ * usePublishPaneLane for a pane host's loading or failure frame, placed as
+ * the pane will be (`place`), with the host's own close. The loaded pane's
+ * place takes over from it as the frame unmounts, since each clears only
+ * its own.
+ */
+export function useFrameLane(place: PanePlacement, close: () => void): void {
+  usePublishPaneLane(place.kind === "card" ? (place.lane ?? null) : null, close);
 }
 
 /**
