@@ -19,9 +19,10 @@ export function labelScreenBox(label: Pick<Label, "x" | "y" | "text" | "size">, 
 
 /**
  * The label pane's box over the canvas for its placement: a bottom sheet,
- * or a card by its label. The pin and light panes take it too, and the
- * panes' loading notices take the same box, so each shows where its pane
- * will appear while the pane's code downloads.
+ * over the top bars where they leave it too little room, or a card by its
+ * label. The pin, light and trap panes take it too, and the panes' loading
+ * notices take the same box, so each shows where its pane will appear
+ * while the pane's code downloads.
  *
  * The top padding is slight because every pane opens with a PaneHeader
  * (components/SheetHeader.tsx), a 48 px row that centers its title and
@@ -30,7 +31,7 @@ export function labelScreenBox(label: Pick<Label, "x" | "y" | "text" | "size">, 
 export function labelPaneFrame(place: PanePlacement): CSSProperties {
   const common: CSSProperties = {
     position: "absolute",
-    zIndex: theme.z.pane,
+    zIndex: place.kind === "sheet" && place.overBars ? theme.z.paneOverBars : theme.z.pane,
     maxHeight: place.maxHeight,
     background: theme.color.surface,
     border: `${theme.line.border}px solid ${theme.color.border}`,

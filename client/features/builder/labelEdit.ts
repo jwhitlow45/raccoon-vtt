@@ -147,11 +147,12 @@ const MARGIN = 8;
 /** A pane squeezed past this scrolls rather than shrinking further. */
 export const PANE_MIN_HEIGHT = 120;
 
+/** `overBars`: a bottom sheet that stands over the top bars, where they leave it less than its least height (labelPaneFrame draws it over them). */
 export type PanePlacement =
-  | { kind: "sheet"; bottom: number; maxHeight: number }
+  | { kind: "sheet"; bottom: number; maxHeight: number; overBars?: true }
   | { kind: "card"; left: number; top: number; width: number; maxHeight: number };
 
-/** The height between the bars (`insets`) that a bottom sheet pane may take, less its margins. Where that is under PANE_MIN_HEIGHT, the pane keeps PANE_MIN_HEIGHT all the same. */
+/** The height between the bars (`insets`) that a bottom sheet pane may take, less its margins. Where that is under PANE_MIN_HEIGHT, the pane keeps PANE_MIN_HEIGHT all the same, over the top bars. */
 export function sheetPaneRoom(input: { viewport: Size; insets: Insets }): number {
   return input.viewport.height - input.insets.bottom - input.insets.top - 2 * MARGIN;
 }
@@ -162,13 +163,22 @@ export function sheetPaneRoom(input: { viewport: Size; insets: Insets }): number
  * under the label, or over it when there is more room there, clear of the
  * bars along each side (`insets`), and scrolls inside when it fits neither.
  * `box` is the label's box on screen, in pixels from the canvas's top left.
+ *
+ * A bottom sheet keeps its least height, 120 px, where the bars leave it
+ * less, as at 480 x 320 at 130%, where they leave 78 px beside the Trap
+ * tool's options. Shrunk to the room, its header alone would fill it, with
+ * no room left to edit in. So there it stands over the top bars instead
+ * (`overBars`), which would otherwise hide its header and Close, up to the
+ * screen's top at most.
  */
 export function panePlacement(input: { viewport: Size; insets: Insets; box: LabelBox; height: number }): PanePlacement {
   const { viewport, insets, box, height } = input;
   const topLimit = insets.top + MARGIN;
   const bottomLimit = viewport.height - insets.bottom - MARGIN;
   if (viewport.width < SHEET_BELOW_PX) {
-    return { kind: "sheet", bottom: insets.bottom, maxHeight: Math.max(PANE_MIN_HEIGHT, sheetPaneRoom(input)) };
+    const room = sheetPaneRoom(input);
+    if (room >= PANE_MIN_HEIGHT) return { kind: "sheet", bottom: insets.bottom, maxHeight: room };
+    return { kind: "sheet", bottom: insets.bottom, maxHeight: Math.max(0, Math.min(PANE_MIN_HEIGHT, viewport.height - insets.bottom)), overBars: true };
   }
   const width = Math.min(PANE_WIDTH, viewport.width - insets.left - insets.right - 2 * MARGIN);
   const center = (box.x0 + box.x1) / 2;

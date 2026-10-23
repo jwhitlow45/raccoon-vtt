@@ -21,12 +21,12 @@ const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 /**
  * Where the canvas mounts a trap's pane, for the DM (docs/design-v1-traps.md
  * 4.1), as it mounts a pin's: a bottom sheet on a map under 600 px wide, a
- * card beside the trap from 600 px. The pane loads only for a DM, and closes on its own
- * once it no longer applies: its trap is gone or on another scene, or the
- * Trap tool was put down. A selection stays, since Set it off and the asks
- * for rolls take the selected creatures, and no token's bar shows while a
- * tool takes the map's taps. While the map picks something for the trap,
- * the pane hides with its folds kept.
+ * card beside the trap from 600 px. The pane loads only for a DM, and
+ * closes on its own once it no longer applies: its trap is gone or on
+ * another scene, or the Trap tool was put down. A selection stays, since
+ * Set it off and the asks for rolls take the selected creatures, and no
+ * token's bar shows while a tool takes the map's taps. While the map picks
+ * something for the trap, the pane hides with its folds kept.
  */
 export function TrapPaneHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets }) {
   const store = useScoped(trapSlot).store;

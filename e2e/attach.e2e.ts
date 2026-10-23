@@ -351,8 +351,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await note.first().waitFor();
     await shots.take(sam, "attach-lp15-follower-note");
     assert.equal((await note.first().innerText()).split("\n")[0], "Goblin can't follow through there.");
-    assert.ok((token(samSocket, run.bree)?.y ?? 0) >= 10, "Bree went into the closet without the goblin");
-    assert.equal(token(samSocket, run.goblin)?.attached?.to, run.bree, "the goblin was left behind");
+    assert.ok((token(samSocket, run.bree)?.y ?? 0) >= 10, "Bree is held outside the closet");
+    assert.equal(token(samSocket, run.goblin)?.attached?.to, run.bree, "the goblin is still in Bree's tow");
   });
 
   test("lp15-at-2. the DM taps a Ride row at the foot of an Attach pop-up longer than its box: the question and its Ride scroll into view, clear of \"Scroll for more\" (review LP15-FU-5)", async () => {

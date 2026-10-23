@@ -842,6 +842,38 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     await dm.keyboard.press("Escape");
   });
 
+  test("fu21b-3. the dock's alerts summary, tapped with a token's bar folded under the sheet, hands focus to the check it names and to nothing on the way (FU20B-OP-12)", async () => {
+    // Still 820 x 1180 from the steps before, which resized rather than reloaded for the server's snapshot budget.
+    const goblin = run.goblins[0]!;
+    await ops.send({ t: "actor.effect.add", target: { tokenId: goblin }, effect: { id: randomUUID(), key: "concentrating", spell: "Bless" } });
+    await ops.send({ t: "actor.hp", target: { tokenId: goblin }, change: { kind: "damage", amount: 1 } });
+    await dm.locator('[data-alert="concentration"]').first().waitFor();
+    await tapThorn(dm);
+    await panelsButton(dm).click();
+    await assertDocked(dm, 1, "820 x 1180, a check and a token");
+    const summary = dm.locator("[data-rvtt-dock]").getByRole("button", { name: /^Concentration save/ });
+    await summary.waitFor();
+    // Every element that takes focus from here on, in order.
+    await dm.evaluate(() => {
+      type Target = { getAttribute(name: string): string | null; textContent: string | null; closest(s: string): unknown };
+      const g = globalThis as unknown as { document: { addEventListener(type: string, f: (e: { target: Target }) => void): void }; rvttFocusLog?: string[] };
+      g.rvttFocusLog = [];
+      g.document.addEventListener("focusin", (e) => {
+        const t = e.target;
+        const where = t.closest('[role="dialog"][aria-label$="actions"]') ? "bar" : t.closest("[data-alert]") ? "column" : "other";
+        g.rvttFocusLog?.push(`${where}: ${t.getAttribute("aria-label") ?? t.textContent?.trim() ?? ""}`);
+      });
+    });
+    await summary.click();
+    await dm.getByRole("region", { name: "Panels" }).waitFor({ state: "detached" });
+    await waitFor("focus in the check", async () => ((await focused(dm)).inColumn ? true : null));
+    const log = await dm.evaluate(() => (globalThis as unknown as { rvttFocusLog?: string[] }).rvttFocusLog ?? []);
+    // The summary's own focus from the click comes first.
+    const after = log.slice(log.findIndex((l) => /Concentration save/.test(l) && !l.startsWith("column")) + 1);
+    assert.ok(after.length > 0 && after.every((l) => l.startsWith("column")), `focus went elsewhere on its way to the check: ${JSON.stringify(log)}`);
+    await dm.keyboard.press("Escape");
+  });
+
   test("16. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

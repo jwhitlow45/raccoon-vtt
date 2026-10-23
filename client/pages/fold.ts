@@ -246,12 +246,19 @@ type DockState = {
    * row's tap would (features/encounter/InitiativeStrip.tsx FightAlerts).
    */
   showAsk: ShowAsk | null;
+  /**
+   * The foot of a map pane's header while the pane stands as a bottom sheet
+   * (RoomDock.tsx usePaneHead), in the chrome's own px from the page's top,
+   * so a toast that shows meanwhile starts under it (canvas/barDock.ts
+   * paneToastTop). Null with no such pane, or before it is measured.
+   */
+  paneHead: number | null;
 };
 
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, showAsk: null })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, showAsk: null, paneHead: null })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

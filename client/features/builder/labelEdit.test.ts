@@ -13,6 +13,7 @@ import {
   labelPaneAllowed,
   labelTapOutcome,
   paneEscape,
+  PANE_MIN_HEIGHT,
   panePlacement,
   paneSizes,
   sheetPanAnchor,
@@ -204,6 +205,18 @@ describe("panePlacement", () => {
     if (p.kind !== "card") return;
     assert.equal(p.left, 8);
     assert.equal(p.top, 60);
+  });
+
+  test("a bottom sheet the bars leave less than its least height stands over the top bars, never past the screen's top (FU20B-PANE-480)", () => {
+    // 480 x 320 at 130% with the Trap tool: 369 x 246 layout px, a 53 px top bar, and 99 px of toolbar and tool's options, so 78 px between the bars.
+    const short = { top: 53, right: 0, bottom: 99, left: 0 };
+    const box = { x0: 60, y0: 120, x1: 90, y1: 150 };
+    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 246 }, insets: short, box, height: 400 }), { kind: "sheet", bottom: 99, maxHeight: PANE_MIN_HEIGHT, overBars: true });
+    // Exactly its least height between the bars: it keeps under them.
+    const exact = { ...short, bottom: 246 - 53 - 16 - PANE_MIN_HEIGHT };
+    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 246 }, insets: exact, box, height: 400 }), { kind: "sheet", bottom: exact.bottom, maxHeight: PANE_MIN_HEIGHT });
+    // Shorter still above the bottom bars than its least height: it stops at the screen's top.
+    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 200 }, insets: short, box, height: 400 }), { kind: "sheet", bottom: 99, maxHeight: 200 - 99, overBars: true });
   });
 
   test("a pane taller than either side takes the roomier one and scrolls", () => {

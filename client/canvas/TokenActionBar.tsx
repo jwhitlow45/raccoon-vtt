@@ -1228,6 +1228,14 @@ function bandStyle(at: Corner, part: "width" | "height"): CSSProperties {
 }
 
 /**
+ * How tall the fade of "Scroll for more" stands over its box's foot: 24 px
+ * of fade above the line, a 16 px line and 8 px under it. A control that
+ * scrolls into view above the fade keeps this much clear of the foot
+ * (features/attach/AttachButton.tsx).
+ */
+export const SCROLL_FOR_MORE_PX = theme.space(12);
+
+/**
  * "Scroll for more", laid over the foot of a box that scrolls while
  * anything is hidden below. It has no height of its own, so it never adds
  * to what scrolls, and screen readers skip it: they reach every control by
@@ -1252,6 +1260,7 @@ export function ScrollForMore(props: { inset?: number }) {
           background: `linear-gradient(transparent, ${theme.color.surface} 60%)`,
           color: theme.color.textMuted,
           fontSize: theme.font.small,
+          lineHeight: `${SCROLL_FOR_MORE_PX - theme.space(8)}px`,
           textAlign: "center",
         }}
       >

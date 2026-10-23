@@ -43,8 +43,8 @@ describe("the visual system's tokens", () => {
   });
 
   test("the stacking order runs from panes to what sits over the bars", () => {
-    const { pane, sheet, options, bars, barOverlay, notices, popover, alertsOverlay, overBars } = theme.z;
-    const order = [pane, sheet, options, bars, barOverlay, notices, popover, alertsOverlay, overBars];
+    const { pane, sheet, options, bars, barOverlay, paneOverBars, notices, popover, alertsOverlay, overBars } = theme.z;
+    const order = [pane, sheet, options, bars, barOverlay, paneOverBars, notices, popover, alertsOverlay, overBars];
     assert.deepEqual(order, [...order].sort((a, b) => a - b));
   });
 });

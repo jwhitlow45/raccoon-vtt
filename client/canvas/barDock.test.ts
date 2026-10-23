@@ -62,6 +62,13 @@ import {
   closeAlertsOverlay,
   TOAST_MIN,
   toastTop,
+  paneToastTop,
+  inToastLayer,
+  nextToastPlaces,
+  NO_TOAST_PLACES,
+  toastLayerTop,
+  type ToastPlace,
+  type ToastPlaces,
   readSpot,
   releaseSpot,
   restingBar,
@@ -893,5 +900,116 @@ describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", ()
     const top = 122 + 120 + EDGE;
     assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
     assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
+  });
+});
+
+describe("a toast while a map pane stands as a bottom sheet (LP15-FU-8)", () => {
+  test("starts 8 px under the pane's header, over the pane's body", () => {
+    assert.equal(paneToastTop({ head: 300, optionsTop: 700 }), 300 + EDGE);
+  });
+
+  test("keeps the top of the notices before the header is measured, or with no room left for it", () => {
+    assert.equal(paneToastTop({ head: null, optionsTop: 700 }), null);
+    const top = 300 + EDGE;
+    assert.equal(paneToastTop({ head: 300, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
+    assert.equal(paneToastTop({ head: 300, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
+  });
+});
+
+describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-ASTRA-1 and 2, FU21B-OP-4)", () => {
+  type Now = Parameters<typeof nextToastPlaces>[1];
+  const phone: Omit<Now, "ids"> = { pane: null, paneStands: false, low: null, layer: true, slot: false };
+  const step = (was: ToastPlaces, ids: readonly number[], now: Partial<Now> = {}) => nextToastPlaces(was, { ...phone, ids, ...now });
+  const top = (state: ToastPlaces, ids: readonly number[]) => toastLayerTop(state, ids);
+
+  test("a column toast live as a pane opens moves under the pane's header, and the trap's toast joins it there", () => {
+    let s = step(NO_TOAST_PLACES, [1], { low: 250 });
+    assert.equal(top(s, [1]), 250);
+    // The pane's first render has no header place yet: nothing moves.
+    s = step(s, [1], { paneStands: true });
+    assert.equal(top(s, [1]), 250);
+    s = step(s, [1], { paneStands: true, pane: 182 });
+    assert.equal(s.places.get(1), "pane");
+    s = step(s, [1, 2], { paneStands: true, pane: 182 });
+    assert.equal(s.places.get(2), "pane");
+    assert.equal(top(s, [1, 2]), 182);
+  });
+
+  test("the stack follows the header as the pane grows or makes room for the alerts row", () => {
+    let s = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 134 });
+    s = step(s, [1], { paneStands: true, pane: 182 });
+    assert.equal(top(s, [1]), 182);
+    // A render with no header place, as with too little room for a toast, keeps it where it was.
+    s = step(s, [1], { paneStands: true, pane: null });
+    assert.equal(top(s, [1]), 182);
+  });
+
+  test("the pane going away freezes the stack where the header last stood, and a new toast joins it there", () => {
+    let s = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
+    s = step(s, [1], { paneStands: false, low: 300 });
+    assert.deepEqual(s.places.get(1), { low: 182 });
+    assert.equal(s.paneLast, null);
+    s = step(s, [1, 2], { low: 300 });
+    assert.deepEqual(s.places.get(2), { low: 182 });
+  });
+
+  test("a stack a closed pane left joins the next pane's header once it has one", () => {
+    let s = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
+    s = step(s, [1]);
+    s = step(s, [1], { paneStands: true });
+    assert.equal(top(s, [1]), 182, "the next pane's first render moves nothing");
+    s = step(s, [1], { paneStands: true, pane: 420 });
+    assert.equal(top(s, [1]), 420);
+  });
+
+  test("a toast that shows on a pane's first render, before its header has a place, joins the stack already there and does not jump", () => {
+    let s = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
+    s = step(s, [1], { paneStands: true, pane: null });
+    s = step(s, [1, 2], { paneStands: true, pane: null });
+    assert.equal(s.places.get(2), "pane");
+    assert.equal(top(s, [1, 2]), 182);
+  });
+
+  test("random renders keep one stack in the layer, keep each toast where it was announced, and move the stack only to a header", () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)]!;
+    const where = (p: ToastPlace | undefined) => (p === undefined ? undefined : inToastLayer(p) ? "layer" : p);
+    for (let run = 0; run < 400; run++) {
+      let s = NO_TOAST_PLACES;
+      let ids: number[] = [];
+      let next = 1;
+      let paneStands = false;
+      for (let render = 0; render < 40; render++) {
+        const event = pick(["toast", "toast", "end", "open", "close", "move", "blank", "slot", "none"] as const);
+        if (event === "toast") ids = [...ids, next++];
+        if (event === "end" && ids.length > 0) {
+          const gone = pick(ids);
+          ids = ids.filter((id) => id !== gone);
+        }
+        if (event === "open") paneStands = true;
+        if (event === "close") paneStands = false;
+        const pane = paneStands && event !== "blank" && random() < 0.8 ? 100 + Math.floor(random() * 400) : null;
+        const now: Now = { ids, pane, paneStands, low: paneStands || random() < 0.3 ? null : 200 + Math.floor(random() * 100), layer: true, slot: event === "slot" };
+        const was = s;
+        s = nextToastPlaces(was, now);
+        const label = `run ${run}, render ${render}`;
+        // Every toast showing has a place, in the same part of the page as before.
+        for (const id of ids) {
+          assert.ok(s.places.has(id), `${label}: toast ${id} has no place`);
+          if (was.places.has(id)) assert.equal(where(s.places.get(id)), where(was.places.get(id)), `${label}: toast ${id} moved between the notices, the layer and the sheet`);
+        }
+        // One stack in the layer.
+        const tops = new Set(ids.filter((id) => inToastLayer(s.places.get(id))).map((id) => JSON.stringify(s.places.get(id))));
+        assert.ok(tops.size <= 1, `${label}: ${tops.size} stacks in the layer`);
+        // While the header has a place, the stack is under it. With no pane standing, it never follows one.
+        if (pane !== null) for (const id of ids) if (inToastLayer(s.places.get(id))) assert.equal(s.places.get(id), "pane", `${label}: toast ${id} is not under the header`);
+        if (!paneStands) for (const id of ids) assert.notEqual(s.places.get(id), "pane", `${label}: toast ${id} follows a pane that went away`);
+        // The stack moves only on a render that has the header's place.
+        const before = toastLayerTop(was, ids.filter((id) => was.places.has(id)));
+        const after = toastLayerTop(s, ids.filter((id) => was.places.has(id)));
+        if (before !== null && pane === null) assert.equal(after, before, `${label}: the stack moved with no header to go to`);
+      }
+    }
   });
 });
