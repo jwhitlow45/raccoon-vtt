@@ -9,6 +9,7 @@ import { ddbCharacterId, ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import type { PcStats } from "../shared/model.ts";
 import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
  * Re-sync from D&D Beyond end to end (docs/design-v1-resync.md 5), on the
@@ -421,6 +422,8 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await review.getByText("Worked out from the armor. Check it.", { exact: true }).waitFor();
     await ac.uncheck();
     assert.equal(await review.getByRole("checkbox", { name: "Name Bree Tallow, now Bree", exact: true }).isChecked(), false, "the name starts off");
+    // The review in line (e2e/helpers/alignment.ts), checked once the step is done so a drift fails only this step.
+    const aligned = alignmentLines(await measureAlignment(review), "the editor's review at 390 x 844");
     await shots.take(ana, "resync-editor-review-390");
     await review.getByRole("button", { name: "Use it", exact: true }).click();
     await editor(ana).getByRole("button", { name: "Save", exact: true }).click();
@@ -434,6 +437,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.equal(breeIn(anaSocket)!.actor.ac, 15, "the unticked AC stays");
     await panel.getByText(/^Last synced from D&D Beyond on [A-Z][a-z]{2} \d{1,2}\.$/).waitFor();
     await shots.take(ana, "resync-last-synced-390");
+    assert.deepEqual(aligned, [], "the editor's review is out of line");
   });
 
   test("rs-2. Ana deletes Shortbow and edits Shillelagh in the editor, then saves", async () => {
@@ -490,6 +494,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await row(review, "AC 15").getByText("D&D Beyond says 12.", { exact: true }).waitFor();
     await row(review, "Shortbow: you removed it.").getByRole("checkbox", { name: "Add it back", exact: true }).waitFor();
     await shots.take(ana, "resync-review");
+    assert.deepEqual(alignmentLines(await measureAlignment(review), "the re-sync review at 1280 x 800"), [], "the re-sync review is out of line");
   });
 
   test("rs-4. Apply shows the done line, the panel and the DM's device show level 6 and Charisma, and Cy's device has neither the block nor the record", async () => {
@@ -762,6 +767,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     // A fresh start at fixture A's level with no record and no rolls, so all 40 rolls read come in as additions and nothing reads as a loss.
     await ops.send({ t: "character.update", characterId: run.bree.characterId, patch: { level: 5, stats: { rolls: [] }, ddbSync: null } });
     await waitFor("Bree with no rolls or record", () => (breeIn(anaSocket)?.stats?.rolls.length === 0 && breeIn(anaSocket)?.ddbSync === undefined && breeIn(anaSocket)?.level === 5 ? true : null));
+    const aligned: string[] = [];
     const sizes = [
       { size: { width: 360, height: 780 }, scale: 1, shot: "resync-46-360" },
       { size: PHONE, scale: 1.3, shot: "resync-46-390-130" },
@@ -791,11 +797,13 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
       });
       assert.deepEqual(sideways, { page: 0, scrollers: [], past: [] }, `${at}: nothing scrolls sideways`);
       assert.ok(await wholeInReach(review.getByRole("button", { name: "Apply", exact: true })), `${at}: Apply in view`);
+      aligned.push(...alignmentLines(await measureAlignment(review), `the 46-roll review at ${at}`));
       await shots.take(ana, shot);
       await review.getByRole("button", { name: "Cancel", exact: true }).click();
       await review.waitFor({ state: "detached" });
     }
     await reopen(ana, DESKTOP, 1);
+    assert.deepEqual(aligned, [], "the 46-roll review is out of line");
   });
 
   test("lp14-rs-a. the DM takes Bree from Ana while her re-sync review, then her editor's D&D Beyond review, is open: each keeps its review, says Bree is no longer hers, the re-sync review rebuilds when she comes back, and the room stays up", async () => {
