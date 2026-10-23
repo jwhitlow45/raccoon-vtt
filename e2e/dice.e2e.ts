@@ -597,14 +597,17 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     const sticky = player.locator("[data-dice-last]");
     await sticky.getByRole("button", { name: "Again" }).waitFor();
     const fit = await sticky.evaluate((el) => {
-      type Box = { getBoundingClientRect(): { height: number }; parentElement: Box | null; scrollWidth: number; clientWidth: number };
-      const g = globalThis as unknown as { getComputedStyle(el: Box): { overflowY: string } };
-      let scroller = (el as unknown as Box).parentElement;
+      type Box = { getBoundingClientRect(): { height: number }; parentElement: Box | null; scrollWidth: number; clientWidth: number; currentCSSZoom?: number };
+      const g = globalThis as unknown as { getComputedStyle(el: Box): { overflowY: string; getPropertyValue(name: string): string } };
+      const line = el as unknown as Box;
+      let scroller = line.parentElement;
       while (scroller && g.getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement;
-      return { height: (el as unknown as Box).getBoundingClientRect().height, sideways: scroller ? scroller.scrollWidth - scroller.clientWidth : -1 };
+      return { height: line.getBoundingClientRect().height, padTop: parseFloat(g.getComputedStyle(line).getPropertyValue("--pane-pad-top")) || 0, zoom: line.currentCSSZoom ?? 1, sideways: scroller ? scroller.scrollWidth - scroller.clientWidth : -1 };
     });
-    // One line: its 44 px (Again's touch target), the pane's top padding and its rule. A second line of words would add 20 px more.
-    assert.ok(fit.height <= 64, `the sticky line is ${fit.height} px tall`);
+    // One line: the pane's top padding, Again's 44 px touch target and the line's 1 px rule, and 3 px for rounding. A second line of words would add 20 px more (review LP2L3-OPUS-03).
+    const oneLine = (fit.padTop + 44 + 1) * fit.zoom + 3;
+    assert.ok(fit.padTop > 0, "the pane's top padding was read");
+    assert.ok(fit.height <= oneLine, `the sticky line is ${fit.height} px tall, over one line's ${oneLine}`);
     assert.equal(fit.sideways, 0, "the Dice sheet scrolls sideways");
     assert.ok(await inView(player, '[data-dice-last] button:has-text("Again")'), "Again is on screen");
     // Again is a whole touch target, as every button is (docs/design-v1-look-pass-2.md D37).
