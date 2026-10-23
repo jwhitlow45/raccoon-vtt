@@ -30,6 +30,14 @@ export type TokenText = {
   notch: Notch | null;
 };
 
+/** Other layers' pills as the label pass keeps off them, in screen pixels: the boxes they draw at this zoom. */
+export function pillObstacles(pills: readonly PillSpec[], scale: number): Obstacle[] {
+  return pills.map((spec) => {
+    const p = pillPlace({ ...spec, scale }, null).box;
+    return { box: { x0: p.x0 * scale, y0: p.y0 * scale, x1: p.x1 * scale, y1: p.y1 * scale }, kind: "pill" };
+  });
+}
+
 /**
  * Every token's marks, label and plate for the zoom, laid out at once
  * (lib/boardText.ts). The selected token places first, then the
@@ -38,7 +46,7 @@ export type TokenText = {
  * still keep their bodies clear, and only the acting creature and the
  * viewer's own tokens there try for their names.
  *
- * `pills` are other layers' pills (an area's name, the move marker), and
+ * `pills` are other layers' pills (an area's or a trap's name, the move marker), and
  * `mapLabels` the DM's text on the map, which labels keep off too. Each
  * layout is kept for the next, whose labels hold their shapes and sides
  * while they fit, so a pinch does not shuffle them.
@@ -74,10 +82,7 @@ export function useBoardText(input: {
     const sizes = boardSizes(scale);
     const out = new Map<string, TokenText>();
     const labelInputs: LabelInput[] = [];
-    const obstacles: Obstacle[] = pills.map((spec) => {
-      const p = pillPlace({ ...spec, scale }, null).box;
-      return { box: { x0: p.x0 * scale, y0: p.y0 * scale, x1: p.x1 * scale, y1: p.y1 * scale }, kind: "pill" };
-    });
+    const obstacles = pillObstacles(pills, scale);
     for (const b of mapLabels) obstacles.push({ box: { x0: b.x0 * scale, y0: b.y0 * scale, x1: b.x1 * scale, y1: b.y1 * scale }, kind: "map" });
     const meta = new Map<string, { widthPx: number; ox: number; oy: number; hpLine: string | null; image: boolean; number: number | undefined }>();
     for (const t of tokens) {

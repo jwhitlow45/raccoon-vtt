@@ -54,6 +54,44 @@ import {
  *   a popover's field, are checked by hand on an iPhone (14).
  */
 
+/** A box the board draws, in page px: a pill (a Konva Label) or one line of a token's label. */
+type BoardBox = { text: string; left: number; top: number; right: number; bottom: number; height: number };
+
+/** The board's pills and the lines of token labels (Konva Texts outside a Label), each with its box on the page. */
+function boardBoxes(page: Page): Promise<{ pills: BoardBox[]; lines: BoardBox[] }> {
+  return page.evaluate(() => {
+    type Node = {
+      getClassName(): string;
+      getParent(): Node | null;
+      isVisible(): boolean;
+      getClientRect(): { x: number; y: number; width: number; height: number };
+      text?(): string;
+      getText?(): { text(): string } | undefined;
+    };
+    const g = globalThis as unknown as { Konva: { stages: { find(selector: string): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } }[] } };
+    const stage = g.Konva.stages[0]!;
+    const at = stage.container().getBoundingClientRect();
+    const box = (n: Node, text: string) => {
+      const r = n.getClientRect();
+      return { text, left: at.left + r.x, top: at.top + r.y, right: at.left + r.x + r.width, bottom: at.top + r.y + r.height, height: r.height };
+    };
+    return {
+      pills: stage
+        .find("Label")
+        .filter((l) => l.isVisible())
+        .map((l) => box(l, l.getText?.()?.text() ?? "")),
+      lines: stage
+        .find("Text")
+        .filter((t) => t.isVisible() && t.getParent()?.getClassName() !== "Label")
+        .map((t) => box(t, t.text?.() ?? "")),
+    };
+  });
+}
+
+function overlap(a: BoardBox, b: BoardBox): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
 describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
   before(openBrowsers);
   after(closeAll);
@@ -777,6 +815,31 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.equal(await measure.getAttribute("aria-label"), shows === "Line" ? "Measure: Line (Straight)" : "Measure: Walking");
     await shots.take(dm, "lp8-ruler-360-measure");
     await key(dm, "v");
+  });
+
+  test("lp2-2c. a creature's label keeps off the name of a trap beside it", async () => {
+    await reloadAt(dm, 1);
+    await view(dm, dmCdp, DESK);
+    await key(dm, "v");
+    // Off the map, so no hovered token shows its plate.
+    await dm.mouse.move(1, 1);
+    const trapId = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    // Goblin 3 stands at (16, 9). The trap's top edge is two rows under it, so its name stands where the goblin's label would hang ("Pois30/30arts").
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Poison darts", zone: { cells: [{ x: 15, y: 11, w: 3, h: 2 }] }, rig } });
+    const seen = await waitFor("the trap's name and Goblin 3's label", async () => {
+      const b = await boardBoxes(dm);
+      const name = b.pills.find((p) => p.text === "Poison darts");
+      const goblin = b.lines.filter((l) => l.text === "Goblin 3");
+      return name && goblin.length > 0 ? { name, goblin } : null;
+    });
+    await dm.waitForTimeout(300);
+    const after = await boardBoxes(dm);
+    const name = after.pills.find((p) => p.text === "Poison darts") ?? seen.name;
+    const lines = after.lines.filter((l) => l.text === "Goblin 3" || /^\d+\/\d+$/.test(l.text));
+    for (const line of lines) assert.ok(!overlap(line, name), `"${line.text}" is drawn over the trap's name`);
+    await shots.take(dm, "lp2-2c-trap-name");
+    await ops.send({ t: "trap.delete", trapId });
   });
 
   test("9. nothing went wrong in the browsers", assertNoConsoleErrors);

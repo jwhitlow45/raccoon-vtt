@@ -4,6 +4,7 @@ import { Circle, Ellipse, Group, Line, Path, Rect, Shape } from "react-konva";
 import { useStore } from "zustand";
 import type { BuildChunk, CellRect, RoomSettings, Scene, Trap, TrapRig } from "#shared/model.ts";
 import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
+import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -85,21 +86,43 @@ function lookOf(trap: SeenTrap, dm: boolean): Look {
   return { color: theme.color.warning, fill: 0.15, hatch: 0.6, dash: undefined, width: 1.5 };
 }
 
+/**
+ * A trap's name as the board draws it, minus the zoom, or null where it
+ * shows none. Squares name the trap over their top edge, as an area does,
+ * clear of the name a creature standing in it shows below itself. A wire
+ * or a door names it under its badge. Published to the board's label pass
+ * (canvas/boardView.ts) as drawn, so token labels keep off it.
+ */
+export function trapNamePill(trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec | null {
+  if (!trapNameShown(scale)) return null;
+  const zone = trap.zone;
+  const words = !dm && (trap as SeenTrap).disarmed ? "Disarmed" : undefined;
+  const pill = { name: trap.name, value: words, size: "map" as const, small: true, maxLines: 1 as const };
+  if ("cells" in zone) {
+    const top = zone.cells.reduce((a, r) => (r.y < a.y || (r.y === a.y && r.x < a.x) ? r : a));
+    return { ...pill, x: top.x + top.w / 2, y: top.y, above: true };
+  }
+  const badge = "wire" in zone ? { x: (zone.wire.a[0] + zone.wire.b[0]) / 2, y: (zone.wire.a[1] + zone.wire.b[1]) / 2 } : findDoor(chunks, trap.sceneId, zone.door)?.mid;
+  return badge ? { ...pill, x: badge.x, y: badge.y, offsetPx: BADGE_PX / 2 + 2, below: true } : null;
+}
+
+const NO_PILLS: readonly PillSpec[] = [];
+
 const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean }) {
   const { trap, scale, dm } = props;
   const seen = trap as SeenTrap;
   const look = lookOf(seen, dm);
   const zone = trap.zone;
   const s = 1 / scale;
+  const name = trapNamePill(trap, props.chunks, scale, dm);
+  const nameKey = name ? JSON.stringify(name) : "";
+  // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
+  usePublishPills(`trap:${trap.id}`, useMemo(() => (name ? [name] : NO_PILLS), [nameKey]));
   let badge: { x: number; y: number } | null = null;
-  // Squares name the trap over their top edge, as an area does, clear of the name a creature standing in it shows below itself.
-  let over: { x: number; y: number } | null = null;
   let body: ReactNode = null;
   if ("cells" in zone) {
     const box = zoneBox(trap, props.chunks)!;
     badge = { x: box.x0 + (BADGE_PX / 2 + 2) * s, y: box.y0 + (BADGE_PX / 2 + 2) * s };
-    const top = zone.cells.reduce((a, r) => (r.y < a.y || (r.y === a.y && r.x < a.x) ? r : a));
-    over = { x: top.x + top.w / 2, y: top.y };
     body = <Squares rects={zone.cells} look={look} />;
   } else if ("wire" in zone) {
     const { a, b } = zone.wire;
@@ -117,17 +140,11 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
     if (door) badge = door.mid;
   }
   if (!badge) return null;
-  const words = !dm && seen.disarmed ? "Disarmed" : undefined;
-  const named = trapNameShown(scale);
   return (
     <Group opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
       {body}
       <Badge x={badge.x} y={badge.y} scale={scale} look={look} found={dm && trap.found} />
-      {!named ? null : over ? (
-        <Pill x={over.x} y={over.y} scale={scale} name={trap.name} value={words} size="map" color={look.color} small maxLines={1} above />
-      ) : (
-        <Pill x={badge.x} y={badge.y + (BADGE_PX / 2 + 2) * s} scale={scale} name={trap.name} value={words} size="map" color={look.color} small maxLines={1} below />
-      )}
+      {name ? <Pill {...name} scale={scale} color={look.color} /> : null}
     </Group>
   );
 });

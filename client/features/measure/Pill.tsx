@@ -31,6 +31,7 @@ export type PillProps = {
   /** A name alone wraps onto two lines, or is cut on one when this is 1, for a smaller pill in a crowd. */
   maxLines?: 1 | 2;
   small?: boolean;
+  /** Screen px between the point and the pill: down and right of it by default, along the pointer for `above` and `below`. */
   offsetPx?: number;
   above?: boolean;
   below?: boolean;
@@ -53,7 +54,8 @@ export function pillGeometry(props: Omit<PillProps, "x" | "y" | "color">): { lin
  * point, and slides back inside `view` if it would cross the screen's edge.
  * With `above`, it sits centered over the point with a small pointer down
  * to it, for naming a shape from its top edge, and with `below` centered
- * under it with the pointer up. A pointed pill stays on its point.
+ * under it with the pointer up, each `offsetPx` off the point along its
+ * pointer. A pointed pill stays on its point.
  */
 export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { box: Box; x: number; y: number } {
   const g = pillGeometry(props);
@@ -61,9 +63,15 @@ export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { 
   const w = g.width * s;
   const h = g.height * s;
   const tip = POINTER_PX * s;
-  if (props.above) return { box: { x0: props.x - w / 2, y0: props.y - h - tip, x1: props.x + w / 2, y1: props.y }, x: props.x, y: props.y };
-  if (props.below) return { box: { x0: props.x - w / 2, y0: props.y, x1: props.x + w / 2, y1: props.y + h + tip }, x: props.x, y: props.y };
   const off = (props.offsetPx ?? 0) * s;
+  if (props.above) {
+    const y = props.y - off;
+    return { box: { x0: props.x - w / 2, y0: y - h - tip, x1: props.x + w / 2, y1: y }, x: props.x, y };
+  }
+  if (props.below) {
+    const y = props.y + off;
+    return { box: { x0: props.x - w / 2, y0: y, x1: props.x + w / 2, y1: y + h + tip }, x: props.x, y };
+  }
   let x = props.x + off;
   let y = props.y + off;
   if (view) {
