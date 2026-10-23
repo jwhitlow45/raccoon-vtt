@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, type EntityKey } from "./keys.ts";
+import { linesPastStart } from "./logRings.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, hash128, hashValue, heldOf, projectEntity, projectState, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
@@ -28,7 +29,8 @@ function connect(state: RoomState, viewer: Viewer, sceneId: string): Connection 
 function candidatesFor(before: RoomState, after: RoomState, touched: EntityKey[], global: boolean, connections: readonly Connection[] = []): Set<EntityKey> {
   if (global) return new Set([...allKeys(before), ...allKeys(after)]);
   const all = [...touched, ...changedSightKeys(before, after, watched(after, connections))];
-  return new Set([...all, ...dependents(before, all), ...dependents(after, all)]);
+  const passed = linesPastStart(before.log, after.log, connections.map((c) => c.viewer)).map((id) => keys.log(id));
+  return new Set([...all, ...dependents(before, all), ...dependents(after, all), ...passed]);
 }
 
 /*
@@ -97,13 +99,14 @@ describe("fan-out invariant", () => {
     assert.ok(applied > refused, `too many refusals: ${applied} applied, ${refused} refused`);
   });
 
-  test("holds through log trimming", () => {
+  test("holds through log trimming, and whispers between others trim nothing a player holds", () => {
     const r = rng(7);
     let state = randomState(r);
     state = { ...state, log: Array.from({ length: 199 }, (_, i) => ({ id: `1:${i}`, at: AT, kind: "chat" as const, from: "p1", text: `m${i}` })) };
     const c = connect(state, P2, "s1");
-    for (let i = 0; i < 5; i++) {
-      const result = applyOp(state, { t: "log.whisper", to: ["dm1"], text: "x" }, P1, env(50 + i));
+    for (let i = 0; i < 10; i++) {
+      const op: Op = i < 5 ? { t: "log.whisper", to: ["dm1"], text: "x" } : { t: "log.chat", text: "y" };
+      const result = applyOp(state, op, P1, env(50 + i));
       assert.ok(result.ok);
       const next = new Map<EntityKey, unknown>();
       for (const key of candidatesFor(state, result.state, result.touched, result.global, [c])) next.set(key, projectEntity(key, result.state, c.viewer, { sceneId: c.sceneId }));
@@ -112,8 +115,10 @@ describe("fan-out invariant", () => {
       c.view = applyChanges(c.view, diff.changes);
       assert.equal(stableStringify(c.view), stableStringify(projectState(result.state, c.viewer, { sceneId: c.sceneId })));
       state = result.state;
+      if (i === 4) assert.equal(c.view.log.length, 199, "five whispers to the DM left the 199 chat lines alone");
     }
-    assert.equal(c.view.log.length, 195);
+    assert.equal(c.view.log.length, 200, "five chat lines then trimmed the oldest four");
+    assert.equal(c.view.log[0]!.id, "1:4");
   });
 });
 

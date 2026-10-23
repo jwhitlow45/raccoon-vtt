@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry, Viewer } from "#shared/model.ts";
-import { projectState } from "#shared/project.ts";
+import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { accessRoutes, type AuthKit, enforce, HttpError, requireGrant, roomParam } from "../auth/http.ts";
 import type { GrantContext } from "../auth/types.ts";
 import type { RoomActor } from "../rooms/actor.ts";
@@ -109,10 +109,9 @@ class ProjectedLogs {
       // that already holds it.
       const { state, seq } = actor.committed;
       const kept = rows.filter((e) => Number(e.id.slice(0, e.id.indexOf(":"))) <= seq);
-      const projected = projectState({ ...state, log: kept }, viewer, { sceneId: null });
-      const view = viewer.role === "dm" ? state : projected;
+      const view = viewer.role === "dm" ? state : projectState(state, viewer, { sceneId: null });
       const log: ProjectedLog = {
-        entries: projected.log,
+        entries: projectArchivedLog(state, kept, viewer, { sceneId: null }),
         names: { members: view.members, tokens: view.tokens, characters: view.characters, handouts: view.handouts, encounter: view.encounter } as LogNames,
         roomName: state.meta.name,
       };

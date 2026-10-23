@@ -227,6 +227,21 @@ describe("area reminders", () => {
     assert.equal(lines(hidden).length, 0);
     assert.equal(projectState(hidden, P1, { sceneId: "s1" }).log.filter((e) => e.data?.type === "area").length, 1, "the aura's owner keeps it");
   });
+
+  test("a hidden area that hits once a turn reminds at a turn's end and again at the next turn's start, though only the DM's lines sort after the turn line", () => {
+    const state = room();
+    state.tokens.g1 = token("g1", { name: "Goblin", number: 1, x: 5, y: 5 });
+    state.templates.glyph = template("glyph", { shape: "sphere", size: 10, origin: { x: 5.5, y: 5.5, z: 0 }, spell: "Glyph", visibility: "dm", ownerId: "dm1", triggers: ["turnStart", "turnEnd"], oncePerTurn: true });
+    // The goblin alone in the fight, so its turn ends and its next one starts in one Next.
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 15 })] };
+    const { state: after, reminders } = play(state, [{ t: "encounter.next" }]);
+    assert.deepEqual(
+      reminders.map((r) => r.type === "area" && r.trigger),
+      ["turnEnd", "turnStart"],
+    );
+    // The turn-end line was written first, yet its id counts past the turn line's.
+    assert.deepEqual(after.log.map((e) => e.data?.type), ["turn", "area", "area"]);
+  });
 });
 
 describe("a move that is a leg of the turn's path and an entry into an area", () => {

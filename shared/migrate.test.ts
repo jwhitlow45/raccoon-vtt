@@ -21,6 +21,7 @@ import {
   stopsOnTrap,
   walksOffFromGround,
   hiddenRowsShareNoMount,
+  logsByAudience,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -30,10 +31,11 @@ import {
 } from "./migrate.ts";
 import type { Encounter, RoomState } from "./model.ts";
 import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
+import { projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { CHANGED_SINCE, guardMatches } from "./reducer/misc.ts";
 import { guardHash } from "./reducer/tx.ts";
-import { AT, DM, actor, blockOf, character, companionBlock, comparable, entry, env, room, srdImage, token } from "./testutil.ts";
+import { AT, DM, P1, P2, actor, blockOf, character, companionBlock, comparable, entry, env, room, srdImage, template, token } from "./testutil.ts";
 
 /** What the v1 reducer left: today's state without the spot each turn began on. */
 function v1Shape(state: RoomState): RoomState {
@@ -964,7 +966,7 @@ describe("follow-up batch 20: op version 17, snapshot version 20 (docs/design-v1
 
 describe("follow-up batch 21: op version 18, snapshot version 20 (docs/design-v1-attach.md 7.1 and 8.6)", () => {
   test("is the version now", () => {
-    assert.equal(OP_VERSION, 18);
+    assert.ok(OP_VERSION >= 18);
     assert.equal(SNAPSHOT_VERSION, 20);
   });
 
@@ -985,5 +987,95 @@ describe("follow-up batch 21: op version 18, snapshot version 20 (docs/design-v1
 
   test("a version 18 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 18, 17, opMigrations), /down/);
+  });
+});
+
+describe("follow-up batch 23: op version 19, snapshot version 20 (design 7.3, Log)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 19);
+    assert.equal(SNAPSHOT_VERSION, 20);
+  });
+
+  test("the op step is the identity", () => {
+    const ops: unknown[] = [
+      { t: "log.whisper", to: ["dm1"], text: "psst" },
+      { t: "token.move", tokenId: "g1", x: 6, y: 5 },
+      { t: "encounter.next" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 18, 19, opMigrations), op);
+  });
+
+  test("only ops stored before version 19 keep one ring for every line", () => {
+    assert.equal(logsByAudience(18), false);
+    assert.equal(logsByAudience(19), true);
+    assert.equal(logsByAudience(undefined), true);
+  });
+
+  test("a version 19 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 19, 18, opMigrations), /down/);
+  });
+
+  /** A full log, and a goblin's turn beside an area hidden from players (sorting first) and one they see. */
+  function full(): RoomState {
+    const state = room();
+    state.tokens.g1 = token("g1", { name: "Goblin", number: 1, x: 2, y: 5 });
+    state.templates.aglyph = template("aglyph", { shape: "sphere", size: 10, origin: { x: 6.5, y: 5.5, z: 0 }, spell: "Glyph", visibility: "dm", ownerId: "dm1", triggers: ["enter"] });
+    state.templates.web = template("web", { shape: "cube", size: 10, origin: { x: 6, y: 5, z: 0 }, spell: "Web", ownerId: "dm1", triggers: ["enter"] });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 15 })] };
+    state.log = Array.from({ length: 200 }, (_, i) => ({ id: `1:${i}`, at: AT, kind: "chat" as const, from: "p1", text: `m${i}` }));
+    return state;
+  }
+
+  test("an op stored before version 19 replays to the lines the archive holds from it, and a later one keeps the rings", () => {
+    const moveIn: Op = { t: "token.move", tokenId: "g1", x: 6, y: 5 };
+    const whisper: Op = { t: "log.whisper", to: ["p1"], text: "Roll Wisdom." };
+    const stored = applyOp(full(), moveIn, DM, { ...env(2), opVersion: 18 });
+    assert.ok(stored.ok);
+    // As the build before the rings wrote them: in order, in the one ring of 200, the oldest chat lines pushed out.
+    assert.deepEqual(stored.log.map((e) => e.id), ["2:0", "2:1"]);
+    assert.deepEqual(stored.state.log.slice(0, 2).map((e) => e.id), ["1:2", "1:3"]);
+    const old = applyOp(stored.state, whisper, DM, { ...env(3), opVersion: 18 });
+    assert.ok(old.ok);
+    assert.equal(old.state.log[0]!.id, "1:3", "a whisper pushed out a chat line then");
+    // Live, the same ops keep each audience apart.
+    const live = applyOp(full(), moveIn, DM, env(2));
+    assert.ok(live.ok);
+    assert.deepEqual(live.log.map((e) => e.id), ["2:900000", "2:0"]);
+    const after = applyOp(live.state, whisper, DM, env(3));
+    assert.ok(after.ok);
+    assert.equal(after.state.log.filter((e) => e.kind === "chat").length, 199, "the move's Web line pushed out one, the glyph's and the whisper none");
+    // A room replayed across the change: the stored op by its rule, the next by today's.
+    const across = applyOp(stored.state, whisper, DM, env(3));
+    assert.ok(across.ok);
+    assert.equal(across.state.log.filter((e) => e.kind === "chat").length, 198);
+    assert.deepEqual(projectState(across.state, P2, { sceneId: "s1" }).log, projectState(stored.state, P2, { sceneId: "s1" }).log, "the whisper to P1 changed nothing P2 holds");
+  });
+
+  test("a room from before the rings loads with every line its viewers held", () => {
+    // The one ring of 200 held lines of every audience: whispers, the DM's notes and the rest.
+    const state = room();
+    state.tokens.g1 = token("g1", { name: "Goblin", visibility: "dm" });
+    state.log = Array.from({ length: 200 }, (_, i) =>
+      i % 4 === 0
+        ? { id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: "p1", to: ["dm1"], text: "psst" }
+        : i % 4 === 1
+          ? { id: `${i + 1}:0`, at: AT, kind: "event" as const, data: { type: "teleport" as const, tokenId: "g1", past: "wall" as const } }
+          : { id: `${i + 1}:0`, at: AT, kind: "chat" as const, from: "p2", text: "hi" },
+    );
+    const loaded = migrateSnapshot(JSON.parse(JSON.stringify(state)), 20);
+    for (const viewer of [DM, P1, P2]) {
+      assert.deepEqual(projectState(loaded, viewer, { sceneId: "s1" }).log, state.log.filter((e) => e.kind !== "whisper" || viewer.role === "dm" || viewer.memberId === "p1").filter((e) => viewer.role === "dm" || e.kind !== "event"), viewer.memberId);
+    }
+    // Its first new line of each audience drops only what that audience's own bound says: the chat line nothing, and
+    // the whisper the oldest of the 50 between P1 and the DM.
+    let next = loaded;
+    for (const [i, op] of ([{ t: "log.chat", text: "back" }, { t: "log.whisper", to: ["dm1"], text: "again" }] as Op[]).entries()) {
+      const r = applyOp(next, op, P1, env(300 + i));
+      assert.ok(r.ok);
+      next = r.state;
+    }
+    const kept = new Set(next.log.map((e) => e.id));
+    assert.deepEqual(loaded.log.filter((e) => !kept.has(e.id)).map((e) => e.id), ["1:0"]);
+    assert.equal(next.log.length, 201);
   });
 });

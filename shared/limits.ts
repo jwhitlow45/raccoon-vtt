@@ -401,6 +401,14 @@ export const LIMITS = {
   trapLogLines: 30,
   trapSeenLines: 20,
   trapLineBytes: 1_536,
+  /**
+   * The room log's lines held in memory beside its newest 200 shared ones
+   * (shared/logRings.ts): the DM's own lines, each held only while its JSON
+   * fits `dmLogLineBytes`, and each member's newest whispers.
+   */
+  dmLogLines: 100,
+  dmLogLineBytes: 1_536,
+  whispersKept: 50,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

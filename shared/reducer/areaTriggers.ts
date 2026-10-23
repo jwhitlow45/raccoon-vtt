@@ -1,3 +1,4 @@
+import { dmNumbered } from "../logRings.ts";
 import { attaches, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
@@ -81,17 +82,30 @@ function inside(state: RoomState, template: AreaTemplate, candidates: readonly T
 
 /**
  * Whether the log already reminded about this creature and area in the turn
- * that is running: for any trigger when the area hits once a turn, else for
- * this one.
+ * that is running, since the newest turn line: for any trigger when the area
+ * hits once a turn, else for this one.
+ *
+ * A reminder only the DM gets counts past the shared lines of its op
+ * (Tx.addLog), so it sorts after the turn line its op wrote. The only one
+ * an op writes before its turn line is a turn end's (remindTurnEnd), for the
+ * turn that ended there, so that one is left to the turn before.
  */
 function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, tokenId: string, trigger: AreaTrigger): boolean {
-  for (let i = log.length - 1; i >= 0; i--) {
-    const data = log[i]!.data;
-    if (data?.type === "turn") return false;
+  let start = log.length - 1;
+  while (start >= 0 && log[start]!.data?.type !== "turn") start--;
+  const turnSeq = start >= 0 ? seqOf(log[start]!.id) : null;
+  for (let i = log.length - 1; i > start; i--) {
+    const line = log[i]!;
+    const data = line.data;
     if (data?.type !== "area" || data.templateId !== template.id || data.tokenId !== tokenId) continue;
+    if (data.trigger === "turnEnd" && seqOf(line.id) === turnSeq && dmNumbered(line.id)) continue;
     if (template.oncePerTurn === true || data.trigger === trigger) return true;
   }
   return false;
+}
+
+function seqOf(id: string): string {
+  return id.slice(0, id.indexOf(":"));
 }
 
 /** "Spirit Guardians", or "20 ft sphere" for an area with no name, as the area tool titles it. */

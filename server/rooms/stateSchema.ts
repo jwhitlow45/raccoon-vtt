@@ -35,7 +35,7 @@ import {
   statBlockFieldsForImport,
   textSchemas,
 } from "#shared/protocol.ts";
-import { MAX_LOG } from "#shared/reducer.ts";
+import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { phaseMap, phaseProblem } from "#shared/reducer/phases.ts";
 
 /**
@@ -716,7 +716,7 @@ export const roomStateSchema = z.strictObject({
   encounter: encounter.nullable(),
   encounterHistory: z.array(encounterSnapshot).max(20),
   handouts: record(handout),
-  log: z.array(logEntry).max(MAX_LOG),
+  log: z.array(logEntry).max(MAX_LOG_LINES),
   monsters: record(monster),
   srdImages: z.record(srdIdSchema, srdImage),
   savedEncounters: record(savedEncounter),

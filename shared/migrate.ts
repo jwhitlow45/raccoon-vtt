@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 20;
-export const OP_VERSION = 18;
+export const OP_VERSION = 19;
 
 export type MigrationStep = {
   from: number;
@@ -538,6 +538,33 @@ export const opMigrations: MigrationStep[] = [
     to: 18,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 23 (design 7.3, Log): no op changes shape, so the
+    // step is the identity. The log keeps each audience's lines apart from
+    // this version (`logsByAudience`, shared/logRings.ts): a line only the
+    // DM gets counts on from DM_LINE_BASE, and each ring drops only its own
+    // oldest, so a line one viewer never receives never moves another's.
+    // Older ops replay by the one ring they were written under, so their
+    // line ids are the ones the archive holds, and the reducer's reads of
+    // the log, such as an area's once a turn, answer as they did.
+    //
+    // The stored state keeps its shape: the log is still one list of
+    // lines, now longer than 200 and with DM lines numbered from
+    // DM_LINE_BASE, so the snapshot version stays 20. An older build reads
+    // such a log as it is and trims it back to one ring of 200 at its next
+    // line, and its projection reads each line by the same rules.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 19, and the shutdown writes version 20 snapshots, as
+    // before. Rollback: an older build refuses to migrate a version 19 op
+    // down (runMigrations), so a room whose log holds one after its last
+    // snapshot would not load there. A clean shutdown writes a snapshot
+    // after the last op, and an older build loads it. Its room import
+    // refuses an export whose log holds more than 200 lines.
+    from: 18,
+    to: 19,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -908,6 +935,17 @@ export function hiddenRowsShareNoMount(opVersion: number | undefined): boolean {
  */
 export function revealsRowAnew(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 18);
+}
+
+/**
+ * Whether the log keeps each audience's lines apart (shared/logRings.ts):
+ * the DM's lines numbered from DM_LINE_BASE, and each ring dropping only
+ * its own oldest. Ops stored before version 19 wrote every line into one
+ * ring of 200, numbered in order, and replay by that rule. Live ops carry
+ * no stored version and take today's rule.
+ */
+export function logsByAudience(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 19);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

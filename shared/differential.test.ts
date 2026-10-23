@@ -237,6 +237,48 @@ describe("public determinism: movement's generators (contract section 5)", () =>
 });
 
 /*
+ * The log's rings (shared/logRings.ts): on the hero's turn, with the wall
+ * taken down, a walk through Fog Cloud, which players see, and in one room
+ * through a glyph hidden from them too, whose id sorts first, so its
+ * reminder is written first. It counts with the DM's lines, so the cloud's
+ * line and everything after it reach players with the same ids in both
+ * rooms.
+ */
+const RING_PAIRS: Pair[] = [
+  pair(
+    "a walk through an area players see and one hidden from them",
+    (s) => {
+      s.buildChunks = {};
+      s.encounter = {
+        rev: 0,
+        round: 1,
+        activeEntryId: "n1",
+        entries: [entry("n1", { tokenId: "hero", value: 15 })],
+        turnStart: { entryId: "n1", tokenId: "hero", sceneId: "s1", x: 2, y: 5, elevation: 0, seen: true, seq: 2 },
+      };
+      s.templates.fog = template("fog", { shape: "sphere", size: 10, origin: { x: 4.5, y: 5.5, z: 0 }, spell: "Fog Cloud", ownerId: "dm1", triggers: ["enter"] });
+      s.templates.aglyph = template("aglyph", { shape: "sphere", size: 10, origin: { x: 7.5, y: 15.5, z: 0 }, spell: "Glyph of Warding", visibility: "dm", ownerId: "dm1", triggers: ["enter"] });
+    },
+    (s) => {
+      s.templates.aglyph = { ...s.templates.aglyph!, origin: { x: 7.5, y: 5.5, z: 0 } };
+    },
+    [heroAcross],
+  ),
+];
+
+describe("public determinism: the log's rings (shared/logRings.ts)", () => {
+  for (const p of RING_PAIRS) {
+    test(p.name, () => {
+      checkPair(p);
+      // The pair tests something: the walk reminds of the cloud in both rooms, and of the glyph only in the second.
+      const drag = applyOp(p.b, { t: "token.move", tokenId: "hero", x: 9, y: 5 }, P1, env(3));
+      assert.ok(drag.ok);
+      assert.deepEqual(drag.log.map((e) => e.data?.type === "area" && [e.id, e.data.templateId]), [["3:900000", "aglyph"], ["3:0", "fog"]]);
+    });
+  }
+});
+
+/*
  * Attached tokens' generators (docs/design-v1-attach.md 8.0): pairs of rooms
  * that differ only in hidden state, and never only in a link that carries a
  * visible token, which the carried-object reveal shows by design. Each pair

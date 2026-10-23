@@ -6,7 +6,7 @@ import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, type PermissionDeps } from "#shared/permissions.ts";
-import { projectEntity, visibleAssetIds } from "#shared/project.ts";
+import { projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { clientOpSchema, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
@@ -733,15 +733,9 @@ export class RoomActor {
     return { room: this.#receipts.size, member: memberId === undefined ? 0 : this.#receipts.countOf(memberId), players: this.#receipts.players };
   }
 
-  /** Projects log rows from the database for a viewer with the same rules as the live log (design 7.3). */
+  /** Projects log rows from the database for a viewer with each line's own rules, as the live log's (design 7.3). */
   projectLog(entries: LogEntry[], viewer: Viewer, sceneId: string | null): LogEntry[] {
-    const state: RoomState = { ...this.#committed.state, log: entries };
-    const out: LogEntry[] = [];
-    for (const entry of entries) {
-      const projected = projectEntity(keys.log(entry.id), state, viewer, { sceneId }) as LogEntry | null;
-      if (projected) out.push(projected);
-    }
-    return out;
+    return projectArchivedLog(this.#committed.state, entries, viewer, { sceneId });
   }
 
   /**

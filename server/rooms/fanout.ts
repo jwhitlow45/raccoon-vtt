@@ -1,4 +1,5 @@
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
+import { linesPastStart } from "#shared/logRings.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, projectEntity, projectState, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import type { Change, RefusalCode } from "#shared/protocol.ts";
@@ -46,10 +47,12 @@ function viewerClass(conn: Connection, state: RoomState): string {
  * (docs/design-v1-maps-vision.md 4.3.5). Scenes nobody looks at need no
  * diff: a viewer arriving on one gets a snapshot.
  */
-export function candidateKeys(batch: CommittedBatch, watched: Iterable<string> = []): Set<EntityKey> {
+export function candidateKeys(batch: CommittedBatch, watched: Iterable<string> = [], viewers: Iterable<Viewer> = []): Set<EntityKey> {
   if (batch.global) return new Set([...allKeys(batch.before), ...allKeys(batch.after)]);
   const touched = [...batch.touched, ...changedSightKeys(batch.before, batch.after, watched)];
-  return new Set([...touched, ...dependents(batch.before, touched), ...dependents(batch.after, touched)]);
+  // A viewer's live log starts where a ring of their own fills (shared/logRings.ts), so the lines it passed over come and go.
+  const passed = linesPastStart(batch.before.log, batch.after.log, viewers).map((id) => keys.log(id));
+  return new Set([...touched, ...dependents(batch.before, touched), ...dependents(batch.after, touched), ...passed]);
 }
 
 /** The scenes the batch's viewers hold: the player scene, unless a blackout hides it, and each DM's own. */
@@ -99,7 +102,11 @@ const SAME_FOR_EVERY_PLAYER = new Set(["chunk", "fog", "sight", "scene", "label"
  */
 export function publishBatch(batch: CommittedBatch, connections: Iterable<Connection>, current: (key: ClientKey) => Connection | undefined): void {
   const all = [...connections];
-  const candidates = candidateKeys(batch, watchedScenes(batch.after, all));
+  const candidates = candidateKeys(
+    batch,
+    watchedScenes(batch.after, all),
+    all.filter((conn) => !conn.closed && conn.held !== null).map((conn) => conn.viewer),
+  );
   const projections = new Map<string, Map<EntityKey, unknown>>();
   const forPlayers = new Map<EntityKey, unknown>();
   for (const conn of all) {

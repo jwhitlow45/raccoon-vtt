@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds } from "#shared/keys.ts";
-import { DM_LINE_BASE } from "#shared/reducer/tx.ts";
+import { DM_LINE_BASE, dmNumbered, lineAudience } from "#shared/logRings.ts";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
@@ -99,7 +99,14 @@ describe("remapState", () => {
       for (const m of e.monsters) if ("monsterId" in m) assert.ok(out.monsters[m.monsterId]);
     });
     assert.ok(out.meta.playerSceneId && out.scenes[out.meta.playerSceneId]);
-    out.log.forEach((e, i) => assert.equal(e.id, `0:${i}`));
+    // The lines a player may get count one after another, and the DM's on their own from DM_LINE_BASE with the trap
+    // log's, so no id a player gets counts a line only the DM holds (shared/logRings.ts).
+    out.log.filter((e) => lineAudience(e) !== "dm").forEach((e, i) => assert.equal(e.id, `0:${i}`));
+    const dmIds = out.log.filter((e) => lineAudience(e) === "dm").map((e) => e.id);
+    assert.ok(dmIds.length > 0, "the random room has lines only the DM gets");
+    for (const id of dmIds) assert.ok(dmNumbered(id), id);
+    assert.equal(new Set([...dmIds, ...out.trapLog.map((e) => e.id)]).size, dmIds.length + out.trapLog.length, "no two DM lines share an id");
+    assert.deepEqual(out.log.map((e) => e.id), [...out.log].sort((a, b) => compareLogIds(a.id, b.id)).map((e) => e.id), "the log is in id order");
     // An imported HP line is history: it keeps what it says and loses what the change replaced.
     assert.ok(state.log.some((e) => e.data?.type === "hp" && e.data.revert), "the random room has HP lines that can be taken back");
     for (const e of out.log) if (e.data?.type === "hp") assert.ok(!("revert" in e.data) && !("of" in e.data), `log ${e.id}`);

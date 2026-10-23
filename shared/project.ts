@@ -1,4 +1,4 @@
-import { chunkKey, doorChunk, keys, parseKey, readEntity, sightOf, tileKey, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
+import { chunkKey, compareLogIds, doorChunk, keys, parseKey, readEntity, sightOf, tileKey, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
 import {
   FOG_SUBCELLS,
   type Actor,
@@ -44,6 +44,7 @@ import {
 } from "./model.ts";
 import { handoutPages } from "./handouts.ts";
 import { imageAssetId } from "./imageRef.ts";
+import { inLiveLog, liveStart } from "./logRings.ts";
 import { revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
 import type { Env } from "./reducer/tx.ts";
@@ -1587,6 +1588,45 @@ function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): Lo
   return out;
 }
 
+/**
+ * A line of the live log for a viewer: inside their live log
+ * (shared/logRings.ts liveStart) and passing its own rules. Lines older
+ * than where it starts reach them through the archive's pages.
+ */
+function projectLiveLineCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
+  return inLiveLog(ctx.state.log, ctx.viewer, entry.id) ? projectLogEntryCtx(ctx, entry) : null;
+}
+
+/** The live log as the viewer may read it: from where their live log starts, each line by its own rules. */
+function projectLiveLogCtx(ctx: Ctx): LogEntry[] {
+  const log = ctx.state.log;
+  const start = liveStart(log, ctx.viewer);
+  let from = 0;
+  if (start !== null) while (from < log.length && compareLogIds(log[from]!.id, start) < 0) from++;
+  const out: LogEntry[] = [];
+  for (let i = from; i < log.length; i++) {
+    const projected = projectLogEntryCtx(ctx, log[i]!);
+    if (projected) out.push(projected);
+  }
+  return out;
+}
+
+/**
+ * Lines from the archive (`room_log`) as a viewer may read them, each by
+ * its own rules against the room as it is now, as the live log's lines
+ * are, with none of the live log's rings: an archive page holds every line
+ * the viewer may read before its cursor (design 10.8).
+ */
+export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[], viewer: Viewer, opts: ProjectOpts): LogEntry[] {
+  const ctx = ctxOf(state, viewer, opts);
+  const out: LogEntry[] = [];
+  for (const line of lines) {
+    const projected = projectLogEntryCtx(ctx, line);
+    if (projected) out.push(projected);
+  }
+  return out;
+}
+
 function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
   if (entry.kind === "whisper") {
     const me = ctx.viewer.memberId;
@@ -1669,7 +1709,7 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "trap":
       return value ? projectTrapCtx(ctx, value as Trap) : null;
     case "log":
-      return value ? projectLogEntryCtx(ctx, value as LogEntry) : null;
+      return value ? projectLiveLineCtx(ctx, value as LogEntry) : null;
     case "trapLog":
       return value && ctx.viewer.role === "dm" ? value : null;
     case "trapSeen":
@@ -1710,7 +1750,7 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     encounter: projectEncounterCtx(ctx),
     encounterHistory: projectHistoryCtx(ctx) ?? [],
     handouts: projectMap(state.handouts, (h) => projectHandoutCtx(ctx, h)),
-    log: state.log.map((e) => projectLogEntryCtx(ctx, e)).filter((e): e is LogEntry => e !== null),
+    log: projectLiveLogCtx(ctx),
     monsters: projectMap(state.monsters, (m) => projectMonsterCtx(ctx, m)),
     srdImages: projectMap(state.srdImages, (e) => projectSrdImageCtx(ctx, e)),
     savedEncounters: projectMap(state.savedEncounters, (e) => projectSavedEncounterCtx(ctx, e)),

@@ -1,7 +1,7 @@
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
-import { DM_LINE_BASE } from "#shared/reducer/tx.ts";
+import { DM_LINE_BASE, lineAudience } from "#shared/logRings.ts";
 import type {
   AreaTemplate,
   Character,
@@ -538,9 +538,14 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         return null;
     }
   };
-  // Log ids are `"<seq>:<index>"`. The new room's ops start at seq 1, so seq 0 can never collide.
+  // Log ids are `"<seq>:<index>"`. The new room's ops start at seq 1, so seq 0 can never collide. Lines are numbered in the
+  // old room's order, the DM's from DM_LINE_BASE with the traps' (dmLineIdsOf), as the reducer writes them, so the lines a
+  // player gets have no gap where one only the DM holds was.
+  const dmLineIds = dmLineIdsOf(state, scenes);
+  let shared = 0;
   for (const e of state.log) {
-    const next: LogEntry = { ...e, id: `0:${out.log.length}` };
+    const dm = lineAudience(e) === "dm";
+    const next: LogEntry = { ...e, id: dm ? dmLineIds.get(e.id)! : `0:${shared}` };
     if (e.from !== undefined) next.from = members.of(e.from);
     if (e.to !== undefined) next.to = e.to.map((id) => members.of(id));
     if (e.data) {
@@ -548,9 +553,11 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (!data) continue;
       next.data = data;
     }
+    if (!dm) shared++;
     out.log.push(next);
   }
-  remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId });
+  out.log.sort((a, b) => compareLogIds(a.id, b.id));
+  remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId, dmLineIds, sharedLines: shared });
   // A hand-made or older file is brought within the companion rules (docs/design-v1-combat-flow.md 4.7), a character's
   // initiative and Passive Perception follow its stat block, and a Wild Shape mark stands only beside its creature
   // (docs/design-v1-pc-stats.md 3.5 and 3.6).
@@ -577,6 +584,23 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
 }
 
 /**
+ * The new ids of every line only the DM holds: the room log's DM lines
+ * (shared/logRings.ts), the trap log's and the occurrences that name them,
+ * each ring in the old room's order, all counting on from DM_LINE_BASE
+ * together, as the reducer writes them (docs/design-v1-traps.md 6.3).
+ * Numbered with the lines players get, each would leave a gap in theirs.
+ */
+function dmLineIdsOf(state: RoomState, scenes: { has(id: string): boolean }): Map<string, string> {
+  const dmIds = new Set<string>();
+  for (const line of state.log) if (lineAudience(line) === "dm") dmIds.add(line.id);
+  for (const trap of Object.values(state.traps ?? {})) if (scenes.has(trap.sceneId)) for (const d of trap.rig?.due ?? []) dmIds.add(d.id);
+  for (const line of state.trapLog ?? []) dmIds.add(line.id);
+  const out = new Map<string, string>();
+  for (const [i, id] of [...dmIds].sort(compareLogIds).entries()) out.set(id, `0:${DM_LINE_BASE + i}`);
+  return out;
+}
+
+/**
  * Traps follow their scene (docs/design-v1-traps.md 6.8), each with a new
  * id, as pins do. What a trap names follows its new id: a light, a stamp
  * or a creature its actions show, and the creature its hint named, each
@@ -585,28 +609,28 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
  * named after the new ids, every list keeping only plain ids that came
  * through and counting the rest, as the reducer stores them (6.1). Lines
  * are numbered in the old room's order, the players' after the room log's
- * and the DM's from DM_LINE_BASE, so no two imported lines share an id and
- * the newest occurrence stays the newest.
+ * shared lines and the DM's from DM_LINE_BASE (dmLineIdsOf), so no two
+ * imported lines share an id and the newest occurrence stays the newest.
  */
 function remapTraps(
   state: RoomState,
   out: RoomState,
-  ids: { scenes: { has(id: string): boolean; of(id: string): string }; tokens: { has(id: string): boolean; of(id: string): string }; stampIds: ReadonlyMap<string, string>; lightIds: ReadonlyMap<string, string>; newId: () => string },
+  ids: {
+    scenes: { has(id: string): boolean; of(id: string): string };
+    tokens: { has(id: string): boolean; of(id: string): string };
+    stampIds: ReadonlyMap<string, string>;
+    lightIds: ReadonlyMap<string, string>;
+    newId: () => string;
+    dmLineIds: ReadonlyMap<string, string>;
+    sharedLines: number;
+  },
 ): void {
-  const { scenes, tokens, stampIds, lightIds, newId } = ids;
+  const { scenes, tokens, stampIds, lightIds, newId, dmLineIds, sharedLines } = ids;
   const trapIds = new Map<string, string>();
-  // Each ring is numbered in the old room's order, so the newest stays the newest. The DM's lines and the occurrences
-  // that name them count on their own from DM_LINE_BASE, as the reducer writes them (6.3): numbered with the players'
-  // lines, each one only the DM holds would leave a gap in the ids players get.
-  const dmLineIds = new Map<string, string>();
-  const dmIds = new Set<string>();
-  for (const trap of Object.values(state.traps ?? {})) if (scenes.has(trap.sceneId)) for (const d of trap.rig?.due ?? []) dmIds.add(d.id);
-  for (const line of state.trapLog ?? []) dmIds.add(line.id);
-  for (const [i, id] of [...dmIds].sort(compareLogIds).entries()) dmLineIds.set(id, `0:${DM_LINE_BASE + i}`);
   const lineId = (id: string) => dmLineIds.get(id)!;
   const seenLineIds = new Map<string, string>();
   const seenKept = (state.trapSeen ?? []).filter((line) => line.data?.type === "trapSeen");
-  for (const [i, id] of seenKept.map((line) => line.id).sort(compareLogIds).entries()) seenLineIds.set(id, `0:${out.log.length + i}`);
+  for (const [i, id] of seenKept.map((line) => line.id).sort(compareLogIds).entries()) seenLineIds.set(id, `0:${sharedLines + i}`);
   const kept = (list: readonly string[], more = 0): { list: string[]; more: number } => {
     const mapped = list.filter((id) => tokens.has(id)).map((id) => tokens.of(id));
     const plain = mapped.filter(isPlainId);

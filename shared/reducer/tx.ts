@@ -1,4 +1,7 @@
-import { collectionOf, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
+import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
+import { LIMITS, serializedBytes } from "../limits.ts";
+import { DM_LINE_BASE, droppedLines, lineAudience, MAX_LOG } from "../logRings.ts";
+import { logsByAudience } from "../migrate.ts";
 import type {
   Actor,
   Character,
@@ -38,15 +41,7 @@ export type Env = {
   withoutTraps?: true;
 };
 
-/** Log entries kept in memory. Older ones live in the room_log table. */
-export const MAX_LOG = 200;
-
-/**
- * Where the DM's trap lines start counting within an op (Tx.addTrapLine):
- * past any count the shared log reaches in one op, and inside the six
- * digits a line id may have, so an occurrence's due still parses.
- */
-export const DM_LINE_BASE = 900_000;
+export { DM_LINE_BASE, MAX_LOG } from "../logRings.ts";
 
 export class Refuse extends Error {
   code: RefusalCode;
@@ -191,7 +186,11 @@ export class Tx {
         } else if (index >= 0) {
           log[index] = next as LogEntry;
         } else {
-          log.push(next as LogEntry);
+          // A DM line counts past its op's shared lines (addLog), so a later shared line of the op goes before it, in id
+          // order, as the client's copy keeps it (keys.ts withLine).
+          let at = log.length;
+          while (at > 0 && sameSeq(log[at - 1]!.id, parsed.id) && compareLogIds(log[at - 1]!.id, parsed.id) > 0) at--;
+          log.splice(at, 0, next as LogEntry);
         }
         break;
       }
@@ -211,16 +210,31 @@ export class Tx {
     this.write(key, null);
   }
 
-  /** Appends a log entry with an id derived from the envelope, so a replay never inserts it twice. */
+  /**
+   * Appends a log entry with an id derived from the envelope, so a replay
+   * never inserts it twice. The log keeps each audience's lines apart
+   * (shared/logRings.ts): a DM line counts on from DM_LINE_BASE, as the
+   * DM's trap lines do, so it never moves the id of a later line a player
+   * gets, and each ring drops only its own oldest, so it never pushes out a
+   * line a player holds. A DM line too long for its ring goes only to the
+   * archive. Ops stored before op version 19 kept one ring for every line,
+   * numbered in order, and replay so.
+   */
   addLog(entry: Omit<LogEntry, "id" | "at">): LogEntry {
-    const full: LogEntry = { id: `${this.env.seq}:${this.logIndex++}`, at: this.env.at, ...entry };
+    const apart = logsByAudience(this.env.opVersion);
+    const dm = apart && lineAudience(entry) === "dm";
+    const index = dm ? DM_LINE_BASE + this.dmLineIndex++ : this.logIndex++;
+    const full: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, ...entry };
     this.log.push(full);
-    this.write(keys.log(full.id), full);
-    const log = this.collection("log");
-    while (log.length > MAX_LOG) {
-      const oldest = log[0]!;
-      this.write(keys.log(oldest.id), null);
+    if (!apart) {
+      this.write(keys.log(full.id), full);
+      const log = this.collection("log");
+      while (log.length > MAX_LOG) this.write(keys.log(log[0]!.id), null);
+      return full;
     }
+    if (dm && serializedBytes(full) > LIMITS.dmLogLineBytes) return full;
+    this.write(keys.log(full.id), full);
+    for (const id of droppedLines(this.collection("log"), full)) this.write(keys.log(id), null);
     return full;
   }
 
@@ -233,11 +247,11 @@ export class Tx {
    * numbered from the envelope, so lines of every log sort together and a
    * replay never writes one twice. The players' lines share the shared
    * log's count, since every player gets both. The DM's lines count on
-   * their own from DM_LINE_BASE, so a line only the DM sees never moves the
-   * id of a later line a player gets, and the DM's merged log never meets
-   * two lines with one id. Each log keeps only its own newest `keep`, so a
-   * line one audience cannot see never pushes out one it could. Trap lines
-   * never reach the stored log.
+   * their own from DM_LINE_BASE, with the room log's DM lines, so a line
+   * only the DM sees never moves the id of a later line a player gets, and
+   * the DM's merged log never meets two lines with one id. Each log keeps
+   * only its own newest `keep`, so a line one audience cannot see never
+   * pushes out one it could. Trap lines never reach the stored log.
    */
   addTrapLine(ring: "trapLog" | "trapSeen", data: LogEvent, keep: number): LogEntry {
     const index = ring === "trapLog" ? DM_LINE_BASE + this.dmLineIndex++ : this.logIndex++;
@@ -382,6 +396,10 @@ export function guardHash(key: EntityKey, value: unknown): string {
     delete rest.thumb;
   }
   return hashValue(rest);
+}
+
+function sameSeq(a: string, b: string): boolean {
+  return a.slice(0, a.indexOf(":")) === b.slice(0, b.indexOf(":"));
 }
 
 /** The kinds that are lines of a log: kept in order, with no rev, and never put back by an undo. */
