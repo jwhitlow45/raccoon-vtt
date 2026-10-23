@@ -32,12 +32,12 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
- * sweep must reach and did not, a root that matches nothing, a window
- * with no header place, a board with no pill and a holder's line missing
- * a word are lines too. The screens that show only at some sizes are
- * counted over the run, and pl3-d fails when one showed at fewer sizes
- * than the polish pass found (pl3-c), so no check passes by measuring
- * nothing.
+ * sweep must reach and did not, a root that matches nothing or only what
+ * is hidden, a window with no header place, a board with no pill and a
+ * holder's line missing a word are lines too. The screens that show only
+ * at some sizes are counted over the run, and pl3-c fails when one showed
+ * at fewer sizes than the polish pass found, so no check passes by
+ * measuring nothing.
  *
  * The DM's page runs in a touch context for the phone and tablet sizes and
  * a mouse context for the desktop, one at a time, beside Pat's touch
@@ -176,13 +176,19 @@ class Sweep {
     if (this.shoot) await shots.take(page, `alignment-${this.at}-${screen}`);
   }
 
-  /** Measures what `root` matches with the five checks, as `screen`. A root that matches nothing is a screen missing, unless `optional`. */
+  /**
+   * Measures what `root` matches and shows with the five checks, as
+   * `screen`. A root that matches nothing, or only what is hidden, is a
+   * screen missing, unless `optional`, when it is a screen that did not
+   * show. Either way it is not counted as seen, since nothing was measured.
+   */
   async measure(page: Page, screen: string, root: Locator, opts: { optional?: boolean } = {}): Promise<void> {
-    if ((await root.count()) === 0) {
-      if (!opts.optional) await this.missing(page, screen, "nothing on the page matched it");
+    const shown = root.filter({ visible: true });
+    if ((await shown.count()) === 0) {
+      if (!opts.optional) await this.missing(page, screen, (await root.count()) === 0 ? "nothing on the page matched it" : "what matched it is hidden");
       return;
     }
-    await this.add(page, screen, alignmentLines(await measureAlignment(root), `${this.at} ${screen}`));
+    await this.add(page, screen, alignmentLines(await measureAlignment(shown), `${this.at} ${screen}`));
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -793,6 +799,7 @@ const CASES = `
 </div>
 <div data-case="zoom-narrow" style="zoom: 1.3"><div role="button" style="display: flex; align-items: center; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; background: #eee"></span></div></div>
 <div data-case="zoom-narrow-off" style="zoom: 1.3"><div role="button" style="display: flex; align-items: flex-start; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; margin-top: 5px; background: #eee"></span></div></div>
+<div data-case="hidden-row"><div data-bar-row="play" style="display: none"><button>Attach</button></div></div>
 <div data-case="label-alone" style="width: 250px">
   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
     <label style="flex: 1 1 110px; min-width: 0">DC</label>
@@ -997,6 +1004,11 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       const drawn = new Sweep("drawn", false);
       await drawn.measure(page, "renamed", page.locator('[data-bar-row="plays"]'));
       assert.match(drawn.lines.join("\n"), /^drawn renamed: never showed/, "a renamed attribute fails the sweep");
+      await drawn.measure(page, "hidden", page.locator('[data-case="hidden-row"] [data-bar-row="play"]'));
+      await drawn.measure(page, "hidden-optional", page.locator('[data-case="hidden-row"] [data-bar-row="play"]'), { optional: true });
+      assert.ok(drawn.lines.includes("drawn hidden: never showed (what matched it is hidden)"), `a hidden play row fails the sweep: ${JSON.stringify(drawn.lines)}`);
+      assert.ok(!drawn.lines.some((l) => l.startsWith("drawn hidden-optional")), "a hidden optional root is a screen that did not show");
+      assert.ok(!drawn.seen.has("hidden") && !drawn.seen.has("hidden-optional"), "a hidden root is never counted as seen");
       assert.deepEqual((await pillLines(page, "no-konva", { needPills: true })).lines, ["no-konva: no Konva stage on the page"]);
       assert.deepEqual(await leadLines(holder("kind-carrying-only"), ["Carrying", "Dragging"], "kind-carrying-only"), ['kind-carrying-only: "Dragging" is not in the group']);
       assert.deepEqual(await leadLines(page.locator('[data-case="none"]').getByRole("group"), ["Carrying"], "no-group"), ["no-group: no group of linked tokens to read"]);
