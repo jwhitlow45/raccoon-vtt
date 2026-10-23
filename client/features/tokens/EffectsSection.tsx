@@ -384,12 +384,12 @@ function EffectDetail(props: {
             </FieldRow>
           ) : null}
           {key === "readied" ? (
-            <FieldRow label="Trigger" hint="What it waits for, such as “if the door opens”.">
+            <FieldRow label="Trigger" fill hint="What it waits for, such as “if the door opens”.">
               <Input aria-label="Trigger" value={label} maxLength={MAX_TRIGGER} onChange={(e) => setLabel(e.target.value)} style={{ flex: 1 }} />
             </FieldRow>
           ) : null}
           {key === "concentrating" ? (
-            <FieldRow label="Spell">
+            <FieldRow label="Spell" fill>
               <input
                 aria-label="Spell"
                 value={spell}
@@ -402,7 +402,7 @@ function EffectDetail(props: {
           ) : null}
           {key === "custom" ? (
             <>
-              <FieldRow label="Label">
+              <FieldRow label="Label" fill>
                 <input aria-label="Label" value={label} maxLength={80} placeholder="Marked by Vex" onChange={(e) => setLabel(e.target.value)} style={{ ...fieldStyle(), flex: 1 }} />
               </FieldRow>
               <FieldRow label="Emoji or letters" hint="Up to 2 characters show on the token.">
@@ -493,11 +493,11 @@ export function DurationFields(props: {
   const { form } = props;
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
-      <FieldRow label="Duration" hint={props.hint}>
+      <FieldRow label="Duration" fill hint={props.hint}>
         <Select<DurationMode> label="Duration" value={form.mode} options={MODE_OPTIONS} onChange={(mode) => props.onChange({ ...form, mode })} />
       </FieldRow>
       {form.mode !== "none" ? (
-        <FieldRow label={form.mode === "rounds" ? "Counted on" : "X is"}>
+        <FieldRow label={form.mode === "rounds" ? "Counted on" : "X is"} fill>
           <Select<string>
             label={form.mode === "rounds" ? "Counted on whose turns" : "Whose turn"}
             value={form.anchorKey}

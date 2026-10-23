@@ -6,7 +6,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { useBoardPillsExcept, usePublishPills } from "../../canvas/boardView.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
-import { Pill, pillGeometry, pillPlace } from "../measure/Pill.tsx";
+import { Pill, pillGeometry, pillReach } from "../measure/Pill.tsx";
 import { areaTitle } from "./labels.ts";
 import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
@@ -64,7 +64,8 @@ export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
   const avoid = useMemo(
     () => [
       ...tokenBoxes(Object.values(tokens).filter((t) => !!t && t.sceneId === scene.id), scale, measureLabel),
-      ...others.map((spec) => pillPlace({ ...spec, scale }, null).box),
+      // Each where the view could slide it (Pill.tsx pillReach), so a name never lands on a trap's name slid in from the edge.
+      ...others.map((spec) => pillReach({ ...spec, scale })),
     ],
     [tokens, scene.id, scale, others],
   );

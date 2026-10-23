@@ -331,7 +331,7 @@ function Fields() {
       <FieldRow label="HP" htmlFor="kit-hp">
         <Input id="kit-hp" type="number" defaultValue={12} />
       </FieldRow>
-      <FieldRow label="Name on the map" htmlFor="kit-label" hint="Up to 40 letters.">
+      <FieldRow label="Name on the map" fill htmlFor="kit-label" hint="Up to 40 letters.">
         <Input id="kit-label" defaultValue="Goblin Boss" style={{ flex: 1 }} />
       </FieldRow>
       <FieldRow label="Size" htmlFor="kit-size">

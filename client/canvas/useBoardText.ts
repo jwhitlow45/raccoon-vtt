@@ -5,7 +5,7 @@ import { boardSizes } from "../lib/boardScale.ts";
 import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type Obstacle, type PlacedLabel } from "../lib/boardText.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
 import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tokenView.ts";
-import { pillPlace } from "../features/measure/Pill.tsx";
+import { pillReach } from "../features/measure/Pill.tsx";
 import type { PillSpec } from "./boardView.ts";
 import { measureLabel } from "./measureText.ts";
 import { bloodiedNotch, numberBadgeWidth, shieldAc, tokenMarks, type Notch, type TokenMarks } from "./tokenMarks.ts";
@@ -30,10 +30,15 @@ export type TokenText = {
   notch: Notch | null;
 };
 
-/** Other layers' pills as the label pass keeps off them, in screen pixels: the boxes they draw at this zoom. */
+/**
+ * Other layers' pills as the label pass keeps off them, in screen pixels:
+ * the room each takes at this zoom, wherever the view slides it
+ * (Pill.tsx pillReach), so a label never lands on a name slid in from the
+ * screen's edge, and a pan never lays the labels out again.
+ */
 export function pillObstacles(pills: readonly PillSpec[], scale: number): Obstacle[] {
   return pills.map((spec) => {
-    const p = pillPlace({ ...spec, scale }, null).box;
+    const p = pillReach({ ...spec, scale });
     return { box: { x0: p.x0 * scale, y0: p.y0 * scale, x1: p.x1 * scale, y1: p.y1 * scale }, kind: "pill" };
   });
 }

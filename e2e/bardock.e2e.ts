@@ -1201,7 +1201,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     await apart("a resize dropped on the column");
     await dragBy(dm, middle(await rectOf(resizeHandle(dm))), 2000, 2000);
     r = await barRect(dm);
-    assert.ok(Math.abs(r.bottom - r.top - 148) <= 1, `the smallest is not 148 tall: ${r.bottom - r.top}`);
+    assert.ok(Math.abs(r.bottom - r.top - 152) <= 1, `the smallest is not 152 tall: ${r.bottom - r.top}`);
     await apart("the smallest");
     await shots.take(dm, "token-window-smallest-in-a-fight");
     await ops.send({ t: "encounter.end" });
@@ -1254,5 +1254,68 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     for (const id of ids) await ops.send({ t: "actor.effect.remove", target: { tokenId: goblin.id }, effectId: id });
     await setUp(dm, { ...DESK, scale: 1 });
   });
+  test("pl2-b. on a phone at 390, 360 and 320 px, and 390 at 130%, a toast that shows under the alerts column's first card takes the card's left and right edges, not the map's, and keeps to the cards as the screen turns while it shows (docs/design-v1-polish.md R9, PL2-ASTRA-02)", async () => {
+    await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
+    for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+    try {
+      // Two loads in all, the widths by resizing alone, so the DM's session keeps under the server's snapshot budget (step 18b).
+      for (const view of [
+        { width: 390, height: 844, scale: 1 },
+        { width: 360, height: 740, scale: 1 },
+        { width: 320, height: 568, scale: 1 },
+        { width: 390, height: 844, scale: 1.3 },
+      ]) {
+        const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        if (view.width === 390) {
+          await setUp(dm, view);
+          // A check comes up as the damage arrives, so a page loaded again has none until the goblins take more.
+          await damageGoblins();
+        } else await dm.setViewportSize({ width: view.width, height: view.height });
+        const check = dm.locator('[data-alert="concentration"]').first();
+        await check.waitFor();
+        await dm.waitForTimeout(300);
+        const card = await rectOf(check);
+        // Undo says what it took back in a toast: a step of the far goblin's, which leaves the checks be.
+        const far = dmSocket.state?.tokens[run.far.id];
+        await ops.send({ t: "token.update", tokenId: run.far.id, patch: { x: (far?.x ?? run.far.x) === run.far.x ? run.far.x - 1 : run.far.x } });
+        await dm.getByRole("button", { name: "Undo", exact: true }).click();
+        const toast = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+        await toast.waitFor();
+        const t = await rectOf(toast);
+        await shots.take(dm, `bardock-pl2-b-toast-under-card-${view.width}-${Math.round(view.scale * 100)}`);
+        assert.ok(Math.abs(t.top - (card.bottom + 8 * view.scale)) < 1.5, `${label}: the toast starts at ${t.top}, not 8 px under the card's foot at ${card.bottom}`);
+        assert.ok(Math.abs(t.left - card.left) <= 1, `${label}: the toast's left edge is ${(t.left - card.left).toFixed(1)} px off the card's`);
+        assert.ok(Math.abs(t.right - card.right) <= 1, `${label}: the toast's right edge is ${(t.right - card.right).toFixed(1)} px off the card's`);
+        // Gone before the next width, so the next toast takes a place of its own rather than joining this one's.
+        await toast.click();
+        await toast.waitFor({ state: "detached" });
+      }
+
+      // A toast still showing as the phone turns sideways keeps its top and stands under the cards as they now stand, not at the edges it showed with.
+      await setUp(dm, { width: 390, height: 844, scale: 1 });
+      await damageGoblins();
+      await dm.locator('[data-alert="concentration"]').first().waitFor();
+      await dm.waitForTimeout(300);
+      await ops.send({ t: "token.update", tokenId: run.far.id, patch: { x: (dmSocket.state?.tokens[run.far.id]?.x ?? run.far.x) === run.far.x ? run.far.x - 1 : run.far.x } });
+      await dm.getByRole("button", { name: "Undo", exact: true }).click();
+      const live = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+      await live.waitFor();
+      const upright = await rectOf(live);
+      await dm.setViewportSize({ width: 844, height: 390 });
+      await dm.waitForTimeout(400);
+      assert.ok(await live.isVisible(), "the toast went before the turn could be read");
+      const turned = await rectOf(live);
+      await shots.take(dm, "bardock-pl2-b-toast-turned-844");
+      const card = await rectOf(dm.locator('[data-alert="concentration"]').first());
+      assert.ok(Math.abs(turned.top - upright.top) < 1, `the toast moved from ${upright.top} to ${turned.top} as the screen turned`);
+      assert.ok(Math.abs(turned.left - card.left) <= 1, `turned, the toast's left edge is ${(turned.left - card.left).toFixed(1)} px off the card's`);
+      assert.ok(Math.abs(turned.right - card.right) <= 1, `turned, the toast's right edge is ${(turned.right - card.right).toFixed(1)} px off the card's`);
+      await live.click();
+    } finally {
+      await ops.send({ t: "encounter.end" });
+      await setUp(dm, { ...DESK, scale: 1 });
+    }
+  });
+
   test("20. nothing went wrong in the browsers", assertNoConsoleErrors);
 });

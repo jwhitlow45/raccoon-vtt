@@ -1,3 +1,4 @@
+import type Konva from "konva";
 import { Label, Tag, Text } from "react-konva";
 import { useBoardView } from "../../canvas/boardView.ts";
 import { measurePill } from "../../canvas/measureText.ts";
@@ -65,31 +66,69 @@ function slideIn(x: number, y: number, w: number, h: number, scale: number, view
 }
 
 /**
+ * The left edge, in cells, of a pointed pill `w` wide over or under `point`:
+ * centered on it, slid back inside `view` as a plain pill is, but never
+ * so far that the point leaves the straight part of the body's edge
+ * between its rounded corners (`corner` wide), where the pointer can reach.
+ * Only across: sliding up or down would part the pointer from its point.
+ */
+function slideAlong(point: number, w: number, corner: number, scale: number, view: Box | null): number {
+  const centered = point - w / 2;
+  if (!view) return centered;
+  const edge = EDGE_PX / scale;
+  const inView = Math.max(view.x0 + edge, Math.min(centered, view.x1 - edge - w));
+  return Math.max(point - w + corner, Math.min(inView, point - corner));
+}
+
+/**
  * Where a pill sits, in cells: its box, and the point its Label is drawn at.
  * By default its top-left corner sits `offsetPx` below and right of the
  * point, and slides back inside `view` if it would cross its edge.
- * With `above`, it sits centered over the point with a small pointer down
- * to it, for naming a shape from its top edge, and with `below` centered
- * under it with the pointer up, each `offsetPx` off the point along its
- * pointer. A pointed pill stays on its point.
+ * With `above`, it sits over the point with a small pointer down to it,
+ * for naming a shape from its top edge, and with `below` under it with the
+ * pointer up, each `offsetPx` off the point along its pointer. A pointed
+ * pill is centered on its point, and near the edge of `view` slides along
+ * it as a plain pill does, its pointer moving along the body's edge to
+ * stay on the point (docs/design-v1-polish.md R4), so a trap's name at the
+ * screen's edge reads whole and still marks its trap. `lean` is how far
+ * the pointer's tip stands from the body's middle, in screen px, and its
+ * Label is drawn at the body's middle.
  */
-export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { box: Box; x: number; y: number } {
+export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { box: Box; x: number; y: number; lean: number } {
   const g = pillGeometry(props);
   const s = 1 / props.scale;
   const w = g.width * s;
   const h = g.height * s;
   const tip = g.pointer * s;
   const off = (props.offsetPx ?? 0) * s;
-  if (props.above) {
-    const y = props.y - off;
-    return { box: { x0: props.x - w / 2, y0: y - h - tip, x1: props.x + w / 2, y1: y }, x: props.x, y };
-  }
-  if (props.below) {
-    const y = props.y + off;
-    return { box: { x0: props.x - w / 2, y0: y, x1: props.x + w / 2, y1: y + h + tip }, x: props.x, y };
+  if (props.above || props.below) {
+    const y = props.above ? props.y - off : props.y + off;
+    const x0 = slideAlong(props.x, w, Math.min(theme.radius.sm * s, w / 2), props.scale, view);
+    const box = props.above ? { x0, y0: y - h - tip, x1: x0 + w, y1: y } : { x0, y0: y, x1: x0 + w, y1: y + h + tip };
+    const middle = x0 + w / 2;
+    return { box, x: middle, y, lean: (props.x - middle) * props.scale };
   }
   const at = slideIn(props.x + off, props.y + off, w, h, props.scale, view);
-  return { box: { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, x: at.x, y: at.y };
+  return { box: { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, x: at.x, y: at.y, lean: 0 };
+}
+
+/**
+ * The room a pill can take wherever the view slides it, in cells, for what
+ * keeps off it without following the camera: token labels
+ * (canvas/useBoardText.ts) and area names (features/areas/TemplateLayer.tsx),
+ * which are laid out by zoom and never by pan, so a pan reshuffles nothing.
+ * A pointed pill's box spans every place slideAlong can put its body, from
+ * the body ending a corner past its point to the body starting a corner
+ * before it. Away from the view's edges that is wider than the pill as
+ * drawn, a price paid only beside a pointed pill. A plain pill's is its box
+ * with no view.
+ */
+export function pillReach(props: Omit<PillProps, "color">): Box {
+  const { box } = pillPlace(props, null);
+  if (!props.above && !props.below) return box;
+  const w = box.x1 - box.x0;
+  const corner = Math.min(theme.radius.sm / props.scale, w / 2);
+  return { ...box, x0: props.x - w + corner, x1: props.x + w - corner };
 }
 
 /** One pill of a stack: its words and look. The stack places it. */
@@ -140,13 +179,55 @@ export function PillStack(props: { x: number; y: number; scale: number; offsetPx
   return (
     <>
       {pills.map((p, i) => (
-        <PillShape key={i} {...p} scale={props.scale} at={place.places[i]!} />
+        <PillShape key={i} {...p} scale={props.scale} at={{ ...place.places[i]!, lean: 0 }} />
       ))}
     </>
   );
 }
 
-function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: number } }) {
+/**
+ * A pointed pill's outline: Konva's Tag (konva/lib/shapes/Label.js), its
+ * pointer's tip moved `lean` px from the middle of the edge to stand on the
+ * point. The pointer's base keeps to the straight part of the edge between
+ * the rounded corners, so a pointer near a corner leans toward its tip
+ * rather than cutting into the corner.
+ */
+export function leaningTag(context: Konva.Context, shape: Konva.Shape): void {
+  const width = shape.width();
+  const height = shape.height();
+  const up = shape.getAttr("pointerDirection") === "up";
+  const pointerWidth: number = shape.getAttr("pointerWidth");
+  const pointerHeight: number = shape.getAttr("pointerHeight");
+  const lean: number = shape.getAttr("lean") ?? 0;
+  const r = Math.min(theme.radius.sm, width / 2, height / 2);
+  const tip = width / 2 + lean;
+  const half = pointerWidth / 2;
+  const base = Math.max(r + half, Math.min(tip, width - r - half));
+  context.beginPath();
+  context.moveTo(r, 0);
+  if (up) {
+    context.lineTo(base - half, 0);
+    context.lineTo(tip, -pointerHeight);
+    context.lineTo(base + half, 0);
+  }
+  context.lineTo(width - r, 0);
+  context.arc(width - r, r, r, (Math.PI * 3) / 2, 0, false);
+  context.lineTo(width, height - r);
+  context.arc(width - r, height - r, r, 0, Math.PI / 2, false);
+  if (!up) {
+    context.lineTo(base + half, height);
+    context.lineTo(tip, height + pointerHeight);
+    context.lineTo(base - half, height);
+  }
+  context.lineTo(r, height);
+  context.arc(r, height - r, r, Math.PI / 2, Math.PI, false);
+  context.lineTo(0, r);
+  context.arc(r, r, r, Math.PI, (Math.PI * 3) / 2, false);
+  context.closePath();
+  context.fillStrokeShape(shape);
+}
+
+function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: number; lean: number } }) {
   const g = pillGeometry(props);
   const s = 1 / props.scale;
   const pointer = props.above ? "down" : props.below ? "up" : "none";
@@ -161,6 +242,7 @@ function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: num
         pointerDirection={pointer}
         pointerWidth={pointer !== "none" ? screenPx(POINTER_WIDTH_PX) : 0}
         pointerHeight={pointer !== "none" ? g.pointer : 0}
+        {...(pointer !== "none" ? { sceneFunc: leaningTag, lean: props.at.lean } : null)}
       />
       <Text
         text={g.lines.join("\n")}

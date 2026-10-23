@@ -53,6 +53,26 @@ describe("the bar's group line", () => {
     assert.equal(named("Carrying Goblin 2"), undefined, "a dragged creature is not carried");
   });
 
+  test("gives each kind of link a row of its own: its word in the first column, its names and actions beside it (docs/design-v1-polish.md R5)", () => {
+    const view = stable();
+    const markup = render(view, createElement(GroupLine, { token: view.tokens.horse! }));
+    assert.match(markup, /^<div role="group" aria-label="Attached tokens" style="display:grid;grid-template-columns:max-content minmax\(0, 1fr\)/);
+    const cells = [...markup.matchAll(/<span aria-hidden="true" data-hold-word="(\w+)"[^>]*>(\w+)<\/span><div data-hold-names="(\w+)"[^>]*>(.*?)<\/div>/g)].map((m) => ({ word: m[2], cell: m[3], names: buttons(m[4] ?? "").map((b) => b.text) }));
+    assert.deepEqual(cells, [
+      { word: "Carrying", cell: "carrying", names: ["Bree", "Torch", "Put down"] },
+      { word: "Dragging", cell: "dragging", names: ["Goblin 2", "Let go"] },
+    ]);
+  });
+
+  test("keeps each name and action to its cell, its words wrapping there, and the word on its first name's first line (PL2-ASTRA-03)", () => {
+    const view = stable();
+    const markup = render(view, createElement(GroupLine, { token: view.tokens.horse! }));
+    assert.match(markup, /^<div role="group" aria-label="Attached tokens" style="[^"]*align-items:baseline/);
+    const found = buttons(markup);
+    assert.equal(found.length, 5);
+    for (const b of found) assert.match(b.attrs, /style="[^"]*flex:0 1 auto;max-width:100%;overflow-wrap:anywhere/, `${b.text} may run past its cell`);
+  });
+
   test("a rider's line names its mount as the panel does", () => {
     const view = stable();
     const markup = render(view, createElement(GroupLine, { token: view.tokens.bree! }));

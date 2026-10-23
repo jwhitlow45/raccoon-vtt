@@ -57,6 +57,32 @@ export function Checkbox(props: {
     if (typeof outer === "function") outer(el);
     else if (outer) outer.current = el;
   };
+  const input = (
+    <input
+      ref={setRef}
+      id={id}
+      type="checkbox"
+      name={props.name}
+      value={props.value}
+      checked={props.checked}
+      disabled={props.disabled}
+      aria-disabled={held ? true : undefined}
+      // A click on the box or its row would toggle it before React could hold it, so the click itself is cancelled.
+      onClick={held ? (e) => e.preventDefault() : undefined}
+      // Named by the label alone, with the help as its description, though the whole row is the label that takes the tap.
+      aria-labelledby={props.help ? labelId : undefined}
+      aria-describedby={props.help ? helpId : undefined}
+      onChange={(e) => {
+        const el = e.currentTarget;
+        if (held) return;
+        props.onChange(el.checked);
+        queueMicrotask(() => {
+          el.indeterminate = latest.current;
+        });
+      }}
+      style={{ width: 22, height: 22, margin: 0, flex: "none", accentColor: theme.color.accent }}
+    />
+  );
   return (
     <label
       htmlFor={id}
@@ -70,30 +96,16 @@ export function Checkbox(props: {
         cursor: off ? "default" : "pointer",
       }}
     >
-      <input
-        ref={setRef}
-        id={id}
-        type="checkbox"
-        name={props.name}
-        value={props.value}
-        checked={props.checked}
-        disabled={props.disabled}
-        aria-disabled={held ? true : undefined}
-        // A click on the box or its row would toggle it before React could hold it, so the click itself is cancelled.
-        onClick={held ? (e) => e.preventDefault() : undefined}
-        // Named by the label alone, with the help as its description, though the whole row is the label that takes the tap.
-        aria-labelledby={props.help ? labelId : undefined}
-        aria-describedby={props.help ? helpId : undefined}
-        onChange={(e) => {
-          const el = e.currentTarget;
-          if (held) return;
-          props.onChange(el.checked);
-          queueMicrotask(() => {
-            el.indeterminate = latest.current;
-          });
-        }}
-        style={{ width: 22, height: 22, margin: props.help ? `${theme.space(0.5)}px 0 0` : 0, flex: "none", accentColor: theme.color.accent }}
-      />
+      {/*
+       * With help under it, the box marks the label's first line, not the
+       * middle of the label and help together. It stands centered in a slot
+       * as tall as that line, so the two share a middle with no offset of
+       * its own to keep in step with the line's height. With no help the
+       * slot takes the box's own height and the row centers it. The slot
+       * stays either way, so help that comes or goes, as when another
+       * device leaves this the last tick, keeps the same input and its focus.
+       */}
+      <span style={{ flex: "none", display: "flex", alignItems: "center", height: props.help ? FIRST_LINE : undefined }}>{input}</span>
       <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
         <span id={labelId} style={{ fontSize: theme.font.body14, lineHeight: theme.leading.body }}>
           {props.label}
@@ -107,3 +119,6 @@ export function Checkbox(props: {
     </label>
   );
 }
+
+/** The label's first line: its 14 px text at body leading. */
+const FIRST_LINE = theme.font.body14 * theme.leading.body;

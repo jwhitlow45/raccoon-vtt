@@ -32,7 +32,8 @@ export function DoorButton(props: { token: Token }) {
   const [choice] = doorActions(token.sceneId, door, "player", token.id);
   if (!choice) return null;
   return (
-    <Button size="sm" onClick={() => actions.dispatch(choice.op)}>
+    // It stands only in the bar's passing row, whose buttons grow to share their line (canvas/TokenActionBar.tsx ButtonRow).
+    <Button size="sm" onClick={() => actions.dispatch(choice.op)} style={{ flex: "1 1 auto" }}>
       {choice.label} door
     </Button>
   );

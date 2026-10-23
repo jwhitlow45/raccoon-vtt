@@ -114,6 +114,27 @@ const NO_CHARACTERS = {};
 /** A row of the bar's buttons, wrapping. An empty one takes no room (globals.css). */
 const BUTTON_ROW = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
 
+/**
+ * A button in one of the bar's rows grows to share its line
+ * (docs/design-v1-polish.md R6), as the HP entry's Damage, Heal, Set and
+ * Temp fill theirs, so the last of a row that wraps, such as Attach or
+ * Delete, never stands alone at its own width. The buttons the bar takes
+ * from other features (Attach, Get off, a door's, Light) stand only in
+ * these rows, so they take this flex themselves.
+ */
+const ROW_BUTTON_FLEX = "1 1 auto";
+
+/** Whether a button stands in one of the bar's rows (ButtonRow), and so grows to share its line. */
+const InButtonRow = createContext(false);
+
+function ButtonRow(props: { row: "passing" | "play" | "less"; children: ReactNode }) {
+  return (
+    <div data-bar-row={props.row} style={BUTTON_ROW}>
+      <InButtonRow.Provider value={true}>{props.children}</InButtonRow.Provider>
+    </div>
+  );
+}
+
 type Drawer = "conditions" | null;
 
 /**
@@ -438,20 +459,14 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
 
       {rows.passing.length > 0 ? (
-        <div data-bar-row="passing" style={BUTTON_ROW}>
-          {rows.passing.map(button)}
-        </div>
+        <ButtonRow row="passing">{rows.passing.map(button)}</ButtonRow>
       ) : null}
-      <div data-bar-row="play" style={BUTTON_ROW}>
-        {rows.play.map(button)}
-      </div>
+      <ButtonRow row="play">{rows.play.map(button)}</ButtonRow>
       {rows.play.includes("detach") ? <DetachNote detach={detach} id={detachNoteId} /> : null}
       {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design-v1-token-window.md 8.9). */}
       {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
       {rows.less.length > 0 ? (
-        <div data-bar-row="less" style={BUTTON_ROW}>
-          {rows.less.map(button)}
-        </div>
+        <ButtonRow row="less">{rows.less.map(button)}</ButtonRow>
       ) : null}
     </>
   );
@@ -532,10 +547,10 @@ export function GroupActionBar(props: {
         <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} />
       ) : null}
       {/* Undo move on a line of its own while it shows, so the steady line below never moves (docs/design-v1-token-window.md 3.2). */}
-      <div data-bar-row="passing" style={BUTTON_ROW}>
+      <ButtonRow row="passing">
         <UndoMoveButton tokenIds={ids} />
-      </div>
-      <div data-bar-row="play" style={BUTTON_ROW}>
+      </ButtonRow>
+      <ButtonRow row="play">
         {offers.conditions ? (
           <BarButton pressed={drawer === "conditions"} onClick={() => setDrawer((d) => (d === "conditions" ? null : "conditions"))}>
             Conditions
@@ -585,7 +600,7 @@ export function GroupActionBar(props: {
         <BarButton icon="close" iconOnly always onClick={props.onClose}>
           Clear
         </BarButton>
-      </div>
+      </ButtonRow>
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
   );
@@ -1342,6 +1357,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
  * turn on. The token, and with it this bar, goes when it does.
  */
 function DismissButton(props: { tokenId: string; name: string }) {
+  const inRow = useContext(InButtonRow);
   const [armed, setArmed] = useState(false);
   const { send, waiting } = useSend();
   useEffect(() => {
@@ -1365,7 +1381,7 @@ function DismissButton(props: { tokenId: string; name: string }) {
         setArmed(false);
         send({ t: "token.delete", tokenId: props.tokenId });
       }}
-      style={{ flex: "none" }}
+      style={{ flex: inRow ? ROW_BUTTON_FLEX : "none" }}
     >
       {text}
     </Button>
@@ -1380,9 +1396,12 @@ function DismissButton(props: { tokenId: string; name: string }) {
  * 3.1 rule 6). The single token's bar takes it: on a tablet or a phone
  * held sideways, Locked and Duplicate with their words leave room for the
  * trash can alone. The group bar's Clear follows its Delete, so a slot
- * there would leave a gap before it.
+ * there would leave a gap before it. In a bar row the button fills its
+ * slot, which grows to share its line (ButtonRow), so arming changes only
+ * its words.
  */
 function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?: boolean }) {
+  const inRow = useContext(InButtonRow);
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -1409,7 +1428,7 @@ function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?:
   );
   if (!props.holdsRoom) return button;
   return (
-    <span style={{ display: "inline-grid", flex: "none" }}>
+    <span style={{ display: "inline-grid", flex: inRow ? ROW_BUTTON_FLEX : "none" }}>
       <ButtonGhost size="sm" icon="delete" style={{ gridArea: "1 / 1" }}>
         {deleteButtonWords(true, props.armedText).text}
       </ButtonGhost>
@@ -1502,6 +1521,7 @@ function BarButton(props: {
   /** The icon alone on every screen: only for an icon read at once without hover, such as the trash can. */
   always?: boolean;
 }) {
+  const inRow = useContext(InButtonRow);
   return (
     <Button
       ref={props.ref}
@@ -1517,7 +1537,7 @@ function BarButton(props: {
       iconOnly={props.iconOnly ? (props.always ? "always" : "fine") : undefined}
       onClick={props.onClick}
       style={{
-        flex: props.grow ? "1 0 auto" : "none",
+        flex: inRow ? ROW_BUTTON_FLEX : props.grow ? "1 0 auto" : "none",
         ...(props.half ? { background: theme.color.surfaceRaised, border: `${theme.line.border}px dashed ${theme.color.accent}`, color: theme.color.text } : null),
       }}
     >

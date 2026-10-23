@@ -167,6 +167,107 @@ function patHeardOfTrap(): boolean {
   return patSocket.received.some((frame) => frame.includes(run.trapId));
 }
 
+/**
+ * The pane's rows, read in the page (docs/design-v1-polish.md R1 to R3):
+ * each remove's middle against the first line of the fields it removes,
+ * each FieldRow's control against its label, each unit against its field,
+ * each tick with help against its label's first line, and the foot's Set
+ * it off, alone on its line after the two asks, against the line's width.
+ */
+type PaneRows = {
+  removes: { name: string; offset: number }[];
+  fieldRows: { label: string; offset: number; wrapped: boolean }[];
+  units: { unit: string; offset: number; sameLine: boolean }[];
+  ticks: { label: string; offset: number }[];
+  setOff: { left: number; short: number; height: number } | null;
+};
+
+/** The page's elements, as far as paneRows reads them: the e2e files build without the DOM's types. */
+type El = {
+  getBoundingClientRect(): { top: number; bottom: number; left: number; width: number };
+  parentElement: El | null;
+  children: ArrayLike<El>;
+  nextElementSibling: El | null;
+  previousElementSibling: El | null;
+  tagName: string;
+  textContent: string | null;
+  getAttribute(name: string): string | null;
+  querySelector(selector: string): El | null;
+  querySelectorAll(selector: string): ArrayLike<El>;
+  ownerDocument: {
+    defaultView: { getComputedStyle(el: El): { flexWrap: string } } | null;
+    getElementById(id: string): El | null;
+    createRange(): { selectNodeContents(node: unknown): void; getClientRects(): ArrayLike<{ top: number; bottom: number }> };
+    createTreeWalker(root: El, show: number): { nextNode(): { textContent: string | null } | null };
+  };
+};
+
+function paneRows(target: Locator): Promise<PaneRows> {
+  return target.evaluate((node) => {
+    const root = node as unknown as El;
+    const doc = root.ownerDocument;
+    const view = doc.defaultView!;
+    const box = (el: El) => el.getBoundingClientRect();
+    const mid = (r: { top: number; bottom: number }) => (r.top + r.bottom) / 2;
+    const tenth = (n: number) => Math.round(n * 10) / 10;
+    // The middle of an element's first line of text, from its first fragment's line box.
+    const firstLine = (el: El): number | null => {
+      const walker = doc.createTreeWalker(el, 4);
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        if (!text.textContent?.trim()) continue;
+        const range = doc.createRange();
+        range.selectNodeContents(text);
+        const r = range.getClientRects()[0];
+        if (r) return mid(r);
+      }
+      return null;
+    };
+    const all = (selector: string) => Array.from(root.querySelectorAll(selector));
+    const removes = all('button[aria-label^="Remove this"]').map((button) => {
+      // The fields beside the remove: its siblings, or the parts inside a sibling that wraps them.
+      const parts = Array.from(button.parentElement!.children)
+        .filter((el) => el !== button)
+        .flatMap((el) => (view.getComputedStyle(el).flexWrap === "wrap" ? Array.from(el.children) : [el]))
+        .filter((el) => box(el).width > 0);
+      const top = Math.min(...parts.map((el) => box(el).top));
+      const line = parts.filter((el) => box(el).top < top + 2);
+      const lineMid = (Math.min(...line.map((el) => box(el).top)) + Math.max(...line.map((el) => box(el).bottom))) / 2;
+      return { name: button.getAttribute("aria-label") ?? "", offset: tenth(mid(box(button)) - lineMid) };
+    });
+    const fieldRows = all("label")
+      .filter((label) => label.parentElement !== null && view.getComputedStyle(label.parentElement).flexWrap === "wrap" && label.nextElementSibling !== null && label.querySelector("input") === null)
+      .map((label) => {
+        const control = label.nextElementSibling!;
+        return { label: label.textContent ?? "", offset: tenth(mid(box(control)) - mid(box(label))), wrapped: box(control).top >= box(label).bottom - 1 };
+      });
+    const units = all("span")
+      .filter((span) => ["rounds", "ft deep"].includes(span.textContent?.trim() ?? "") && span.previousElementSibling?.tagName === "INPUT")
+      .map((span) => {
+        const field = span.previousElementSibling!;
+        return { unit: span.textContent ?? "", offset: tenth(mid(box(span)) - mid(box(field))), sameLine: box(span).top < box(field).bottom && box(field).top < box(span).bottom };
+      });
+    const ticks = all('input[type="checkbox"][aria-describedby]').map((input) => {
+      const label = doc.getElementById(input.getAttribute("aria-labelledby") ?? "")!;
+      return { label: label.textContent ?? "", offset: tenth(mid(box(input)) - (firstLine(label) ?? Number.NaN)) };
+    });
+    const buttons = all("button");
+    const set = buttons.find((b) => b.textContent?.trim() === "Set it off");
+    const search = buttons.find((b) => b.textContent?.trim() === "Ask to search");
+    const line = set?.parentElement ?? null;
+    const setOff = set && search && line ? { left: tenth(box(set).left - box(search).left), short: tenth(box(line).width - box(set).width), height: tenth(box(search).bottom - box(search).top - (box(set).bottom - box(set).top)) } : null;
+    return { removes, fieldRows, units, ticks, setOff };
+  });
+}
+
+/** How far a frame's Close stands under the frame's own top. */
+function closeUnderTop(frame: Locator): Promise<number> {
+  return frame.evaluate((node) => {
+    const el = node as unknown as El;
+    const close = Array.from(el.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === "Close")!;
+    return Math.round((close.getBoundingClientRect().top - el.getBoundingClientRect().top) * 10) / 10;
+  });
+}
+
 describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -922,6 +1023,180 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     assert.equal(await why.count(), 0, "the removed part's error moved to the next part");
     assert.equal(await pane(dm).getByRole("textbox", { name: "Damage dice" }).inputValue(), "1d6");
     assert.deepEqual(trap(dmSocket)?.rig?.damage, [{ formula: "1d6", type: "bludgeoning" }]);
+    await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
+
+  test("pl1-a. a trap with every part filled lays out its rows level, as a card at 1440 x 900 and as a sheet at 320 x 568 at 130%: each remove beside its fields' first line, DC, On a pass and Uses left beside their labels, rounds beside its field, Set it off filling its line with every button's words on one line, and the last tick on its label's first line (docs/design-v1-polish.md R1 to R3)", async () => {
+    // A door for the trap to lock, as an effect with a choice.
+    await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: [{ key: "12,9,w", feature: { kind: "door", state: "closed", secret: false, discovered: false } }] });
+    const needleId = randomUUID().replace(/-/g, "").slice(0, 16);
+    await ops.send({
+      t: "trap.create",
+      trap: {
+        id: needleId,
+        sceneId: run.sceneId,
+        name: "Poisoned Needle Gauntlet",
+        zone: { cells: [{ x: 9, y: 8, w: 3, h: 1 }] },
+        rig: {
+          on: ["enter", "leave"],
+          who: "party",
+          floor: true,
+          resets: "nextTurn",
+          usesLeft: 3,
+          stops: false,
+          foundOnSpring: true,
+          hits: "zone",
+          save: { ability: "con", dc: 15, onPass: "none" },
+          damage: [
+            { formula: "2d10", type: "poison" },
+            { formula: "1d6+2", type: "piercing" },
+          ],
+          conditions: ["poisoned", "blinded"],
+          lasts: { mode: "rounds", rounds: 3 },
+          sound: "hiss",
+          actions: [{ door: { edge: "12,9,w" }, state: "locked" }, { show: { tokenId: run.thorn } }],
+          find: [{ ability: "int", skill: "investigation", dc: 15, what: "the pressure plate" }],
+          notice: false,
+          disarm: { text: "Wedging an iron spike under the plate", check: { ability: "dex", skill: "sleight-of-hand", dc: 15 } },
+        },
+      },
+    });
+    await waitFor("the needle trap on the DM's copy", () => state(dmSocket)?.traps?.[needleId] ?? null);
+
+    for (const at of [
+      { size: { width: 1440, height: 900 }, scale: 1, kind: "card" },
+      { size: { width: 320, height: 568 }, scale: 1.3, kind: "sheet" },
+    ]) {
+      const label = `${at.size.width} x ${at.size.height} at ${Math.round(at.scale * 100)}%, as a ${at.kind}`;
+      await dm.setViewportSize(at.size);
+      await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), at.scale);
+      await reopenRoom(dm);
+      await waitFor("the DM's snapshot again", () => state(dmSocket)?.traps?.[needleId] ?? null);
+      await dm.locator(".konvajs-content").first().waitFor();
+      await pickTool(dm, "Trap");
+      await tapCell(dm, BOUNDS, { x: 10, y: 8 });
+      await pane(dm).getByText("Poisoned Needle Gauntlet", { exact: true }).first().waitFor();
+      for (const group of ["Afterwards", "Save and damage", "Players read", "It also", "Finding and disarming"]) await unfold(dm, group);
+      await dm.waitForTimeout(200);
+      const rows = await paneRows(pane(dm));
+      await shots.take(dm, `traps-pl1-a-${at.size.width}x${at.size.height}-${Math.round(at.scale * 100)}`);
+      assert.equal(rows.removes.length, 6, `${label}: not every remove was read: ${JSON.stringify(rows.removes)}`);
+      for (const r of rows.removes) assert.ok(Math.abs(r.offset) <= 1, `${label}: ${r.name} stands ${r.offset} px off its fields' first line`);
+      assert.deepEqual(rows.fieldRows.map((r) => r.label).sort(), ["DC", "On a pass", "Uses left"], `${label}: the field rows read: ${JSON.stringify(rows.fieldRows)}`);
+      for (const r of rows.fieldRows) assert.ok(!r.wrapped && Math.abs(r.offset) <= 1, `${label}: ${r.label}'s field is ${r.wrapped ? "under" : `${r.offset} px off`} its label`);
+      assert.equal(rows.units.length, 1, `${label}: rounds was not read`);
+      for (const u of rows.units) assert.ok(u.sameLine && Math.abs(u.offset) <= 1, `${label}: ${u.unit} stands ${u.sameLine ? `${u.offset} px off` : "apart from"} its field`);
+      assert.ok(rows.setOff, `${label}: the foot's buttons were not read`);
+      assert.ok(Math.abs(rows.setOff.left) <= 1 && Math.abs(rows.setOff.short) <= 1, `${label}: Set it off, alone on its line, does not fill it: ${JSON.stringify(rows.setOff)}`);
+      assert.ok(Math.abs(rows.setOff.height) <= 1, `${label}: Ask to search breaks its words where Set it off does not: ${JSON.stringify(rows.setOff)}`);
+      await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+      await pane(dm).waitFor({ state: "detached" });
+
+      // The pit's one way to go off keeps its tick, with the help that says why under it.
+      await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+      await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+      await unfold(dm, "Goes off when");
+      await pane(dm).getByText("A trap on squares goes off at least one way.").waitFor();
+      const { ticks } = await paneRows(pane(dm));
+      assert.equal(ticks.length, 1, `${label}: the held tick was not read`);
+      for (const t of ticks) assert.ok(Math.abs(t.offset) <= 1, `${label}: the tick by "${t.label}" stands ${t.offset} px off its label's first line`);
+      await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+      await pane(dm).waitFor({ state: "detached" });
+      await pickTool(dm, "Select");
+    }
+    await ops.send({ t: "trap.delete", trapId: needleId });
+    await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: [{ key: "12,9,w", feature: null }] });
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+  });
+
+  test("pl1-b. at 1440 x 900, at 100% and 130%, a docked token window's Close stands as far under its frame's top as a trap pane's, and the Trap tool's hint sits in the middle of its line (docs/design-v1-polish.md R7, R8)", async () => {
+    await ops.send({ t: "token.update", tokenId: run.thorn, patch: { x: 2, y: 9, elevation: 0 } });
+    for (const scale of [1, 1.3]) {
+      const label = `1440 x 900 at ${Math.round(scale * 100)}%`;
+      await dm.setViewportSize({ width: 1440, height: 900 });
+      await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await reopenRoom(dm);
+      await waitFor("the DM's snapshot again", () => trap(dmSocket));
+      await dm.locator(".konvajs-content").first().waitFor();
+      await pickTool(dm, "Select");
+      await tapCell(dm, BOUNDS, { x: 2, y: 9 });
+      const window = dm.getByRole("dialog", { name: "Thorn actions" });
+      await window.waitFor();
+      await dm.waitForTimeout(200);
+      assert.ok((await window.getAttribute("data-bar-mode")) !== "compact", `${label}: the token window did not dock`);
+      const windowClose = await closeUnderTop(window);
+      await window.getByRole("button", { name: "Close", exact: true }).click();
+      await window.waitFor({ state: "detached" });
+
+      await pickTool(dm, "Trap");
+      const hint = dm.locator('[data-options-line="shown"]').filter({ visible: true }).first();
+      await hint.waitFor();
+      const words = await hint.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const range = el.ownerDocument.createRange();
+        range.selectNodeContents(el.querySelector("span")!.firstChild!);
+        const line = range.getClientRects()[0]!;
+        // The line's border is the same above and below, so the middle of its outer box is the middle of its inner one.
+        return { text: el.textContent ?? "", offset: Math.round(((line.top + line.bottom) / 2 - (r.top + r.bottom) / 2) * 10) / 10 };
+      });
+      assert.ok(Math.abs(words.offset) <= 1, `${label}: the hint "${words.text}" stands ${words.offset} px off its line's middle`);
+
+      await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+      await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+      const paneClose = await closeUnderTop(pane(dm));
+      assert.ok(Math.abs(windowClose - paneClose) <= 1, `${label}: the window's Close stands ${windowClose} px under its top, the pane's ${paneClose}`);
+      await shots.take(dm, `traps-pl1-b-1440x900-${Math.round(scale * 100)}`);
+      await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+      await pane(dm).waitFor({ state: "detached" });
+      await pickTool(dm, "Select");
+    }
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+  });
+
+  test("pl1-c. a focused control keeps its element and its focus when its row changes around it: a tick that another device leaves the last way the pit goes off, which gains the help that says why and loses it again, and the Sound field as Play comes and goes beside it (PL1-ASTRA-01, PL1-ASTRA-02)", async () => {
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter", "leave"] } } });
+    await waitFor("two ways it goes off", () => (trap(dmSocket)?.rig?.on?.length === 2 ? true : null));
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    await unfold(dm, "Goes off when");
+    const onto = pane(dm).getByRole("checkbox", { name: "A creature steps onto it" });
+    // A mark on the element itself, which a new element in its place would not carry.
+    const mark = (l: Locator) => l.evaluate((el) => ((el as unknown as { pl1Mark: boolean }).pl1Mark = true));
+    const keeps = (l: Locator) => l.evaluate((el) => (el as unknown as { pl1Mark?: boolean }).pl1Mark === true && el.ownerDocument.activeElement === el);
+    await onto.focus();
+    await mark(onto);
+    const why = pane(dm).getByText("A trap on squares goes off at least one way.");
+    // Another device takes the other way away: this tick becomes the last, with its help.
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter"] } } });
+    await why.waitFor();
+    assert.equal(await keeps(onto), true, "the tick was replaced, or lost focus, as its help came");
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter", "leave"] } } });
+    await why.waitFor({ state: "detached" });
+    assert.equal(await keeps(onto), true, "the tick was replaced, or lost focus, as its help went");
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { on: ["enter"] } } });
+    await why.waitFor();
+
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { sound: null } } });
+    await waitFor("no sound", () => (trap(dmSocket)?.rig?.sound ? null : true));
+    await unfold(dm, "Players read");
+    const sound = pane(dm).getByRole("combobox", { name: "Sound", exact: true });
+    const play = pane(dm).getByRole("button", { name: "Play", exact: true });
+    await sound.focus();
+    await mark(sound);
+    await sound.selectOption("click");
+    await play.waitFor();
+    assert.equal(await keeps(sound), true, "the Sound field was replaced, or lost focus, as Play came");
+    await sound.selectOption("");
+    await play.waitFor({ state: "detached" });
+    assert.equal(await keeps(sound), true, "the Sound field was replaced, or lost focus, as Play went");
+    await waitFor("no sound again", () => (trap(dmSocket)?.rig?.sound ? null : true));
     await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
     await pane(dm).waitFor({ state: "detached" });
     await pickTool(dm, "Select");

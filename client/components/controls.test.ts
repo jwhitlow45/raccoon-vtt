@@ -152,6 +152,46 @@ describe("Checkbox", () => {
     const input = /<input[^>]*>/.exec(html(createElement(Checkbox, { label: "Secret", checked: false, onChange() {} })))?.[0] ?? "";
     assert.doesNotMatch(input, /aria-disabled/);
   });
+
+  /*
+   * With help under its label, the box marks the label's first line: it
+   * stands centered in a slot as tall as that line, where a 2 px margin
+   * set it 3.5 px under the line's middle (docs/design-v1-polish.md R1).
+   */
+  test("with help, the box stands centered in a slot as tall as its label's first line, with no margin of its own", () => {
+    const markup = html(createElement(Checkbox, { label: "A creature steps onto it", help: "A trap on squares goes off at least one way.", checked: true, onChange() {} }));
+    const slot = /<span style="([^"]*)"><input[^>]*><\/span>/.exec(markup)?.[1];
+    assert.ok(slot, "the box has no slot of its own");
+    const line = theme.font.body14 * theme.leading.body;
+    assert.match(slot, new RegExp(`(^|;)height:${String(line).replace(".", "\\.")}px(;|$)`));
+    assert.match(slot, /align-items:center/);
+    assert.match(slot, /flex:none/);
+    assert.match(/<input[^>]*>/.exec(markup)?.[0] ?? "", /margin:0[;"]/);
+    // The slot's height is the label's own line: its 14 px text at body leading.
+    assert.match(markup, new RegExp(`font-size:${theme.font.body14}px;line-height:${theme.leading.body}">A creature steps onto it<`));
+  });
+
+  test("with no help, the box sits on the row's middle in a slot of its own height", () => {
+    const markup = html(createElement(Checkbox, { label: "Secret", checked: false, onChange() {} }));
+    assert.match(markup, /^<label[^>]*align-items:center[^>]*><span style="[^"]*"><input/);
+    const slot = /<span style="([^"]*)"><input[^>]*><\/span>/.exec(markup)?.[1] ?? "";
+    assert.doesNotMatch(slot, /(^|;)height:/, "the slot sets a height with no help to fit");
+  });
+
+  /*
+   * Another device can leave a focused tick the last one, which gives it
+   * help (TrapPane.tsx). The input keeps its place in the tree either way,
+   * so React keeps the element and its focus. The page's own rerender of
+   * the focused tick is e2e/traps.e2e.ts pl1-c's.
+   */
+  test("the input stands at the same place in the tree with help and without, so help that comes or goes keeps the element", () => {
+    const shape = (markup: string) => markup.replace(/ [a-z-]+="[^"]*"/g, "").replace(/>[^<]+</g, "><");
+    const path = (markup: string) => /^<label><span><input\/?>/.test(shape(markup));
+    const without = html(createElement(Checkbox, { label: "A creature steps onto it", checked: true, onChange() {} }));
+    const withHelp = html(createElement(Checkbox, { label: "A creature steps onto it", help: "A trap on squares goes off at least one way.", checked: true, onChange() {} }));
+    assert.ok(path(without), shape(without));
+    assert.ok(path(withHelp), shape(withHelp));
+  });
 });
 
 describe("Switch", () => {

@@ -5,7 +5,8 @@ import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import type { Box } from "../../lib/boardText.ts";
 
 const { boardViewOf } = await import("../../canvas/boardView.ts");
-const { pillGeometry, pillPlace, pillStackPlace } = await import("./Pill.tsx");
+const { leaningTag, pillGeometry, pillPlace, pillReach, pillStackPlace } = await import("./Pill.tsx");
+const { theme } = await import("../../lib/theme.ts");
 
 /*
  * The board's readouts (docs/design-v1-look-pass-2.md 2.11): one size at
@@ -145,4 +146,106 @@ describe("a stack of readouts", () => {
     const [a, b] = boxes({ x: 5, y: 10, scale: 20, offsetPx: 4, pills: [label, { size: "screen", color: "#fa0", small: true }, ends] }, 1).filter((_, i) => i !== 1);
     near(b!.y0, a!.y1 + 4 / 20, "the next one keeps the one gap");
   });
+});
+
+describe("a pointed pill at the screen's edge (docs/design-v1-polish.md R4)", () => {
+  // A 390 x 844 phone at 40 px a cell, with its bars over the map.
+  const scale = 40;
+  const view = boardViewOf({ x: 0, y: 0, scale }, { width: 390, height: 844 }, { top: 52, right: 0, bottom: 113, left: 0 });
+  const name = { name: "Poisoned needle in the lock", size: "map" as const, small: true, maxLines: 1 as const, scale };
+
+  /** Where the pointer's tip stands, in cells: the Label's point, leaned along the body's edge. */
+  const tipOf = (place: ReturnType<typeof pillPlace>) => place.x + place.lean / scale;
+
+  for (const ui of [1, 1.3]) {
+    for (const side of ["left", "right"] as const) {
+      for (const way of ["above", "below"] as const) {
+        test(`${way} a point 10 px from the ${side} edge at ${Math.round(ui * 100)}%: the body inside the view, the pointer's tip on the point`, () => {
+          const point = { x: side === "left" ? view.x0 + 10 / scale : view.x1 - 10 / scale, y: (view.y0 + view.y1) / 2 };
+          const place = at(ui, () => pillPlace({ ...name, ...point, [way]: true }, view));
+          const g = at(ui, () => pillGeometry({ ...name, ...point, [way]: true }));
+          inside(place.box, view, "the body");
+          near(tipOf(place), point.x, "the tip's x");
+          near(place.y, point.y, "the tip's y: a pointed pill never slides up or down");
+          near((place.box.x1 - place.box.x0) * scale, g.width, "the name keeps its width");
+          // The tip stays on the straight part of the edge, clear of the rounded corners.
+          assert.ok(Math.abs(place.lean) <= g.width / 2 - theme.radius.sm + 1e-9, `the lean ${place.lean} reaches into a corner of ${g.width}`);
+          assert.ok(Math.abs(place.lean) > 0, "it slid, so the pointer leans");
+        });
+      }
+    }
+  }
+
+  test("away from the edges it stands centered on its point, its pointer in the middle", () => {
+    const point = { x: (view.x0 + view.x1) / 2, y: (view.y0 + view.y1) / 2 };
+    const place = pillPlace({ ...name, ...point, above: true }, view);
+    near((place.box.x0 + place.box.x1) / 2, point.x, "centered");
+    near(place.x, point.x, "the Label at the point");
+    assert.equal(place.lean, 0);
+  });
+
+  test("a point past the edge keeps the pointer on it, the body following it out rather than leaving it", () => {
+    const point = { x: view.x1 + 1, y: (view.y0 + view.y1) / 2 };
+    const place = pillPlace({ ...name, ...point, above: true }, view);
+    const g = pillGeometry({ ...name, ...point, above: true });
+    near(tipOf(place), point.x, "the tip's x");
+    near(place.box.x1, point.x + theme.radius.sm / scale, "the body stops a corner past it");
+    near(place.lean, g.width / 2 - theme.radius.sm, "the pointer at the straight edge's end");
+  });
+
+  test("with no view it stays centered", () => {
+    const place = pillPlace({ ...name, x: view.x1, y: 5, above: true }, null);
+    near((place.box.x0 + place.box.x1) / 2, view.x1, "centered");
+    assert.equal(place.lean, 0);
+  });
+
+  test("its reach spans every place a view can slide it to, and a plain pill's is its box", () => {
+    const point = { x: 8, y: 20 };
+    const reach = pillReach({ ...name, ...point, below: true });
+    const w = pillGeometry({ ...name, ...point, below: true }).width / scale;
+    const corner = theme.radius.sm / scale;
+    near(reach.x0, point.x - w + corner, "slid left to its end");
+    near(reach.x1, point.x + w - corner, "slid right to its end");
+    assert.deepEqual([reach.y0, reach.y1], [pillPlace({ ...name, ...point, below: true }, null).box.y0, pillPlace({ ...name, ...point, below: true }, null).box.y1], "never up or down");
+    for (const edge of [point.x - 1, point.x + 1]) {
+      const v = edge < point.x ? { ...view, x0: edge, x1: edge + 50 } : { ...view, x0: edge - 50, x1: edge };
+      const box = pillPlace({ ...name, ...point, below: true }, v).box;
+      assert.ok(box.x0 >= reach.x0 - 1e-9 && box.x1 <= reach.x1 + 1e-9, `slid to ${JSON.stringify(box)}, past ${JSON.stringify(reach)}`);
+    }
+    const plain = { value: "30 ft", size: "screen" as const, scale, x: 3, y: 4, offsetPx: 18 };
+    assert.deepEqual(pillReach(plain), pillPlace(plain, null).box);
+  });
+});
+
+describe("a pointed pill's outline", () => {
+  /** The outline's points as leaningTag draws them, from a context that records them. */
+  function outline(attrs: { width: number; height: number; pointerDirection: "up" | "down"; lean: number }) {
+    const points: { x: number; y: number }[] = [];
+    const context = { beginPath() {}, moveTo: (x: number, y: number) => points.push({ x, y }), lineTo: (x: number, y: number) => points.push({ x, y }), arc() {}, closePath() {}, fillStrokeShape() {} };
+    const all: Record<string, unknown> = { pointerWidth: 10, pointerHeight: 6, ...attrs };
+    const shape = { width: () => attrs.width, height: () => attrs.height, getAttr: (key: string) => all[key] };
+    leaningTag(context as never, shape as never);
+    return points;
+  }
+
+  for (const pointerDirection of ["up", "down"] as const) {
+    test(`pointing ${pointerDirection}, its tip stands \`lean\` from the middle, its base on the straight edge`, () => {
+      const height = 24;
+      const edgeY = pointerDirection === "up" ? 0 : height;
+      const tipY = pointerDirection === "up" ? -6 : height + 6;
+      for (const lean of [0, 20, -20, 44, -44]) {
+        const points = outline({ width: 100, height, pointerDirection, lean });
+        const i = points.findIndex((p) => p.y === tipY);
+        assert.ok(i > 0, `no tip at ${lean}`);
+        near(points[i]!.x, 50 + lean, `the tip at ${lean}`);
+        // The pointer is drawn base end, tip, base end.
+        const base = [points[i - 1]!, points[i + 1]!];
+        for (const p of base) {
+          assert.equal(p.y, edgeY, `the base end ${JSON.stringify(p)} is off the edge at ${lean}`);
+          assert.ok(p.x >= theme.radius.sm - 1e-9 && p.x <= 100 - theme.radius.sm + 1e-9, `the base end ${p.x} leaves the straight edge at ${lean}`);
+        }
+        near(Math.abs(base[0]!.x - base[1]!.x), 10, `the base keeps its width at ${lean}`);
+      }
+    });
+  }
 });

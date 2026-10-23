@@ -1,9 +1,10 @@
 {
   "defaultSeconds": 60,
   "seconds": {
+    "alignment": 240,
     "areas": 32,
-    "attach": 12,
-    "bardock": 169,
+    "attach": 82,
+    "bardock": 185,
     "bardock-sweep-large": 160,
     "bardock-sweep-small": 164,
     "characters": 29,
@@ -47,7 +48,7 @@
     "table": 10,
     "tokenpanel": 95,
     "tools": 37,
-    "traps": 11,
+    "traps": 103,
     "vision": 27
   }
 }

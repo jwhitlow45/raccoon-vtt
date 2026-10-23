@@ -144,6 +144,29 @@ async function patDevice(viewport: { width: number; height: number }, scale = 1,
   return { context, page, route };
 }
 
+/** The little of an element a measure in the page reads, since e2e has no DOM types. */
+type Elem = {
+  getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number };
+  querySelector(selector: string): Elem | null;
+  getAttribute(name: string): string | null;
+  children: ArrayLike<Elem>;
+  textContent: string | null;
+};
+
+/** The DM on a phone of their own at its size and interface size, signed in as the DM. */
+async function dmPhone(viewport: { width: number; height: number }, scale: number): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await context.addCookies(await dmContext.cookies(server.origin));
+  const page = await context.newPage();
+  if (scale !== 1) {
+    await page.goto(`${server.origin}/`);
+    await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+  }
+  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await page.locator(".konvajs-content").first().waitFor();
+  return { context, page };
+}
+
 /** Which of the Attach list's rows has the focus, by its place among them, or -1. */
 function focusedRow(list: Locator): Promise<number> {
   return list.evaluate((el) => {
@@ -534,5 +557,168 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     assert.equal(await focusedRow(list), 0, "Home goes to the first row");
     await shots.take(dm, "attach-lp2-3c-keys");
     await dm.keyboard.press("Escape");
+  });
+
+  test("pl2-a. on the DM's phone at 390 and 360 px, and 390 at 130%, a hobgoblin carrying a lantern and dragging a prisoner: its window's line gives each kind a row, the word first and its names beside it on the word's line (docs/design-v1-polish.md R5)", async () => {
+    const hobgoblin = randomUUID();
+    const lantern = randomUUID();
+    const prisoner = randomUUID();
+    await ops.send(tokenOp(hobgoblin, { kind: "monster", name: "Hobgoblin", x: 9, y: 1, disposition: "hostile", actor: { inline: actor() } }));
+    await ops.send(tokenOp(lantern, { kind: "object", name: "Lantern", size: "tiny", x: 9, y: 1.5, actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
+    await ops.send(tokenOp(prisoner, { kind: "npc", name: "Prisoner", x: 10, y: 1, disposition: "neutral", actor: { inline: actor() } }));
+    await ops.send({ t: "actor.effect.add", target: { tokenId: prisoner }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "token.attach", tokenId: lantern, to: hobgoblin, kind: "carry", x: 9, y: 1.5, elevation: 0 });
+    await ops.send({ t: "token.attach", tokenId: prisoner, to: hobgoblin, kind: "drag", x: 10, y: 1, elevation: 0 });
+    await waitFor("the hobgoblin's load", () => (token(dmSocket, lantern)?.attached?.to === hobgoblin && token(dmSocket, prisoner)?.attached?.to === hobgoblin) || null);
+    for (const [viewport, scale] of [
+      [PHONE, 1],
+      [{ width: 360, height: 740 }, 1],
+      [PHONE, 1.3],
+    ] as const) {
+      const { context, page } = await dmPhone(viewport, scale);
+      try {
+        // The hobgoblin's top-right quarter, clear of the lantern in its bottom-left one.
+        const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
+        const line = b.getByRole("group", { name: "Attached tokens" });
+        await line.scrollIntoViewIfNeeded();
+        const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        await shots.take(page, `attach-pl2-a-holder-line-${viewport.width}-${Math.round(scale * 100)}`);
+        const rows = await line.evaluate((node) => {
+          const el = node as unknown as Elem;
+          const box = (e: Elem) => {
+            const r = e.getBoundingClientRect();
+            return { left: r.left, top: r.top, bottom: r.bottom, middle: (r.top + r.bottom) / 2 };
+          };
+          return (["carrying", "dragging"] as const).map((kind) => {
+            const word = el.querySelector(`[data-hold-word="${kind}"]`);
+            const names = el.querySelector(`[data-hold-names="${kind}"]`);
+            return {
+              kind,
+              word: word ? { ...box(word), text: word.textContent } : null,
+              names: names ? box(names) : null,
+              items: names ? Array.from(names.children).map((c) => ({ ...box(c), text: c.textContent })) : [],
+            };
+          });
+        });
+        const [carrying, dragging] = rows;
+        for (const row of rows) {
+          assert.ok(row.word && row.names && row.items.length > 0, `${where}: the ${row.kind} row is missing`);
+          // The word starts its row, and its first name stands on the word's line.
+          assert.ok(Math.abs(row.word.middle - row.items[0]!.middle) <= 1, `${where}: "${row.word.text}" stands ${(row.word.middle - row.items[0]!.middle).toFixed(1)} px off its first name's middle`);
+          assert.ok(row.items[0]!.left > row.word.left, `${where}: "${row.items[0]!.text}" is not beside "${row.word.text}"`);
+        }
+        assert.ok(Math.abs(carrying!.word!.left - dragging!.word!.left) <= 1, `${where}: the words start at ${carrying!.word!.left} and ${dragging!.word!.left}`);
+        assert.ok(Math.abs(carrying!.names!.left - dragging!.names!.left) <= 1, `${where}: the names start at ${carrying!.names!.left} and ${dragging!.names!.left}`);
+        assert.deepEqual(carrying!.items.map((i) => i.text), ["Lantern", "Put down"], `${where}: the carrying row`);
+        assert.deepEqual(dragging!.items.map((i) => i.text), ["Prisoner", "Let go"], `${where}: the dragging row`);
+        const carriedFoot = Math.max(...carrying!.items.map((i) => i.bottom));
+        assert.ok(dragging!.word!.top >= carriedFoot - 0.5, `${where}: "Dragging" starts at ${dragging!.word!.top}, inside the carrying row (foot ${carriedFoot})`);
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
+  test("pl2-c. the hobgoblin's window on the DM's phone at 320 px and 390 px at 130%, and at 360 px: every row of its buttons fills each line it wraps onto, so Attach or Delete never stands alone (docs/design-v1-polish.md R6)", async () => {
+    for (const [viewport, scale] of [
+      [{ width: 320, height: 568 }, 1.3],
+      [PHONE, 1.3],
+      [{ width: 360, height: 740 }, 1],
+    ] as const) {
+      const { context, page } = await dmPhone(viewport, scale);
+      try {
+        const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
+        const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        await b.locator('[data-bar-row="less"]').scrollIntoViewIfNeeded();
+        await shots.take(page, `attach-pl2-c-rows-${viewport.width}-${Math.round(scale * 100)}`);
+        const rows = await b.locator("[data-bar-row]").evaluateAll((nodes) =>
+          nodes.map((node) => {
+            const el = node as unknown as Elem;
+            const row = el.getBoundingClientRect();
+            // Its buttons by line.
+            const lines = new Map<number, { left: number; right: number; text: string }[]>();
+            for (const child of Array.from(el.children)) {
+              const r = child.getBoundingClientRect();
+              if (r.width === 0) continue;
+              const key = Math.round(r.top);
+              lines.set(key, [...(lines.get(key) ?? []), { left: r.left, right: r.right, text: child.textContent || child.getAttribute("aria-label") || "" }]);
+            }
+            return { row: el.getAttribute("data-bar-row"), left: row.left, right: row.right, lines: [...lines.values()] };
+          }),
+        );
+        assert.ok(rows.some((r) => r.row === "play" && r.lines.length > 0), `${where}: no play row`);
+        let wrapped = false;
+        for (const r of rows) {
+          if (r.lines.length > 1) wrapped = true;
+          for (const line of r.lines) {
+            const items = [...line].sort((a, z) => a.left - z.left);
+            const names = items.map((i) => i.text).join(", ");
+            assert.ok(Math.abs(items[0]!.left - r.left) <= 1, `${where}: the ${r.row} row's line "${names}" starts ${(items[0]!.left - r.left).toFixed(1)} px in`);
+            assert.ok(Math.abs(items[items.length - 1]!.right - r.right) <= 1, `${where}: the ${r.row} row's line "${names}" stops ${(r.right - items[items.length - 1]!.right).toFixed(1)} px short of the row's end`);
+          }
+        }
+        if (viewport.width === 320) assert.ok(wrapped, `${where}: no row wrapped, so the check saw no line but the first`);
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
+  test("pl2-d. an ogre carrying a chest with a long name and dragging a creature named in one long word, on the DM's phone at 320 px at 130% and at 360 px: each name and action keeps inside its cell, its words wrapping there, and each word stands on its first name's first line (PL2-ASTRA-03)", async () => {
+    const ogre = randomUUID();
+    const chest = randomUUID();
+    const captive = randomUUID();
+    await ops.send(tokenOp(ogre, { kind: "monster", name: "Ogre", size: "large", x: 12, y: 0, disposition: "hostile", actor: { inline: actor() } }));
+    await ops.send(tokenOp(chest, { kind: "object", name: "Chest of the Drowned Archduke", size: "tiny", x: 12, y: 1.5, actor: { inline: actor({ hp: { cur: 5, max: 5, temp: 0 } }) } }));
+    await ops.send(tokenOp(captive, { kind: "npc", name: "Bogglethwaitesonofgrimblethorn", x: 14, y: 0, disposition: "neutral", actor: { inline: actor() } }));
+    await ops.send({ t: "actor.effect.add", target: { tokenId: captive }, effect: { id: randomUUID(), key: "grappled" } });
+    await ops.send({ t: "token.attach", tokenId: chest, to: ogre, kind: "carry", x: 12, y: 1.5, elevation: 0 });
+    await ops.send({ t: "token.attach", tokenId: captive, to: ogre, kind: "drag", x: 14, y: 0, elevation: 0 });
+    await waitFor("the ogre's load", () => (token(dmSocket, chest)?.attached?.to === ogre && token(dmSocket, captive)?.attached?.to === ogre) || null);
+    for (const [viewport, scale] of [
+      [{ width: 320, height: 568 }, 1.3],
+      [{ width: 360, height: 740 }, 1],
+    ] as const) {
+      const { context, page } = await dmPhone(viewport, scale);
+      try {
+        // The ogre's top-right square, clear of the chest in its bottom-left corner.
+        const b = await select(page, "Ogre", { x: 13, y: 0 });
+        const line = b.getByRole("group", { name: "Attached tokens" });
+        await line.scrollIntoViewIfNeeded();
+        const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        await shots.take(page, `attach-pl2-d-long-names-${viewport.width}-${Math.round(scale * 100)}`);
+        const rows = await line.evaluate((node) => {
+          type Rect = { left: number; top: number; right: number; bottom: number };
+          type Range = { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<Rect> };
+          const doc = (globalThis as unknown as { document: { createRange(): Range } }).document;
+          const el = node as unknown as Elem;
+          return (["carrying", "dragging"] as const).map((kind) => {
+            const word = el.querySelector(`[data-hold-word="${kind}"]`)!;
+            const cell = el.querySelector(`[data-hold-names="${kind}"]`)!;
+            const items = Array.from(cell.children).map((c) => {
+              const r = c.getBoundingClientRect();
+              return { text: c.textContent, left: r.left, right: r.right };
+            });
+            // The first name's first line of words.
+            const range = doc.createRange();
+            range.selectNodeContents(cell.children[0]);
+            const first = range.getClientRects()[0]!;
+            const w = word.getBoundingClientRect();
+            const c = cell.getBoundingClientRect();
+            return { kind, cell: { left: c.left, right: c.right }, items, wordMiddle: (w.top + w.bottom) / 2, firstLineMiddle: (first.top + first.bottom) / 2, lines: range.getClientRects().length };
+          });
+        });
+        for (const row of rows) {
+          for (const item of row.items) {
+            assert.ok(item.left >= row.cell.left - 0.5 && item.right <= row.cell.right + 0.5, `${where}: "${item.text}" (${item.left.toFixed(1)} to ${item.right.toFixed(1)}) runs out of its cell (${row.cell.left.toFixed(1)} to ${row.cell.right.toFixed(1)})`);
+          }
+          assert.ok(Math.abs(row.wordMiddle - row.firstLineMiddle) <= 1, `${where}: the ${row.kind} word stands ${(row.wordMiddle - row.firstLineMiddle).toFixed(1)} px off its first name's first line`);
+        }
+        // At 320 px at 130% the names wrap. At 360 px they fit, and the check is that they still sit as before.
+        if (viewport.width === 320) assert.ok(rows.some((r) => r.lines > 1), `${where}: no name wrapped, so this tests nothing`);
+      } finally {
+        await context.close();
+      }
+    }
   });
 });

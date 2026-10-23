@@ -225,7 +225,9 @@ const STACKED_TITLE_LINE = 22;
 const ROW_TOP_SPACE = (56 - theme.touch) / 2;
 /** A pane's frame pads its top by this much above its header (builder/labelPaneFrame.ts), and a pane's 48 px header row centers its 44 px buttons under that. */
 const PANE_FRAME_TOP = theme.space(1);
-const PANE_TOP_SPACE = PANE_FRAME_TOP + (48 - theme.touch) / 2;
+/** The room a 48 px header row keeps under its 44 px buttons. */
+const PANE_ROW_SPACE = (48 - theme.touch) / 2;
+const PANE_TOP_SPACE = PANE_FRAME_TOP + PANE_ROW_SPACE;
 
 /**
  * One `<button>` in both states, so arming it changes its content, name
@@ -376,7 +378,7 @@ export function PaneHeader(props: {
    * reaches up already. Either grows its top padding by what the pill
    * needs beyond the room it had above its buttons (SheetGrabber).
    */
-  const lift = props.grab ? GRABBER_ROOM - (sticky ? PANE_FRAME_TOP : PANE_TOP_SPACE) : 0;
+  const lift = props.grab ? GRABBER_ROOM - PANE_TOP_SPACE : 0;
   const reach: CSSProperties | null = props.grab && !sticky ? { position: "relative", marginTop: -PANE_FRAME_TOP, paddingTop: PANE_FRAME_TOP + lift, minHeight: 48 + PANE_FRAME_TOP + lift } : null;
   return (
     <div
@@ -400,10 +402,16 @@ export function PaneHeader(props: {
               position: "sticky",
               top: 0,
               zIndex: 1,
-              // The frame's 4 px top padding and 12 px side padding, taken back so the fill covers what scrolls under it.
-              margin: `-${theme.space(1)}px -${theme.space(3)}px 0`,
-              padding: `${theme.space(1) + lift}px ${theme.space(3)}px 0`,
-              minHeight: 48 + lift,
+              /*
+               * The frame's 4 px top padding and 12 px side padding, taken
+               * back so the fill covers what scrolls under it, and given back
+               * as padding with the 2 px a 48 px row keeps above and below
+               * its buttons, so its Close and title stand where a pane's own
+               * header puts them.
+               */
+              margin: `-${PANE_FRAME_TOP}px -${theme.space(3)}px 0`,
+              padding: `${PANE_TOP_SPACE + lift}px ${theme.space(3)}px ${PANE_ROW_SPACE}px`,
+              minHeight: 48 + PANE_FRAME_TOP + lift,
               background: theme.color.surface,
             }
           : null),

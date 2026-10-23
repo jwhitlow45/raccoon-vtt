@@ -328,7 +328,7 @@ export function CompanionForm(props: {
   return (
     // One column no wider than the pane, so a long turn label shortens its Select rather than widening the form, and a character's long unbroken name wraps in the lines that name it.
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
-      <FieldRow label="Name">
+      <FieldRow label="Name" fill>
         <Input aria-label="Name" value={draft.name} maxLength={80} error={error !== null && !draft.name.trim()} onChange={(e) => set({ name: e.target.value })} style={{ flex: 1 }} />
       </FieldRow>
       <FieldRow label="It is">
@@ -351,7 +351,7 @@ export function CompanionForm(props: {
         <Select<CompanionTurn> label="Turn" value={chosen.value} options={choices} onChange={(turn) => set({ turn })} />
       </TurnField>
       <Help>{chosen.help}</Help>
-      <FieldRow label="Size">
+      <FieldRow label="Size" fill>
         <Select<CreatureSize> label="Size" value={draft.size} options={SIZE_OPTIONS} onChange={(size) => set({ size })} />
       </FieldRow>
       {draft.what === "creature" ? (
@@ -496,7 +496,7 @@ export function CompanionSection(props: {
     <Group label="Companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>
       {access.dm ? (
         <>
-          <FieldRow label="Belongs to">
+          <FieldRow label="Belongs to" fill>
             <Select<string>
               label="Belongs to"
               value={companion.of}
@@ -617,7 +617,7 @@ export function MakeCompanion(props: { token: Token }) {
   };
   return (
     <div ref={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <FieldRow label="Belongs to">
+      <FieldRow label="Belongs to" fill>
         <Select<string>
           label="Belongs to"
           value={character ? character.id : NO_CHARACTER}
