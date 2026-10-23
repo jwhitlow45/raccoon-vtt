@@ -13,14 +13,18 @@ import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { TRAP_ICON_PATH } from "./icon.ts";
 import {
   afterSummary,
+  alsoSummary,
   cleanLine,
   crossedTraps,
   crossesText,
   warnsOf,
   disarmFill,
+  findSummary,
   newTrapInput,
+  noteSummary,
   openedLine,
   presetLine,
+  readSummary,
   rectBetween,
   saveSummary,
   searchFill,
@@ -264,7 +268,29 @@ describe("the pane's lines and its asks for rolls", () => {
     assert.equal(pitOpen(ground({ "2,2": -10 }), "s1", cells, { floor: -10 }), false, "one square still shut");
     assert.equal(afterSummary(rig({}), 10), "Goes off once, stops the creature, opens a 10 ft pit");
     assert.equal(afterSummary(rig({}), null, true), "Goes off once, stops the creature, its pit is open");
-    assert.equal(openedLine({ floor: -10 }), "Opened: its floor is at -10 ft.");
+    assert.equal(openedLine({ floor: -10 }), "Opened: its floor is at \u221210 ft.", "a true minus");
+    assert.equal(openedLine({ floor: 5 }), "Opened: its floor is at 5 ft.");
+  });
+
+  test("one wording per idea: the switch's words, uses, and None for every empty summary (docs/design-v1-look-pass-2.md D22)", () => {
+    assert.equal(afterSummary(rig({ resets: "nextTurn", stops: false, usesLeft: 3 }), null), "Arms again at the start of the next turn, 3 uses left");
+    assert.equal(afterSummary(rig({ stops: false, usesLeft: 0 }), null), "Goes off once, no uses left");
+    assert.equal(findSummary(rig({})), "None");
+    assert.equal(readSummary(rig({})), "None");
+    assert.equal(readSummary(rig({ sound: "click" })), "Only a click");
+    assert.equal(readSummary(rig({ message: "The floor gives way!", sound: "crash" })), "The floor gives way!");
+    assert.equal(alsoSummary(rig({})), "None");
+    assert.equal(alsoSummary(rig({ actions: [{ door: { edge: "h:1:1" }, state: "locked" }] })), "1 thing");
+    assert.equal(noteSummary(rig({})), "None");
+    assert.equal(noteSummary(rig({ note: "Roll 2d6 a dart\nThen check" })), "Roll 2d6 a dart");
+    assert.equal(saveSummary(rig({})), "None");
+  });
+
+  test("the summaries keep Who's long words, which the choice shortens to one word each", () => {
+    const squares = { cells: [{ x: 0, y: 0, w: 1, h: 1 }] };
+    assert.equal(triggerSummary({ zone: squares, rig: rig({ who: "party", floor: false }) }), "Steps onto it, by party creatures");
+    assert.equal(triggerSummary({ zone: squares, rig: rig({ who: "others", floor: false }) }), "Steps onto it, by other creatures");
+    assert.equal(triggerSummary({ zone: squares, rig: rig({ who: "any", floor: false }) }), "Steps onto it, by any creature");
   });
 
   test("Ask to search fills its first check and DC with the note Search, never the trap's name, and Ask to disarm its disarm check", () => {

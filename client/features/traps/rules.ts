@@ -432,9 +432,13 @@ export function triggerSummary(trap: Pick<Trap, "zone"> & { rig: TrapRig }): str
   return `${how}, by ${who}`;
 }
 
-/** "Goes off once, stops the creature" or "Arms again each turn, at most 3 times". */
+/**
+ * "Goes off once, stops the creature" or "Arms again at the start of the
+ * next turn, 3 uses left": the words of the pane's own switch and uses
+ * field, one wording per idea (docs/design-v1-look-pass-2.md 2.10).
+ */
 export function afterSummary(rig: TrapRig, pitDepth: number | null, opened = false): string {
-  const parts = [rig.resets === "never" ? "Goes off once" : "Arms again each turn"];
+  const parts = [rig.resets === "never" ? "Goes off once" : "Arms again at the start of the next turn"];
   if (rig.usesLeft !== undefined) parts.push(rig.usesLeft === 0 ? "no uses left" : `${rig.usesLeft} ${rig.usesLeft === 1 ? "use" : "uses"} left`);
   if (rig.stops) parts.push("stops the creature");
   if (opened) parts.push("its pit is open");
@@ -442,9 +446,10 @@ export function afterSummary(rig: TrapRig, pitDepth: number | null, opened = fal
   return parts.join(", ");
 }
 
-/** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at -10 ft." */
+/** An open pit's line in the pane, where its depth no longer reads: "Opened: its floor is at −10 ft.", with a true minus. */
 export function openedLine(pit: { floor: number }): string {
-  return `Opened: its floor is at ${pitFloorOf(pit)} ft.`;
+  const floor = pitFloorOf(pit);
+  return `Opened: its floor is at ${floor < 0 ? `\u2212${-floor}` : floor} ft.`;
 }
 
 export function hitsSummary(rig: TrapRig): string {
@@ -462,7 +467,7 @@ export function saveSummary(rig: TrapRig): string {
   if (rig.damage) parts.push(rig.damage.map((d) => `${d.formula} ${damageTypeName(d.type)}`).join(" + "));
   if (rig.save && rig.damage) parts.push(rig.save.onPass === "half" ? "half on a pass" : "none on a pass");
   if (rig.conditions) parts.push(`${rig.conditions.map((c) => CONDITIONS[c].name).join(" and ")} on a fail`);
-  if (!rig.damage && !rig.conditions) return rig.save ? `${parts[0]}, no effect yet` : "None";
+  if (!rig.damage && !rig.conditions) return rig.save ? `${parts[0]}, no effect yet` : NONE;
   return parts.join(", ");
 }
 
@@ -471,10 +476,29 @@ export function checkText(check: TrapCheck): string {
   return `${choiceText(check)} DC ${check.dc}${check.what ? `: ${check.what}` : ""}`;
 }
 
+/** Every empty summary in the pane reads this, whatever its group holds. */
+export const NONE = "None";
+
 export function findSummary(rig: TrapRig): string {
   const parts = rig.find.map(checkText);
   if (rig.disarm?.check) parts.push(`disarm ${checkText(rig.disarm.check)}`);
-  return parts.length > 0 ? parts.join(", ") : "No checks";
+  return parts.length > 0 ? parts.join(", ") : NONE;
+}
+
+/** Players read: its line, else "Only a click", else None. */
+export function readSummary(rig: Pick<TrapRig, "message" | "sound">): string {
+  return rig.message ?? (rig.sound ? `Only a ${rig.sound}` : NONE);
+}
+
+/** It also: "2 things", or None. */
+export function alsoSummary(rig: Pick<TrapRig, "actions">): string {
+  const n = rig.actions.length;
+  return n === 0 ? NONE : `${n} ${n === 1 ? "thing" : "things"}`;
+}
+
+/** The DM note's first line, or None. */
+export function noteSummary(rig: Pick<TrapRig, "note">): string {
+  return rig.note ? (rig.note.split("\n")[0] ?? NONE) : NONE;
 }
 
 // ------------------------------------------------------------ asking for rolls

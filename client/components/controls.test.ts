@@ -132,6 +132,22 @@ describe("disabled controls swap colors and never fade", () => {
   }
 });
 
+describe("Checkbox", () => {
+  test("a tick held by aria-disabled keeps its place in the focus order, with the disabled look and its reason as the description", () => {
+    const markup = html(createElement(Checkbox, { label: "A creature steps onto it", help: "A trap on squares goes off at least one way.", checked: true, "aria-disabled": true, onChange() {} }));
+    const input = /<input[^>]*>/.exec(markup)?.[0] ?? "";
+    assert.match(input, /aria-disabled="true"/);
+    assert.doesNotMatch(input, /\sdisabled=""/, "a native disabled drops it from the focus order");
+    assert.match(input, /aria-describedby="[^"]+"/);
+    assert.match(markup, new RegExp(theme.color.textDisabled), "it looks unavailable");
+  });
+
+  test("a plain checkbox has no aria-disabled", () => {
+    const input = /<input[^>]*>/.exec(html(createElement(Checkbox, { label: "Secret", checked: false, onChange() {} })))?.[0] ?? "";
+    assert.doesNotMatch(input, /aria-disabled/);
+  });
+});
+
 describe("Switch", () => {
   test("a switch named by its setting alone, with the help as its description", () => {
     const markup = html(createElement(Switch, { label: "Fog", help: "Players see only what you reveal.", checked: false, onChange() {} }));

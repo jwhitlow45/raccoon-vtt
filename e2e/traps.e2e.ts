@@ -712,4 +712,73 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pickTool(dm, "Select");
     await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { hits: "trigger" } } });
   });
+
+  test("lp2-1b-2. the last way a trap goes off keeps its tick and focus on a click, Space and Enter, says why, and lets go once another is ticked, and a cleared name goes back to the saved one and says why (docs/design-v1-look-pass-2.md 2.7, D13)", async () => {
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 6, y: 4 });
+    await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
+    assert.deepEqual(trap(dmSocket)?.rig?.on, ["enter"]);
+    await unfold(dm, "Goes off when");
+    const onto = pane(dm).getByRole("checkbox", { name: "A creature steps onto it" });
+    assert.equal(await onto.getAttribute("aria-disabled"), "true");
+    assert.equal(await onto.evaluate((el) => (el as unknown as { disabled: boolean }).disabled), false, "the last tick is natively disabled, out of the focus order");
+    await pane(dm).getByText("A trap on squares goes off at least one way.").waitFor();
+    const focusedIsOnto = () => onto.evaluate((el) => el.ownerDocument.activeElement === el);
+    // Playwright waits for an aria-disabled control to be enabled before it clicks, so the click is the mouse's own.
+    const box = await onto.boundingBox();
+    assert.ok(box);
+    await dm.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    assert.equal(await onto.isChecked(), true, "a click took the last tick away");
+    assert.equal(await focusedIsOnto(), true, "a click moved focus off the last tick");
+    for (const key of ["Space", "Enter"]) {
+      await dm.keyboard.press(key);
+      assert.equal(await onto.isChecked(), true, `${key} took the last tick away`);
+      assert.equal(await focusedIsOnto(), true, `${key} moved focus off the last tick`);
+    }
+    await dm.waitForTimeout(200);
+    assert.deepEqual(trap(dmSocket)?.rig?.on, ["enter"], "the last way it goes off was sent away");
+    await shots.take(dm, "traps-lp2-1b-last-trigger");
+    // With a second way ticked, the first lets go.
+    await pane(dm).getByRole("checkbox", { name: "A creature steps off it" }).click();
+    await waitFor("two ways", () => (trap(dmSocket)?.rig?.on?.length === 2 ? true : null));
+    assert.equal(await onto.getAttribute("aria-disabled"), null);
+    await onto.click();
+    await waitFor("only off it", () => (JSON.stringify(trap(dmSocket)?.rig?.on) === JSON.stringify(["leave"]) ? true : null));
+    await onto.click();
+    await pane(dm).getByRole("checkbox", { name: "A creature steps off it" }).click();
+    await waitFor("back to onto it", () => (JSON.stringify(trap(dmSocket)?.rig?.on) === JSON.stringify(["enter"]) ? true : null));
+
+    await unfold(dm, "Name");
+    const name = pane(dm).getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("");
+    await name.press("Tab");
+    await pane(dm).getByText("A trap needs a name.").waitFor();
+    assert.equal(await name.inputValue(), "Hidden Pit", "the cleared name stayed empty");
+    assert.equal(trap(dmSocket)?.name, "Hidden Pit");
+    await shots.take(dm, "traps-lp2-1b-name-needed");
+
+    // A remove has the danger look, as every remove in the app does.
+    await unfold(dm, "Save and damage");
+    const remove = pane(dm).getByRole("button", { name: "Remove this damage", exact: true });
+    assert.equal(await remove.evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el).color), "rgb(248, 113, 113)", "the remove is not in the danger look");
+
+    // Arming with no uses left asks for them with secondary buttons: Done stays the pane's one primary.
+    // Its one use spent by going off, as ops cannot set none.
+    await ops.send({ t: "trap.update", trapId: run.trapId, patch: { state: "armed", rig: { usesLeft: 1 } } });
+    await ops.send({ t: "trap.spring", trapId: run.trapId, tokenIds: [run.thorn] });
+    await waitFor("no uses left", () => (trap(dmSocket)?.rig?.usesLeft === 0 && trap(dmSocket)?.state !== "armed" ? true : null));
+    for (const due of trap(dmSocket)?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: run.trapId, due: due.id });
+    await pane(dm).getByRole("switch", { name: "Armed" }).click();
+    const prompt = pane(dm).getByRole("group", { name: "Give it uses" });
+    await prompt.waitFor();
+    const background = (l: Locator) => l.evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el).backgroundColor);
+    const primary = await background(pane(dm).getByRole("button", { name: "Done", exact: true }));
+    assert.notEqual(await background(prompt.getByRole("button", { name: "Arm", exact: true })), primary, "Arm is a second primary beside Done");
+    await shots.take(dm, "traps-lp2-1b-uses-prompt");
+    await prompt.getByRole("button", { name: "No limit", exact: true }).click();
+    await waitFor("armed with no limit", () => (trap(dmSocket)?.state === "armed" && trap(dmSocket)?.rig?.usesLeft === undefined ? true : null));
+    await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
+    await pane(dm).waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+  });
 });

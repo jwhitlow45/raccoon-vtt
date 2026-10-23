@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { parseFormula } from "#shared/dice/formula.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type BuildChunk, type ConditionKey, type SkillKey, type Trap, type TrapAction, type TrapCheck, type TrapRig, type TrapSound } from "#shared/model.ts";
@@ -9,8 +9,9 @@ import { pitOpen, trapCreature } from "#shared/rules/traps.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { Input, Select, TextArea } from "../../components/Field.tsx";
-import { Group, Help } from "../../components/Panel.tsx";
+import { FieldRow, Input, Select, TextArea } from "../../components/Field.tsx";
+import { Chip, ChipRow } from "../../components/Chip.tsx";
+import { Group, Help, Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -37,6 +38,7 @@ import { NumberInput } from "../scenes/controls.tsx";
 import { trapScreenBox } from "./paneBox.ts";
 import {
   afterSummary,
+  alsoSummary,
   boxCenter,
   checkText,
   cleanLine,
@@ -44,9 +46,11 @@ import {
   disarmFill,
   findSummary,
   hitsSummary,
+  noteSummary,
   openedLine,
   pitFloor,
   presetLine,
+  readSummary,
   saveSummary,
   searchFill,
   tokensOn,
@@ -165,6 +169,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
   const selected = useRoomView((s) => s.local.selectedIds);
   const [open, setOpen] = useState<ReadonlySet<Part>>(() => new Set());
   const [askUses, setAskUses] = useState(false);
+  const setOffId = useId();
   if (!rig) return null;
 
   const update = (patch: TrapPatch) => actions.dispatch({ t: "trap.update", trapId: trap.id, patch });
@@ -222,113 +227,122 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <PaneHeader title={trap.name} onClose={props.onClose} grab={props.sheet} />
       {from ? <Help>{from}</Help> : null}
-      {doorGone ? <Help>Its door is gone, so it cannot go off. Delete it, or put a door back.</Help> : null}
+      {doorGone ? <Note>Its door is gone, so it cannot go off. Delete it, or put a door back.</Note> : null}
 
-      <Group label="Name" summary={trap.name} holds="rows" {...fold("name")}>
-        <TextField label="Name" value={trap.name} max={MAX_NAME} onSave={(name) => name && update({ name })} />
-        <Help>Players see this name once the trap is found.</Help>
-      </Group>
+      {/* The groups stack as the token panel's do, their lines doing the parting (docs/design-v1-look-pass-2.md 2.6). */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+        {/* No summary: the pane's title already shows the name. */}
+        <Group label="Name" holds="rows" {...fold("name")}>
+          <TextField label="Name" value={trap.name} max={MAX_NAME} required="A trap needs a name." onSave={(name) => name && update({ name })} />
+          <Help>Players see this name once the trap is found.</Help>
+        </Group>
 
-      <Group label="Goes off when" summary={triggerSummary({ zone: trap.zone, rig })} holds="rows" {...fold("when")}>
-        {squares ? (
-          <div role="group" aria-label="Goes off when" style={{ display: "grid", gap: theme.space(1) }}>
-            {TRIGGER_ORDER.map((t) => {
-              const on = rig.on.includes(t);
-              return (
-                <Checkbox
-                  key={t}
-                  label={TRIGGER_LABELS[t]}
-                  checked={on}
-                  // A trap on squares goes off at least one way.
-                  disabled={on && rig.on.length === 1}
-                  onChange={(next) => setRig({ on: TRIGGER_ORDER.filter((o) => (o === t ? next : rig.on.includes(o))) })}
-                />
-              );
-            })}
-          </div>
-        ) : (
-          <Help>{zoneKind(trap.zone) === "wire" ? "A creature crosses it." : "A creature opens it."}</Help>
-        )}
-        <Segmented<TrapRig["who"]>
-          label="Who"
-          value={rig.who}
-          even
-          options={(["party", "others", "any"] as const).map((w) => ({ value: w, label: WHO_CHOICES[w] }))}
-          description={WHO_HELP[rig.who]}
-          onChange={(who) => setRig({ who })}
-        />
-        <Checkbox label="Small or larger only" checked={rig.minSize === "small"} onChange={(on) => setRig({ minSize: on ? "small" : null })} />
-        <Checkbox label="Only creatures on the floor" help="Leaves out fliers, burrowers and riders." checked={rig.floor} onChange={(floor) => setRig({ floor })} />
-      </Group>
+        <Group label="Goes off when" summary={triggerSummary({ zone: trap.zone, rig })} holds="rows" {...fold("when")}>
+          {squares ? (
+            <div role="group" aria-label="Goes off when" style={{ display: "grid", gap: theme.space(1) }}>
+              {TRIGGER_ORDER.map((t) => {
+                const on = rig.on.includes(t);
+                const last = on && rig.on.length === 1;
+                return (
+                  <Checkbox
+                    key={t}
+                    label={TRIGGER_LABELS[t]}
+                    checked={on}
+                    // The last way it goes off keeps its tick and its place in the focus order, with the reason (docs/design-v1-look-pass-2.md 2.7).
+                    aria-disabled={last}
+                    help={last ? "A trap on squares goes off at least one way." : undefined}
+                    onChange={(next) => setRig({ on: TRIGGER_ORDER.filter((o) => (o === t ? next : rig.on.includes(o))) })}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <Help>{zoneKind(trap.zone) === "wire" ? "A creature crosses it." : "A creature opens it."}</Help>
+          )}
+          {squares ? (
+            <div>
+              <Button size="sm" icon="plus" onClick={() => pick("squares")}>
+                Add squares
+              </Button>
+            </div>
+          ) : null}
+          <Segmented<TrapRig["who"]>
+            label="Who"
+            value={rig.who}
+            even
+            options={(["party", "others", "any"] as const).map((w) => ({ value: w, label: WHO_CHOICES[w] }))}
+            description={WHO_HELP[rig.who]}
+            onChange={(who) => setRig({ who })}
+          />
+          <Switch label="Small or larger only" checked={rig.minSize === "small"} onChange={(on) => setRig({ minSize: on ? "small" : null })} />
+          <Switch label="Only creatures on the floor" help="Leaves out fliers, burrowers and riders." checked={rig.floor} onChange={(floor) => setRig({ floor })} />
+        </Group>
 
-      <Group label="Afterwards" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
-        {/* Off is the plain case, a trap that goes off once (docs/design-v1-look-pass-2.md 2.7). */}
-        <Switch label="Arms again at the start of the next turn" checked={rig.resets === "nextTurn"} onChange={(on) => setRig({ resets: on ? "nextTurn" : "never" })} />
-        <UsesField value={rig.usesLeft ?? null} onChange={(usesLeft) => setRig({ usesLeft })} />
-        <Switch label="Stops the creature where it goes off" help="A silent trap should not stop the creature: its player would notice." checked={rig.stops} onChange={(stops) => setRig({ stops })} />
-        <Switch label="Marks itself found when players see it go off" checked={rig.foundOnSpring} onChange={(foundOnSpring) => setRig({ foundOnSpring })} />
-        {squares ? (
+        <Group label="Afterwards" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
+          {/* Off is the plain case, a trap that goes off once (docs/design-v1-look-pass-2.md 2.7). */}
+          <Switch label="Arms again at the start of the next turn" checked={rig.resets === "nextTurn"} onChange={(on) => setRig({ resets: on ? "nextTurn" : "never" })} />
+          <UsesField value={rig.usesLeft ?? null} onChange={(usesLeft) => setRig({ usesLeft })} />
+          <Switch label="Stops the creature where it goes off" help="A silent trap should not stop the creature: its player would notice." checked={rig.stops} onChange={(stops) => setRig({ stops })} />
+          <Switch label="Marks itself found when players see it go off" checked={rig.foundOnSpring} onChange={(foundOnSpring) => setRig({ foundOnSpring })} />
+          {squares ? (
+            // An opened pit cannot be undone, so its switch stays disabled with the line that says where its floor is.
+            <Switch label="Opens a pit" help={opened && rig.pit ? openedLine(rig.pit) : undefined} checked={rig.pit !== undefined} disabled={opened} onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })} />
+          ) : null}
+          {squares && pitDepth !== null ? (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+              <NumberInput label="Pit depth, feet" value={pitDepth} min={1} max={ground - MIN_HEIGHT_FT} onChange={(depth) => setRig({ pit: { floor: pitFloor(ground, depth) } })} />
+              <span style={{ color: theme.color.textMuted }}>ft deep</span>
+            </div>
+          ) : null}
+        </Group>
+
+        <Group label="Hits" summary={hitsSummary(rig)} holds="rows" {...fold("hits")}>
+          <HitsChoice trap={trap} rig={rig} chunks={chunks} setRig={setRig} pick={pick} />
+        </Group>
+
+        <Group label="Save and damage" summary={saveSummary(rig)} holds="rows" {...fold("save")}>
+          <SaveFields rig={rig} setRig={setRig} />
+        </Group>
+
+        <Group label="Players read" summary={readSummary(rig)} holds="rows" {...fold("read")}>
+          <TextField label="What players read" placeholder="The floor gives way!" value={rig.message ?? ""} max={LIMITS.trapMessageChars} onSave={(message) => setRig({ message })} />
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-            <Checkbox label="Opens a pit" checked={rig.pit !== undefined} disabled={opened} onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })} />
-            {opened && rig.pit ? <span style={{ color: theme.color.textMuted }}>{openedLine(rig.pit)}</span> : null}
-            {pitDepth !== null ? (
-              <>
-                <NumberInput label="Pit depth, feet" value={pitDepth} min={1} max={ground - MIN_HEIGHT_FT} onChange={(depth) => setRig({ pit: { floor: pitFloor(ground, depth) } })} />
-                <span style={{ color: theme.color.textMuted }}>ft deep</span>
-              </>
+            <Select aria-label="Sound" value={rig.sound ?? ""} onChange={(e) => setRig({ sound: e.target.value === "" ? null : (e.target.value as TrapSound) })}>
+              <option value="">No sound</option>
+              {TRAP_SOUNDS.map((s) => (
+                <option key={s} value={s}>
+                  {SOUND_NAMES[s]}
+                </option>
+              ))}
+            </Select>
+            {rig.sound ? (
+              <Button size="sm" onClick={() => playTrapSound(rig.sound!, true)}>
+                Play
+              </Button>
             ) : null}
           </div>
-        ) : null}
-        {squares ? (
-          <Button size="sm" onClick={() => pick("squares")}>
-            Add squares
-          </Button>
-        ) : null}
-      </Group>
+          <Help>Players read the line, and hear the sound where their sound is on, when they see it go off.</Help>
+        </Group>
 
-      <Group label="Hits" summary={hitsSummary(rig)} holds="rows" {...fold("hits")}>
-        <HitsChoice trap={trap} rig={rig} chunks={chunks} setRig={setRig} pick={pick} />
-      </Group>
-
-      <Group label="Save and damage" summary={saveSummary(rig)} holds="rows" {...fold("save")}>
-        <SaveFields rig={rig} setRig={setRig} />
-      </Group>
-
-      <Group label="Players read" summary={rig.message ?? (rig.sound ? `Only a ${rig.sound}` : "Nothing")} holds="rows" {...fold("read")}>
-        <TextField label="What players read" placeholder="The floor gives way!" value={rig.message ?? ""} max={LIMITS.trapMessageChars} onSave={(message) => setRig({ message })} />
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-          <Select aria-label="Sound" value={rig.sound ?? ""} onChange={(e) => setRig({ sound: e.target.value === "" ? null : (e.target.value as TrapSound) })}>
-            <option value="">No sound</option>
-            {TRAP_SOUNDS.map((s) => (
-              <option key={s} value={s}>
-                {SOUND_NAMES[s]}
-              </option>
-            ))}
-          </Select>
-          {rig.sound ? (
-            <Button size="sm" onClick={() => playTrapSound(rig.sound!, true)}>
-              Play
+        <Group label="It also" summary={alsoSummary(rig)} holds="rows" {...fold("also")}>
+          <ActionList trap={trap} rig={rig} setRig={setRig} />
+          {/* The tool's options say what to tap once the pick starts (TrapTool.tsx PICK_LINES). */}
+          <div>
+            <Button size="sm" icon="plus" disabled={rig.actions.length >= LIMITS.trapActions} onClick={() => pick("action")}>
+              Add an effect
             </Button>
-          ) : null}
-        </div>
-        <Help>Players read the line, and hear the sound where their sound is on, when they see it go off.</Help>
-      </Group>
+          </div>
+        </Group>
 
-      <Group label="It also" summary={rig.actions.length === 0 ? "Nothing" : `${rig.actions.length} ${rig.actions.length === 1 ? "thing" : "things"}`} holds="rows" {...fold("also")}>
-        <ActionList trap={trap} rig={rig} setRig={setRig} />
-        <Button size="sm" disabled={rig.actions.length >= LIMITS.trapActions} onClick={() => pick("action")}>
-          Add: tap a door, light, creature or stamp
-        </Button>
-      </Group>
+        <Group label="Finding and disarming" summary={findSummary(rig)} holds="rows" {...fold("find")}>
+          <FindFields rig={rig} setRig={setRig} />
+        </Group>
 
-      <Group label="Finding and disarming" summary={findSummary(rig)} holds="rows" {...fold("find")}>
-        <FindFields rig={rig} setRig={setRig} />
-      </Group>
-
-      <Group label="DM note" summary={rig.note ? rig.note.split("\n")[0] : "None"} holds="rows" {...fold("note")}>
-        <NoteField value={rig.note ?? ""} onSave={(note) => setRig({ note })} />
-        <Help>Shown on the card when it goes off.</Help>
-      </Group>
+        <Group label="DM note" summary={noteSummary(rig)} holds="rows" {...fold("note")}>
+          <NoteField value={rig.note ?? ""} onSave={(note) => setRig({ note })} />
+          <Help>Shown on the card when it goes off.</Help>
+        </Group>
+      </div>
 
       <div style={{ display: "grid", gap: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(2) }}>
         <Switch label="Armed" help={trap.state === "sprung" ? "Sprung. Arm it to set it again." : undefined} checked={trap.state === "armed"} onChange={arm} />
@@ -353,10 +367,11 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
               Ask to disarm
             </Button>
           ) : null}
-          <Button size="sm" onClick={setOff} title={selected.length > 0 ? "The selected creatures set it off" : "The creatures on it now set it off"}>
+          <Button size="sm" aria-describedby={setOffId} onClick={setOff}>
             Set it off
           </Button>
         </div>
+        <Help id={setOffId}>With Set it off, {selected.length > 0 ? "the selected creatures" : "the creatures on it now"} set it off.</Help>
       </div>
       <PaneFooter>
         <ConfirmButton
@@ -397,29 +412,47 @@ const TRIGGER_LABELS: Record<TrapRig["on"][number], string> = {
 
 const SOUND_NAMES: Record<TrapSound, string> = { click: "Click", rumble: "Rumble", crash: "Crash", whoosh: "Whoosh", hiss: "Hiss" };
 
-/** A line of text sent when its field is left or Enter is pressed, never letter by letter. Empty sends null. */
-function TextField(props: { label: string; value: string; max: number; placeholder?: string; onSave(value: string | null): void }) {
+/**
+ * A line of text sent when its field is left or Enter is pressed, never
+ * letter by letter. Empty sends null, unless the line is `required`: then
+ * the field goes back to the saved text and says why, in those words, as
+ * the label pane does, so an empty field never stands for a name the trap
+ * still has.
+ */
+function TextField(props: { label: string; value: string; max: number; placeholder?: string; required?: string; onSave(value: string | null): void }) {
   const [text, setText] = useState(props.value);
+  const [refused, setRefused] = useState(false);
+  const noteId = useId();
   useEffect(() => setText(props.value), [props.value]);
   const save = () => {
     const clean = cleanLine(text, props.max);
+    if (clean === null && props.required) {
+      setText(props.value);
+      setRefused(true);
+      return;
+    }
+    setRefused(false);
     if ((clean ?? "") !== props.value) props.onSave(clean);
     else setText(props.value);
   };
   return (
-    <Input
-      type="text"
-      aria-label={props.label}
-      placeholder={props.placeholder}
-      maxLength={props.max}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={save}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") save();
-      }}
-      style={{ width: "100%" }}
-    />
+    <>
+      <Input
+        type="text"
+        aria-label={props.label}
+        aria-describedby={refused ? noteId : undefined}
+        placeholder={props.placeholder}
+        maxLength={props.max}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+        }}
+        style={{ width: "100%" }}
+      />
+      {refused ? <Note id={noteId}>{props.required}</Note> : null}
+    </>
   );
 }
 
@@ -441,8 +474,9 @@ function NoteField(props: { value: string; onSave(value: string | null): void })
   );
 }
 
-/** "At most N times": empty is no limit. Each springing spends one, so it reads what is left. */
+/** Its uses left, the word the summary and the prompt use: empty is no limit. Each springing spends one, so it reads what is left. */
 function UsesField(props: { value: number | null; onChange(value: number | null): void }) {
+  const id = useId();
   const shown = props.value === null ? "" : String(props.value);
   const [text, setText] = useState(shown);
   useEffect(() => setText(shown), [shown]);
@@ -459,22 +493,20 @@ function UsesField(props: { value: number | null; onChange(value: number | null)
     if (clamped !== props.value) props.onChange(clamped);
   };
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-      <span>At most</span>
+    <FieldRow label="Uses left" htmlFor={id} hint="Each time it goes off spends one. Empty for no limit.">
       <Input
-        aria-label="At most this many times, empty for no limit"
+        id={id}
         inputMode="numeric"
-        placeholder="no limit"
+        placeholder="No limit"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") commit();
         }}
-        style={{ width: 96, textAlign: "center" }}
+        style={{ width: theme.layout.options.field, textAlign: "center" }}
       />
-      <span>times</span>
-    </div>
+    </FieldRow>
   );
 }
 
@@ -482,11 +514,12 @@ function UsesField(props: { value: number | null; onChange(value: number | null)
 function UsesPrompt(props: { onArm(uses: number | null): void; onCancel(): void }) {
   const [uses, setUses] = useState(1);
   return (
-    <div role="group" aria-label="Give it uses" style={{ display: "grid", gap: theme.space(2), padding: theme.space(2), borderRadius: theme.radius.md, background: theme.color.surfaceRaised }}>
+    // A line and its buttons under Armed, with no box of its own: Done stays the pane's one primary (docs/design-v1-look-pass-2.md 2.2).
+    <div role="group" aria-label="Give it uses" style={{ display: "grid", gap: theme.space(2) }}>
       <Help>It has no uses left. How many more times can it go off?</Help>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
         <NumberInput label="Uses" value={uses} min={1} max={99} onChange={setUses} />
-        <Button size="sm" variant="primary" onClick={() => props.onArm(uses)}>
+        <Button size="sm" onClick={() => props.onArm(uses)}>
           Arm
         </Button>
         <Button size="sm" onClick={() => props.onArm(null)}>
@@ -642,7 +675,7 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
               </option>
             ))}
           </Select>
-          <Button size="sm" icon="delete" iconOnly="always" aria-label="Remove this damage" onClick={() => setDamage(damage.filter((_, j) => j !== i))} />
+          <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this damage" onClick={() => setDamage(damage.filter((_, j) => j !== i))} />
         </div>
       ))}
       {damage.length < LIMITS.trapDamageParts ? (
@@ -650,12 +683,17 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
           Add damage
         </Button>
       ) : null}
+      {conditions.length > 0 ? (
+        // Removable choices, as the group save's conditions (docs/design-v1-look-pass-2.md 2.4).
+        <ChipRow label="On a fail">
+          {conditions.map((c) => (
+            <Chip key={c} remove aria-label={`Remove ${CONDITIONS[c].name}`} onClick={() => setConditions(conditions.filter((o) => o !== c))}>
+              {CONDITIONS[c].name}
+            </Chip>
+          ))}
+        </ChipRow>
+      ) : null}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
-        {conditions.map((c) => (
-          <Button key={c} size="sm" icon="close" onClick={() => setConditions(conditions.filter((o) => o !== c))} aria-label={`Remove ${CONDITIONS[c].name}`}>
-            {CONDITIONS[c].name}
-          </Button>
-        ))}
         {conditions.length < LIMITS.trapConditions ? (
           <Select aria-label="Add a condition on a fail" value="" onChange={(e) => e.target.value && setConditions([...conditions, e.target.value as ConditionKey])}>
             <option value="">{conditions.length === 0 ? "A condition on a fail…" : "Another condition…"}</option>
@@ -772,7 +810,7 @@ function ActionList(props: { trap: Trap; rig: TrapRig; setRig(patch: RigPatch): 
           <div key={i} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
             <span style={{ flex: "1 1 120px" }}>{what}</span>
             {choice}
-            <Button size="sm" icon="delete" iconOnly="always" aria-label="Take this out" onClick={() => put(i, null)} />
+            <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this effect" onClick={() => put(i, null)} />
           </div>
         );
       })}
@@ -814,7 +852,7 @@ function CheckRow(props: { check: TrapCheck; what: boolean; onChange(check: Trap
           <TextField label="What it finds" placeholder="the pressure plate" value={check.what ?? ""} max={LIMITS.trapCheckChars} onSave={(what) => props.onChange(checkOf(checkValue(check), { dc: check.dc, ...(what ? { what } : {}) }))} />
         </div>
       ) : null}
-      <Button size="sm" icon="delete" iconOnly="always" aria-label="Remove this check" onClick={props.onRemove} />
+      <Button size="sm" variant="danger" icon="delete" iconOnly="always" aria-label="Remove this check" onClick={props.onRemove} />
     </div>
   );
 }
@@ -836,7 +874,7 @@ function FindFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
           Add a check to find it
         </Button>
       ) : null}
-      <Checkbox
+      <Switch
         label="Hint when a creature's Passive Perception would notice it"
         help={perception ? undefined : "Needs a Wisdom (Perception) check."}
         checked={rig.notice && perception}
@@ -844,7 +882,7 @@ function FindFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
         onChange={(notice) => setRig({ notice })}
       />
       <TextField label="How it is disarmed" placeholder="Wedging an iron spike under the plate" value={disarm?.text ?? ""} max={LIMITS.trapDisarmChars} onSave={(text) => setDisarm({ ...(text ? { text } : {}), ...(disarm?.check ? { check: disarm.check } : {}) })} />
-      <Checkbox
+      <Switch
         label="With a check"
         checked={disarm?.check !== undefined}
         onChange={(on) => setDisarm({ ...(disarm?.text ? { text: disarm.text } : {}), ...(on ? { check: { ability: "dex", skill: "sleight-of-hand", dc: 15 } } : {}) })}
