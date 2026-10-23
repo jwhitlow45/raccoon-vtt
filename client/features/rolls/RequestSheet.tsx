@@ -157,6 +157,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
       title="Request a roll"
       onClose={close}
       width={theme.layout.dialog.md}
+      statusGrow
       status={
         error ? (
           <span role="alert" style={{ color: theme.color.dangerText }}>

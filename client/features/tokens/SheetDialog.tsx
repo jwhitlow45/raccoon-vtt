@@ -20,6 +20,7 @@ export function SheetDialog(props: {
   children: ReactNode;
   footer?: ReactNode;
   status?: DialogProps["status"];
+  statusGrow?: DialogProps["statusGrow"];
 }) {
   return (
     <Dialog
@@ -31,6 +32,7 @@ export function SheetDialog(props: {
       backClose
       footer={props.footer}
       status={props.status}
+      statusGrow={props.statusGrow}
       bodyStyle={{ fontSize: theme.font.body14 }}
     >
       {props.children}
