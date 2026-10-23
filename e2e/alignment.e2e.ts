@@ -840,6 +840,18 @@ const CASES = `
     <div style="flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-end"><input style="width: 96px"></div>
   </div>
 </div>
+<div data-case="label-stacked" style="width: 250px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
+    <label style="flex: 1 1 min(110px, 40%); min-width: 0">It lasts</label>
+    <div style="flex: 1 1 160px; min-width: 0; display: flex; justify-content: flex-end"><div style="min-width: 100%; max-width: 160px; display: flex; gap: 8px; align-items: center; justify-content: flex-end"><select style="flex: 1; min-width: 0; width: 100%"><option>Until the start of the next turn</option></select></div></div>
+  </div>
+</div>
+<div data-case="label-room" style="width: 250px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px">
+    <label style="flex: 1 1 120px; min-width: 0">Rounds</label>
+    <input style="flex: none; width: 140px">
+  </div>
+</div>
 <div data-case="remove-alone" style="width: 300px">
   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
     <input style="width: 120px" value="2d10"><select style="width: 150px"><option>Poison</option></select><button aria-label="Remove this damage">x</button>
@@ -956,6 +968,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await caught("tick-wrapped-middle", "row");
       await caught("label-alone", "wrap-label");
       await passes("label-beside");
+      // A FieldRow's label stacked over a field that fills the line is a heading over it. A label above a field that leaves its words room beside it is alone.
+      await passes("label-stacked");
+      await caught("label-room", "wrap-label");
       await caught("remove-alone", "wrap-orphan");
       await passes("remove-held");
       await caught("hint-high", "center");

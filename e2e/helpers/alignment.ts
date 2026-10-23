@@ -74,6 +74,10 @@ import type { Locator, Page } from "playwright-core";
  * - A heading or a paragraph above what follows is a title or a
  *   sentence, not a field's name (a section label puts its action under
  *   itself when both do not fit, components/Panel.tsx).
+ * - A name above controls that leave its words no room beside them is a
+ *   heading over them, as a FieldRow stacks its label over a field that
+ *   does not fit beside it (docs/design-v1-polish.md R2). A name is alone
+ *   above its controls only where its words fit in the room they leave.
  * - A pane's header band and a pane's frame are placed by
  *   the header check instead, since the band's room above its row is
  *   set by the frame (components/SheetHeader.tsx).
@@ -649,12 +653,19 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           // A part that grows to fill its line is a line of its own, as a window's buttons share each line they wrap onto.
           const content = { l: b.inner.l + b.pad.l, r: b.inner.r - b.pad.r };
           const fills = (it: Item) => it.box.l <= content.l + LIMIT && it.box.r >= content.r - LIMIT;
+          // A name stacked above controls that leave its words no room beside them is a heading over them, as a FieldRow stacks its label over a field that does not fit (docs/design-v1-polish.md R2). It is alone only where its words would fit in the room the controls leave on their line.
+          const gap = num(cs, "column-gap") * zoomOf(el);
+          const roomBeside = (named: Item[], controls: Item[]) => {
+            const need = named.reduce((n, it) => n + (it.v.r - it.v.l), 0) + gap * named.length;
+            const held = union(controls.map((it) => it.v));
+            return need <= content.r - content.l - (held.r - held.l) + LIMIT;
+          };
           for (let i = 1; i < lines.length; i++) {
             const prev = lines[i - 1]!.items.filter((it) => !ownLine(it));
             const cur = lines[i]!.items.filter((it) => !ownLine(it));
             if (!prev.length || !cur.length) continue;
             if (i === 1 && prev.every(words) && !prev.some(prose) && cur.some((it) => !words(it))) {
-              push({ check: "wrap-label", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${prev.map((it) => it.what).join(" + ")} alone above ${cur.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
+              if (roomBeside(prev, cur)) push({ check: "wrap-label", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${prev.map((it) => it.what).join(" + ")} alone above ${cur.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
             } else if (i === lines.length - 1 && cur.length === 1 && prev.length >= 2 && !choices && !fills(cur[0]!)) {
               push({ check: "wrap-orphan", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${cur[0]!.what} alone under ${prev.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
             }
