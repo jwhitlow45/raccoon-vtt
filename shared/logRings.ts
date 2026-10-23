@@ -90,8 +90,13 @@ export const DM_LINE_BASE = 900_000;
  * the roster, so the ids a player gets in one op count on without a gap
  * whatever lines the op wrote for others. The roster's most members fill
  * the runs up to DM_LINE_BASE.
+ *
+ * It lies past any count the shared lines reach in one op. The op that
+ * writes the most is a turn that ends every effect the room holds, a line
+ * each, and a room's bytes hold about 80,000 effects at the most: 32 a
+ * creature, which with its effects at their shortest takes about 3.4 KB.
  */
-export const PARTY_LINE_BASE = 800_000;
+export const PARTY_LINE_BASE = 100_000;
 export const PARTY_SLOT = (DM_LINE_BASE - PARTY_LINE_BASE) / LIMITS.membersPerRoom;
 
 /** A reader's line number `count` within an op, by their place `rank` on the roster (rosterRanks). */

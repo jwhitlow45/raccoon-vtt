@@ -401,8 +401,8 @@ describe("the log's rings (shared/logRings.ts)", () => {
   test("dmNumbered and countedApart tell the DM's count and the party lines' from the shared one", () => {
     assert.equal(dmNumbered("12:899999"), false);
     assert.equal(dmNumbered("12:900000"), true);
-    assert.equal(countedApart("12:799999"), false);
-    assert.equal(countedApart("12:800000"), true);
+    assert.equal(countedApart("12:99999"), false);
+    assert.equal(countedApart("12:100000"), true);
     assert.equal(PARTY_SLOT * LIMITS.membersPerRoom, DM_LINE_BASE - PARTY_LINE_BASE, "every member's run fits below the DM's lines");
   });
 });

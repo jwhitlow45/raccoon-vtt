@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { resolveDiceOp, type DiceOp } from "./dice/resolve.ts";
-import { dmNumbered, eventLines, lineAudience } from "./logRings.ts";
+import { dmNumbered, eventLines, lineAudience, memberRing, PARTY_SLOT } from "./logRings.ts";
 import type { LogEntry, LogEvent, RoomState, Viewer } from "./model.ts";
 import { projectState } from "./project.ts";
-import type { Op } from "./protocol.ts";
+import { MAX_EFFECTS, type Op } from "./protocol.ts";
 import { applyOp, type Applied } from "./reducer.ts";
 import { Tx } from "./reducer/tx.ts";
 import { LIMITS } from "./limits.ts";
-import { AT, DM, P1, P2, actor, castTable, entry, env, room, template, token } from "./testutil.ts";
+import { AT, DM, P1, P2, actor, castTable, effect, entry, env, room, template, token } from "./testutil.ts";
 
 /**
  * A log line's readers and its parts' readers, fixed when it is written by
@@ -158,6 +158,39 @@ describe("a party line's copy is the line as its reader read it", () => {
     assert.equal(copy.data?.type === "turn" && copy.data.toSeen, undefined, "the copy holds what P2 read, which names no mark");
     const read = live(tx.state, P2).find((e) => e.id === copy.id)!.data as Extract<LogEvent, { type: "turn" }>;
     assert.equal(read.to, "e-hero", "and still names the row every player saw resume");
+  });
+});
+
+describe("each reader's copies count in a run of their own (PARTY_SLOT)", () => {
+  /** A creature only its players see, holding 32 effects that end when the hero's turn does. */
+  function hidden(id: string, ownerIds: string[]) {
+    const effects = Array.from({ length: MAX_EFFECTS }, (_, i) => effect(`${id}-${i}`, { duration: { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-hero" } } }));
+    return token(id, { visibility: "dm", ownerIds, actor: { inline: actor({ effects }) } });
+  }
+
+  test("63 creatures of P1's whose effects all end on one turn leave P2 their copy of a creature they share", () => {
+    const state = room();
+    state.tokens.hero = token("hero", { kind: "pc", name: "Ayla", ownerIds: ["p2"] });
+    for (let i = 0; i < 63; i++) state.tokens[`pet${i}`] = hidden(`pet${i}`, ["p1"]);
+    state.tokens.mount = hidden("mount", ["p1", "p2"]);
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-hero", entries: [entry("e-hero", { tokenId: "hero", value: 15 }), entry("e-ogre", { tokenId: "pet0", value: 10, tieOrder: 1 })] };
+    const next = run(state, { t: "encounter.next" }, DM, 2);
+    const copies = (reader: string, tokenId?: string) => next.state.log.filter((e) => e.to?.[0] === reader && e.data?.type === "effect" && (tokenId === undefined || e.data.tokenId === tokenId)).length;
+    assert.ok(next.log.filter((e) => e.to?.[0] === "p1").length > 2_000, "more copies for P1 than a run held before");
+    assert.equal(copies("p2", "mount"), Math.min(MAX_EFFECTS, memberRing("party", 3).lines), "P2 reads the mount's");
+  });
+
+  test("a reader whose run is full gets no more copies, and the next reader still gets theirs", () => {
+    const state = room();
+    state.tokens.pet = token("pet", { visibility: "dm", ownerIds: ["p1"] });
+    state.tokens.mount = token("mount", { visibility: "dm", ownerIds: ["p1", "p2"] });
+    const tx = new Tx(state, DM, { seq: 2, at: AT });
+    for (let i = 0; i < PARTY_SLOT; i++) tx.addEvent({ type: "hp", tokenId: "pet", change: "damage", amount: 1 });
+    tx.addEvent({ type: "hp", tokenId: "mount", change: "damage", amount: 2 });
+    tx.finish();
+    const mount = tx.log.filter((e) => e.data?.type === "hp" && e.data.tokenId === "mount");
+    assert.deepEqual(mount.map((e) => [dmNumbered(e.id), e.to]), [[true, undefined], [false, ["p2"]]], "the DM line, and P2's copy");
+    assert.equal(tx.log.filter((e) => e.to?.[0] === "p1").length, PARTY_SLOT, "P1's run took its PARTY_SLOT and no more");
   });
 });
 

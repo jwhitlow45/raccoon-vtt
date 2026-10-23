@@ -259,9 +259,10 @@ export class Tx {
    *   reader gets a copy of their own: the line as they read it, naming the
    *   DM line it copies, cut as DM lines are, in that reader's own run from
    *   PARTY_LINE_BASE, so the ids each player gets in one op count on
-   *   without a gap whatever the op wrote for others. A reader's 2,000th
-   *   copy in one op, which no op comes
-   *   near, would leave their run, so such a line stays the DM's alone.
+   *   without a gap whatever the op wrote for others. A reader whose run of
+   *   PARTY_SLOT is full in this op gets no more copies, a cap only an op
+   *   ending thousands of effects on creatures they alone see comes near,
+   *   and each other reader's copies and the DM line stay as they are.
    *
    * Each ring then drops only its own oldest, once, so a line never pushes
    * out one a viewer holds who could not read it.
@@ -296,9 +297,10 @@ export class Tx {
         }
         const dmLine = this.writeLine(entry, u.dmIndex, cutLine);
         const lines = [dmLine];
-        if (reach.audience === "party" && reach.views.every(([reader]) => (copies.get(reader) ?? 0) < PARTY_SLOT)) {
+        if (reach.audience === "party") {
           for (const [reader, view] of reach.views) {
             const count = copies.get(reader) ?? 0;
+            if (count >= PARTY_SLOT) continue;
             copies.set(reader, count + 1);
             lines.push(this.writeLine({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id }, partyIndex(ranks.get(reader)!, count), cutLine));
           }
