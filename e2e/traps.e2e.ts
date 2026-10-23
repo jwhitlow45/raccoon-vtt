@@ -172,14 +172,14 @@ function patHeardOfTrap(): boolean {
  * each remove's middle against the first line of the fields it removes,
  * each FieldRow's control against its label, each unit against its field,
  * each tick with help against its label's first line, and the foot's Set
- * it off against Ask to search, whose half of an even grid it should match.
+ * it off, alone on its line after the two asks, against the line's width.
  */
 type PaneRows = {
   removes: { name: string; offset: number }[];
   fieldRows: { label: string; offset: number; wrapped: boolean }[];
   units: { unit: string; offset: number; sameLine: boolean }[];
   ticks: { label: string; offset: number }[];
-  setOff: { width: number; left: number } | null;
+  setOff: { left: number; short: number; height: number } | null;
 };
 
 /** The page's elements, as far as paneRows reads them: the e2e files build without the DOM's types. */
@@ -253,7 +253,8 @@ function paneRows(target: Locator): Promise<PaneRows> {
     const buttons = all("button");
     const set = buttons.find((b) => b.textContent?.trim() === "Set it off");
     const search = buttons.find((b) => b.textContent?.trim() === "Ask to search");
-    const setOff = set && search ? { width: tenth(box(set).width - box(search).width), left: tenth(box(set).left - box(search).left) } : null;
+    const line = set?.parentElement ?? null;
+    const setOff = set && search && line ? { left: tenth(box(set).left - box(search).left), short: tenth(box(line).width - box(set).width), height: tenth(box(search).bottom - box(search).top - (box(set).bottom - box(set).top)) } : null;
     return { removes, fieldRows, units, ticks, setOff };
   });
 }
@@ -1027,7 +1028,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pickTool(dm, "Select");
   });
 
-  test("pl1-a. a trap with every part filled lays out its rows level, as a card at 1440 x 900 and as a sheet at 320 x 568 at 130%: each remove beside its fields' first line, DC, On a pass and Uses left beside their labels, rounds beside its field, Set it off in a half as wide as Ask to search's, and the last tick on its label's first line (docs/design-v1-polish.md R1 to R3)", async () => {
+  test("pl1-a. a trap with every part filled lays out its rows level, as a card at 1440 x 900 and as a sheet at 320 x 568 at 130%: each remove beside its fields' first line, DC, On a pass and Uses left beside their labels, rounds beside its field, Set it off filling its line with every button's words on one line, and the last tick on its label's first line (docs/design-v1-polish.md R1 to R3)", async () => {
     // A door for the trap to lock, as an effect with a choice.
     await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: [{ key: "12,9,w", feature: { kind: "door", state: "closed", secret: false, discovered: false } }] });
     const needleId = randomUUID().replace(/-/g, "").slice(0, 16);
@@ -1088,7 +1089,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       assert.equal(rows.units.length, 1, `${label}: rounds was not read`);
       for (const u of rows.units) assert.ok(u.sameLine && Math.abs(u.offset) <= 1, `${label}: ${u.unit} stands ${u.sameLine ? `${u.offset} px off` : "apart from"} its field`);
       assert.ok(rows.setOff, `${label}: the foot's buttons were not read`);
-      assert.ok(Math.abs(rows.setOff.width) <= 1 && Math.abs(rows.setOff.left) <= 1, `${label}: Set it off is not in a half as wide as Ask to search's: ${JSON.stringify(rows.setOff)}`);
+      assert.ok(Math.abs(rows.setOff.left) <= 1 && Math.abs(rows.setOff.short) <= 1, `${label}: Set it off, alone on its line, does not fill it: ${JSON.stringify(rows.setOff)}`);
+      assert.ok(Math.abs(rows.setOff.height) <= 1, `${label}: Ask to search breaks its words where Set it off does not: ${JSON.stringify(rows.setOff)}`);
       await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
       await pane(dm).waitFor({ state: "detached" });
 

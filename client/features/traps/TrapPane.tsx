@@ -360,8 +360,14 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
           />
         ) : null}
         <Switch label="Found" help="Players see a found trap's name and where it lies." checked={trap.found} onChange={(found) => update({ found })} />
-        {/* Two to a line in even halves, so Set it off never trails alone at the end of a ragged row. */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: theme.space(2) }}>
+        {/*
+         * Two to a line in even halves where a half holds "Ask to disarm" on
+         * one line, from 248 px up, and one to a line below that. Set it off
+         * comes last, so when it would stand alone in a half (an odd count of
+         * buttons) it takes the whole line: no button trails alone at the end
+         * of a ragged row, and none breaks its words in two.
+         */}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, max(${ASK_WIDTH}px, calc(50% - ${theme.space(1)}px))), 1fr))`, gap: theme.space(2) }}>
           {search ? (
             <Button size="sm" onClick={() => ask(search)}>
               Ask to search
@@ -372,7 +378,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
               Ask to disarm
             </Button>
           ) : null}
-          <Button size="sm" aria-describedby={setOffId} onClick={setOff}>
+          <Button size="sm" aria-describedby={setOffId} onClick={setOff} style={((search ? 1 : 0) + (disarm ? 1 : 0)) % 2 === 0 ? { gridColumn: "1 / -1" } : undefined}>
             Set it off
           </Button>
         </div>
@@ -397,6 +403,9 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
     </div>
   );
 }
+
+/** The foot's widest button with its words on one line, "Ask to disarm" at 118.6 px, rounded up. */
+const ASK_WIDTH = 120;
 
 /** Who's options in a word each, so the three share a row at any width. The summaries keep rules.ts WHO_WORDS, as they are sentences. */
 const WHO_CHOICES: Record<TrapRig["who"], string> = { party: "Party", others: "Others", any: "Any" };
