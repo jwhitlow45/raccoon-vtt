@@ -19,6 +19,10 @@ import { Icon } from "./Icon.tsx";
  * chosen (docs/design-v1-known-forms.md 5.2): `chosen`'s look without its
  * `aria-current`, and a check in the leading slot, which an unpressed one
  * keeps empty so the titles line up.
+ *
+ * A row that unfolds a short body under itself keeps its own look, never
+ * the chosen tint, and ends in `RowChevron` (docs/design-v1-look-pass-2.md
+ * 2.5).
  */
 export function Row(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -45,6 +49,16 @@ export function Row(props: {
    * (docs/design-v1-resync.md 3.3).
    */
   fullDetail?: boolean;
+  /**
+   * A title that wraps onto as many lines as it needs, never cut, for a row
+   * that names an action which must read whole, such as "Get on Treasure
+   * chest" on a 320 px phone.
+   */
+  wrapTitle?: boolean;
+  /** The work this row started is under way: `aria-busy` on its button. Only with `onClick`. */
+  busy?: boolean;
+  /** `data-*` attributes on its button, by which a list's own keys find its rows, such as the Attach list's `data-attach-row`. Only with `onClick`. */
+  data?: Record<`data-${string}`, string>;
   /**
    * A stable id for a row that opens a panel's subpage, as `data-opener`,
    * so Back finds this row again even after the list mounts anew,
@@ -89,7 +103,15 @@ export function Row(props: {
     <>
       {leading ? <span style={{ flex: "none", display: "grid", placeItems: "center" }}>{leading}</span> : null}
       <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
-        <span id={full ? titleId : undefined} style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span
+          id={full ? titleId : undefined}
+          style={{
+            fontSize: theme.font.input,
+            fontWeight: theme.weight.strong,
+            lineHeight: theme.leading.tight,
+            ...(props.wrapTitle ? { overflowWrap: "anywhere" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }),
+          }}
+        >
           {props.title}
         </span>
         {props.detail ? (
@@ -120,6 +142,7 @@ export function Row(props: {
     <button
       ref={props.ref}
       type="button"
+      {...props.data}
       data-opener={props.opener}
       aria-label={props.label}
       aria-labelledby={full && props.label === undefined ? titleId : undefined}
@@ -127,6 +150,7 @@ export function Row(props: {
       aria-current={props.chosen ? true : undefined}
       aria-pressed={props.pressed}
       aria-expanded={props.expanded}
+      aria-busy={props.busy ? true : undefined}
       disabled={props.disabled}
       onClick={(e) => {
         // A disclosure takes focus before it folds, so a field being typed in under it blurs and commits first, and focus stays on the row.
@@ -158,6 +182,16 @@ export function RowList(props: { label?: string; children: ReactNode }) {
       ))}
     </ul>
   );
+}
+
+/**
+ * The end of a row that unfolds what is under it: one chevron, muted, at
+ * `md`, pointing down while open and right while folded, so every such row
+ * draws the same one (docs/design-v1-look-pass-2.md 2.5). Decoration only:
+ * the row's `aria-expanded` says the state.
+ */
+export function RowChevron(props: { open: boolean }) {
+  return <Icon name={props.open ? "chevronDown" : "chevronRight"} size="md" style={{ color: theme.color.textMuted }} />;
 }
 
 /** A row's leading dot, in a member's or a disposition's color. */

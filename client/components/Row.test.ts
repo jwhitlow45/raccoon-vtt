@@ -4,7 +4,9 @@ import { describe, test } from "node:test";
 
 const { createElement, isValidElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { RowList, Row } = await import("./Row.tsx");
+const { RowList, Row, RowChevron } = await import("./Row.tsx");
+const { Icon } = await import("./Icon.tsx");
+const { theme } = await import("../lib/theme.ts");
 
 type Element = { key: string | null; props: { children: unknown } };
 
@@ -51,5 +53,42 @@ describe("a row whose detail is told in full (docs/design-v1-resync.md 3.3)", ()
     const out = html(false);
     assert.doesNotMatch(out, /aria-labelledby|aria-describedby/);
     assert.match(out, /text-overflow:ellipsis/);
+  });
+});
+
+describe("a row's options for lists of actions (docs/design-v1-look-pass-2.md 2.5)", () => {
+  const title = "Get on Treasure chest";
+  const titleStyle = (out: string) => /<span[^>]*style="([^"]*)"[^>]*>Get on Treasure chest<\/span>/.exec(out)?.[1] ?? "";
+
+  test("wrapTitle wraps the title, never cutting it, and keeps the button named by its words", () => {
+    const wrapped = renderToStaticMarkup(createElement(Row, { title, wrapTitle: true, onClick() {} }));
+    assert.match(titleStyle(wrapped), /overflow-wrap:anywhere/);
+    assert.doesNotMatch(titleStyle(wrapped), /white-space:nowrap|text-overflow:ellipsis/);
+    assert.doesNotMatch(wrapped, /aria-label|aria-labelledby/, "named by its own text, as before");
+    assert.match(wrapped, /<button[^>]*>.*Get on Treasure chest/);
+    const cut = renderToStaticMarkup(createElement(Row, { title, onClick() {} }));
+    assert.match(titleStyle(cut), /white-space:nowrap/, "a row without it cuts its title to one line");
+  });
+
+  test("busy and data land on the row's button", () => {
+    const out = renderToStaticMarkup(createElement(Row, { title, busy: true, data: { "data-attach-row": "" }, onClick() {} }));
+    const button = /<button[^>]*>/.exec(out)?.[0] ?? "";
+    assert.match(button, /aria-busy="true"/);
+    assert.match(button, /data-attach-row=""/);
+    const idle = /<button[^>]*>/.exec(renderToStaticMarkup(createElement(Row, { title, busy: false, onClick() {} })))?.[0] ?? "";
+    assert.doesNotMatch(idle, /aria-busy/);
+  });
+
+  test("RowChevron is decoration, muted, and points down while open and right while folded", () => {
+    const open = renderToStaticMarkup(createElement(RowChevron, { open: true }));
+    const folded = renderToStaticMarkup(createElement(RowChevron, { open: false }));
+    for (const out of [open, folded]) {
+      assert.match(out, /^<svg aria-hidden="true"/);
+      assert.match(out, /width="20"/, "md, as every unfolding row draws it");
+    }
+    assert.notEqual(open, folded);
+    const chevron = (name: "chevronDown" | "chevronRight") => renderToStaticMarkup(createElement(Icon, { name, size: "md", style: { color: theme.color.textMuted } }));
+    assert.equal(open, chevron("chevronDown"));
+    assert.equal(folded, chevron("chevronRight"));
   });
 });
