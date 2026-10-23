@@ -71,7 +71,7 @@ export type RoomState = {
   /** DM only. The last 20 states before each `next`, so `prev` can restore them. */
   encounterHistory: EncounterSnapshot[];
   handouts: Record<HandoutId, Handout>;
-  /** The most recent 200 entries. Older ones live in the room_log table. */
+  /** The newest lines of each audience's ring, in id order (shared/logRings.ts). Older ones live in the room_log table. */
   log: LogEntry[];
   /** DM only. The room's own stat blocks, entered from books the group owns. */
   monsters: Record<MonsterId, CustomMonster>;

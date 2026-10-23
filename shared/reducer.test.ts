@@ -1396,7 +1396,7 @@ describe("log and handouts", () => {
     assert.equal(refused(fresh(), { t: "log.whisper", to: ["ghost"], text: "psst" }, P1).code, "gone");
   });
 
-  test("the in-memory log keeps the newest 200 and reports what it trimmed", () => {
+  test("the in-memory log keeps the newest 200 shared lines and reports what it trimmed", () => {
     const state = fresh();
     state.log = Array.from({ length: MAX_LOG }, (_, i) => ({ id: `1:${i}`, at: AT, kind: "chat" as const, text: "x" }));
     const r = applyOp(state, { t: "log.chat", text: "new" }, P1, env(2));

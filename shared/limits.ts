@@ -102,7 +102,6 @@ export const LIMITS = {
    * block, and one at every bound is about 4.8 KB.
    */
   ddbSyncBytes: 6 * 1024,
-  logInMemory: 200,
   logStored: 10_000,
   stateBytes: 8 * 1024 * 1024,
   projectedSceneBytes: 3 * 1024 * 1024,
