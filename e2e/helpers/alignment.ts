@@ -23,9 +23,15 @@ import type { Locator, Page } from "playwright-core";
  * text's Range rect grown by half the leading above and below. In a
  * block that lays its lines from its top, a line within a pixel of the
  * block's own line is put on it, since the browser rounds a font's ascent
- * and descent to whole pixels. Words moved on purpose (a relative offset,
- * a transform or a vertical alignment on any element between them and
- * their block) are never put back. What a scroller inside the measured
+ * and descent to whole pixels. Words moved by a relative offset on any
+ * element between them and their block are put on the line they would
+ * stand on unmoved, then moved by that offset again, so the move is kept
+ * whole and only the font's rounding is put right. An offset moves only
+ * what is painted, so the line stays where it was. A vertical alignment
+ * moves the line box with the words instead: a 1.4 px raise grows the
+ * line, which its block then centers, so the words move 0.7 px. No grid
+ * says where they stand, and they keep their own estimate. A transform
+ * does not move an inline box at all. What a scroller inside the measured
  * part hides is not seen. What takes a tap is one box to the eye, painted
  * or not, and what it holds is centered in it.
  *
@@ -248,32 +254,44 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     const lhPx = lh * zoomOf(parent);
     const half = (lhPx - (r.bottom - r.top)) / 2;
     const own = { t: r.top - half, b: r.bottom + half };
-    // The block the line belongs to, and whether anything between the words and it moves them on purpose: a relative offset, a transform or a vertical alignment. Words moved on purpose are never snapped back.
+    // The block the line belongs to, and how far everything between the words and it moves them on purpose.
     let block: DomElement | null = parent;
-    let moved = false;
+    let shift: number | null = 0;
     while (block && ["inline", "contents"].includes(style(block).display)) {
-      if (placedOff(block)) moved = true;
+      const by = shiftOf(block);
+      shift = shift === null || by === null ? null : shift + by;
       block = block.parentElement;
     }
-    if (moved || !block || !["block", "flow-root", "list-item", "inline-block"].includes(style(block).display) || parseFloat(style(block).lineHeight) !== lh) return own;
+    if (shift === null || !block || !["block", "flow-root", "list-item", "inline-block"].includes(style(block).display) || parseFloat(style(block).lineHeight) !== lh) return own;
     const bs = style(block);
     const top = block.getBoundingClientRect().top + ((parseFloat(bs.getPropertyValue("border-top-width")) || 0) + (parseFloat(bs.getPropertyValue("padding-top")) || 0)) * zoomOf(block);
-    const i = Math.round((own.t - top) / lhPx);
+    // The move is taken off before the line is put on the grid and added back after. Snapping the moved words would cancel a move of about a pixel, or add the font's rounding to it.
+    const unmoved = own.t - shift;
+    const i = Math.round((unmoved - top) / lhPx);
     const t = top + i * lhPx;
     // Only the rounding of a font's metrics, at most a pixel, is put back. A line further off the grid, as beside a taller inline control, keeps the text's own estimate.
-    return i >= 0 && Math.abs(t - own.t) <= 1 ? { t, b: t + lhPx } : own;
+    return i >= 0 && Math.abs(t - unmoved) <= 1 ? { t: t + shift, b: t + shift + lhPx } : own;
   }
 
-  /** Whether an inline element moves its words off their line on purpose. */
-  function placedOff(el: DomElement): boolean {
+  /**
+   * How far down an inline element's relative offset moves its words, in
+   * page px. Null when it sets a vertical alignment, which moves the line
+   * box too (see the header). A transform adds nothing, since it does not
+   * move an inline box.
+   */
+  function shiftOf(el: DomElement): number | null {
     const cs = style(el);
-    const offset = (side: string) => {
-      const v = cs.getPropertyValue(side);
-      return v !== "auto" && v !== "" && parseFloat(v) !== 0;
-    };
-    if (cs.position === "relative" && (offset("top") || offset("bottom"))) return true;
-    if (cs.getPropertyValue("transform") !== "none") return true;
-    return cs.getPropertyValue("vertical-align") !== "baseline";
+    if (cs.getPropertyValue("vertical-align") !== "baseline") return null;
+    if (cs.position !== "relative") return 0;
+    const px = (v: string) => (v.endsWith("px") ? parseFloat(v) * zoomOf(el) : null);
+    const top = cs.getPropertyValue("top");
+    const bottom = cs.getPropertyValue("bottom");
+    if (top !== "auto" && top !== "") return px(top);
+    if (bottom !== "auto" && bottom !== "") {
+      const up = px(bottom);
+      return up === null ? null : -up;
+    }
+    return 0;
   }
 
   function rectOf(el: DomElement): Box {

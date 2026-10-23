@@ -654,6 +654,7 @@ const CASES = `
   input, select { font: inherit; height: 44px; box-sizing: border-box; border: 1px solid #888; background: #111; color: inherit; }
   .chip { border-radius: 999px; }
   /* Fixed widths, so a wider fallback font cannot move a part to another line. */
+  .nudge { background: #333; height: 44px; padding: 0 10px; display: flex; align-items: center; }
   .fixed { flex: none; width: 60px; overflow: hidden; white-space: nowrap; padding: 0; }
   .box { background: #333; }
 </style>
@@ -734,6 +735,11 @@ const CASES = `
 <div data-case="shift-valign">
   <div class="box" style="height: 44px; padding: 12px 10px; line-height: 20px">Plain words <span style="vertical-align: 4px">raised</span></div>
 </div>
+<div data-case="nudge-none"><div class="nudge"><div style="flex: 1"><span>Nudged words</span></div></div></div>
+<div data-case="nudge-down"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: 1.5px">Nudged words</span></div></div></div>
+<div data-case="nudge-up"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: -1.5px">Nudged words</span></div></div></div>
+<div data-case="nudge-1-4"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: 1.4px">Nudged words</span></div></div></div>
+<div data-case="nudge-transform"><div class="nudge"><div style="flex: 1"><span style="transform: translateY(3px)">Nudged words</span></div></div></div>
 <div data-case="font-rounding">
   <div class="box" style="height: 54.96px; padding: 15px 10px; font-size: 20.8px; line-height: 24.96px"><span><span>A zoomed title</span></span></div>
 </div>
@@ -962,6 +968,12 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await caught("shift-two", "center");
       await caught("shift-valign", "center");
       await passes("font-rounding");
+      // Moved by a known length, words keep the whole move and lose only the font's rounding: 1.5 px down or up reads 1.5. An inline box does not take a transform.
+      await passes("nudge-none");
+      await caught("nudge-down", "center");
+      await caught("nudge-up", "center");
+      await caught("nudge-1-4", "center");
+      await passes("nudge-transform");
       // A control's only content placed absolutely is measured. A badge beside content in the flow is not.
       await caught("placed-sole", "center");
       await passes("placed-badge");
