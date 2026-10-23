@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { MoveAnyToken, RoomState } from "./model.ts";
+import type { LogEntry, MoveAnyToken, RoomState } from "./model.ts";
 import { canApply, MOVE_PLAYERS_FIRST, movesAnyToken, NO_ROOM_TO_GROW_BACK, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import { projectState } from "./project.ts";
 import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
@@ -607,6 +607,21 @@ describe("encounter", () => {
     assert.equal(code({ t: "encounter.setValues", values: [{ entryId: "n1", value: 3 }] }, DM, state), "ok", "the DM's values are unaffected");
     state.meta.settings.playersTypeTotals = true;
     assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 3 }, P1, state), "ok", "on, a typed value goes");
+  });
+
+  test("with typed totals off an initiative from before the fight stays refused once the DM's ring has dropped the fight's start line", () => {
+    const state = combat();
+    state.meta.settings.playersTypeTotals = false;
+    const initiative = (id: string, tag: string, total: number): LogEntry => ({ id, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag, by: P1.memberId, to: "all", rolls: [{ formula: "1d20+2", faces: [total - 2], total, label: "Initiative", tokenId: "pc1", initiative: true }] } });
+    // A fight started at seq 2 behind the blackout: its start line was the DM's, and their ring has dropped it.
+    state.encounter = { ...state.encounter!, startSeq: 2 };
+    state.log = [initiative("1:0", "t-old", 17), initiative("3:0", "t-mine", 14)];
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 17, roll: "t-old" }, P1, state), "forbidden", "an initiative from before the fight");
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 14, roll: "t-mine" }, P1, state), "ok", "this fight's");
+    // The same room with the start line still held answers the same.
+    const held = { ...state, log: [state.log[0]!, { id: "2:900000", at: "2026-10-17T20:00:00.000Z", kind: "event" as const, data: { type: "encounter" as const, action: "start" as const } }, state.log[1]!] };
+    assert.equal(code({ t: "encounter.setValue", entryId: "n1", value: 17, roll: "t-old" }, P1, held), "forbidden");
+    assert.equal(apply(setup(), { t: "encounter.start", entries: [{ id: "n1", tokenId: "pc1", value: 20 }] }, DM, 7).encounter?.startSeq, 7, "a fight keeps the seq that started it");
   });
 
   test("with typed totals off a player's row joins the fight with no value, or with their own roll's total, by every way it joins (B7B-ASTRA-02)", () => {

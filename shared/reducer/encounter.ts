@@ -10,7 +10,7 @@ import {
   tickEffects,
   unbindFromEntry,
 } from "../rules/durations.ts";
-import { attaches, hiddenRowsShareNoMount, marksHadTurn, revealsRowAnew } from "../migrate.ts";
+import { attaches, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
@@ -39,8 +39,9 @@ export function writeEncounter(tx: Tx, encounter: Encounter): void {
  * rest of the fight (docs/design-v1-combat-flow.md 11.2).
  */
 function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): Encounter {
-  const { turnStart: _previous, ...rest } = encounter;
+  const { turnStart: _previous, turnSeq: _turnSeq, ...rest } = encounter;
   const next: Encounter = { ...rest, activeEntryId };
+  if (activeEntryId !== null && logsByAudience(tx.env.opVersion)) next.turnSeq = tx.env.seq;
   const entry = activeEntryId === null ? undefined : encounter.entries.find((e) => e.id === activeEntryId);
   if (entry && !entry.hadTurn && marksHadTurn(tx.env.opVersion)) next.entries = encounter.entries.map((e) => (e === entry ? { ...e, hadTurn: true } : e));
   const token = entry?.tokenId !== undefined ? tx.state.tokens[entry.tokenId] : undefined;
@@ -185,7 +186,7 @@ export function encounterStart(tx: Tx, op: OpOf<"encounter.start">): void {
     const entry = buildEntry(tx, input, entries);
     entries = placeEntry(tx.state, entries, entry);
   }
-  writeEncounter(tx, { rev: 0, round: 1, activeEntryId: null, entries });
+  writeEncounter(tx, { rev: 0, round: 1, activeEntryId: null, entries, ...(logsByAudience(tx.env.opVersion) ? { startSeq: tx.env.seq } : {}) });
   for (const entry of entries) bindDurations(tx, entry);
   if (tx.state.encounterHistory.length > 0) tx.write(keys.encounterHistory, []);
   tx.addEvent({ type: "encounter", action: "start" });

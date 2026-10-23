@@ -179,7 +179,8 @@ describe("a fight stored before the dragon turtle's id was renamed", () => {
     const stored: Op[] = [];
     for (const [i, step] of steps.entries()) {
       const op: Op = step === UNDO ? ({ t: "sys.restore", entries: inverse!, from: "undo", deps: true } as Op) : step;
-      const result = applyOp(state, op, DM, env(i + 1));
+      // Under the rules of op version 9, which the rows below are stored at.
+      const result = applyOp(state, op, DM, { ...env(i + 1), opVersion: 9 });
       assert.ok(result.ok, `step ${i} applied in the build that stored it${result.ok ? "" : `: ${result.message}`}`);
       state = result.state;
       inverse = result.inverse ?? undefined;

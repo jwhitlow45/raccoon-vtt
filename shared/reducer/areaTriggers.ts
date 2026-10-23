@@ -1,6 +1,6 @@
 import { eventLines } from "../logRings.ts";
 import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
-import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
+import type { AreaTemplate, AreaTrigger, Encounter, LogEntry, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
@@ -85,16 +85,20 @@ function inside(state: RoomState, template: AreaTemplate, candidates: readonly T
  * that is running: for any trigger when the area hits once a turn, else for
  * this one.
  *
- * The turn runs from the op that wrote the newest turn line, read one line
- * per event (eventLines) and by op, since a line only the DM or only some
- * players get counts past the shared lines of its op (Tx.addLog) and may
- * sort before or after the turn line. The only reminder an op writes before
- * its turn line is a turn end's (remindTurnEnd), for the turn that ended
- * there, so that one is left to the turn before. An op stored before op
- * version 19 numbered every line in order (`apart` false), so it replays
- * from the newest turn line's place, as the build that stored it ran.
+ * The turn runs from the op that started it (Encounter.turnSeq), read one
+ * line per event (eventLines) and by op, since a line only the DM or only
+ * some players get counts past the shared lines of its op (Tx.addLog) and
+ * may sort before or after the turn line. The seq is kept in the encounter,
+ * so a turn whose line only the DM got still bounds the read once the DM's
+ * ring has dropped that line. A fight from before it reads the newest turn
+ * line instead. The only reminder an op writes before its turn starts is a
+ * turn end's (remindTurnEnd), for the turn that ended there, so that one is
+ * left to the turn before. An op stored before op version 19 numbered every
+ * line in order (`apart` false), so it replays from the newest turn line's
+ * place, as the build that stored it ran.
  */
-function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, tokenId: string, trigger: AreaTrigger, apart: boolean): boolean {
+function remindedThisTurn(state: RoomState, template: AreaTemplate, tokenId: string, trigger: AreaTrigger, apart: boolean): boolean {
+  const log = state.log;
   const reminded = (data: LogEntry["data"]) => data?.type === "area" && data.templateId === template.id && data.tokenId === tokenId && (template.oncePerTurn === true || data.trigger === trigger);
   if (!apart) {
     for (let i = log.length - 1; i >= 0; i--) {
@@ -105,9 +109,7 @@ function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, toke
     return false;
   }
   const lines = eventLines(log);
-  let turn = lines.length - 1;
-  while (turn >= 0 && lines[turn]!.data?.type !== "turn") turn--;
-  const turnSeq = turn >= 0 ? Number(seqOf(lines[turn]!.id)) : null;
+  const turnSeq = turnSeqOf(state.encounter) ?? newestTurnSeq(lines);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     const seq = Number(seqOf(line.id));
@@ -116,6 +118,19 @@ function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, toke
     if (reminded(line.data)) return true;
   }
   return false;
+}
+
+/** The seq of the op that started the acting row's turn, as the encounter keeps it, or null in a fight from before op version 19. */
+function turnSeqOf(encounter: Encounter | null): number | null {
+  if (!encounter || encounter.activeEntryId === null) return null;
+  if (encounter.turnSeq !== undefined) return encounter.turnSeq;
+  return encounter.turnStart?.entryId === encounter.activeEntryId ? (encounter.turnStart.seq ?? null) : null;
+}
+
+/** The seq of the newest turn line among these, or null for none. */
+function newestTurnSeq(lines: readonly LogEntry[]): number | null {
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.data?.type === "turn") return Number(seqOf(lines[i]!.id));
+  return null;
 }
 
 function seqOf(id: string): string {
@@ -137,7 +152,7 @@ function areaName(t: AreaTemplate): string {
  * the dark.
  */
 function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigger, areaMoved: boolean, at: RoomState = tx.state): void {
-  if (remindedThisTurn(tx.state.log, template, token.id, trigger, logsByAudience(tx.env.opVersion))) return;
+  if (remindedThisTurn(tx.state, template, token.id, trigger, logsByAudience(tx.env.opVersion))) return;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
   const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env));
   const there = at.tokens[token.id] ?? token;

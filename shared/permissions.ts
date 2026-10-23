@@ -1029,10 +1029,14 @@ function typedInitiative(c: Check, row: InitEntry, value: number | null, roll: s
  */
 function rolledInitiative(state: RoomState, memberId: string, row: InitEntry, value: number, roll: string | undefined): boolean {
   if (roll === undefined) return false;
-  // Newest first, one line per event, so the fight's start line ends the search: anything older is another fight's. A start the log no longer holds is older than every line it holds.
+  // Newest first, one line per event, so the fight's start ends the search: anything older is another fight's. The encounter keeps the
+  // start's seq, so a start line the DM's ring dropped still ends it. A fight from before it ends at its start line, and a start the log no
+  // longer holds is older than every line it holds.
+  const startSeq = state.encounter?.startSeq;
   const lines = eventLines(state.log);
   for (let i = lines.length - 1; i >= 0; i--) {
     const data = lines[i]!.data;
+    if (startSeq !== undefined && Number(lines[i]!.id.slice(0, lines[i]!.id.indexOf(":"))) < startSeq) return false;
     if (data?.type === "encounter" && data.action === "start") return false;
     if (data?.type !== "dice" || data.tag !== roll || data.by !== memberId) continue;
     const ok = data.rolls.some((r) => {

@@ -174,6 +174,8 @@ describe("remapState", () => {
     const pip = Object.values(out.tokens).find((t) => t.name === "Pip")!;
     const goblin = Object.values(out.tokens).find((t) => t.name === "Goblin")!;
     assert.deepEqual(out.encounter!.turnStart, { entryId: out.encounter!.activeEntryId, tokenId: pip.id, sceneId: pip.sceneId, x: 2, y: 3, elevation: 0, seen: true });
+    assert.deepEqual([state.encounter!.startSeq, state.encounter!.turnSeq], [1, 2]);
+    assert.deepEqual(["startSeq" in out.encounter!, "turnSeq" in out.encounter!], [false, false], "nor do the seqs that started the fight and its turn");
     // The seq that names a turn counts the old room's ops, and the new room counts again from the start.
     assert.equal(pip.path, undefined, "the path of the turn stays behind with the seq naming the turn");
     const kept = Object.values(out.drawings);

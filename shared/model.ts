@@ -1414,6 +1414,19 @@ export type Encounter = {
    * first turn, for a row without a token, and in rooms from before it.
    */
   turnStart?: TurnStart;
+  /**
+   * The seq of the op that started the fight, and of the op that started
+   * the acting row's turn, whatever the row: TurnStart holds the latter
+   * only for a row with a token. Previous puts the earlier turn's back with
+   * the rest of the encounter. The reducer reads this fight and this turn
+   * from them, never from a start or turn line the DM's ring may have
+   * dropped (shared/reducer/areaTriggers.ts, shared/permissions.ts). The
+   * DM's alone: a player's projection leaves them out, since they would say
+   * when a fight or a turn no player sees began. Absent in fights from
+   * before op version 19.
+   */
+  startSeq?: number;
+  turnSeq?: number;
 };
 
 /**

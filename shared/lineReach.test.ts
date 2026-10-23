@@ -271,6 +271,41 @@ describe("the reducer reads the log one line per event (eventLines)", () => {
     }
   });
 
+  test("a turn whose line only the DM got bounds an area's once a turn after the DM's ring drops that line", () => {
+    // The hero walks into the glyph on its turn and out, then a goblin no player sees takes its turn, and the DM moves the hero back in.
+    const fight = (): RoomState => {
+      const state = room();
+      state.meta = { ...state.meta, settings: { ...state.meta.settings, revealHiddenOnTurn: false } };
+      state.tokens.hero = token("hero", { kind: "pc", name: "Ayla", x: 2, y: 5, ownerIds: ["p1"], disposition: "ally" });
+      state.tokens.gob = token("gob", { visibility: "dm", x: 20, y: 20, actor: { inline: actor({ hp: { cur: 1_000, max: 1_000, temp: 0 } }) } });
+      state.templates.glyph = template("glyph", { shape: "sphere", size: 10, origin: { x: 6.5, y: 5.5, z: 0 }, spell: "Glyph", ownerId: "dm1", triggers: ["enter"] });
+      state.encounter = { rev: 0, round: 1, activeEntryId: "e-hero", entries: [entry("e-hero", { tokenId: "hero", value: 15 }), entry("e-gob", { tokenId: "gob", value: 10, tieOrder: 1, hidden: true })], turnStart: { entryId: "e-hero", tokenId: "hero", sceneId: "s1", x: 2, y: 5, elevation: 0, seen: true, seq: 1 } };
+      return state;
+    };
+    const back: string[][] = [];
+    for (const hits of [0, LIMITS.dmLogLines]) {
+      let state = run(fight(), { t: "token.move", tokenId: "hero", x: 6, y: 5 }, P1, 2).state;
+      state = run(state, { t: "token.move", tokenId: "hero", x: 15, y: 5 }, P1, 3).state;
+      const next = run(state, { t: "encounter.next" }, DM, 4);
+      const turn = next.log.find((e) => e.data?.type === "turn")!;
+      assert.ok(dmNumbered(turn.id), "the goblin's turn line is the DM's");
+      state = next.state;
+      for (let i = 0; i < hits; i++) state = run(state, { t: "actor.damageMany", hits: [{ target: { tokenId: "gob" }, amount: 1 }] }, DM, 5 + i).state;
+      if (hits > 0) assert.ok(!state.log.some((e) => e.id === turn.id), "the DM's ring dropped the turn line");
+      const moved = run(state, { t: "token.move", tokenId: "hero", x: 6, y: 5 }, DM, 5 + hits);
+      back.push(live(moved.state, P1).filter((e) => e.data?.type === "area" && e.id.startsWith(`${5 + hits}:`)).map((e) => e.data!.type));
+    }
+    assert.deepEqual(back, [["area"], ["area"]], "the goblin's turn reminds the hero again, the turn line held or not");
+  });
+
+  test("a player's projection of the fight leaves out the seqs that started it and its turn", () => {
+    const started = run(room({ tokens: { hero: token("hero", { kind: "pc", ownerIds: ["p1"] }) } }), { t: "encounter.start", entries: [{ id: "e-hero", tokenId: "hero", value: 15 }] }, DM, 3);
+    const turned = run(started.state, { t: "encounter.next" }, DM, 4).state;
+    assert.deepEqual([turned.encounter?.startSeq, turned.encounter?.turnSeq], [3, 4]);
+    const mine = projectState(turned, P1, { sceneId: "s1" }).encounter!;
+    assert.deepEqual(["startSeq" in mine, "turnSeq" in mine], [false, false]);
+  });
+
   test("a line of an op that writes more DM lines than the ring holds is read once, from its copy, once its own DM line leaves", () => {
     const state = room();
     state.tokens.pet = token("pet", { visibility: "dm", ownerIds: ["p1"] });
