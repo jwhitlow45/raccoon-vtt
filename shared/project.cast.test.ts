@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { partyIndex, rosterRanks } from "./logRings.ts";
 import { keys } from "./keys.ts";
 import type { CastAsk, LogEntry, RoomState, Viewer } from "./model.ts";
 import { dependents, projectEntity, projectState } from "./project.ts";
@@ -146,6 +147,7 @@ describe("the caster's closing line", () => {
     }
     assert.deepEqual(lines[1], lines[0]);
     assert.deepEqual(lines[2], lines[0]);
-    assert.equal((lines[0] as LogEntry[])[0]?.id, "70:0");
+    // Only the caster's players read it, so it counts in their own run (shared/logRings.ts).
+    assert.equal((lines[0] as LogEntry[])[0]?.id, `70:${partyIndex(rosterRanks(table().members).get("p1")!, 0)}`);
   });
 });

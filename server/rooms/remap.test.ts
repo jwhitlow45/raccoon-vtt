@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds } from "#shared/keys.ts";
-import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, whispersKept } from "#shared/logRings.ts";
+import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, partyIndex, rosterRanks, whispersKept } from "#shared/logRings.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { stableStringify, visibleAssetIds } from "#shared/project.ts";
+import { projectState, stableStringify, visibleAssetIds } from "#shared/project.ts";
 import { AT, DM, P1, actor, apply, env, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 import { exportableState } from "./exportRoom.ts";
@@ -676,6 +676,42 @@ describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
     assert.deepEqual(out.trapSeen.map((e) => e.id), [`0:${n}`, `0:${n + 1}`], "no gap where the hidden springing was");
     assert.deepEqual(out.trapLog.map((e) => e.id), ["0:900000", "0:900001", "0:900002"]);
     assert.equal(Object.values(out.traps)[0]!.rig!.due![0]!.id, "0:900001", "the occurrence still names its line");
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+});
+
+describe("party lines in an import (shared/logRings.ts)", () => {
+  test("each reader's copies count on in their own run, and a line whose readers did not come through is the DM's alone", () => {
+    const state = room();
+    state.tokens.pet = token("pet", { visibility: "dm", ownerIds: ["p1"] });
+    state.tokens.mount = token("mount", { visibility: "dm", ownerIds: ["p1", "p2"] });
+    state.tokens.gob = token("gob", { visibility: "dm" });
+    const hp = (id: string, tokenId: string, to: string[]) => ({ id, at: AT, kind: "event" as const, to, data: { type: "hp" as const, tokenId, change: "damage" as const, amount: 1 } });
+    state.log = [
+      { id: "1:0", at: AT, kind: "chat", from: "p1", text: "hi" },
+      hp("2:802000", "pet", ["p1"]),
+      hp("3:802000", "mount", ["p1"]),
+      hp("3:804000", "mount", ["p2", "p1"]),
+      // Lines of members who left before the export: the DM's copy, and another reader's.
+      hp("4:806000", "gob", ["gone1"]),
+      hp("4:808000", "gob", ["gone2", "gone1"]),
+    ];
+    const memberIds = new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]);
+    const out = remapState(state, { assets: new Map(), memberIds });
+    const ranks = rosterRanks(out.members);
+    const run = (id: string) => partyIndex(ranks.get(id)!, 0);
+    assert.deepEqual(out.log.map((e) => [e.id, e.to]), [
+      ["0:0", undefined],
+      [`0:${run("m-p1")}`, ["m-p1"]],
+      [`0:${run("m-p1") + 1}`, ["m-p1"]],
+      [`0:${run("m-p2")}`, ["m-p2", "m-p1"]],
+      [`0:${DM_LINE_BASE}`, undefined],
+    ]);
+    const p2 = projectState(out, { memberId: "m-p2", role: "player" }, { sceneId: "s1" }).log;
+    assert.deepEqual(p2.map((e) => [e.id, e.to]), [["0:0", undefined], [`0:${run("m-p2")}`, ["m-p2"]]]);
+    const dm = projectState(out, { memberId: "m-dm", role: "dm" }, { sceneId: "s1" }).log;
+    assert.deepEqual(dm.map((e) => e.id), ["0:0", `0:${run("m-p1")}`, `0:${run("m-p1") + 1}`, `0:${DM_LINE_BASE}`], "the DM reads each line once");
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });

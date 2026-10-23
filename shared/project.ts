@@ -7,6 +7,7 @@ import {
   type BuildChunk,
   type CastAsk,
   type Character,
+  type DiceRoll,
   type CustomMonster,
   type Drawing,
   type Effect,
@@ -44,7 +45,7 @@ import {
 } from "./model.ts";
 import { handoutPages } from "./handouts.ts";
 import { imageAssetId } from "./imageRef.ts";
-import { inLiveLog, liveStart } from "./logRings.ts";
+import { inLiveLog, lineAudience, liveStart, neverRead } from "./logRings.ts";
 import { revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
 import type { Env } from "./reducer/tx.ts";
@@ -1152,27 +1153,6 @@ function projectPinCtx(ctx: Ctx, pin: Pin): Pin | null {
   return fogged ? null : pin;
 }
 
-/**
- * Whether a roll line holds a result no player's answer could carry, so
- * that a DM's bare mark wrote it: a result with no total and no save failed
- * without rolling (a mark on a creature still waiting), a pass on a save
- * failed without rolling, a result beside a total on a request with no DC
- * (a player's total there carries none), or a result other than the DC's
- * own verdict on the total (an overrule). A player sends only a total, or
- * a fail without rolling on a save (permissions.ts rollAnswerCheck), and
- * the reducer sets a result only from the DC. The stored line is the same
- * whoever wrote it, so this reads its values alone: a mark that says what
- * the answer already says, such as a mark back to the DC's verdict after an
- * overrule, cannot be told from the answer and still reaches the player as
- * the same words again.
- */
-function isMarkLine(data: Extract<LogEvent, { type: "roll" }>): boolean {
-  if (data.result === undefined) return false;
-  if (data.total === undefined) return !data.noRoll || data.result === "pass";
-  if (data.dc === undefined) return true;
-  return data.result !== (data.total >= data.dc ? "pass" : "fail");
-}
-
 /** Whether the viewer owns the creature a roll target or a roll line names, now. A creature that is gone is no one's. */
 function ownsRollCreature(ctx: Ctx, ref: { tokenId?: string; characterId?: string }): boolean {
   if (ref.tokenId !== undefined) {
@@ -1374,17 +1354,153 @@ function projectHistoryCtx(ctx: Ctx): EncounterSnapshot[] | null {
   return ctx.state.encounterHistory;
 }
 
+/** Everyone who plays a token, by its own owners or its character's. A projected token a player does not own has no `ownerIds`. */
+function ownersOf(state: RoomState, token: Token): string[] {
+  return [...(token.ownerIds ?? []), ...(characterOf(state, token)?.ownerIds ?? [])];
+}
+
+/** Who may read a log event: every player and table display, or only the members listed. */
+export type Reach = "all" | readonly string[];
+
+function reaches(reach: Reach, memberId: string): boolean {
+  return reach === "all" || reach.includes(memberId);
+}
+
+function both(a: Reach, b: Reach): Reach {
+  if (a === "all") return b;
+  if (b === "all") return a;
+  return a.filter((id) => b.includes(id));
+}
+
 /**
- * The creature a log event is about, or null when a player may not have the
- * event: the creature is out of sight now, or the event is about a token
- * that players who do not own it could not see when it happened.
+ * Who may read a log event, by the line and the room as it stands (design
+ * 7.3, Log): "all", each viewer still reading it only by what they see when
+ * they read it (projectEventCtx), or only the members listed, which may be
+ * none. The list is what the line names:
+ *
+ * - An event about a token that players who do not own it could not see
+ *   when it happened (no `seen`), or an effect companion's life, which
+ *   reaches others as alive whatever it is (effectCompanion): the token's
+ *   players.
+ * - A turn of a row players who do not own it could not see then: the row
+ *   creature's players.
+ * - A roll's answer, and a cast: their creature's players, as the request
+ *   and the ask reach them (projectRollCtx, projectCastCtx).
+ * - A dice line: everyone who may read any of its rolls (diceRollReach).
+ * - A handout: its recipients.
+ * - A line no player ever gets (neverRead): none.
+ *
+ * The projection asks it of every line when it is read, and Tx.addLog when
+ * a line is written (lineReaders). A line from op version 19 on keeps the
+ * readers it had then, so it reaches no one it could not have reached then,
+ * a player who comes to own its creature later included.
  */
-function holderOfEvent(ctx: Ctx, data: { tokenId?: string; characterId?: string; seen?: true }): { token?: Token; character?: Character } | null {
+export function eventReach(state: RoomState, data: LogEvent): Reach {
+  if (neverRead(data)) return [];
+  switch (data.type) {
+    case "hp":
+    case "rest":
+    case "concentration":
+    case "effect":
+    case "area":
+      return creatureReach(state, data, false);
+    case "deathSave":
+    case "life":
+      return creatureReach(state, data, true);
+    case "turn": {
+      const row = state.encounter?.entries.find((e) => e.id === data.entryId);
+      if (!row) return [];
+      if (data.seen) return "all";
+      const token = row.tokenId !== undefined ? state.tokens[row.tokenId] : undefined;
+      const character = row.characterId !== undefined ? state.characters[row.characterId] : undefined;
+      return [...(token ? ownersOf(state, token) : []), ...(character?.ownerIds ?? [])];
+    }
+    case "encounter":
+    case "member":
+      return "all";
+    case "handout": {
+      const handout = state.handouts[data.handoutId];
+      if (!handout) return [];
+      return handout.to === "all" ? "all" : handout.to;
+    }
+    case "roll":
+    case "cast":
+      return creaturePlayers(state, data);
+    case "dice": {
+      const out = new Set<string>();
+      for (const roll of data.rolls) {
+        const reach = diceRollReach(state, roll);
+        if (reach === "all") return "all";
+        for (const id of reach) out.add(id);
+      }
+      return [...out];
+    }
+    case "teleport":
+    case "saveEnds":
+    case "companion":
+    case "characterDeleted":
+    case "trap":
+    case "trapSeen":
+    case "trapNotice":
+      return [];
+  }
+}
+
+/** The players of the creature a roll line, a cast or a roll names. A creature that is gone is no one's. */
+function creaturePlayers(state: RoomState, ref: { tokenId?: string; characterId?: string }): string[] {
+  if (ref.tokenId !== undefined) {
+    const token = state.tokens[ref.tokenId];
+    return token ? ownersOf(state, token) : [];
+  }
+  if (ref.characterId !== undefined) return state.characters[ref.characterId]?.ownerIds ?? [];
+  return [];
+}
+
+/**
+ * Who may have an event about a creature: everyone when it names only a
+ * character, or a token that players who do not own it could see when it
+ * happened, else the token's players. An effect companion's life
+ * (`lifeOnly`) reaches only its players however it was seen.
+ */
+function creatureReach(state: RoomState, data: { tokenId?: string; characterId?: string; seen?: true }, lifeOnly: boolean): Reach {
+  if (data.characterId !== undefined && !state.characters[data.characterId]) return [];
+  if (data.tokenId === undefined) return "all";
+  const token = state.tokens[data.tokenId];
+  if (!token) return [];
+  return data.seen && !(lifeOnly && effectCompanion(token)) ? "all" : ownersOf(state, token);
+}
+
+/**
+ * Who may have one roll of a `dice` line (docs/design-v1-dice.md 5.2): as an
+ * event about its token when it names one, and when marked `hidden`, an
+ * initiative roll for a creature whose place in the order players did not
+ * know then, only the creature's players (docs/design-v1-combat-flow.md
+ * 11.3).
+ */
+function diceRollReach(state: RoomState, roll: DiceRoll): Reach {
+  const own = roll.hidden ? creaturePlayers(state, roll) : "all";
+  return roll.tokenId === undefined ? own : both(own, creatureReach(state, roll, false));
+}
+
+/**
+ * The players who could read a log line when it is written (Tx.addLog):
+ * "all", or the players on the roster then whom eventReach lists, in id
+ * order, which may be none. A chat line reaches all, and a whisper its
+ * parties (whisperParties).
+ */
+export function lineReaders(state: RoomState, entry: Pick<LogEntry, "kind" | "data">): "all" | string[] {
+  if (entry.kind !== "event" || !entry.data) return "all";
+  const reach = eventReach(state, entry.data);
+  if (reach === "all") return reach;
+  return [...new Set(reach)].filter((id) => state.members[id]?.kind === "player").sort();
+}
+
+/** The creature a log event is about, as a player in sight of it now may have it: null when its token is gone or out of their sight. */
+function holderInSight(ctx: Ctx, data: { tokenId?: string; characterId?: string }): { token?: Token; character?: Character } | null {
   const holder: { token?: Token; character?: Character } = {};
   if (data.tokenId !== undefined) {
     const token = ctx.state.tokens[data.tokenId];
     if (!token || !tokenVisibleTo(ctx, token)) return null;
-    if (!data.seen && !ownsToken(ctx.state, ctx.viewer, token)) return null;
     holder.token = token;
     const character = characterOf(ctx.state, token);
     if (character) holder.character = character;
@@ -1397,23 +1513,19 @@ function holderOfEvent(ctx: Ctx, data: { tokenId?: string; characterId?: string;
   return holder;
 }
 
-/** Whether the creature's life is shown to this viewer as alive whatever it is: an effect companion the viewer does not own. */
-function hiddenLife(ctx: Ctx, holder: { token?: Token }): boolean {
-  return holder.token !== undefined && effectCompanion(holder.token) && !ownsToken(ctx.state, ctx.viewer, holder.token);
-}
-
-/** Whether the viewer owns the creature on an initiative row, so its turns are part of the viewer's own history. */
-function ownsRow(ctx: Ctx, row: ProjectedEntry): boolean {
-  const token = row.tokenId !== undefined ? ctx.state.tokens[row.tokenId] : undefined;
-  if (token && ownsToken(ctx.state, ctx.viewer, token)) return true;
-  const character = row.characterId !== undefined ? ctx.state.characters[row.characterId] : undefined;
-  return character !== undefined && ownsCharacter(ctx.viewer, character);
-}
-
+/**
+ * A log event as a player reads it: only when eventReach reaches them, and
+ * then by what the room shows them now. These read-time rules hide a line
+ * from a viewer who may have seen it arrive, and tell nothing about lines
+ * they never get: its creature, area or row is out of their sight or gone
+ * now, the game is paused, a handout is not theirs now, and what HP numbers
+ * they may read.
+ */
 function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
+  if (!reaches(eventReach(ctx.state, data), ctx.viewer.memberId)) return null;
   switch (data.type) {
     case "hp": {
-      const holder = holderOfEvent(ctx, data);
+      const holder = holderInSight(ctx, data);
       if (!holder) return null;
       const access = hpAccess(ctx.state, ctx.viewer, holder);
       // An allowlist: what the change replaced and which line a take-back names are the DM's alone, the owner included.
@@ -1431,20 +1543,18 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
       return out;
     }
     case "concentration": {
-      if (data.hidden) return null;
-      const holder = holderOfEvent(ctx, data);
+      const holder = holderInSight(ctx, data);
       if (!holder) return null;
       if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
       const { dc: _dc, ...rest } = data;
       return rest;
     }
     case "effect":
-      // Hidden from players, owners included, like the effect itself on the actor.
-      if (data.hidden) return null;
-      return holderOfEvent(ctx, data) ? data : null;
+      // Hidden from players, owners included, like the effect itself on the actor (neverRead).
+      return holderInSight(ctx, data) ? data : null;
     case "rest": {
       // Everyone who sees the creature sees it rest. The HP it got back is as private as its HP.
-      const holder = holderOfEvent(ctx, data);
+      const holder = holderInSight(ctx, data);
       if (!holder) return null;
       const access = hpAccess(ctx.state, ctx.viewer, holder);
       const out: LogEvent = { type: "rest", kind: data.kind };
@@ -1460,21 +1570,18 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     }
     case "deathSave": {
       // Life is public, but how close a creature is to death is as private as its HP.
-      const holder = holderOfEvent(ctx, data);
-      if (!holder || hiddenLife(ctx, holder)) return null;
+      const holder = holderInSight(ctx, data);
+      if (!holder) return null;
       if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
       const { ok: _ok, fail: _fail, ...rest } = data;
       return rest;
     }
-    case "life": {
-      // An effect companion reaches non-owners alive (effectCompanion), so its life lines would say otherwise.
-      const holder = holderOfEvent(ctx, data);
-      return holder && !hiddenLife(ctx, holder) ? data : null;
-    }
+    case "life":
+      return holderInSight(ctx, data) ? data : null;
     case "turn": {
       const rows = projectEncounterCtx(ctx)?.entries;
       const row = rows?.find((e) => e.id === data.entryId);
-      if (!row || !(data.seen || ownsRow(ctx, row))) return null;
+      if (!row) return null;
       if (data.to === undefined && data.toSeen === undefined) return data;
       // The row a take-back resumed, only for a player who could see it resume, and sees it now.
       const { to, toSeen, ...rest } = data;
@@ -1483,7 +1590,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     }
     case "area": {
       // The area must have been in players' sight when it happened and be in this player's now, as must the creature.
-      if (data.hidden || !holderOfEvent(ctx, data)) return null;
+      if (!holderInSight(ctx, data)) return null;
       const template = ctx.state.templates[data.templateId];
       return template && projectTemplateCtx(ctx, template) ? data : null;
     }
@@ -1498,24 +1605,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
       // Every player sees the whole roster, so its history is public too.
       // Not tied to who is on the roster now: a removed member's lines stay.
       return data;
-    case "teleport":
-      // The DM's note (docs/design-v1-maps-vision.md 4.1). No player gets it, the token's owners included.
-      return null;
-    case "saveEnds":
-      // The DM's reminder with the save's DC (docs/design-v1-roll-options.md 6.1). A player's creature's player gets a request instead.
-      return null;
-    case "companion":
-      // The DM's note that a player added a companion (docs/design-v1-combat-flow.md 3.6.3). No player gets it.
-      return null;
-    case "characterDeleted":
-      // The DM's note that a player deleted a character, with counts that name what no player may see. No player gets it.
-      return null;
     case "roll": {
-      // As the request itself (projectRollCtx): its creature's players now, under the same two switches.
-      if (ctx.paused || !ownsRollCreature(ctx, data)) return null;
-      // With pass or fail hidden a DM's mark adds nothing a player may read, and its line alone would tell them the DM judged it (LP5-ROLLS-4).
-      // A line written since wave 7 carries its tag and says itself whether a mark wrote it (docs/design-v1-roll-request.md 7.5).
-      if (!data.resultShown && (data.tag === undefined ? isMarkLine(data) : data.mark === true)) return null;
+      // As the request itself (projectRollCtx): its creature's players, under the same two switches.
+      if (ctx.paused) return null;
       const out: LogEvent = { type: "roll", test: data.test };
       if (data.tokenId !== undefined) out.tokenId = data.tokenId;
       if (data.characterId !== undefined) out.characterId = data.characterId;
@@ -1540,9 +1632,13 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
     case "dice":
       return projectDiceCtx(ctx, data);
     case "cast":
-      // As the ask itself (projectCastCtx): its caster's players now, never behind a pause.
-      return ctx.paused || !ownsRollCreature(ctx, data) ? null : data;
-    // Trap lines live in their own logs (projectTrapSeenCtx), never in this one.
+      // As the ask itself (projectCastCtx): its caster's players, never behind a pause.
+      return ctx.paused ? null : data;
+    // The DM's alone (neverRead), and trap lines live in their own logs (projectTrapSeenCtx).
+    case "teleport":
+    case "saveEnds":
+    case "companion":
+    case "characterDeleted":
     case "trap":
     case "trapSeen":
     case "trapNotice":
@@ -1550,15 +1646,19 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
   }
 }
 
+/** Whether the viewer owns the creature on an initiative row, so its turns are part of the viewer's own history. */
+function ownsRow(ctx: Ctx, row: ProjectedEntry): boolean {
+  const token = row.tokenId !== undefined ? ctx.state.tokens[row.tokenId] : undefined;
+  if (token && ownsToken(ctx.state, ctx.viewer, token)) return true;
+  const character = row.characterId !== undefined ? ctx.state.characters[row.characterId] : undefined;
+  return character !== undefined && ownsCharacter(ctx.viewer, character);
+}
+
 /**
  * A `dice` line for a player (docs/design-v1-dice.md 5.2). Each roll is
- * kept when it names no creature, a character, or a token the player may
- * have the events of (holderOfEvent: in sight now, and seen then or
- * owned), so a token's roll follows that token's events and none passes a
- * blackout. An initiative roll marked `hidden`, for a creature whose place
- * in the order players did not know then, is kept only for the creature's
- * own players, such as a monster's lent to one (docs/design-v1-combat-flow.md
- * 11.3). With none kept there is no line.
+ * kept when it reaches them (diceRollReach) and names no token or one in
+ * their sight now, so a token's roll follows that token's events and none
+ * passes a blackout. With none kept there is no line.
  * Open to everyone, or the
  * player's own, it reads in full, the tag only for its roller. A secret
  * roll of someone else's reads as the bare line, and only when the same
@@ -1569,7 +1669,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent): LogEvent | null {
 function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): LogEvent | null {
   if (!ctx.state.members[ctx.viewer.memberId]) return null;
   const rolls = data.rolls
-    .filter((roll) => (!roll.hidden || ownsRollCreature(ctx, roll)) && (roll.tokenId === undefined || holderOfEvent(ctx, roll) !== null))
+    .filter((roll) => reaches(diceRollReach(ctx.state, roll), ctx.viewer.memberId) && (roll.tokenId === undefined || holderInSight(ctx, roll) !== null))
     // The mark is the DM's, so the DM's log alone says the roll was kept from players.
     .map((roll) => {
       if (!roll.hidden) return roll;
@@ -1627,17 +1727,30 @@ export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[],
   return out;
 }
 
+/**
+ * A log line as a viewer reads it, by its audience (shared/logRings.ts): a
+ * whisper by its parties, a DM line by the DM alone, and a party line by
+ * its reader, as a copy naming only them, with the first reader's copy
+ * standing for it in the DM's log. Then a player reads an event by its own
+ * rules (projectEventCtx).
+ */
 function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
-  if (entry.kind === "whisper") {
-    const me = ctx.viewer.memberId;
-    return entry.from === me || entry.to?.includes(me) ? entry : null;
-  }
-  if (ctx.viewer.role === "dm") return entry;
-  if (entry.kind === "chat") return entry;
+  const me = ctx.viewer.memberId;
+  if (entry.kind === "whisper") return entry.from === me || entry.to?.includes(me) ? entry : null;
+  const audience = lineAudience(entry);
+  let line = entry;
+  if (audience === "party") {
+    if (ctx.viewer.role === "dm") return entry.to!.length === 1 ? entry : null;
+    if (entry.to![0] !== me) return null;
+    // Who else reads it is the DM's to know.
+    if (entry.to!.length !== 1) line = { ...entry, to: [me] };
+  } else if (ctx.viewer.role === "dm") return entry;
+  else if (audience === "dm") return null;
+  if (entry.kind === "chat") return line;
   if (!entry.data) return null;
   const data = projectEventCtx(ctx, entry.data);
   if (!data) return null;
-  return data === entry.data ? entry : { ...entry, data };
+  return data === entry.data ? line : { ...line, data };
 }
 
 function projectMemberCtx(_ctx: Ctx, member: Member): Member {

@@ -53,6 +53,7 @@ function replay(start: RoomState, from: number, opVersion: number | undefined, c
   let state = start;
   const states: RoomState[] = [];
   const hashes: string[] = [];
+  const logs: LogEntry[][] = [];
   const refusals: (string | null)[] = [];
   for (let i = from; i < fixture.steps.length; i++) {
     const step = fixture.steps[i]!;
@@ -60,10 +61,11 @@ function replay(start: RoomState, from: number, opVersion: number | undefined, c
     refusals.push(r.ok ? null : r.message);
     if (!r.ok) break;
     hashes.push(hash128(stableStringify({ state: asThatBuild(r.state), log: r.log })));
+    logs.push(r.log);
     states.push(r.state);
     state = r.state;
   }
-  return { state, states, hashes, refusals };
+  return { state, states, hashes, logs, refusals };
 }
 
 /** A log line as a member reads it from the archive, projected as the actor projects stored rows (actor.ts projectLog). */
@@ -131,7 +133,13 @@ describe("a DM's Pass mark from before wave 7", () => {
     assert.deepEqual(old.hashes, fixture.steps.map((s) => s.after), "version 6 keeps the old rule whatever the op holds");
     const today = replay(fixture.state, 0, undefined, tagged);
     assert.notEqual(today.refusals.at(-1), null, "today's rule writes the tag and the mark, so the stored undo refuses");
-    assert.deepEqual(replay(fixture.state, 0, undefined).hashes, fixture.steps.map((s) => s.after), "an untagged live op is judged by the old rule too");
+    // Today each log line keeps its readers (op version 19, shared/logRings.ts), so its id and `to` differ: the rest is compared.
+    const plain = (run: ReturnType<typeof replay>) =>
+      run.states.map((state, i) => {
+        const line = ({ id: _id, to: _to, ...rest }: LogEntry) => stableStringify(rest);
+        return stableStringify({ state: asThatBuild({ ...state, log: [] }), log: state.log.map(line).sort(), wrote: run.logs[i]!.map(line) });
+      });
+    assert.deepEqual(plain(replay(fixture.state, 0, undefined)), plain(replay(fixture.state, 0, fixture.opVersion)), "an untagged live op is judged by the old rule too");
   });
 
   test("a new mark on the legacy answer wins: the DM's Fail keeps the 3, takes its tag, and its line says a mark wrote it", () => {

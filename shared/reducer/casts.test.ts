@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "../keys.ts";
+import { partyIndex, rosterRanks } from "../logRings.ts";
 import type { CastAsk, DiceRoll, LogEntry, RoomState } from "../model.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import type { CastInput, Op } from "../protocol.ts";
@@ -9,6 +10,9 @@ import { DM, P1, P2, castAsk, castTable, damageRoll, diceLine, env } from "../te
 import { labelDamageType } from "./casts.ts";
 
 /** A player's asks for saves in the room's state (docs/design-v1-player-save-spell.md 5.3). */
+
+/** The id of an op's first line only Thorn's player reads, at seq 50 (shared/logRings.ts). */
+const theirs = () => `50:${partyIndex(rosterRanks(castTable().members).get("p1")!, 0)}`;
 
 const ask = (overrides: Partial<CastInput> = {}): Op => ({ t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", ...overrides } });
 
@@ -32,9 +36,10 @@ describe("an ask for saves", () => {
   test("is stored with its asker and time from the envelope, and its line first in the op", () => {
     const r = run(castTable(), ask());
     assert.deepEqual(r.state.casts.k1, { id: "k1", rev: 1, by: "p1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", at: env(50).at });
-    assert.equal(r.log[0]!.id, "50:0");
+    // Only the caster's players read it, so it counts in Thorn's player's own run.
+    assert.equal(r.log[0]!.id, theirs());
     assert.deepEqual(r.log[0]!.data, { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3 });
-    assert.deepEqual(r.touched, [keys.log("50:0"), keys.cast("k1")]);
+    assert.deepEqual(r.touched, [keys.log(theirs()), keys.cast("k1")]);
   });
 
   test("a targets ask keeps its targets and the roll's key, and an ask with no level has none on its line", () => {
@@ -134,7 +139,7 @@ describe("closing an ask", () => {
     ] as const) {
       const r = run(open(), { t: "cast.close", castId: "k1", end }, who);
       assert.equal(r.state.casts.k1, undefined, end);
-      assert.equal(r.log[0]!.id, "50:0");
+      assert.equal(r.log[0]!.id, theirs());
       assert.deepEqual(r.log[0]!.data, { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3, end });
     }
   });

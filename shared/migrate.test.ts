@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { readEntity } from "./keys.ts";
+import { compareLogIds, readEntity } from "./keys.ts";
+import { LIMITS } from "./limits.ts";
 import {
   OP_VERSION,
   SNAPSHOT_VERSION,
@@ -29,9 +30,9 @@ import {
   withTodaysSrdIds,
   type MigrationStep,
 } from "./migrate.ts";
-import type { Encounter, RoomState } from "./model.ts";
+import type { Encounter, LogEntry, RoomState } from "./model.ts";
 import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
-import { projectState } from "./project.ts";
+import { projectArchivedLog, projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { CHANGED_SINCE, guardMatches } from "./reducer/misc.ts";
 import { guardHash } from "./reducer/tx.ts";
@@ -1077,5 +1078,39 @@ describe("follow-up batch 23: op version 19, snapshot version 20 (design 7.3, Lo
     const kept = new Set(next.log.map((e) => e.id));
     assert.deepEqual(loaded.log.filter((e) => !kept.has(e.id)).map((e) => e.id), ["1:0"]);
     assert.equal(next.log.length, 201);
+  });
+
+  test("a room from before the rings with more whispers and DM lines than their bounds keeps every line within reach", () => {
+    const whisper = (i: number) => ({ id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: i % 4 === 0 ? "p1" : "dm1", to: [i % 4 === 0 ? "dm1" : "p1"], text: "psst" });
+    const note = (i: number) => ({ id: `${i + 1}:0`, at: AT, kind: "event" as const, data: { type: "teleport" as const, tokenId: "g1", past: "wall" as const } });
+    const chat = (i: number) => ({ id: `${i + 1}:0`, at: AT, kind: "chat" as const, from: "p2", text: "hi" });
+    const layouts: [string, (i: number) => LogEntry][] = [
+      // 60 whispers between P1 and the DM, 110 of the DM's notes, and 30 chat lines.
+      ["whispers first", (i) => (i < 120 && i % 2 === 0 ? whisper(i) : i < 170 ? note(i) : chat(i))],
+      // 120 of the DM's notes among 80 chat lines.
+      ["the DM's notes among chat", (i) => (i % 5 < 3 ? note(i) : chat(i))],
+    ];
+    for (const [name, line] of layouts) {
+      const state = room();
+      state.tokens.g1 = token("g1", { name: "Goblin", visibility: "dm" });
+      state.log = Array.from({ length: 200 }, (_, i) => line(i));
+      // Ops wrote every line to the archive as they came, so a line before a live log reaches its viewer from there.
+      const archive = [...state.log];
+      let next = migrateSnapshot(JSON.parse(JSON.stringify(state)), 20);
+      for (let i = 0; i < 40; i++) {
+        const r = applyOp(next, i % 2 === 0 ? { t: "log.whisper", to: ["dm1"], text: `more ${i}` } : { t: "log.chat", text: `back ${i}` }, P1, env(300 + i));
+        assert.ok(r.ok);
+        archive.push(...r.log);
+        next = r.state;
+      }
+      assert.ok(archive.filter((e) => e.kind === "event").length > LIMITS.dmLogLines, name);
+      for (const viewer of [DM, P1, P2]) {
+        const live = projectState(next, viewer, { sceneId: "s1" }).log;
+        const readable = projectArchivedLog(next, archive, viewer, { sceneId: "s1" });
+        const first = live[0]!.id;
+        const pages = readable.filter((e) => compareLogIds(e.id, first) < 0);
+        assert.deepEqual([...pages, ...live].map((e) => e.id), readable.map((e) => e.id), `${name}, ${viewer.memberId}: the archive's pages and the live log together hold every line`);
+      }
+    }
   });
 });

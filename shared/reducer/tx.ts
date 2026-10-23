@@ -1,6 +1,6 @@
 import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import { DM_LINE_BASE, droppedLines, lineAudience, MAX_LOG } from "../logRings.ts";
+import { DM_LINE_BASE, droppedLines, MAX_LOG, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
 import { logsByAudience } from "../migrate.ts";
 import type {
   Actor,
@@ -15,7 +15,7 @@ import type {
   TokenKind,
   Viewer,
 } from "../model.ts";
-import { hashValue, seenByNonOwners } from "../project.ts";
+import { hashValue, lineReaders, seenByNonOwners } from "../project.ts";
 import type { ActorTarget, RefusalCode, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { decodeTile } from "../rules/fog.ts";
@@ -90,6 +90,8 @@ export class Tx {
   private readonly bookkeeping = new Set<EntityKey>();
   private logIndex = 0;
   private dmLineIndex = 0;
+  /** Each reader's party lines this op has written (Tx.addLog). */
+  private readonly partyLines = new Map<string, number>();
 
   constructor(state: RoomState, actor: Viewer, env: Env) {
     this.state = { ...state };
@@ -213,28 +215,62 @@ export class Tx {
   /**
    * Appends a log entry with an id derived from the envelope, so a replay
    * never inserts it twice. The log keeps each audience's lines apart
-   * (shared/logRings.ts): a DM line counts on from DM_LINE_BASE, as the
-   * DM's trap lines do, so it never moves the id of a later line a player
-   * gets, and each ring drops only its own oldest, so it never pushes out a
-   * line a player holds. A DM line too long for its ring goes only to the
-   * archive. Ops stored before op version 19 kept one ring for every line,
-   * numbered in order, and replay so.
+   * (shared/logRings.ts), each fixed by who could read the line now
+   * (lineReaders), the room as the op has left it so far:
+   *
+   * - A line every player may read counts on from 0 in the op.
+   * - A line no player could read counts on from DM_LINE_BASE, as the DM's
+   *   trap lines do, so it never moves the id of a later line a player
+   *   gets. One too long for its ring goes only to the archive.
+   * - A line only some players could read is written once for each, in
+   *   that reader's own run from PARTY_LINE_BASE, so the ids each player
+   *   gets in one op count on without a gap whatever the op wrote for
+   *   others. Its first reader's copy stands for it in the DM's log and is
+   *   the one returned. A reader's 2,000th line in one op, which no op
+   *   comes near, would leave their run, so such a line goes to the DM
+   *   alone.
+   *
+   * Each ring then drops only its own oldest, so a line never pushes out
+   * one a viewer holds who could not read it. Ops stored before op version
+   * 19 kept one ring for every line, numbered in order, and replay so.
    */
   addLog(entry: Omit<LogEntry, "id" | "at">): LogEntry {
-    const apart = logsByAudience(this.env.opVersion);
-    const dm = apart && lineAudience(entry) === "dm";
-    const index = dm ? DM_LINE_BASE + this.dmLineIndex++ : this.logIndex++;
-    const full: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, ...entry };
-    this.log.push(full);
-    if (!apart) {
-      this.write(keys.log(full.id), full);
+    if (!logsByAudience(this.env.opVersion)) {
+      const full = this.appendLine(entry, this.logIndex++);
       const log = this.collection("log");
       while (log.length > MAX_LOG) this.write(keys.log(log[0]!.id), null);
       return full;
     }
-    if (dm && serializedBytes(full) > LIMITS.dmLogLineBytes) return full;
-    this.write(keys.log(full.id), full);
+    let readers = entry.kind === "whisper" ? "all" : lineReaders(this.state, entry);
+    if (readers !== "all" && readers.some((id) => (this.partyLines.get(id) ?? 0) >= PARTY_SLOT)) readers = [];
+    let first: LogEntry;
+    if (readers === "all") first = this.appendLine(entry, this.logIndex++);
+    else if (readers.length === 0) {
+      const index = DM_LINE_BASE + this.dmLineIndex++;
+      const line: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, ...entry };
+      if (serializedBytes(line) > LIMITS.dmLogLineBytes) {
+        this.log.push(line);
+        return line;
+      }
+      first = this.appendLine(entry, index);
+    } else {
+      const ranks = rosterRanks(this.state.members);
+      const copies = readers.map((reader, i) => {
+        const count = this.partyLines.get(reader) ?? 0;
+        this.partyLines.set(reader, count + 1);
+        return this.appendLine({ ...entry, to: i === 0 ? [reader] : [reader, readers[0]!] }, partyIndex(ranks.get(reader)!, count));
+      });
+      first = copies[0]!;
+    }
     for (const id of droppedLines(this.collection("log"), this.state.members)) this.write(keys.log(id), null);
+    return first;
+  }
+
+  /** Writes a log line numbered `index` in this op, and keeps it for the archive. */
+  private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number): LogEntry {
+    const full: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, ...entry };
+    this.log.push(full);
+    this.write(keys.log(full.id), full);
     return full;
   }
 

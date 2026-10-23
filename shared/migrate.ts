@@ -541,18 +541,25 @@ export const opMigrations: MigrationStep[] = [
   {
     // Follow-up batch 23 (design 7.3, Log): no op changes shape, so the
     // step is the identity. The log keeps each audience's lines apart from
-    // this version (`logsByAudience`, shared/logRings.ts): a line only the
-    // DM gets counts on from DM_LINE_BASE, and each ring drops only its own
-    // oldest, so a line one viewer never receives never moves another's.
-    // Older ops replay by the one ring they were written under, so their
-    // line ids are the ones the archive holds, and the reducer's reads of
-    // the log, such as an area's once a turn, answer as they did.
+    // this version (`logsByAudience`, shared/logRings.ts), each line's
+    // audience fixed by who could read it when written (lineReaders): a
+    // line no player could read counts on from DM_LINE_BASE, one only some
+    // players could read is written once for each in their own run from
+    // PARTY_LINE_BASE, and each ring drops only its own oldest, so a line one
+    // viewer never receives never moves another's. Older ops replay by the
+    // one ring they were written under, so their line ids are the ones the
+    // archive holds, and the reducer's reads of the log, such as an area's
+    // once a turn, answer as they did.
     //
     // The stored state keeps its shape: the log is still one list of
-    // lines, now longer than 200 and with DM lines numbered from
-    // DM_LINE_BASE, so the snapshot version stays 20. An older build reads
-    // such a log as it is and trims it back to one ring of 200 at its next
-    // line, and its projection reads each line by the same rules.
+    // lines, now longer than 200, with lines numbered from PARTY_LINE_BASE
+    // and DM_LINE_BASE, and with `to` on a party line, a field every line
+    // could already hold. So the snapshot version stays 20. An older build
+    // reads such a log as it is and trims it back to one ring of 200 at its
+    // next line. Its projection reads each line by its own rules then: a
+    // line written for its readers shows each of its copies to the
+    // creature's players of the moment, its `to` included, and a DM line
+    // about a creature reaches a player who plays it since.
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 19, and the shutdown writes version 20 snapshots, as

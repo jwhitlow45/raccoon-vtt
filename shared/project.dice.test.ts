@@ -126,14 +126,17 @@ describe("who receives a dice line (docs/design-v1-dice.md 5.2)", () => {
     assert.equal(seen(lifted, goblin.entry, P2), null, "nor after it lifts: no one saw the goblin then");
   });
 
-  test("a token revealed later keeps its earlier unseen rolls out of others' logs, and its new owner gets them", () => {
+  test("a token revealed or lent later keeps its earlier unseen rolls out of every player's log, its new owner's too", () => {
     const dark = roll(DM, table(), "all", [{ formula: "1d20+2", creature: { tokenId: "g3" } }]);
     const revealed = structuredClone(dark.state);
     reveal(revealed, "s1", { x: 0, y: 0, w: 40, h: 30 });
     assert.equal(seen(revealed, dark.entry, P2), null);
+    // No player could read the line when it was written, so it is the DM's for good (shared/logRings.ts).
     const given = apply(dark.state, { t: "token.update", tokenId: "g3", patch: { ownerIds: ["p2"] } }, DM, 50);
-    assert.equal(seen(given, dark.entry, P2)?.rolls[0]?.tokenId, "g3");
+    assert.equal(seen(given, dark.entry, P2), null);
     assert.equal(seen(given, dark.entry, P1), null);
+    const now = roll(DM, given, "all", [{ formula: "1d20+2", creature: { tokenId: "g3" } }]);
+    assert.equal(seen(now.state, now.entry, P2)?.rolls[0]?.tokenId, "g3", "a roll made since reaches its player");
   });
 
   test("a public ac and dc reach players, and a roller removed from the room still has a line", () => {

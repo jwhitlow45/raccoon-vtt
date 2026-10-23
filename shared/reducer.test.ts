@@ -4,6 +4,7 @@ import { keys } from "./keys.ts";
 import type { LogEvent, RoomState, Viewer } from "./model.ts";
 import { MAX_NAME, type Op, type RestoreEntry } from "./protocol.ts";
 import { LIMITS } from "./limits.ts";
+import { DM_LINE_BASE } from "./logRings.ts";
 import { applyOp, MAX_LOG } from "./reducer.ts";
 import { hashValue } from "./project.ts";
 import { MAX_HISTORY } from "./reducer/encounter.ts";
@@ -65,7 +66,8 @@ describe("the reducer itself", () => {
     assert.deepEqual(state, snapshot);
     assert.deepEqual(a, b);
     assert.ok(a.ok && b.ok);
-    assert.equal(a.log[0]!.id, "7:0");
+    // No player sees or plays the goblin, so its line counts with the DM's (shared/logRings.ts).
+    assert.equal(a.log[0]!.id, `7:${DM_LINE_BASE}`);
     assert.equal(a.log[0]!.at, AT);
     const c = applyOp(state, op, DM, env(8));
     assert.ok(c.ok);

@@ -1,4 +1,4 @@
-import { dmNumbered } from "../logRings.ts";
+import { countedApart } from "../logRings.ts";
 import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, RoomState, Token } from "../model.ts";
 import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
@@ -85,10 +85,11 @@ function inside(state: RoomState, template: AreaTemplate, candidates: readonly T
  * that is running, since the newest turn line: for any trigger when the area
  * hits once a turn, else for this one.
  *
- * A reminder only the DM gets counts past the shared lines of its op
- * (Tx.addLog), so it sorts after the turn line its op wrote. The only one
- * an op writes before its turn line is a turn end's (remindTurnEnd), for the
- * turn that ended there, so that one is left to the turn before. An op
+ * A reminder only the DM or only some players get counts past the shared
+ * lines of its op (Tx.addLog), so it may sort after the turn line its op
+ * wrote. The only one an op writes before its turn line is a turn end's
+ * (remindTurnEnd), for the turn that ended there, so that one is left to
+ * the turn before. An op
  * stored before op version 19 numbered every line in order (`apart`
  * false), so it replays without that rule, as the build that stored it ran.
  */
@@ -100,7 +101,7 @@ function remindedThisTurn(log: readonly LogEntry[], template: AreaTemplate, toke
     const line = log[i]!;
     const data = line.data;
     if (data?.type !== "area" || data.templateId !== template.id || data.tokenId !== tokenId) continue;
-    if (apart && data.trigger === "turnEnd" && seqOf(line.id) === turnSeq && dmNumbered(line.id)) continue;
+    if (apart && data.trigger === "turnEnd" && seqOf(line.id) === turnSeq && countedApart(line.id)) continue;
     if (template.oncePerTurn === true || data.trigger === trigger) return true;
   }
   return false;
