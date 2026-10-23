@@ -412,11 +412,9 @@ function CardBody(props: Shown) {
           addBlock={character && actor?.srdId === undefined && init !== null && editsPcStats(dice.you, character) ? () => openPcStats(character.id) : null}
         />
       )}
-      {numbers ? (
-        init !== null ? <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} /> : null
-      ) : init !== null ? (
+      {init !== null ? (
         <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
-      ) : (
+      ) : numbers ? null : (
         // With no known bonus it rolls by the one typed, and waits for it.
         <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? d20Text(typed.bonus) : "d20"} />
       )}
@@ -463,7 +461,6 @@ function OptionGroups(props: Shown) {
   const attackNote = presetLine(presetOf({ kind: "attack" }));
   const spellNote = presetLine(presetOf({ kind: "attack", spell: true }));
   const sharedNote = [...new Set([saveNote, checkNote].flatMap((n) => n.split(". ")).filter(Boolean))].join(". ");
-  const unknown = numbers ? null : { typed };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
@@ -473,18 +470,18 @@ function OptionGroups(props: Shown) {
         </div>
       ) : null}
       <Group label="Saves and checks" {...groupFold("saves")} summary={foldSummary({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves)}>
-        <Grid label="Saves" note={unknown ? undefined : saveNote}>
+        <Grid label="Saves" note={numbers ? saveNote : undefined}>
           {ABILITY_KEYS.map((a) =>
-            unknown || !numbers ? (
+            !numbers ? (
               <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={0} unknown={{ typed }} text={typedText(ABILITY_SHORT[a], typed)} />
             ) : (
               <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={numbers.abilities[a].save} text={`${ABILITY_SHORT[a]} ${signedText(numbers.abilities[a].save)}`} common={saveCommon} />
             ),
           )}
         </Grid>
-        <Grid label="Checks" note={unknown ? undefined : checkNote}>
+        <Grid label="Checks" note={numbers ? checkNote : undefined}>
           {ABILITY_KEYS.map((a) => {
-            if (unknown || !numbers) return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={0} unknown={{ typed }} text={typedText(ABILITY_SHORT[a], typed)} />;
+            if (!numbers) return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={0} unknown={{ typed }} text={typedText(ABILITY_SHORT[a], typed)} />;
             const bonus = bonusFor(numbers, { kind: "check", ability: a }) ?? 0;
             return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={bonus} text={`${ABILITY_SHORT[a]} ${signedText(bonus)}`} common={checkCommon} />;
           })}
@@ -504,7 +501,7 @@ function OptionGroups(props: Shown) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
           {SKILL_KEYS.map((s: SkillKey) => {
             const ability: AbilityKey = SKILLS[s].ability;
-            if (unknown || !numbers) return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={0} unknown={{ typed }} text={typedText(SKILLS[s].name, typed)} />;
+            if (!numbers) return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={0} unknown={{ typed }} text={typedText(SKILLS[s].name, typed)} />;
             const bonus = bonusFor(numbers, { kind: "check", ability, skill: s }) ?? 0;
             return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={bonus} text={`${SKILLS[s].name} ${signedText(bonus)}`} common={checkCommon} />;
           })}
