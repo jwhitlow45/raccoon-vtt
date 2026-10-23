@@ -28,12 +28,18 @@ import type { Locator, Page } from "playwright-core";
  * stand on unmoved, then moved by that offset again, so the move is kept
  * whole and only the font's rounding is put right. An offset moves only
  * what is painted, so the line stays where it was. A vertical alignment
- * moves the line box with the words instead: a 1.4 px raise grows the
- * line, which its block then centers, so the words move 0.7 px. No grid
- * says where they stand, and they keep their own estimate. A transform
- * does not move an inline box at all. What a scroller inside the measured
- * part hides is not seen. What takes a tap is one box to the eye, painted
- * or not, and what it holds is centered in it.
+ * moves the words' box in the line instead, and grows the line: a 1.4 px
+ * raise grows the line, which its block then centers, so the words move
+ * 0.7 px. Aligned by a length, the line's top is put on its block's
+ * grid, and the words stand below it as far as the alignment lowers them
+ * (a raised box sets the line's top, so its words stand at it). This
+ * holds on the block's first line only, since a line under an aligned
+ * one stands off the grid by what that one grew. Aligned by a keyword
+ * (middle, sub, top and the rest), which rests on the font's metrics, no
+ * grid says where the words stand, and they keep their own estimate. A
+ * transform does not move an inline box at all. What a scroller inside
+ * the measured part hides is not seen. What takes a tap is one box to the
+ * eye, painted or not, and what it holds is centered in it.
  *
  * What the checks leave out, each for a reason, each with a drawn case
  * in e2e/alignment.e2e.ts (pl3-0):
@@ -78,11 +84,12 @@ import type { Locator, Page } from "playwright-core";
  *   option's fill, which stands its padding outside words that line up
  *   with its unchosen kin, places nothing. A row that draws a box around
  *   words it centers (a stacked foot's full-width button) starts at its
- *   box. A lone painted notice, its fill on the column's edge and its
- *   words set in, may start at its box or its words. Painted rows
- *   stacked together also share their fills' edge and their words' edge.
- *   What is set centered or at the end, as a
- *   field row's field at its right, is no edge. Three rows that each
+ *   box. A lone painted notice may start at its words, or at its box
+ *   with its fill on the column's edge, its words then set in by its
+ *   border and padding alone: set in further, they have drifted inside
+ *   it. Painted rows stacked together also share their fills' edge and
+ *   their words' edge. What is set centered or at the end, as a field
+ *   row's field at its right, is no edge. Three rows that each
  *   start apart share none. A nested list or group set in by its own
  *   padding or margin is a column of its own when it sits an indent step
  *   (INDENT_PX) or more past the column's edge. Set in by less, it has
@@ -256,44 +263,68 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     const lhPx = lh * zoomOf(parent);
     const half = (lhPx - (r.bottom - r.top)) / 2;
     const own = { t: r.top - half, b: r.bottom + half };
-    // The block the line belongs to, and how far everything between the words and it moves them on purpose.
+    // The block the line belongs to, and how far everything between the words and it moves them on purpose: the offsets, and each vertical alignment from the outermost in.
     let block: DomElement | null = parent;
     let shift: number | null = 0;
+    const aligns: number[] = [];
     while (block && ["inline", "contents"].includes(style(block).display)) {
       const by = shiftOf(block);
-      shift = shift === null || by === null ? null : shift + by;
+      if (by === null) shift = null;
+      else if (shift !== null) {
+        shift += by.offset;
+        aligns.unshift(by.align);
+      }
       block = block.parentElement;
     }
     if (shift === null || !block || !["block", "flow-root", "list-item", "inline-block"].includes(style(block).display) || parseFloat(style(block).lineHeight) !== lh) return own;
     const bs = style(block);
     const top = block.getBoundingClientRect().top + ((parseFloat(bs.getPropertyValue("border-top-width")) || 0) + (parseFloat(bs.getPropertyValue("padding-top")) || 0)) * zoomOf(block);
-    // The move is taken off before the line is put on the grid and added back after. Snapping the moved words would cancel a move of about a pixel, or add the font's rounding to it.
-    const unmoved = own.t - shift;
-    const i = Math.round((unmoved - top) / lhPx);
+    // The line's top is the top of its highest box: the block's own strut, or an aligned box around the words. The words stand `drop` below it.
+    let at = 0;
+    let highest = 0;
+    for (const a of aligns) {
+      at += a;
+      highest = Math.min(highest, at);
+    }
+    const drop = at - highest;
+    // The moves are taken off before the line is put on the grid and added back after. Snapping the moved words would cancel a move of about a pixel, or add the font's rounding to it.
+    const lineTop = own.t - shift - drop;
+    const i = Math.round((lineTop - top) / lhPx);
     const t = top + i * lhPx;
+    // An aligned line is taller than the grid's step by its move, so a line wrapped under it stands off the grid by as much, and a move under a pixel would pass for the font's rounding. Only the block's first line is sure to start on the grid.
+    const grows = aligns.some((a) => a !== 0);
     // Only the rounding of a font's metrics, at most a pixel, is put back. A line further off the grid, as beside a taller inline control, keeps the text's own estimate.
-    return i >= 0 && Math.abs(t - unmoved) <= 1 ? { t: t + shift, b: t + shift + lhPx } : own;
+    return i >= 0 && !(grows && i > 0) && Math.abs(t - lineTop) <= 1 ? { t: t + drop + shift, b: t + drop + shift + lhPx } : own;
   }
 
   /**
-   * How far down an inline element's relative offset moves its words, in
-   * page px. Null when it sets a vertical alignment, which moves the line
-   * box too (see the header). A transform adds nothing, since it does not
+   * How far down an inline element moves its words on purpose, in page
+   * px: `offset` by a relative offset, which moves only what is painted,
+   * and `align` by a vertical alignment of a length, which moves its box
+   * in the line and grows the line (see the header). Null for a keyword
+   * alignment, whose move rests on the font's metrics, or for an offset
+   * or alignment not in px. A transform adds nothing, since it does not
    * move an inline box.
    */
-  function shiftOf(el: DomElement): number | null {
+  function shiftOf(el: DomElement): { offset: number; align: number } | null {
     const cs = style(el);
-    if (cs.getPropertyValue("vertical-align") !== "baseline") return null;
-    if (cs.position !== "relative") return 0;
+    const va = cs.getPropertyValue("vertical-align");
+    // A length raises the box, and `align` counts down.
+    const align = va === "baseline" ? 0 : va.endsWith("px") ? -parseFloat(va) * zoomOf(el) : null;
+    if (align === null) return null;
+    if (cs.position !== "relative") return { offset: 0, align };
     const px = (v: string) => (v.endsWith("px") ? parseFloat(v) * zoomOf(el) : null);
     const top = cs.getPropertyValue("top");
     const bottom = cs.getPropertyValue("bottom");
-    if (top !== "auto" && top !== "") return px(top);
+    if (top !== "auto" && top !== "") {
+      const down = px(top);
+      return down === null ? null : { offset: down, align };
+    }
     if (bottom !== "auto" && bottom !== "") {
       const up = px(bottom);
-      return up === null ? null : -up;
+      return up === null ? null : { offset: -up, align };
     }
-    return 0;
+    return { offset: 0, align };
   }
 
   function rectOf(el: DomElement): Box {
@@ -714,18 +745,20 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           });
           const near = (a: number, b: number) => Math.abs(a - b) <= LIMIT;
           const reported = new Set<DomElement>();
-          // Lines for the rows of `at` that start apart from the most, each row meeting at any of its lefts. `least` is how many must share the edge.
-          const judge = (at: { c: DomElement; lefts: number[] }[], least: number, label: string) => {
+          // Lines for the rows of `at` that start apart from the most, each row meeting at any of its lefts. `least` is how many must share the edge. It gives the edge, or null when too few share one.
+          const judge = (at: { c: DomElement; lefts: number[] }[], least: number, label: string): number | null => {
             const meets = (x: { lefts: number[] }, v: number) => x.lefts.some((l) => near(l, v));
             const mode = at.flatMap((x) => x.lefts).sort((a, b) => at.filter((y) => meets(y, b)).length - at.filter((y) => meets(y, a)).length)[0]!;
             const shared = at.filter((x) => meets(x, mode)).length;
+            if (shared < least) return null;
             const off = (x: { lefts: number[] }) => x.lefts.reduce((a, l) => (Math.abs(l - mode) < Math.abs(a - mode) ? l : a)) - mode;
             const odd = at.filter((x) => !meets(x, mode) && !reported.has(x.c)).map((x) => ({ c: x.c, left: mode + off(x) }));
-            if (shared < least || !odd.length) return;
+            if (!odd.length) return mode;
             for (const x of odd) reported.add(x.c);
             push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: round(Math.max(...odd.map((x) => Math.abs(x.left - mode)))), box: union(odd.map((x) => rectOf(x.c))), what: odd.map((x) => `${say(x.c)} at ${round(x.left - mode)}`).join(" | "), detail: `${label} start at ${round(mode)}` });
+            return mode;
           };
-          // Each row is read by its words, and a row that draws a box around words it centers by its box. A lone painted notice, its fill on the column's edge and its words set in, may start at either. A chosen option's fill shows the choice, so it meets by its words.
+          // Each row is read by its words, and a row that draws a box around words it centers by its box. A lone painted notice may start at its words, or at its fill on the column's edge with its words set in by its border and padding alone. A chosen option's fill shows the choice, so it meets by its words.
           const painted = known.filter((x) => x.box !== null);
           const lone = painted.length === 1 && painted[0]!.notice ? painted[0]! : null;
           const rows = known.map((x) => ({ c: x.c, inset: x.inset, lefts: x.words === null ? [x.box!] : x === lone ? [x.box!, x.words] : [x.words] }));
@@ -738,7 +771,13 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             // A nested list or group an indent step or more past the edge is a column of its own. Set in by less, it has drifted.
             const step = INDENT_PX * zoomOf(el) - LIMIT;
             // An edge is where two rows or more start: three rows that each start apart, as a dialog's header, body and foot, share none.
-            judge(rows.filter((x) => !(x.inset && x.lefts[0]! - mode >= step)), 2, "most");
+            const edge = judge(rows.filter((x) => !(x.inset && x.lefts[0]! - mode >= step)), 2, "most");
+            // A lone notice on the edge by its fill holds its words in by its border and padding, so words set in further have drifted inside it.
+            if (lone && lone.words !== null && edge !== null && near(lone.box!, edge) && !reported.has(lone.c)) {
+              const b = boxes(lone.c);
+              const off = round(lone.words - (b.inner.l + b.pad.l));
+              if (Math.abs(off) > LIMIT) push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: off, box: rectOf(lone.c), what: `${say(lone.c)} words at ${off} past its padding`, detail: `its fill starts on the edge at ${round(edge)}` });
+            }
           }
           // Painted rows stacked in a column are boxes the eye lays side by side, so their fills share an edge, and so do their words.
           if (painted.length >= 2) {

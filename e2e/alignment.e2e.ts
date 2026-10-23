@@ -649,9 +649,12 @@ async function patScreens(sweep: Sweep, page: Page): Promise<void> {
  * Drawn cases for the helper itself: each shape the polish pass found
  * (docs/design-v1-polish.md 1), and the shape its fix gives (section 2),
  * so the helper is shown to catch the one and pass the other without the
- * app. Each case is a root of its own, named by `data-case`.
+ * app. Each case is a root of its own, named by `data-case`. The doctype
+ * lays them out in standards mode, as the app is: in quirks mode a line
+ * that holds only a lowered span does not grow, so its words never move.
  */
 const CASES = `
+<!doctype html>
 <style>
   body { margin: 0; font: 14px/1.4 sans-serif; color: #eee; background: #222; }
   * { box-sizing: border-box; }
@@ -737,6 +740,8 @@ const CASES = `
 <div data-case="cards-box-drift"><div class="card">Card one</div><div class="card">Card two</div><div class="card" style="padding: 8px 7px; margin-left: 3px">Card three</div></div>
 <div data-case="notice-lone"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px">A notice set in</div><div>Plain four</div></div>
 <div data-case="notice-lone-drift"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px; margin-left: 3px">A notice set in</div><div>Plain four</div></div>
+<div data-case="notice-inner-6"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 12px"><span style="margin-left: 6px">A notice set in</span></div><div>Plain four</div></div>
+<div data-case="notice-pad-18"><div>Plain one</div><div>Plain two</div><div role="status" style="background: #333; padding: 4px 18px">A notice set in</div><div>Plain four</div></div>
 <div data-case="ul-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><ul style="padding-left: 14px; margin: 0; list-style: none"><li>Item</li></ul></div>
 <div data-case="group-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><div role="group" aria-label="Grouped" style="padding-left: 16px"><span>Grouped</span></div></div>
 <div data-case="group-step"><div>Row one</div><div>Row two</div><div role="group" aria-label="Grouped" style="padding-left: 12px"><span>Grouped</span></div><div>Row four</div></div>
@@ -755,6 +760,8 @@ const CASES = `
 <div data-case="nudge-up"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: -1.5px">Nudged words</span></div></div></div>
 <div data-case="nudge-1-4"><div class="nudge"><div style="flex: 1"><span style="position: relative; top: 1.4px">Nudged words</span></div></div></div>
 <div data-case="nudge-transform"><div class="nudge"><div style="flex: 1"><span style="transform: translateY(3px)">Nudged words</span></div></div></div>
+<div data-case="valign-down-3"><div class="nudge"><div style="flex: 1"><span style="vertical-align: -3px">Nudged words</span></div></div></div>
+<div data-case="valign-up-1-4"><div class="nudge"><div style="flex: 1"><span style="vertical-align: 1.4px">Nudged words</span></div></div></div>
 <div data-case="font-rounding">
   <div class="box" style="height: 54.96px; padding: 15px 10px; font-size: 20.8px; line-height: 24.96px"><span><span>A zoomed title</span></span></div>
 </div>
@@ -982,9 +989,11 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await passes("cards-even");
       await caught("cards-words-drift", "edge");
       await caught("cards-box-drift", "edge");
-      // A lone notice may start at its fill, its words set in. Its fill moved, it has drifted.
+      // A lone notice may start at its fill, its words set in. Its fill moved, it has drifted. On the edge by its fill, its words start at its padding: set in 6 px further by a margin, they have drifted, where a wider padding is the notice's own.
       await passes("notice-lone");
       await caught("notice-lone-drift", "edge");
+      await caught("notice-inner-6", "edge");
+      await passes("notice-pad-18");
       // A nested list or group set in by less than an indent step has drifted. Set in by a step, it is a column of its own.
       await caught("ul-pad", "edge");
       await caught("group-pad", "edge");
@@ -1000,6 +1009,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await caught("nudge-up", "center");
       await caught("nudge-1-4", "center");
       await passes("nudge-transform");
+      // A vertical alignment by a length moves the words' box in its line and grows the line, which its block centers: lowered 3 px, the words move 1.5 px, and raised 1.4 px, 0.7 px. Only the font's rounding is put right.
+      await caught("valign-down-3", "center");
+      await passes("valign-up-1-4");
       // A control's only content placed absolutely is measured. A badge beside content in the flow is not.
       await caught("placed-sole", "center");
       await passes("placed-badge");
