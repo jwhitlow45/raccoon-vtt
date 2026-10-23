@@ -609,6 +609,63 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     }
   });
 
+  test("lp2-3b. in Wild Shape the panel's Known forms has Change: its step has no Back and its Close closes it, removing the last form leaves Choose known forms, and adding one again never ends the shape or reaches Back to the creatures (docs/design-v1-look-pass-2.md D19)", async () => {
+    const panel = await showBree(ana);
+    const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;
+    const breeForms = () => anaSocket.state?.characters[run.bree.characterId]?.knownForms ?? [];
+    await panel.getByRole("button", { name: "Wolf", exact: true }).click();
+    await waitFor("Bree as a wolf", () => (breeActor()?.srdId === "wolf" && breeActor()?.wildShape ? true : null));
+    const stillWolf = () => assert.ok(breeActor()?.srdId === "wolf" && breeActor()?.wildShape, "the shape ended");
+    assert.equal(await panel.getByRole("button", { name: "Take a shape" }).count(), 0, "Take a shape is hidden in a shape");
+    const step = ana.getByRole("dialog", { name: "Bree’s known forms" });
+    const forms = panel.locator("section").filter({ has: ana.getByRole("heading", { name: "Known forms", exact: true }) });
+    const noWayBack = async () => {
+      assert.equal(await step.getByRole("button", { name: /^Back/ }).count(), 0, "the step offers a Back");
+      assert.equal(await ana.getByRole("button", { name: "Back to the creatures" }).count(), 0);
+    };
+    const open = async (words: string) => {
+      await forms.getByRole("button", { name: words, exact: true }).click();
+      await step.waitFor();
+      await noWayBack();
+    };
+    const close = async () => {
+      await step.getByRole("button", { name: "Close Bree’s known forms", exact: true }).click();
+      await step.waitFor({ state: "detached" });
+    };
+
+    await open("Change");
+    await shots.take(ana, "pcstats-lp2-3b-change-step");
+    await close();
+    stillWolf();
+
+    await open("Change");
+    const row = (name: RegExp) => step.getByRole("button", { name }).first();
+    for (const name of [/^Black Bear /, /^Wolf /]) {
+      if ((await row(name).getAttribute("aria-pressed")) === "true") await row(name).click();
+    }
+    await waitFor("no known forms", () => (breeForms().length === 0 ? true : null));
+    // The step stays in the user's hands after the last form goes, with still no way back to the creatures.
+    await step.getByText(/^0 (of \d+ )?known forms/).waitFor();
+    await noWayBack();
+    await close();
+    stillWolf();
+    await forms.getByRole("button", { name: "Choose known forms", exact: true }).waitFor();
+    assert.equal(await forms.getByRole("button", { name: "Change", exact: true }).count(), 0);
+    await shots.take(ana, "pcstats-lp2-3b-choose-known-forms");
+
+    await open("Choose known forms");
+    await row(/^Black Bear /).click();
+    await row(/^Wolf /).click();
+    await waitFor("the two forms back", () => (breeForms().length === 2 ? true : null));
+    await noWayBack();
+    await close();
+    stillWolf();
+    await forms.getByRole("button", { name: "Change", exact: true }).waitFor();
+    assert.equal(await forms.getByRole("button", { name: "Wolf", exact: true }).getAttribute("aria-pressed"), "true");
+    await panel.getByRole("button", { name: "End the shape" }).click();
+    await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
+  });
+
   test("5. a D&D Beyond character's JSON pasted fills the review, which lists what it replaces since Bree has no sync record, and Use it then Save keeps Ana's own block parts it did not read", async () => {
     const panel = await showBree(ana);
     await panel.getByRole("button", { name: "Edit", exact: true }).click();

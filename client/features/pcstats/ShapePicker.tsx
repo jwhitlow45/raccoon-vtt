@@ -4,7 +4,7 @@ import { MAX_KNOWN_FORMS } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
-import { Input, Select } from "../../components/Field.tsx";
+import { ErrorText, Input, Select } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Note, SectionLabel } from "../../components/Panel.tsx";
 import { Row } from "../../components/Row.tsx";
@@ -39,8 +39,13 @@ function isBeast(m: SrdMonster): boolean {
  * A Druid's known forms come first, each taking Wild Shape in one tap, and
  * "Change" opens the step that chooses them, sharing the search and both
  * filters with the first page (docs/design-v1-known-forms.md 5.1 and 5.2).
+ *
+ * `start="forms"` opens on that step alone, for the panel's Change, which a
+ * druid in Wild Shape reaches without ending the shape. It has no Back, so
+ * its Close is the one way out, and nothing in it leads to the creatures
+ * (docs/design-v1-look-pass-2.md 3, lane 3, D19).
  */
-export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats" | "knownForms">; onClose(): void }) {
+export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats" | "knownForms">; start?: "forms"; onClose(): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
@@ -52,7 +57,8 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   const [remembered, setRemembered] = useState(() => rememberedDruidLevel(roomId, characterId));
   const [druidLevel, setDruidLevel] = useState<number | null>(() => startDruidLevel(remembered, props.character));
   const [picked, setPicked] = useState<SrdMonster | null>(null);
-  const [choosing, setChoosing] = useState(false);
+  const formsOnly = props.start === "forms";
+  const [choosing, setChoosing] = useState(formsOnly);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [kind, setKind] = useState<ShapeKind>("wild");
   const [gainTemp, setGainTemp] = useState(true);
@@ -120,11 +126,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   );
 
   // A refused toggle's words, on whichever page is open when the answer comes, so going Back never hides one (5.2).
-  const refusalLine = refusal ? (
-    <p role="alert" style={{ margin: 0, fontSize: theme.font.small, color: theme.color.dangerText }}>
-      {refusal}
-    </p>
-  ) : null;
+  const refusalLine = <ErrorText>{refusal}</ErrorText>;
   // Back and Change clear it, so a page never opens on an old refusal.
   const leaving = (go: () => void) => () => {
     setRefusal(null);
@@ -209,12 +211,18 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       </li>
     );
     return (
-      <Dialog title={`${whose(name)} known forms`} onClose={props.onClose} back={{ label: "Back to the creatures", onBack: leaving(() => setChoosing(false)) }} phone="fill" width="md">
+      <Dialog
+        title={`${whose(name)} known forms`}
+        onClose={props.onClose}
+        back={formsOnly ? null : { label: "Back to the creatures", onBack: leaving(() => setChoosing(false)) }}
+        phone="fill"
+        width="md"
+      >
         <PickerBody>
           <Help>{`The Beast forms ${name} knows for Wild Shape, listed first in Take a shape. By the rules a Druid replaces one after each Long Rest, and the DM may allow other Beasts.`}</Help>
           {/* Where the focus goes when a toggled row leaves the list and no row follows it. */}
           <div ref={countLine} tabIndex={-1} style={{ outline: "none" }}>
-            {count.over ? <Note>{count.text}</Note> : <p style={{ margin: 0, fontSize: theme.font.body14 }}>{count.text}</p>}
+            {count.over ? <Note>{count.text}</Note> : <Help>{count.text}</Help>}
           </div>
           {refusalLine}
           {filters}
@@ -262,7 +270,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
         {refusalLine}
         {/* The rows need the SRD list's names, AC and speeds, so the group waits under the list's own loading and failure lines (5.1). */}
         {monsters ? (
-          <div style={{ display: "grid", gap: theme.space(1) }}>
+          <div style={{ display: "grid", gap: theme.space(2) }}>
             <SectionLabel
               action={
                 <>
@@ -275,7 +283,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
             >
               Known forms
             </SectionLabel>
-            {none ? <Help>{`${name} knows no forms yet. A Druid knows 4 Beast forms at level 2, 6 at level 4 and 8 at level 8.`}</Help> : <MonsterList items={knownRows} onPick={takeForm} />}
+            {none ? <Help>{noFormsText(name)}</Help> : <MonsterList items={knownRows} onPick={takeForm} />}
             {known.missing.map((id) => (
               <Help key={id}>{missingFormText(id)}</Help>
             ))}
@@ -289,6 +297,11 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       </PickerBody>
     </Dialog>
   );
+}
+
+/** What a druid's known forms read with none chosen yet, in Take a shape and in the panel. */
+export function noFormsText(name: string): string {
+  return `${name} knows no forms yet. A Druid knows 4 Beast forms at level 2, 6 at level 4 and 8 at level 8.`;
 }
 
 /** The known forms step's row buttons, in order. */
