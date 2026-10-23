@@ -24,7 +24,7 @@ import { DoorButton } from "../features/doors/DoorButton.tsx";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { LightChip } from "../features/vision/LightChip.tsx";
 import { AttachButton } from "../features/attach/AttachButton.tsx";
-import { DetachButton, GroupLine, useAttachSlots } from "../features/attach/BarParts.tsx";
+import { DetachButton, DetachNote, GroupLine, useAttachSlots, useDetach } from "../features/attach/BarParts.tsx";
 import { offersRequest } from "../features/rolls/logic.ts";
 import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
@@ -183,6 +183,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
   const attachSlots = useAttachSlots(token);
+  const detach = useDetach(token, attachSlots.includes("detach"));
+  const detachNoteId = useId();
 
   const access = useMemo(
     () =>
@@ -291,7 +293,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       case "attach":
         return <AttachButton key={id} token={token} onOpen={frame.raise} />;
       case "detach":
-        return <DetachButton key={id} token={token} />;
+        return <DetachButton key={id} token={token} detach={detach} noteId={detachNoteId} />;
       case "multiSelect":
         return (
           <BarButton key={id} pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
@@ -443,6 +445,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       <div data-bar-row="play" style={BUTTON_ROW}>
         {rows.play.map(button)}
       </div>
+      {rows.play.includes("detach") ? <DetachNote detach={detach} id={detachNoteId} /> : null}
       {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design-v1-token-window.md 8.9). */}
       {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
       {rows.less.length > 0 ? (
@@ -504,9 +507,9 @@ export function GroupActionBar(props: {
       anchor={props.anchor}
       viewport={props.viewport}
       label={`${tokens.length} selected tokens`}
-      dock={{ text: `${tokens.length} selected`, show: `Show actions for ${tokens.length} selected tokens`, closeLabel: "Let go of all of them", close: props.onClose }}
+      dock={{ text: `${tokens.length} selected`, show: `Show actions for ${tokens.length} selected tokens`, closeLabel: "Deselect all", close: props.onClose }}
     >
-      <BarHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Let go of all of them" />
+      <BarHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Deselect all" />
       <div style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>{tokens.map((t) => displayName(t)).join(", ")}</div>
       <GroupBarHp tokens={tokens} />
       {props.movable >= 2 ? (

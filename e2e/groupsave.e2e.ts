@@ -399,8 +399,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
   test("6. the wyrmling's Fire Breath Group save opens on no creature, and the goblins selected after it become its rows (W7B-P-1)", async () => {
     // The applied page and the group of four from the steps before give way first.
     if (await diceSheet(dm).isVisible()) await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
-    await dm.getByRole("button", { name: "Let go of all of them" }).first().tap();
-    await waitFor("the group let go", async () => ((await dm.getByRole("button", { name: "Let go of all of them" }).count()) === 0 ? true : null));
+    await dm.getByRole("button", { name: "Deselect all" }).first().tap();
+    await waitFor("the group let go", async () => ((await dm.getByRole("button", { name: "Deselect all" }).count()) === 0 ? true : null));
     // Multi-select from step 3 ends, so a tap selects one token again.
     const done = dm.getByRole("button", { name: "Done", exact: true });
     if (await done.isVisible()) await done.tap();
