@@ -823,7 +823,8 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     const start = await at(13, 3);
     await dm.mouse.move(start.x, start.y);
     // For the drag only, the page's clock runs 20 times fast, so a frame's share of route work (features/movement/routeWork.ts) runs out
-    // after a sliver of real work and every walk is searched over several frames, on any machine.
+    // after a sliver of real work and walks tend to be searched over several frames. That only makes a search likely: the line's
+    // data-finding, asserted below, is what shows one happened.
     await dm.evaluate(() => {
       const perf = (globalThis as unknown as { performance: { now(): number } }).performance;
       const real = perf.now.bind(perf);
