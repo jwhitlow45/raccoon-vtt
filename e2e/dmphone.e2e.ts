@@ -1340,6 +1340,53 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
   });
 
+  test("lp19-bs3. at 390 x 844 with Larger on, a token bar that opens under its token while a trap's toast stands under the alerts' card moves the map up only so far that the token stays below the toast (review LP19-BS-3)", async () => {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    // The middle of the map, where the bar hangs under the brute and Larger moves the map up.
+    const cell = { x: Math.floor(bounds.w / 2), y: Math.floor(bounds.h / 2) };
+    const brute = randomUUID();
+    const walker = randomUUID();
+    const trapId = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "token.create", token: { id: brute, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: 1, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
+    await waitFor("the brute, the scout and the trap in the DM's view", () => (dmSocket.state?.tokens[brute] && dmSocket.state.tokens[walker] && dmSocket.state.traps[trapId] ? true : null));
+    await dm.evaluate(() => localStorage.setItem("rvtt.tokenBarLarger", "1"));
+    const bar = dm.getByRole("dialog", { name: "Brute actions" });
+    try {
+      await setUp({ width: 390, height: 844, scale: 1 });
+      // A move onto the plate toasts the DM, with Save and damage, and brings its card.
+      await ops.send({ t: "token.move", tokenId: walker, x: 1, y: 1 });
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Needle Plate went off: Scout." }).first();
+      await toast.waitFor();
+      await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor();
+      await dm.waitForTimeout(900);
+      const t = await rectOf(toast);
+      const before = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      assert.equal(await hit(dm, before), "CANVAS", "the brute is under something");
+      await dm.touchscreen.tap(before.x, before.y);
+      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await dm.waitForTimeout(500);
+      // The map moved up for the larger bar under the brute, and the brute's top stays below the trap's toast, where a tap reaches it.
+      const top = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y });
+      const middle = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      const b = await rectOf(bar);
+      assert.ok(middle.y < before.y - 20, `the map did not move up for the larger bar: the brute went from ${before.y} to ${middle.y}`);
+      assert.ok(b.top > middle.y, `the bar does not hang under the brute: ${JSON.stringify(b)}`);
+      assert.ok(top.y >= t.bottom - 0.5, `the brute's top went to ${top.y}, under the trap's toast, whose foot is at ${t.bottom}`);
+      assert.equal(await hit(dm, top.y + 2 > middle.y ? middle : { x: top.x, y: top.y + 2 }), "CANVAS", "the brute's top does not take a tap");
+      await shots.take(dm, "dmphone-lp19-bs3-larger-under-the-toast");
+    } finally {
+      await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
+      if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await ops.send({ t: "token.delete", tokenId: brute });
+      await ops.send({ t: "token.delete", tokenId: walker });
+      await waitFor("the brute, the scout and the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[brute] && !dmSocket.state.tokens[walker] ? true : null));
+    }
+  });
 });
 
 /**

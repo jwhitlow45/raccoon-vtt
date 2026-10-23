@@ -970,7 +970,18 @@ const TALL_TOKEN_MARGIN = 12;
  * anchor as drawn, in the chrome's pixels: its height at the map's zoom,
  * and its plate where the anchor hangs under that (Stage.tsx belowLabel).
  */
-export type SpanRoom = { layout: Size; viewport: Size; chrome: Chrome; foot: number; anchor: Point; column: ColumnFacts | null; height: number; tokenHeight: number };
+export type SpanRoom = {
+  layout: Size;
+  viewport: Size;
+  chrome: Chrome;
+  foot: number;
+  anchor: Point;
+  column: ColumnFacts | null;
+  height: number;
+  tokenHeight: number;
+  /** The foot of the toasts over the map as they stand, or null (spanToastSlot). */
+  toastFoot?: number | null;
+};
 
 /** The free area and the highest the bar may reach, while it spans. Null for a bar that docks or opens compact. */
 function spanRoom(input: SpanRoom): { free: Box; top: number } | null {
@@ -1011,13 +1022,22 @@ export function largerShift(input: SpanRoom): number {
   return above < want ? want - above : 0;
 }
 
-/** Where a larger bar hangs, and the room it asks for, while it spans. */
+/**
+ * Where a larger bar hangs, and the room it asks for, while it spans. A bar
+ * under its token, which the map moves up, asks for no more than leaves its
+ * token below the toasts over the map as they stand (`toastFoot`), at the
+ * notices' top, under the column's card or under a header, so a trap's
+ * toast never covers the token (review LP19-BS-3). Over its token the bar
+ * stands between the toasts and the token, so they never meet.
+ */
 function largerHang(input: SpanRoom): { free: Box; top: number; want: number; hang: Hang } | null {
   const room = spanRoom(input);
   if (!room) return null;
   const { free, top } = room;
   const want = Math.min(input.height, largerRoom(input.layout, free, top, input.tokenHeight));
-  return { free, top, want, hang: spanHang(input.anchor, free, want, top) };
+  const hang = spanHang(input.anchor, free, want, top);
+  if (hang.anchor !== "top" || input.toastFoot == null) return { free, top, want, hang };
+  return { free, top, want: Math.min(want, largerRoom(input.layout, free, Math.max(top, input.toastFoot + EDGE), input.tokenHeight)), hang };
 }
 
 /**
@@ -1469,14 +1489,16 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
 // ------------------------------------------------------------ the Room's slot
 
 /*
- * What an upright phone's spanning token bar tells the toasts as it moves,
- * never by drawing them again, so a pan that moves the bar draws no toast:
- * the box of the bar's header while it spans (`head`), which a toast that
- * shows over it moves under (barToastTop, review LP19-BS-2). In the
- * chrome's px from the page's top, null while no bar spans. Per Room page,
- * as the dock store is.
+ * What an upright phone's spanning token bar and the toasts read of each
+ * other as they act, never as they draw, so a pan that moves the bar draws
+ * no toast and a toast that comes moves no bar: the box of the bar's
+ * header while it spans (`head`), which a toast that shows over it moves
+ * under (barToastTop, review LP19-BS-2), and the foot of the toasts over
+ * the map (`foot`), which Larger leaves its token below (largerHang, review
+ * LP19-BS-3). In the chrome's px from the page's top, null while there is
+ * none. Per Room page, as the dock store is.
  */
-export const spanToastSlot = scopeSlot(() => ({ head: null as Band | null }));
+export const spanToastSlot = scopeSlot(() => ({ head: null as Band | null, foot: null as number | null }));
 
 /** The bar as it shows, for the column, the notices and the camera. `freeRight` is the free area's right edge (barCover). */
 export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number };

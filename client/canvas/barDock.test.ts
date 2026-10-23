@@ -1614,6 +1614,24 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     assert.equal(carriedMove(room(kira, 586), 0), 0);
   });
 
+  test("under its token, Larger leaves the token below the toasts over the map, and over it asks as before (review LP19-BS-3)", () => {
+    // A trap's toast under the column's card ends at 237: Thorn's anchor at 391 moves up only 60, not 197, so his top stays 8 px under the toast.
+    const foot = 237;
+    const dy = largerShift({ ...room(391, 586), toastFoot: foot });
+    assert.equal(dy, -(776 - (foot + EDGE) - LARGER_LEAVES - 351));
+    assert.ok(391 + dy - FLIP_CLEARANCE >= foot + EDGE, `the token's top went to ${391 + dy - FLIP_CLEARANCE}, under the toast's foot at ${foot}`);
+    assert.ok(after(391, 586, dy).clear, "the bar meets the token");
+    // A tall token keeps its whole height below the toast too: without it, its top would go to 120.
+    assert.equal(450 + largerShift(room(450, 586, null, 128)) - 128, 120);
+    const tall = largerShift({ ...room(450, 586, null, 128), toastFoot: foot });
+    assert.ok(tall < 0 && 450 + tall - 128 >= foot + EDGE, `the tall token's top went to ${450 + tall - 128}`);
+    // No toast, or a bar over its token, which stands between the toasts and the token: as before.
+    assert.equal(largerShift({ ...room(391, 586), toastFoot: null }), largerShift(room(391, 586)));
+    assert.equal(largerShift({ ...room(640, 586), toastFoot: foot }), largerShift(room(640, 586)));
+    // Toasts that reach past the room the token needs leave the bar as it is.
+    assert.equal(largerShift({ ...room(391, 586), toastFoot: 700 }), 0);
+  });
+
   test("a tall or zoomed token keeps its top in the free area: Larger asks for less under a 128 px token, Smaller moves back less over a 64 px one, and a token too tall for more room moves nothing (review BS-ASTRA-01)", () => {
     // Under a 128 px token Larger leaves its label gap, its height and 12 px: 668 - 174 = 494, so the map moves up 143, not 197.
     const tall = 128;

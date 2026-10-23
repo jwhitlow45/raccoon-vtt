@@ -968,6 +968,8 @@ function BarFrame(props: {
   const roomStore = useRoomStore();
   const spanToast = useScoped(spanToastSlot);
   const spanRoom = { layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, column, tokenHeight: props.tokenHeight };
+  // Read as Larger acts, so the toasts standing then keep the token below them (barDock.ts largerHang).
+  const larging = () => ({ ...spanRoom, height: barHeight, toastFoot: spanToast.foot });
   const shift = (dy: number) => {
     if (dy !== 0) props.onShift?.(dy);
   };
@@ -976,7 +978,7 @@ function BarFrame(props: {
     if (!preview) writeLarger(next);
     const dock = dockStore.getState();
     if (next) {
-      const dy = largerShift({ ...spanRoom, height: barHeight });
+      const dy = largerShift(larging());
       dockStore.setState({ larger: true, largerFor: props.opening, largerMoved: dy });
       shift(dy);
     } else {
@@ -992,9 +994,9 @@ function BarFrame(props: {
     const dock = dockStore.getState();
     // Back after a token drag, which hides the bar, the map stays where the drop left it.
     if (dock.largerFor === props.opening) return;
-    const dy = dock.larger && !folded ? largerShift({ ...spanRoom, height: barHeight }) : 0;
+    const dy = dock.larger && !folded ? largerShift(larging()) : 0;
     // Taking over from a bar still open, this opening keeps that one's move on its side for Smaller.
-    const carried = dock.largerFor === null ? 0 : carriedMove({ ...spanRoom, height: barHeight }, dock.largerMoved);
+    const carried = dock.largerFor === null ? 0 : carriedMove(larging(), dock.largerMoved);
     dockStore.setState({ largerFor: props.opening, largerMoved: carried + dy });
     shift(dy);
     // Once per opening, on the first render with the content measured.

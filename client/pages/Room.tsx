@@ -1654,6 +1654,10 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     }
     const notices = stacks.notices.box.current;
     mapFoot.current = overMap.length > 0 && notices ? notices.getBoundingClientRect().bottom / zoom : null;
+    // The foot of the toasts over the map, at the top of the notices or in the layer, which Larger leaves its token below (barDock.ts largerHang, review LP19-BS-3).
+    const layerBox = lowAt !== null ? stacks.layer.box.current : null;
+    const feet = [mapFoot.current, layerBox && low.length > 0 ? layerBox.getBoundingClientRect().bottom / zoom : null].filter((f): f is number => f !== null);
+    spanToast.foot = feet.length > 0 ? Math.max(...feet) : null;
     // A toast that just showed over the bar's header takes its place again under it, on a render before the browser paints.
     const boxes = drawn.flatMap((t) => {
       const r = recent.has(t.id) ? hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect() : undefined;
@@ -1664,6 +1668,12 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     const next = at === null ? NOT_OVER_BAR : { ids: over, at };
     if (next.at !== overBar.at || next.ids.size !== overBar.ids.size || [...next.ids].some((id) => !overBar.ids.has(id))) setOverBar(next);
   });
+  useEffect(
+    () => () => {
+      spanToast.foot = null;
+    },
+    [spanToast],
+  );
   return (
     <>
       <ToastVoice toasts={toasts} />
