@@ -30,8 +30,8 @@ function table(): RoomState {
   return state;
 }
 
-function render(view: RoomState, capped: boolean): string {
-  const store = createStore(() => ({ view, you: { role: "dm", memberId: DM.memberId } }));
+function render(view: RoomState, capped: boolean, you: { role: "dm" | "player"; memberId: string } = { role: "dm", memberId: DM.memberId }): string {
+  const store = createStore(() => ({ view, you }));
   const list = createElement(AttachList, { token: view.tokens.thorn!, capped, onDone() {} });
   return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, assets: { url: () => "" } as never, children: list }));
 }
@@ -55,5 +55,30 @@ describe("the Attach list's rows", () => {
     assert.match(capped, /^<div[^>]*style="[^"]*max-width:360px/);
     const sheet = render(table(), false);
     assert.doesNotMatch(sheet.slice(0, sheet.indexOf(">")), /max-width/);
+  });
+});
+
+describe("the Attach list with nothing in reach (review LP2L3)", () => {
+  /** Thorn alone on the map. */
+  function alone(): RoomState {
+    const view = table();
+    delete view.tokens.horse;
+    delete view.tokens.torch;
+    delete view.tokens.pony;
+    return view;
+  }
+
+  test("says what the list is for, in the Empty look, and nothing to press", () => {
+    const markup = render(alone(), true, { role: "player", memberId: "pat" });
+    assert.match(markup, /<p style="[^"]*color:[^"]*">Nothing within 5 ft to ride, carry or drag\.<\/p>/);
+    assert.doesNotMatch(markup, /<button/);
+  });
+
+  test("tells a player, as help under it, how a grappled creature joins it, and the DM only what it is for", () => {
+    const player = render(alone(), true, { role: "player", memberId: "pat" });
+    assert.match(player, /Nothing within 5 ft to ride, carry or drag\.<\/p><\/div><p[^>]*>A grappled creature can be dragged once the DM marks it Grappled\.<\/p>/);
+    const dm = render(alone(), false);
+    assert.match(dm, /Nothing within 5 ft to ride, carry or drag\./);
+    assert.doesNotMatch(dm, /grappled creature/);
   });
 });

@@ -1214,4 +1214,36 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     assert.ok(total !== null, "Escape never came while the dice flew");
     await shots.take(player, "ra-escape-mid-throw-toast");
   });
+
+  test("fu22b-rolling. a roll whose answer waits past 200 ms says \"Rolling…\" on the sticky line, in no live region, since the result's own says it once it lands (review LP2L3)", async () => {
+    // Another of Pat's phones, whose rolls never leave it while `hold` is on, so the panel waits on an answer that never comes.
+    const context = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    try {
+      await context.addCookies(await playerContext.cookies(server.origin));
+      const page = await context.newPage();
+      const route = { hold: false, held: 0 };
+      await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+        const upstream = ws.connectToServer();
+        ws.onMessage((m) => {
+          if (route.hold && typeof m === "string" && m.includes('"dice.roll"')) route.held++;
+          else upstream.send(m);
+        });
+        upstream.onMessage((m) => ws.send(m));
+      });
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(page);
+      route.hold = true;
+      await field(page).fill("1d20 Held");
+      await field(page).press("Enter");
+      await waitFor("the roll held on the phone", () => (route.held === 1 ? true : null));
+      const rolling = page.locator("[data-dice-last]").getByText("Rolling…", { exact: true });
+      await rolling.waitFor({ timeout: 3_000 });
+      const live = await rolling.evaluate((el) => (el as unknown as { closest(s: string): { outerHTML: string } | null }).closest('[role="status"], [role="alert"], [aria-live]:not([aria-live="off"])')?.outerHTML.slice(0, 120) ?? null);
+      assert.equal(live, null, `"Rolling…" is in a live region: ${live}`);
+      await shots.take(page, "dice-rolling-held");
+    } finally {
+      await context.close();
+    }
+  });
 });
