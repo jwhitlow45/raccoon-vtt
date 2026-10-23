@@ -1,6 +1,5 @@
 import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
-import { LIMITS, serializedBytes } from "../limits.ts";
-import { DM_LINE_BASE, droppedLines, MAX_LOG, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
+import { cutDmLine, DM_LINE_BASE, droppedLines, MAX_LOG, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
 import { logsByAudience } from "../migrate.ts";
 import type {
   Actor,
@@ -221,7 +220,7 @@ export class Tx {
    * - A line every player may read counts on from 0 in the op.
    * - A line no player could read counts on from DM_LINE_BASE, as the DM's
    *   trap lines do, so it never moves the id of a later line a player
-   *   gets. One too long for its ring goes only to the archive.
+   *   gets, and is cut to its ring's bound (cutDmLine).
    * - A line only some players could read is written once for each, in
    *   that reader's own run from PARTY_LINE_BASE, so the ids each player
    *   gets in one op count on without a gap whatever the op wrote for
@@ -245,15 +244,8 @@ export class Tx {
     if (readers !== "all" && readers.some((id) => (this.partyLines.get(id) ?? 0) >= PARTY_SLOT)) readers = [];
     let first: LogEntry;
     if (readers === "all") first = this.appendLine(entry, this.logIndex++);
-    else if (readers.length === 0) {
-      const index = DM_LINE_BASE + this.dmLineIndex++;
-      const line: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, ...entry };
-      if (serializedBytes(line) > LIMITS.dmLogLineBytes) {
-        this.log.push(line);
-        return line;
-      }
-      first = this.appendLine(entry, index);
-    } else {
+    else if (readers.length === 0) first = this.appendLine(entry, DM_LINE_BASE + this.dmLineIndex++, cutDmLine);
+    else {
       const ranks = rosterRanks(this.state.members);
       const copies = readers.map((reader, i) => {
         const count = this.partyLines.get(reader) ?? 0;
@@ -266,9 +258,9 @@ export class Tx {
     return first;
   }
 
-  /** Writes a log line numbered `index` in this op, and keeps it for the archive. */
-  private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number): LogEntry {
-    const full: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, ...entry };
+  /** Writes a log line numbered `index` in this op, as `fit` makes it, and keeps it for the archive. */
+  private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
+    const full = fit({ id: `${this.env.seq}:${index}`, at: this.env.at, ...entry });
     this.log.push(full);
     this.write(keys.log(full.id), full);
     return full;

@@ -1,5 +1,5 @@
 import { compareLogIds } from "./keys.ts";
-import { LIMITS } from "./limits.ts";
+import { LIMITS, serializedBytes } from "./limits.ts";
 import type { LogEntry, LogEvent, RoomState, Viewer } from "./model.ts";
 import { isWritable } from "./writable.ts";
 
@@ -12,11 +12,10 @@ import { isWritable } from "./writable.ts";
  *   read it. The shared lines keep their newest MAX_LOG.
  * - A DM line reaches no player: no player could read it when it was
  *   written, and none who could later, such as one lent its creature, ever
- *   gets it. The DM lines keep their newest `dmLogLines`, and one whose
- *   JSON is over `dmLogLineBytes` is left to the archive. So the size guard
- *   can leave every one of them out of its measure
- *   (server/rooms/sizeGuard.ts), and such a line never changes whether an
- *   op passes.
+ *   gets it. The DM lines keep their newest `dmLogLines`, each cut to
+ *   `dmLogLineBytes` when written (cutDmLine). So the size guard can leave
+ *   every one of them out of its measure (server/rooms/sizeGuard.ts), and
+ *   such a line never changes whether an op passes.
  * - A party line reaches only some players: those who could read it then,
  *   each of whom holds a copy of their own (`to`, its reader first), so one
  *   player's lines never push out another's. Each player's copies keep
@@ -193,6 +192,40 @@ export function dmNumbered(id: string): boolean {
 /** Whether a line was numbered past its op's shared lines: a party line or a DM line. */
 export function countedApart(id: string): boolean {
   return lineIndex(id) >= PARTY_LINE_BASE;
+}
+
+/**
+ * A DM line cut to `dmLogLineBytes`, as trap lines are cut when written
+ * (shared/reducer/traps.ts), so it keeps its place in the live log with no
+ * hole: text no event line uses first, then what only a take-back needs (an
+ * HP line's `revert`), a rolled answer's dice and what it changed, and a
+ * dice line's rolls from the end. The longest line an op writes, a dice
+ * line of 20 rolls at about 4.5 KB, fits whole, so in play only a
+ * take-back's record of many effects is cut, and that change can no longer
+ * be taken back. What is left is bounded by the protocol, far inside.
+ */
+export function cutDmLine(line: LogEntry): LogEntry {
+  const fits = (e: LogEntry) => serializedBytes(e) <= LIMITS.dmLogLineBytes;
+  if (fits(line)) return line;
+  let out = line;
+  if (out.kind === "event" && (out.text !== undefined || out.from !== undefined)) {
+    const { text: _text, from: _from, ...rest } = out;
+    out = rest;
+  }
+  const data = out.data;
+  if (fits(out) || !data) return out;
+  if (data.type === "hp" && data.revert) {
+    const { revert: _revert, ...rest } = data;
+    out = { ...out, data: rest };
+  } else if (data.type === "roll") {
+    const { dice: _dice, changed: _changed, ...rest } = data;
+    out = { ...out, data: rest };
+  } else if (data.type === "dice") {
+    let rolls = data.rolls;
+    while (rolls.length > 0 && !fits({ ...out, data: { ...data, rolls } })) rolls = rolls.slice(0, -1);
+    out = { ...out, data: { ...data, rolls } };
+  }
+  return out;
 }
 
 /** Everyone a whisper reaches: its sender and its recipients, each once. */

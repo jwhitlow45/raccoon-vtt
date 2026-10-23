@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds, keys, type EntityKey } from "./keys.ts";
-import { LIMITS } from "./limits.ts";
+import { LIMITS, serializedBytes } from "./limits.ts";
 import {
   countedApart,
+  cutDmLine,
   DM_LINE_BASE,
   dmNumbered,
   droppedLines,
@@ -23,7 +24,7 @@ import { applyChanges, dependents, diffProjection, heldOf, lineReaders, projectA
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { Tx } from "./reducer/tx.ts";
-import { AT, DM, P1, P2, chance, member, pick, randomState, rng, room, token } from "./testutil.ts";
+import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, token } from "./testutil.ts";
 
 /**
  * The room log's rings (shared/logRings.ts, design 7.3). The randomized
@@ -312,11 +313,20 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.deepEqual(both.state.log.map((e) => e.id), ["7:0", "7:1", "7:900000", "7:900001"], "the DM lines sort after the op's shared lines");
   });
 
-  test("a DM line too long for its ring stays in the archive alone", () => {
-    const long: Line = { kind: "event", data: { type: "companion", tokenId: "\u0001".repeat(64), characterId: "\u0002".repeat(64), memberId: "\u0003".repeat(64), name: "\u0004".repeat(80) } };
-    const out = write(base(), [long], 3);
-    assert.equal(out.written.length, 1, "the archive gets it");
-    assert.deepEqual(out.state.log, []);
+  test("a DM line too long for its ring is cut, as trap lines are, and keeps its place in the live log", () => {
+    const vitals = (cur: number) => ({ hp: { cur, max: 7, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
+    const removed = Array.from({ length: 60 }, (_, i) => effect(`e${i}`, { key: "custom", label: "x".repeat(60) }));
+    const hp: Line = { kind: "event", data: { type: "hp", tokenId: "gob", change: "damage", amount: 7, revert: { before: vitals(7), after: vitals(0), removed } } };
+    const chat = (text: string): Line => ({ kind: "chat", from: "dm1", text });
+    const out = write(base(), [chat("a"), hp, chat("b")], 3);
+    const cut = out.state.log.find((e) => e.data?.type === "hp")!;
+    assert.ok(serializedBytes(cut) <= LIMITS.dmLogLineBytes);
+    assert.deepEqual(cut.data, { type: "hp", tokenId: "gob", change: "damage", amount: 7 }, "only the take-back's record went");
+    assert.deepEqual(out.written.find((e) => e.id === cut.id), cut, "the archive holds the same line");
+    assert.deepEqual(liveLog(out.state, DM).map((e) => e.id), ["3:0", "3:1", cut.id]);
+    // Text no event line uses goes first, as from a hand-made file.
+    const stray = cutDmLine({ id: "4:900000", at: AT, kind: "event", text: "x".repeat(7000), data: { type: "teleport", tokenId: "gob", past: "wall" } });
+    assert.deepEqual(stray, { id: "4:900000", at: AT, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } });
   });
 
   test("dmNumbered and countedApart tell the DM's count and the party lines' from the shared one", () => {

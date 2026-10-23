@@ -403,8 +403,9 @@ export const LIMITS = {
   trapLineBytes: 1_536,
   /**
    * The room log's lines held in memory beside its newest 200 shared ones
-   * (shared/logRings.ts): the DM's own lines, each held only while its JSON
-   * fits `dmLogLineBytes`, each member's newest whispers and each player's
+   * (shared/logRings.ts): the DM's own lines, each cut to `dmLogLineBytes`,
+   * room for the longest line an op writes, so 600 KiB at most outside the
+   * room's measures, each member's newest whispers and each player's
    * newest party lines, the lines only some players read. A member keeps 50
    * of each, or fewer once the room is large enough that all members' would
    * pass 400 whispers or 200 party lines, so a room keeps at most that many
@@ -419,7 +420,7 @@ export const LIMITS = {
    * one changes how ops replay: it needs a new op version (shared/migrate.ts).
    */
   dmLogLines: 100,
-  dmLogLineBytes: 1_536,
+  dmLogLineBytes: 6 * 1024,
   whispersKept: 50,
   whispersPerRoom: 400,
   partyLinesKept: 50,
