@@ -1,5 +1,4 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { parseFormula } from "#shared/dice/formula.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type BuildChunk, type ConditionKey, type SkillKey, type Trap, type TrapAction, type TrapCheck, type TrapRig, type TrapSound } from "#shared/model.ts";
 import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
@@ -35,6 +34,7 @@ import { requestPan } from "../encounter/pan.ts";
 import { ChoiceRows, ConfirmButton, type RowOption } from "../measure/controls.tsx";
 import { openAsk } from "../rolls/open.ts";
 import { NumberInput } from "../scenes/controls.tsx";
+import { diceLeft, diceTyped, lineLeft, lineTyped, type DiceState, type LineState } from "./fieldNote.ts";
 import { trapScreenBox } from "./paneBox.ts";
 import { Pair, PartRow, Words } from "./PartRow.tsx";
 import {
@@ -42,7 +42,6 @@ import {
   alsoSummary,
   boxCenter,
   checkText,
-  cleanLine,
   cleanNote,
   disarmFill,
   findSummary,
@@ -434,20 +433,14 @@ const SOUND_NAMES: Record<TrapSound, string> = { click: "Click", rumble: "Rumble
  * still has.
  */
 function TextField(props: { label: string; value: string; max: number; placeholder?: string; required?: string; onSave(value: string | null): void }) {
-  const [text, setText] = useState(props.value);
-  const [refused, setRefused] = useState(false);
+  const [field, setField] = useState<LineState>({ text: props.value, refused: false });
+  const { text, refused } = field;
   const noteId = useId();
-  useEffect(() => setText(props.value), [props.value]);
+  useEffect(() => setField((was) => ({ ...was, text: props.value })), [props.value]);
   const save = () => {
-    const clean = cleanLine(text, props.max);
-    if (clean === null && props.required) {
-      setText(props.value);
-      setRefused(true);
-      return;
-    }
-    setRefused(false);
-    if ((clean ?? "") !== props.value) props.onSave(clean);
-    else setText(props.value);
+    const next = lineLeft(field, props.value, props.max, props.required !== undefined);
+    setField(next.state);
+    if (next.send !== undefined) props.onSave(next.send);
   };
   return (
     <>
@@ -458,7 +451,7 @@ function TextField(props: { label: string; value: string; max: number; placehold
         placeholder={props.placeholder}
         maxLength={props.max}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setField(lineTyped(e.target.value))}
         onBlur={save}
         onKeyDown={(e) => {
           if (e.key === "Enter") save();
@@ -772,22 +765,15 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
  * (docs/design-v1-look-pass-2.md 2.9), not only in an outline and a title.
  */
 function DamagePart(props: { part: { formula: string; type: DamageType }; onFormula(formula: string): void; onType(type: DamageType): void; onRemove(): void }) {
-  const [text, setText] = useState(props.part.formula);
-  const [bad, setBad] = useState(false);
+  const [field, setField] = useState<DiceState>({ text: props.part.formula, bad: false });
+  const { text, bad } = field;
   const errorId = useId();
   // Dice saved from here or elsewhere replace what was typed, and any error with it.
-  useEffect(() => {
-    setText(props.part.formula);
-    setBad(false);
-  }, [props.part.formula]);
+  useEffect(() => setField({ text: props.part.formula, bad: false }), [props.part.formula]);
   const save = () => {
-    const clean = cleanLine(text, LIMITS.diceFormulaChars);
-    if (!clean || !parseFormula(clean).ok) {
-      setBad(true);
-      return;
-    }
-    setBad(false);
-    if (clean !== props.part.formula) props.onFormula(clean);
+    const next = diceLeft(field, props.part.formula);
+    setField(next.state);
+    if (next.send !== undefined) props.onFormula(next.send);
   };
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
@@ -799,7 +785,7 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
           aria-describedby={bad ? errorId : undefined}
           error={bad}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => setField(diceTyped(field, e.target.value))}
           onBlur={save}
           onKeyDown={(e) => {
             if (e.key === "Enter") save();
