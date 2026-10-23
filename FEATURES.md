@@ -289,6 +289,7 @@ The Builder tool is the DM's. Its modes:
 - Recharge: at the start of a monster's turn, an action that recharges, such as Fire Breath, and was marked Used in this browser tab's Dice panel, prompts the DM to roll its recharge.
 - A Ready marker (Hold is the same thing) records the trigger and shows on the row and the token until the creature's next turn. Players learn only that a monster readied, not its trigger.
 - The combat log keeps each HP change ("Goblin 2 takes 7 damage, 3/7 left"). The DM can take any one back while the creature is still as that change left it.
+- An HP change whose take-back record is very large, such as one that removed many effects at once, can't be taken back.
 - An optional turn timer, from 30 seconds to 10 minutes. It never ends a turn.
 - "End the fight" ends it, with a second tap to confirm.
 
@@ -420,7 +421,7 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 - The DM sets it up from the DM panel's Table display section:
   - "Add a TV" shows a code of 10 letters and numbers (such as `K7QH 2MXA 4F`), a link and a QR code, good once and for 10 minutes. On the TV's browser, "Set up a table display" on Home takes the code.
   - "Open on this device" opens the display in a new window, for a laptop wired to the TV. The window draws only what players get, but the laptop is still signed in as the DM.
-- The display shows the players' scene as players see it: the map, the fog, party vision, tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat, roll requests or Initiative strip.
+- The display shows the players' scene as players see it: the map, the fog, party vision, tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat or log, roll requests or Initiative strip, and the room sends it no log lines at all.
 - It also shows the pause screen during a blackout, handouts shown to everyone, the X-card, and "Waiting for the DM to choose a scene" when there is none.
 - A handout of several pages shows one page at a time, with its page number. The arrow and page keys step through it, and a tap shows Previous page, Next page and Close.
 - A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), Full screen, and Leave. The display remembers these choices. While the X-card or a one-page handout is open, a tap closes it instead.

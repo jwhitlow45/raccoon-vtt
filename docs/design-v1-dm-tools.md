@@ -84,7 +84,7 @@ The projection stays an allowlist (design.md 7.3). The new collections and field
 | X-card | yes | yes | yes |
 | DM camera for the display (`view` event) | never | never | yes |
 
-A table display's connection keeps the role `'player'`, so every projection and routing rule treats it as a player, and its viewer is `{ memberId: <display id>, role: 'player' }` (section 3.1). The display id is in no `ownerIds`, no whisper's `to`, no handout's list and no page's access, so it receives what a player who owns nothing receives, by the existing code. A separate `display` flag on the connection is read only where a display differs.
+A table display's connection keeps the role `'player'`, so every projection and routing rule treats it as a player, and its viewer is `{ memberId: <display id>, role: 'player' }` (section 3.1). The display id is in no `ownerIds`, no whisper's `to`, no handout's list and no page's access, so it receives what a player who owns nothing receives, by the existing code. The one exception is the log: a display shows none, so it gets no line of it, live or from the archive, and a line only members read, such as a dice line, never changes what a display holds (follow-up batch 23). A separate `display` flag on the connection is read only where a display differs.
 
 ### 2.2 New collections and fields
 
