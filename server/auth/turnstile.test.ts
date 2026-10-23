@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import { after, before, describe, test } from "node:test";
 import { MockAgent } from "undici";
-import { setTurnstileDispatcherForTests, strictDispatcher, verifyTurnstile } from "./turnstile.ts";
+import { setTurnstileConnectAnswerMsForTests, setTurnstileDispatcherForTests, verifyTurnstile } from "./turnstile.ts";
 
 describe("verifyTurnstile", () => {
   let cloudflare: MockAgent;
@@ -54,9 +54,9 @@ describe("verifyTurnstile through a proxy that takes a CONNECT and never answers
     });
     await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
     const { port } = proxy.address() as net.AddressInfo;
-    const dispatcher = strictDispatcher(`http://127.0.0.1:${port}`, 300);
-    setTurnstileDispatcherForTests(dispatcher);
-    const config = { TURNSTILE_SECRET: "secret", EGRESS_STRICT_PROXY: undefined, production: false, publicOrigin: "https://vtt.example.com" };
+    // Through turnstile's own dispatcher for the strict port the config names, its limit shortened.
+    await setTurnstileConnectAnswerMsForTests(300);
+    const config = { TURNSTILE_SECRET: "secret", EGRESS_STRICT_PROXY: `http://127.0.0.1:${port}`, production: false, publicOrigin: "https://vtt.example.com" };
     try {
       const started = Date.now();
       assert.equal(await verifyTurnstile(config, "token", "203.0.113.5"), "unavailable");
@@ -66,9 +66,8 @@ describe("verifyTurnstile through a proxy that takes a CONNECT and never answers
       assert.equal(await verifyTurnstile(config, "token", "203.0.113.5"), "unavailable");
       assert.equal(connects, 2);
     } finally {
-      setTurnstileDispatcherForTests(null);
       for (const socket of sockets) socket.destroy();
-      await dispatcher.close();
+      await setTurnstileConnectAnswerMsForTests(undefined);
       await new Promise<void>((resolve) => proxy.close(() => resolve()));
     }
   });

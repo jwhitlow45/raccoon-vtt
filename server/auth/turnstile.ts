@@ -26,20 +26,30 @@ export function setTurnstileDispatcherForTests(value: Dispatcher | null): void {
   testDispatcher = value;
 }
 
+let connectAnswerMs: number | undefined;
+
+/**
+ * How long the strict port's proxy may take to answer a CONNECT, shorter
+ * than egress.ts's limit, so a test meets it quickly. Tests only. It drops
+ * the dispatcher built with the old limit.
+ */
+export async function setTurnstileConnectAnswerMsForTests(ms: number | undefined): Promise<void> {
+  connectAnswerMs = ms;
+  const old = dispatcher;
+  dispatcher = undefined;
+  await old?.value.close();
+}
+
 /**
  * The strict port's dispatcher, built by egress.ts's own proxy agent (review
  * HF22-F6), so a CONNECT squid takes and never answers fails at the same
  * limit as every other call through that port, and nothing queues behind it
- * for undici's five minutes. `connectAnswerMs` is for tests.
+ * for undici's five minutes.
  */
-export function strictDispatcher(proxy: string | undefined, connectAnswerMs?: number): Dispatcher {
-  return proxy ? proxyAgent(proxy, connectAnswerMs) : new Agent();
-}
-
 function dispatcherFor(proxy: string | undefined): Dispatcher {
   const key = proxy ?? "direct";
   if (dispatcher?.key !== key) {
-    dispatcher = { key, value: strictDispatcher(proxy) };
+    dispatcher = { key, value: proxy ? proxyAgent(proxy, connectAnswerMs) : new Agent() };
   }
   return dispatcher.value;
 }
