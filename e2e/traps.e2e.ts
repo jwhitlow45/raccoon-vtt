@@ -513,6 +513,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     // The DM's own copy holds the trap, so the move the drop predicts already stops in the pit, on the row the goblin started on.
     await dragCells(dm, BOUNDS, { x: 1, y: 9 }, { x: 8, y: 10 });
     const stopped = await waitFor("the goblin stopped in the pit", () => (token(dmSocket, goblin)?.elevation === -10 ? token(dmSocket, goblin) : null));
+    // On the row it started from, so only one of its coordinates changed, the case the picture missed (review LP15-OP-4).
+    assert.equal(stopped.y, 9, "the pit stops the goblin on the row it started from");
     await dm.waitForTimeout(500);
     const drawn = await dm.evaluate((id) => {
       type Node = { x(): number; y(): number };

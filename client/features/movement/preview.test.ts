@@ -160,6 +160,14 @@ describe("a drag off a ride reads what the reducer stores (docs/design-v1-attach
     assert.equal(preview.read.dragFt, 25);
     // Nothing used before the drag on her turn, so 25 of her 30 ft leaves 5, within her Speed.
     assert.deepEqual([preview.read.left?.band, preview.read.left?.leftFt], ["walk", 5]);
+    // And the store leaves the same: the drop's op, applied, counts 25 of her 30 ft on her turn (review LP15-OP-2).
+    const plan = planWalk(state, bree, { x: 1, y: 4 }, "free", { kind: "open" }, state.meta.settings.feetPerCell);
+    const [move] = moveOpsOf(plan.moves);
+    assert.ok(move);
+    const r = applyOp(state, move as Op, DM, env(9));
+    assert.ok(r.ok);
+    const counted = r.state.tokens.bree!.path!.stops.filter((st) => st.uncounted !== true).reduce((sum, st) => sum + (st.cost ?? 0), 0);
+    assert.equal(30 - counted, preview.read.left?.leftFt);
   });
   test("a drop that keeps the rider's seat on her mount never reads as ending in its space, while one beside a creature still does (review LP15-FU-3)", () => {
     const state = dropView(riding(), "dm");
