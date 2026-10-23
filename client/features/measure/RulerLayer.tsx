@@ -202,7 +202,7 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
           <Group key={i}>
             <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
             <Line points={flat} stroke={stroke} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={props.kept ? undefined : [10, 6]} perfectDrawEnabled={false} />
-            {labelled ? <Pill x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} scale={scale} value={read.none ? "No way through" : formatFeet(read.ft)} size="screen" color={read.none ? theme.color.danger : stroke} small /> : null}
+            {labelled ? <Pill x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} scale={scale} value={read.none ? "No way through" : formatFeet(read.ft)} size="screen" color={stroke} small /> : null}
           </Group>
         );
       })}
