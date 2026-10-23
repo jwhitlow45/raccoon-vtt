@@ -296,10 +296,17 @@ describe("panePlacement beside the alerts lane (docs/design-v1-look-pass-2.md 2.
 
   test("a summary row that rose over the bars moves the card's limit with it", () => {
     const viewport = { width: 600, height: 800 };
-    const lane = paneLaneBox({ viewport, chrome, column: { ...column, row: 20 }, folded: false });
-    assert.equal(lane?.top, 20);
-    const p = panePlacement({ viewport, insets, box: { x0: 400, y0: 40, x1: 460, y1: 70 }, height: 200, lane });
-    assert.equal(p.kind === "card" ? p.top : null, 80, "the row's foot is above the top bars' limit, which then holds");
+    // A thing near the top, so the card's top is the limit, not its place under the thing.
+    const box = { x0: 400, y0: 0, x1: 460, y1: 10 };
+    const topOf = (row: number | undefined) => {
+      const lane = paneLaneBox({ viewport, chrome, column: row === undefined ? column : { ...column, row }, folded: false });
+      const p = panePlacement({ viewport, insets, box, height: 200, lane });
+      return p.kind === "card" ? p.top : null;
+    };
+    assert.equal(topOf(20), 20 + SUMMARY_ROW + 8, "under the risen row, which stands over the top bar");
+    assert.equal(topOf(60), 60 + SUMMARY_ROW + 8, "under the row in its usual place");
+    const without = panePlacement({ viewport, insets, box, height: 200, lane: null });
+    assert.equal(without.kind === "card" ? without.top : null, 52 + 8, "without the lane, only the top bar holds it");
   });
 
   test("a phone keeps its bottom sheet, which leaves the column to fold under it", () => {
