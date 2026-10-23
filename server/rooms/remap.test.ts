@@ -183,14 +183,15 @@ describe("remapState", () => {
     assert.deepEqual(kept[0]!.anchors, [pip.id, goblin.id]);
   });
 
-  test("the record of the running turn's reminders comes in the file and stays behind", () => {
+  test("the record of the running turn's reminders stays out of the export, and a file that carries it imports without it", () => {
     let state = room();
     state.tokens.gob = token("gob", { x: 12, y: 5 });
     state.templates.sg = template("sg", { shape: "sphere", size: 10, origin: { x: 6.5, y: 5.5, z: 0 }, ownerId: "dm1", triggers: ["enter"] });
     state.encounter = { rev: 0, round: 1, activeEntryId: "e-gob", entries: [entry("e-gob", { tokenId: "gob", value: 15 })] };
     state = apply(state, { t: "token.move", tokenId: "gob", x: 6, y: 5 }, DM, 2);
     assert.deepEqual(state.reminded, { shared: { sg: { gob: 1 } } });
-    const parsed = parseRoomState(JSON.parse(JSON.stringify(exportableState(state, DM))));
+    assert.equal("reminded" in exportableState(state, DM), false);
+    const parsed = parseRoomState(JSON.parse(JSON.stringify({ ...exportableState(state, DM), reminded: state.reminded })));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
     assert.equal("reminded" in remapState(parsed.state, { assets: new Map() }), false);
   });

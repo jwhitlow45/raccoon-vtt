@@ -61,10 +61,16 @@ export function assetFileName(sha256: string, kind: AssetKind, variant: Variant)
   return `assets/${sha256}-${kind}-${variant}.webp`;
 }
 
-/** The state as the export carries it: everything, with whispers the DM is not party to removed. */
+/**
+ * The state as the export carries it: everything, with whispers the DM is
+ * not party to removed, and without the record of the running turn's
+ * reminders (RoomState.reminded), which belongs to that turn and which the
+ * import would leave behind anyway.
+ */
 export function exportableState(state: RoomState, dm: Viewer): RoomState {
   const log = state.log.filter((e) => e.kind !== "whisper" || e.from === dm.memberId || e.to?.includes(dm.memberId) === true);
-  return { ...state, log };
+  const { reminded: _reminded, ...rest } = state;
+  return { ...rest, log };
 }
 
 type AssetRow = {
