@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page } from "playwright-core";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, pressOption, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -32,8 +32,12 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
- * sweep should reach and did not is a line too, so a check never passes
- * by measuring nothing.
+ * sweep must reach and did not, a root that matches nothing, a window
+ * with no header place, a board with no pill and a holder's line missing
+ * a word are lines too. The screens that show only at some sizes are
+ * counted over the run, and pl3-d fails when one showed at fewer sizes
+ * than the polish pass found (pl3-c), so no check passes by measuring
+ * nothing.
  *
  * The DM's page runs in a touch context for the phone and tablet sizes and
  * a mouse context for the desktop, one at a time, beside Pat's touch
@@ -120,6 +124,34 @@ function cookieOf(context: BrowserContext): Promise<string> {
   return context.cookies(server.origin).then((cs) => cs.map((c) => `${c.name}=${c.value}`).join("; "));
 }
 
+/** How many size steps measured each screen, over the whole run, for pl3-c. */
+const seenAt = new Map<string, number>();
+
+/**
+ * The screens that show only at some sizes, and at how many the sweep
+ * meets them on the polish pass's build: a chip or pop-up the row shows
+ * only where it has room, the column's summary row on a short screen,
+ * and a trap name's pointer where the zoom shows names. pl3-c fails when
+ * one shows at fewer, so a screen that stops showing everywhere is caught.
+ */
+const SOME_SIZES: Record<string, number> = {
+  "trap-start-from": 12,
+  "trap-more": 2,
+  "trap-pane-header-place": 6,
+  "pane-dock": 6,
+  "alerts-beside-pane": 5,
+  "alerts-column": 9,
+  "alerts-column-open": 9,
+  "alerts-summary": 5,
+  "alerts-overlay": 5,
+  "toast-under-card": 7,
+  "toast-hint": 12,
+  "ruler-measure-chip": 6,
+  "board points at Poisoned Needle": 9,
+  "board points at Hidden Pit": 9,
+  "pat-board points at Poisoned Needle": 9,
+};
+
 /**
  * One size's sweep: every line the checks report, a list of the screens
  * measured, and a shot of each screen that reported something.
@@ -128,9 +160,12 @@ class Sweep {
   readonly lines: string[] = [];
   readonly seen = new Set<string>();
   readonly at: string;
+  /** Whether a screen with lines is shot. The drawn cases' sweeps are not. */
+  readonly shoot: boolean;
 
-  constructor(at: string) {
+  constructor(at: string, shoot = true) {
     this.at = at;
+    this.shoot = shoot;
   }
 
   /** Adds a check's lines for `screen`, shooting `page` when there are any. */
@@ -138,18 +173,34 @@ class Sweep {
     this.seen.add(screen);
     if (lines.length === 0) return;
     this.lines.push(...lines);
-    await shots.take(page, `alignment-${this.at}-${screen}`);
+    if (this.shoot) await shots.take(page, `alignment-${this.at}-${screen}`);
   }
 
-  /** Measures what `root` matches with the five checks, as `screen`. */
-  async measure(page: Page, screen: string, root: Locator): Promise<void> {
+  /** Measures what `root` matches with the five checks, as `screen`. A root that matches nothing is a screen missing, unless `optional`. */
+  async measure(page: Page, screen: string, root: Locator, opts: { optional?: boolean } = {}): Promise<void> {
+    if ((await root.count()) === 0) {
+      if (!opts.optional) await this.missing(page, screen, "nothing on the page matched it");
+      return;
+    }
     await this.add(page, screen, alignmentLines(await measureAlignment(root), `${this.at} ${screen}`));
+  }
+
+  /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
+  async pills(page: Page, screen: string, opts: { points?: readonly PillPoint[]; needPills?: boolean } = {}): Promise<void> {
+    const check = await pillLines(page, `${this.at} ${screen}`, opts);
+    for (const words of check.matched) this.seen.add(`${screen} points at ${words}`);
+    await this.add(page, screen, check.lines);
   }
 
   /** A screen the sweep must reach at this size and did not, shot as it stands. */
   async missing(page: Page, screen: string, why: string): Promise<void> {
     this.lines.push(`${this.at} ${screen}: never showed (${why})`);
-    await shots.take(page, `alignment-${this.at}-${screen}-missing`);
+    if (this.shoot) await shots.take(page, `alignment-${this.at}-${screen}-missing`);
+  }
+
+  /** Counts this size's screens into the run's tally. */
+  tally(): void {
+    for (const screen of this.seen) seenAt.set(screen, (seenAt.get(screen) ?? 0) + 1);
   }
 }
 
@@ -322,12 +373,14 @@ async function selectToken(page: Page, name: string, cell: { x: number; y: numbe
   return (await showsWithin(bar, 3_000)) ? bar : null;
 }
 
-/** Measures a token window's header, play row and group line, and keeps where its header stands. */
-async function measureWindow(sweep: Sweep, page: Page, screen: string, bar: Locator, headers: HeaderPlace[]): Promise<void> {
+/** Measures a token window's header, play row and group line (where it has one), and keeps where its header stands. */
+async function measureWindow(sweep: Sweep, page: Page, screen: string, bar: Locator, headers: HeaderPlace[], groupLine: boolean): Promise<void> {
   await sweep.measure(page, `${screen}-header`, bar.locator("[data-sticky-header]"));
   await sweep.measure(page, `${screen}-play-row`, bar.locator('[data-bar-row="play"]'));
-  await sweep.measure(page, `${screen}-group-line`, bar.getByRole("group", { name: "Attached tokens" }));
-  headers.push(...(await headerPlaces(bar)));
+  await sweep.measure(page, `${screen}-group-line`, bar.getByRole("group", { name: "Attached tokens" }), { optional: !groupLine });
+  const places = await headerPlaces(bar);
+  if (places.length !== 1) await sweep.missing(page, `${screen}-header-place`, `read ${places.length} header places, not 1`);
+  headers.push(...places);
 }
 
 /** The DM's screens at one size. */
@@ -335,7 +388,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const headers: HeaderPlace[] = [];
   // Pat's walk left a springing waiting, whose card could cover a trap.
   await settleTraps();
-  await sweep.add(page, "board", await pillLines(page, `${sweep.at} board`, await trapPoints(page, true)));
+  await sweep.pills(page, "board", { points: await trapPoints(page, true), needPills: true });
 
   // The Trap tool's options, its Start from, and its More where the row has one.
   await pickTool(page, "Trap");
@@ -375,8 +428,13 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
       await escapeAll(page);
       continue;
     }
-    // Its header's place as it opens, before an unfolded group scrolls the frame.
-    if (which === "pit") headers.push(...(await headerPlaces(pane)));
+    // Its header's place as it opens, before an unfolded group scrolls the frame. A pane standing as a sheet has a grab area, and its grabber places its header.
+    if (which === "pit") {
+      const places = await headerPlaces(pane);
+      if (places.length > 0) sweep.seen.add("trap-pane-header-place");
+      else if ((await pane.locator("[data-sheet-grab]").count()) === 0) await sweep.missing(page, "trap-pane-header-place", "the pane is no sheet, and its header place was not read");
+      headers.push(...places);
+    }
     await unfoldAll(pane);
     await sweep.measure(page, `trap-pane-${which}`, pane);
     await dismissToasts(page);
@@ -440,6 +498,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await summary.first().click();
     const overlay = page.getByRole("dialog", { name: "Alerts" });
     if (await showsWithin(overlay, 2_500)) await sweep.measure(page, "alerts-overlay", overlay);
+    else await sweep.missing(page, "alerts-overlay", "a tap on the summary row showed no alerts");
     await escapeAll(page);
   }
   if (!column && !(await visible(summary))) await sweep.missing(page, "alerts-column", "neither the column nor its summary row showed");
@@ -461,7 +520,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await escapeAll(page);
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
-    await measureWindow(sweep, page, "window-thorn", thorn, headers);
+    await measureWindow(sweep, page, "window-thorn", thorn, headers, false);
     const attach = thorn.getByRole("button", { name: "Attach", exact: true });
     await attach.click();
     const sheet = page.getByRole("dialog", { name: "Attach Thorn" });
@@ -476,7 +535,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   // The goblin's window, a holder's line, then the group window.
   const goblin = await selectToken(page, "Goblin", { x: 9, y: 3 });
   if (goblin) {
-    await measureWindow(sweep, page, "window-goblin", goblin, headers);
+    await measureWindow(sweep, page, "window-goblin", goblin, headers, true);
     await sweep.add(page, "holder-line", await leadLines(goblin.getByRole("group", { name: "Attached tokens" }), ["Carrying", "Dragging"], `${sweep.at} holder-line`));
     const multi = goblin.getByRole("button", { name: "Multi-select", exact: true });
     await multi.click();
@@ -485,7 +544,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     if (await canvasAt(page, { x: 10, y: 3 })) await tapCell(page, BOUNDS, { x: 10, y: 3 });
     const group = page.locator('[role="dialog"][data-bar-mode]');
     if (await showsWithin(group.first(), 3_000)) {
-      await measureWindow(sweep, page, "window-group", group.first(), headers);
+      await measureWindow(sweep, page, "window-group", group.first(), headers, false);
       await page.getByRole("button", { name: "Deselect all" }).first().click();
     } else await sweep.missing(page, "window-group", "Multi-select and two taps opened no group window");
     await escapeAll(page);
@@ -494,17 +553,19 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   // A rider's window: Thorn on the warhorse, steering it.
   await ops.send({ t: "token.attach", tokenId: run.ids.thorn, to: run.ids.horse, kind: "ride", steer: true, x: 6, y: 5, elevation: 0 });
   const rider = await selectToken(page, "Thorn", { x: 6, y: 5 });
-  if (rider) await measureWindow(sweep, page, "window-rider", rider, headers);
+  if (rider) await measureWindow(sweep, page, "window-rider", rider, headers, true);
   else await sweep.missing(page, "window-rider", "a tap on the mounted Thorn opened no window");
   await escapeAll(page);
   await resetThorn();
 
+  if (headers.length === 0) await sweep.missing(page, "headers", "no header place was read");
   await sweep.add(page, "headers", headerLines(headers, `${sweep.at} headers`));
 }
 
 /** Pat's screens at one size: the Ruler, a drag's stop note, and the toast of his own walk. */
 async function patScreens(sweep: Sweep, page: Page): Promise<void> {
-  await sweep.add(page, "pat-board", await pillLines(page, `${sweep.at} pat-board`, await trapPoints(page, false)));
+  // A player's board at a small zoom may show no name, so only its stage is required.
+  await sweep.pills(page, "pat-board", { points: await trapPoints(page, false) });
   await resetThorn();
   await patCrosses();
   const own = toasts(page, /^Thorn: /);
@@ -526,7 +587,7 @@ async function patScreens(sweep: Sweep, page: Page): Promise<void> {
   for (let i = 1; i <= 12; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / 12, a.y + ((b.y - a.y) * i) / 12);
   await page.locator("[data-options-reading]").first().waitFor().catch(() => {});
   await sweep.measure(page, "ruler-live", bar);
-  await sweep.add(page, "ruler-live-pills", await pillLines(page, `${sweep.at} ruler-live-pills`));
+  await sweep.pills(page, "ruler-live-pills", { needPills: true });
   await page.mouse.up();
   await sweep.measure(page, "ruler-done", bar);
   await pressOption(page, "Ruler", "Keep this ruler on the map");
@@ -538,7 +599,7 @@ async function patScreens(sweep: Sweep, page: Page): Promise<void> {
   await page.mouse.up();
   await pressOption(page, "Ruler", "Keep this ruler on the map");
   await sweep.measure(page, "ruler-kept-row", bar);
-  await sweep.add(page, "ruler-kept-pills", await pillLines(page, `${sweep.at} ruler-kept-pills`));
+  await sweep.pills(page, "ruler-kept-pills", { needPills: true });
   const kept = bar.getByRole("button", { name: /^Kept/ });
   const moreButton = bar.getByRole("button", { name: "More options" });
   const opener = (await visible(kept)) ? kept.first() : (await visible(moreButton)) ? moreButton.first() : null;
@@ -568,7 +629,7 @@ async function patScreens(sweep: Sweep, page: Page): Promise<void> {
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   for (let i = 1; i <= 12; i++) await page.mouse.move(from.x + ((to.x - from.x) * i) / 12, from.y + ((to.y - from.y) * i) / 12);
-  await sweep.add(page, "drag-pills", await pillLines(page, `${sweep.at} drag-pills`));
+  await sweep.pills(page, "drag-pills", { needPills: true });
   await page.mouse.up();
   const note = page.locator("[data-stop-note]");
   if (await showsWithin(note.first(), 3_000)) await sweep.measure(page, "stop-note", note.first());
@@ -654,6 +715,10 @@ const CASES = `
     <div style="display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center"><span>Dragging</span><div style="display: flex; flex-wrap: wrap; gap: 4px"><button>Prisoner</button><button>Let go</button></div></div>
   </div>
 </div>
+<div data-case="kind-carrying-only" style="width: 280px">
+  <div role="group" aria-label="Attached tokens" style="display: flex; align-items: center; gap: 4px"><span>Carrying</span><button>Lantern</button></div>
+</div>
+<div id="board" style="width: 300px; height: 160px; background: #111"></div>
 <div data-case="windows">
   <div role="dialog" aria-label="Thorn actions" aria-labelledby="w1" style="border: 1px solid #888; height: 120px; overflow: hidden"><div style="padding: 4px 12px; height: 100%; overflow: auto">
     <div data-sticky-header style="display: flex; align-items: center; margin: -4px -12px 0; padding: 4px 12px 0; min-height: 48px"><strong id="w1" style="flex: 1; line-height: 1.2">Thorn</strong><button aria-label="Close">x</button></div>
@@ -732,6 +797,46 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       const headers = headerLines(await headerPlaces(page.locator('[data-case="windows"] [role="dialog"]')), "windows");
       assert.equal(headers.length, 1, `only the window whose header pads 4 above and 0 below stands apart: ${JSON.stringify(headers)}`);
       assert.match(headers[0]!, /"Thorn actions" has its Close 5 px/);
+      // A target that is not there is a line, never a pass.
+      const drawn = new Sweep("drawn", false);
+      await drawn.measure(page, "renamed", page.locator('[data-bar-row="plays"]'));
+      assert.match(drawn.lines.join("\n"), /^drawn renamed: never showed/, "a renamed attribute fails the sweep");
+      assert.deepEqual((await pillLines(page, "no-konva", { needPills: true })).lines, ["no-konva: no Konva stage on the page"]);
+      assert.deepEqual(await leadLines(holder("kind-carrying-only"), ["Carrying", "Dragging"], "kind-carrying-only"), ['kind-carrying-only: "Dragging" is not in the group']);
+      assert.deepEqual(await leadLines(page.locator('[data-case="none"]').getByRole("group"), ["Carrying"], "no-group"), ["no-group: no group of linked tokens to read"]);
+
+      // Pills on a real Konva stage: a pill in view pointing at its point passes, one past the board's edge, one whose pointer is off its point and one that is not drawn are each caught.
+      await page.addScriptTag({ path: path.join(ROOT, "node_modules/konva/konva.min.js") });
+      const board = await page.locator("#board").boundingBox();
+      assert.ok(board, "the drawn board");
+      const at = (x: number, y: number) => ({ x: board.x + x, y: board.y + y });
+      const draw = (pills: { x: number; y: number; text: string }[]) =>
+        page.evaluate((list) => {
+          type K = { stages: { destroy(): void }[]; Stage: new (o: object) => { add(l: unknown): void }; Layer: new () => { add(n: unknown): void; draw(): void }; Label: new (o: object) => { add(n: unknown): void }; Tag: new (o: object) => unknown; Text: new (o: object) => unknown };
+          const konva = (globalThis as unknown as { Konva: K }).Konva;
+          for (const old of [...konva.stages]) old.destroy();
+          const stage = new konva.Stage({ container: "board", width: 300, height: 160 });
+          const layer = new konva.Layer();
+          stage.add(layer);
+          for (const p of list) {
+            const label = new konva.Label({ x: p.x, y: p.y });
+            label.add(new konva.Tag({ fill: "#333", pointerDirection: "down", pointerWidth: 10, pointerHeight: 6, cornerRadius: 6 }));
+            label.add(new konva.Text({ text: p.text, fontSize: 12, padding: 4, fill: "#fff" }));
+            layer.add(label);
+          }
+          layer.draw();
+        }, pills);
+      await draw([{ x: 150, y: 80, text: "Centered" }]);
+      const centered = await pillLines(page, "konva", { points: [{ words: "Centered", at: at(150, 80), required: true }], needPills: true });
+      assert.deepEqual(centered, { lines: [], matched: ["Centered"] }, "a pill in view on its point passes");
+      await draw([{ x: 280, y: 80, text: "A long name near the edge" }]);
+      assert.match((await pillLines(page, "konva", { needPills: true })).lines.join("\n"), /^konva: pill "A long name near the edge" runs [\d.]+ px past the board's visible part$/);
+      await draw([{ x: 150, y: 80, text: "Centered" }]);
+      assert.deepEqual((await pillLines(page, "konva", { points: [{ words: "Centered", at: at(155, 80) }] })).lines, ['konva: pill "Centered" points 5 px off its point']);
+      assert.deepEqual((await pillLines(page, "konva", { points: [{ words: "Absent", at: at(150, 80), required: true }] })).lines, ['konva: no pointed pill reads "Absent"']);
+      await draw([]);
+      assert.deepEqual((await pillLines(page, "konva", { needPills: true })).lines, ["konva: no board pill drawn"]);
+
       const lanes = await toastLaneLines(page, "toasts");
       assert.equal(lanes.length, 1, `the toast spanning the map under the card is caught: ${JSON.stringify(lanes)}`);
       await page.locator('[data-case="toasts"] [role="status"]').evaluate((el) => {
@@ -868,24 +973,35 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       index++;
       test(`pl3-b${index}. at ${size.width} x ${size.height} at ${scale * 100}%, on ${size.touch ? "touch" : "a mouse"}: every screen of the sweep within ${LIMIT_PX} px`, async () => {
         const sweep = new Sweep(at);
-        await resetThorn();
-        await restartFight();
-        pat.setDefaultTimeout(10_000);
-        await openAt(pat, size, scale);
-        await patScreens(sweep, pat);
-        await pat.goto("about:blank");
-        const page = await dmPageFor(size);
-        page.setDefaultTimeout(10_000);
-        await openAt(page, size, scale);
-        await waitFor("the DM's snapshot", () => dmSocket.state);
-        await dmScreens(sweep, page, size);
-        console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
+        try {
+          await resetThorn();
+          await restartFight();
+          pat.setDefaultTimeout(10_000);
+          await openAt(pat, size, scale);
+          await patScreens(sweep, pat);
+          await pat.goto("about:blank");
+          const page = await dmPageFor(size);
+          page.setDefaultTimeout(10_000);
+          await openAt(page, size, scale);
+          await waitFor("the DM's snapshot", () => dmSocket.state);
+          await dmScreens(sweep, page, size);
+          console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
+        } finally {
+          sweep.tally();
+        }
         assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line at ${at}:\n${sweep.lines.join("\n")}`);
       });
     }
   }
 
-  test("pl3-c. no page logged an error", () => {
+  test("pl3-c. the screens that show only at some sizes showed at as many as the polish pass found, and each trap name's pointer was read", () => {
+    const short = Object.entries(SOME_SIZES)
+      .filter(([screen, sizes]) => (seenAt.get(screen) ?? 0) < sizes)
+      .map(([screen, sizes]) => `${screen}: ${seenAt.get(screen) ?? 0} of ${sizes} sizes`);
+    assert.deepEqual(short, [], "screens that showed at fewer sizes than the polish pass found");
+  });
+
+  test("pl3-d. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
   });

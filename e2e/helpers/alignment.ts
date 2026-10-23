@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import type { Locator, Page } from "playwright-core";
 
 /**
@@ -49,7 +48,7 @@ import type { Locator, Page } from "playwright-core";
  *   sentence, not a field's name (a section label puts its action under
  *   itself when both do not fit, components/Panel.tsx).
  * - A pane's header band and a pane's frame are placed by
- *   assertHeaderPlace instead, since the band's room above its row is
+ *   the header check instead, since the band's room above its row is
  *   set by the frame (components/SheetHeader.tsx).
  * - Kin that hold different lines of words, in number or in height (a
  *   name on two lines over one line of help), are left out of the same
@@ -57,17 +56,20 @@ import type { Locator, Page } from "playwright-core";
  * - An edge is where two rows or more start: three rows that each start
  *   apart share none.
  *
- * Three named checks cover what the five cannot see: assertPillsInView
- * (board pills drawn by Konva inside the canvas's visible part, a pointed
- * one across only, its pointer on its point), assertHeaderPlace (every
- * pane's and window's Close and title where a map pane's header puts
- * them under its frame's top) and assertToastLane (a toast under an alert
- * card takes the card's left and right edges). assertWordsLead reads a
+ * Three named checks cover what the five cannot see: pillLines (board
+ * pills drawn by Konva inside the canvas's visible part, a pointed one
+ * across only, its pointer on its point), headerLines with headerPlaces
+ * (every pane's and window's Close and title where a map pane's header
+ * puts them under its frame's top) and toastLaneLines (a toast under an
+ * alert card takes the card's left and right edges). leadLines reads a
  * line of linked tokens row by row: each kind's word starts its row.
  *
- * Each check has a form that returns readable lines, for a sweep that
- * gathers every screen's lines before it fails, and an assert form. With
- * E2E_ALIGN_DEBUG=1 a row's line also gives each part's boxes.
+ * Each check returns readable lines, so a sweep gathers every screen's
+ * lines before it fails. None passes by reading nothing: a pill check
+ * with no stage or no pill, and a lead check with no group or no word,
+ * report that. measureAlignment over a root that matches nothing returns
+ * nothing, so its caller requires the root (e2e/alignment.e2e.ts Sweep).
+ * With E2E_ALIGN_DEBUG=1 a row's line also gives each part's boxes.
  */
 
 /** The most a part may be off, in CSS px. Offsets are rounded to 0.1 px first, so layout rounding at 130% (1.0 px) passes. */
@@ -616,16 +618,12 @@ export function alignmentLines(findings: readonly Finding[], screen: string): st
   return findings.filter((f) => Math.abs(f.offset) > LIMIT_PX).map((f) => `${screen}: ${f.check} ${f.offset} px, ${f.role} "${f.name}": ${f.what}${f.detail ? ` (${f.detail})` : ""}`);
 }
 
-export function assertAligned(findings: readonly Finding[], screen: string): void {
-  const lines = alignmentLines(findings, screen);
-  assert.equal(lines.length, 0, `${screen} is out of line:\n${lines.join("\n")}`);
-}
 
 /** A board pill as Konva draws it: its words, its body and, for a pointed pill, its pointer's tip, in page px. */
 type PillSeen = { text: string; body: Box; view: Box; pointed: boolean; tip: { x: number; y: number } | null };
 
-/** Every board pill (a Konva Label) that shows, with its body, its pointer's tip, and the canvas's part inside the window. */
-function pillsInPage(): PillSeen[] {
+/** Every board pill (a Konva Label) that shows, with its body, its pointer's tip, and the canvas's part inside the window, and how many stages there are. */
+function pillsInPage(): { stages: number; pills: PillSeen[] } {
   type KRect = { x: number; y: number; width: number; height: number };
   type KNode = { isVisible(): boolean; getAbsoluteOpacity(): number; getClientRect(o?: { skipStroke?: boolean }): KRect };
   type KTag = KNode & {
@@ -639,8 +637,9 @@ function pillsInPage(): PillSeen[] {
   type KLabel = KNode & { getTag(): KTag | undefined; getText(): (KNode & { text(): string }) | undefined };
   type KStage = { container(): { getBoundingClientRect(): DomRect }; find(selector: string): KLabel[] };
   const g = globalThis as unknown as { Konva?: { stages: KStage[] }; innerWidth: number; innerHeight: number };
-  const out: PillSeen[] = [];
-  for (const stage of g.Konva?.stages ?? []) {
+  const stages = g.Konva?.stages ?? [];
+  const pills: PillSeen[] = [];
+  for (const stage of stages) {
     const host = stage.container().getBoundingClientRect();
     const view = { l: Math.max(0, host.left), t: Math.max(0, host.top), r: Math.min(g.innerWidth, host.right), b: Math.min(g.innerHeight, host.bottom) };
     for (const label of stage.find("Label")) {
@@ -654,7 +653,7 @@ function pillsInPage(): PillSeen[] {
       const lean = Number(tag?.getAttr("lean") ?? 0) || 0;
       const local = tag && pointed ? { x: tag.width() / 2 + lean, y: direction === "down" ? tag.height() + tag.pointerHeight() : -tag.pointerHeight() } : null;
       const at = local && tag ? tag.getAbsoluteTransform().point(local) : null;
-      out.push({
+      pills.push({
         text: (label.getText()?.text() ?? "").replace(/\n/g, " / ").slice(0, 60),
         body: { l: host.left + r.x, t: host.top + r.y, r: host.left + r.x + r.width, b: host.top + r.y + r.height },
         view,
@@ -663,24 +662,36 @@ function pillsInPage(): PillSeen[] {
       });
     }
   }
-  return out;
+  return { stages: stages.length, pills };
 }
 
-/** A point a pointed pill names, in page px: a pill shown whose words start with `words` must have its pointer's tip there. */
-export type PillPoint = { words: string; at: { x: number; y: number } };
+/**
+ * A point a pointed pill names, in page px: a pill shown whose words
+ * start with `words` must have its pointer's tip there. `required` makes
+ * a missing pill a line of its own, for a pill that must show. A sweep
+ * where the zoom may hide a name leaves it off and counts `matched`.
+ */
+export type PillPoint = { words: string; at: { x: number; y: number }; required?: boolean };
+
+/** What the pill check found: a line for each fault, and the words of each point a pill pointed at. */
+export type PillCheck = { lines: string[]; matched: string[] };
 
 /**
- * A line for each board pill that runs past the canvas's visible part,
- * and for each pointed pill in `points` whose pointer's tip is off its
- * point. A plain pill slides inside the board on every side, and a
- * pointed one only across, since sliding it up or down would part its
- * pointer from its point. A pill wholly out of view is the camera's
- * business, not the pill's.
+ * The board pills against the canvas's visible part, and the pointed
+ * pills of `points` against their points. A plain pill slides inside the
+ * board on every side, and a pointed one only across, since sliding it
+ * up or down would part its pointer from its point. A pill wholly out of
+ * view is the camera's business, not the pill's. With no Konva stage on
+ * the page, or with `needPills` and no pill drawn, it reports that, so it
+ * never passes by reading nothing.
  */
-export async function pillLines(page: Page, screen: string, points: readonly PillPoint[] = []): Promise<string[]> {
-  const pills = await page.evaluate(pillsInPage);
+export async function pillLines(page: Page, screen: string, opts: { points?: readonly PillPoint[]; needPills?: boolean } = {}): Promise<PillCheck> {
+  const { stages, pills } = await page.evaluate(pillsInPage);
   const round = (n: number) => Math.round(n * 10) / 10;
   const lines: string[] = [];
+  const matched: string[] = [];
+  if (stages === 0) lines.push(`${screen}: no Konva stage on the page`);
+  else if (opts.needPills && pills.length === 0) lines.push(`${screen}: no board pill drawn`);
   for (const p of pills) {
     const { body: a, view: v } = p;
     if (a.r <= v.l || a.l >= v.r || a.b <= v.t || a.t >= v.b) continue;
@@ -688,19 +699,16 @@ export async function pillLines(page: Page, screen: string, points: readonly Pil
     const past = p.pointed ? across : Math.max(across, v.t - a.t, a.b - v.b);
     if (round(past) > LIMIT_PX) lines.push(`${screen}: pill "${p.text}" runs ${round(past)} px past the board's visible part`);
   }
-  for (const point of points) {
-    // A name the board does not show at this zoom has no pointer to check (features/traps/rules.ts trapNameShown).
-    for (const p of pills.filter((x) => x.pointed && x.tip && x.text.startsWith(point.words))) {
+  for (const point of opts.points ?? []) {
+    const named = pills.filter((x) => x.pointed && x.tip && x.text.startsWith(point.words));
+    if (named.length > 0) matched.push(point.words);
+    else if (point.required) lines.push(`${screen}: no pointed pill reads "${point.words}"`);
+    for (const p of named) {
       const off = Math.hypot(p.tip!.x - point.at.x, p.tip!.y - point.at.y);
       if (round(off) > LIMIT_PX) lines.push(`${screen}: pill "${p.text}" points ${round(off)} px off its point`);
     }
   }
-  return lines;
-}
-
-export async function assertPillsInView(page: Page, screen: string, points: readonly PillPoint[] = []): Promise<void> {
-  const lines = await pillLines(page, screen, points);
-  assert.equal(lines.length, 0, lines.join("\n"));
+  return { lines, matched };
 }
 
 /**
@@ -768,10 +776,6 @@ export function headerLines(places: readonly HeaderPlace[], screen: string): str
     .map((p) => `${screen}: header of "${p.frame}" has its Close ${p.close} px and its title's middle ${p.title} px under its frame's top, where a map pane's has ${p.wantClose} and ${p.wantTitle}`);
 }
 
-export function assertHeaderPlace(places: readonly HeaderPlace[], screen: string): void {
-  const lines = headerLines(places, screen);
-  assert.equal(lines.length, 0, lines.join("\n"));
-}
 
 type ToastSeen = { text: string; toast: Box; card: Box | null };
 
@@ -821,10 +825,6 @@ export async function toastsUnderCards(page: Page): Promise<number> {
   return (await page.evaluate(toastsInPage)).filter((s) => s.card !== null).length;
 }
 
-export async function assertToastLane(page: Page, screen: string): Promise<void> {
-  const lines = await toastLaneLines(page, screen);
-  assert.equal(lines.length, 0, lines.join("\n"));
-}
 
 /** Where each lead word sits in its group: its left against the group's, and what stands before it on its line. */
 function leadsInPage(group: DomElement, words: string[]): { word: string; inset: number; before: string[] }[] {
@@ -858,15 +858,16 @@ function leadsInPage(group: DomElement, words: string[]): { word: string; inset:
     }));
 }
 
-/** A line for each of `words` in the group that does not start its row: something stands before it on its line, or it starts off the group's left edge. */
+/** A line for each of `words` in the group that does not start its row (something stands before it on its line, or it starts off the group's left edge), or is not in the group at all. */
 export async function leadLines(group: Locator, words: readonly string[], screen: string): Promise<string[]> {
+  if ((await group.count()) === 0) return [`${screen}: no group of linked tokens to read`];
   const leads = await group.evaluate(leadsInPage, [...words]);
-  return leads
-    .filter((w) => w.before.length > 0 || Math.abs(w.inset) > LIMIT_PX)
-    .map((w) => `${screen}: "${w.word}" does not start its row: ${w.before.length ? `${w.before.join(", ")} before it` : `${w.inset} px in from the group's edge`}`);
+  const absent = words.filter((w) => !leads.some((l) => l.word === w)).map((w) => `${screen}: "${w}" is not in the group`);
+  return [
+    ...absent,
+    ...leads
+      .filter((w) => w.before.length > 0 || Math.abs(w.inset) > LIMIT_PX)
+      .map((w) => `${screen}: "${w.word}" does not start its row: ${w.before.length ? `${w.before.join(", ")} before it` : `${w.inset} px in from the group's edge`}`),
+  ];
 }
 
-export async function assertWordsLead(group: Locator, words: readonly string[], screen: string): Promise<void> {
-  const lines = await leadLines(group, words, screen);
-  assert.equal(lines.length, 0, lines.join("\n"));
-}
