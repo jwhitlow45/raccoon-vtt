@@ -545,12 +545,14 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   // player gets have no gap where one only others hold was. All of them share seq 0, so the import cannot keep the order
   // across audiences: it reads audience by audience, and the archive holds every line (importRoom).
   const dmLineIds = dmLineIdsOf(state, scenes);
+  const dmLines = new Set(state.log.filter((e) => lineAudience(e) === "dm").map((e) => e.id));
   const ranks = rosterRanks(out.members);
   const copies = new Map<string, number>();
   let shared = 0;
   for (const e of state.log) {
     let id: string;
-    const next: LogEntry = { ...e };
+    const { copyOf, ...rest } = e;
+    const next: LogEntry = rest;
     if (e.from !== undefined) next.from = members.of(e.from);
     if (e.to !== undefined) next.to = e.to.map((member) => members.of(member));
     if (e.parts !== undefined) next.parts = remapParts(e.parts, memberList);
@@ -563,6 +565,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       const count = copies.get(reader) ?? 0;
       copies.set(reader, count + 1);
       id = `0:${partyIndex(ranks.get(reader)!, count)}`;
+      // A copy whose DM line did not come with it stands for its event alone (eventLines).
+      if (copyOf !== undefined && dmLines.has(copyOf)) next.copyOf = dmLineIds.get(copyOf)!;
     } else id = `0:${shared++}`;
     next.id = id;
     if (e.data) {

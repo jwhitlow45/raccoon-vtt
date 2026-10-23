@@ -445,22 +445,23 @@ export function linesPastStart(beforeRoom: LogRoom, afterRoom: LogRoom, viewers:
 
 /**
  * The log's lines one per event, for the reducer's reads of what happened.
- * A party line's copy is its reader's view of a DM line of the same op
- * (Tx.addLog), so a copy is left out while the log holds a DM line of its
- * op. Where it holds none, the copies stand for their lines: on a player's
- * own projection, which the client replays ops on (design 7.4) and which
- * holds no DM line, and once the DM ring has dropped the op's lines. A copy
- * keeps only what its reader read, a dice line's tag only for its roller,
- * so the reads that count lines, such as a cast's damage roll, meet one.
+ * A party line's copy is its reader's view of the DM line it names
+ * (`copyOf`), so a copy is left out while the log holds that line. Where it
+ * does not, the copies stand for it: on a player's own projection, which
+ * the client replays ops on (design 7.4) and which holds no DM line and no
+ * `copyOf`, and once the DM ring has dropped that one line, whatever other
+ * lines of its op it still holds. A copy keeps only what its reader read, a
+ * dice line's tag only for its roller, so the reads that count lines, such
+ * as a cast's damage roll, meet one.
  *
  * In id order, so by op, and within an op each audience in the order it
  * was written. What was written before what across audiences in one op is
  * not kept, so a read goes by op (shared/reducer/areaTriggers.ts).
  */
 export function eventLines(log: readonly LogEntry[]): LogEntry[] {
-  const withDmLines = new Set<number>();
-  for (const e of log) if (dmNumbered(e.id)) withDmLines.add(seqOf(e.id));
-  return log.filter((e) => lineAudience(e) !== "party" || !withDmLines.has(seqOf(e.id)));
+  const dmLines = new Set<string>();
+  for (const e of log) if (dmNumbered(e.id)) dmLines.add(e.id);
+  return log.filter((e) => e.copyOf === undefined || !dmLines.has(e.copyOf));
 }
 
 function seqOf(id: string): number {

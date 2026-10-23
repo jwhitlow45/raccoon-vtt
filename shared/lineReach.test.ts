@@ -7,7 +7,8 @@ import { projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp, type Applied } from "./reducer.ts";
 import { Tx } from "./reducer/tx.ts";
-import { AT, DM, P1, P2, castTable, entry, env, room, template, token } from "./testutil.ts";
+import { LIMITS } from "./limits.ts";
+import { AT, DM, P1, P2, actor, castTable, entry, env, room, template, token } from "./testutil.ts";
 
 /**
  * A log line's readers and its parts' readers, fixed when it is written by
@@ -206,5 +207,48 @@ describe("the reducer reads the log one line per event (eventLines)", () => {
         assert.deepEqual([area?.data?.type, turn?.data?.type, dmNumbered(turn!.id)], ["area", "turn", true], "the turn line sorts after the reminder");
       }
     }
+  });
+  /**
+   * P1's hero on its turn, beside two of P2's areas that other players
+   * cannot see, so a reminder of either is the DM's line with a copy for
+   * P2, and a goblin no player sees, whose hits put DM lines alone.
+   */
+  function twoAreas(): RoomState {
+    const state = room();
+    state.meta = { ...state.meta, settings: { ...state.meta.settings, playersSeeAoeOfOthers: false } };
+    state.tokens.hero = token("hero", { kind: "pc", name: "Ayla", x: 2, y: 5, ownerIds: ["p1"], disposition: "ally" });
+    state.tokens.gob = token("gob", { visibility: "dm", actor: { inline: actor({ hp: { cur: 1_000, max: 1_000, temp: 0 } }) } });
+    for (const [id, x] of [["sg", 6.5], ["moon", 7.5]] as const) state.templates[id] = template(id, { shape: "sphere", size: 10, origin: { x, y: 5.5, z: 0 }, spell: id, ownerId: "p2", triggers: ["enter"] });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-hero", entries: [entry("e-hero", { tokenId: "hero", value: 15 })], turnStart: { entryId: "e-hero", tokenId: "hero", sceneId: "s1", x: 2, y: 5, elevation: 0, seen: true, seq: 1 } };
+    return state;
+  }
+
+  test("an area reminds once a turn after the DM ring drops its line, while a later line of the same move stays", () => {
+    for (const hits of [0, LIMITS.dmLogLines - 1]) {
+      const into = run(twoAreas(), { t: "token.move", tokenId: "hero", x: 6, y: 5 }, P1, 2);
+      const lines = into.log.filter((e) => e.data?.type === "area");
+      assert.deepEqual(lines.map((e) => [dmNumbered(e.id), e.to, e.copyOf]), [[true, undefined, undefined], [false, ["p2"], lines[0]!.id], [true, undefined, undefined], [false, ["p2"], lines[2]!.id]], "two DM lines, each with P2's copy naming it");
+      let state = into.state;
+      for (let i = 0; i < hits; i++) state = run(state, { t: "actor.damageMany", hits: [{ target: { tokenId: "gob" }, amount: 1 }] }, DM, 3 + i).state;
+      const held = new Set(state.log.map((e) => e.id));
+      if (hits > 0) assert.deepEqual(lines.map((e) => held.has(e.id)), [false, true, true, true], "the first reminder's DM line left the ring, its copy and the second's lines stayed");
+      state = run(state, { t: "token.move", tokenId: "hero", x: 15, y: 5 }, P1, 3 + hits).state;
+      const back = run(state, { t: "token.move", tokenId: "hero", x: 6, y: 5 }, P1, 4 + hits);
+      assert.deepEqual(back.log.filter((e) => e.data?.type === "area"), [], `with ${hits} hits between, walking back in reminds of neither`);
+    }
+  });
+
+  test("a line of an op that writes more DM lines than the ring holds is read once, from its copy, once its own DM line leaves", () => {
+    const state = room();
+    state.tokens.pet = token("pet", { visibility: "dm", ownerIds: ["p1"] });
+    state.tokens.gob = token("gob", { visibility: "dm", actor: { inline: actor({ hp: { cur: 1_000, max: 1_000, temp: 0 } }) } });
+    const tx = new Tx(state, DM, { seq: 2, at: AT });
+    tx.addEvent({ type: "hp", tokenId: "pet", change: "damage", amount: 1 });
+    for (let i = 0; i < LIMITS.dmLogLines; i++) tx.addEvent({ type: "hp", tokenId: "gob", change: "damage", amount: 1 });
+    tx.finish();
+    const read = eventLines(tx.state.log);
+    assert.equal(tx.state.log.filter((e) => dmNumbered(e.id)).length, LIMITS.dmLogLines, "the pet's DM line left the ring");
+    assert.deepEqual(read.filter((e) => e.data?.type === "hp" && e.data.tokenId === "pet").map((e) => e.to), [["p1"]], "P1's copy stands for it");
+    assert.equal(read.length, LIMITS.dmLogLines + 1, "one line per event");
   });
 });

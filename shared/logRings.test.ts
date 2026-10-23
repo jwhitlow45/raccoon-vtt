@@ -257,6 +257,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
           assert.deepEqual(held.map((e) => e.id), theirs.slice(theirs.length - held.length).map((e) => e.id), `${where}: ${reader}'s copies are their newest`);
         }
         assert.ok(party.every((e) => e.to!.length === 1 && roster.includes(e.to![0]!)), `${where}: every copy names one current member`);
+        assert.ok(party.every((e) => e.copyOf !== undefined && dmNumbered(e.copyOf) && e.copyOf.startsWith(e.id.slice(0, e.id.indexOf(":") + 1))), `${where}: every copy names a DM line of its op`);
         const whispers = state.log.filter((e) => e.kind === "whisper");
         assert.ok(whispers.length <= LIMITS.whispersPerRoom && bytesOf(whispers) <= LIMITS.whisperBytesPerRoom, `${where}: ${whispers.length} whispers`);
         // Each ring keeps at least its bound at the largest roster the run can have, of the lines since its member last joined.
@@ -292,6 +293,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
           assert.deepEqual(live, liveLog(alone.get(viewer)!, viewer), `${name}: lines they never receive changed their log`);
           // 4. No gap.
           const readable = projectArchivedLog(state, history, viewer, { sceneId: "s1" }).sort((a, b) => compareLogIds(a.id, b.id));
+          if (viewer.role !== "dm") assert.ok([...live, ...readable].every((e) => e.parts === undefined && e.copyOf === undefined), `${name}: a DM's field reached a player`);
           const first = live[0];
           const fromFirst = first ? readable.filter((e) => compareLogIds(e.id, first.id) >= 0) : [];
           if (process.env.DEBUG_RINGS && stableStringify(live.map((e) => e.id)) !== stableStringify(fromFirst.map((e) => e.id))) {

@@ -1861,7 +1861,8 @@ export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[],
  * whisper by its parties, a DM line, a party line's own included, by the DM
  * alone, and a party line's copy by its one reader. A player then reads an
  * event by its own rules (projectEventCtx), a shared line's without the
- * parts they were not among the readers of when it was written (LineParts).
+ * parts they were not among the readers of when it was written (LineParts),
+ * and never the DM's own fields, `parts` and a copy's `copyOf`.
  */
 function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
   const me = ctx.viewer.memberId;
@@ -1871,12 +1872,13 @@ function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
     if (ctx.viewer.role === "dm" || entry.to![0] !== me) return null;
   } else if (ctx.viewer.role === "dm") return entry;
   else if (audience === "dm") return null;
-  const { parts, ...line } = entry;
-  if (entry.kind === "chat") return parts ? line : entry;
+  const { parts, copyOf, ...line } = entry;
+  const whole = parts === undefined && copyOf === undefined;
+  if (entry.kind === "chat") return whole ? entry : line;
   if (!entry.data) return null;
   const data = projectEventCtx(ctx, parts ? withinParts(entry.data, parts, me) : entry.data, audience === "party");
   if (!data) return null;
-  return data === entry.data && !parts ? entry : { ...line, data };
+  return data === entry.data && whole ? entry : { ...line, data };
 }
 
 function projectMemberCtx(_ctx: Ctx, member: Member): Member {

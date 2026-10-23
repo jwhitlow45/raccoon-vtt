@@ -708,6 +708,7 @@ const logEntry = z.strictObject({
       rolls: z.array(partReaders.nullable()).max(LIMITS.diceRollsPerOp).optional(),
     })
     .optional(),
+  copyOf: lineId.optional(),
 });
 
 const record = <T extends z.ZodType>(value: T) => z.record(z.string().min(1).max(120), value);

@@ -2143,6 +2143,12 @@ export type LogEntry = {
   data?: LogEvent;
   /** The readers of each part of a shared event line that not every player could read when it was written. The DM's alone. */
   parts?: LineParts;
+  /**
+   * A party line's copy: the id of the DM line it copies, so the reducer
+   * reads each event once (shared/logRings.ts eventLines). The DM's alone,
+   * since it counts the DM's lines of its op.
+   */
+  copyOf?: string;
 };
 
 /**

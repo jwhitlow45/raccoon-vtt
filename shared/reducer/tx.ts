@@ -256,10 +256,11 @@ export class Tx {
    *   is cut to its ring's bound (cutLine). Each event line took its number
    *   there when written, so the DM's lines keep the op's order.
    * - A line only some players could read is such a DM line, and each
-   *   reader gets a copy of their own: the line as they read it, cut as DM
-   *   lines are, in that reader's own run from PARTY_LINE_BASE, so the ids
-   *   each player gets in one op count on without a gap whatever the op
-   *   wrote for others. A reader's 2,000th copy in one op, which no op comes
+   *   reader gets a copy of their own: the line as they read it, naming the
+   *   DM line it copies, cut as DM lines are, in that reader's own run from
+   *   PARTY_LINE_BASE, so the ids each player gets in one op count on
+   *   without a gap whatever the op wrote for others. A reader's 2,000th
+   *   copy in one op, which no op comes
    *   near, would leave their run, so such a line stays the DM's alone.
    *
    * Each ring then drops only its own oldest, once, so a line never pushes
@@ -293,12 +294,13 @@ export class Tx {
           settled.set(u.line, [this.writeLine(reach.parts ? { ...entry, parts: reach.parts } : entry, index++)]);
           return;
         }
-        const lines = [this.writeLine(entry, u.dmIndex, cutLine)];
+        const dmLine = this.writeLine(entry, u.dmIndex, cutLine);
+        const lines = [dmLine];
         if (reach.audience === "party" && reach.views.every(([reader]) => (copies.get(reader) ?? 0) < PARTY_SLOT)) {
           for (const [reader, view] of reach.views) {
             const count = copies.get(reader) ?? 0;
             copies.set(reader, count + 1);
-            lines.push(this.writeLine({ kind: entry.kind, to: [reader], data: view }, partyIndex(ranks.get(reader)!, count), cutLine));
+            lines.push(this.writeLine({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id }, partyIndex(ranks.get(reader)!, count), cutLine));
           }
         }
         settled.set(u.line, lines);
