@@ -629,6 +629,16 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
   const damage = rig.damage ?? [];
   const conditions = rig.conditions ?? [];
   const setDamage = (next: { formula: string; type: DamageType }[]) => setRig({ damage: next.length > 0 ? next : null });
+  /*
+   * Each damage part keeps its own key as parts come and go, so a part's
+   * typed dice and their error never pass to the part after a removed one.
+   * Two parts may share their dice, so the dice cannot key them. A change
+   * from elsewhere that adds or drops parts keys the end of the list anew.
+   */
+  const partKeys = useRef<number[]>([]);
+  const nextPartKey = useRef(0);
+  while (partKeys.current.length < damage.length) partKeys.current.push(nextPartKey.current++);
+  if (partKeys.current.length > damage.length) partKeys.current = partKeys.current.slice(0, damage.length);
   const setConditions = (next: ConditionKey[]) => setRig(next.length > 0 ? { conditions: next } : { conditions: null, lasts: null });
   return (
     <>
@@ -670,11 +680,14 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
       ) : null}
       {damage.map((part, i) => (
         <DamagePart
-          key={i}
+          key={partKeys.current[i]}
           part={part}
           onFormula={(formula) => setDamage(damage.map((p, j) => (j === i ? { ...p, formula } : p)))}
           onType={(type) => setDamage(damage.map((p, j) => (j === i ? { ...p, type } : p)))}
-          onRemove={() => setDamage(damage.filter((_, j) => j !== i))}
+          onRemove={() => {
+            partKeys.current.splice(i, 1);
+            setDamage(damage.filter((_, j) => j !== i));
+          }}
         />
       ))}
       {damage.length < LIMITS.trapDamageParts ? (
@@ -742,7 +755,11 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
   const [text, setText] = useState(props.part.formula);
   const [bad, setBad] = useState(false);
   const errorId = useId();
-  useEffect(() => setText(props.part.formula), [props.part.formula]);
+  // Dice saved from here or elsewhere replace what was typed, and any error with it.
+  useEffect(() => {
+    setText(props.part.formula);
+    setBad(false);
+  }, [props.part.formula]);
   const save = () => {
     const clean = cleanLine(text, LIMITS.diceFormulaChars);
     if (!clean || !parseFormula(clean).ok) {

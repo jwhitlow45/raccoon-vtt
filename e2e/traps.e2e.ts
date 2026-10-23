@@ -906,6 +906,20 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dice.fill("1d6");
     await dice.press("Tab");
     await why.waitFor({ state: "detached" });
+
+    // With two parts of the same dice, removing the first while it shows its error leaves the second without one (F4).
+    await pane(dm).getByRole("button", { name: "Add damage", exact: true }).click();
+    await waitFor("two damage parts", () => (trap(dmSocket)?.rig?.damage?.length === 2 ? true : null));
+    const first = pane(dm).getByRole("textbox", { name: "Damage dice" }).first();
+    await first.fill("2dx");
+    await first.press("Tab");
+    await why.waitFor();
+    await pane(dm).getByRole("button", { name: "Remove this damage", exact: true }).first().click();
+    await waitFor("one damage part", () => (trap(dmSocket)?.rig?.damage?.length === 1 ? true : null));
+    await dm.waitForTimeout(200);
+    assert.equal(await why.count(), 0, "the removed part's error moved to the next part");
+    assert.equal(await pane(dm).getByRole("textbox", { name: "Damage dice" }).inputValue(), "1d6");
+    assert.deepEqual(trap(dmSocket)?.rig?.damage, [{ formula: "1d6", type: "bludgeoning" }]);
     await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
     await pane(dm).waitFor({ state: "detached" });
     await pickTool(dm, "Select");
