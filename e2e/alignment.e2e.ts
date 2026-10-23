@@ -891,6 +891,14 @@ const CASES = `
     <div style="display: flex; align-items: center; min-height: 48px"><strong id="w3" style="flex: 1; line-height: 1.2">Hidden Pit</strong><button aria-label="Close">x</button></div>
   </div>
 </div>
+<div data-case="windows-two-line" style="width: 220px">
+  <div role="dialog" aria-label="Lizard actions" aria-labelledby="w4" style="border: 1px solid #888; padding: 4px 12px">
+    <div style="display: flex; align-items: center; min-height: 48px"><strong id="w4" style="flex: 1; line-height: 1.2">Gigantic Armored Riding Lizard</strong><button aria-label="Close">x</button></div>
+  </div>
+  <div role="dialog" aria-label="Lizard actions, title set high" aria-labelledby="w5" style="border: 1px solid #888; padding: 4px 12px; margin-top: 8px">
+    <div style="display: flex; align-items: center; min-height: 48px"><strong id="w5" style="flex: 1; align-self: flex-start; line-height: 1.2">Gigantic Armored Riding Lizard</strong><button aria-label="Close">x</button></div>
+  </div>
+</div>
 <div data-case="toasts" style="position: relative; width: 390px; height: 300px">
   <div style="position: absolute; left: 82px; right: 8px; top: 0; display: flex; flex-direction: column; gap: 8px"><div data-alert="rolls" style="display: contents"><section style="height: 60px; background: #333">Trip Wire went off</section></div></div>
   <div style="position: absolute; top: 72px; left: 12px; right: 12px"><div data-toast="" style="background: #444; height: 44px">Trip Wire went off: Thorn.</div></div>
@@ -1046,6 +1054,10 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       const headers = headerLines(await headerPlaces(page.locator('[data-case="windows"] [role="dialog"]')), "windows");
       assert.equal(headers.length, 1, `only the window whose header pads 4 above and 0 below stands apart: ${JSON.stringify(headers)}`);
       assert.match(headers[0]!, /"Thorn actions" has its Close 5 px/);
+      // A long name's title on two lines is read by its lines together, so centered on Close it passes, and set at its row's top it is caught.
+      const wrapped = headerLines(await headerPlaces(page.locator('[data-case="windows-two-line"] [role="dialog"]')), "windows-two-line");
+      assert.equal(wrapped.length, 1, `only the two-line title set at its row's top stands apart: ${JSON.stringify(wrapped)}`);
+      assert.match(wrapped[0]!, /"Lizard actions, title set high" has its Close 7 px and its title's middle/);
       // A target that is not there is a line, never a pass.
       const drawn = new Sweep("drawn", false);
       await drawn.measure(page, "renamed", page.locator('[data-bar-row="plays"]'));

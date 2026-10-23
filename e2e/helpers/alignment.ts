@@ -944,11 +944,10 @@ function headerInPage(frames: DomElement[], rowPx: number): HeaderPlace[] {
     if (!close) continue;
     const range = doc.createRange();
     range.selectNodeContents(title);
-    const r = Array.from(range.getClientRects())[0];
-    if (!r) continue;
-    const lh = parseFloat(style(title).lineHeight);
-    const titleZoom = zoomOf(title);
-    const half = Number.isFinite(lh) ? (lh * titleZoom - r.height) / 2 : 0;
+    // A long name wraps the title onto two lines or more, which its row centers on Close as one block, so the title is read from its first line's top to its last line's foot. The half-leading above the one and below the other are the same, so the glyphs and the line boxes share that middle.
+    const rects = Array.from(range.getClientRects()).filter((x) => x.width > 0 && x.height > 0);
+    if (rects.length === 0) continue;
+    const lines = { top: Math.min(...rects.map((x) => x.top)), bottom: Math.max(...rects.map((x) => x.bottom)) };
     // The frame's top padding is the padding of the box the header row stands in, the frame or a scroller inside it, which a sticky header takes back with its margin.
     const holder = row.parentElement ?? frame;
     const holderZoom = zoomOf(holder);
@@ -957,7 +956,7 @@ function headerInPage(frames: DomElement[], rowPx: number): HeaderPlace[] {
     out.push({
       frame: frame.getAttribute("aria-label") ?? title.textContent ?? "",
       close: round(c.top - box.top),
-      title: round((r.top - half + r.bottom + half) / 2 - box.top),
+      title: round((lines.top + lines.bottom) / 2 - box.top),
       wantClose: round(inset + (rowPx * zoom - c.height) / 2),
       wantTitle: round(inset + (rowPx * zoom) / 2),
     });
