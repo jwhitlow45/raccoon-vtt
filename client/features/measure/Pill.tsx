@@ -112,6 +112,25 @@ export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { 
   return { box: { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, x: at.x, y: at.y, lean: 0 };
 }
 
+/**
+ * The room a pill can take wherever the view slides it, in cells, for what
+ * keeps off it without following the camera: token labels
+ * (canvas/useBoardText.ts) and area names (features/areas/TemplateLayer.tsx),
+ * which are laid out by zoom and never by pan, so a pan reshuffles nothing.
+ * A pointed pill's box spans every place slideAlong can put its body, from
+ * the body ending a corner past its point to the body starting a corner
+ * before it. Away from the view's edges that is wider than the pill as
+ * drawn, a price paid only beside a pointed pill. A plain pill's is its box
+ * with no view.
+ */
+export function pillReach(props: Omit<PillProps, "color">): Box {
+  const { box } = pillPlace(props, null);
+  if (!props.above && !props.below) return box;
+  const w = box.x1 - box.x0;
+  const corner = Math.min(theme.radius.sm / props.scale, w / 2);
+  return { ...box, x0: props.x - w + corner, x1: props.x + w - corner };
+}
+
 /** One pill of a stack: its words and look. The stack places it. */
 export type StackPill = Omit<PillProps, "x" | "y" | "scale" | "offsetPx" | "above" | "below">;
 

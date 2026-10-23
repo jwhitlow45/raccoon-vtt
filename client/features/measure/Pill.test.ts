@@ -5,7 +5,7 @@ import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import type { Box } from "../../lib/boardText.ts";
 
 const { boardViewOf } = await import("../../canvas/boardView.ts");
-const { leaningTag, pillGeometry, pillPlace, pillStackPlace } = await import("./Pill.tsx");
+const { leaningTag, pillGeometry, pillPlace, pillReach, pillStackPlace } = await import("./Pill.tsx");
 const { theme } = await import("../../lib/theme.ts");
 
 /*
@@ -193,10 +193,27 @@ describe("a pointed pill at the screen's edge (docs/design-v1-polish.md R4)", ()
     near(place.lean, g.width / 2 - theme.radius.sm, "the pointer at the straight edge's end");
   });
 
-  test("with no view it stays centered, as the label pass reads it", () => {
+  test("with no view it stays centered", () => {
     const place = pillPlace({ ...name, x: view.x1, y: 5, above: true }, null);
     near((place.box.x0 + place.box.x1) / 2, view.x1, "centered");
     assert.equal(place.lean, 0);
+  });
+
+  test("its reach spans every place a view can slide it to, and a plain pill's is its box", () => {
+    const point = { x: 8, y: 20 };
+    const reach = pillReach({ ...name, ...point, below: true });
+    const w = pillGeometry({ ...name, ...point, below: true }).width / scale;
+    const corner = theme.radius.sm / scale;
+    near(reach.x0, point.x - w + corner, "slid left to its end");
+    near(reach.x1, point.x + w - corner, "slid right to its end");
+    assert.deepEqual([reach.y0, reach.y1], [pillPlace({ ...name, ...point, below: true }, null).box.y0, pillPlace({ ...name, ...point, below: true }, null).box.y1], "never up or down");
+    for (const edge of [point.x - 1, point.x + 1]) {
+      const v = edge < point.x ? { ...view, x0: edge, x1: edge + 50 } : { ...view, x0: edge - 50, x1: edge };
+      const box = pillPlace({ ...name, ...point, below: true }, v).box;
+      assert.ok(box.x0 >= reach.x0 - 1e-9 && box.x1 <= reach.x1 + 1e-9, `slid to ${JSON.stringify(box)}, past ${JSON.stringify(reach)}`);
+    }
+    const plain = { value: "30 ft", size: "screen" as const, scale, x: 3, y: 4, offsetPx: 18 };
+    assert.deepEqual(pillReach(plain), pillPlace(plain, null).box);
   });
 });
 
