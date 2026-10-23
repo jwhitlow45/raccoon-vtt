@@ -1558,7 +1558,9 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   const turned = Date.now() - turn.current.at < TURN_MS;
   // The places from the render before, the same again when a render repeats, so this stays pure.
   const placed = useRef<ToastPlaces>(NO_TOAST_PLACES);
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned });
+  // The foot of the toasts at the notices' top as last drawn, in the chrome's px, so a toast never starts under the column's card over them (review LP18-TO-4).
+  const mapFoot = useRef<number | null>(null);
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;
@@ -1613,6 +1615,8 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
       const drop = stack.fit(list, height, props.foot, zoom);
       for (const id of drop) ui.dismissToast(id);
     }
+    const notices = stacks.notices.box.current;
+    mapFoot.current = overMap.length > 0 && notices ? notices.getBoundingClientRect().bottom / zoom : null;
   });
   return (
     <>

@@ -1193,6 +1193,24 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.deepEqual(u.places.get(1), { low: 182, column: false });
   });
 
+  test("a toast that would start under the column's card while a toast at the notices' top reaches down past it joins that toast below, so the two never overlap (review LP18-TO-4)", () => {
+    // The trap's toast came with its card, at the notices' top, 68 to 174. The card ends at 123, so a stack under it would start at 131.
+    let s = step(NO_TOAST_PLACES, [1]);
+    assert.equal(s.places.get(1), "map");
+    s = step(s, [1, 2], { low: 131, mapFoot: 174 });
+    assert.equal(s.places.get(2), "map", "it joins the toast at the top");
+    s = step(s, [1, 2, 3], { low: 131, mapFoot: 226 });
+    assert.equal(s.places.get(3), "map");
+    // A toast at the top that ends above the card's foot leaves room: the next starts under the card.
+    let t = step(NO_TOAST_PLACES, [1]);
+    t = step(t, [1, 2], { low: 131, mapFoot: 112 });
+    assert.deepEqual(t.places.get(2), { low: 131, column: true });
+    // With the top's toasts gone, a toast starts under the card again, whatever foot was last drawn.
+    let u = step(NO_TOAST_PLACES, [1]);
+    u = step(u, [2], { low: 131, mapFoot: 174 });
+    assert.deepEqual(u.places.get(2), { low: 131, column: true });
+  });
+
   test("a card that arrives with no turn moves no toast, so nothing jumps under a finger", () => {
     let s = step(NO_TOAST_PLACES, [1]);
     s = step(s, [1], { low: 250 });

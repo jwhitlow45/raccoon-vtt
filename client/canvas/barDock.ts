@@ -1145,11 +1145,14 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * place after a turn may come from the card as it stood before, until
  * the column measures it again. So does a toast that comes under the
  * card while the turn lasts (review FU22B-ASTRA-03). A card that arrives at another time moves
- * no toast, so nothing jumps under a finger. A pane that stops standing as
- * the screen turns leaves its toasts to be placed anew (review LP18-TO-3). A toast never leaves the layer or the sheet, and leaves the
+ * no toast, so nothing jumps under a finger. A toast that would start under
+ * the card while toasts at the notices' top reach down past it (`mapFoot`,
+ * their foot as last drawn) joins them there instead, so the two stacks
+ * never overlap (review LP18-TO-4). A pane that stops standing as the
+ * screen turns leaves its toasts to be placed anew (review LP18-TO-3). A toast never leaves the layer or the sheet, and leaves the
  * notices only for a pane's header or a turned screen's card.
  */
-export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean }): ToastPlaces {
+export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean; mapFoot?: number | null }): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
   const paneLast = now.pane ?? was.paneLast;
   const places = new Map<number, ToastPlace>();
@@ -1172,7 +1175,9 @@ export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[];
   }
   for (const id of now.ids) {
     if (places.has(id)) continue;
-    const fresh: ToastPlace = now.slot ? "sheet" : !now.layer ? "map" : now.pane !== null ? "pane" : now.low !== null ? { low: now.low, column: true } : "map";
+    // Toasts already at the notices' top that reach down past the card, as a trap's toast that came with its card does, would be covered by a stack started under the card, so the new toast joins them below instead (review LP18-TO-4).
+    const mapReaches = now.low !== null && now.mapFoot != null && now.mapFoot + EDGE > now.low && [...places.values()].includes("map");
+    const fresh: ToastPlace = now.slot ? "sheet" : !now.layer ? "map" : now.pane !== null ? "pane" : now.low !== null && !mapReaches ? { low: now.low, column: true } : "map";
     const below = fresh === "sheet" || !now.layer ? undefined : [...places.values()].find(inToastLayer);
     const at = below !== undefined && (inToastLayer(fresh) || now.paneStands) ? below : fresh;
     places.set(id, at);

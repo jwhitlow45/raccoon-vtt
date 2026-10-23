@@ -1141,6 +1141,66 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await pickTool(dm, "Select");
     }
   });
+
+  test("lp18-to. at 390 x 844 a whisper after a trap's toast, which came with its card at the notices' top, stands under that toast, not over its Save and damage, and a toast under a trap pane's header stays on screen as the phone turns sideways (reviews LP18-TO-3 and LP18-TO-4)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const walker = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Tripstone", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
+    const springs = async () => {
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.update", trapId, patch: { state: "armed" } });
+      await ops.send({ t: "token.update", tokenId: walker, patch: { x: cell.x, y: cell.y - 3 } });
+      await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
+    };
+    try {
+      // The trap's toast and its card come together, so the toast stands at the notices' top, over the card.
+      await springs();
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Tripstone went off: Scout." }).first();
+      await toast.waitFor();
+      await dm.waitForTimeout(400);
+      await whisperFromPat("Behind you!");
+      const whisper = dm.locator("[data-toast]").filter({ hasText: "Behind you!" }).first();
+      await whisper.waitFor();
+      await dm.waitForTimeout(300);
+      const save = toast.getByRole("button", { name: "Save and damage", exact: true });
+      assert.ok(!intersects(await rectOf(whisper), await rectOf(toast)), `the whisper ${JSON.stringify(await rectOf(whisper))} covers the trap's toast ${JSON.stringify(await rectOf(toast))}`);
+      assert.ok(await wholeInReach(save), "the trap's Save and damage is out of reach under the whisper");
+      await shots.take(dm, "dmphone-lp18-whisper-under-trap-toast");
+      await toast.locator("button").first().click();
+      await whisper.click();
+      await toast.waitFor({ state: "detached" });
+
+      // Under the trap's pane, open as a sheet, the trap goes off again. Then the phone turns sideways, where the pane is a card.
+      await pickTool(dm, "Trap");
+      const pane = dm.getByRole("dialog", { name: "Edit trap" });
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.getByText("Tripstone", { exact: true }).first().waitFor();
+      await dm.waitForTimeout(300);
+      await springs();
+      await toast.waitFor();
+      await dm.setViewportSize({ width: 844, height: 390 });
+      await dm.waitForTimeout(800);
+      const sideways = await rectOf(toast);
+      assert.ok(sideways.top >= 0 && sideways.bottom <= 390, `turned sideways, the trap's toast stands at ${sideways.top} to ${sideways.bottom}, off the screen`);
+      assert.ok(await wholeInReach(save), "turned sideways, the trap's Save and damage is out of reach");
+      await shots.take(dm, "dmphone-lp18-pane-toast-turned");
+    } finally {
+      await dm.setViewportSize({ width: 390, height: 844 });
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await ops.send({ t: "token.delete", tokenId: walker });
+      await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
+      await setUp({ width: 390, height: 844, scale: 1 });
+      await pickTool(dm, "Select");
+    }
+  });
 });
 
 /** Pat, joined once from a device of their own, whose cookies send a whisper to the DM. */
