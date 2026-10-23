@@ -165,7 +165,8 @@ export class Tx {
   private put(key: EntityKey, value: unknown): void {
     const parsed = parseKey(key);
     if (!parsed) throw new Error(`unknown entity key ${key}`);
-    const prev = readEntity(this.state, key);
+    const line = parsed.kind === "log" || parsed.kind === "trapLog" || parsed.kind === "trapSeen";
+    const prev = line ? lineIn(this.state[parsed.kind] ?? [], parsed.id) : readEntity(this.state, key);
     if (!this.before.has(key)) {
       this.before.set(key, prev);
       this.order.push(key);
@@ -188,17 +189,16 @@ export class Tx {
       case "log":
       case "trapLog":
       case "trapSeen": {
+        // A DM line counts past its op's shared lines (addLog), so a later shared line of the op goes before it, in id
+        // order, as the client's copy keeps it (keys.ts withLine).
         const log = this.collection(parsed.kind);
-        const index = log.findIndex((e) => e.id === parsed.id);
+        const at = lineSlot(log, parsed.id);
+        const found = log[at]?.id === parsed.id;
         if (next === null) {
-          if (index >= 0) log.splice(index, 1);
-        } else if (index >= 0) {
-          log[index] = next as LogEntry;
+          if (found) log.splice(at, 1);
+        } else if (found) {
+          log[at] = next as LogEntry;
         } else {
-          // A DM line counts past its op's shared lines (addLog), so a later shared line of the op goes before it, in id
-          // order, as the client's copy keeps it (keys.ts withLine).
-          let at = log.length;
-          while (at > 0 && sameSeq(log[at - 1]!.id, parsed.id) && compareLogIds(log[at - 1]!.id, parsed.id) > 0) at--;
           log.splice(at, 0, next as LogEntry);
         }
         break;
@@ -275,10 +275,16 @@ export class Tx {
     if (reaches.some((r) => r !== null && (r.audience !== "shared" || r.parts !== undefined))) {
       // Only an op whose trap step wrote a players' line meets their log, which a room from before traps lacks.
       const held = new Set<LogEntry>(this.unsettled.some((u) => "trapSeen" in u) ? this.collection("trapSeen") : []);
+      const writes: LogWrite[] = [];
       for (const u of this.unsettled) {
-        if ("line" in u) this.write(keys.log(u.line.id), null);
+        if ("line" in u) writes.push([u.line.id, null]);
         else if (held.has(u.trapSeen)) this.write(keys.trapSeen(u.trapSeen.id), null);
       }
+      const write = (entry: Omit<LogEntry, "id" | "at">, index: number, fit?: (line: LogEntry) => LogEntry): LogEntry => {
+        const line = this.lineOf(entry, index, fit);
+        writes.push([line.id, line]);
+        return line;
+      };
       const ranks = rosterRanks(this.state.members);
       const copies = new Map<string, number>();
       const settled = new Map<LogEntry, LogEntry[]>();
@@ -293,46 +299,84 @@ export class Tx {
         const { id: _id, at: _at, ...entry } = u.line;
         const reach = reaches[i] ?? { audience: "shared" };
         if (reach.audience === "shared") {
-          settled.set(u.line, [this.writeLine(reach.parts ? { ...entry, parts: reach.parts } : entry, index++)]);
+          settled.set(u.line, [write(reach.parts ? { ...entry, parts: reach.parts } : entry, index++)]);
           return;
         }
-        const dmLine = this.writeLine(entry, u.dmIndex, cutLine);
+        const dmLine = write(entry, u.dmIndex, cutLine);
         const lines = [dmLine];
         if (reach.audience === "party") {
           for (const [reader, view] of reach.views) {
             const count = copies.get(reader) ?? 0;
             if (count >= PARTY_SLOT) continue;
             copies.set(reader, count + 1);
-            lines.push(this.writeLine({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id }, partyIndex(ranks.get(reader)!, count), cutLine));
+            lines.push(write({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id }, partyIndex(ranks.get(reader)!, count), cutLine));
           }
         }
         settled.set(u.line, lines);
       });
+      this.writeLog(writes);
       this.log = this.log.flatMap((e) => settled.get(e) ?? [e]);
       // A number a line held only until now was never in the room, so the op never touched it.
+      const inLog = new Set(this.state.log.map((e) => e.id));
       const unused = new Set<EntityKey>();
       for (const u of this.unsettled) {
         const key = "line" in u ? keys.log(u.line.id) : keys.trapSeen(u.trapSeen.id);
-        if (this.before.get(key) === null && readEntity(this.state, key) === null) unused.add(key);
+        const gone = "line" in u ? !inLog.has(u.line.id) : readEntity(this.state, key) === null;
+        if (this.before.get(key) === null && gone) unused.add(key);
       }
       for (const key of unused) this.before.delete(key);
-      for (let i = this.order.length - 1; i >= 0; i--) if (unused.has(this.order[i]!)) this.order.splice(i, 1);
+      if (unused.size > 0) {
+        let kept = 0;
+        for (const key of this.order) if (!unused.has(key)) this.order[kept++] = key;
+        this.order.length = kept;
+      }
     }
-    for (const id of droppedLines(this.collection("log"), this.state.members)) this.write(keys.log(id), null);
+    this.writeLog(droppedLines(this.collection("log"), this.state.members).map((id) => [id, null]));
+  }
+
+  /**
+   * Writes lines of the room log as `write` would one at a time, in their
+   * order, in one pass over the log, so an op that writes or drops
+   * thousands of lines, such as a turn that ends every effect in a large
+   * room, takes time in proportion to them rather than to their square.
+   */
+  private writeLog(writes: readonly LogWrite[]): void {
+    if (writes.length === 0) return;
+    const log = this.collection("log");
+    const last = new Map<string, LogEntry | null>();
+    for (const [id, line] of writes) {
+      const key = keys.log(id);
+      this.bookkeeping.delete(key);
+      if (!this.before.has(key)) {
+        this.before.set(key, lineIn(log, id));
+        this.order.push(key);
+      }
+      last.set(id, line);
+    }
+    const added = [...last.values()].filter((line): line is LogEntry => line !== null).sort((a, b) => compareLogIds(a.id, b.id));
+    const next: LogEntry[] = [];
+    let i = 0;
+    for (const e of log) {
+      if (last.has(e.id)) continue;
+      while (i < added.length && compareLogIds(added[i]!.id, e.id) < 0) next.push(added[i++]!);
+      next.push(e);
+    }
+    while (i < added.length) next.push(added[i++]!);
+    markWritable(next);
+    this.state.log = next;
   }
 
   /** Writes a log line numbered `index` in this op, as `fit` makes it, and keeps it for the archive. */
-  private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
-    const full = this.writeLine(entry, index, fit);
+  private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit?: (line: LogEntry) => LogEntry): LogEntry {
+    const full = this.lineOf(entry, index, fit);
+    this.write(keys.log(full.id), full);
     this.log.push(full);
     return full;
   }
 
-  /** Writes a log line numbered `index` in this op, as `fit` makes it. */
-  private writeLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
-    const full = fit({ id: `${this.env.seq}:${index}`, at: this.env.at, ...entry });
-    this.write(keys.log(full.id), full);
-    return full;
+  /** A log line numbered `index` in this op, as `fit` makes it. */
+  private lineOf(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
+    return fit({ id: `${this.env.seq}:${index}`, at: this.env.at, ...entry });
   }
 
   addEvent(data: LogEvent): LogEntry {
@@ -499,13 +543,34 @@ export function guardHash(key: EntityKey, value: unknown): string {
   return hashValue(rest);
 }
 
-function sameSeq(a: string, b: string): boolean {
-  return a.slice(0, a.indexOf(":")) === b.slice(0, b.indexOf(":"));
-}
-
 /** The kinds that are lines of a log: kept in order, with no rev, and never put back by an undo. */
 function isLine(kind: string): boolean {
   return kind === "log" || kind === "trapLog" || kind === "trapSeen";
+}
+
+/** A line written to the room log, or null for one removed (Tx.writeLog). */
+type LogWrite = readonly [id: string, line: LogEntry | null];
+
+/**
+ * Where the line `id` is, or would go, in a log: the first place whose line
+ * does not sort before it. Each log is kept in id order, since an op writes
+ * only lines of its own seq, the newest, and a line is never put back.
+ */
+function lineSlot(log: readonly LogEntry[], id: string): number {
+  let lo = 0;
+  let hi = log.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (compareLogIds(log[mid]!.id, id) < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The line `id` of a log, or null. */
+function lineIn(log: readonly LogEntry[], id: string): LogEntry | null {
+  const line = log[lineSlot(log, id)];
+  return line?.id === id ? line : null;
 }
 
 /** Whether a tile's new bits lack any bit it had. An unreadable tile counts as clearing, which only re-projects more. */

@@ -439,8 +439,8 @@ describe("a card's roll keeps a DC players may not see off its line", () => {
   test("concentration: the owner's roll carries no DC, which tells the damage to a player without exact HP", () => {
     const state = breeRoom();
     state.meta.settings.pcHpVisibleToParty = false;
-    state.log = [{ id: "4:0", at: AT, kind: "event", data: { type: "concentration", characterId: "bree", dc: 12 } }];
-    const seenBy = (viewer: Viewer) => projectEntity(keys.log("4:0"), state, viewer, { sceneId: "s1" }) as LogEntry | null;
+    state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "concentration", characterId: "bree", dc: 12 } }];
+    const seenBy = (viewer: Viewer) => projectEntity(keys.log("1:0"), state, viewer, { sceneId: "s1" }) as LogEntry | null;
     assert.equal((seenBy(P1)?.data as { dc?: number } | undefined)?.dc, 12, "the owner sees the DC");
     assert.equal((seenBy(P2)?.data as { dc?: number } | undefined)?.dc, undefined, "another player does not");
     const prompt = { target: { characterId: "bree" }, dc: 12 };
