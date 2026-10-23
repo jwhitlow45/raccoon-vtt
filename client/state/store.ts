@@ -51,6 +51,25 @@ export const TOAST_MS = 5_000;
 /** How long a toast with a button stays (types.ts ToastAction). */
 export const ACTION_TOAST_MS = 12_000;
 
+/**
+ * How long each toast showing has left, counted from when it first showed,
+ * so a toast that comes or goes never gives the others more time: TOAST_MS,
+ * or ACTION_TOAST_MS for one with a button. Counted from each change
+ * instead, a stack that keeps changing, as whispers and refusals arriving
+ * in turn, kept every toast up long past its time. `shown` holds when each
+ * showed, by id, and is brought up to date here: a new id starts now, and
+ * an id no longer showing is dropped.
+ */
+export function toastsLeft(toasts: readonly Toast[], shown: Map<number, number>, now: number): { id: number; ms: number }[] {
+  const showing = new Set(toasts.map((t) => t.id));
+  for (const id of shown.keys()) if (!showing.has(id)) shown.delete(id);
+  return toasts.map((t) => {
+    const at = shown.get(t.id) ?? now;
+    shown.set(t.id, at);
+    return { id: t.id, ms: Math.max(0, at + (t.action ? ACTION_TOAST_MS : TOAST_MS) - now) };
+  });
+}
+
 /** Options for one dispatched op. */
 export type DispatchOptions = {
   /**

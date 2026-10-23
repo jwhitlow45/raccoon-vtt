@@ -59,7 +59,7 @@ import { sceneGate, selectionScene } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, useRoomScope, useScoped } from "../state/scope.ts";
-import { ACTION_TOAST_MS, TOAST_MS } from "../state/store.ts";
+import { toastsLeft } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
@@ -1524,9 +1524,10 @@ function Toasts(props: { low: number | null; pane: number | null; paneStands: bo
     if (slot) return;
     for (const [id, place] of placed.current.places) if (place === "sheet") ui.dismissToast(id);
   }, [slot, ui]);
+  // When each toast showed, so one that comes or goes never restarts the others' time (store.ts toastsLeft).
+  const shownAt = useRef(new Map<number, number>());
   useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((t) => setTimeout(() => ui.dismissToast(t.id), t.action ? ACTION_TOAST_MS : TOAST_MS));
+    const timers = toastsLeft(toasts, shownAt.current, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   if (toasts.length === 0) return null;
