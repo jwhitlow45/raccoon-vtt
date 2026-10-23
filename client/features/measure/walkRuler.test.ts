@@ -374,4 +374,13 @@ describe("the walk a ruler holds (review LP2L2-ASTRA-1)", () => {
     assert.equal(heldKey("r1", [{ x: 1.5, y: 2.5 }, { x: 9.5, y: 2.5 }]), before, "a stop dragged further keeps the ruler");
     assert.deepEqual(run([[done, before], [searching, restarted]]), [done, null]);
   });
+
+  test("a ruler that starts on a token is that token's wherever it moves, so a kept ruler on a walking creature keeps its walk (review LP2L2-OPUS-11)", () => {
+    const on = (x: number) => [{ x, y: 2.5, tokenId: "thorn" }, { x: 9.5, y: 2.5 }];
+    const before = heldKey("k1", on(1.5));
+    const moved = heldKey("k1", on(4.5));
+    assert.equal(moved, before, "the token moved, the ruler is the same");
+    assert.notEqual(heldKey("k1", [{ x: 1.5, y: 2.5, tokenId: "goblin" }]), before, "another token is another start");
+    assert.deepEqual(run([[done, before], [searching, moved]]), [done, done]);
+  });
 });

@@ -527,11 +527,14 @@ export type HeldWalk = { ruler: string; walk: WalkMeasure } | null;
  * Which ruler a held walk belongs to: its id and where it starts. A drag
  * that does not carry on from the last stop starts the ruler afresh under
  * the same id (ruler.ts dragTo), so the start tells a new ruler from the
- * old one (review LP2L2-OPUS-9).
+ * old one (review LP2L2-OPUS-9). A start on a token is that token, wherever
+ * it moves, so a kept ruler riding a creature that walks keeps its walk
+ * while the walk is searched again (review LP2L2-OPUS-11).
  */
 export function heldKey(id: string, stops: readonly RulerStop[]): string {
   const first = stops[0];
-  return first ? `${id}|${first.x},${first.y}` : id;
+  if (!first) return id;
+  return first.tokenId !== undefined ? `${id}|token:${first.tokenId}` : `${id}|${first.x},${first.y}`;
 }
 
 /**
