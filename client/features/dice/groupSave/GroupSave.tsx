@@ -1000,9 +1000,6 @@ function GroupRow(props: {
 
 export { DAMAGE_TYPES, type DamageType };
 
-/** The open group save's notice, for the alignment sweep and the e2e suites. */
-export const OPEN_GROUP_SAVE = "[data-open-group-save]";
-
 /**
  * The Dice panel's notice of the open group save (5.1): "Fireball's save: 2
  * waiting." with Open. An info notice between the roll modes and the
@@ -1014,7 +1011,7 @@ export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
   const waiting = page.phase === "setup" ? 0 : [...results(page).values()].filter((r) => r === null).length;
   const state = openSaveState(page, waiting);
   return (
-    // A notice draws no marks of its own, so a plain box carries it.
+    // A notice draws no marks of its own, so a plain box carries the one the alignment sweep and the e2e suites find it by.
     <div data-open-group-save="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
       <Notice
         tone="info"

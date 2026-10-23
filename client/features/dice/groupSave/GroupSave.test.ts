@@ -12,7 +12,7 @@ import { newPage } from "./chain.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { OPEN_GROUP_SAVE, OpenGroupSave } = await import("./GroupSave.tsx");
+const { OpenGroupSave } = await import("./GroupSave.tsx");
 
 const PAGE = newPage({
   id: "p",
@@ -29,7 +29,6 @@ const PAGE = newPage({
 describe("the open group save's notice (7.8)", () => {
   test("marked for the sweep, an info notice on the raised fill inside its outline, its words and then Open", () => {
     const markup = renderToStaticMarkup(createElement(OpenGroupSave, { page: PAGE, onOpen() {} }));
-    assert.equal(OPEN_GROUP_SAVE, "[data-open-group-save]");
     assert.match(markup, /^<div data-open-group-save=""/);
     assert.ok(markup.includes(`border:1px solid ${theme.color.border};background:${theme.color.surfaceRaised}`), "the info tone's outline and fill");
     const words = markup.indexOf("Dexterity save for 2: set up.");
