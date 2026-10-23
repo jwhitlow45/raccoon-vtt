@@ -165,8 +165,9 @@ const SOME_SIZES: Record<string, number> = {
   // Setup on the phone layout (the upright phones, the tablet and 844 x 390 at 100%), Tools in the pair (844 x 390 at 130%).
   "setup-menu": 9,
   "tools-menu": 1,
-  // The token bar's Larger, on the upright phones, where the bar spans.
+  // The token bar's Larger, on the upright phones, where the bar spans, and the group's.
   "window-larger": 6,
+  "group-larger": 6,
 };
 
 /**
@@ -673,6 +674,15 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     const group = page.locator('[role="dialog"][data-bar-mode]');
     if (await showsWithin(group.first(), 3_000)) {
       await measureWindow(sweep, page, "window-group", group.first(), headers, false);
+      // The group's bar in its larger size on an upright phone, then Smaller again.
+      const larger = group.first().getByRole("button", { name: "Larger", exact: true });
+      if (await visible(larger)) {
+        await larger.click();
+        await group.first().getByRole("button", { name: "Smaller", exact: true }).waitFor();
+        await sweep.measure(page, "group-larger", group.first());
+        await group.first().getByRole("button", { name: "Smaller", exact: true }).click();
+        await group.first().getByRole("button", { name: "Larger", exact: true }).waitFor();
+      }
       await page.getByRole("button", { name: "Deselect all" }).first().click();
     } else await sweep.missing(page, "window-group", "Multi-select and two taps opened no group window");
     await escapeAll(page);
