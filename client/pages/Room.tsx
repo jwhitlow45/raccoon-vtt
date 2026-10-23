@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, toastLayerPlace, toastTop, type Chrome, type ToastLow, type ToastPlaces } from "../canvas/barDock.ts";
+import { barDockSlot, columnEdges, DEFAULT_CHROME, EDGE, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, toastLayerPlace, toastTop, type Chrome, type ToastEdges, type ToastPlaces } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
@@ -791,7 +791,8 @@ function RoomPage() {
   // The alerts column's width as it works it out (features/encounter/InitiativeStrip.tsx): it steps left of a phone's sideways sheet, and beside the side panel no right safe area is the map's.
   const columnSheet = !wide && width > height && sheetOpen ? sideWidth : 0;
   const columnWidth = { mapWidth, sheet: columnSheet, safe: { left: safe.left, right: sideShown ? 0 : safe.right } };
-  const toastLow = chrome && !underPane ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop, width: columnWidth }) : null;
+  const toastLow = chrome && !underPane ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop }) : null;
+  const toastEdges = columnEdges(columnWidth);
   const toastUnderPane = chrome && underPane ? paneToastTop({ head: paneHead, optionsTop }) : null;
   const [toastLayer, setToastLayer] = useState<HTMLDivElement | null>(null);
   // Where the row and its line would stand above the last lasting notice's foot, they stand over it, so the tool's controls stay in reach (8).
@@ -919,7 +920,7 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts low={toastLow} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} />
+          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} />
         </div>
         <div ref={setToastLayer} {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
@@ -1501,9 +1502,11 @@ function Banner() {
  * modal leaves the map's notices out of reach. On a phone whose alerts
  * column shows a card, a new toast starts under that card (`low`,
  * barDock.ts toastTop), in `layer`, and joins any toast already there,
- * below it, so their stack keeps the place its first took. A toast never
- * moves from the notices, the layer or the sheet to another of them, so it
- * is never announced again: one shown in the sheet goes with the sheet.
+ * below it, so their stack keeps the top its first took, and across the
+ * cards' edges as they stand now (`edges`, barDock.ts columnEdges). A toast
+ * never moves from the notices, the layer or the sheet to another of them,
+ * so it is never announced again: one shown in the sheet goes with the
+ * sheet.
  *
  * While a map pane stands as a bottom sheet (`paneStands`), a new toast
  * starts under the pane's header instead (`pane`, barDock.ts
@@ -1515,7 +1518,7 @@ function Banner() {
  * Once the pane goes away, the stack stays where the header last stood,
  * until another pane stands (barDock.ts nextToastPlaces).
  */
-function Toasts(props: { low: ToastLow | null; pane: number | null; paneStands: boolean; layer: HTMLElement | null }) {
+function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
@@ -1538,7 +1541,7 @@ function Toasts(props: { low: ToastLow | null; pane: number | null; paneStands: 
   const overMap = toasts.filter((t) => places.get(t.id) === "map");
   const inSheet = slot ? toasts.filter((t) => places.get(t.id) === "sheet") : [];
   const low = toasts.filter((t) => inToastLayer(places.get(t.id)));
-  const lowAt = toastLayerPlace(placed.current, ids);
+  const lowAt = toastLayerPlace(placed.current, ids, props.edges);
   return (
     <>
       {overMap.map((t) => (

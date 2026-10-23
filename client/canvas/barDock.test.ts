@@ -11,6 +11,7 @@ import {
   barMode,
   BESIDE_MIN,
   columnCards,
+  columnEdges,
   DEFAULT_CHROME,
   EDGE,
   LANE_WIDTH,
@@ -915,10 +916,11 @@ describe("a card's action that opens a panel (LP13-TR-3)", () => {
 
 describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", () => {
   const column = { top: 122, content: 260, first: 120 };
-  const phone = { spanning: true, column, cards: true, optionsTop: 700, width: { mapWidth: 390, sheet: 0, safe: { left: 0, right: 0 } } };
+  const phone = { spanning: true, column, cards: true, optionsTop: 700 };
+  const upright = { mapWidth: 390, sheet: 0, safe: { left: 0, right: 0 } };
 
   test("starts 8 px under the first card while the notices span the map", () => {
-    assert.equal(toastTop(phone)?.top, 122 + 120 + EDGE);
+    assert.equal(toastTop(phone), 122 + 120 + EDGE);
   });
 
   test("keeps the top of the notices beside the lane, with no card, with the cards folded or summarized, or with no room left for it", () => {
@@ -927,7 +929,7 @@ describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", ()
     assert.equal(toastTop({ ...phone, column: { ...column, first: 0 } }), null);
     assert.equal(toastTop({ ...phone, cards: false }), null);
     const top = 122 + 120 + EDGE;
-    assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN })?.top, top, "44 px left is enough");
+    assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
     assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
   });
 
@@ -937,20 +939,17 @@ describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", ()
     [360, 52],
     [320, 12],
   ] as const) {
-    test(`takes the first card's left and right edges at ${mapWidth} px, not the map's (docs/design-v1-polish.md R9)`, () => {
-      const low = toastTop({ ...phone, width: { ...phone.width, mapWidth } });
-      assert.deepEqual(low?.edges, { left, right: EDGE });
-      assert.equal(mapWidth - left - EDGE, columnCards({ ...phone.width, mapWidth }).card, "as wide as the card");
+    test(`stands at the first card's left and right edges at ${mapWidth} px, not the map's (docs/design-v1-polish.md R9)`, () => {
+      assert.deepEqual(columnEdges({ ...upright, mapWidth }), { left, right: EDGE });
+      assert.equal(mapWidth - left - EDGE, columnCards({ ...upright, mapWidth }).card, "as wide as the card");
     });
   }
 
   test("beside a sideways sheet and inside the safe areas it keeps to the card too", () => {
     const sideways = { mapWidth: 844, sheet: 340, safe: { left: 47, right: 47 } };
-    const low = toastTop({ ...phone, width: sideways });
-    assert.ok(low);
-    assert.deepEqual(low.edges, { left: 844 - 340 - EDGE - columnCards(sideways).card, right: 340 + EDGE }, "left of the sheet, which takes the right safe area's place");
+    assert.deepEqual(columnEdges(sideways), { left: 844 - 340 - EDGE - columnCards(sideways).card, right: 340 + EDGE }, "left of the sheet, which takes the right safe area's place");
     const notched = { mapWidth: 649, sheet: 0, safe: { left: 47, right: 47 } };
-    assert.deepEqual(toastTop({ ...phone, width: notched })?.edges, { left: 649 - 47 - EDGE - 300, right: 47 + EDGE });
+    assert.deepEqual(columnEdges(notched), { left: 649 - 47 - EDGE - 300, right: 47 + EDGE });
   });
 });
 
@@ -971,19 +970,30 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
   type Now = Parameters<typeof nextToastPlaces>[1];
   const phone: Omit<Now, "ids"> = { pane: null, paneStands: false, low: null, layer: true, slot: false };
   const step = (was: ToastPlaces, ids: readonly number[], now: Partial<Now> = {}) => nextToastPlaces(was, { ...phone, ids, ...now });
-  const top = (state: ToastPlaces, ids: readonly number[]) => toastLayerPlace(state, ids)?.top ?? null;
-  /** A place under the column's first card, with the card's edges at 390 px. */
-  const low = (at: number) => ({ top: at, edges: { left: 82, right: EDGE } });
+  /** The column's cards' edges upright at 390 px, and held sideways at 844 px beside a 340 px sheet. */
+  const upright = columnEdges({ mapWidth: 390, sheet: 0, safe: { left: 0, right: 0 } });
+  const sideways = columnEdges({ mapWidth: 844, sheet: 340, safe: { left: 0, right: 0 } });
+  const top = (state: ToastPlaces, ids: readonly number[]) => toastLayerPlace(state, ids, upright)?.top ?? null;
 
-  test("a column toast keeps the card's edges, and one that joins it takes them too", () => {
-    let s = step(NO_TOAST_PLACES, [1], { low: low(250) });
-    assert.deepEqual(toastLayerPlace(s, [1]), { top: 250, edges: { left: 82, right: EDGE } });
-    s = step(s, [1, 2], { low: { top: 300, edges: { left: 20, right: 20 } } });
-    assert.deepEqual(s.places.get(2), { low: 250, edges: { left: 82, right: EDGE } }, "it joins the stack where it stands");
+  test("a column stack keeps the top its first toast took, and one that joins it takes it too", () => {
+    let s = step(NO_TOAST_PLACES, [1], { low: 250 });
+    assert.deepEqual(toastLayerPlace(s, [1], upright), { top: 250, edges: upright });
+    s = step(s, [1, 2], { low: 300 });
+    assert.deepEqual(s.places.get(2), { low: 250, column: true }, "it joins the stack where it stands");
+  });
+
+  test("a column stack keeps its top through a turn of the screen, and takes the cards' edges as they stand now (PL2-ASTRA-02)", () => {
+    let s = step(NO_TOAST_PLACES, [1], { low: 140 });
+    assert.deepEqual(toastLayerPlace(s, [1], sideways), { top: 140, edges: { left: 196, right: 348 } });
+    // Turned upright, the screen is 390 px wide: the edges kept from the sideways sheet would leave the stack 390 - 196 - 348 px.
+    s = step(s, [1], { low: 250 });
+    const now = toastLayerPlace(s, [1], upright);
+    assert.deepEqual(now, { top: 140, edges: { left: 82, right: EDGE } });
+    assert.ok(390 - now!.edges!.left - now!.edges!.right >= 300, "as wide as a card");
   });
 
   test("a column toast live as a pane opens moves under the pane's header, and the trap's toast joins it there", () => {
-    let s = step(NO_TOAST_PLACES, [1], { low: low(250) });
+    let s = step(NO_TOAST_PLACES, [1], { low: 250 });
     assert.equal(top(s, [1]), 250);
     // The pane's first render has no header place yet: nothing moves.
     s = step(s, [1], { paneStands: true });
@@ -1006,11 +1016,12 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
 
   test("the pane going away freezes the stack where the header last stood, and a new toast joins it there", () => {
     let s = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
-    s = step(s, [1], { paneStands: false, low: low(300) });
-    assert.deepEqual(s.places.get(1), { low: 182, edges: null }, "across the map, as under the header");
+    s = step(s, [1], { paneStands: false, low: 300 });
+    assert.deepEqual(s.places.get(1), { low: 182, column: false }, "across the map, as under the header");
+    assert.equal(toastLayerPlace(s, [1], upright)?.edges, null);
     assert.equal(s.paneLast, null);
-    s = step(s, [1, 2], { low: low(300) });
-    assert.deepEqual(s.places.get(2), { low: 182, edges: null });
+    s = step(s, [1, 2], { low: 300 });
+    assert.deepEqual(s.places.get(2), { low: 182, column: false });
   });
 
   test("a stack a closed pane left joins the next pane's header once it has one", () => {
@@ -1050,7 +1061,7 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
         if (event === "open") paneStands = true;
         if (event === "close") paneStands = false;
         const pane = paneStands && event !== "blank" && random() < 0.8 ? 100 + Math.floor(random() * 400) : null;
-        const now: Now = { ids, pane, paneStands, low: paneStands || random() < 0.3 ? null : low(200 + Math.floor(random() * 100)), layer: true, slot: event === "slot" };
+        const now: Now = { ids, pane, paneStands, low: paneStands || random() < 0.3 ? null : 200 + Math.floor(random() * 100), layer: true, slot: event === "slot" };
         const was = s;
         s = nextToastPlaces(was, now);
         const label = `run ${run}, render ${render}`;
@@ -1066,8 +1077,8 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
         if (pane !== null) for (const id of ids) if (inToastLayer(s.places.get(id))) assert.equal(s.places.get(id), "pane", `${label}: toast ${id} is not under the header`);
         if (!paneStands) for (const id of ids) assert.notEqual(s.places.get(id), "pane", `${label}: toast ${id} follows a pane that went away`);
         // The stack moves only on a render that has the header's place.
-        const before = toastLayerPlace(was, ids.filter((id) => was.places.has(id)));
-        const after = toastLayerPlace(s, ids.filter((id) => was.places.has(id)));
+        const before = toastLayerPlace(was, ids.filter((id) => was.places.has(id)), upright);
+        const after = toastLayerPlace(s, ids.filter((id) => was.places.has(id)), upright);
         if (before !== null && pane === null) assert.deepEqual(after, before, `${label}: the stack moved with no header to go to`);
       }
     }

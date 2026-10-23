@@ -1254,7 +1254,7 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
     for (const id of ids) await ops.send({ t: "actor.effect.remove", target: { tokenId: goblin.id }, effectId: id });
     await setUp(dm, { ...DESK, scale: 1 });
   });
-  test("pl2-b. on a phone at 390, 360 and 320 px, and 390 at 130%, a toast that shows under the alerts column's first card takes the card's left and right edges, not the map's (docs/design-v1-polish.md R9)", async () => {
+  test("pl2-b. on a phone at 390, 360 and 320 px, and 390 at 130%, a toast that shows under the alerts column's first card takes the card's left and right edges, not the map's, and keeps to the cards as the screen turns while it shows (docs/design-v1-polish.md R9, PL2-ASTRA-02)", async () => {
     await ops.send({ t: "encounter.start", entries: run.goblins.map((g, i) => ({ id: randomUUID(), tokenId: g.id, value: 15 - i })) });
     for (const g of run.goblins) await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
     try {
@@ -1290,6 +1290,27 @@ describe("raccoon-vtt: the docked token action bar", { timeout: 900_000 }, () =>
         await toast.click();
         await toast.waitFor({ state: "detached" });
       }
+
+      // A toast still showing as the phone turns sideways keeps its top and stands under the cards as they now stand, not at the edges it showed with.
+      await setUp(dm, { width: 390, height: 844, scale: 1 });
+      await damageGoblins();
+      await dm.locator('[data-alert="concentration"]').first().waitFor();
+      await dm.waitForTimeout(300);
+      await ops.send({ t: "token.update", tokenId: run.far.id, patch: { x: (dmSocket.state?.tokens[run.far.id]?.x ?? run.far.x) === run.far.x ? run.far.x - 1 : run.far.x } });
+      await dm.getByRole("button", { name: "Undo", exact: true }).click();
+      const live = dm.locator('[role="status"]').filter({ hasText: /^(Undid|Nothing to undo|Could not undo)/ }).first();
+      await live.waitFor();
+      const upright = await rectOf(live);
+      await dm.setViewportSize({ width: 844, height: 390 });
+      await dm.waitForTimeout(400);
+      assert.ok(await live.isVisible(), "the toast went before the turn could be read");
+      const turned = await rectOf(live);
+      await shots.take(dm, "bardock-pl2-b-toast-turned-844");
+      const card = await rectOf(dm.locator('[data-alert="concentration"]').first());
+      assert.ok(Math.abs(turned.top - upright.top) < 1, `the toast moved from ${upright.top} to ${turned.top} as the screen turned`);
+      assert.ok(Math.abs(turned.left - card.left) <= 1, `turned, the toast's left edge is ${(turned.left - card.left).toFixed(1)} px off the card's`);
+      assert.ok(Math.abs(turned.right - card.right) <= 1, `turned, the toast's right edge is ${(turned.right - card.right).toFixed(1)} px off the card's`);
+      await live.click();
     } finally {
       await ops.send({ t: "encounter.end" });
       await setUp(dm, { ...DESK, scale: 1 });
