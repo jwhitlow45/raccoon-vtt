@@ -209,6 +209,25 @@ describe("the reducer reads the log one line per event (eventLines)", () => {
     assert.deepEqual(run(mine, askOp, P1, 3).state.casts.k1!.rolled, [{ formula: "8d6", total: 48, type: "fire" }]);
   });
 
+  test("a DM's roll under the tag of a player's is not theirs, so the player's ask reads the same whether or not the DM's ring holds it", () => {
+    const asked: unknown[] = [];
+    for (const hits of [0, LIMITS.dmLogLines]) {
+      const state = castTable();
+      state.tokens.g2 = { ...state.tokens.g2!, actor: { inline: actor({ hp: { cur: 1_000, max: 1_000, temp: 0 } }) } };
+      const mine = rolled(state, { t: "dice.roll", tag: "dmg", to: "all", rolls: [{ formula: "8d6", label: "Fireball damage, Fire", creature: { tokenId: "thorn" } }] }, P1, 2);
+      // Each member's tags are their own, so the DM's roll for the goblin no player sees may share P1's.
+      const theirs = rolled(mine.state, { t: "dice.roll", tag: "dmg", to: "all", rolls: [{ formula: "1d6", label: "Bite damage, Piercing", creature: { tokenId: "g2" } }] }, DM, 3);
+      const line = theirs.log.find((e) => e.data?.type === "dice")!;
+      assert.equal(lineAudience(line), "dm");
+      let room = theirs.state;
+      for (let i = 0; i < hits; i++) room = run(room, { t: "actor.damageMany", hits: [{ target: { tokenId: "g2" }, amount: 1 }] }, DM, 4 + i).state;
+      assert.equal(room.log.some((e) => e.id === line.id), hits === 0, hits === 0 ? "the DM's ring holds the roll" : "the DM's ring dropped the roll");
+      const ask = run(room, { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", damage: { tag: "dmg", parts: 1 } } }, P1, 4 + hits);
+      asked.push(ask.state.casts.k1!.rolled);
+    }
+    assert.deepEqual(asked, [[{ formula: "8d6", total: 48, type: "fire" }], [{ formula: "8d6", total: 48, type: "fire" }]]);
+  });
+
   /**
    * A goblin everyone sees inside a glyph that hits once a turn, at its
    * turn's start and on entering, whose row is hidden from players and stays

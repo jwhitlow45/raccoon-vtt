@@ -67,15 +67,17 @@ function castLine(ask: CastAsk): Extract<LogEvent, { type: "cast" }> {
  * The caster's damage roll, read from the log the op meets (5.3), which
  * replay rebuilds the same, one line per roll (eventLines), so a roll that
  * only its caster's players read counts once, however many hold a copy of
- * it. Every line under the roll's tag in `part`
- * order, a line without one being part 0 as the receipts read it, when the
- * lines hold each part from 0 to `parts` less one exactly once and none
- * past it, since the splitter puts a roll past 100 dice into several
- * batches under one tag. Every line is the asker's, and every roll names
- * the caster, by its token or its character, and is plain damage: no
- * critical, and no d20 test (no critical range, save, initiative or
- * advantage, and no d20 in its formula). Anything else leaves it
- * undefined, as a pruned roll does, and the DM rolls.
+ * it. Every line of the asker's under the roll's tag in `part` order, a
+ * line without one being part 0 as the receipts read it, when the lines
+ * hold each part from 0 to `parts` less one exactly once and none past it,
+ * since the splitter puts a roll past 100 dice into several batches under
+ * one tag. Each member's tags are their own (receipts), so another's line
+ * under the same tag, such as the DM's for a creature no player sees, is
+ * never read, and whether a ring still holds it changes nothing. Every
+ * roll names the caster, by its token or its character, and is plain
+ * damage: no critical, and no d20 test (no critical range, save,
+ * initiative or advantage, and no d20 in its formula). Anything else
+ * leaves it undefined, as a pruned roll does, and the DM rolls.
  */
 function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[] | undefined {
   const damage = ask.damage;
@@ -83,7 +85,7 @@ function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[]
   const parts = new Map<number, Extract<LogEvent, { type: "dice" }>>();
   for (const entry of eventLines(tx.state.log)) {
     const data = entry.data;
-    if (data?.type !== "dice" || data.tag !== damage.tag) continue;
+    if (data?.type !== "dice" || data.by !== ask.by || data.tag !== damage.tag) continue;
     const part = data.part ?? 0;
     if (part >= damage.parts || parts.has(part)) return undefined;
     parts.set(part, data);
@@ -93,7 +95,7 @@ function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[]
   const out: CastRolled[] = [];
   for (let part = 0; part < damage.parts; part++) {
     const line = parts.get(part)!;
-    if (line.by !== ask.by || line.rolls.length === 0) return undefined;
+    if (line.rolls.length === 0) return undefined;
     for (const roll of line.rolls) {
       const names = roll.tokenId === caster.id || (roll.tokenId === undefined && characterId !== undefined && roll.characterId === characterId);
       if (!names || roll.crit !== undefined || roll.critOn !== undefined || roll.save !== undefined || roll.initiative || roll.mode !== undefined) return undefined;
