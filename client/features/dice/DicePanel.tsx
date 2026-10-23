@@ -177,7 +177,7 @@ export default function DicePanel(props: PanelProps) {
   return (
     // One column no wider than the pane: an auto column grows to its widest row's content, so one long roll would widen the whole panel past the screen.
     // A plain box, as above: the sheet or the tab names the panel.
-    <div {...throwPanel} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+    <div {...throwPanel} data-dice-panel="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <LastResult onOpen={show} />
       <Roller />
       {/* The roller and what it rolls for part by the panel's section line, 16 px each side, the grid's gap and this margin making the 16 above (docs/design-v1-dice-pass.md 7.1). */}

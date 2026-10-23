@@ -78,7 +78,8 @@ import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, WaitingAsks } from "./cast/CastBlock.tsx";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
-/** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design-v1-dice-pass.md 8). */
+/** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design-v1-dice-pass.md 8), found from the Dice panel's root (DicePanel.tsx). */
+const DICE_PANEL = "[data-dice-panel]";
 const DICE_MODES = "[data-dice-modes]";
 const DICE_LAST = "[data-dice-last]";
 
@@ -133,7 +134,8 @@ export function RollOptions(_props: PanelProps) {
  * header (LP7-DICE-6).
  */
 function landOnModes(options: HTMLElement, smooth: boolean): void {
-  const panel = options.parentElement;
+  // The panel's root, not the options' parent: the section line's box stands between them, and the modes and the sticky line are outside it.
+  const panel = options.closest<HTMLElement>(DICE_PANEL);
   const modes = panel?.querySelector<HTMLElement>(DICE_MODES) ?? options;
   const box = scrollBox(modes as unknown as Parameters<typeof scrollBox>[0]);
   if (!box) return;
