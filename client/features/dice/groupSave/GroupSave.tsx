@@ -456,14 +456,22 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
 
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
+      {/*
+       * The count takes the line's spare room, so All fail and All pass keep
+       * their own width beside it. Where the two do not fit beside it they
+       * wrap as a pair and grow to share their line (docs/design-v1-polish.md
+       * R6), so neither stands alone under the other.
+       */}
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-        <span style={{ fontWeight: theme.weight.strong, flex: 1, fontVariantNumeric: "tabular-nums" }}>{page.phase === "setup" && page.test.kind !== "none" ? creatureCount(rows.length) : count}</span>
-        <Button size="sm" disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
-          All fail
-        </Button>
-        <Button size="sm" disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "pass")), { ...pageRef.current, rows } as Page))}>
-          All pass
-        </Button>
+        <span style={{ fontWeight: theme.weight.strong, flex: "999 1 0%", fontVariantNumeric: "tabular-nums" }}>{page.phase === "setup" && page.test.kind !== "none" ? creatureCount(rows.length) : count}</span>
+        <span style={{ flex: "1 1 auto", display: "flex", gap: theme.space(2) }}>
+          <Button size="sm" style={{ flex: "1 1 auto" }} disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
+            All fail
+          </Button>
+          <Button size="sm" style={{ flex: "1 1 auto" }} disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "pass")), { ...pageRef.current, rows } as Page))}>
+            All pass
+          </Button>
+        </span>
       </div>
       {tooMany ? <Note tone="error">At most 100 creatures in one group save.</Note> : null}
       {rows.length === 0 ? <Note>Select the creatures it hits, or place an area from it.</Note> : null}
