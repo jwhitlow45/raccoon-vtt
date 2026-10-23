@@ -204,7 +204,8 @@ export type Slot = {
 /** The line's tone (8): a hint, a reading, a warning, or a status such as "Grid saved". */
 export type LineTone = "hint" | "reading" | "warning" | "status";
 
-export type StripLine = { tone: LineTone; content: ReactNode };
+/** `finding`: the reading is being worked out, such as a walking ruler's search, marked `data-finding` on the line so a run can see the search happen. */
+export type StripLine = { tone: LineTone; content: ReactNode; finding?: boolean };
 
 /**
  * A tool's options as one row and its line (6): the slots that fit
@@ -749,15 +750,18 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
       // How Room's measure reads it (pages/Room.tsx useOptionsBox): only a line shown on one line sets its reserve.
       data-options-line={props.hidden ? "hidden" : open ? "open" : "shown"}
       data-options-reading={reading ? "" : undefined}
+      data-finding={line?.finding ? "" : undefined}
       style={props.hidden ? VISUALLY_HIDDEN : look}
     >
       {pill ? (
         <button type="button" onClick={() => frame?.show()} style={LINE_BUTTON}>
           {inner}
+          <span aria-hidden data-touch-reach="" style={LINE_REACH} />
         </button>
       ) : cut || open ? (
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={LINE_BUTTON}>
           {inner}
+          <span aria-hidden data-touch-reach="" style={LINE_REACH} />
         </button>
       ) : (
         inner
@@ -784,6 +788,7 @@ const LINE_MIN = theme.font.body14 * theme.leading.body + 2 * LINE_PAD.y;
  * and height what its words alone give it.
  */
 const LINE_BUTTON: CSSProperties = {
+  position: "relative",
   display: "block",
   boxSizing: "border-box",
   width: `calc(100% + ${2 * LINE_PAD.x}px)`,
@@ -796,6 +801,22 @@ const LINE_BUTTON: CSSProperties = {
   font: "inherit",
   textAlign: "left",
   cursor: "pointer",
+};
+
+/**
+ * The line button's touch target: 44 px tall however short its one line
+ * is, reaching past the pill's top and foot rather than growing it, since
+ * the pill's height is the map's reserve (pages/Room.tsx useOptionsBox).
+ * The 6 px gap above the row holds what it reaches down, so it never takes
+ * a tap meant for the row.
+ */
+const LINE_REACH: CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: "50%",
+  height: `max(100%, ${theme.touch}px)`,
+  transform: "translateY(-50%)",
 };
 
 // ------------------------------------------------------------ value chips (6.2, 7.2)
@@ -1085,16 +1106,18 @@ export type RowOption<T extends string> = { value: T; label: string; title?: str
  * Rows (7.2): a choice as 44 px rows with a check mark on the chosen one,
  * for values with longer names (a blank token kind, an edge, a light, a
  * creature an area is cast from). Native radios, as ChoiceTiles. Wrap it
- * in PickCloses.
+ * in PickCloses. `wrap` lets a long name break onto a second line, for
+ * rows in a narrow pane, where one line ran past its edge (the trap
+ * pane's Hits at 320 px and 130%), each row still 44 px at least.
  */
-export function ChoiceRows<T extends string>(props: { label: string; value: T; options: readonly RowOption<T>[]; onChange(value: NoInfer<T>): void }) {
+export function ChoiceRows<T extends string>(props: { label: string; value: T; options: readonly RowOption<T>[]; onChange(value: NoInfer<T>): void; wrap?: boolean }) {
   const name = useId();
   return (
     <div role="radiogroup" aria-label={props.label} style={{ display: "grid", gap: theme.space(0.5) }}>
       {props.options.map((o) => {
         const chosen = o.value === props.value;
         return (
-          <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...CHOICE_ROW, ...buttonLook("quiet", { pressed: chosen }) }}>
+          <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...CHOICE_ROW, ...(props.wrap ? CHOICE_ROW_WRAP : null), ...buttonLook("quiet", { pressed: chosen }) }}>
             <input type="radio" name={name} value={o.value} checked={chosen} aria-label={accessibleName(o.label, o.title)} onChange={() => props.onChange(o.value)} style={RADIO_COVER} />
             {o.swatch !== undefined ? <ChipSwatch color={o.swatch} /> : null}
             {o.picture !== undefined ? (
@@ -1102,11 +1125,11 @@ export function ChoiceRows<T extends string>(props: { label: string; value: T; o
                 {o.picture}
               </span>
             ) : null}
-            <span style={{ flex: 1 }}>
+            <span style={{ flex: 1, minWidth: props.wrap ? 0 : undefined }}>
               {o.label}
               {o.detail !== undefined ? <span style={{ fontWeight: theme.weight.regular, color: theme.color.textMuted }}> {o.detail}</span> : null}
             </span>
-            {chosen ? <Icon name="check" size="sm" /> : null}
+            {chosen ? <Icon name="check" size="sm" style={props.wrap ? { flex: "none" } : undefined} /> : null}
           </label>
         );
       })}
@@ -1127,6 +1150,8 @@ const CHOICE_ROW: CSSProperties = {
   whiteSpace: "nowrap",
   cursor: "pointer",
 };
+
+const CHOICE_ROW_WRAP: CSSProperties = { whiteSpace: "normal", paddingTop: theme.space(1), paddingBottom: theme.space(1) };
 
 /**
  * The parts of a control made of kit controls, such as a stepper's − and
@@ -1357,6 +1382,12 @@ export function OptButton(props: {
    * words, as every row there is.
    */
   iconOnly?: "always" | "fine";
+  /**
+   * A row as wide as its popover with its icon and words at the left, as
+   * ⋯'s rows are, where it stands in a chip's own content rather than in a
+   * slot: a kept ruler's remove in the Kept rulers popover.
+   */
+  row?: boolean;
 }) {
   const place = useSlotPlace();
   if (place?.at === "measure") return <OptButtonFace {...props} form={place.form} />;
@@ -1383,7 +1414,7 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
   const variant = tone ?? "secondary";
   const short = place?.at === "row" && place.form === "compact" && props.short !== undefined;
   const iconAlone = place?.at === "row" && place.form === "compact" && props.compactIcon === true;
-  const row = inPopover(place);
+  const row = inPopover(place) || props.row === true;
   const children = short ? props.short : row && props.children === undefined && props.rowWords ? props.rowWords : props.children;
   const full = props.label ?? textOf(props.children);
   const act = () => {

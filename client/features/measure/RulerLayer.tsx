@@ -16,11 +16,11 @@ import { groupReading } from "../movement/preview.ts";
 import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
 import { dragLabel, remoteReading, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
-import { Pill, pillGeometry } from "./Pill.tsx";
+import { Pill, PillStack } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
-import { useWalkMeasure } from "./useWalkMeasure.ts";
-import { walkText, type WalkInput } from "./walkRuler.ts";
-import { TrapCrossing } from "../traps/Crossing.tsx";
+import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
+import { heldKey, walkShown, walkText, type WalkInput } from "./walkRuler.ts";
+import { useTrapCrossing } from "../traps/Crossing.tsx";
 
 /**
  * Rulers and the distance a dragged token travels (design sections 7.6 and
@@ -44,7 +44,7 @@ import { TrapCrossing } from "../traps/Crossing.tsx";
  * move falls in (features section 4): green within its speed, yellow within
  * a Dash, red past both. During a fight that is the active creature's path
  * this turn plus the leg being dragged (movement.ts dragReading). The label
- * says the same in words, so the color is never the only sign.
+ * says the same in words, so the color is never the only sign (dragColor).
  */
 
 const EMPTY_TOKENS: Record<string, Token> = {};
@@ -56,6 +56,11 @@ const LEG_LABEL_MIN_PX = 56;
 
 /** Green, yellow and red, as features section 4 names them, whatever the viewer's accent. */
 const BAND_COLOR: Record<SpeedLeft["band"], string> = { walk: theme.color.success, dash: theme.color.crest, over: theme.color.danger };
+
+/** A drag's line and label: its speed band's color, or the text color with no band to show, never the member's, whose crest yellow would read as a Dash. */
+export function dragColor(left: SpeedLeft | null | undefined): string {
+  return left ? BAND_COLOR[left.band] : theme.color.text;
+}
 
 type ReadDrag = (token: Token, to: Point, walk?: { corners: readonly Point[]; costFt?: number }) => DragRead;
 
@@ -128,12 +133,12 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
       {Object.entries(drags).map(([key, d]) =>
         // This device's own drag is measured from Konva's node below. Another device of the same member counts as remote.
         d.ended || d.tokenId === localDrag?.tokenId ? null : (
-          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} color={colorOf(d.from)} />
+          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} />
         ),
       )}
       {/* The route is this drag's, set as it starts: a rider's drag walks its mount, whose route and cost these are (docs/design-v1-attach.md 4.2). */}
       {route && tokens[route.tokenId] && (route.waiting || localDrag !== null) ? (
-        <RouteMeasure route={route} token={tokens[route.tokenId]!} scale={props.scale} color={youId ? colorOf(youId) : theme.color.crest} />
+        <RouteMeasure route={route} token={tokens[route.tokenId]!} scale={props.scale} />
       ) : localDrag && tokens[localDrag.tokenId] ? (
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
@@ -141,7 +146,6 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
           group={dropRoom ? { room: dropRoom, role } : undefined}
           read={read}
           scale={props.scale}
-          color={youId ? colorOf(youId) : theme.color.crest}
         />
       ) : null}
     </Group>
@@ -169,15 +173,18 @@ function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rul
  * route the creature would walk, between its footprint's centers, with a
  * dot at each stop, each leg's cost, and "Walking 40 ft" at the end with
  * what terrain added. A leg with no route runs straight in red, "No way
- * through". While a leg's search runs, it waits grey and straight, and past
- * the shared loading delay the label says "Finding the way…", as a drag's
- * does.
+ * through". While a leg's search runs it is drawn straight, and the total
+ * keeps the last walk (walkShown). Past the shared loading delay the leg
+ * waits grey and the label says "Finding the way…", as a drag's does.
  */
 function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean; live?: boolean }) {
   const { stops, walk, scale, color } = props;
   const m = useWalkMeasure({ ...walk, stops }, props.live === true);
   const slow = useDelayed(m?.searching === true);
+  // One component draws one ruler by its id, which a fresh start keeps, so the start tells them apart.
+  const held = useHeldWalk(m, heldKey("", stops));
   if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
+  const shown = walkShown(m, held, slow);
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
   const last = mid(m.legs[m.legs.length - 1]!.to);
   return (
@@ -185,7 +192,7 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
       {m.legs.map((leg, i) => {
         const pts = [leg.from, ...leg.corners, leg.to].map(mid);
         const flat = pts.flatMap((p) => [p.x, p.y]);
-        const stroke = leg.searching ? theme.color.textMuted : leg.none ? theme.color.danger : color;
+        const stroke = leg.searching && shown.finding ? theme.color.textMuted : leg.none ? theme.color.danger : color;
         const a = pts[0]!;
         const b = pts[pts.length - 1]!;
         const labelled = !leg.searching && (leg.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX));
@@ -201,11 +208,11 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
         const c = mid(p);
         return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
       })}
-      {m.searching ? (
-        slow ? <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={theme.color.textMuted} offsetPx={18} /> : null
-      ) : (
-        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(m)} size="screen" color={color} offsetPx={18} />
-      )}
+      {shown.finding ? (
+        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={theme.color.textMuted} offsetPx={18} />
+      ) : shown.reading ? (
+        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(shown.reading)} size="screen" color={color} offsetPx={18} />
+      ) : null}
     </>
   );
 }
@@ -253,26 +260,25 @@ function Ruler(props: { stops: readonly RulerStop[]; tokens: Record<string, Toke
  * A line from where a token stood to where it is being dropped, through
  * the corners of the route it would walk, with a dot at each, in the color
  * of the speed band, and the label at its end. A creature whose space the
- * walk would end in is named under it in amber. While the search runs past
- * the shared loading delay, the line waits grey and straight and the label
- * says "Finding the way…", as it does at the ghost of a drop that waits.
+ * walk would end in is named under it in amber, and so is a trap it
+ * crosses, the three placed as one stack (Pill.tsx PillStack). While the
+ * search runs past the shared loading delay, the line waits grey and
+ * straight and the label says "Finding the way…", as it does at the ghost
+ * of a drop that waits.
  */
-function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; color: string }) {
+function RouteMeasure(props: { route: DragRoute; token: Token; scale: number }) {
   const { route, token, scale } = props;
   const slow = useDelayed(route.searching);
   const fp = footprint(token);
   const to = route.to;
-  if (to.x === token.x && to.y === token.y && !route.waiting) return null;
   const finding = route.waiting || slow;
-  const left = route.read.left;
-  const color = finding ? theme.color.textMuted : left ? BAND_COLOR[left.band] : props.color;
   const corners = finding ? [] : route.corners;
+  const crossing = useTrapCrossing(token, [token, ...corners, to]);
+  if (to.x === token.x && to.y === token.y && !route.waiting) return null;
+  const left = route.read.left;
+  const color = finding ? theme.color.textMuted : dragColor(left);
   const flat = [token, ...corners, to].flatMap((p) => [p.x + fp.w / 2, p.y + fp.h / 2]);
   const text = finding ? "Finding the way…" : dragLabel(route.read);
-  const at = { x: to.x + fp.w, y: to.y + fp.h };
-  const main = pillGeometry({ value: text, scale, size: "screen", offsetPx: 4 });
-  const endsText = `Ends in ${route.endsIn}'s space`;
-  const ends = pillGeometry({ value: endsText, scale, size: "screen", offsetPx: 4, small: true });
   return (
     <>
       <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
@@ -280,9 +286,17 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; co
       {corners.map((c, i) => (
         <Circle key={i} x={c.x + fp.w / 2} y={c.y + fp.h / 2} radius={3.5 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />
       ))}
-      <Pill x={at.x} y={at.y} scale={scale} value={text} size="screen" color={color} offsetPx={4} />
-      {!finding && route.endsIn ? <Pill x={at.x} y={at.y + (main.height + 4) / scale} scale={scale} value={endsText} size="screen" color={theme.color.warning} offsetPx={4} small /> : null}
-      {!finding ? <TrapCrossing token={token} path={[token, ...corners, to]} x={at.x} y={at.y + (main.height + 4 + (route.endsIn ? ends.height + 4 : 0)) / scale} scale={scale} /> : null}
+      <PillStack
+        x={to.x + fp.w}
+        y={to.y + fp.h}
+        scale={scale}
+        offsetPx={4}
+        pills={[
+          { value: text, size: "screen", color },
+          !finding && route.endsIn ? { value: `Ends in ${route.endsIn}'s space`, size: "screen", color: theme.color.warning, small: true } : null,
+          !finding && crossing,
+        ]}
+      />
     </>
   );
 }
@@ -292,17 +306,18 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number; co
  * through the corners a remote frame carries, how far that is, and what the
  * creature's speed has left after it.
  */
-function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: number; color: string; corners?: readonly Point[]; costFt?: number; group?: { room: DropView; role: Role } | undefined }) {
+function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: number; corners?: readonly Point[]; costFt?: number; group?: { room: DropView; role: Role } | undefined }) {
   const { token, to, scale } = props;
   const fp = footprint(token);
-  if (to.x === token.x && to.y === token.y) return null;
   const corners = props.corners ?? [];
+  const crossing = useTrapCrossing(token, [token, ...corners, to]);
+  if (to.x === token.x && to.y === token.y) return null;
   // This device's own drag with no walk preview, a group's, reads where its token lands and its dismount, as `token.moveMany` records them.
   const read = props.group
     ? groupReading(props.group.room, token, to, props.group.role)
     : props.read(token, to, corners.length > 0 || props.costFt !== undefined ? { corners, ...(props.costFt !== undefined ? { costFt: props.costFt } : {}) } : undefined);
   const left = read.left;
-  const color = left ? BAND_COLOR[left.band] : props.color;
+  const color = dragColor(left);
   const flat = [token, ...corners, to].flatMap((p) => [p.x + fp.w / 2, p.y + fp.h / 2]);
   return (
     <>
@@ -311,8 +326,7 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
       {corners.map((c, i) => (
         <Circle key={i} x={c.x + fp.w / 2} y={c.y + fp.h / 2} radius={3.5 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />
       ))}
-      <Pill x={to.x + fp.w} y={to.y + fp.h} scale={scale} value={dragLabel(read)} size="screen" color={color} offsetPx={4} />
-      <TrapCrossing token={token} path={[token, ...corners, to]} x={to.x + fp.w} y={to.y + fp.h + (pillGeometry({ value: dragLabel(read), scale, size: "screen", offsetPx: 4 }).height + 4) / scale} scale={scale} />
+      <PillStack x={to.x + fp.w} y={to.y + fp.h} scale={scale} offsetPx={4} pills={[{ value: dragLabel(read), size: "screen", color }, crossing]} />
     </>
   );
 }
@@ -325,7 +339,7 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
  * viewer (design 7.6), and the corners on scenes with fog or vision, so the
  * measurement shows only what the ghost token below it shows.
  */
-function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined; read: ReadDrag; scale: number; color: string }) {
+function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined; read: ReadDrag; scale: number }) {
   const { drag, token } = props;
   const corners = useMemo(() => {
     const out: Point[] = [];
@@ -340,7 +354,6 @@ function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined;
       to={snapPosition(drag.x, drag.y, footprint(token))}
       read={props.read}
       scale={props.scale}
-      color={props.color}
       corners={corners}
       {...(drag.ft !== undefined ? { costFt: drag.ft } : {})}
     />

@@ -4,7 +4,7 @@ import type { Point } from "../../lib/camera.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
-import { Pill } from "../measure/Pill.tsx";
+import type { StackPill } from "../measure/Pill.tsx";
 import { crossedTraps, crossesText, warnsOf } from "./rules.ts";
 
 const NO_TRAPS: Readonly<Record<string, Trap>> = {};
@@ -14,11 +14,12 @@ const NO_TRAPS: Readonly<Record<string, Trap>> = {};
  * for a player the found traps not disarmed that the walk crosses, and for
  * the DM every armed one. Client only, from the traps this viewer holds.
  * `path` is the token's top-left corner along the walk, the start first.
+ * It is a pill of the drag's stack (measure/Pill.tsx PillStack), so the
+ * drag places its label and its warnings as one. Null when it crosses none.
  */
-export function TrapCrossing(props: { token: Token; path: readonly Point[]; x: number; y: number; scale: number }) {
+export function useTrapCrossing(token: Token, path: readonly Point[]): StackPill | null {
   const traps = useRoomView((s) => s.view?.traps ?? NO_TRAPS);
   const role = useRoomView((s) => s.you?.role ?? "player");
-  const { token, path } = props;
   const fp = footprint(token);
   const key = path.map((p) => `${p.x},${p.y}`).join(" ");
   const text = useMemo(() => {
@@ -27,6 +28,5 @@ export function TrapCrossing(props: { token: Token; path: readonly Point[]; x: n
     // The path is read by its points, which a drag's every frame rebuilds as a new array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [traps, role, token.sceneId, fp.w, fp.h, key]);
-  if (!text) return null;
-  return <Pill x={props.x} y={props.y} scale={props.scale} value={text} size="screen" color={theme.color.warning} offsetPx={4} small />;
+  return text ? { value: text, size: "screen", color: theme.color.warning, small: true } : null;
 }

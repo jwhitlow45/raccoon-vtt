@@ -6,7 +6,7 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { useAttachViewer } from "./BarParts.tsx";
 import { waitsForServer } from "./list.ts";
-import { panelLinkTags, steerChoice, steerOp } from "./tags.ts";
+import { panelLinkTags, STEER_OPTIONS, steerChoice, steerOp, steerWords } from "./tags.ts";
 
 type Steer = "controlled" | "independent";
 
@@ -18,7 +18,9 @@ export function usePanelLinkTags(token: Token): string[] {
 
 /**
  * A rider's Controlled or Independent under the name block's tags (4.5),
- * the Attach list's own choice, for whoever may attach the pair. Most
+ * the Attach list's own choice, for whoever may attach the pair: two words
+ * side by side, and under them a line that says what the chosen one does
+ * (docs/design-v1-look-pass-2.md 2.7). Most
  * changes show at once, as the room predicts them. One a fight makes the
  * server's to answer (a player's controlled ride, 8.4, list.ts
  * waitsForServer) shows the new choice held still while it waits, with
@@ -44,10 +46,7 @@ export function SteerControl(props: { token: Token }) {
           label={`How ${choice.holderName} moves`}
           value={value}
           disabled={waiting}
-          options={[
-            { value: "controlled", label: `Controlled: moves on ${choice.riderName}'s turn` },
-            { value: "independent", label: "Independent: keeps its own turn" },
-          ]}
+          options={STEER_OPTIONS}
           onChange={(next) => {
             if (waiting || next === value || !view) return;
             const op = steerOp(token, choice.holderId, next === "controlled");
@@ -58,7 +57,8 @@ export function SteerControl(props: { token: Token }) {
             setAsked(next);
             if (actions.dispatch(op, { onAnswer: () => setAsked(null) }) === null) setAsked(null);
           }}
-          wrap
+          even
+          description={steerWords(value === "controlled", choice.holderName, choice.riderName)}
         />
       </div>
       {spin ? <Spinner label="Saving" /> : null}

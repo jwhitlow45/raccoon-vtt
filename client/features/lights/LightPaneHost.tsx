@@ -1,18 +1,18 @@
 import { Suspense, useEffect } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
-import { Loading } from "../../components/Loading.tsx";
 import { LoadBoundary } from "../../components/LoadBoundary.tsx";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
-import { theme } from "../../lib/theme.ts";
+import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { lightSlot } from "../builder/lightTap.ts";
 import { builderSlot } from "../builder/store.ts";
 import { panePlacement } from "../builder/labelEdit.ts";
-import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
+import { PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
+import { PaneFailedFrame, PaneLoadingFrame } from "../builder/PaneFrames.tsx";
 import { lightScreenBox } from "./paneBox.ts";
 import { lightModeSlot } from "./store.ts";
 
@@ -34,28 +34,24 @@ export function LightPaneHost(props: { scene: Scene; camera: Camera; viewport: S
   const role = useRoomView((s) => s.you?.role ?? "player");
   const light = useRoomView((s) => (lightId ? s.view?.lights[lightId] : undefined));
   const open = paneOpen && role === "dm" && building && lightMode && light !== undefined && light.sceneId === props.scene.id;
+  // The frames shown while the pane loads or failed to stand where the pane will, beside the fight's alerts.
+  const lane = useAlertsLane(props.viewport);
   useEffect(() => {
     if (paneOpen && !open) modeStore.setState({ paneOpen: false });
   }, [paneOpen, open, modeStore]);
   if (!open || !light) return null;
   const close = () => modeStore.setState({ paneOpen: false });
+  // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in.
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: lightScreenBox(light, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (
-        <div style={{ ...labelPaneFrame(panePlacement({ viewport: props.viewport, insets: props.insets, box: lightScreenBox(light, props.camera), height: PANE_HEIGHT_UNMEASURED })), padding: theme.space(3) }}>
+        <PaneFailedFrame place={place} close={close}>
           <RoomLoadNotice {...f} subject="The light editor" verb="load" compact reopen={{ tool: "build" }} />
-        </div>
+        </PaneFailedFrame>
       )}
     >
-      <Suspense
-        fallback={
-          <Loading
-            text="Loading the light editor…"
-            // Even padding: the pane's slight top padding is for its header, which a loading notice does not have.
-            style={{ ...labelPaneFrame(panePlacement({ viewport: props.viewport, insets: props.insets, box: lightScreenBox(light, props.camera), height: PANE_HEIGHT_UNMEASURED })), padding: theme.space(3) }}
-          />
-        }
-      >
+      <Suspense fallback={<PaneLoadingFrame text="Loading the light editor…" place={place} close={close} />}>
         <LightPane light={light} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
       </Suspense>
     </LoadBoundary>

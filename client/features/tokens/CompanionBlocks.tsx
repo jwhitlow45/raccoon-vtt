@@ -4,9 +4,8 @@ import { emptyStatBlock } from "#shared/statBlock.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Empty } from "../../components/Empty.tsx";
-import { Icon } from "../../components/Icon.tsx";
 import { Help, SectionLabel } from "../../components/Panel.tsx";
-import { Row, RowList } from "../../components/Row.tsx";
+import { Row, RowChevron, RowList } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -368,7 +367,7 @@ function BlockRow(props: { block: CompanionBlock; open: boolean; onToggle(): voi
         onClick={props.onToggle}
         title={block.name}
         detail={blockDetail(block)}
-        trailing={<Icon name={props.open ? "chevronDown" : "chevronRight"} style={{ color: theme.color.textMuted }} />}
+        trailing={<RowChevron open={props.open} />}
       />
       {props.open ? (
         <div style={{ display: "grid", gap: theme.space(2), padding: `0 ${theme.space(1)}px ${theme.space(2)}px` }}>

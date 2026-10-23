@@ -1,16 +1,16 @@
 import { Suspense, useEffect } from "react";
 import { useStore } from "zustand";
-import type { BuildChunk, Scene, Trap } from "#shared/model.ts";
-import { Loading } from "../../components/Loading.tsx";
+import type { BuildChunk, Scene } from "#shared/model.ts";
 import { LoadBoundary } from "../../components/LoadBoundary.tsx";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
-import { theme } from "../../lib/theme.ts";
+import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { panePlacement } from "../builder/labelEdit.ts";
-import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
+import { PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
+import { PaneFailedFrame, PaneLoadingFrame } from "../builder/PaneFrames.tsx";
 import { trapScreenBox } from "./paneBox.ts";
 import { trapSlot } from "./store.ts";
 
@@ -35,28 +35,26 @@ export function TrapPaneHost(props: { scene: Scene; tool: string; camera: Camera
   const trap = useRoomView((s) => (paneId ? s.view?.traps[paneId] : undefined));
   const chunks = useRoomView((s) => s.view?.buildChunks ?? NO_CHUNKS);
   const open = paneId !== null && trap !== undefined && trap.sceneId === props.scene.id && props.tool === "trap";
+  // The frames shown while the pane loads or failed to stand where the pane will, beside the fight's alerts.
+  const lane = useAlertsLane(props.viewport);
   useEffect(() => {
     if (paneId !== null && !open) store.setState({ paneId: null, picking: null });
   }, [paneId, open, store]);
   if (!open || !trap) return null;
+  const close = () => store.setState({ paneId: null });
+  // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in.
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(trap, chunks, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (
-        <div style={{ ...labelPaneFrame(panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(trap, chunks, props.camera), height: PANE_HEIGHT_UNMEASURED })), padding: theme.space(3) }}>
+        <PaneFailedFrame place={place} close={close}>
           <RoomLoadNotice {...f} subject="The trap editor" verb="load" compact reopen={{ tool: props.tool }} />
-        </div>
+        </PaneFailedFrame>
       )}
     >
-      <Suspense fallback={<PaneLoading trap={trap} chunks={chunks} camera={props.camera} viewport={props.viewport} insets={props.insets} />}>
-        <TrapPane trap={trap} hidden={picking} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={() => store.setState({ paneId: null })} />
+      <Suspense fallback={<PaneLoadingFrame text="Loading the trap editor…" place={place} close={close} />}>
+        <TrapPane trap={trap} hidden={picking} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
       </Suspense>
     </LoadBoundary>
   );
-}
-
-/** While the pane's code downloads, the shared loading notice takes the box the pane will appear in. */
-function PaneLoading(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; camera: Camera; viewport: Size; insets: Insets }) {
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(props.trap, props.chunks, props.camera), height: PANE_HEIGHT_UNMEASURED });
-  // Even padding: the pane's slight top padding is for its header, which a loading notice does not have.
-  return <Loading text="Loading the trap editor…" style={{ ...labelPaneFrame(place), padding: theme.space(3) }} />;
 }

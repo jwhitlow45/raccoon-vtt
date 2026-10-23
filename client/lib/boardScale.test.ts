@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { boardSizes, chipFit, PIN_CELL_PX, TEXT_FLOOR_PX } from "./boardScale.ts";
+import { boardSizes, chipFit, PIN_CELL_PX, screenPx, setBoardInterfaceScale, TEXT_FLOOR_PX } from "./boardScale.ts";
 
 describe("board sizes for a zoom", () => {
   test("at the pin every mark is its old fixed size", () => {
@@ -60,5 +60,26 @@ describe("board sizes for a zoom", () => {
       assert.equal(big.f, base.f);
     }
     assert.deepEqual(boardSizes(PIN_CELL_PX), boardSizes(PIN_CELL_PX, 1), "100% is the board as it was");
+  });
+});
+
+describe("readouts at an interface size", () => {
+  test("a screen size scales with the interface size, to half pixels, and is its design size at 100%", () => {
+    for (const px of [4, 6, 12, 15]) assert.equal(screenPx(px, 1), px);
+    assert.equal(screenPx(15, 1.3), 19.5);
+    assert.equal(screenPx(12, 1.3), 15.5);
+    assert.equal(screenPx(12, 0.85), 10);
+    assert.equal(screenPx(15, 0.85), 13);
+    for (const ui of [0.85, 1, 1.15, 1.3]) for (const px of [4, 6, 12, 15]) assert.equal(screenPx(px, ui) * 2, Math.round(screenPx(px, ui) * 2), `${px} px at ${ui}`);
+  });
+
+  test("it follows the device's interface size when none is given", () => {
+    setBoardInterfaceScale(1.3);
+    try {
+      assert.equal(screenPx(15), 19.5);
+    } finally {
+      setBoardInterfaceScale(1);
+    }
+    assert.equal(screenPx(15), 15);
   });
 });

@@ -12,7 +12,7 @@ import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { Icon } from "../../components/Icon.tsx";
-import { Input, Select, TextArea } from "../../components/Field.tsx";
+import { Field, Input, Select, TextArea } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { Help, Section, SectionLabel } from "../../components/Panel.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -358,7 +358,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
       <Dialog
         title="Check what was read"
         onClose={close}
-        back={{ label: "Back", onBack: () => send({ t: "back" }) }}
+        back={{ label: review.from === "paste" ? "Back to the pasted text" : "Back to the D&D Beyond link", onBack: () => send({ t: "back" }) }}
         status={status}
         phone="fill"
         width="lg"
@@ -481,18 +481,14 @@ export function DdbStep(props: {
   readingJson: boolean;
   name: string;
 }) {
-  const linkId = useId();
   const jsonId = useId();
   const [pasting, setPasting] = useState(false);
   const id = ddbCharacterId(props.link);
   return (
     <div style={{ display: "grid", gap: theme.space(3), fontSize: theme.font.body14 }}>
       <Help>{`The character must be Public in D&D Beyond. The import reads numbers, proficiencies, weapons and spells, never their text, and you check what it read before anything is saved. It is best effort: D&D Beyond can change its format.`}</Help>
-      <label htmlFor={linkId} style={{ fontWeight: theme.weight.strong }}>
-        Share link or character number
-      </label>
-      <Input
-        id={linkId}
+      <Field
+        label="Share link or character number"
         type="text"
         inputMode="url"
         value={props.link}
@@ -506,7 +502,6 @@ export function DdbStep(props: {
             props.onGet();
           }
         }}
-        style={{ width: "100%" }}
       />
       {props.waiting ? <Loading text={`Getting ${props.name} from D&D Beyond…`} /> : null}
       {props.error ? (
@@ -529,7 +524,8 @@ export function DdbStep(props: {
             Open its data in D&amp;D Beyond, copy the whole page, and paste it here. It is read on this device, up to 5 MiB.
           </label>
           <TextArea id={jsonId} value={props.json} onChange={(e) => props.onJson(e.target.value)} rows={8} spellCheck={false} style={{ width: "100%", fontFamily: theme.font.mono }} />
-          <Button size="sm" variant="primary" busy={props.readingJson} disabled={props.json.trim() === ""} onClick={props.onReadJson} style={{ justifySelf: "start" }}>
+          {/* Secondary: the footer's Get it stays the step's one primary (docs/design-v1-look-pass-2.md 2.2). */}
+          <Button size="sm" busy={props.readingJson} disabled={props.json.trim() === ""} onClick={props.onReadJson} style={{ justifySelf: "start" }}>
             {props.readingJson ? "Reading…" : "Read it"}
           </Button>
           {props.readingJson ? <Loading text="Reading the character…" /> : null}
@@ -570,14 +566,17 @@ function PasteStep(props: { text: string; onText(text: string): void; level: num
   );
 }
 
+/** A section of the review, spaced as a panel's `Section` inside a group and as the re-sync's review (SyncReview.tsx). */
+const REVIEW_SECTION: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 };
+
 /** The review (6.1): what was read, what to check, what it replaces, and the other fields it sets, each ticked or not. */
 function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
   const { review } = props;
   return (
-    <div style={{ display: "grid", gap: theme.space(3), fontSize: theme.font.body14 }}>
+    <div style={{ display: "grid", gap: theme.space(4), fontSize: theme.font.body14 }}>
       <p style={{ margin: 0 }}>{readLine(review.fill)}</p>
       {review.fill.warnings.length > 0 ? (
-        <section style={{ display: "grid", gap: theme.space(1) }}>
+        <section style={REVIEW_SECTION}>
           <SectionLabel>Check these</SectionLabel>
           {review.fill.warnings.map((w, i) => (
             <p key={i} style={{ margin: 0 }}>
@@ -588,7 +587,7 @@ function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
       ) : null}
       {review.merge ? <p style={{ margin: 0 }}>{fillSummary(review.fill, review.merge)}</p> : null}
       {review.lines.length > 0 ? (
-        <section style={{ display: "grid", gap: theme.space(1) }}>
+        <section style={REVIEW_SECTION}>
           <SectionLabel>Also set</SectionLabel>
           {review.lines.map((line) => (
             <Checkbox key={line.key} label={line.text} checked={line.on} onChange={() => props.onToggle(line.key)} />

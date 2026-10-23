@@ -13,8 +13,9 @@ import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { dockSlot, drawn, focusAlert, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
+import { dockSlot, drawn, drawsPaneRow, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
+import { SheetHeader } from "../../components/SheetHeader.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useUiScale } from "../device/settings.ts";
 import { sheetOpen } from "../../state/types.ts";
@@ -490,6 +491,9 @@ type Notice = { id: string; text: string };
  * summary as the dock in one 44 px row, with its cards hidden as under a
  * sheet, and a tap on the row hides the bar and shows them. It starts
  * below the notices that last when they span the map over it (Room.tsx).
+ * A map pane drawn as a card keeps left of the lane the same way, and
+ * where the lane leaves it no room the same row stands for the cards,
+ * whose tap closes the pane (docs/design-v1-look-pass-2.md 2.8).
  *
  * It stops at the active tool's options, so it never covers Select
  * several's Actions. Where that leaves it under one whole card, as with
@@ -574,13 +578,30 @@ function FightAlerts() {
   const [asked, setAsked] = useState<AskedAlerts | null>(null);
   const toOptions = chrome ? height - chrome.top - chrome.bottom - push : Infinity;
   const cramped = !folded && roomSummary !== null && firstHeight > 0 && toOptions < EDGE + firstHeight;
-  const forRoom = cramped && !asked && !forFootCard;
-  const summary = forRoom ? roomSummary : barSummary;
-  const summarized = forFootCard || forRoom || (!folded && bar?.lane === "summary" && summary !== null);
+  /*
+   * A map pane drawn as a card where the lane leaves it no room beside the
+   * cards has the row stand for them, with the pane's words, which win
+   * over the token window's (pages/fold.ts summaryFor), and over the room's
+   * since a tap must clear the pane first. Not while the cards were asked
+   * for, as they then show where they are or over the screen.
+   */
+  const alertsDock = useScoped(dockSlot);
+  const paneSummary = useDockSummary("pane");
+  const paneLane = useStore(alertsDock, (s) => s.paneLane);
+  const laneRow = summaryFor({ paneLane: folded || asked !== null ? null : (paneLane?.lane ?? null), barLane: bar?.lane ?? null });
+  const forPane = drawsPaneRow({ paneLane: paneLane?.lane ?? null, barLane: bar?.lane ?? null, folded, asked: asked !== null, waiting: paneSummary !== null });
+  const forRoom = cramped && !asked && !forFootCard && !forPane;
+  const summary = forPane ? paneSummary : forRoom ? roomSummary : barSummary;
+  const summarized = forFootCard || forRoom || forPane || (!folded && laneRow === "bar" && summary !== null);
   useLayoutEffect(() => {
     if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
   }, [dock, forRoom]);
   useLayoutEffect(() => () => dock.setState({ columnCramped: false }), [dock]);
+  // Room reads out what arrives under the pane's row as under the others (pages/fold.ts drawsPaneRow).
+  useLayoutEffect(() => {
+    if (dock.getState().columnPaneRow !== forPane) dock.setState({ columnPaneRow: forPane });
+  }, [dock, forPane]);
+  useLayoutEffect(() => () => dock.setState({ columnPaneRow: false }), [dock]);
   // What waits changed: the cards are measured again, which a hidden card cannot be. Asked for, they stay shown while anything waits, since opening a roll's card changes the summary's words too.
   const waits = roomSummary?.name ?? null;
   // The last alert answered over the screen takes the alerts and the row with it: focus goes to the map, never to the page (pages/mapFocus.ts).
@@ -828,7 +849,6 @@ function FightAlerts() {
    * whole card, then the roll opens or the alert takes focus. The bar stays
    * where the cards show beside it.
    */
-  const alertsDock = useScoped(dockSlot);
   const showAsk = useStore(alertsDock, (s) => s.showAsk);
   useLayoutEffect(() => {
     if (!showAsk || folded) return;
@@ -951,24 +971,9 @@ function FightAlerts() {
       }}
     >
       {overlay ? (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: theme.space(2),
-            flex: "none",
-            boxSizing: "border-box",
-            height: OVERLAY_HEAD,
-            padding: `0 calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
-            borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
-          }}
-        >
-          <h2 id={overlayTitle} style={{ flex: 1, margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>
-            Alerts
-          </h2>
-          <Button size="sm" icon="close" iconOnly="always" onClick={closeOverlay}>
-            Close
-          </Button>
+        // Every sheet and dialog's header, in its one-row form, inside the safe areas the screen's edges keep.
+        <div style={{ flex: "none", padding: `0 ${theme.safe.mapRight} 0 ${theme.safe.left}` }}>
+          <SheetHeader title="Alerts" titleId={overlayTitle} compact divider closeLabel="Close" onClose={closeOverlay} />
         </div>
       ) : null}
       {summarized && summary ? (
@@ -976,6 +981,12 @@ function FightAlerts() {
           ref={rowRef}
           summary={summary}
           onClick={() => {
+            // As the row on a sheet pane's edge (pages/RoomDock.tsx PaneDockRow): the pane closes, and once the cards are back the column meets the ask.
+            if (forPane) {
+              alertsDock.setState({ showAsk: summary.first.kind === "rolls" && rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first } });
+              paneLane?.close();
+              return;
+            }
             ui.showActions(false);
             // A card at a phone's foot opens at once, since it may stay folded for want of room until asked for, and the column has no room to show it.
             if (forFootCard || (forRoom && rolls?.waiting && footRolls)) {
@@ -1019,29 +1030,9 @@ function FightAlerts() {
         <div data-alert="rolls" style={{ display: "contents" }}>
           <RollAlerts />
         </div>
-        {timeUp.text ? (
-          <button
-            type="button"
-            role="status"
-            data-alert="timeUp"
-            onClick={timeUp.dismiss}
-            style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body, borderColor: theme.color.danger }}
-          >
-            {timeUp.text}
-          </button>
-        ) : null}
+        {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger onDismiss={timeUp.dismiss} /> : null}
         {notices.map((n) => (
-          <button
-            key={n.id}
-            type="button"
-            role="status"
-            data-alert="notice"
-            data-alert-id={n.id}
-            onClick={() => dismissNotice(n.id)}
-            style={{ ...card, minHeight: theme.touch, textAlign: "left", fontSize: theme.font.body14, cursor: "pointer", fontFamily: theme.font.body }}
-          >
-            {n.text}
-          </button>
+          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
         ))}
       </div>
       {/* Wherever the column cuts its cards, such as at the toolbar on a phone held sideways. Its foot keeps the shadow's room unless it stands over a docked bar. */}
@@ -1069,9 +1060,36 @@ function firstCardHeight(cards: HTMLElement): number {
   return firstCard(cards)?.getBoundingClientRect().height ?? 0;
 }
 
-/** The alerts over the screen: their header's height, a touch target and a little, with its rule, and the padding above and below their cards. */
-const OVERLAY_HEAD = theme.touch + theme.space(1) + theme.line.border;
+/** The alerts over the screen: their header's height, SheetHeader's one row with its rule, and the padding above and below their cards. */
+const OVERLAY_HEAD = theme.touch + theme.line.border;
 const OVERLAY_PAD = theme.space(2);
+
+/**
+ * A time-up or a notice in the column: its words as a status, read out as
+ * it arrives, and a quiet Dismiss. As a whole card that was a button, a
+ * reader met no button and a tap dismissed it with nothing to say it would
+ * (docs/design-v1-look-pass-2.md D27). Focusable from script, not by Tab,
+ * so a summary's tap can show it (pages/fold.ts focusAlert).
+ */
+function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string; danger?: boolean; onDismiss(): void }) {
+  return (
+    <section
+      role="group"
+      aria-label={props.text}
+      tabIndex={-1}
+      data-alert={props.kind}
+      data-alert-id={props.id}
+      style={{ ...card, display: "flex", alignItems: "center", gap: theme.space(2), minHeight: theme.touch, ...(props.danger ? { borderColor: theme.color.danger } : null) }}
+    >
+      <p role="status" style={{ flex: 1, minWidth: 0, margin: 0, fontSize: theme.font.body14 }}>
+        {props.text}
+      </p>
+      <Button size="sm" variant="quiet" aria-label={`Dismiss ${props.text.replace(/[.!]+$/, "")}`} onClick={props.onDismiss}>
+        Dismiss
+      </Button>
+    </section>
+  );
+}
 
 /** Where the summary row stands against its usual place (FightAlerts `rowPlace`): how far it rose and moved left, and how far in from each edge it stops. */
 type RowPlace = { lift: number; shift: number; insetLeft: number; insetRight: number };

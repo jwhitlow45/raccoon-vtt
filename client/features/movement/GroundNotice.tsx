@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { Note } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { tokenAccess } from "../tokens/access.ts";
@@ -25,8 +26,8 @@ export function GroundNotice(props: { token: Token }) {
   const access = tokenAccess({ role: you.role, memberId: you.memberId, view: { characters: character ? { [character.id]: character } : {} }, token });
   if (!access.dm && !access.owner) return null;
   return (
-    <div role="note" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), color: theme.color.warning, fontSize: theme.font.body14 }}>
-      <span style={{ flex: "1 1 160px" }}>{belowGroundText(below.depth)}</span>
+    <div role="note" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
+      <Note style={{ flex: "1 1 160px" }}>{belowGroundText(below.depth)}</Note>
       {access.canEditToken("elevation") ? (
         <Button size="sm" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: below.ground } })}>
           Stand on it

@@ -147,6 +147,21 @@ function actor() {
   return { hp: { cur: 20, max: 20, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 }
 
+/** The pasted image offer's rows, each by its title, the button's name, and its line, the button's description. */
+function offerRows(sheet: Locator): Promise<{ title: string; detail: string }[]> {
+  return sheet
+    .getByRole("group", { name: "Use it for" })
+    .getByRole("button")
+    .evaluateAll((buttons) =>
+      buttons.map((b) => {
+        type El = { getAttribute(name: string): string | null; ownerDocument: { getElementById(id: string): { textContent: string | null } | null } };
+        const el = b as unknown as El;
+        const text = (attr: string) => el.ownerDocument.getElementById(el.getAttribute(attr) ?? "")?.textContent ?? "";
+        return { title: text("aria-labelledby"), detail: text("aria-describedby") };
+      }),
+    );
+}
+
 describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
   before(async () => {
     const px = drawMap({ width: 1400, height: 1000, seed: 3, art: [{ kind: "noise", scale: 60, amp: 70 }], noise: 4, grid: { cellPx: DRAWN.cellPx, origin: DRAWN.originPx, opacity: 0.5, width: 2 } });
@@ -375,8 +390,11 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     const sheet = dm.getByRole("dialog", { name: "Use the pasted image" });
     await sheet.waitFor();
     await sheet.getByText("320 × 240 px").waitFor();
-    const rows = await sheet.getByRole("group", { name: "Use it for" }).getByRole("button").allTextContents();
-    assert.deepEqual(rows, ["New scene", "Stamp", "Handout"]);
+    // The offer's choices are card rows, each named by its title and described by its line (docs/design-v1-look-pass-2.md 2.5), under the file's name at 16 px.
+    const rows = await offerRows(sheet);
+    assert.deepEqual(rows.map((r) => r.title), ["New scene", "Stamp", "Handout"]);
+    assert.deepEqual(rows.map((r) => r.detail), ["Make a scene with it as the map.", "Then tap the map to place it.", "Then choose who sees it."]);
+    assert.equal(await sheet.locator("strong").first().evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { fontSize: string } }).getComputedStyle(el).fontSize), "16px");
     await shots.take(dm, "paste-room-offer");
     const handouts = dmUploads.handout ?? 0;
     await sheet.getByRole("button", { name: "Handout", exact: true }).click();
@@ -414,7 +432,7 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     assert.equal(await paste(dm, { files: [await swatch([200, 200, 40])] }), true);
     await sheet.waitFor();
     const first = sheet.getByRole("group", { name: "Use it for" }).getByRole("button").first();
-    assert.equal(await first.textContent(), "Picture for Goblin");
+    assert.equal((await offerRows(sheet))[0]?.title, "Picture for Goblin");
     await first.click();
     const crop = dm.getByRole("dialog", { name: "Crop the image" });
     await crop.waitFor({ timeout: 30_000 });

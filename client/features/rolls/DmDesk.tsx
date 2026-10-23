@@ -58,6 +58,20 @@ const NO_CASTS = {};
 const NO_TRAPS = {};
 
 /**
+ * How many of the desk's waiting things its summary words leave out
+ * (docs/design-v1-visual.md 3.2.1): the words name the traps that went
+ * off, else the asks for saves, else the roll requests, so the rest count
+ * in the summary's "+N". "Dart plate went off +2" with two asks for saves
+ * waiting, where the row once read "Dart plate went off" alone
+ * (LP16-PT-3).
+ */
+export function deskUnnamed(counts: { traps: number; asks: number; cards: number }): number {
+  if (counts.traps > 0) return counts.asks + counts.cards;
+  if (counts.asks > 0) return counts.cards;
+  return 0;
+}
+
+/**
  * The DM's side of request a roll (docs/design-v1-dm-tools.md 3.3): the
  * sheet, opened from the party bar or a token's action bar, and a live card
  * per open request in the fight alerts column, newest on top. Each card
@@ -180,6 +194,7 @@ export function DmDesk() {
           name: [wentOff, forSaves, rollsName].filter((x): x is string => x !== null).join(", "),
           waiting: asks > 0 || forSaves !== null || wentOff !== null,
           requests: items,
+          unnamed: deskUnnamed({ traps: sprung.length, asks: asked.length, cards: cards.length }),
           open,
         }
       : null,

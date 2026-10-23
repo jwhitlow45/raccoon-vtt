@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { Icon } from "../../components/Icon.tsx";
 import type { Drawing, RoomState } from "#shared/model.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { theme } from "../../lib/theme.ts";
@@ -16,8 +15,9 @@ import { formatFeet, keptStops, measureStops } from "./ruler.ts";
  *
  * They sit behind a chip in the Ruler's row, "Kept rulers (2)", whose
  * setting popover holds one danger row per ruler (docs/design-v1-tool-options.md
- * 9.2). The popover stays open as rulers go, and closes with its chip
- * when none is left.
+ * 9.2), the eraser before its words as Clear has it, and at the left as
+ * ⋯'s rows are (docs/design-v1-look-pass-2.md D17). The popover stays open
+ * as rulers go, and closes with its chip when none is left.
  */
 
 const EMPTY: RoomState["drawings"] = {};
@@ -66,13 +66,12 @@ export function KeptRulersChip(props: { kept: readonly KeptRuler[] }) {
     >
       <div role="group" aria-label="Kept rulers" style={{ display: "grid", gap: theme.space(1) }}>
         {kept.map((d) => (
-          <OptButton key={d.id} tone="danger" label={`Remove the kept ruler: ${d.text}`} onClick={() => actions.dispatch({ t: "drawing.delete", drawingId: d.id })}>
+          <OptButton key={d.id} tone="danger" icon="eraser" row label={`Remove the kept ruler: ${d.text}`} onClick={() => actions.dispatch({ t: "drawing.delete", drawingId: d.id })}>
             {d.text}
-            <Icon name="close" size="sm" />
           </OptButton>
         ))}
         {count > 1 ? (
-          <OptButton tone="danger" onClick={() => dispatchGesture(actions, kept.map((d) => ({ t: "drawing.delete" as const, drawingId: d.id })))}>
+          <OptButton tone="danger" icon="eraser" row onClick={() => dispatchGesture(actions, kept.map((d) => ({ t: "drawing.delete" as const, drawingId: d.id })))}>
             Remove all
           </OptButton>
         ) : null}

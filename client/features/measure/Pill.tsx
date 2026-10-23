@@ -1,7 +1,7 @@
 import { Label, Tag, Text } from "react-konva";
 import { useBoardView } from "../../canvas/boardView.ts";
 import { measurePill } from "../../canvas/measureText.ts";
-import { boardSizes } from "../../lib/boardScale.ts";
+import { boardSizes, screenPx } from "../../lib/boardScale.ts";
 import type { Box } from "../../lib/boardText.ts";
 import { theme } from "../../lib/theme.ts";
 import { pillLines } from "./readout.ts";
@@ -10,8 +10,11 @@ import { pillLines } from "./readout.ts";
 const PILL_MAX_PX = 240;
 const LEADING = 1.15;
 const POINTER_PX = 6;
-/** Room kept between a pill and the screen's edge when it slides back into view. */
+const POINTER_WIDTH_PX = 10;
+/** Room kept between a pill and the edge of the map the bars leave clear, when it slides back into view. */
 const EDGE_PX = 4;
+/** Room between the pills of a stack. */
+const STACK_GAP_PX = 4;
 
 export type PillProps = {
   x: number;
@@ -26,72 +29,138 @@ export type PillProps = {
    * "screen" keeps one size on screen at any zoom, for the readouts of a
    * ruler or a move in progress. "map" grows and shrinks with the map
    * within the board's text bounds (lib/boardScale.ts), like token names.
+   * Both follow the interface size.
    */
   size: "screen" | "map";
   /** A name alone wraps onto two lines, or is cut on one when this is 1, for a smaller pill in a crowd. */
   maxLines?: 1 | 2;
   small?: boolean;
+  /** Screen px between the point and the pill: down and right of it by default, along the pointer for `above` and `below`. */
   offsetPx?: number;
   above?: boolean;
   below?: boolean;
 };
 
-/** A pill's text and size on screen, which its drawing and its box both use. */
-export function pillGeometry(props: Omit<PillProps, "x" | "y" | "color">): { lines: string[]; fontSize: number; padding: number; width: number; height: number } {
+/**
+ * A pill's text and size on screen, which its drawing and its box both use.
+ * A screen-size pill's text, padding and pointer scale with the interface
+ * size (`screenPx`), so the box token labels keep off
+ * (canvas/useBoardText.ts) is the box drawn at every interface size.
+ */
+export function pillGeometry(props: Omit<PillProps, "x" | "y" | "color">): { lines: string[]; fontSize: number; padding: number; width: number; height: number; pointer: number } {
   const designPx = props.small ? 12 : 15;
-  const fontSize = props.size === "screen" ? designPx : props.small ? boardSizes(props.scale).pillPx : Math.max(designPx, boardSizes(props.scale).pillPx);
+  const fontSize = props.size === "screen" ? screenPx(designPx) : props.small ? boardSizes(props.scale).pillPx : Math.max(screenPx(designPx), boardSizes(props.scale).pillPx);
   const padding = Math.round(((props.small ? 4 : 6) * fontSize) / designPx);
-  const lines = pillLines({ value: props.value, name: props.name, px: fontSize, maxWidth: PILL_MAX_PX, maxLines: props.maxLines }, (t, px) => measurePill(t, px, theme.font.body));
+  const lines = pillLines({ value: props.value, name: props.name, px: fontSize, maxWidth: screenPx(PILL_MAX_PX), maxLines: props.maxLines }, (t, px) => measurePill(t, px, theme.font.body));
   const width = Math.max(0, ...lines.map((l) => measurePill(l, fontSize, theme.font.body))) + 2 * padding;
   const height = lines.length * fontSize * LEADING + 2 * padding;
-  return { lines, fontSize, padding, width, height };
+  return { lines, fontSize, padding, width, height, pointer: screenPx(POINTER_PX) };
+}
+
+/** A box `w` by `h` cells with its top-left corner at `x`, `y`, slid back inside `view` where it would cross its edge. */
+function slideIn(x: number, y: number, w: number, h: number, scale: number, view: Box | null): { x: number; y: number } {
+  if (!view) return { x, y };
+  const edge = EDGE_PX / scale;
+  return { x: Math.max(view.x0 + edge, Math.min(x, view.x1 - edge - w)), y: Math.max(view.y0 + edge, Math.min(y, view.y1 - edge - h)) };
 }
 
 /**
  * Where a pill sits, in cells: its box, and the point its Label is drawn at.
  * By default its top-left corner sits `offsetPx` below and right of the
- * point, and slides back inside `view` if it would cross the screen's edge.
+ * point, and slides back inside `view` if it would cross its edge.
  * With `above`, it sits centered over the point with a small pointer down
  * to it, for naming a shape from its top edge, and with `below` centered
- * under it with the pointer up. A pointed pill stays on its point.
+ * under it with the pointer up, each `offsetPx` off the point along its
+ * pointer. A pointed pill stays on its point.
  */
 export function pillPlace(props: Omit<PillProps, "color">, view: Box | null): { box: Box; x: number; y: number } {
   const g = pillGeometry(props);
   const s = 1 / props.scale;
   const w = g.width * s;
   const h = g.height * s;
-  const tip = POINTER_PX * s;
-  if (props.above) return { box: { x0: props.x - w / 2, y0: props.y - h - tip, x1: props.x + w / 2, y1: props.y }, x: props.x, y: props.y };
-  if (props.below) return { box: { x0: props.x - w / 2, y0: props.y, x1: props.x + w / 2, y1: props.y + h + tip }, x: props.x, y: props.y };
+  const tip = g.pointer * s;
   const off = (props.offsetPx ?? 0) * s;
-  let x = props.x + off;
-  let y = props.y + off;
-  if (view) {
-    const edge = EDGE_PX * s;
-    x = Math.max(view.x0 + edge, Math.min(x, view.x1 - edge - w));
-    y = Math.max(view.y0 + edge, Math.min(y, view.y1 - edge - h));
+  if (props.above) {
+    const y = props.y - off;
+    return { box: { x0: props.x - w / 2, y0: y - h - tip, x1: props.x + w / 2, y1: y }, x: props.x, y };
   }
-  return { box: { x0: x, y0: y, x1: x + w, y1: y + h }, x, y };
+  if (props.below) {
+    const y = props.y + off;
+    return { box: { x0: props.x - w / 2, y0: y, x1: props.x + w / 2, y1: y + h + tip }, x: props.x, y };
+  }
+  const at = slideIn(props.x + off, props.y + off, w, h, props.scale, view);
+  return { box: { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, x: at.x, y: at.y };
+}
+
+/** One pill of a stack: its words and look. The stack places it. */
+export type StackPill = Omit<PillProps, "x" | "y" | "scale" | "offsetPx" | "above" | "below">;
+
+/**
+ * Where a stack of readouts sits (docs/design-v1-look-pass-2.md 2.11), such
+ * as a drag's label with "Ends in Goblin 2's space" and "Crosses Hidden Pit"
+ * under it, each under the one before with a small gap. The stack is placed
+ * as one box, as wide as its widest pill and as tall as all of them and
+ * their gaps, `offsetPx` below and right of the point, and slides back
+ * inside `view` as one, so at an edge no warning leaves the screen or lands
+ * on the label. In cells, as pillPlace's: the stack's box, and each pill's
+ * top-left corner. A pill with no words takes no room.
+ */
+export function pillStackPlace(input: { x: number; y: number; scale: number; offsetPx?: number; pills: readonly StackPill[] }, view: Box | null): { box: Box; places: { x: number; y: number }[] } {
+  const s = 1 / input.scale;
+  const gap = screenPx(STACK_GAP_PX) * s;
+  const geometry = input.pills.map((p) => pillGeometry({ ...p, scale: input.scale }));
+  const tops: number[] = [];
+  let h = 0;
+  let any = false;
+  for (const g of geometry) {
+    const top = any ? h + gap : 0;
+    tops.push(top);
+    if (g.lines.length === 0) continue;
+    h = top + g.height * s;
+    any = true;
+  }
+  const w = Math.max(0, ...geometry.map((g) => (g.lines.length > 0 ? g.width : 0))) * s;
+  const off = (input.offsetPx ?? 0) * s;
+  const at = slideIn(input.x + off, input.y + off, w, h, input.scale, view);
+  return { box: { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, places: tops.map((t) => ({ x: at.x, y: at.y + t })) };
 }
 
 /** A label in a rounded box over the map: a distance, a movement, a name. */
 export function Pill(props: PillProps) {
-  const view = useBoardView();
+  // A readout slides into the part of the map the bars leave clear (canvas/boardView.ts).
+  const view = useBoardView()?.clear ?? null;
+  return <PillShape {...props} at={pillPlace(props, view)} />;
+}
+
+/** Readouts that stand together, drawn and slid back into view as one (pillStackPlace). A pill left out (`null` or `false`) takes no room. */
+export function PillStack(props: { x: number; y: number; scale: number; offsetPx?: number; pills: readonly (StackPill | null | false)[] }) {
+  const view = useBoardView()?.clear ?? null;
+  const pills = props.pills.filter((p): p is StackPill => !!p);
+  const place = pillStackPlace({ x: props.x, y: props.y, scale: props.scale, offsetPx: props.offsetPx, pills }, view);
+  return (
+    <>
+      {pills.map((p, i) => (
+        <PillShape key={i} {...p} scale={props.scale} at={place.places[i]!} />
+      ))}
+    </>
+  );
+}
+
+function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: number } }) {
   const g = pillGeometry(props);
-  const place = pillPlace(props, view);
   const s = 1 / props.scale;
   const pointer = props.above ? "down" : props.below ? "up" : "none";
   if (g.lines.length === 0) return null;
   return (
-    <Label x={place.x} y={place.y} scaleX={s} scaleY={s} listening={false}>
+    <Label x={props.at.x} y={props.at.y} scaleX={s} scaleY={s} listening={false}>
       <Tag
         fill={theme.color.overlay}
         stroke={props.color}
         strokeWidth={1.5}
-        cornerRadius={6}
+        cornerRadius={theme.radius.sm}
         pointerDirection={pointer}
-        pointerWidth={pointer !== "none" ? 10 : 0}
-        pointerHeight={pointer !== "none" ? POINTER_PX : 0}
+        pointerWidth={pointer !== "none" ? screenPx(POINTER_WIDTH_PX) : 0}
+        pointerHeight={pointer !== "none" ? g.pointer : 0}
       />
       <Text
         text={g.lines.join("\n")}

@@ -6,6 +6,7 @@ import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { cardStyle } from "../rolls/parts.tsx";
+import { Note as Caution } from "../../components/Panel.tsx";
 import { Note } from "../tokens/ui.tsx";
 import { didLines, hiddenLine, lineOf, whoLines } from "./desk.ts";
 import { TrapSaveStart } from "./TrapSaveStart.tsx";
@@ -83,13 +84,21 @@ export function TrapCard(props: { trap: Trap; due: TrapDue; open: boolean; onTog
       </button>
       {props.open ? (
         <>
-          {due.hidden ? <Note>{hiddenLine(view, due)}</Note> : <span style={{ fontSize: theme.font.small }}>{who.by}</span>}
+          {/* Out of the players' sight it is still armed for them, which the DM must weigh: a warning, not muted help. */}
+          {due.hidden ? <Caution>{hiddenLine(view, due)}</Caution> : <span style={{ fontSize: theme.font.small }}>{who.by}</span>}
           <span style={{ fontSize: theme.font.small }}>{who.hits}</span>
-          {did.map((d, i) => (
-            <span key={i} style={{ fontSize: theme.font.small, color: d.startsWith("Could not") ? theme.color.dangerText : theme.color.text }}>
-              {d}
-            </span>
-          ))}
+          {/* What it could not do takes the error's color from the line's own outcome, not from its words. */}
+          {did.map((d, i) =>
+            line?.did[i]?.ok === false ? (
+              <Note key={i} tone="error">
+                {d}
+              </Note>
+            ) : (
+              <span key={i} style={{ fontSize: theme.font.small }}>
+                {d}
+              </span>
+            ),
+          )}
           {trap.rig?.note ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, whiteSpace: "pre-wrap" }}>{trap.rig.note}</span> : null}
           {saving ? <TrapSaveStart trap={trap} due={due} onDone={() => setSaving(false)} /> : null}
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>

@@ -272,8 +272,8 @@ function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): v
   };
 
   return (
-    <section ref={section} tabIndex={-1} aria-label="This room's images" style={{ display: "grid", gap: theme.space(2), marginTop: theme.space(4), outline: "none" }}>
-      <SectionLabel>This room's images</SectionLabel>
+    <section ref={section} tabIndex={-1} aria-label="This room’s images" style={{ display: "grid", gap: theme.space(2), marginTop: theme.space(4), outline: "none" }}>
+      <SectionLabel>This room’s images</SectionLabel>
       <div style={{ display: "flex" }}>
         <PasteButton paste={props.paste} />
       </div>
@@ -281,7 +281,7 @@ function RoomImages(props: { chosen: string | null; onPick(chosen: ChosenArt): v
       <Loading text="Loading this room's images…" active={library.rows === null && !library.failed} />
       {library.failed ? (
         <LoadFailed retry={library.retry} focusTo={() => section.current}>
-          The room's library did not load. Images already on the map are below.
+          The room’s library did not load. Images already on the map are below.
         </LoadFailed>
       ) : null}
       {ids.length === 0 && (listed !== null || library.failed) ? <Empty>No token images yet. Add one in the Library panel or on a token.</Empty> : null}

@@ -55,7 +55,8 @@ function RoughPreview(props: Pick<LayerProps, "scene" | "scale">) {
 
 function HeightMarks(props: LayerProps) {
   const { scene, scale, labelBoxes } = props;
-  const view = useBoardView();
+  // Culled by the whole canvas, not the part the bars leave clear: a number beside the options line still shows (canvas/boardView.ts).
+  const view = useBoardView()?.canvas ?? null;
   const allChunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY);
   const chunks = useMemo(() => Object.values(allChunks).filter((c): c is BuildChunk => !!c && c.sceneId === scene.id), [allChunks, scene.id]);
   const { w, h } = scene.bounds;

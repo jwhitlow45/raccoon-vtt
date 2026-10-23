@@ -659,6 +659,47 @@ export function laneChoice(input: { laneTop: number; laneHeight: number; column:
   return { lane: "summary", floor: Math.max(laneTop, (column.row ?? column.top) + SUMMARY_ROW + EDGE) };
 }
 
+/** Where a map pane drawn as a card stands against a column with a card (paneLane). */
+export type PaneLane = "beside" | "summary";
+
+/** The lane as a map pane keeps out of it: the lane's left edge, and the top of the column's summary row, where its first card starts. */
+export type PaneLaneBox = { left: number; top: number };
+
+/**
+ * Where a map pane drawn as a card (a label's, pin's, light's or trap's,
+ * features/builder/labelEdit.ts panePlacement) goes while the column shows
+ * a card (docs/design-v1-look-pass-2.md 2.8). The lane's rule for the
+ * token window (shareLane) without its stacked step, since a pane stands
+ * by its thing rather than in a corner:
+ *
+ * 1. Beside: where the room left of the lane holds the pane and both its
+ *    margins, the pane keeps its right edge 8 px left of the lane.
+ * 2. Summary: otherwise the column shows its summary row in place of its
+ *    cards, and the pane keeps under the row where it meets the lane.
+ *
+ * `roomLeft` is the left edge of the room the pane may take, and `width`
+ * the pane's width, in the lane's own px.
+ */
+export function paneLane(input: { laneLeft: number; roomLeft: number; width: number }): PaneLane {
+  return input.laneLeft - input.roomLeft >= input.width + 2 * EDGE ? "beside" : "summary";
+}
+
+/**
+ * The lane a map pane drawn as a card keeps out of (paneLane), while the
+ * column shows a card or its summary row: the lane's left edge, as the
+ * token window takes it (laneLeft), and where the row stands. `column` is
+ * what the column publishes, which it keeps while its cards are hidden,
+ * and `viewport` the map as the panes see it. The column's facts and the
+ * chrome are already in the zoomed layout px the panes are placed in
+ * (pages/Room.tsx divides the chrome by the zoom, the column its cards),
+ * so nothing is divided here. Null before the chrome is measured, with no
+ * card, or while a sheet folds the column.
+ */
+export function paneLaneBox(input: { viewport: Size; chrome: Chrome | null; column: ColumnFacts | null; folded: boolean }): PaneLaneBox | null {
+  if (!input.chrome || !input.column || input.folded) return null;
+  return { left: laneLeft(freeArea(input.viewport, input.chrome)), top: input.column.row ?? input.column.top };
+}
+
 /**
  * The column's room while a bar shares the lane: down to 8 px above the
  * bar when stacked, nothing but the summary row when summarized, and the
@@ -1149,6 +1190,8 @@ type BarDockState = {
   footYields: boolean;
   /** The room between the top bars and the tool's options is under one whole alert card, and the column's summary row stands for its cards. */
   columnCramped: boolean;
+  /** The column draws a map pane's summary row in place of its cards (pages/fold.ts drawsPaneRow). */
+  columnPaneRow: boolean;
   /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
   alertsOverlay: boolean;
   /** Asks for the alerts over the screen to close (closeAlertsOverlay), counted so each ask is heard, and the panel the ask opened, which then takes focus. */
@@ -1160,7 +1203,7 @@ type BarDockState = {
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
 );
 
 /**

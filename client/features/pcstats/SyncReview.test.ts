@@ -17,6 +17,7 @@ import { actor, character } from "#shared/testutil.ts";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { SyncReview } = await import("./SyncReview.tsx");
+const { RowChevron } = await import("../../components/Row.tsx");
 
 const SHEET = "https://www.dndbeyond.com/characters/12345678";
 const empty = (): PcStats => structuredClone(EMPTY_PC_STATS) as PcStats;
@@ -28,8 +29,8 @@ function fillOf(stats: Partial<PcStats>): PcFill {
 
 const bree = (stats?: PcStats): Character => character("bree", { name: "Bree", level: 5, ...(stats ? { stats } : {}), actor: actor({ ac: 15, hp: { cur: 38, max: 38, temp: 0 }, speeds: { walk: 30 }, senses: "", sheetUrl: SHEET }) });
 
-function render(c: Character, fill: PcFill, ticks?: Set<string>): { html: string; plan: SyncPlan } {
-  const plan = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill });
+function render(c: Character, fill: PcFill, ticks?: Set<string>, mode: "resync" | "editor" = "resync"): { html: string; plan: SyncPlan } {
+  const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill });
   const t = ticks ?? defaultTicks(plan);
   const result = syncResult(plan, t);
   const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}` }));
@@ -89,5 +90,31 @@ describe("the review's markup", () => {
     assert.match(html, /aria-label="Take these: Spellcasting"/);
     assert.match(html, /aria-expanded="true"/);
     assert.match(html, /Overwrite with Wisdom 16/);
+  });
+});
+
+describe("the review's spacing and chevrons (docs/design-v1-look-pass-2.md 2.5 and 3, lane 3)", () => {
+  const typed = () => bree({ ...empty(), spellAbility: "cha", abilities: { ...empty().abilities, wis: 12 } });
+  const fill = () => fillOf({ spellAbility: "wis", abilities: { ...empty().abilities, wis: 16 } });
+  const rowStyles = (html: string) => [...html.matchAll(/data-sync-row="[^"]+" style="([^"]+)"/g)].map((m) => m[1]);
+
+  test("a group's row ends in the chevron every unfolding row shares", () => {
+    const { html } = render(typed(), fill());
+    assert.match(html, /aria-expanded="true"/);
+    assert.ok(html.includes(renderToStaticMarkup(createElement(RowChevron, { open: true }))), "the shared chevron, open");
+    const folded = render(bree(empty()), fillOf({ rolls: Array.from({ length: 40 }, (_, i) => roll(i)) })).html;
+    assert.ok(folded.includes(renderToStaticMarkup(createElement(RowChevron, { open: false }))), "the shared chevron, folded");
+  });
+
+  test("Replaces your changes rows are spaced as kept and different rows are, and every section stacks its rows by Section's gap", () => {
+    const different = rowStyles(render(typed(), fill()).html);
+    const editor = render(typed(), fill(), undefined, "editor");
+    assert.match(editor.html, /id="label-replaces"/);
+    const replaces = rowStyles(editor.html);
+    assert.ok(different.length > 0 && replaces.length > 0);
+    for (const style of [...different, ...replaces]) assert.equal(style, different[0]);
+    const sections = [...editor.html.matchAll(/<section style="([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(sections.length > 0);
+    for (const style of sections) assert.match(style ?? "", /grid-template-columns:minmax\(0, 1fr\);gap:8px/);
   });
 });

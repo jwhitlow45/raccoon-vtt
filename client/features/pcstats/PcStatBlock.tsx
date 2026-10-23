@@ -21,7 +21,7 @@ import { ddbCharacterId } from "#shared/ddb/link.ts";
 import { PcStatsView } from "./PcStatsView.tsx";
 import { END_SHAPE, shapeNote } from "./shape.ts";
 import { useCharacterRollNumbers } from "./useRollNumbers.ts";
-import { ShapePicker } from "./ShapePicker.tsx";
+import { noFormsText, ShapePicker } from "./ShapePicker.tsx";
 
 /**
  * A player character's "Stat block" section (docs/design-v1-pc-stats.md
@@ -49,6 +49,8 @@ export function PcStatBlock(props: {
   // A token's owner who does not own its character gets no section at all (statBlockShown), and never the buttons that change it.
   const edits = editsPcStats(you, character);
   const [picking, setPicking] = useState(false);
+  // The known forms step the section's Change opens, kept here so removing the last form, which can drop the section, leaves it open in the user's hands.
+  const [choosingForms, setChoosingForms] = useState(false);
   const shaped = pcShape(character) !== "none";
   const take = shaped || !edits ? null : (
     <SmallButton wrap onClick={() => setPicking(true)}>
@@ -61,10 +63,17 @@ export function PcStatBlock(props: {
         Add a stat block
       </SmallButton>
     ) : null;
-  const picker = picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null;
+  const picker = (
+    <>
+      {picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null}
+      {choosingForms ? <ShapePicker character={character} start="forms" onClose={() => setChoosingForms(false)} /> : null}
+    </>
+  );
   // In another shape, such as Polymorph, the forms are not drawn: End the shape first.
   const formCount = edits && pcShape(character) !== "other" ? (character.knownForms?.length ?? 0) : 0;
-  const forms = formCount > 0 ? <KnownFormsSection character={character} /> : null;
+  // In Wild Shape, Take a shape is hidden, so the section shows even with no forms, as the one way to choose them without ending the shape.
+  const showsForms = formCount > 0 || (edits && pcShape(character) === "wild");
+  const forms = showsForms ? <KnownFormsSection character={character} onChange={() => setChoosingForms(true)} /> : null;
   // Folded, the row says what the block holds, so it reads without opening (docs/design-v1-look-pass.md 3.3).
   const summary = pcBlockSummary(character, formCount);
   if (!character.stats && !shaped) {
@@ -118,16 +127,33 @@ export function PcStatBlock(props: {
  * the new form's Temporary HP go only where they are more than held. Out of
  * a shape they are plain buttons, never toggles. Each button's text names
  * it, with no `label`, which would also set a native tooltip.
+ *
+ * Change, in the label's action slot, opens the step that chooses them,
+ * "Choose known forms" while there are none (docs/design-v1-look-pass.md 5,
+ * docs/design-v1-look-pass-2.md D19).
  */
-function KnownFormsSection(props: { character: Character }) {
+function KnownFormsSection(props: { character: Character; onChange(): void }) {
   const { character } = props;
   const actions = useRoomActions();
   const roomId = useRoomView((s) => s.roomId);
   const { list, failed } = useSrdList(true);
   const known = knownFormsIn(character.knownForms, list ?? []);
   const current = pcShape(character) === "wild" ? character.actor.srdId : undefined;
+  const none = (character.knownForms?.length ?? 0) === 0;
+  const change = (
+    <SmallButton wrap onClick={props.onChange}>
+      {none ? "Choose known forms" : "Change"}
+    </SmallButton>
+  );
+  if (none) {
+    return (
+      <Section label="Known forms" action={change}>
+        <Help>{noFormsText(character.name)}</Help>
+      </Section>
+    );
+  }
   return (
-    <Section label="Known forms">
+    <Section label="Known forms" action={change}>
       {failed ? (
         <SrdLoadFailed what="The known forms" inline />
       ) : !list ? (

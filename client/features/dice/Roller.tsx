@@ -7,7 +7,7 @@ import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
-import { Spinner, useDelayed } from "../../components/Loading.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -29,8 +29,10 @@ import { useReceipt } from "./useReceipt.ts";
 
 /** The scrolling pane's top padding, which its body publishes (components/Sheet.tsx paneBodyPadding). 0 outside a pane. */
 const PAD_TOP = "var(--pane-pad-top, 0px)";
-/** The sticky line's height (Appendix C). */
-export const LAST_LINE_PX = 40;
+/** The sticky line's height (Appendix C), a touch target's, so Again at its full 44 px never makes the line taller than it is without it. */
+export const LAST_LINE_PX = theme.touch;
+
+const ROLLING = "Rolling…";
 
 /**
  * The line under the field is always this tall, empty or not, so a reading,
@@ -87,7 +89,6 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const holding = tag !== null && thrown.held === tag;
   const receipt = useReceipt(tag);
   const waiting = receipt !== null && (receipt.state === "sending" || receipt.state === "checking");
-  const slow = useDelayed(waiting);
   const committed = receipt?.state === "committed" ? receipt : null;
   const rolls = useMemo(() => (committed ? rollsOf(committed.lines) : []), [committed]);
   const first = rolls[0];
@@ -97,17 +98,12 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   // A polite live region says each result once, from the render that first holds it, so it is said as it lands on the server even while the dice still fly.
   const said = first && head ? spokenResult(head, spokenVerdict(first, data)) : "";
   if (!last) return null;
-  const rollingNote = (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
-      <Spinner size={16} /> Rolling…
-    </span>
-  );
   let body;
   if ("error" in last) body = <span role="alert" style={{ color: theme.color.dangerText }}>{last.error}</span>;
-  // The shared delayed indicator: a quick answer never flashes "Rolling...".
-  else if (!receipt || waiting) body = slow ? rollingNote : null;
-  // The dice are in the air: the line stays as it was, "Rolling…" only where the wait was long enough to say it.
-  else if (receipt.state === "committed" && holding) body = thrown.rolling ? rollingNote : null;
+  // The shared delayed indicator: a quick answer never flashes "Rolling...". Not a live region: the result's own says it once it lands.
+  else if (!receipt || waiting) body = <Loading text={ROLLING} active={waiting} live={false} />;
+  // The dice are in the air: the line stays as it was, "Rolling…" only where the wait was long enough to say it, so at once.
+  else if (receipt.state === "committed" && holding) body = <Loading text={ROLLING} active={thrown.rolling} delay={0} live={false} />;
   else if (receipt.state === "refused") body = <span role="alert" style={{ color: theme.color.dangerText }}>{receipt.text || receipt.message}</span>;
   else if (receipt.state === "unknown") body = <span style={{ color: theme.color.textMuted }}>This may have happened. Check the log.</span>;
   else if (!first || !head) body = <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
@@ -146,7 +142,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
         <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
-          <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none", minHeight: LAST_LINE_PX }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
+          <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none" }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
             Again
           </Button>
         ) : null}

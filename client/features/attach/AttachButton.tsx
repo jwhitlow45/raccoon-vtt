@@ -1,11 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { Token } from "#shared/model.ts";
 import { SCROLL_FOR_MORE_PX } from "../../canvas/TokenActionBar.tsx";
 import { Button } from "../../components/Button.tsx";
+import { Empty } from "../../components/Empty.tsx";
 import { useDelayed } from "../../components/Loading.tsx";
 import { menuAction } from "../../components/menuKeys.ts";
-import { sectionLabelLook } from "../../components/Panel.tsx";
+import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { Popover, usePopover, type PopoverSide, type Rect } from "../../components/Popover.tsx";
+import { Row, RowChevron } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { useLayoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
@@ -17,6 +19,7 @@ import { letterOf } from "../../state/shortcuts.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { AttachSends, asksControl, attachOp, attachRows, emptyWords, waitsForServer, type AttachRow } from "./list.ts";
 import type { AttachViewer } from "./rights.ts";
+import { STEER_OPTIONS, steerWords } from "./tags.ts";
 
 /**
  * Attach in the token's bar (docs/design-v1-attach.md 4.1): a popover from
@@ -47,6 +50,7 @@ function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
       <Button
         size="sm"
         {...anchor}
+        expanded={open}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
           setSide(r.top + r.height / 2 > window.innerHeight / 2 ? "above" : "below");
@@ -56,8 +60,8 @@ function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
       >
         Attach
       </Button>
-      <Popover handle={handle} side={side} bound={viewportBound} title="Attach">
-        <AttachList token={props.token} onDone={() => handle.close("pick")} />
+      <Popover handle={handle} side={side} bound={viewportBound} title={`Attach ${displayName(props.token)}`}>
+        <AttachList token={props.token} capped onDone={() => handle.close("pick")} />
       </Popover>
     </>
   );
@@ -86,16 +90,25 @@ function viewportBound(): Rect {
 }
 
 const ROW_ATTR = "data-attach-row";
+const ROW_DATA = { [ROW_ATTR]: "" };
 
 /**
- * The rows, each a portrait and its sentence. Ride opens its one more
- * question under its row, Controlled or Independent, with Ride under it.
- * The rows take the keys every list does (components/menuKeys.ts): Down
- * and Up move and wrap, Home and End go to the ends, Enter and Space pick.
- * A row that waits for the server (list.ts waitsForServer) shows busy
- * after the room's usual 200 ms and takes no second tap meanwhile.
+ * The rows, each a card `Row` with a portrait and its sentence, which wraps
+ * rather than cut, so "Get on Treasure chest" reads whole on a small phone
+ * (docs/design-v1-look-pass-2.md 2.5). Ride opens its one more question
+ * under its row, Controlled or Independent, with Ride under it, and ends
+ * in the chevron every unfolding row has. The rows take the keys every
+ * list does (components/menuKeys.ts): Down and Up move and wrap, Home and
+ * End go to the ends, across the near rows and "Farther away" alike, and
+ * Enter and Space pick. A row that waits for the server (list.ts
+ * waitsForServer) shows busy after the room's usual 200 ms and takes no
+ * second tap meanwhile.
+ *
+ * `capped` is the pop-up's: it holds the list to a side panel's width. A
+ * sheet and the card from 600 px have widths of their own, which the rows
+ * span.
  */
-function AttachList(props: { token: Token; onDone(): void }) {
+export function AttachList(props: { token: Token; capped?: boolean; onDone(): void }) {
   const actions = useRoomActions();
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.view);
@@ -107,6 +120,7 @@ function AttachList(props: { token: Token; onDone(): void }) {
   const [pending, setPending] = useState<string | null>(null);
   const busy = useDelayed(pending !== null);
   const listRef = useRef<HTMLDivElement>(null);
+  const fartherId = useId();
   /*
    * A pop-up keeps the size it opened with (components/Popover.tsx), so a
    * Ride row near its foot opens its question and its Ride past the box,
@@ -161,13 +175,14 @@ function AttachList(props: { token: Token; onDone(): void }) {
     buttons[action.index]?.focus();
   };
 
+  const cap = props.capped ? { maxWidth: theme.layout.sidePanelWidth } : null;
   if (rows.length === 0) {
+    const [first, ...more] = emptyWords(viewer.role);
     return (
-      <div style={{ display: "grid", gap: theme.space(1), maxWidth: 320, color: theme.color.textMuted, fontSize: theme.font.body14 }}>
-        {emptyWords(viewer.role).map((line) => (
-          <p key={line} style={{ margin: 0 }}>
-            {line}
-          </p>
+      <div style={{ display: "grid", gap: theme.space(1), ...cap }}>
+        <Empty>{first}</Empty>
+        {more.map((line) => (
+          <Help key={line}>{line}</Help>
         ))}
       </div>
     );
@@ -179,34 +194,32 @@ function AttachList(props: { token: Token; onDone(): void }) {
   const renderRow = (row: AttachRow) => {
     const open = riding === row.key;
     const rowBusy = pending === row.key;
+    const asks = asksControl(row);
     return (
       <div key={row.key} style={{ display: "grid", gap: theme.space(1) }}>
-        <button
-          type="button"
-          {...{ [ROW_ATTR]: "" }}
-          aria-expanded={asksControl(row) ? open : undefined}
-          aria-busy={rowBusy && busy ? true : undefined}
+        <Row
+          title={row.text}
+          wrapTitle
+          leading={<Portrait entry={{ tokenId: row.otherId }} size={32} />}
+          trailing={asks ? <RowChevron open={open} /> : undefined}
+          expanded={asks ? open : undefined}
+          busy={rowBusy && busy}
+          data={ROW_DATA}
           onClick={() => {
-            if (asksControl(row)) setRiding(open ? null : row.key);
+            if (asks) setRiding(open ? null : row.key);
             else send(row, false);
           }}
-          style={rowStyle(open)}
-        >
-          <Portrait entry={{ tokenId: row.otherId }} size={32} />
-          <span style={{ flex: "1 1 auto", minWidth: 0, overflowWrap: "anywhere" }}>{row.text}</span>
-        </button>
+        />
         {open ? (
           // The margin keeps Ride clear of the fade that says "Scroll for more" where more rows follow.
           <div ref={askRef} style={{ display: "grid", gap: theme.space(1), paddingLeft: theme.space(2), scrollMarginBottom: SCROLL_FOR_MORE_PX }}>
             <Segmented<"controlled" | "independent">
               label={`How ${holderName(row)} moves`}
               value={steer}
-              options={[
-                { value: "controlled", label: `Controlled: moves on ${displayName(view?.tokens[row.carriedId] ?? props.token)}'s turn` },
-                { value: "independent", label: "Independent: keeps its own turn" },
-              ]}
+              options={STEER_OPTIONS}
               onChange={setSteer}
-              wrap
+              even
+              description={steerWords(steer === "controlled", holderName(row), displayName(view?.tokens[row.carriedId] ?? props.token))}
             />
             <Button size="sm" variant="primary" busy={rowBusy && busy} onClick={() => send(row, steer === "controlled")} style={{ justifySelf: "start" }}>
               Ride
@@ -218,33 +231,14 @@ function AttachList(props: { token: Token; onDone(): void }) {
   };
 
   return (
-    <div ref={listRef} onKeyDown={onKeyDown} style={{ display: "grid", gap: theme.space(1), minWidth: 240, maxWidth: 360 }}>
+    <div ref={listRef} onKeyDown={onKeyDown} style={{ display: "grid", gap: theme.space(1), ...(props.capped ? { minWidth: 240, ...cap } : null) }}>
       {near.map(renderRow)}
       {far.length > 0 ? (
-        <>
-          <div style={{ ...sectionLabelLook(), marginTop: near.length > 0 ? theme.space(2) : 0 }}>Farther away</div>
+        <div role="group" aria-labelledby={fartherId} style={{ display: "grid", gap: theme.space(1), marginTop: near.length > 0 ? theme.space(2) : 0 }}>
+          <SectionLabel id={fartherId}>Farther away</SectionLabel>
           {far.map(renderRow)}
-        </>
+        </div>
       ) : null}
     </div>
   );
-}
-
-function rowStyle(open: boolean) {
-  return {
-    display: "flex",
-    alignItems: "center",
-    gap: theme.space(2),
-    minHeight: theme.touch,
-    width: "100%",
-    padding: `${theme.space(1)}px ${theme.space(2)}px`,
-    border: `${theme.line.border}px solid ${open ? theme.color.accent : theme.color.border}`,
-    borderRadius: theme.radius.md,
-    background: open ? theme.color.accentTint : theme.color.surfaceRaised,
-    color: theme.color.text,
-    font: "inherit",
-    fontSize: theme.font.input,
-    textAlign: "left" as const,
-    cursor: "pointer",
-  };
 }

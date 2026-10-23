@@ -603,9 +603,13 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       while (scroller && g.getComputedStyle(scroller).overflowY !== "auto") scroller = scroller.parentElement;
       return { height: (el as unknown as Box).getBoundingClientRect().height, sideways: scroller ? scroller.scrollWidth - scroller.clientWidth : -1 };
     });
-    assert.ok(fit.height <= 60, `the sticky line is ${fit.height} px tall`);
+    // One line: its 44 px (Again's touch target), the pane's top padding and its rule. A second line of words would add 20 px more.
+    assert.ok(fit.height <= 64, `the sticky line is ${fit.height} px tall`);
     assert.equal(fit.sideways, 0, "the Dice sheet scrolls sideways");
     assert.ok(await inView(player, '[data-dice-last] button:has-text("Again")'), "Again is on screen");
+    // Again is a whole touch target, as every button is (docs/design-v1-look-pass-2.md D37).
+    const again = (await sticky.getByRole("button", { name: "Again" }).boundingBox())!;
+    assert.ok(again.height >= 44, `Again is ${again.height} px tall`);
     await shots.take(player, "dice-hundred-dice-sticky");
   });
 
@@ -911,6 +915,10 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     // The scrim stands until the dice fade at 1.8 s, whatever React drew in between.
     const scrim = await js<number>(player, `return Number(getComputedStyle(document.querySelector("[data-dice-tray]").firstElementChild).opacity);`);
     assert.ok(scrim > 0.9, `the scrim is at ${scrim} as the dice land`);
+    // Square under the header line's straight edge, rounded at its foot (docs/design-v1-look-pass-2.md D37).
+    const corners = await js<string[]>(player, `const s = getComputedStyle(document.querySelector("[data-dice-tray]").firstElementChild); return [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomLeftRadius];`);
+    assert.deepEqual(corners.slice(0, 2), ["0px", "0px"], "the scrim rounds its top corners");
+    assert.notEqual(corners[2], "0px", "the scrim's foot is rounded");
     await shots.take(player, "ra-landed-phone");
     await settled(player);
   });
@@ -1112,6 +1120,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
   test("ra-8. at 320 x 568 at 100% and 130%, a 20d6 throw and the dice set picker never scroll sideways, the tiles are 44 px, and the canvas is drawn at its screen size", async (t) => {
     if (!(await needsWebGL(player, t))) return;
     await player.setViewportSize({ width: 320, height: 568 });
+    /** The "+N" disc's number against its disc, at each size. */
+    const discs: number[] = [];
     for (const scale of [1, 1.3]) {
       const label = `320 x 568 at ${Math.round(scale * 100)}%`;
       await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
@@ -1126,6 +1136,10 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       assert.equal(await sideways(player, "[data-dice-last]"), 0, `${label}: the pane scrolls sideways during the throw`);
       const backing = hook.cssWidth * hook.ratio * hook.zoom;
       assert.ok(Math.abs(hook.width - backing) <= 1, `${label}: the canvas is ${hook.width} px wide, not ${backing} (${hook.cssWidth} CSS px, ratio ${hook.ratio}, zoom ${hook.zoom})`);
+      // The "+N" disc's number is in the tray's own pixels, as the disc is, so it keeps one size inside it at every interface size (docs/design-v1-look-pass-2.md D37).
+      const disc = await js<{ font: number; box: number } | null>(player, `const d = document.querySelector("[data-dice-more]"); if (!d) return null; return { font: parseFloat(getComputedStyle(d).fontSize), box: parseFloat(getComputedStyle(d).width) };`);
+      assert.ok(disc, `${label}: 20d6 shows no +N disc`);
+      discs.push(disc.font / disc.box);
       await shots.take(player, `ra-20d6-${Math.round(scale * 100)}`);
       await settled(player);
       const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
@@ -1147,6 +1161,7 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await shots.take(player, `ra-dice-picker-${Math.round(scale * 100)}`);
       await player.keyboard.press("Escape");
     }
+    assert.ok(Math.abs(discs[1]! / discs[0]! - 1) < 0.01, `the +N disc's number grows inside its disc: ${discs.map((d) => d.toFixed(3)).join(" at 100%, ")} at 130%`);
     await player.setViewportSize({ width: 390, height: 844 });
     await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
     await reopenRoom(player);

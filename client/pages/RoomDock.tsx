@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
+import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { useAlertsSummaryEntry } from "../components/sheetFocus.ts";
@@ -41,7 +42,8 @@ export function useDockSummary(hides: SummaryHides = "sheet"): AlertsSummary | n
   const name = rolls?.name ?? null;
   const waiting = rolls?.waiting ?? false;
   const requests = rolls?.requests ?? 0;
-  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests } : null, alerts, hides), [alerts, text, name, waiting, requests, hides]);
+  const unnamed = rolls?.unnamed ?? 0;
+  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests, unnamed } : null, alerts, hides), [alerts, text, name, waiting, requests, unnamed, hides]);
 }
 
 /**
@@ -246,11 +248,11 @@ export function PaneDockRow(props: { ref?: Ref<HTMLDivElement>; pane: RefObject<
 
 /**
  * The dock's buttons in the sheet's header, when the dock does not fit
- * above the sheet (3.2.1): the token's group is one outlined chip with
- * its name, whose tap shows the bar as "Show Thorn actions" does, with no
+ * above the sheet (3.2.1): the token's group is one small button with its
+ * name, whose tap shows the bar as "Show Thorn actions" does, with no
  * close of its own, so the header holds one close, the sheet's. Then the
  * alerts summary. The sheet's title shrinks first, down to a few letters,
- * then the chip's name and the summary's text.
+ * then the button's name and the summary's text.
  */
 export function DockHeaderActions(props: { summary: AlertsSummary | null; actions: DockActions; showRef: Ref<HTMLButtonElement>; summaryRef: Ref<HTMLButtonElement> }) {
   const bar = useStore(useScoped(dockSlot), (s) => s.bar);
@@ -258,11 +260,16 @@ export function DockHeaderActions(props: { summary: AlertsSummary | null; action
   return (
     <>
       {bar ? (
-        <button ref={props.showRef} type="button" aria-label={bar.show} title={bar.show} onClick={actions.showBar} style={{ ...chipStyle, flex: "0 1 auto" }}>
+        <Button ref={props.showRef} size="sm" aria-label={bar.show} title={bar.show} onClick={actions.showBar} style={headerButton}>
           <span style={ellipsis}>{bar.text}</span>
-        </button>
+        </Button>
       ) : null}
-      {summary ? <SummaryButton ref={props.summaryRef} summary={summary} onClick={() => actions.showAlerts(summary)} style={{ ...chipStyle, flex: "0 1 auto" }} /> : null}
+      {summary ? (
+        <Button ref={props.summaryRef} size="sm" aria-label={summary.name} title={summary.name} onClick={() => actions.showAlerts(summary)} style={{ ...headerButton, gap: theme.space(1.5) }}>
+          {/* No chevron here, as Show beside it has none: the header's few pixels go to the words. */}
+          <SummaryWords summary={summary} chevron={false} />
+        </Button>
+      ) : null}
     </>
   );
 }
@@ -272,8 +279,9 @@ export function DockHeaderActions(props: { summary: AlertsSummary | null; action
  * (fold.ts alertsSummary). It is the "sheet" kind, with no
  * `aria-expanded`: a tap closes the sheets and the full column shows. The
  * alerts column draws it too, as its summary row beside the docked token
- * bar, where a tap hides the bar instead
- * (features/encounter/InitiativeStrip.tsx).
+ * window, where a tap hides the window instead
+ * (features/encounter/InitiativeStrip.tsx). It ends in the chevron Show
+ * has beside it, since both bring up what they stand for.
  */
 export function SummaryButton(props: { ref?: Ref<HTMLButtonElement>; summary: AlertsSummary; onClick(): void; style: CSSProperties }) {
   const { summary } = props;
@@ -299,9 +307,20 @@ export function SummaryButton(props: { ref?: Ref<HTMLButtonElement>; summary: Al
         ...props.style,
       }}
     >
+      <SummaryWords summary={summary} chevron />
+    </button>
+  );
+}
+
+/** A summary's words, which may shrink, then its count and its chevron, which never do. */
+function SummaryWords(props: { summary: AlertsSummary; chevron: boolean }) {
+  const { summary } = props;
+  return (
+    <>
       <span style={ellipsis}>{summary.text}</span>
       {summary.more ? <span style={{ flex: "none", color: theme.color.textMuted, fontWeight: theme.weight.bold }}>{summary.more}</span> : null}
-    </button>
+      {props.chevron ? <Icon name="chevronRight" size="sm" style={{ flex: "none" }} /> : null}
+    </>
   );
 }
 
@@ -336,23 +355,8 @@ const showStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-/** An outlined chip in a sheet's header, 44 px tall like every target there. */
-const chipStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: theme.space(1),
-  minWidth: theme.touch,
-  minHeight: theme.touch,
-  padding: `0 ${theme.space(3)}px`,
-  border: `${theme.line.border}px solid ${theme.color.controlBorder}`,
-  borderRadius: theme.radius.pill,
-  background: "transparent",
-  color: theme.color.text,
-  fontFamily: theme.font.body,
-  fontSize: theme.font.body14,
-  fontWeight: theme.weight.strong,
-  cursor: "pointer",
-};
+/** A small button in a sheet's header that gives way, its words shrinking before the close does. */
+const headerButton: CSSProperties = { flex: "0 1 auto", minWidth: theme.touch };
 
 /** How long after it arrived an alert that folds away still counts as news. */
 const FRESH_MS = 1_000;

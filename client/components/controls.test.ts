@@ -66,6 +66,28 @@ describe("choices are native radios", () => {
     assert.equal(names.size, 2);
   });
 
+  test("Segmented: a description is a Help line the radiogroup points at, and without one there is none", () => {
+    const options = [
+      { value: "c", label: "Controlled" },
+      { value: "i", label: "Independent" },
+    ];
+    for (const even of [false, true]) {
+      const markup = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, even, description: "Warhorse moves on Thorn's turn.", onChange() {} }));
+      const id = /role="radiogroup"[^>]* aria-describedby="([^"]+)"/.exec(markup)?.[1];
+      assert.ok(id, "the radiogroup names its description");
+      assert.match(markup, new RegExp(`<p id="${id}"[^>]*>Warhorse moves on Thorn&#x27;s turn.</p>`));
+    }
+    // Its style places the whole choice: on the outer box with the Help line, never inside it, even or not (review P3-3).
+    for (const even of [false, true]) {
+      const markup = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, even, description: "Warhorse moves on Thorn's turn.", style: { marginTop: 7 }, onChange() {} }));
+      assert.match(markup, /^<div style="display:grid;[^"]*margin-top:7px">/, `the outer box takes the style${even ? ", even" : ""}`);
+      assert.equal(markup.match(/margin-top:7px/g)?.length, 1, `only the outer box${even ? ", even" : ""}`);
+    }
+    const plain = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, onChange() {} }));
+    assert.doesNotMatch(plain, /aria-describedby/);
+    assert.match(plain, /^<div role="radiogroup"/, "without a description the group is drawn as before");
+  });
+
   test("a glyph option is named by its title", () => {
     const markup = html(createElement(Segmented<number>, { label: "Size", value: 1, options: [{ value: 1, label: "+", title: "Bigger" }], onChange() {} }));
     assert.match(radios(markup)[0]!, /aria-label="Bigger"/);
@@ -114,6 +136,22 @@ describe("disabled controls swap colors and never fade", () => {
       assert.match(markup, new RegExp(theme.color.textDisabled), `${name} uses the disabled color`);
     });
   }
+});
+
+describe("Checkbox", () => {
+  test("a tick held by aria-disabled keeps its place in the focus order, with the disabled look and its reason as the description", () => {
+    const markup = html(createElement(Checkbox, { label: "A creature steps onto it", help: "A trap on squares goes off at least one way.", checked: true, "aria-disabled": true, onChange() {} }));
+    const input = /<input[^>]*>/.exec(markup)?.[0] ?? "";
+    assert.match(input, /aria-disabled="true"/);
+    assert.doesNotMatch(input, /\sdisabled=""/, "a native disabled drops it from the focus order");
+    assert.match(input, /aria-describedby="[^"]+"/);
+    assert.match(markup, new RegExp(theme.color.textDisabled), "it looks unavailable");
+  });
+
+  test("a plain checkbox has no aria-disabled", () => {
+    const input = /<input[^>]*>/.exec(html(createElement(Checkbox, { label: "Secret", checked: false, onChange() {} })))?.[0] ?? "";
+    assert.doesNotMatch(input, /aria-disabled/);
+  });
 });
 
 describe("Switch", () => {

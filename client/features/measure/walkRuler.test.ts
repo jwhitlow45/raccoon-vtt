@@ -7,7 +7,7 @@ import { P1, reveal, template, token } from "#shared/testutil.ts";
 import { line, world } from "../movement/testing.ts";
 import { keptDrawing, keptStops, tokenStop, type RulerStop } from "./ruler.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
-import { measureWalk, saveWalk, savedWalk, walkText } from "./walkRuler.ts";
+import { heldKey, measureWalk, nextHeld, saveWalk, savedWalk, walkShown, walkText, type HeldWalk, type WalkMeasure } from "./walkRuler.ts";
 
 /** The ruler's walking mode (docs/design-v1-movement.md 3.3). */
 
@@ -297,5 +297,90 @@ describe("the walking ruler", () => {
     };
     assert.equal(savedWalk(broken), false);
     assert.doesNotThrow(() => saveWalk(true, broken));
+  });
+});
+
+describe("a walking ruler while its walk is searched", () => {
+  const leg = (searching: boolean) => ({ from: { x: 0, y: 0 }, to: { x: 4, y: 0 }, corners: [], ft: searching ? 0 : 20, none: false, ...(searching ? { searching: true as const } : {}) });
+  const done: WalkMeasure = { legs: [leg(false)], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: false };
+  const searching: WalkMeasure = { legs: [leg(false), leg(true)], totalFt: 20, extra: null, size: { w: 1, h: 1 }, searching: true };
+
+  test("a finished walk reads itself", () => {
+    assert.deepEqual(walkShown(done, null, false), { reading: done, finding: false });
+  });
+
+  test("a search that has just started keeps the last walk's reading, and nothing waits grey yet", () => {
+    assert.deepEqual(walkShown(searching, done, false), { reading: done, finding: false });
+  });
+
+  test("only past the shared loading delay does it say it is finding the way", () => {
+    assert.deepEqual(walkShown(searching, done, true), { reading: null, finding: true });
+  });
+
+  test("a first search, with no walk to keep, reads nothing until then", () => {
+    assert.deepEqual(walkShown(searching, null, false), { reading: null, finding: false });
+  });
+
+  test("a random run of frames never leaves the ruler without a reading once it has had one, until the delay passes", () => {
+    let seed = 7;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    let held: WalkMeasure | null = null;
+    let since = 0;
+    for (let frame = 0; frame < 2000; frame++) {
+      const m = random() < 0.6 ? searching : { ...done, totalFt: 5 * Math.floor(random() * 20) };
+      since = m.searching ? since + 16 : 0;
+      const slow = since >= 200;
+      const shown = walkShown(m, held, slow);
+      if (!m.searching) held = m;
+      // Invariants: a reading or the wait shows whenever a walk was ever finished, and the wait shows only past the delay.
+      if (held) assert.ok(shown.reading !== null || shown.finding, `frame ${frame} shows nothing`);
+      assert.equal(shown.finding, m.searching && slow, `frame ${frame} waits at the wrong time`);
+      if (shown.reading) assert.equal(shown.reading.searching, false, "a reading is always a finished walk");
+    }
+  });
+});
+
+describe("the walk a ruler holds (review LP2L2-ASTRA-1)", () => {
+  const leg = { from: { x: 0, y: 0 }, to: { x: 4, y: 0 }, corners: [], ft: 20, none: false };
+  const done: WalkMeasure = { legs: [leg], totalFt: 120, extra: null, size: { w: 1, h: 1 }, searching: false };
+  const searching: WalkMeasure = { legs: [{ ...leg, ft: 0, searching: true }], totalFt: 0, extra: null, size: { w: 1, h: 1 }, searching: true };
+  /** The reading after each render of `steps`, each what the render measured and for which ruler. */
+  function run(steps: [WalkMeasure | null, string][]): (WalkMeasure | null)[] {
+    let held: HeldWalk = null;
+    return steps.map(([m, ruler]) => {
+      held = nextHeld(held, m, ruler);
+      return m ? walkShown(m, held?.walk ?? null, false).reading : null;
+    });
+  }
+
+  test("a finished walk, then a search of the same ruler, keeps the walk", () => {
+    assert.deepEqual(run([[done, "a"], [searching, "a"]]), [done, done]);
+  });
+
+  test("a finished walk, then nothing measured (Clear, Keep, Straight), then a new search, reads nothing", () => {
+    assert.deepEqual(run([[done, "a"], [null, "a"], [searching, "a"]]), [done, null, null]);
+    assert.deepEqual(run([[done, "a"], [null, ""], [searching, "b"]]), [done, null, null]);
+  });
+
+  test("a new ruler's first search never reads the last ruler's walk", () => {
+    assert.deepEqual(run([[done, "a"], [searching, "b"]]), [done, null]);
+  });
+
+  test("a ruler started afresh under the same id, from another start, reads nothing while it searches (review LP2L2-OPUS-9)", () => {
+    const from = (x: number) => [{ x, y: 2.5 }, { x: x + 4, y: 2.5 }];
+    const before = heldKey("r1", from(1.5));
+    const restarted = heldKey("r1", from(7.5));
+    assert.notEqual(before, restarted);
+    assert.equal(heldKey("r1", [{ x: 1.5, y: 2.5 }, { x: 9.5, y: 2.5 }]), before, "a stop dragged further keeps the ruler");
+    assert.deepEqual(run([[done, before], [searching, restarted]]), [done, null]);
+  });
+
+  test("a ruler that starts on a token is that token's wherever it moves, so a kept ruler on a walking creature keeps its walk (review LP2L2-OPUS-11)", () => {
+    const on = (x: number) => [{ x, y: 2.5, tokenId: "thorn" }, { x: 9.5, y: 2.5 }];
+    const before = heldKey("k1", on(1.5));
+    const moved = heldKey("k1", on(4.5));
+    assert.equal(moved, before, "the token moved, the ruler is the same");
+    assert.notEqual(heldKey("k1", [{ x: 1.5, y: 2.5, tokenId: "goblin" }]), before, "another token is another start");
+    assert.deepEqual(run([[done, before], [searching, moved]]), [done, done]);
   });
 });

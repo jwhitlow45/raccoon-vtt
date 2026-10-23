@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
+import { boardViewsOf } from "../../../canvas/boardView.ts";
 import { measureLabel, measurePill } from "../../../canvas/measureText.ts";
 import { placedTextBoxes } from "../../../canvas/textBoxes.ts";
 import type { TokenText } from "../../../canvas/useBoardText.ts";
@@ -139,6 +140,25 @@ describe("height mode's board text", () => {
       SCALES.map((s) => heightTextSizes(s, 1.3).pill.fontPx),
       [14.5, 15.5, 21],
     );
+  });
+
+  test("a number beside the options line, over the bars' band at the screen's foot, is still drawn: the layer culls by the whole canvas (review P3-2)", () => {
+    const heights = new Map<string, number>();
+    block(heights, 1, 8, 3, 3, 10);
+    const cellPx = 40;
+    const pills = placeHeightPills(ordered(heights, { w: 10, h: 12 }), [], cellPx, heightTextSizes(cellPx, 1).pill, measure);
+    assert.equal(pills.length, 1);
+    // A 400 x 440 canvas: the platform's number stands in the foot's last 100 px, which the toolbar and the options' line reserve.
+    const views = boardViewsOf({ x: 0, y: 0, scale: cellPx }, { width: 400, height: 440 }, { top: 52, right: 0, bottom: 100, left: 0 });
+    const onCanvas = recorder();
+    drawPills(onCanvas.g, pills, cellPx, views.canvas);
+    assert.deepEqual(
+      onCanvas.texts.map((t) => t.text),
+      ["↑10 ft"],
+    );
+    const clearOnly = recorder();
+    drawPills(clearOnly.g, pills, cellPx, views.clear);
+    assert.equal(clearOnly.texts.length, 0, "the clear part alone would cull it");
   });
 
   test("only the pills on screen are drawn", () => {

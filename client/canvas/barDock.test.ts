@@ -4,6 +4,8 @@ import { RoomScope } from "../state/scope.ts";
 import {
   BAR_WIDTH,
   laneChoice,
+  paneLane,
+  paneLaneBox,
   SUMMARY_ROW,
   barCover,
   barMode,
@@ -717,6 +719,33 @@ describe("the right lane", () => {
   test("notices center left of the lane from 320 px, and span below that", () => {
     assert.deepEqual(noticePlace({ left: 8, top: 60, width: 312 + 320, height: 400 }), { left: 8, width: 320 });
     assert.equal(noticePlace({ left: 8, top: 60, width: 312 + 319, height: 400 }), null);
+  });
+});
+
+describe("a map pane drawn as a card and the lane (docs/design-v1-look-pass-2.md 2.8)", () => {
+  const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
+  const column = { top: 60, content: 300, first: 160 };
+
+  test("beside where the room left of the lane holds the pane and both its margins, else the summary row", () => {
+    assert.equal(paneLane({ laneLeft: 296 + 16, roomLeft: 0, width: 296 }), "beside");
+    assert.equal(paneLane({ laneLeft: 296 + 15, roomLeft: 0, width: 296 }), "summary");
+    assert.equal(paneLane({ laneLeft: 296 + 16 + 40, roomLeft: 40, width: 296 }), "beside", "from the room's own left edge");
+  });
+
+  test("the lane is the token window's, and its top where the column's row stands", () => {
+    assert.deepEqual(paneLaneBox({ viewport: { width: 1440, height: 900 }, chrome, column, folded: false }), { left: 1440 - EDGE - LANE_WIDTH, top: 60 });
+    assert.deepEqual(paneLaneBox({ viewport: { width: 1440, height: 900 }, chrome, column: { ...column, row: 12 }, folded: false }), { left: 1440 - EDGE - LANE_WIDTH, top: 12 }, "a row risen over the bars");
+    // A phone's sheet on the right in landscape: the column steps left of it, and the lane with it.
+    assert.deepEqual(paneLaneBox({ viewport: { width: 844, height: 390 }, chrome: { ...chrome, sheet: 340 }, column, folded: false }), { left: 844 - 340 - EDGE - LANE_WIDTH, top: 60 });
+    // The right safe area takes its share.
+    assert.equal(paneLaneBox({ viewport: { width: 844, height: 390 }, chrome: { ...chrome, safe: { ...NONE, right: 47 } }, column, folded: false })?.left, 844 - 47 - EDGE - LANE_WIDTH);
+  });
+
+  test("no lane with no card, before the chrome is measured, or with the column folded under a sheet", () => {
+    const viewport = { width: 1440, height: 900 };
+    assert.equal(paneLaneBox({ viewport, chrome, column: null, folded: false }), null);
+    assert.equal(paneLaneBox({ viewport, chrome: null, column, folded: false }), null);
+    assert.equal(paneLaneBox({ viewport, chrome, column, folded: true }), null);
   });
 });
 

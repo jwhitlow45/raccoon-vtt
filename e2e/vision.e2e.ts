@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { BuildChunk, Drawing, EdgeFeature, RoomState, SightTile, Token } from "#shared/model.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import { decodeTile, getBit, isCellFullyFogged, TILE_CELLS } from "#shared/rules/fog.ts";
@@ -224,9 +224,64 @@ async function thornAt(at: { x: number; y: number; elevation?: number }): Promis
   }
 }
 
-/** The stopped walk's note on the player's screen. */
+/** The stopped walk's note on the player's screen: the card, whose sentence alone is its status. */
 function stopNote(text: string) {
-  return player.getByRole("status").filter({ hasText: text });
+  return player.locator("[data-stop-note]").filter({ has: player.getByRole("status").filter({ hasText: text }) });
+}
+
+/**
+ * Brings up the stopped walk's note at `size` at 130%, by step 9's walk into
+ * the platform's wall again, and checks it keeps between the bars: Close,
+ * Teleport here and the note's top and foot each take a tap, as a finger's
+ * would. `more` checks the note further. Then 390 x 844 at 100% again.
+ */
+async function stopNoteAt(size: { width: number; height: number }, shot: string, more?: (note: Locator) => Promise<void>): Promise<void> {
+  await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+  await player.setViewportSize(size);
+  await player.reload();
+  await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  await player.locator(".konvajs-content").first().waitFor();
+  // Back west of the platform's wall, then the walk of step 9 again.
+  await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
+  await thornAt({ x: 7, y: 14, elevation: 10 });
+  await player.waitForTimeout(500);
+  await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
+  await thornAt({ x: 8, y: 14, elevation: 10 });
+  const note = player.locator("[data-stop-note]");
+  await note.getByRole("button", { name: "Teleport here" }).waitFor();
+  await player.waitForTimeout(300);
+  /** Whether a tap at a point lands inside `target`. */
+  const lands = (target: string, x: number, y: number) =>
+    player.evaluate(
+      ([sel, px, py]) => {
+        const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
+        return doc.elementFromPoint(px, py)?.closest(sel) != null;
+      },
+      [target, x, y] as const,
+    );
+  const inReach = async (when: string) => {
+    const box = (await note.boundingBox())!;
+    for (const name of ["Close", "Teleport here"]) {
+      const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
+      assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle${when}`);
+    }
+    // Its top and its foot are the note's own, not under the top bar or the toolbar.
+    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), `the note's top is in reach${when}`);
+    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), `the note's foot is in reach, not under the toolbar${when}`);
+  };
+  await inReach("");
+  await shots.take(player, shot);
+  if (more) {
+    await more(note);
+    await inReach(", after the further checks");
+  }
+  await note.getByRole("button", { name: "Close" }).click();
+  await note.waitFor({ state: "detached" });
+  await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  await player.setViewportSize({ width: 390, height: 844 });
+  await player.reload();
+  await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  await player.locator(".konvajs-content").first().waitFor();
 }
 
 async function closeNote(text: string): Promise<void> {
@@ -647,6 +702,38 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await shots.take(dm, "vision-dm-explored-outline");
   });
 
+  test("lp2-2e. at 844 x 390 at 130% the stopped walk's note keeps between the bars, its Close and Teleport here in reach", async () => {
+    // A phone held sideways at the largest interface size, where the note with its help is taller than the map between the bars.
+    await stopNoteAt({ width: 844, height: 390 }, "lp2-2e-stop-note-844x390-130");
+  });
+
+  test("lp2-2f. at 480 x 320 at 130%, too short for the note's usual rows, its sentence and help scroll as its body, and the capped search's sentence too", async () => {
+    await stopNoteAt({ width: 480, height: 320 }, "lp2-2f-stop-note-480x320-130", async (note) => {
+      const body = note.locator("[data-stop-note-body]");
+      await body.waitFor();
+      /** The help's height in view inside the body once the body is scrolled to its end, and whether the body scrolls at all. */
+      const helpInView = () =>
+        body.evaluate((el) => {
+          type Box = { top: number; bottom: number };
+          const b = el as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number; getBoundingClientRect(): Box; querySelector(s: string): { getBoundingClientRect(): Box } | null };
+          const scrolls = b.scrollHeight > b.clientHeight + 1;
+          b.scrollTop = b.scrollHeight;
+          const outer = b.getBoundingClientRect();
+          const help = b.querySelector("p")!.getBoundingClientRect();
+          return { scrolls, shown: Math.min(outer.bottom, help.bottom) - Math.max(outer.top, help.top) };
+        });
+      const ordinary = await helpInView();
+      assert.ok(ordinary.scrolls, "the body scrolls");
+      assert.ok(ordinary.shown > 0, `the help shows ${ordinary.shown} px once scrolled to`);
+      // The capped search's sentence, which a scene this size cannot stage, put in the ordinary one's place: the body takes it, and Close and Teleport here stay where they were.
+      await note.getByRole("status").evaluate((el) => {
+        (el as unknown as { textContent: string }).textContent = "Too far to work out a way around. Stopped at a wall. There is no way around it that you have seen.";
+      });
+      const capped = await helpInView();
+      assert.ok(capped.scrolls && capped.shown > 0, `with the longer sentence the help shows ${capped.shown} px once scrolled to`);
+    });
+  });
+
   test("mv-1. on Thorn's turn the player's drag walks round a wall's end, and the trail bends there", async () => {
     // Out of the party's way first: the goblin goes where nobody sees it, so no frame of it reaches the player again.
     await ops.send({ t: "token.update", tokenId: run.goblinId, patch: { visibility: "dm" } });
@@ -700,6 +787,93 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.equal(marker, "Moved 15 ft, used 20 ft\n10 ft left");
     await shots.take(player, "vision-player-moved-used");
     await ops.send({ t: "encounter.end" });
+  });
+
+  test("lp2-2b. a walking ruler keeps its total while its walk is searched, and the search shows on its line and ends", async () => {
+    // The DM's own ruler, which stays on the DM's screen, so no frame of it reaches the player.
+    await dm.getByRole("button", { name: "Ruler", exact: true }).click();
+    await pickOption(dm, "Ruler", "Measure", "Walking");
+    const line = dm.getByRole("toolbar", { name: "Ruler options" }).locator("[data-options-line]");
+    // What each frame shows: the line marked while a walk is searched, the board's total, and its wait.
+    await dm.evaluate(() => {
+      type Node = { text(): string; isVisible(): boolean };
+      const g = globalThis as unknown as {
+        Konva: { stages: { find(selector: string): Node[] }[] };
+        document: { querySelector(s: string): { hasAttribute(name: string): boolean } | null };
+        requestAnimationFrame(cb: () => void): number;
+        lp2Frames: { finding: boolean; walk: boolean; waiting: boolean }[];
+        lp2Stop: boolean;
+      };
+      g.lp2Frames = [];
+      g.lp2Stop = false;
+      const read = () => {
+        const texts = g.Konva.stages[0]!.find("Text")
+          .filter((t) => t.isVisible())
+          .map((t) => t.text());
+        g.lp2Frames.push({
+          finding: g.document.querySelector("[data-options-line]")?.hasAttribute("data-finding") === true,
+          walk: texts.some((t) => t.startsWith("Walking ")),
+          waiting: texts.includes("Finding the way…"),
+        });
+        if (!g.lp2Stop) g.requestAnimationFrame(read);
+      };
+      g.requestAnimationFrame(read);
+    });
+    const at = (x: number, y: number) => pagePoint(dm, BOUNDS, { x: x + 0.5, y: y + 0.5 });
+    const start = await at(13, 3);
+    await dm.mouse.move(start.x, start.y);
+    // For the drag only, the page's clock runs 20 times fast, so a frame's share of route work (features/movement/routeWork.ts) runs out
+    // after a sliver of real work and walks tend to be searched over several frames. That only makes a search likely: the line's
+    // data-finding, asserted below, is what shows one happened.
+    await dm.evaluate(() => {
+      const perf = (globalThis as unknown as { performance: { now(): number } }).performance;
+      const real = perf.now.bind(perf);
+      const t0 = real();
+      perf.now = () => t0 + (real() - t0) * 20;
+    });
+    try {
+      await dm.mouse.down();
+      // Round the room and through the wall's door, up onto the platform and back, so each stop's walk is searched anew.
+      for (const [x, y] of [
+        [13, 7],
+        [6, 8],
+        [2, 13],
+        [5, 15],
+        [10, 15],
+        [12, 17],
+        [4, 12],
+      ] as const) {
+        const p = await at(x, y);
+        await dm.mouse.move(p.x, p.y, { steps: 6 });
+        await dm.waitForTimeout(120);
+      }
+      await dm.mouse.up();
+    } finally {
+      // The page's own clock again: the instance's override goes, and the prototype's shows through.
+      await dm.evaluate(() => delete (globalThis as unknown as { performance: { now?: unknown } }).performance.now);
+    }
+    // The last walk is found, and the line no longer says it is searching.
+    await waitFor("the walk found", async () => ((await line.getAttribute("data-finding")) === null ? true : null));
+    await dm.waitForTimeout(200);
+    const frames = await dm.evaluate(() => {
+      const g = globalThis as unknown as { lp2Frames: { finding: boolean; walk: boolean; waiting: boolean }[]; lp2Stop: boolean };
+      g.lp2Stop = true;
+      return g.lp2Frames;
+    });
+    await shots.take(dm, "lp2-2b-walking-ruler");
+    assert.ok(
+      frames.some((f) => f.finding),
+      "no frame showed a walk being searched, so nothing here was tested",
+    );
+    assert.equal(frames.at(-1)?.finding, false, "the search ended");
+    const first = frames.findIndex((f) => f.walk);
+    assert.ok(first >= 0, "the walking ruler never read a total");
+    const searchedAfter = frames.slice(first).filter((f) => f.finding).length;
+    assert.ok(searchedAfter > 0, "no walk was searched once the ruler had a total");
+    const blank = frames.slice(first).filter((f) => !f.walk && !f.waiting).length;
+    assert.equal(blank, 0, `the total went blank in ${blank} of ${frames.length - first} frames, ${searchedAfter} of them searching`);
+    await pickOption(dm, "Ruler", "Measure", "Straight");
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
   });
 
   test("11. no frame the player received held anything out of the party's sight, and every ruler stood on its measurer's ground", () => {

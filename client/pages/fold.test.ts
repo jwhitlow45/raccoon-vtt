@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_CHROME } from "../canvas/barDock.ts";
-import { alertsSummary, dockFits, foldsUnderSheet, paneDockFits, sideSheetRoom, type ColumnAlert } from "./fold.ts";
+import { alertsSummary, dockFits, drawsPaneRow, foldsUnderSheet, paneDockFits, sideSheetRoom, summaryFor, type ColumnAlert } from "./fold.ts";
 
 describe("foldsUnderSheet", () => {
   test("a phone in portrait folds while a sheet is open", () => {
@@ -107,13 +107,13 @@ describe("alertsSummary", () => {
     assert.equal(waiting?.name, "Roll asked: the DM asks for a Wisdom check and 1 more roll. Close the sheet to answer.", "a roll to answer still says answer");
   });
 
-  test("for the column's summary row beside the docked bar, each advice says to hide the bar", () => {
+  test("for the column's summary row beside the docked bar, each advice says to hide the window", () => {
     const answer = alertsSummary({ text: "Roll asked", name: "the DM asks for a Wisdom check", waiting: true, requests: 1 }, [], "bar");
-    assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Hide the bar to answer.");
+    assert.equal(answer?.name, "Roll asked: the DM asks for a Wisdom check. Hide the window to answer.");
     const them = alertsSummary(null, [prompt("p1", "Thorn"), timeUp], "bar");
-    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Hide the bar to see them.");
+    assert.equal(them?.name, "Concentration save +1: Thorn makes a Concentration save, time is up. Hide the window to see them.");
     const it = alertsSummary(null, [notice("n1", "Bless ended on Thorn.")], "bar");
-    assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Hide the bar to see it.");
+    assert.equal(it?.name, "Bless ended on Thorn: Bless ended on Thorn. Hide the window to see it.");
     // The sheet's three wordings stay as they were.
     assert.match(alertsSummary({ text: "Roll asked", name: "a roll", waiting: true, requests: 1 }, [])?.name ?? "", /Close the sheet to answer\.$/);
     assert.match(alertsSummary(null, [prompt("p1", "Thorn"), timeUp])?.name ?? "", /Close the sheet to see them\.$/);
@@ -192,5 +192,63 @@ describe("paneDockFits", () => {
     // 52 + 8 + 48 + 120 + 8 + 120
     assert.equal(paneDockFits({ viewport: { width: 390, height: 356 }, insets }), true);
     assert.equal(paneDockFits({ viewport: { width: 390, height: 355 }, insets }), false);
+  });
+});
+
+describe("summaryFor (docs/design-v1-look-pass-2.md 2.8)", () => {
+  test("no row with nothing that wants it", () => {
+    assert.equal(summaryFor({ paneLane: null, barLane: null }), null);
+    assert.equal(summaryFor({ paneLane: "beside", barLane: "stacked" }), null);
+    assert.equal(summaryFor({ paneLane: null, barLane: "beside" }), null);
+  });
+
+  test("the token window's row, and a pane beside the lane leaves it so", () => {
+    assert.equal(summaryFor({ paneLane: null, barLane: "summary" }), "bar");
+    assert.equal(summaryFor({ paneLane: "beside", barLane: "summary" }), "bar");
+  });
+
+  test("a pane with no room beside the lane, whose words win when the window wants the row too", () => {
+    assert.equal(summaryFor({ paneLane: "summary", barLane: null }), "pane");
+    assert.equal(summaryFor({ paneLane: "summary", barLane: "summary" }), "pane");
+  });
+});
+
+describe("a rolls' line whose words name only its lead (LP16-PT-3)", () => {
+  const desk = { text: "Dart plate went off", name: "Dart plate went off, 2 asks for saves", waiting: true, requests: 3, unnamed: 2 };
+
+  test("counts what its words leave out in +N, as for the other kinds", () => {
+    const s = alertsSummary(desk, []);
+    assert.equal(s?.text, "Dart plate went off");
+    assert.equal(s?.more, "+2");
+    assert.equal(s?.name, "Dart plate went off +2: Dart plate went off, 2 asks for saves. Close the sheet to answer.");
+  });
+
+  test("and adds them to the column's own alerts, wherever the line stands", () => {
+    assert.equal(alertsSummary(desk, [prompt("p1", "Thorn")])?.more, "+3");
+    const notWaiting = alertsSummary({ ...desk, waiting: false }, [prompt("p1", "Thorn")]);
+    assert.equal(notWaiting?.text, "Concentration save");
+    assert.equal(notWaiting?.more, "+3");
+  });
+
+  test("a line that names everything it stands for adds nothing", () => {
+    assert.equal(alertsSummary({ ...desk, text: "Rolls 1/3", unnamed: 0 }, [])?.more, "");
+    assert.equal(alertsSummary({ text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 3 }, [])?.more, "");
+  });
+});
+
+describe("drawsPaneRow, the flag Room reads (docs/design-v1-look-pass-2.md 2.8)", () => {
+  const base = { paneLane: "summary" as const, barLane: null, folded: false, asked: false, waiting: true };
+
+  test("the pane's row while a pane card has no room beside the lane and something waits", () => {
+    assert.equal(drawsPaneRow(base), true);
+    assert.equal(drawsPaneRow({ ...base, barLane: "summary" }), true, "over the window's");
+  });
+
+  test("none while the DM asked for the cards, folded under a sheet, with nothing waiting, or with the pane beside", () => {
+    assert.equal(drawsPaneRow({ ...base, asked: true }), false);
+    assert.equal(drawsPaneRow({ ...base, folded: true }), false);
+    assert.equal(drawsPaneRow({ ...base, waiting: false }), false);
+    assert.equal(drawsPaneRow({ ...base, paneLane: "beside" }), false);
+    assert.equal(drawsPaneRow({ ...base, paneLane: null, barLane: "summary" }), false, "the window's row is not the pane's");
   });
 });

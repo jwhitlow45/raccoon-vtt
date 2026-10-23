@@ -54,6 +54,51 @@ import {
  *   a popover's field, are checked by hand on an iPhone (14).
  */
 
+/** A box the board draws, in page px: a pill (a Konva Label) or one line of a token's label. */
+type BoardBox = { text: string; left: number; top: number; right: number; bottom: number; height: number };
+
+/** The board's pills and the lines of token labels (Konva Texts outside a Label), each with its box on the page. */
+function boardBoxes(page: Page): Promise<{ pills: BoardBox[]; lines: BoardBox[] }> {
+  return page.evaluate(() => {
+    type Node = {
+      getClassName(): string;
+      getParent(): Node | null;
+      isVisible(): boolean;
+      getClientRect(): { x: number; y: number; width: number; height: number };
+      text?(): string;
+      getText?(): { text(): string } | undefined;
+    };
+    const g = globalThis as unknown as { Konva: { stages: { find(selector: string): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } }[] } };
+    const stage = g.Konva.stages[0]!;
+    const at = stage.container().getBoundingClientRect();
+    const box = (n: Node, text: string) => {
+      const r = n.getClientRect();
+      return { text, left: at.left + r.x, top: at.top + r.y, right: at.left + r.x + r.width, bottom: at.top + r.y + r.height, height: r.height };
+    };
+    return {
+      pills: stage
+        .find("Label")
+        .filter((l) => l.isVisible())
+        .map((l) => box(l, l.getText?.()?.text() ?? "")),
+      lines: stage
+        .find("Text")
+        .filter((t) => t.isVisible() && t.getParent()?.getClassName() !== "Label")
+        .map((t) => box(t, t.text?.() ?? "")),
+    };
+  });
+}
+
+function overlap(a: BoardBox, b: BoardBox): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/** The pills drawn now that were not in `before`: what a gesture added, such as a ruler's total beside the kept rulers' own. */
+async function newPills(page: Page, before: readonly BoardBox[]): Promise<BoardBox[]> {
+  const key = (b: BoardBox) => `${b.text}@${Math.round(b.left)},${Math.round(b.top)}`;
+  const had = new Set(before.map(key));
+  return (await boardBoxes(page)).pills.filter((p) => !had.has(key(p)));
+}
+
 describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
   before(openBrowsers);
   after(closeAll);
@@ -777,6 +822,127 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.equal(await measure.getAttribute("aria-label"), shows === "Line" ? "Measure: Line (Straight)" : "Measure: Walking");
     await shots.take(dm, "lp8-ruler-360-measure");
     await key(dm, "v");
+  });
+
+  test("lp2-2a. at 390 x 844 the ruler's total and a drag's label grow 1.3 times at 130%, and slide under the top bar", async () => {
+    const heights: Record<string, number> = {};
+    // A straight ruler, whatever this browser last measured with, so its total reads "N ft".
+    await player.evaluate(() => localStorage.setItem("rvtt.ruler.measure", "straight"));
+    for (const ui of [1, 1.3]) {
+      await reloadAt(player, ui);
+      await view(player, playerCdp, { width: 390, height: 844, insets: {} });
+      const bar = (await player.locator("header").first().boundingBox())!;
+      const barFoot = bar.y + bar.height;
+      // Closer in, over Thorn, so the map runs on under the top bar.
+      await key(player, "v");
+      const thorn = await pagePoint(player, { w: 0, h: 0 }, { x: 8.5, y: 8.5 });
+      await player.mouse.move(thorn.x, thorn.y);
+      for (let i = 0; i < 3; i++) {
+        await player.mouse.wheel(0, -200);
+        await player.waitForTimeout(100);
+      }
+      const pct = Math.round(ui * 100);
+
+      await selectTool(player, "r");
+      // The hint names no diagonal rule, which follows a reading only (D29).
+      const line = options(player).locator("[data-options-line]");
+      assert.equal((await line.innerText()).trim(), "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.");
+      if (ui === 1) {
+        // Cut short on the phone, the line opens from a tap anywhere 44 px tall around it, though it stands shorter.
+        const lineButton = line.getByRole("button");
+        await lineButton.waitFor();
+        const lineBox = (await line.boundingBox())!;
+        const reach = (await line.locator("[data-touch-reach]").boundingBox())!;
+        assert.ok(lineBox.height < 44, `the line stands ${lineBox.height} px tall`);
+        assert.ok(reach.height >= 44 - 0.5, `the line takes taps ${reach.height} px tall`);
+        await player.mouse.click(lineBox.x + lineBox.width / 2, lineBox.y - 3);
+        assert.equal(await lineButton.getAttribute("aria-expanded"), "true", "a tap just over the cut line opens it");
+        await lineButton.click();
+        assert.equal(await lineButton.getAttribute("aria-expanded"), "false");
+      }
+      // A ruler measured up under the top bar: its total, 18 px down and right of its end, would stand under the bar.
+      const start = await pagePoint(player, { w: 0, h: 0 }, { x: 11.5, y: 8.5 });
+      const beforeRuler = (await boardBoxes(player)).pills;
+      await player.mouse.move(start.x, start.y);
+      await player.mouse.down();
+      await player.mouse.move(start.x, bar.y + bar.height / 2, { steps: 10 });
+      await player.mouse.up();
+      const reading = ((await options(player).locator("[data-options-line]").innerText()).split(" · ")[0] ?? "").trim();
+      assert.match(reading, /^\d+ ft$/, `the line reads the ruler (${reading})`);
+      const total = await waitFor("the ruler's total", async () => (await newPills(player, beforeRuler)).find((p) => p.text === reading));
+      assert.ok(total.top >= barFoot - 0.5, `the total's top ${total.top} stands under the top bar's foot ${barFoot} at ${pct}%`);
+      heights[`total${pct}`] = total.height;
+      await shots.take(player, `lp2-2a-ruler-390-${pct}`);
+      await key(player, "v");
+
+      // Thorn dragged up under the top bar: the drag's label, 4 px down and right of the token, would stand under it too.
+      const from = await pagePoint(player, { w: 0, h: 0 }, { x: 8.5, y: 8.5 });
+      const beforeDrag = (await boardBoxes(player)).pills;
+      await player.mouse.move(from.x, from.y);
+      await player.mouse.down();
+      await player.mouse.move(from.x, bar.y + 4, { steps: 12 });
+      const label = await waitFor("the drag's label", async () => (await newPills(player, beforeDrag)).find((p) => /^\d+ ft/.test(p.text)));
+      assert.ok(label.top >= barFoot - 0.5, `the drag's label's top ${label.top} stands under the top bar's foot ${barFoot} at ${pct}%`);
+      heights[`drag${pct}`] = label.height;
+      await shots.take(player, `lp2-2a-drag-390-${pct}`);
+      await player.mouse.up();
+      await ops.send({ t: "token.move", tokenId: run.thorn.id, x: 8, y: 8, elevation: 0 });
+      await waitFor("Thorn back at (8, 8)", () => {
+        const t = playerSocket.state?.tokens[run.thorn.id];
+        return t?.x === 8 && t.y === 8 ? true : null;
+      });
+    }
+    for (const what of ["total", "drag"]) {
+      const ratio = heights[`${what}130`]! / heights[`${what}100`]!;
+      assert.ok(ratio > 1.25 && ratio < 1.35, `the ${what === "total" ? "ruler's total" : "drag's label"} at 130% is ${ratio.toFixed(3)} times its 100% height`);
+    }
+    await reloadAt(player, 1);
+  });
+
+  test("lp2-2d. a kept ruler's remove is a row at the left with the eraser before its words", async () => {
+    await reloadAt(player, 1);
+    await view(player, playerCdp, DESK);
+    await selectTool(player, "r");
+    await options(player).getByRole("button", { name: /^Kept rulers/ }).click();
+    const kept = player.getByRole("dialog", { name: "Kept rulers" });
+    await kept.waitFor();
+    const removes = kept.getByRole("button", { name: /^Remove the kept ruler: / });
+    const group = (await kept.getByRole("group", { name: "Kept rulers" }).boundingBox())!;
+    assert.ok((await removes.count()) > 0);
+    for (const row of [...(await removes.all()), kept.getByRole("button", { name: "Remove all" })]) {
+      const box = (await row.boundingBox())!;
+      const icon = (await row.locator("svg").first().boundingBox())!;
+      assert.ok(Math.abs(box.width - group.width) < 1, `the row spans the popover: ${box.width} of ${group.width}`);
+      assert.ok(icon.x - box.x < 20, `the eraser stands at the row's left, ${icon.x - box.x} px in`);
+    }
+    await shots.take(player, "lp2-2d-kept-rulers");
+    await closePopover(player);
+    await key(player, "v");
+  });
+
+  test("lp2-2c. a creature's label keeps off the name of a trap beside it", async () => {
+    await reloadAt(dm, 1);
+    await view(dm, dmCdp, DESK);
+    await key(dm, "v");
+    // Off the map, so no hovered token shows its plate.
+    await dm.mouse.move(1, 1);
+    const trapId = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    // Goblin 3 stands at (16, 9). The trap's top edge is two rows under it, so its name stands where the goblin's label would hang ("Pois30/30arts").
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Poison darts", zone: { cells: [{ x: 15, y: 11, w: 3, h: 2 }] }, rig } });
+    const seen = await waitFor("the trap's name and Goblin 3's label", async () => {
+      const b = await boardBoxes(dm);
+      const name = b.pills.find((p) => p.text === "Poison darts");
+      const goblin = b.lines.filter((l) => l.text === "Goblin 3");
+      return name && goblin.length > 0 ? { name, goblin } : null;
+    });
+    await dm.waitForTimeout(300);
+    const after = await boardBoxes(dm);
+    const name = after.pills.find((p) => p.text === "Poison darts") ?? seen.name;
+    const lines = after.lines.filter((l) => l.text === "Goblin 3" || /^\d+\/\d+$/.test(l.text));
+    for (const line of lines) assert.ok(!overlap(line, name), `"${line.text}" is drawn over the trap's name`);
+    await shots.take(dm, "lp2-2c-trap-name");
+    await ops.send({ t: "trap.delete", trapId });
   });
 
   test("9. nothing went wrong in the browsers", assertNoConsoleErrors);

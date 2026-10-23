@@ -1,9 +1,9 @@
-import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
-import { barDockSlot, freeArea, WINDOW_FOLD_BELOW, type Chrome } from "../canvas/barDock.ts";
+import { barDockSlot, freeArea, paneLaneBox, WINDOW_FOLD_BELOW, type Chrome, type Lane, type PaneLane, type PaneLaneBox } from "../canvas/barDock.ts";
 import { sheetRoom, SHEET_MIN_HEIGHT, type SheetSpace } from "../components/sheetCap.ts";
-import { PANE_MIN_HEIGHT, sheetPaneRoom } from "../features/builder/labelEdit.ts";
+import { PANE_MIN_HEIGHT, sheetPaneRoom, type PanePlacement } from "../features/builder/labelEdit.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
 import type { Insets, Size } from "../lib/camera.ts";
 import { revealAndFocus } from "../lib/reveal.ts";
@@ -108,6 +108,88 @@ export function useFoldUnderPane(on: boolean): void {
   }, [store, on]);
 }
 
+/**
+ * The alerts lane a map pane drawn as a card keeps out of
+ * (canvas/barDock.ts paneLaneBox), for this Room now: from what the
+ * column publishes, as the token window reads it, with `viewport` the
+ * map as the pane sees it. The pane and its host's loading frame both
+ * read it, so the frame stands where the pane will.
+ */
+export function useAlertsLane(viewport: Size): PaneLaneBox | null {
+  const dock = useScoped(barDockSlot);
+  const chrome = useStore(dock, (s) => s.chrome);
+  const column = useStore(dock, (s) => s.column);
+  const folded = useUnderSheet();
+  const lane = paneLaneBox({ viewport, chrome, column, folded });
+  const left = lane?.left ?? null;
+  const top = lane?.top ?? null;
+  return useMemo(() => (left === null || top === null ? null : { left, top }), [left, top]);
+}
+
+/**
+ * Publishes where a map pane drawn as a card stands against the alerts
+ * column (features/builder/labelEdit.ts panePlacement `lane`) while it is
+ * mounted and shown, or nothing for null. For "summary" the column shows
+ * its summary row in place of its cards, and the row's tap closes the
+ * pane through `close`, the pane's own close, which may be a new function
+ * on every render. The pane's place clears as it closes or unmounts.
+ */
+export function usePublishPaneLane(lane: PaneLane | null, close: () => void): void {
+  const store = useScoped(dockSlot);
+  const latest = useRef(close);
+  latest.current = close;
+  useLayoutEffect(() => {
+    if (lane === null) return;
+    const mine = { lane, close: () => latest.current() };
+    store.setState({ paneLane: mine });
+    return () => {
+      if (store.getState().paneLane === mine) store.setState({ paneLane: null });
+    };
+  }, [store, lane]);
+}
+
+/**
+ * usePublishPaneLane for a pane host's loading or failure frame, placed as
+ * the pane will be (`place`), with the host's own close. The loaded pane's
+ * place takes over from it as the frame unmounts, since each clears only
+ * its own.
+ */
+export function useFrameLane(place: PanePlacement, close: () => void): void {
+  usePublishPaneLane(place.kind === "card" ? (place.lane ?? null) : null, close);
+}
+
+/**
+ * Whose summary row the alerts column shows in place of its cards for
+ * what shares its lane: a map pane's drawn as a card ("pane", whose tap
+ * closes the pane), the docked token window's ("bar", whose tap hides
+ * it), or none. The column draws one row, so where both want it the
+ * pane's words win: the pane is what stands over the cards, and once it
+ * closes the column's ask hides the window too (features/encounter
+ * InitiativeStrip.tsx FightAlerts `showAsk`).
+ */
+export function summaryFor(input: { paneLane: PaneLane | null; barLane: Lane | null }): "pane" | "bar" | null {
+  if (input.paneLane === "summary") return "pane";
+  if (input.barLane === "summary") return "bar";
+  return null;
+}
+
+/**
+ * Whether the alerts column draws the pane's summary row in place of its
+ * cards (summaryFor): a pane drawn as a card with no room beside the lane,
+ * while something waits, the column unfolded and its cards not asked for.
+ * The column publishes it (canvas/barDock.ts `columnPaneRow`), so Room
+ * reads out what arrives under the row as under any other.
+ *
+ * While the DM has asked for the cards, they show where they are or over
+ * the screen, and may cover a pane in a summary layout. That is accepted:
+ * the DM asked to see them, and closing them brings the row back, so the
+ * pane does not move for them.
+ */
+export function drawsPaneRow(input: { paneLane: PaneLane | null; barLane: Lane | null; folded: boolean; asked: boolean; waiting: boolean }): boolean {
+  if (input.folded || input.asked || !input.waiting) return false;
+  return summaryFor({ paneLane: input.paneLane, barLane: input.barLane }) === "pane";
+}
+
 /** The dock's row height, and the gap kept above it under the top bars. */
 export const DOCK_PX = 48;
 export const DOCK_GAP = theme.space(2);
@@ -133,8 +215,8 @@ export type ColumnAlert =
   | { id: string; kind: "timeUp"; says: string }
   | { id: string; kind: "notice"; text: string; says: string };
 
-/** The rolls' line, as features/rolls publishes it (components/sheetFocus.ts AlertsSummaryEntry). */
-export type RollsLine = { text: string; name: string; waiting: boolean; requests: number };
+/** The rolls' line, as features/rolls publishes it (components/sheetFocus.ts AlertsSummaryEntry). `unnamed`: how many of its requests its words leave out. */
+export type RollsLine = { text: string; name: string; waiting: boolean; requests: number; unnamed?: number };
 
 export type SummaryKind = "rolls" | ColumnAlert["kind"];
 
@@ -173,16 +255,21 @@ function phrase(text: string): string {
  * checks concentration, time is up, rolls 1 of 3 answered. Close the
  * sheet to see them." It says "see them" whenever the summary stands for
  * more than one thing, the rolls' line of several requests included, and
- * "see it" for one. Null while nothing waits.
+ * "see it" for one. Null while nothing waits. A rolls' line whose words
+ * name only what leads it, as the DM desk's "Dart plate went off" over
+ * two asks for saves, adds what they leave out (`unnamed`) to the count:
+ * "Dart plate went off +2".
  *
  * `hides` is what stands over the alerts: the sheet that folded them, or
- * the docked token bar that leaves the column only this summary row
- * (docs/design-v1-bar-dock.md 1.3), whose tap hides the bar. Each advice
- * then says that: "Hide the bar to answer.", "Hide the bar to see them.",
- * "Hide the bar to see it.". `room` is a screen whose tool's options leave
+ * the docked token window that leaves the column only this summary row
+ * (docs/design-v1-bar-dock.md 1.3), whose tap hides the window. Each advice
+ * then says that, in the word the frame names itself by: "Hide the window
+ * to answer.", "Hide the window to see them.", "Hide the window to see
+ * it.". `room` is a screen whose tool's options leave
  * the column under one whole card, where the row's tap brings up what it
  * stands for over them: "Tap to answer.", "Tap to see them.", "Tap to see
- * it.". `pane` is a map pane's bottom sheet (useFoldUnderPane), whose row's
+ * it.". `pane` is a map pane, as a bottom sheet (useFoldUnderPane) or as a
+ * card the lane leaves no room beside (usePublishPaneLane), whose row's
  * tap closes the pane: "Close the pane to answer.", "Close the pane to see
  * them.", "Close the pane to see it.".
  */
@@ -201,9 +288,11 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   }
   const [first] = items;
   if (!first) return null;
-  const more = items.length > 1 ? `+${items.length - 1}` : "";
+  // The rolls' line may stand for things its words leave out, such as asks for saves under a trap that went off: they wait too, so they count.
+  const others = items.length - 1 + (rolls ? Math.max(0, rolls.unnamed ?? 0) : 0);
+  const more = others > 0 ? `+${others}` : "";
   const several = items.length > 1 || (rolls !== null && rolls.requests > 1);
-  const way = hides === "bar" ? "Hide the bar" : hides === "room" ? "Tap" : hides === "pane" ? "Close the pane" : "Close the sheet";
+  const way = hides === "bar" ? "Hide the window" : hides === "room" ? "Tap" : hides === "pane" ? "Close the pane" : "Close the sheet";
   const advice = first.kind === "rolls" && rolls?.waiting ? `${way} to answer.` : several ? `${way} to see them.` : `${way} to see it.`;
   const head = more ? `${first.text} ${more}` : first.text;
   return { text: first.text, more, name: `${head}: ${items.map((i) => i.phrase).join(", ")}. ${advice}`, first: { kind: first.kind, id: first.id } };
@@ -239,6 +328,8 @@ type DockState = {
   sheetFullMode: boolean;
   /** How many map panes show as a bottom sheet now (useFoldUnderPane), which fold the alerts column as a panel sheet does. */
   paneSheets: number;
+  /** Where a map pane drawn as a card stands against the column, and its close (usePublishPaneLane). */
+  paneLane: { lane: PaneLane; close(): void } | null;
   /**
    * What a summary on a map pane's edge asked to show as its tap closed the
    * pane (RoomDock.tsx PaneDockRow): a roll waiting for this viewer, or the
@@ -258,7 +349,7 @@ type DockState = {
 const NO_ALERTS: readonly ColumnAlert[] = [];
 
 /** Per Room page (state/scope.ts): "view as a player" draws a second room with a bar and a column of its own. */
-export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, showAsk: null, paneHead: null })));
+export const dockSlot = scopeSlot(() => createStore<DockState>(() => ({ bar: null, alerts: NO_ALERTS, column: null, sheetFull: false, sheetFullMode: false, paneSheets: 0, paneLane: null, showAsk: null, paneHead: null })));
 
 /**
  * Publishes the token bar for the dock while it is mounted, or nothing for

@@ -3,6 +3,7 @@ import type { Token } from "#shared/model.ts";
 import { carriedGroup, carriedIndex, fullRect, holderOf, publicMembers, type SeenByAll } from "#shared/rules/attach.ts";
 import type { PlacedToken } from "#shared/rules/footprint.ts";
 import { displayName } from "../../lib/scene.ts";
+import { linkTag } from "./tags.ts";
 
 /**
  * What a group of attached tokens looks like on the map and moves like
@@ -278,18 +279,22 @@ function center(t: Token, p: { x: number; y: number }): { x: number; y: number }
 }
 
 /**
- * The group line in the bar (4.4): "On Warhorse" or "Dragged by Thorn" on a
- * carried token, and on a holder what it carries, each a button that
- * selects it, so a phone reaches a rider that hides its mount.
+ * The group line in the bar (4.4): on a carried token what carries it, in
+ * the panel's words ("Riding Warhorse", "On Bree", "Dragged by Thorn",
+ * tags.ts linkTag), so the bar, the panel and the tracker name a link one
+ * way (docs/design-v1-look-pass-2.md 2.10). On a holder, what it carries,
+ * then what it drags, each a button that selects it, so a phone reaches a
+ * rider that hides its mount.
  */
-export type GroupLine = { holder: { id: string; text: string } | null; carried: { id: string; name: string; token: Token }[] };
+export type GroupLine = { holder: { id: string; text: string } | null; carried: { id: string; name: string; token: Token; dragged: boolean }[] };
 
 export function groupLine(tokens: Tokens, token: Token): GroupLine {
   const holder = holderOf(tokens, token) as Token | undefined;
-  const up = holder && token.attached ? { id: holder.id, text: token.attached.kind === "drag" ? `Dragged by ${displayName(holder)}` : `On ${displayName(holder)}` } : null;
+  const text = holder ? linkTag(tokens, token) : null;
+  const up = holder && text !== null ? { id: holder.id, text } : null;
   const carried = (carriedIndex(tokens).get(token.id) ?? []).flatMap((id) => {
     const t = tokens[id];
-    return t ? [{ id, name: displayName(t), token: t }] : [];
+    return t ? [{ id, name: displayName(t), token: t, dragged: t.attached?.kind === "drag" }] : [];
   });
   return { holder: up, carried };
 }

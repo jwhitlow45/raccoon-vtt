@@ -105,7 +105,8 @@ function Scrim(props: { shown: ShownThrow; now: number }) {
         top: 0,
         width: "100%",
         height: TRAY_PX / z,
-        borderRadius: theme.radius.md,
+        // Square at the top, where it meets the header line's straight edge, and rounded at the foot.
+        borderRadius: `0 0 ${theme.radius.md}px ${theme.radius.md}px`,
         background: theme.color.surface,
         opacity: 0.92,
         animation: `rvtt-tray-scrim ${GONE_MS}ms linear ${after(late, 0)} both`,
@@ -164,7 +165,8 @@ function Marks(props: { shown: ShownThrow; now: number }) {
             border: `${px(theme.line.border)}px solid ${set.edge}`,
             color: set.ink,
             fontFamily: theme.font.body,
-            fontSize: theme.font.input,
+            // In the tray's own pixels, as its box is, so the number keeps inside the disc at every interface size.
+            fontSize: px(theme.font.input),
             fontWeight: theme.weight.bold,
             fontVariantNumeric: "tabular-nums",
             animation: shown.reduced ? undefined : `rvtt-tray-disc ${GONE_MS}ms linear ${after(late, 0)} both`,
