@@ -1,6 +1,7 @@
 import { parseFormula } from "../dice/formula.ts";
 import { keys } from "../keys.ts";
 import { eventLines } from "../logRings.ts";
+import { logsByAudience } from "../migrate.ts";
 import type { CastAsk, CastEnd, CastRolled, LogEvent, Token } from "../model.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
@@ -71,21 +72,24 @@ function castLine(ask: CastAsk): Extract<LogEvent, { type: "cast" }> {
  * line without one being part 0 as the receipts read it, when the lines
  * hold each part from 0 to `parts` less one exactly once and none past it,
  * since the splitter puts a roll past 100 dice into several batches under
- * one tag. Each member's tags are their own (receipts), so another's line
- * under the same tag, such as the DM's for a creature no player sees, is
- * never read, and whether a ring still holds it changes nothing. Every
- * roll names the caster, by its token or its character, and is plain
- * damage: no critical, and no d20 test (no critical range, save,
- * initiative or advantage, and no d20 in its formula). Anything else
- * leaves it undefined, as a pruned roll does, and the DM rolls.
+ * one tag. Each member's tags are their own (receipts), so since op
+ * version 19 another's line under the same tag, such as the DM's for a
+ * creature no player sees, is never read, and whether a ring still holds
+ * it changes nothing. Older ops read every line under the tag, and leave
+ * it undefined when one is another's, as they did. Every roll names the
+ * caster, by its token or its character, and is plain damage: no
+ * critical, and no d20 test (no critical range, save, initiative or
+ * advantage, and no d20 in its formula). Anything else leaves it
+ * undefined, as a pruned roll does, and the DM rolls.
  */
 function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[] | undefined {
   const damage = ask.damage;
   if (!damage || !caster) return undefined;
   const parts = new Map<number, Extract<LogEvent, { type: "dice" }>>();
+  const askers = logsByAudience(tx.env.opVersion);
   for (const entry of eventLines(tx.state.log)) {
     const data = entry.data;
-    if (data?.type !== "dice" || data.by !== ask.by || data.tag !== damage.tag) continue;
+    if (data?.type !== "dice" || data.tag !== damage.tag || (askers && data.by !== ask.by)) continue;
     const part = data.part ?? 0;
     if (part >= damage.parts || parts.has(part)) return undefined;
     parts.set(part, data);
@@ -95,7 +99,7 @@ function rolledOf(tx: Tx, ask: CastAsk, caster: Token | undefined): CastRolled[]
   const out: CastRolled[] = [];
   for (let part = 0; part < damage.parts; part++) {
     const line = parts.get(part)!;
-    if (line.rolls.length === 0) return undefined;
+    if (line.by !== ask.by || line.rolls.length === 0) return undefined;
     for (const roll of line.rolls) {
       const names = roll.tokenId === caster.id || (roll.tokenId === undefined && characterId !== undefined && roll.characterId === characterId);
       if (!names || roll.crit !== undefined || roll.critOn !== undefined || roll.save !== undefined || roll.initiative || roll.mode !== undefined) return undefined;

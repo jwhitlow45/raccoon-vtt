@@ -228,6 +228,22 @@ describe("the reducer reads the log one line per event (eventLines)", () => {
     assert.deepEqual(asked, [[{ formula: "8d6", total: 48, type: "fire" }], [{ formula: "8d6", total: 48, type: "fire" }]]);
   });
 
+  test("an ask stored before op version 19 reads every member's line under the tag, and replays without the roll as it did then", () => {
+    const asked: unknown[] = [];
+    for (const opVersion of [18, undefined]) {
+      const roll = (state: RoomState, op: DiceOp, who: Viewer, seq: number) => {
+        const resolved = resolveDiceOp(op, state, { draw: (sides) => sides, batch: "AbCdEfGhIjKlMnOp" });
+        assert.ok(resolved.ok, resolved.ok ? "" : resolved.message);
+        return run(state, resolved.op, who, seq, opVersion);
+      };
+      const mine = roll(castTable(), { t: "dice.roll", tag: "dmg", to: "all", rolls: [{ formula: "8d6", label: "Fireball damage, Fire", creature: { tokenId: "thorn" } }] }, P1, 2);
+      const theirs = roll(mine.state, { t: "dice.roll", tag: "dmg", to: "all", rolls: [{ formula: "1d6", label: "Bite damage, Piercing", creature: { tokenId: "g2" } }] }, DM, 3);
+      const ask = run(theirs.state, { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", damage: { tag: "dmg", parts: 1 } } }, P1, 4, opVersion);
+      asked.push(ask.state.casts.k1!.rolled);
+    }
+    assert.deepEqual(asked, [undefined, [{ formula: "8d6", total: 48, type: "fire" }]]);
+  });
+
   /**
    * A goblin everyone sees inside a glyph that hits once a turn, at its
    * turn's start and on entering, whose row is hidden from players and stays
