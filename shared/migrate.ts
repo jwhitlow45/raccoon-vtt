@@ -10,7 +10,7 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 20;
+export const SNAPSHOT_VERSION = 21;
 export const OP_VERSION = 19;
 
 export type MigrationStep = {
@@ -147,6 +147,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // absence reads as before, so a v19 room is a v20 room as it is. The number moves so that an older build, whose
   // strict state schema refuses the field, refuses a v20 snapshot instead of failing on the character.
   { from: 19, to: 20, apply: (state) => state },
+  // The log keeps each audience's lines apart (op version 19, shared/logRings.ts): a party line's copies carry their
+  // reader in `to`, and a shared line the readers of its parts in `parts`, a new optional field. A v20 room holds
+  // neither and is a v21 room as it is. The number moves so that an older build, which would show a copy and its `to`
+  // to whoever plays its creature then, refuses a v21 snapshot instead of loading it.
+  { from: 20, to: 21, apply: (state) => state },
 ];
 
 /**
@@ -542,32 +547,21 @@ export const opMigrations: MigrationStep[] = [
     // Follow-up batch 23 (design 7.3, Log): no op changes shape, so the
     // step is the identity. The log keeps each audience's lines apart from
     // this version (`logsByAudience`, shared/logRings.ts), each line's
-    // audience fixed by who could read it when written (lineReaders): a
-    // line no player could read counts on from DM_LINE_BASE, one only some
-    // players could read is written once for each in their own run from
-    // PARTY_LINE_BASE, and each ring drops only its own oldest, so a line one
-    // viewer never receives never moves another's. Older ops replay by the
-    // one ring they were written under, so their line ids are the ones the
-    // archive holds, and the reducer's reads of the log, such as an area's
-    // once a turn, answer as they did.
-    //
-    // The stored state keeps its shape: the log is still one list of
-    // lines, now longer than 200, with lines numbered from PARTY_LINE_BASE
-    // and DM_LINE_BASE, and with `to` on a party line, a field every line
-    // could already hold. So the snapshot version stays 20. An older build
-    // reads such a log as it is and trims it back to one ring of 200 at its
-    // next line. Its projection reads each line by its own rules then: a
-    // line written for its readers shows each of its copies to the
-    // creature's players of the moment, its `to` included, and a DM line
-    // about a creature reaches a player who plays it since.
+    // readers fixed by the real projection of the room as its op leaves it
+    // (lineReach): a line no player could read counts on from DM_LINE_BASE,
+    // one only some players could read is such a line, with a copy for each
+    // reader in their own run from PARTY_LINE_BASE, and each ring drops only
+    // its own oldest, so a line one viewer never receives never moves
+    // another's. Older ops replay by the one ring they were written under,
+    // so their line ids are the ones the archive holds, and the reducer's
+    // reads of the log, such as an area's once a turn, answer as they did.
     //
     // Deploy: back up the database just before. The first op after it is
-    // stored at version 19, and the shutdown writes version 20 snapshots, as
-    // before. Rollback: an older build refuses to migrate a version 19 op
-    // down (runMigrations), so a room whose log holds one after its last
-    // snapshot would not load there. A clean shutdown writes a snapshot
-    // after the last op, and an older build loads it. Its room import
-    // refuses an export whose log holds more than 200 lines.
+    // stored at version 19, and the shutdown writes version 21 snapshots
+    // (snapshotMigrations). Rollback: restore the backup taken before the
+    // deploy, as for any snapshot version bump. An older build refuses a
+    // version 21 snapshot and a version 19 op (runMigrations), so it never
+    // shows a copy or the readers it names to a player.
     from: 18,
     to: 19,
     apply: (op) => op,

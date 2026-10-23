@@ -944,7 +944,7 @@ describe("re-sync from D&D Beyond: op version 16 and snapshot version 20 (docs/d
 describe("follow-up batch 20: op version 17, snapshot version 20 (docs/design-v1-traps.md 6.6, docs/design-v1-attach.md 8.6)", () => {
   test("came before follow-up batch 21's op version", () => {
     assert.ok(OP_VERSION >= 17);
-    assert.equal(SNAPSHOT_VERSION, 20);
+    assert.ok(SNAPSHOT_VERSION >= 20);
   });
 
   test("the op step is the identity", () => {
@@ -966,9 +966,9 @@ describe("follow-up batch 20: op version 17, snapshot version 20 (docs/design-v1
 });
 
 describe("follow-up batch 21: op version 18, snapshot version 20 (docs/design-v1-attach.md 7.1 and 8.6)", () => {
-  test("is the version now", () => {
+  test("came before follow-up batch 23's versions", () => {
     assert.ok(OP_VERSION >= 18);
-    assert.equal(SNAPSHOT_VERSION, 20);
+    assert.ok(SNAPSHOT_VERSION >= 20);
   });
 
   test("the op step is the identity", () => {
@@ -991,10 +991,17 @@ describe("follow-up batch 21: op version 18, snapshot version 20 (docs/design-v1
   });
 });
 
-describe("follow-up batch 23: op version 19, snapshot version 20 (design 7.3, Log)", () => {
+describe("follow-up batch 23: op version 19, snapshot version 21 (design 7.3, Log)", () => {
   test("is the version now", () => {
     assert.equal(OP_VERSION, 19);
-    assert.equal(SNAPSHOT_VERSION, 20);
+    assert.equal(SNAPSHOT_VERSION, 21);
+  });
+
+  test("the snapshot step is the identity, and a version 21 snapshot never migrates down", () => {
+    const state = room();
+    state.log = [{ id: "1:0", at: AT, kind: "chat", from: "p1", text: "hi" }];
+    assert.equal(runMigrations(state, 20, 21, snapshotMigrations), state);
+    assert.throws(() => runMigrations(state, 21, 20, snapshotMigrations), /down/);
   });
 
   test("the op step is the identity", () => {
