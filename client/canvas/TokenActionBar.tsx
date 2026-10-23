@@ -1396,7 +1396,9 @@ function DismissButton(props: { tokenId: string; name: string }) {
  * 3.1 rule 6). The single token's bar takes it: on a tablet or a phone
  * held sideways, Locked and Duplicate with their words leave room for the
  * trash can alone. The group bar's Clear follows its Delete, so a slot
- * there would leave a gap before it.
+ * there would leave a gap before it. In a bar row the button fills its
+ * slot, which grows to share its line (ButtonRow), so arming changes only
+ * its words.
  */
 function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?: boolean }) {
   const inRow = useContext(InButtonRow);
