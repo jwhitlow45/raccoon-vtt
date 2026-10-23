@@ -198,6 +198,35 @@ describe("what hidden work leaves in a player's message", () => {
     assert.ok(quiet.inboxes.every((m) => m.includes(reentry) && m.includes('"type":"area"')), "both players read the reminder of the hero walking back in");
   });
 
+  test("a reminder every player reads reaches P2 alike whether or not P1 read it before as their own copy", () => {
+    // P1's aura, which only P1 sees at first. In one room it stands where the goblin walks, so only P1 reads the reminder.
+    const run = (earlier: boolean) => {
+      const state = room({
+        tokens: { g1: token("g1", { name: "Goblin", number: 1, x: 12, y: 5 }), orc: token("orc", { name: "Orc", x: 20, y: 20 }) },
+      });
+      state.meta = { ...state.meta, settings: { ...state.meta.settings, playersSeeAoeOfOthers: false } };
+      const at = { x: 6.5, y: 5.5, z: 0 };
+      state.templates.sg = template("sg", { shape: "sphere", size: 10, origin: earlier ? at : { x: 6.5, y: 25.5, z: 0 }, spell: "Spirit Guardians", ownerId: "p1", triggers: ["enter"], oncePerTurn: true });
+      state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 15 }), entry("e-orc", { tokenId: "orc", value: 10, tieOrder: 1 })] };
+      const goblin = (x: number): Op => ({ t: "token.move", tokenId: "g1", x, y: 5 });
+      const chats: Op[] = Array.from({ length: LIMITS.dmLogLines }, (_, i) => ({ t: "log.chat", text: `c${i}` }));
+      // Then P1's aura stands there in both, the room shows players each other's areas, its shared lines fill their ring, and the goblin walks in.
+      const ops: Op[] = [goblin(6), goblin(12), { t: "template.update", templateId: "sg", patch: { origin: at } }, ...chats, { t: "room.update", settings: { playersSeeAoeOfOthers: true } }, goblin(6)];
+      return played(state, ops);
+    };
+    const quiet = run(false);
+    const earlier = run(true);
+    assert.deepEqual([earlier.state.reminded?.players, quiet.state.reminded?.players], [{ p1: { sg: { g1: 1 } } }, undefined], "only one room's P1 read a copy");
+    assert.deepEqual(earlier.inboxes[1], quiet.inboxes[1], "P2's every message is the same");
+    const p2 = (r: ReturnType<typeof run>) => {
+      const log = projectState(r.state, P2, { sceneId: "s1" }).log;
+      return { count: log.length, oldest: log[0]?.id, reminders: log.filter((e) => e.data?.type === "area").map((e) => e.id) };
+    };
+    const seq = 5 + LIMITS.dmLogLines + 1;
+    assert.deepEqual(p2(earlier), p2(quiet));
+    assert.deepEqual(p2(quiet).reminders, [`${seq}:0`], "a shared line");
+  });
+
   test("the DM's record past its cap changes no player's message, and the players' reminders still come once", () => {
     // A hundred goblins no player sees, in one room only, and ten glyphs only the DM knows of moved onto where they stand.
     const run = (crowd: boolean) => {

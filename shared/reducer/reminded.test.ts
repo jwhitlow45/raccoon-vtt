@@ -70,23 +70,31 @@ describe("each audience's own reminders hold back a matching one this turn (remi
     }
   });
 
-  test("a reminder some of its readers already read goes to the rest alone, and the DM reads it again", () => {
+  test("a reminder every player reads is held back only by one every player read, so P1's own copy before holds back nothing", () => {
     // P1's own aura: only P1 reads the goblin's first entering. Then the room shows players each other's areas.
     const into = run(goblinTurn({ ownerId: "p1", oncePerTurn: true }), move("g1", 6), DM, 2);
     assert.deepEqual([read(into, P1), read(into, P2)], [["sg g1 enter"], []]);
     let state = run(into.state, { t: "room.update", settings: { playersSeeAoeOfOthers: true } }, DM, 3).state;
     state = run(state, move("g1", 12), DM, 4).state;
     const back = run(state, move("g1", 6), DM, 5);
-    assert.deepEqual([read(back, P1), read(back, P2), read(back, DM)], [[], ["sg g1 enter"], ["sg g1 enter"]]);
-    assert.deepEqual(
-      back.log.map((e) => [lineAudience(e), e.to]),
-      [
-        ["dm", undefined],
-        ["party", ["p2"]],
-      ],
-      "a party line for P2 alone, though every player reads the area now",
-    );
-    assert.deepEqual(back.state.reminded?.players, { p1: { sg: { g1: 1 } }, p2: { sg: { g1: 1 } } });
+    assert.deepEqual([read(back, P1), read(back, P2), read(back, DM)], [["sg g1 enter"], ["sg g1 enter"], ["sg g1 enter"]], "P1 reads it again, as the DM does");
+    assert.deepEqual(back.log.map((e) => [e.id, lineAudience(e)]), [["5:0", "shared"]], "a shared line, as if P1 had read none");
+    assert.deepEqual(back.state.reminded, { shared: { sg: { g1: 1 } }, players: { p1: { sg: { g1: 1 } } } });
+    state = run(back.state, move("g1", 12), DM, 6).state;
+    assert.deepEqual(run(state, move("g1", 6), DM, 7).log, [], "and once every player read it, it holds back the next");
+  });
+
+  test("a party line goes only to its readers who have not read one, and the others' copies stay as they were", () => {
+    // A goblin hidden from players but its owners P1 and P2, in the DM's aura: each reads the reminder as their own copy.
+    const state = goblinTurn({ ownerId: "dm1", oncePerTurn: true });
+    state.tokens.g1 = { ...state.tokens.g1!, visibility: "dm", ownerIds: ["p1"] };
+    const into = run(state, move("g1", 6), DM, 2);
+    assert.deepEqual([read(into, P1), read(into, P2)], [["sg g1 enter"], []]);
+    let next = run(into.state, { t: "token.update", tokenId: "g1", patch: { ownerIds: ["p1", "p2"] } }, DM, 3).state;
+    next = run(next, move("g1", 12), DM, 4).state;
+    const back = run(next, move("g1", 6), DM, 5);
+    assert.deepEqual([read(back, P1), read(back, P2)], [[], ["sg g1 enter"]]);
+    assert.deepEqual(back.log.map((e) => [lineAudience(e), e.to]), [["dm", undefined], ["party", ["p2"]]]);
   });
 
   test("a player past their cap is reminded again only of pairs past it, and another player's record holds", () => {

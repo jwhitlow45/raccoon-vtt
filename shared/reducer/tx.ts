@@ -273,9 +273,12 @@ export class Tx {
    *   PARTY_SLOT is full in this op gets no more copies, a cap only an op
    *   ending thousands of effects on creatures they alone see comes near,
    *   and each other reader's copies and the DM line stay as they are.
-   * - An area's reminder reaches only the readers who have not read a
-   *   matching one this turn, as a party line when that leaves some players
-   *   out, and is not written when it leaves nobody (reminded.ts).
+   * - An area's reminder is not written when every reader already read a
+   *   matching one this turn (reminded.ts). One every player reads is held
+   *   back only by one every player read, so it reaches each player alike
+   *   whatever any of them read before as their own copy, and may remind
+   *   such a player again. A party line's copies go only to the readers
+   *   who still need it, each counting only their own.
    *
    * Each ring then drops only its own oldest, once, so a line never pushes
    * out one a viewer holds who could not read it.
@@ -287,7 +290,7 @@ export class Tx {
     const reaches = this.unsettled.map((u): LineReach | null => {
       if (!("line" in u) || u.line.kind !== "event") return null;
       if (!this.reminders.has(u.line)) return reachOf(u.line);
-      return dmNumbered(u.line.id) ? { audience: "dm" } : reachOf(u.line, true);
+      return dmNumbered(u.line.id) ? { audience: "dm" } : reachOf(u.line);
     });
     // A reminder settles here even when every reader gets it, so the record learns who read it.
     if (this.reminders.size > 0 || reaches.some((r) => r !== null && (r.audience !== "shared" || r.parts !== undefined))) {

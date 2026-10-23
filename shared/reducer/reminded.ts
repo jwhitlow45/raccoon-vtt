@@ -21,13 +21,17 @@ import type { LineReach } from "../project.ts";
  * - a party line's readers read their own copies, kept for each of them,
  * - and the DM read every line, so `dm` keeps only lines no player read.
  *
- * A reminder nobody still needs is not written. One only some of its
- * readers still need goes to them alone, as a party line, which the DM
- * reads as well, so the DM may read a second one. A reminder only the DM
- * read never holds back one a player would read. Each audience records its
- * pairs under a cap of its own (LIMITS.remindedShared, remindedPerPlayer
- * and remindedDm) and past it records no new pair, so a player is only
- * ever reminded twice because of reminders they read themselves.
+ * A reminder nobody still needs is not written. One every player reads is
+ * held back only by `shared`, a line every player read, and goes to them
+ * all, so how it reaches each player never rests on another's reminders,
+ * which they never got. So a player who read the first as their own copy
+ * reads it again once every player can, as the DM can read a second. One
+ * only some players read goes to those who still need it, each in their
+ * own copy, which counts only their own. A reminder only the DM read never
+ * holds back one a player would read. Each audience records its pairs
+ * under a cap of its own (LIMITS.remindedShared, remindedPerPlayer and
+ * remindedDm) and past it records no new pair, so a player is only ever
+ * reminded twice because of reminders they read themselves.
  *
  * A turn that starts (Next, the removal of the acting row, Previous)
  * starts an empty record, so a turn put back with Previous reminds again,
@@ -129,18 +133,17 @@ export class Book {
   }
 
   /**
-   * Who the reminder still goes to: its line's reach less the readers who
-   * read a matching one this turn, or null when none is left. A shared
-   * line's reach lists every player's view (lineReader), so it can narrow
-   * to a party line for those who still need it.
+   * Who the reminder still goes to, or null when nobody is left. A line
+   * every player reads is held back only by one every player read, so no
+   * player's line rests on what another read. A party line goes to the
+   * readers who have not read one this turn, each in their own copy.
    */
   narrow(r: Reminder, reach: LineReach): LineReach | null {
     if (this.shared.has(r)) return null;
+    if (reach.audience === "shared") return reach;
     if (reach.audience === "dm") return this.dmRead(r) ? null : reach;
-    const views = reach.views;
-    if (!views) throw new Error("a reminder's shared reach must list its readers");
-    const left = views.filter(([id]) => !this.player(id).has(r));
-    if (left.length === views.length) return reach;
+    const left = reach.views.filter(([id]) => !this.player(id).has(r));
+    if (left.length === reach.views.length) return reach;
     // A player who read one is on the record, so the DM read it too.
     return left.length === 0 ? null : { audience: "party", views: left };
   }
