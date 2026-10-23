@@ -2,7 +2,8 @@ import { isDiceOp, resolveDiceOp } from "#shared/dice/resolve.ts";
 import { serverDraw } from "#shared/dice/roll.ts";
 import { allKeys, dependents, diffProjection, hash128, heldOf, projectEntity, projectState } from "#shared/project.ts";
 import { canApply } from "#shared/permissions.ts";
-import type { EntityKey } from "#shared/keys.ts";
+import { keys, type EntityKey } from "#shared/keys.ts";
+import { linesPastStart } from "#shared/logRings.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { clientMessageSchema, clientOpSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -71,6 +72,7 @@ export class LocalServer {
     const stamped: { n: number; at: string }[] = [];
     const touched: EntityKey[] = [];
     let global = false;
+    const before = this.state;
     for (const { n, op } of ops) {
       if (n <= this.committed) {
         acks.push(n);
@@ -126,7 +128,7 @@ export class LocalServer {
       const at = stampedAt(next, this.state);
       if (at !== undefined) stamped.push({ n, at });
     }
-    const changes = this.fanOut(touched, global);
+    const changes = this.fanOut(before, touched, global);
     if (changes.length > 0 || acks.length > 0 || rejects.length > 0) {
       const ev: Extract<ServerMessage, { t: "ev" }> = { t: "ev", seq: this.seq, changes };
       if (acks.length > 0) ev.acks = acks;
@@ -142,14 +144,17 @@ export class LocalServer {
     const result = applyOp(this.state, op, actor, { seq: this.seq + 1, at: new Date().toISOString() });
     if (!result.ok) return null;
     this.seq++;
+    const before = this.state;
     this.state = result.state;
-    const changes = this.fanOut(result.touched, result.global);
+    const changes = this.fanOut(before, result.touched, result.global);
     return changes.length > 0 ? { t: "ev", seq: this.seq, changes } : null;
   }
 
-  private fanOut(touched: EntityKey[], global: boolean): Change[] {
-    if (touched.length === 0 && !global) return [];
-    const candidates = new Set<EntityKey>(global ? [...allKeys(this.state), ...this.held.keys()] : [...touched, ...dependents(this.state, touched)]);
+  private fanOut(before: RoomState, touched: EntityKey[], global: boolean): Change[] {
+    // The lines a live log's start passed come and go with no key touched (shared/logRings.ts), as the actor's fan-out has them.
+    const passed = linesPastStart(before, this.state, [this.viewer]).map((id) => keys.log(id));
+    if (touched.length === 0 && !global && passed.length === 0) return [];
+    const candidates = new Set<EntityKey>(global ? [...allKeys(this.state), ...this.held.keys()] : [...touched, ...dependents(this.state, touched), ...passed]);
     const projected = new Map<EntityKey, unknown>();
     for (const key of candidates) projected.set(key, projectEntity(key, this.state, this.viewer, { sceneId: this.snapshotScene }));
     const { changes, held } = diffProjection(this.held, projected);
