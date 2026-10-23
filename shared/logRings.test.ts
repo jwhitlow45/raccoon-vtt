@@ -13,16 +13,16 @@ import {
   linesPastStart,
   liveStart,
   MAX_LOG,
+  memberRing,
   PARTY_LINE_BASE,
   PARTY_SLOT,
-  partyLinesKept,
   rosterRanks,
   whisperParties,
-  whispersKept,
+  type MemberRing,
 } from "./logRings.ts";
 import type { LogEntry, LogEvent, RoomState, Viewer } from "./model.ts";
 import { applyChanges, dependents, diffProjection, heldOf, lineReach, projectArchivedLog, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
-import type { Op } from "./protocol.ts";
+import { MAX_CHAT, MAX_OWNERS, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { Tx } from "./reducer/tx.ts";
 import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, token } from "./testutil.ts";
@@ -33,9 +33,9 @@ import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, t
  * while members come and go, and checks after them what must always hold:
  *
  * 1. Bounds: the shared lines are at most MAX_LOG, the DM lines at most
- *    `dmLogLines`, each player's copies of party lines at most
- *    partyLinesKept, no copy of a member gone, and the whispers at most
- *    `whispersPerRoom`.
+ *    `dmLogLines`, each player's copies of party lines inside their ring
+ *    (memberRing), no copy of a member gone, and the whispers inside the
+ *    room's count and bytes.
  * 2. Own newest: the shared lines, the DM lines, each player's copies and
  *    each member's whispers are their ring's newest, less those older than
  *    the oldest shared line once the shared lines are full.
@@ -162,6 +162,21 @@ function liveLog(state: RoomState, viewer: Viewer): LogEntry[] {
 
 const index = (id: string) => Number(id.slice(id.indexOf(":") + 1));
 
+const bytesOf = (lines: readonly LogEntry[]) => lines.reduce((n, e) => n + serializedBytes(e), 0);
+
+/** A member's ring of `lines`, theirs in id order: the newest while their count and bytes stay inside `bound`. */
+function ringOf(lines: readonly LogEntry[], bound: MemberRing): LogEntry[] {
+  const out: LogEntry[] = [];
+  let bytes = 0;
+  for (let i = lines.length - 1; i >= 0 && out.length < bound.lines; i--) {
+    const size = serializedBytes(lines[i]!);
+    if (bytes + size > bound.bytes) break;
+    bytes += size;
+    out.unshift(lines[i]!);
+  }
+  return out;
+}
+
 describe("the log's rings (shared/logRings.ts)", () => {
   test("a line no player gets is one no player's projection carries, in any room", () => {
     for (let seed = 1; seed <= 30; seed++) {
@@ -234,22 +249,23 @@ describe("the log's rings (shared/logRings.ts)", () => {
         const dm = state.log.filter((e) => lineAudience(e) === "dm");
         assert.deepEqual(dm.map((e) => e.id), history.filter((e) => lineAudience(e) === "dm").slice(-LIMITS.dmLogLines).filter(sinceFloor).map((e) => e.id), `${where}: the DM lines are their newest`);
         const party = state.log.filter((e) => lineAudience(e) === "party");
+        const copyRing = memberRing("party", roster.length);
         for (const reader of roster) {
           const held = party.filter((e) => e.to![0] === reader);
-          assert.ok(held.length <= partyLinesKept(roster.length), `${where}: ${reader} holds ${held.length} copies`);
+          assert.ok(held.length <= copyRing.lines && bytesOf(held) <= copyRing.bytes, `${where}: ${reader} holds ${held.length} copies`);
           const theirs = history.filter((e) => lineAudience(e) === "party" && e.to![0] === reader && sinceFloor(e));
           assert.deepEqual(held.map((e) => e.id), theirs.slice(theirs.length - held.length).map((e) => e.id), `${where}: ${reader}'s copies are their newest`);
         }
         assert.ok(party.every((e) => e.to!.length === 1 && roster.includes(e.to![0]!)), `${where}: every copy names one current member`);
         const whispers = state.log.filter((e) => e.kind === "whisper");
-        assert.ok(whispers.length <= LIMITS.whispersPerRoom, `${where}: ${whispers.length} whispers`);
+        assert.ok(whispers.length <= LIMITS.whispersPerRoom && bytesOf(whispers) <= LIMITS.whisperBytesPerRoom, `${where}: ${whispers.length} whispers`);
         // Each ring keeps at least its bound at the largest roster the run can have, of the lines since its member last joined.
         const largest = MEMBERS.length + GUESTS.length;
         for (const m of roster) {
           const since = (e: LogEntry) => sinceFloor(e) && Number(e.id.slice(0, e.id.indexOf(":"))) > (joinedAt.get(m) ?? 0);
           const newest = [
-            ...history.filter((e) => e.kind === "whisper" && whisperParties(e).includes(m) && since(e)).slice(-whispersKept(largest)),
-            ...history.filter((e) => lineAudience(e) === "party" && e.to![0] === m && since(e)).slice(-partyLinesKept(largest)),
+            ...ringOf(history.filter((e) => e.kind === "whisper" && whisperParties(e).includes(m) && since(e)), memberRing("whisper", largest)),
+            ...ringOf(history.filter((e) => lineAudience(e) === "party" && e.to![0] === m && since(e)), memberRing("party", largest)),
           ];
           const held = new Set(state.log);
           assert.deepEqual(newest.filter((e) => !held.has(e)).map((e) => e.id), [], `${where}: ${m}'s newest whispers and copies stay`);
@@ -361,7 +377,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
     const pet: Line = { kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 1 } };
     let state = write(base(), [{ kind: "chat", from: "dm1", text: "first" }], 1).state;
     state = write(state, [{ kind: "chat", from: "dm1", text: "a" }, pet], 2).state;
-    const keep = partyLinesKept(Object.keys(state.members).length);
+    const keep = memberRing("party", Object.keys(state.members).length).lines;
     for (let i = 0; i < keep; i++) state = write(state, [pet], 3 + i).state;
     assert.ok(state.log.some((e) => e.id === "2:0"), "the op's chat line is still here");
     assert.ok(!state.log.some((e) => e.to?.[0] === "p1" && e.id.startsWith("2:")), "P1's copy of its line went");
@@ -475,7 +491,7 @@ describe("a line's readers, fixed when it is written (shared/project.ts lineReac
 
   test("a player's own copies start their live log once they hold their bound, with no gap", () => {
     let state = base();
-    const keep = partyLinesKept(Object.keys(state.members).length);
+    const keep = memberRing("party", Object.keys(state.members).length).lines;
     for (let i = 0; i < keep + 10; i++) state = write(state, [{ kind: "chat", from: "dm1", text: `c${i}` }, { kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 1 } }], i + 1).state;
     const own = state.log.filter((e) => e.to?.[0] === "p1");
     assert.equal(own.length, keep);
@@ -524,12 +540,12 @@ describe("whispers, bounded by the room (shared/logRings.ts)", () => {
   const whisper = (n: number, from: string, to: string, text = `w${n}`): LogEntry => ({ id: `${n}:0`, at: AT, kind: "whisper", from, to: [to], text });
 
   test("each member keeps 50, fewer past 8 members, so a room never holds more than 400", () => {
-    assert.equal(whispersKept(8), 50);
-    assert.equal(whispersKept(9), 44);
-    assert.equal(whispersKept(50), 8);
+    assert.equal(memberRing("whisper", 8).lines, 50);
+    assert.equal(memberRing("whisper", 9).lines, 44);
+    assert.equal(memberRing("whisper", 50).lines, 8);
     for (const players of [3, 7, 19, 49]) {
       const state = roster(players);
-      const keep = whispersKept(players + 1);
+      const keep = memberRing("whisper", players + 1).lines;
       // Every player whispers the DM, and the next player, more than they keep.
       state.log = [];
       let n = 0;
@@ -549,6 +565,48 @@ describe("whispers, bounded by the room (shared/logRings.ts)", () => {
         assert.equal(start, theirs.at(-keep)!.id, `${players} players: ${id}'s live log starts at their own bound`);
       }
     }
+  });
+
+  test("each member keeps their share of the room's bytes too, so long letters never hold more than the old ring did", () => {
+    // 1,000 letters of three bytes each, the longest text a whisper takes.
+    const long = "\u4e00".repeat(1000);
+    for (const players of [1, 7, 19, 49]) {
+      const state = roster(players);
+      const ring = memberRing("whisper", players + 1);
+      state.log = [];
+      let n = 0;
+      for (let round = 0; round < 60; round++) for (let i = 1; i <= players; i++) state.log.push(whisper(++n, `p${i}`, "dm1", long));
+      const dropped = new Set(droppedLines(state.log, state.members));
+      const held = state.log.filter((e) => !dropped.has(e.id));
+      assert.ok(bytesOf(held) <= LIMITS.whisperBytesPerRoom, `${players} players: ${bytesOf(held)} bytes`);
+      for (const id of Object.keys(state.members)) {
+        const theirs = state.log.filter((e) => whisperParties(e).includes(id));
+        const newest = ringOf(theirs, ring);
+        assert.ok(newest.length > 0 && newest.every((e) => !dropped.has(e.id)), `${players} players: ${id}'s newest stay`);
+        assert.ok(bytesOf(newest) <= ring.bytes);
+        // The live log starts where the ring's bytes pass its bound less the longest line, so a whisper it dropped is never inside it.
+        const start = liveStart({ log: held, members: state.members }, { memberId: id, role: id === "dm1" ? "dm" : "player" });
+        const live = start === null ? theirs : theirs.filter((e) => compareLogIds(e.id, start) >= 0);
+        assert.ok(live.every((e) => !dropped.has(e.id)), `${players} players: ${id}'s live log holds no whisper the ring dropped`);
+      }
+    }
+  });
+
+  test("a ring holds its newest while they fit and none older, so a short whisper behind a long one that did not fit goes too", () => {
+    const state = roster(49);
+    const long = "\u4e00".repeat(1000);
+    state.log = [whisper(1, "p1", "dm1", "short"), ...Array.from({ length: 5 }, (_, i) => whisper(2 + i, "p1", "dm1", long))];
+    const ring = memberRing("whisper", 50);
+    assert.ok(4 * serializedBytes(state.log[1]!) <= ring.bytes && 5 * serializedBytes(state.log[1]!) > ring.bytes, "four long ones fit, five do not");
+    assert.deepEqual(droppedLines(state.log, state.members).sort(), ["1:0", "2:0"]);
+  });
+
+  test("the longest whisper the protocol takes fits a line apart, so a ring always holds its newest", () => {
+    const id = "m".repeat(64);
+    const longest: LogEntry = { id: `${"9".repeat(18)}:999999`, at: AT, kind: "whisper", from: id, to: Array.from({ length: MAX_OWNERS }, (_, i) => `${id.slice(2)}${String(i).padStart(2, "0")}`), text: "\u4e00".repeat(MAX_CHAT) };
+    assert.ok(serializedBytes(longest) <= LIMITS.apartLineBytes, `${serializedBytes(longest)} bytes`);
+    assert.ok(memberRing("whisper", LIMITS.membersPerRoom).bytes > LIMITS.apartLineBytes);
+    assert.ok(memberRing("party", LIMITS.membersPerRoom).bytes > LIMITS.apartLineBytes);
   });
 
   test("a removed member keeps none, so each whisper stays by the members left, and one only those gone were party to goes", () => {

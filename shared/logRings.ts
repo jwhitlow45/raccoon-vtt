@@ -10,7 +10,8 @@ import { isWritable } from "./writable.ts";
  * lineReach, Tx.settleLog):
  *
  * - A shared line may reach every player, each by what they see when they
- *   read it. The shared lines keep their newest MAX_LOG.
+ *   read it, less the parts they were not among the readers of then
+ *   (LineParts). The shared lines keep their newest MAX_LOG.
  * - A DM line reaches no player: no player could read it when it was
  *   written, and none who could later, such as one lent its creature, ever
  *   gets it. The DM lines keep their newest `dmLogLines`.
@@ -22,17 +23,19 @@ import { isWritable } from "./writable.ts";
  * - A whisper reaches only its sender and its recipients, and stays while
  *   it is among the newest of a current member it reaches.
  *
- * Each member's whispers keep their newest `whispersKept`, and each
- * player's copies their newest `partyLinesKept`, fewer as the room grows.
- * A DM line and a copy are cut to `apartLineBytes` when written (cutLine),
- * and neither is in the room's measures (server/rooms/sizeGuard.ts), so
- * neither decides whether an op passes.
+ * Each member's whispers and each player's copies keep their newest,
+ * bounded by count and by bytes (memberRing), each a share of the room's
+ * by the roster's size. A DM line and a copy are cut to `apartLineBytes`
+ * when written (cutLine), and the longest whisper fits it. None of these
+ * lines is in the room's measures (server/rooms/sizeGuard.ts), so none
+ * decides whether an op passes, and their bounds keep them to about 2 MiB.
  *
  * Each audience keeps its own newest lines and drops only its own oldest,
  * so a line one viewer never receives never pushes out a line they hold. A
  * viewer's live log holds only their own newest (liveStart), so lines
- * between others never change which of theirs it holds. The roster is
- * public, so a bound that moves with it tells no one anything.
+ * between others never change which of theirs it holds, and a ring's bytes
+ * count only what its own viewer reads. The roster is public, so a bound
+ * that moves with it tells no one anything.
  *
  * One ring may reach back further than another, and the archive's pages
  * start before a live log's oldest line, so a ring reaching back past the
@@ -54,18 +57,19 @@ export const MAX_LOG = 200;
 /** The most lines the log holds with every ring full: what a room's state, an import's included, may hold. */
 export const MAX_LOG_LINES = MAX_LOG + LIMITS.dmLogLines + LIMITS.whispersPerRoom + LIMITS.partyLinesPerRoom;
 
-/**
- * The whispers each member keeps in a room of `members` members: their
- * newest `whispersKept`, or fewer once the room is large enough that every
- * member's would pass `whispersPerRoom` together.
- */
-export function whispersKept(members: number): number {
-  return Math.min(LIMITS.whispersKept, Math.floor(LIMITS.whispersPerRoom / Math.max(1, members)));
-}
+/** A member's ring of whispers or of party lines' copies: their newest `lines`, at most `bytes` of them together. */
+export type MemberRing = { lines: number; bytes: number };
 
-/** The copies of party lines each player keeps in a room of `members` members, as whispersKept does with `partyLinesPerRoom`. */
-export function partyLinesKept(members: number): number {
-  return Math.min(LIMITS.partyLinesKept, Math.floor(LIMITS.partyLinesPerRoom / Math.max(1, members)));
+/**
+ * Each member's ring in a room of `members` members: their newest
+ * `whispersKept` whispers, or `partyLinesKept` copies, or fewer once the
+ * room is large enough that every member's would pass the room's count or
+ * bytes together, so a room keeps at most that much however many join.
+ */
+export function memberRing(kind: "whisper" | "party", members: number): MemberRing {
+  const n = Math.max(1, members);
+  if (kind === "whisper") return { lines: Math.min(LIMITS.whispersKept, Math.floor(LIMITS.whispersPerRoom / n)), bytes: Math.floor(LIMITS.whisperBytesPerRoom / n) };
+  return { lines: Math.min(LIMITS.partyLinesKept, Math.floor(LIMITS.partyLinesPerRoom / n)), bytes: Math.floor(LIMITS.partyLineBytesPerRoom / n) };
 }
 
 type Roster = Readonly<Record<string, unknown>>;
@@ -238,6 +242,15 @@ export function whisperParties(entry: Pick<LogEntry, "from" | "to">): string[] {
   return [...out];
 }
 
+const sizes = new WeakMap<LogEntry, number>();
+
+/** A line's serialized bytes, kept for the life of the line object, which is replaced and never changed. */
+function lineBytes(e: LogEntry): number {
+  let bytes = sizes.get(e);
+  if (bytes === undefined) sizes.set(e, (bytes = serializedBytes(e)));
+  return bytes;
+}
+
 /** The members whose ring holds a line: a whisper's parties, a copy's reader, or none. */
 function ringMembers(e: LogEntry): readonly string[] {
   if (e.kind === "whisper") return whisperParties(e);
@@ -285,28 +298,35 @@ export function ringed(log: readonly LogEntry[], members: Roster): LogEntry[] {
 
 /**
  * The whispers and copies outside every member ring: each ring holds its
- * member's newest `whispersKept` whispers or `partyLinesKept` copies. A
- * whisper stays while any current member it reaches holds it. A member no
- * longer on the roster holds none, so a whisper only they and those gone
- * were party to goes, and so does a copy of theirs.
+ * member's newest lines while their count and bytes stay inside its bound
+ * (memberRing), and no older one once one does not fit. A whisper stays
+ * while any current member it reaches holds it. A member no longer on the
+ * roster holds none, so a whisper only they and those gone were party to
+ * goes, and so does a copy of theirs.
  */
 function outsideMemberRings(log: readonly LogEntry[], members: Roster): string[] {
   const size = Object.keys(members).length;
-  const bounds = { whisper: whispersKept(size), party: partyLinesKept(size) };
-  const held = new Map<string, number>();
+  const bounds = { whisper: memberRing("whisper", size), party: memberRing("party", size) };
+  const rings = new Map<string, { lines: number; bytes: number; full: boolean }>();
   const out: string[] = [];
   for (let i = log.length - 1; i >= 0; i--) {
     const e = log[i]!;
-    const ring = ringMembers(e);
-    if (ring.length === 0) continue;
+    const held = ringMembers(e);
+    if (held.length === 0) continue;
     const kind = e.kind === "whisper" ? "whisper" : "party";
+    const bound = bounds[kind];
+    const bytes = lineBytes(e);
     let kept = false;
-    for (const id of ring) {
+    for (const id of held) {
       if (!Object.hasOwn(members, id)) continue;
       const key = `${kind}|${id}`;
-      const n = held.get(key) ?? 0;
-      held.set(key, n + 1);
-      if (n < bounds[kind]) kept = true;
+      const ring = rings.get(key) ?? { lines: 0, bytes: 0, full: false };
+      rings.set(key, ring);
+      if (!ring.full && ring.lines < bound.lines && ring.bytes + bytes <= bound.bytes) {
+        ring.lines++;
+        ring.bytes += bytes;
+        kept = true;
+      } else ring.full = true;
     }
     if (!kept) out.push(e.id);
   }
@@ -330,9 +350,11 @@ const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, Map<string, stri
  * smaller bound do not come back, so a ring may have dropped lines and
  * still be short of its bound. A ring counts as full here at the bound of a
  * roster as large as it may have been since the oldest shared line: this
- * one with every member the log says left added back. A line a ring
- * dropped after that line then always lies before where the live log
- * starts.
+ * one with every member the log says left added back, and never past the
+ * most a roster holds. A ring of whispers or copies counts as full once its
+ * bytes pass that bound less the longest line it may hold, since the line
+ * it dropped last fit no more than that. A line a ring dropped after the
+ * oldest shared line then always lies before where the live log starts.
  */
 export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   const { log, members } = room;
@@ -341,9 +363,10 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   if (cached !== undefined) return cached;
   let largest = Object.keys(members).length;
   for (const e of log) if (e.data?.type === "member" && e.data.action === "remove") largest++;
+  largest = Math.min(largest, LIMITS.membersPerRoom);
   const dmViewer = viewer.role === "dm";
-  const bounds = { whisper: whispersKept(largest), party: partyLinesKept(largest) };
-  const rings = { whisper: 0, party: 0 };
+  const bounds = { whisper: memberRing("whisper", largest), party: memberRing("party", largest) };
+  const rings = { whisper: { lines: 0, bytes: 0 }, party: { lines: 0, bytes: 0 } };
   let start: string | null = null;
   let dm = 0;
   // Newest first, so the first ring to fill is the newer start.
@@ -356,7 +379,10 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
     }
     const kind = audience === "whisper" ? "whisper" : audience === "party" ? "party" : null;
     if (kind === null || !ringMembers(e).includes(viewer.memberId)) continue;
-    if (++rings[kind] === bounds[kind]) start = e.id;
+    const ring = rings[kind];
+    ring.lines++;
+    ring.bytes += lineBytes(e);
+    if (ring.lines === bounds[kind].lines || ring.bytes > bounds[kind].bytes - LIMITS.apartLineBytes) start = e.id;
   }
   if (!isWritable(log) && !isWritable(members)) {
     let byRoster = starts.get(log);

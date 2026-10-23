@@ -265,22 +265,21 @@ describe("SizeGuard's room-level part (docs/design-v1-dm-tools.md 2.4)", () => {
     }
   });
 
-  test("every whisper counts, so an op that fits the DM with fewer whispers but not the other is refused", () => {
-    const state = room();
-    state.members.dm2 = { ...state.members.dm1!, id: "dm2", name: "Second DM" };
+  test("whispers ride outside the measures, so an op passes or fails the same whatever whispers the room holds", () => {
+    const quiet = room();
+    quiet.members.dm2 = { ...quiet.members.dm1!, id: "dm2", name: "Second DM" };
     const whisper = (id: string, to: string, text: string) => ({ id, at: "2026-10-14T00:00:00.000Z", kind: "whisper" as const, from: "p1", to: [to], text });
-    state.log = [whisper("0:0", "dm1", "w".repeat(900)), whisper("0:1", "dm2", "short")];
+    const loud = { ...quiet, log: [whisper("0:0", "dm1", "w".repeat(900)), whisper("0:1", "dm2", "short")] };
     const dm2: Viewer = { memberId: "dm2", role: "dm" };
-    const next = applied(state, { t: "log.chat", text: "hello" });
-    const fewer = serializedBytes(projectState(next.state, dm2, { sceneId: "s1" }));
-    const more = serializedBytes(projectState(next.state, { memberId: "dm1", role: "dm" }, { sceneId: "s1" }));
-    assert.ok(more - fewer > 800);
-    const guard = new SizeGuard({ sceneLimit: fewer + 100 });
-    assert.equal(guard.check(next.state, [], next.growth, state).ok, false);
-    // The measure is the most any DM can receive: every whisper, the other DM's short one too.
-    const all = more + serializedBytes(state.log[1]) + 1;
-    assert.equal(new SizeGuard({ sceneLimit: all }).check(next.state, [], next.growth, state).ok, true);
-    assert.equal(new SizeGuard({ sceneLimit: all - 1 }).check(next.state, [], next.growth, state).ok, false);
+    const plain = applied(quiet, { t: "log.chat", text: "hello" });
+    const next = applied(loud, { t: "log.chat", text: "hello" });
+    // The chat line, which every DM gets, is the whole of the log the measure counts.
+    const bytes = serializedBytes(projectState(plain.state, dm2, { sceneId: "s1" }));
+    for (const limit of [bytes - 1, bytes, bytes + 1]) {
+      const passes = (r: { state: RoomState; growth: number }, before: RoomState) => new SizeGuard({ sceneLimit: limit }).check(r.state, [], r.growth, before).ok;
+      assert.equal(passes(next, loud), passes(plain, quiet), `${limit}`);
+      assert.equal(passes(next, loud), limit >= bytes, `${limit}`);
+    }
   });
 
   test("a scene already over its limit refuses only an op that grows it, so the room's other edits still work", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds } from "#shared/keys.ts";
-import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, partyIndex, ringed, rosterRanks, whispersKept } from "#shared/logRings.ts";
+import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, memberRing, partyIndex, ringed, rosterRanks } from "#shared/logRings.ts";
 import { compareLogIds as byId } from "#shared/keys.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
@@ -806,7 +806,7 @@ describe("an imported log (importRoom)", () => {
     const state = room();
     state.log = Array.from({ length: 120 }, (_, i) => (i % 3 === 0 ? chat(`${i + 1}:0`) : { id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: "p1", to: ["dm1"], text: `w${i}` }));
     const { room: out, archive } = imported(state);
-    assert.equal(out.log.filter((e) => e.kind === "whisper").length, whispersKept(Object.keys(out.members).length));
+    assert.equal(out.log.filter((e) => e.kind === "whisper").length, memberRing("whisper", Object.keys(out.members).length).lines);
     reachable(out, archive, "m-dm", "dm", "whispers");
     reachable(out, archive, "m-p1", "player", "whispers");
     reachable(out, archive, "m-p2", "player", "whispers");
@@ -830,7 +830,7 @@ describe("whispers through an export (shared/logRings.ts)", () => {
     }
     assert.ok(state.log.length <= MAX_LOG_LINES, `${state.log.length} lines`);
     // Only the DM, still on the roster, keeps any: their newest.
-    assert.equal(state.log.filter((e) => e.kind === "whisper").length, whispersKept(Object.keys(state.members).length));
+    assert.equal(state.log.filter((e) => e.kind === "whisper").length, memberRing("whisper", Object.keys(state.members).length).lines);
     const exported = parseRoomState(JSON.parse(JSON.stringify(exportableState(state, DM))));
     assert.ok(exported.ok, exported.ok ? "" : exported.message);
     const imported = remapState(exported.state, { assets: new Map() });

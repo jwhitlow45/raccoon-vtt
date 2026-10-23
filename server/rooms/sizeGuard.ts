@@ -39,9 +39,8 @@ import { isWritable } from "#shared/writable.ts";
  *
  * - The room-level part is measured exactly on every op, which costs only
  *   the collections the op wrote: sizes are kept per collection and per
- *   entity object, which are replaced and never changed. It counts every
- *   whisper in the in-memory log, since a whisper reaches only the DMs it
- *   names, and so it is the most any DM can receive.
+ *   entity object, which are replaced and never changed. It counts the
+ *   log's shared lines, which every DM receives.
  * - Each scene's own part is measured once, from one pass over the stored
  *   entities grouped by scene, at the room's first check, and kept with its
  *   growth bound. An op that touches a scene adds its growth there as
@@ -50,7 +49,8 @@ import { isWritable } from "#shared/writable.ts";
  *
  * A DM's projection of a scene is exactly the two parts with the JSON around
  * them (and an empty sight map, whose real tiles the sight reserve covers),
- * so the measure is the projection's size, every whisper counted.
+ * and the log's lines outside the measure, so the measure is the
+ * projection's size less those.
  *
  * Traps (docs/design-v1-traps.md 6.7) are counted so that a springing
  * never moves a measure: a trap's own fields exactly and, in place of what
@@ -67,11 +67,12 @@ import { isWritable } from "#shared/writable.ts";
  * (shared/limits.ts). So a map, a monster or a journal page never grows
  * into the blocks' room, and a DM's snapshot is at most 3 MiB plus theirs.
  *
- * So do the log's DM lines and party lines' copies (shared/logRings.ts):
- * their rings hold at most `dmLogLines` and each player's `partyLinesKept`
- * on their own, each of at most `apartLineBytes`, and the measure leaves
- * them out. A hidden area's reminder, or any other line no player gets,
- * then never changes whether a player's op passes.
+ * So do the log's lines that only some viewers or none read
+ * (shared/logRings.ts): DM lines, party lines' copies and whispers. Each
+ * ring bounds them on its own, by count and by bytes, about 2 MiB together
+ * (shared/limits.ts), and the measure leaves them out. A hidden area's
+ * reminder, another player's aura or a whisper between others then never
+ * changes whether a player's op passes.
  */
 
 function roomFull(limit: number): LimitCheck {
@@ -241,8 +242,9 @@ function sightReserve(scene: Scene): number {
 /*
  * A DM's projection (shared/project.ts projectState) as JSON:
  * `{"meta":…,"members":{…},…,"sight":{}}`. Its room-level collections are
- * the state's own, every one of them, the log with every whisper. Its
- * scene-level collections hold only the viewed scene's entities.
+ * the state's own, every one of them, the log as the measures count it
+ * (measuredLog). Its scene-level collections hold only the viewed scene's
+ * entities.
  */
 const ROOM_LEVEL = [
   "meta",
@@ -333,7 +335,7 @@ function collectionBytes(collection: unknown): number {
 
 /**
  * The room-level part of every DM's projected scene, with its field names:
- * the state's own room-level collections, the log with every whisper in it.
+ * the state's own room-level collections, the log as the measures count it.
  * A singleton the op did not write and a collection it did not copy are the
  * same objects as before, so they cost a lookup.
  */
@@ -350,12 +352,17 @@ export function roomLevelBytes(state: RoomState): number {
 
 const measuredLogs = new WeakMap<readonly LogEntry[], readonly LogEntry[]>();
 
-/** The log as the measures count it: without its DM lines and party lines' copies, which ride outside them. The very list when it holds neither. */
+/**
+ * The log as the measures count it: its shared lines alone. The lines only
+ * some viewers or none read, DM lines, party lines' copies and whispers,
+ * ride outside the measures under bounds of their own (shared/logRings.ts),
+ * so a line a player cannot read never decides whether their op passes.
+ * The very list when it holds no other.
+ */
 export function measuredLog(log: readonly LogEntry[]): readonly LogEntry[] {
   const cached = measuredLogs.get(log);
   if (cached) return cached;
-  const apart = (e: LogEntry) => lineAudience(e) === "dm" || lineAudience(e) === "party";
-  const kept = log.some(apart) ? log.filter((e) => !apart(e)) : log;
+  const kept = log.some((e) => lineAudience(e) !== "shared") ? log.filter((e) => lineAudience(e) === "shared") : log;
   if (!isWritable(log)) measuredLogs.set(log, kept);
   return kept;
 }
@@ -559,8 +566,8 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     const parsed = parseKey(key);
     // A trap's line is held by its log's reserve while the room has a trap.
     if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
-    // The log's DM lines and party lines' copies ride outside the measures.
-    if (parsed?.kind === "log" && (lineAudience(next as LogEntry) === "dm" || lineAudience(next as LogEntry) === "party")) continue;
+    // The log's lines only some viewers or none read ride outside the measures.
+    if (parsed?.kind === "log" && lineAudience(next as LogEntry) !== "shared") continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
     const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value));

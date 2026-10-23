@@ -9,12 +9,14 @@ import { growthBound, measuredFromStored, measuredStateBytes, roomLevelBytes, Si
 import { serializedBytes } from "#shared/limits.ts";
 
 /**
- * The log's DM lines ride outside the size measures (shared/logRings.ts,
- * server/rooms/sizeGuard.ts), so a player's move near a limit gets the same
- * answer whether or not it walks into an area hidden from players. The two
- * rooms differ only in where the hidden area stands: on the hero's way in
- * one, far off in the other, with the same digits, so each room's bytes
- * are the same before the move.
+ * The log's lines only some viewers or none read ride outside the size
+ * measures (shared/logRings.ts, server/rooms/sizeGuard.ts): DM lines, party
+ * lines' copies and whispers. So a player's move near a limit gets the
+ * same answer whether or not it walks into an area hidden from them, and
+ * whatever lines between others the room holds. The paired rooms differ
+ * only in where the area stands, on the hero's way in one and far off in
+ * the other, with the same digits, so each room's bytes are the same before
+ * the move.
  */
 function fightWithGlyph(x: number): RoomState {
   const state = room();
@@ -80,6 +82,53 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
     assert.equal(measuredStateBytes(into.after), measuredStateBytes(away.after));
     assert.equal(roomLevelBytes(into.after), roomLevelBytes(away.after));
     assert.equal(measuredFromStored(serializedBytes(into.after), into.after), measuredStateBytes(into.after));
+  });
+
+  test("a player's move near either limit gets the same answer with and without another player's area they cannot see", () => {
+    // P2's Spirit Guardians, which players who do not own it never see: the move into it writes P2's line, and the DM's.
+    const aura = (x: number) => {
+      const state = fightWithGlyph(30);
+      state.meta = { ...state.meta, settings: { ...state.meta.settings, playersSeeAoeOfOthers: false } };
+      state.templates.glyph = { ...state.templates.glyph!, visibility: "all", ownerId: "p2", spell: "Spirit Guardians", origin: { x, y: 5.5, z: 0 } };
+      return state;
+    };
+    const away = moved(aura(9.5));
+    const into = moved(aura(6.5));
+    assert.equal(serializedBytes(away.before), serializedBytes(into.before));
+    assert.deepEqual(
+      into.log.map((e) => [e.data?.type, lineAudience(e)]),
+      [
+        ["area", "dm"],
+        ["area", "party"],
+      ],
+    );
+    for (const which of ["stateLimit", "sceneLimit"] as const) {
+      const limit = threshold(away, which);
+      for (let at = limit - 3; at <= limit + 3; at++) assert.equal(passes(into, { [which]: at }), passes(away, { [which]: at }), `${which} ${at}, the move passes at ${limit}`);
+    }
+    assert.equal(measuredStateBytes(into.after), measuredStateBytes(away.after));
+  });
+
+  test("a player's move near either limit gets the same answer whatever whispers and party lines between others the room holds", () => {
+    const quiet = fightWithGlyph(9.5);
+    // A whisper between the DM and P2, and a line about P2's hidden familiar, the DM's with P2's copy.
+    const busy = structuredClone(quiet);
+    busy.tokens.owl = token("owl", { name: "Owl", visibility: "dm", ownerIds: ["p2"] });
+    quiet.tokens.owl = busy.tokens.owl;
+    let next = applyOp(busy, { t: "log.whisper", to: ["dm1"], text: "\u4e00".repeat(1_000) }, { memberId: "p2", role: "player" }, { seq: 10, at: "2026-10-23T20:00:00.000Z" });
+    assert.ok(next.ok);
+    next = applyOp(next.state, { t: "actor.damageMany", hits: [{ target: { tokenId: "owl" }, amount: 1 }] }, { memberId: "dm1", role: "dm" }, { seq: 11, at: "2026-10-23T20:00:00.000Z" });
+    assert.ok(next.ok);
+    assert.deepEqual(next.state.log.map((e) => lineAudience(e)).sort(), ["dm", "party", "whisper"]);
+    const plain = moved(quiet);
+    const loud = moved(next.state);
+    for (const which of ["stateLimit", "sceneLimit"] as const) {
+      const limit = threshold(plain, which);
+      for (let at = limit - 3; at <= limit + 3; at++) assert.equal(passes(loud, { [which]: at }), passes(plain, { [which]: at }), `${which} ${at}, the move passes at ${limit}`);
+    }
+    assert.equal(measuredStateBytes(loud.after), measuredStateBytes(plain.after));
+    assert.equal(roomLevelBytes(loud.after), roomLevelBytes(plain.after));
+    assert.equal(measuredFromStored(serializedBytes(loud.after), loud.after), measuredStateBytes(loud.after));
   });
 
   test("the DM lines the measures leave out are bounded on their own, and a room without any measures exactly", () => {

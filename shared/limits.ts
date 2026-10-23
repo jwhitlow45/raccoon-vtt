@@ -402,28 +402,36 @@ export const LIMITS = {
   trapLineBytes: 1_536,
   /**
    * The room log's lines held in memory beside its newest 200 shared ones
-   * (shared/logRings.ts): the DM's own lines, a party line's own included,
-   * each cut to `apartLineBytes`, room for the longest line an op writes, so
-   * 600 KiB at most outside the room's measures, each member's newest
-   * whispers and each player's newest copies of party lines, the lines only
-   * some players read. A member keeps 50 of each, or fewer once the room is
-   * large enough that all members' would pass 400 whispers or 200 copies,
-   * so a room keeps at most that many however many join. A copy rides
-   * outside the measures as well, since no DM receives it, and is cut as a
-   * DM line is. Whispers are measured like any line
-   * (server/rooms/sizeGuard.ts): 400 whispers of 1,000 plain letters are
-   * about 460 KB, half of what 200 dice lines at their 4.5 KB took in the
-   * one ring before.
+   * (shared/logRings.ts), none of them in the room's measures
+   * (server/rooms/sizeGuard.ts), so a line a player cannot read never
+   * decides whether their op passes:
+   *
+   * - The DM's own lines, a party line's own included, their newest 100,
+   *   each cut to `apartLineBytes`: 800 KiB at most.
+   * - Each member's newest whispers and each player's newest copies of
+   *   party lines, the lines only some players read: 50 of each, and at
+   *   most 640 KiB of each over the whole roster. A member keeps a share of
+   *   both by the roster's size, `whispersPerRoom` and `whisperBytesPerRoom`
+   *   or `partyLinesPerRoom` and `partyLineBytesPerRoom` over the members,
+   *   so a room keeps at most that much of each however many join. A copy
+   *   is cut to `apartLineBytes` as well, and the longest whisper fits it.
+   *
+   * Each byte budget is about what the old single ring could hold: 200
+   * lines of the longest text, 1,000 letters of three bytes, about 3.2 KB a
+   * line, took about 620 KiB. So the log keeps at most about 2 MiB outside
+   * the measures, beside the shared lines the measures count.
    *
    * These bounds decide which lines a logged op keeps and drops, so changing
    * one changes how ops replay: it needs a new op version (shared/migrate.ts).
    */
   dmLogLines: 100,
-  apartLineBytes: 6 * 1024,
+  apartLineBytes: 8 * 1024,
   whispersKept: 50,
   whispersPerRoom: 400,
+  whisperBytesPerRoom: 640 * 1024,
   partyLinesKept: 50,
-  partyLinesPerRoom: 200,
+  partyLinesPerRoom: 400,
+  partyLineBytesPerRoom: 640 * 1024,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };
