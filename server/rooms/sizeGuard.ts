@@ -1,5 +1,6 @@
 import { chunkKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
-import { CHUNK_CELLS, type Trap } from "#shared/model.ts";
+import { lineAudience } from "#shared/logRings.ts";
+import { CHUNK_CELLS, type LogEntry, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, exploringSceneId, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
 import type { RoomState, Scene } from "#shared/model.ts";
@@ -65,6 +66,11 @@ import { isWritable } from "#shared/writable.ts";
  * their field as empty, and the room's caps hold them to 3 MiB on their own
  * (shared/limits.ts). So a map, a monster or a journal page never grows
  * into the blocks' room, and a DM's snapshot is at most 3 MiB plus theirs.
+ *
+ * So do the log's DM lines (shared/logRings.ts): their ring holds at most
+ * `dmLogLines` of at most `dmLogLineBytes` each on its own, and the measure
+ * leaves them out. A hidden area's reminder, or any other line no player
+ * gets, then never changes whether a player's op passes.
  */
 
 function roomFull(limit: number): LimitCheck {
@@ -335,9 +341,21 @@ export function roomLevelBytes(state: RoomState): number {
   const trapped = hasTraps(state);
   for (const name of ROOM_LEVEL) {
     if ((name === "trapLog" || name === "trapSeen") && trapped) bytes += fieldBytes(name) + (name === "trapLog" ? TRAP_LOG_RESERVE : TRAP_SEEN_RESERVE + DUE_RESERVE);
+    else if (name === "log") bytes += fieldBytes(name) + collectionBytes(measuredLog(state.log));
     else bytes += fieldBytes(name) + (name === "meta" || name === "encounter" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
   }
   return bytes;
+}
+
+const measuredLogs = new WeakMap<readonly LogEntry[], readonly LogEntry[]>();
+
+/** The log as the measures count it: without its DM lines, which ride outside them. The very list when it holds none. */
+export function measuredLog(log: readonly LogEntry[]): readonly LogEntry[] {
+  const cached = measuredLogs.get(log);
+  if (cached) return cached;
+  const kept = log.some((e) => lineAudience(e) === "dm") ? log.filter((e) => lineAudience(e) !== "dm") : log;
+  if (!isWritable(log)) measuredLogs.set(log, kept);
+  return kept;
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +436,7 @@ function trapsMeasure(state: RoomState): number {
 
 /** The room's own bytes as the guard counts them: everything exactly, the traps by their measures and reserves. */
 export function measuredStateBytes(state: RoomState): number {
-  return serializedBytes({ ...state, traps: {}, trapLog: [], trapSeen: [] }) + trapsMeasure(state);
+  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [] }) + trapsMeasure(state);
 }
 
 /**
@@ -430,8 +448,10 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   const traps = state.traps ?? {};
   const log = state.trapLog ?? [];
   const seen = state.trapSeen ?? [];
-  if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes;
-  return bytes - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
+  const roomLog = measuredLog(state.log);
+  const outside = roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog);
+  if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
+  return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
 
 /** The scene an entity of a scene-level collection belongs to. */
@@ -537,6 +557,8 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     const parsed = parseKey(key);
     // A trap's line is held by its log's reserve while the room has a trap.
     if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
+    // The log's DM lines ride outside the measures.
+    if (parsed?.kind === "log" && lineAudience(next as LogEntry) === "dm") continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
     const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value));

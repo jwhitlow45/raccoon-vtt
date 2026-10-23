@@ -24,7 +24,7 @@ import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts"
 import type { Op, ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor as testActor, character as testCharacter, companionBlock as testBlock, token as testToken } from "#shared/testutil.ts";
+import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
 import { RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
@@ -33,7 +33,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, measuredStateBytes, roomLevelBytes } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, measuredStateBytes, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 
 /**
@@ -2911,5 +2911,77 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
     }
     assert.deepEqual(answers[0], answers[1]);
     assert.ok(answers[0]!.includes("ok") && answers[0]!.some((a) => a.startsWith("quota")), answers[0]!.join(", "));
+  });
+});
+
+describe("a hidden line never changes whether a player's op passes (design 10.5, Log)", () => {
+  /** A player's hero on its turn, and a glyph hidden from players on its way or far off, at the same digits. */
+  function glyphRoom(glyphX: number): { state: RoomState; dm: Member; pc: Member } {
+    const dm = member("DM", "dm");
+    const pc = member("Ayla's player", "player");
+    const state = createInitialState({ roomName: "Glyphs", dm });
+    state.members[pc.id] = pc;
+    const sceneId = state.meta.playerSceneId!;
+    state.tokens.hero = testToken("hero", { sceneId, kind: "pc", name: "Ayla", disposition: "ally", x: 2, y: 5, ownerIds: [pc.id] });
+    state.templates.glyph = testTemplate("glyph", { sceneId, shape: "sphere", size: 10, origin: { x: glyphX, y: 5.5, z: 0 }, spell: "Glyph of Warding", visibility: "dm", ownerId: dm.id, triggers: ["enter"] });
+    state.encounter = {
+      rev: 0,
+      round: 1,
+      activeEntryId: "e-hero",
+      entries: [testEntry("e-hero", { tokenId: "hero", value: 15 })],
+      turnStart: { entryId: "e-hero", tokenId: "hero", sceneId, x: 2, y: 5, elevation: 0, seen: true, seq: 1 },
+    };
+    return { state, dm, pc };
+  }
+
+  const move: Op = { t: "token.move", tokenId: "hero", x: 6, y: 5 };
+
+  /** The player's move at these limits, through the room actor. */
+  async function answer(room: { state: RoomState; dm: Member; pc: Member }, sizeLimits: { stateLimit?: number; sceneLimit?: number }): Promise<string> {
+    const db = new FakeDb({ state: room.state, dmGrants: [room.dm.id] });
+    const base = deps(db);
+    const actor = await RoomActor.load({ ...base, options: { ...base.options, sizeLimits } });
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, room.pc, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, move);
+      const ev = await answerTo(phone.sent, 1);
+      assert.ok(ev !== "stuck");
+      const refusal = ev.rejects?.find((r) => r.n === 1);
+      return refusal ? `${refusal.code}: ${refusal.message}` : "ok";
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  }
+
+  test("a player's move at the edge of either limit gets the same answer with and without a hidden area's reminder", async () => {
+    const away = glyphRoom(9.5);
+    const into = glyphRoom(6.5);
+    const viewer = { memberId: away.pc.id, role: "player" as const };
+    const probe = applyOp(into.state, move, viewer, { seq: 1, at: new Date().toISOString() });
+    assert.ok(probe.ok && probe.log.some((e) => e.data?.type === "area" && e.data.hidden === true), "the move into the glyph writes a hidden reminder");
+    // The smallest limits at which the move passes in the room without the reminder, as the actor's guard measures it.
+    const passes = (which: "stateLimit" | "sceneLimit", limit: number) => {
+      const r = applyOp(away.state, move, viewer, { seq: 1, at: new Date().toISOString() });
+      assert.ok(r.ok);
+      const guard = new SizeGuard({ stateLimit: which === "stateLimit" ? limit : 1 << 30, sceneLimit: which === "sceneLimit" ? limit : 1 << 30 });
+      return guard.check(r.state, touchedScenes(away.state, r.state, r.touched), growthBound(away.state, r.state, r.touched), away.state).ok;
+    };
+    for (const which of ["stateLimit", "sceneLimit"] as const) {
+      let lo = 0;
+      let hi = 1 << 24;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (passes(which, mid)) hi = mid;
+        else lo = mid + 1;
+      }
+      for (const limit of [lo - 1, lo]) {
+        const answers = [await answer(away, { [which]: limit }), await answer(into, { [which]: limit })];
+        assert.equal(answers[1], answers[0], `${which} ${limit}`);
+        assert.equal(answers[0] === "ok", limit === lo, `${which} ${limit}: ${answers[0]}`);
+      }
+    }
   });
 });
