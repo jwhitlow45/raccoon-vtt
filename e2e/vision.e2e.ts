@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { BuildChunk, Drawing, EdgeFeature, RoomState, SightTile, Token } from "#shared/model.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import { decodeTile, getBit, isCellFullyFogged, TILE_CELLS } from "#shared/rules/fog.ts";
@@ -227,6 +227,61 @@ async function thornAt(at: { x: number; y: number; elevation?: number }): Promis
 /** The stopped walk's note on the player's screen: the card, whose sentence alone is its status. */
 function stopNote(text: string) {
   return player.locator("[data-stop-note]").filter({ has: player.getByRole("status").filter({ hasText: text }) });
+}
+
+/**
+ * Brings up the stopped walk's note at `size` at 130%, by step 9's walk into
+ * the platform's wall again, and checks it keeps between the bars: Close,
+ * Teleport here and the note's top and foot each take a tap, as a finger's
+ * would. `more` checks the note further. Then 390 x 844 at 100% again.
+ */
+async function stopNoteAt(size: { width: number; height: number }, shot: string, more?: (note: Locator) => Promise<void>): Promise<void> {
+  await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+  await player.setViewportSize(size);
+  await player.reload();
+  await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  await player.locator(".konvajs-content").first().waitFor();
+  // Back west of the platform's wall, then the walk of step 9 again.
+  await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
+  await thornAt({ x: 7, y: 14, elevation: 10 });
+  await player.waitForTimeout(500);
+  await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
+  await thornAt({ x: 8, y: 14, elevation: 10 });
+  const note = player.locator("[data-stop-note]");
+  await note.getByRole("button", { name: "Teleport here" }).waitFor();
+  await player.waitForTimeout(300);
+  /** Whether a tap at a point lands inside `target`. */
+  const lands = (target: string, x: number, y: number) =>
+    player.evaluate(
+      ([sel, px, py]) => {
+        const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
+        return doc.elementFromPoint(px, py)?.closest(sel) != null;
+      },
+      [target, x, y] as const,
+    );
+  const inReach = async (when: string) => {
+    const box = (await note.boundingBox())!;
+    for (const name of ["Close", "Teleport here"]) {
+      const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
+      assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle${when}`);
+    }
+    // Its top and its foot are the note's own, not under the top bar or the toolbar.
+    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), `the note's top is in reach${when}`);
+    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), `the note's foot is in reach, not under the toolbar${when}`);
+  };
+  await inReach("");
+  await shots.take(player, shot);
+  if (more) {
+    await more(note);
+    await inReach(", after the further checks");
+  }
+  await note.getByRole("button", { name: "Close" }).click();
+  await note.waitFor({ state: "detached" });
+  await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  await player.setViewportSize({ width: 390, height: 844 });
+  await player.reload();
+  await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  await player.locator(".konvajs-content").first().waitFor();
 }
 
 async function closeNote(text: string): Promise<void> {
@@ -649,45 +704,34 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
 
   test("lp2-2e. at 844 x 390 at 130% the stopped walk's note keeps between the bars, its Close and Teleport here in reach", async () => {
     // A phone held sideways at the largest interface size, where the note with its help is taller than the map between the bars.
-    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
-    await player.setViewportSize({ width: 844, height: 390 });
-    await player.reload();
-    await player.getByRole("status", { name: "Connected" }).first().waitFor();
-    await player.locator(".konvajs-content").first().waitFor();
-    // Back west of the platform's wall, then the walk of step 9 again.
-    await ops.send({ t: "token.move", tokenId: run.thornId, x: 7, y: 14, elevation: 10 });
-    await thornAt({ x: 7, y: 14, elevation: 10 });
-    await player.waitForTimeout(500);
-    await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
-    await thornAt({ x: 8, y: 14, elevation: 10 });
-    const note = player.locator("[data-stop-note]");
-    await note.getByRole("button", { name: "Teleport here" }).waitFor();
-    await player.waitForTimeout(300);
-    const box = (await note.boundingBox())!;
-    /** Whether a tap at a point lands inside `target`, as a finger's would. */
-    const lands = (target: string, x: number, y: number) =>
-      player.evaluate(
-        ([sel, px, py]) => {
-          const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
-          return doc.elementFromPoint(px, py)?.closest(sel) != null;
-        },
-        [target, x, y] as const,
-      );
-    for (const name of ["Close", "Teleport here"]) {
-      const b = (await note.getByRole("button", { name, exact: true }).boundingBox())!;
-      assert.ok(await lands("[data-stop-note] button", b.x + b.width / 2, b.y + b.height / 2), `${name} takes a tap at its middle`);
-    }
-    // Its top and its foot are the note's own, not under the top bar or the toolbar.
-    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + 3), "the note's top is in reach");
-    assert.ok(await lands("[data-stop-note]", box.x + box.width / 2, box.y + box.height - 3), "the note's foot is in reach, not under the toolbar");
-    await shots.take(player, "lp2-2e-stop-note-844x390-130");
-    await note.getByRole("button", { name: "Close" }).click();
-    await note.waitFor({ state: "detached" });
-    await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-    await player.setViewportSize({ width: 390, height: 844 });
-    await player.reload();
-    await player.getByRole("status", { name: "Connected" }).first().waitFor();
-    await player.locator(".konvajs-content").first().waitFor();
+    await stopNoteAt({ width: 844, height: 390 }, "lp2-2e-stop-note-844x390-130");
+  });
+
+  test("lp2-2f. at 480 x 320 at 130%, too short for the note's usual rows, its sentence and help scroll as its body, and the capped search's sentence too", async () => {
+    await stopNoteAt({ width: 480, height: 320 }, "lp2-2f-stop-note-480x320-130", async (note) => {
+      const body = note.locator("[data-stop-note-body]");
+      await body.waitFor();
+      /** The help's height in view inside the body once the body is scrolled to its end, and whether the body scrolls at all. */
+      const helpInView = () =>
+        body.evaluate((el) => {
+          type Box = { top: number; bottom: number };
+          const b = el as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number; getBoundingClientRect(): Box; querySelector(s: string): { getBoundingClientRect(): Box } | null };
+          const scrolls = b.scrollHeight > b.clientHeight + 1;
+          b.scrollTop = b.scrollHeight;
+          const outer = b.getBoundingClientRect();
+          const help = b.querySelector("p")!.getBoundingClientRect();
+          return { scrolls, shown: Math.min(outer.bottom, help.bottom) - Math.max(outer.top, help.top) };
+        });
+      const ordinary = await helpInView();
+      assert.ok(ordinary.scrolls, "the body scrolls");
+      assert.ok(ordinary.shown > 0, `the help shows ${ordinary.shown} px once scrolled to`);
+      // The capped search's sentence, which a scene this size cannot stage, put in the ordinary one's place: the body takes it, and Close and Teleport here stay where they were.
+      await note.getByRole("status").evaluate((el) => {
+        (el as unknown as { textContent: string }).textContent = "Too far to work out a way around. Stopped at a wall. There is no way around it that you have seen.";
+      });
+      const capped = await helpInView();
+      assert.ok(capped.scrolls && capped.shown > 0, `with the longer sentence the help shows ${capped.shown} px once scrolled to`);
+    });
   });
 
   test("mv-1. on Thorn's turn the player's drag walks round a wall's end, and the trail bends there", async () => {

@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { IconButton } from "../../components/IconButton.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { worldToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
@@ -22,6 +23,21 @@ const NO_FOG: Readonly<Record<string, FogTile>> = {};
 const UNMEASURED = 156;
 /** Lines the stopping sentence may take: more than the longest ("Too far to work out a way around. Stopped at a wall. …") needs at the note's width, so it always shows whole. */
 const TITLE_LINES = 6;
+/** The card's padding top and foot, its borders, and the gap between its rows. */
+const PAD_TOP = theme.space(1);
+const PAD_FOOT = theme.space(3);
+const GAP = theme.space(2);
+
+/**
+ * The least room between the bars in which the note keeps its usual look,
+ * the sentence in its header over Teleport here and the help: a header of
+ * all TITLE_LINES, the action, a line of the help, and the card's padding,
+ * borders and gaps. In less, as at 480 x 320 at 130%, those rows cannot
+ * all show, so the note is compact (StopNoteHost).
+ */
+export const FULL_NOTE_ROOM = Math.ceil(
+  Math.max(48, TITLE_LINES * theme.font.input * theme.leading.tight) + theme.touch + theme.font.small * theme.leading.body + PAD_TOP + PAD_FOOT + 2 * theme.line.border + 2 * GAP,
+);
 
 /**
  * The note after a stopped drop (docs/design-v1-maps-vision.md 4.1), beside
@@ -72,12 +88,16 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   const width = Math.min(PANE_WIDTH, props.viewport.width - 2 * theme.space(2));
   /*
    * No taller than the map the bars leave, inside the same margins, so on a
-   * short screen (844 x 390 at 130%) its foot never runs under the toolbar.
-   * The help under Teleport here scrolls first, so the sentence, Close and
-   * the action stay in view. cardPlace gets the capped height, its first
-   * frame's guess included, since it only keeps the top in bounds.
+   * short screen its foot never runs under the toolbar. cardPlace gets the
+   * capped height, its first frame's guess included, since it only keeps
+   * the top in bounds. Where the usual rows fit (FULL_NOTE_ROOM), the help
+   * under Teleport here is what scrolls. Where they cannot, the note is
+   * compact: the sentence and the help scroll together as its body, with
+   * Close beside them and Teleport here under them, both always in view
+   * (reviews LP2L2-ASTRA-2 and LP2L2-OPUS-10).
    */
   const room = Math.max(0, props.viewport.height - props.insets.top - props.insets.bottom - 2 * theme.space(2));
+  const compact = room < FULL_NOTE_ROOM;
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: Math.min(height, room), gap: theme.space(3), prefer: "below" });
   const close = () => slot.setState({ note: null, busy: false });
   const teleport = () => {
@@ -95,6 +115,19 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
     });
   };
 
+  // The whole sentence, wrapped: it says what stopped the walk. It alone is the status a screen reader hears when the note comes, not Close or the help.
+  const status = (
+    <span role="status" aria-live="polite">
+      {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}
+    </span>
+  );
+  // The note's one action, so the primary (docs/design-v1-visual.md 2.3). The help is its description, read with it.
+  const action = (
+    <Button variant="primary" size="sm" busy={busy} onClick={teleport} aria-describedby={helpId}>
+      {busy ? "Teleporting…" : "Teleport here"}
+    </Button>
+  );
+
   return (
     <div
       ref={ref}
@@ -107,9 +140,9 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
         maxHeight: room,
         zIndex: theme.z.pane,
         display: "grid",
-        gridTemplateRows: "auto auto minmax(0, 1fr)",
-        gap: theme.space(2),
-        padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
+        gridTemplateRows: compact ? "minmax(0, 1fr) auto" : "auto auto minmax(0, 1fr)",
+        gap: GAP,
+        padding: `${PAD_TOP}px ${theme.space(3)}px ${PAD_FOOT}px`,
         background: theme.color.surface,
         border: `${theme.line.border}px solid ${theme.color.border}`,
         borderRadius: theme.radius.lg,
@@ -118,23 +151,30 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
         fontSize: theme.font.body14,
       }}
     >
-      <PaneHeader
-        // The whole sentence, wrapped: it says what stopped the walk. It alone is the status a screen reader hears when the note comes, not Close or the help.
-        title={
-          <span role="status" aria-live="polite">
-            {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}
-          </span>
-        }
-        lines={TITLE_LINES}
-        onClose={close}
-      />
-      {/* The note's one action, so the primary (docs/design-v1-visual.md 2.3). The help is its description, read with it. */}
-      <Button variant="primary" size="sm" busy={busy} onClick={teleport} aria-describedby={helpId}>
-        {busy ? "Teleporting…" : "Teleport here"}
-      </Button>
-      <div style={{ minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
-        <Help id={helpId}>For Misty Step and anything else that passes walls. The walk to the wall is taken back, and the teleport does not count against Speed.</Help>
-      </div>
+      {compact ? (
+        <>
+          <div style={{ display: "flex", alignItems: "stretch", gap: theme.space(1), minHeight: 0 }}>
+            <div data-stop-note-body="" style={{ flex: 1, minWidth: 0, overflowY: "auto", overscrollBehavior: "contain", paddingTop: theme.space(3) }}>
+              <strong style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{status}</strong>
+              <Help id={helpId} style={{ marginTop: theme.space(1) }}>
+                {HELP}
+              </Help>
+            </div>
+            <IconButton icon="close" label="Close" onClick={close} style={{ alignSelf: "flex-start" }} />
+          </div>
+          {action}
+        </>
+      ) : (
+        <>
+          <PaneHeader title={status} lines={TITLE_LINES} onClose={close} />
+          {action}
+          <div style={{ minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+            <Help id={helpId}>{HELP}</Help>
+          </div>
+        </>
+      )}
     </div>
   );
 }
+
+const HELP = "For Misty Step and anything else that passes walls. The walk to the wall is taken back, and the teleport does not count against Speed.";

@@ -13,7 +13,7 @@ const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { RoomProvider } = await import("../../state/view.ts");
 const { stopNoteSlot } = await import("./store.ts");
 const { holdMarkSizes } = await import("./MoveLayer.tsx");
-const { StopNoteHost } = await import("./StopNote.tsx");
+const { FULL_NOTE_ROOM, StopNoteHost } = await import("./StopNote.tsx");
 const { GroundNotice } = await import("./GroundNotice.tsx");
 
 /*
@@ -88,12 +88,12 @@ describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () 
   // The capped search's note, the longest sentence there is.
   const note = { tokenId: "thorn", sceneId: "s1", blocker: "wall" as const, door: null, ghost: { x: 7, y: 4 }, aim: { x: 7.5, y: 4.5 }, at: { x: 4, y: 4 }, searched: true as const, capped: true as const, n: null };
   // 844 x 390 at 130%, in the chrome's own px: 649 x 300, the top bar 52 and the toolbar 60 over the map.
-  function render(height = 300): string {
+  function render(height = 300, width = 649): string {
     const scope = new RoomScope();
     const slot = scope.get(stopNoteSlot);
     slot.setState({ note });
     Object.assign(slot, { getInitialState: slot.getState });
-    return inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, camera: { x: 0, y: 0, scale: 12 }, viewport: { width: 649, height }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
+    return inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, camera: { x: 0, y: 0, scale: 12 }, viewport: { width, height }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
   }
   const topOf = (markup: string) => Number(/top:(\d+(?:\.\d+)?)px/.exec(markup)?.[1]);
 
@@ -111,10 +111,33 @@ describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () 
     assert.equal(topOf(markup), 52 + 8, "its top at the top bar's margin, its foot at the toolbar's");
   });
 
-  test("the help under Teleport here is the part that scrolls, so the sentence, Close and the action stay in view", () => {
-    const markup = render();
+  test("where its usual rows fit, the help under Teleport here is the part that scrolls, so the sentence, Close and the action stay in view", () => {
+    // 272 px between the bars.
+    const markup = render(400);
     assert.match(markup, /grid-template-rows:auto auto minmax\(0, 1fr\)/);
+    assert.match(markup, /-webkit-line-clamp:6/, "the sentence in the header");
     assert.match(markup, /<div style="min-height:0;overflow-y:auto;overscroll-behavior:contain"><p id="[^"]+"[^>]*>For Misty Step/);
+    assert.doesNotMatch(markup, /data-stop-note-body/);
+  });
+
+  test("its usual rows need FULL_NOTE_ROOM: a six-line sentence, Teleport here, a line of help, the padding, borders and gaps", () => {
+    assert.equal(FULL_NOTE_ROOM, 212);
+    assert.doesNotMatch(render(FULL_NOTE_ROOM + 52 + 60 + 16), /data-stop-note-body/, "at the room it needs, the usual look");
+    assert.match(render(FULL_NOTE_ROOM + 52 + 60 + 15), /data-stop-note-body/, "a pixel less, compact");
+  });
+
+  // 480 x 320 at 130% in the chrome's px: 369 x 246, which leaves 118 px between the bars (review LP2L2-ASTRA-2).
+  test("compact where they cannot fit: the capped search's long sentence and the help scroll together as its body, Close beside them and Teleport here under them", () => {
+    const markup = render(246, 369);
+    assert.match(markup, /max-height:118px/);
+    assert.match(markup, /grid-template-rows:minmax\(0, 1fr\) auto/);
+    const body = /<div data-stop-note-body=""[^>]*overflow-y:auto[^>]*>([\s\S]*?)<\/div><button/.exec(markup);
+    assert.ok(body, "a scrolling body, then Close");
+    assert.match(body[1]!, /<span role="status" aria-live="polite">Too far to work out a way around\. Stopped at a wall\. There is no way around it that you have seen\.<\/span>/);
+    assert.match(body[1]!, />For Misty Step and anything else that passes walls\./);
+    assert.doesNotMatch(body[1]!, /<button/, "Close and Teleport here stand outside the body");
+    assert.match(markup, /<\/div><button[^>]*aria-label="Close"/);
+    assert.match(markup, /aria-describedby="[^"]+"[^>]*>(?:<[^>]+>)*Teleport here/);
   });
 });
 
