@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_CHROME } from "../canvas/barDock.ts";
-import { alertsSummary, dockFits, drawsPaneRow, foldsUnderSheet, paneDockFits, sideSheetRoom, summaryFor, type ColumnAlert } from "./fold.ts";
+import { alertsSummary, dockFits, drawsPaneRow, foldsUnderSheet, paneDockFits, rollsLineSays, sideSheetRoom, summaryFor, type ColumnAlert } from "./fold.ts";
 
 describe("foldsUnderSheet", () => {
   test("a phone in portrait folds while a sheet is open", () => {
@@ -233,6 +233,17 @@ describe("a rolls' line whose words name only its lead (LP16-PT-3)", () => {
   test("a line that names everything it stands for adds nothing", () => {
     assert.equal(alertsSummary({ ...desk, text: "Rolls 1/3", unnamed: 0 }, [])?.more, "");
     assert.equal(alertsSummary({ text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 3 }, [])?.more, "");
+  });
+
+  test("the folded alerts' status names a trap once (LP18-TO-2)", () => {
+    assert.equal(rollsLineSays({ text: "Dart plate went off", name: "Dart plate went off" }), "Dart plate went off.");
+    assert.equal(rollsLineSays(desk), "Dart plate went off, 2 asks for saves.");
+    assert.equal(rollsLineSays({ text: "Thorn asks for saves", name: "Thorn asks for saves" }), "Thorn asks for saves.");
+  });
+
+  test("and leads with the line's words when the name does not start with them", () => {
+    assert.equal(rollsLineSays({ text: "Rolls 1/3", name: "rolls 1 of 3 answered" }), "Rolls 1/3: rolls 1 of 3 answered.");
+    assert.equal(rollsLineSays({ text: "Roll asked", name: "the DM asks for a Wisdom check" }), "Roll asked: the DM asks for a Wisdom check.");
   });
 });
 

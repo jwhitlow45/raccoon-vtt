@@ -10,7 +10,7 @@ import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { GRAB_ATTR, GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
-import { alertsSummary, DOCK_PX, dockSlot, useFoldUnderPane, type AlertsSummary, type SummaryHides } from "./fold.ts";
+import { alertsSummary, DOCK_PX, dockSlot, rollsLineSays, useFoldUnderPane, type AlertsSummary, type SummaryHides } from "./fold.ts";
 import { inModal, useModalSlot } from "./modalSlot.tsx";
 
 /*
@@ -393,7 +393,7 @@ export function FoldStatus(props: { folded: boolean }) {
   const arrived = useRef(new Map<string, number>());
   const wasFolded = useRef(props.folded);
   const rollsKey = rolls ? `rolls:${rolls.text}:${rolls.name}` : null;
-  const rollsSays = rolls ? `${rolls.text}: ${rolls.name}.` : null;
+  const rollsSays = rolls ? rollsLineSays(rolls) : null;
   useEffect(() => {
     const items = alerts.map((a) => ({ id: a.id, says: a.says }));
     if (rollsKey !== null && rollsSays !== null) items.push({ id: rollsKey, says: rollsSays });

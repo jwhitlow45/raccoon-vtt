@@ -239,6 +239,19 @@ export type AlertsSummary = {
 
 type Item = { kind: SummaryKind; id: string; text: string; phrase: string };
 
+/**
+ * What the folded alerts' status region says for the rolls' line
+ * (pages/RoomDock.tsx FoldStatus). A name that already starts with the
+ * line's words, as the DM desk's "Dart plate went off" over two asks for
+ * saves, is said alone, so the trap is named once: "Dart plate went off, 2
+ * asks for saves." (review LP18-TO-2). Otherwise the words lead: "Rolls
+ * 1/3: rolls 1 of 3 answered." The summary button's own name keeps its
+ * visible words first either way, as a name must start with what it shows.
+ */
+export function rollsLineSays(line: Pick<RollsLine, "text" | "name">): string {
+  return line.name.startsWith(line.text) ? `${line.name}.` : `${line.text}: ${line.name}.`;
+}
+
 /** "Bless ended on Thorn." as a phrase in a list: no closing stop. */
 function phrase(text: string): string {
   return text.replace(/[.!]+$/, "");
