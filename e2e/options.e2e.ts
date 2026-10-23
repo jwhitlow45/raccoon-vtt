@@ -899,6 +899,27 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await reloadAt(player, 1);
   });
 
+  test("lp2-2d. a kept ruler's remove is a row at the left with the eraser before its words", async () => {
+    await reloadAt(player, 1);
+    await view(player, playerCdp, DESK);
+    await selectTool(player, "r");
+    await options(player).getByRole("button", { name: /^Kept rulers/ }).click();
+    const kept = player.getByRole("dialog", { name: "Kept rulers" });
+    await kept.waitFor();
+    const removes = kept.getByRole("button", { name: /^Remove the kept ruler: / });
+    const group = (await kept.getByRole("group", { name: "Kept rulers" }).boundingBox())!;
+    assert.ok((await removes.count()) > 0);
+    for (const row of [...(await removes.all()), kept.getByRole("button", { name: "Remove all" })]) {
+      const box = (await row.boundingBox())!;
+      const icon = (await row.locator("svg").first().boundingBox())!;
+      assert.ok(Math.abs(box.width - group.width) < 1, `the row spans the popover: ${box.width} of ${group.width}`);
+      assert.ok(icon.x - box.x < 20, `the eraser stands at the row's left, ${icon.x - box.x} px in`);
+    }
+    await shots.take(player, "lp2-2d-kept-rulers");
+    await closePopover(player);
+    await key(player, "v");
+  });
+
   test("lp2-2c. a creature's label keeps off the name of a trap beside it", async () => {
     await reloadAt(dm, 1);
     await view(dm, dmCdp, DESK);

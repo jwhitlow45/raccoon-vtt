@@ -1376,6 +1376,12 @@ export function OptButton(props: {
    * words, as every row there is.
    */
   iconOnly?: "always" | "fine";
+  /**
+   * A row as wide as its popover with its icon and words at the left, as
+   * ⋯'s rows are, where it stands in a chip's own content rather than in a
+   * slot: a kept ruler's remove in the Kept rulers popover.
+   */
+  row?: boolean;
 }) {
   const place = useSlotPlace();
   if (place?.at === "measure") return <OptButtonFace {...props} form={place.form} />;
@@ -1402,7 +1408,7 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
   const variant = tone ?? "secondary";
   const short = place?.at === "row" && place.form === "compact" && props.short !== undefined;
   const iconAlone = place?.at === "row" && place.form === "compact" && props.compactIcon === true;
-  const row = inPopover(place);
+  const row = inPopover(place) || props.row === true;
   const children = short ? props.short : row && props.children === undefined && props.rowWords ? props.rowWords : props.children;
   const full = props.label ?? textOf(props.children);
   const act = () => {

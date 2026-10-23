@@ -8,7 +8,7 @@ const { MeasuringContext } = await import("../../components/measuring.ts");
 const { Segmented } = await import("../../components/Segmented.tsx");
 const { Swatches } = await import("../../components/Swatches.tsx");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { ConfirmButton, shortName, StableWords, ValueChip } = await import("./controls.tsx");
+const { ConfirmButton, OptButton, shortName, StableWords, ValueChip } = await import("./controls.tsx");
 
 /*
  * The options kit's controls (docs/design-v1-tool-options.md 6.2 and 11),
@@ -90,5 +90,22 @@ describe("a value chip (11)", () => {
     const markup = inRoom(createElement(ValueChip, { label: "Nudge", kind: "setting", plain: true, value: "nudge", options: [{ key: "nudge", words: "Nudge" }], title: "Move or size the box a pixel at a time", children: "arrows" }));
     assert.doesNotMatch(markup, /aria-label=/);
     assert.match(markup, /title="Move or size the box a pixel at a time"/);
+  });
+});
+
+describe("a kept ruler's remove (docs/design-v1-look-pass-2.md D17)", () => {
+  const remove = (row: boolean) =>
+    inRoom(createElement(OptButton, { tone: "danger", icon: "eraser", row, label: "Remove the kept ruler: Pat · 30 ft", onClick: () => undefined, children: "Pat · 30 ft" }));
+
+  test("is a danger row as wide as its popover, the eraser and its words at the left, as ⋯'s rows are", () => {
+    const markup = remove(true);
+    assert.match(markup, /justify-content:flex-start/);
+    assert.match(markup, /width:100%/);
+    assert.match(markup, /<svg[\s\S]*<\/svg>[\s\S]*Pat · 30 ft<\/button>/, "the eraser stands before the words");
+    assert.match(markup, /aria-label="Remove the kept ruler: Pat · 30 ft"/, "its name is kept");
+  });
+
+  test("outside a popover's rows a kit button keeps the centered look", () => {
+    assert.doesNotMatch(remove(false), /justify-content:flex-start/);
   });
 });
