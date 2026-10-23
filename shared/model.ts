@@ -2137,6 +2137,7 @@ export type LogEntry = {
   at: string;
   kind: "chat" | "whisper" | "event";
   from?: MemberId;
+  /** A whisper's recipients, or the one reader of a party line's copy (shared/logRings.ts). */
   to?: MemberId[];
   text?: string;
   data?: LogEvent;

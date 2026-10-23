@@ -67,10 +67,11 @@ import { isWritable } from "#shared/writable.ts";
  * (shared/limits.ts). So a map, a monster or a journal page never grows
  * into the blocks' room, and a DM's snapshot is at most 3 MiB plus theirs.
  *
- * So do the log's DM lines (shared/logRings.ts): their ring holds at most
- * `dmLogLines` of at most `dmLogLineBytes` each on its own, and the measure
- * leaves them out. A hidden area's reminder, or any other line no player
- * gets, then never changes whether a player's op passes.
+ * So do the log's DM lines and party lines' copies (shared/logRings.ts):
+ * their rings hold at most `dmLogLines` and each player's `partyLinesKept`
+ * on their own, each of at most `apartLineBytes`, and the measure leaves
+ * them out. A hidden area's reminder, or any other line no player gets,
+ * then never changes whether a player's op passes.
  */
 
 function roomFull(limit: number): LimitCheck {
@@ -349,11 +350,12 @@ export function roomLevelBytes(state: RoomState): number {
 
 const measuredLogs = new WeakMap<readonly LogEntry[], readonly LogEntry[]>();
 
-/** The log as the measures count it: without its DM lines, which ride outside them. The very list when it holds none. */
+/** The log as the measures count it: without its DM lines and party lines' copies, which ride outside them. The very list when it holds neither. */
 export function measuredLog(log: readonly LogEntry[]): readonly LogEntry[] {
   const cached = measuredLogs.get(log);
   if (cached) return cached;
-  const kept = log.some((e) => lineAudience(e) === "dm") ? log.filter((e) => lineAudience(e) !== "dm") : log;
+  const apart = (e: LogEntry) => lineAudience(e) === "dm" || lineAudience(e) === "party";
+  const kept = log.some(apart) ? log.filter((e) => !apart(e)) : log;
   if (!isWritable(log)) measuredLogs.set(log, kept);
   return kept;
 }
@@ -557,8 +559,8 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     const parsed = parseKey(key);
     // A trap's line is held by its log's reserve while the room has a trap.
     if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
-    // The log's DM lines ride outside the measures.
-    if (parsed?.kind === "log" && lineAudience(next as LogEntry) === "dm") continue;
+    // The log's DM lines and party lines' copies ride outside the measures.
+    if (parsed?.kind === "log" && (lineAudience(next as LogEntry) === "dm" || lineAudience(next as LogEntry) === "party")) continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
     const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value));

@@ -686,20 +686,22 @@ describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
 });
 
 describe("party lines in an import (shared/logRings.ts)", () => {
-  test("each reader's copies count on in their own run, and a line whose readers did not come through is the DM's alone", () => {
+  test("each reader's copies count on in their own run, a copy whose reader did not come through goes, and the DM reads each line once", () => {
     const state = room();
     state.tokens.pet = token("pet", { visibility: "dm", ownerIds: ["p1"] });
     state.tokens.mount = token("mount", { visibility: "dm", ownerIds: ["p1", "p2"] });
     state.tokens.gob = token("gob", { visibility: "dm" });
-    const hp = (id: string, tokenId: string, to: string[]) => ({ id, at: AT, kind: "event" as const, to, data: { type: "hp" as const, tokenId, change: "damage" as const, amount: 1 } });
+    const hp = (id: string, tokenId: string, to?: string[]) => ({ id, at: AT, kind: "event" as const, ...(to ? { to } : {}), data: { type: "hp" as const, tokenId, change: "damage" as const, amount: 1 } });
     state.log = [
       { id: "1:0", at: AT, kind: "chat", from: "p1", text: "hi" },
       hp("2:802000", "pet", ["p1"]),
+      hp("2:900000", "pet"),
       hp("3:802000", "mount", ["p1"]),
-      hp("3:804000", "mount", ["p2", "p1"]),
-      // Lines of members who left before the export: the DM's copy, and another reader's.
+      hp("3:804000", "mount", ["p2"]),
+      hp("3:900000", "mount"),
+      // A line of a member who left before the export: their copy, and the DM's line.
       hp("4:806000", "gob", ["gone1"]),
-      hp("4:808000", "gob", ["gone2", "gone1"]),
+      hp("4:900000", "gob"),
     ];
     const memberIds = new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]);
     const out = remapState(state, { assets: new Map(), memberIds });
@@ -709,13 +711,15 @@ describe("party lines in an import (shared/logRings.ts)", () => {
       ["0:0", undefined],
       [`0:${run("m-p1")}`, ["m-p1"]],
       [`0:${run("m-p1") + 1}`, ["m-p1"]],
-      [`0:${run("m-p2")}`, ["m-p2", "m-p1"]],
+      [`0:${run("m-p2")}`, ["m-p2"]],
       [`0:${DM_LINE_BASE}`, undefined],
+      [`0:${DM_LINE_BASE + 1}`, undefined],
+      [`0:${DM_LINE_BASE + 2}`, undefined],
     ]);
     const p2 = projectState(out, { memberId: "m-p2", role: "player" }, { sceneId: "s1" }).log;
     assert.deepEqual(p2.map((e) => [e.id, e.to]), [["0:0", undefined], [`0:${run("m-p2")}`, ["m-p2"]]]);
     const dm = projectState(out, { memberId: "m-dm", role: "dm" }, { sceneId: "s1" }).log;
-    assert.deepEqual(dm.map((e) => e.id), ["0:0", `0:${run("m-p1")}`, `0:${run("m-p1") + 1}`, `0:${DM_LINE_BASE}`], "the DM reads each line once");
+    assert.deepEqual(dm.map((e) => e.id), ["0:0", `0:${DM_LINE_BASE}`, `0:${DM_LINE_BASE + 1}`, `0:${DM_LINE_BASE + 2}`], "the DM reads each line once");
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
@@ -764,26 +768,27 @@ describe("an imported log (importRoom)", () => {
     const state = room();
     state.tokens.t1 = token("t1");
     const roll = { formula: "5d1000-1000", faces: [1000, 1000, 1000, 1000, 1000], total: 4000, label: "x".repeat(LIMITS.diceLabelChars), tokenId: "t1", critOn: 19 as const, save: "dex" as const, hidden: true as const };
-    // The DM's dice lines of 20 hidden rolls, each with text no event line uses.
+    // The DM's dice lines of 20 hidden rolls, each with text and a sender no event line uses.
     state.log = Array.from({ length: MAX_LOG_LINES }, (_, i) => ({
-      id: `${i + 1}:900000`,
+      id: `1${String(i + 1).padStart(17, "0")}:900000`,
       at: AT,
       kind: "event" as const,
+      from: "f".repeat(64),
       text: "\u{1F600}".repeat(1_000),
       data: { type: "dice" as const, by: "dm1", to: "dm" as const, rolls: Array.from({ length: LIMITS.diceRollsPerOp }, () => roll) },
     }));
     const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
-    assert.ok(serializedBytes(parsed.state.log[0]) > LIMITS.dmLogLineBytes);
+    assert.ok(serializedBytes(parsed.state.log[0]) > LIMITS.apartLineBytes);
     const { room: out, archive } = imported(parsed.state);
     assert.equal(archive.length, MAX_LOG_LINES, "the archive takes them all");
     assert.equal(out.log.length, LIMITS.dmLogLines);
     for (const e of out.log) {
-      assert.ok(serializedBytes(e) <= LIMITS.dmLogLineBytes);
+      assert.ok(serializedBytes(e) <= LIMITS.apartLineBytes);
       assert.equal(e.data?.type === "dice" && e.data.rolls.length, LIMITS.diceRollsPerOp, "the text went, and every roll stays");
     }
     // So the lines the measures leave out are bounded as in any room.
-    assert.ok(serializedBytes(out) - measuredStateBytes(out) <= LIMITS.dmLogLines * LIMITS.dmLogLineBytes);
+    assert.ok(serializedBytes(out) - measuredStateBytes(out) <= LIMITS.dmLogLines * LIMITS.apartLineBytes);
     reachable(out, archive, "m-dm", "dm", "full of notes");
   });
 

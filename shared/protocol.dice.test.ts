@@ -5,7 +5,7 @@ import { batchRolls } from "./dice/batch.ts";
 import { FORMULA_ERRORS } from "./dice/formula.ts";
 import { resolveDiceOp } from "./dice/resolve.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
-import { cutDmLine } from "./logRings.ts";
+import { cutLine } from "./logRings.ts";
 import { clientOpSchema, opSchema, serverOnlyOpSchema, type OpOf } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, actor, chance, effect, int, pick, rng, room, scene, token } from "./testutil.ts";
@@ -137,9 +137,9 @@ describe("the largest dice line (Appendix B)", () => {
     assert.ok(line.data?.type === "dice" && line.data.rolls.every((r) => r.fails === "unconscious"), "a free save for an Unconscious creature fails");
     const bytes = serializedBytes(line);
     assert.ok(bytes <= 4_608, `${bytes} bytes`);
-    // So a DM line, which is cut to its bound when written (shared/logRings.ts), never loses a roll.
-    assert.ok(4_608 <= LIMITS.dmLogLineBytes);
-    assert.equal(cutDmLine(line), line);
+    // So a DM line or a copy, each cut to its bound when written (shared/logRings.ts), never loses a roll.
+    assert.ok(4_608 <= LIMITS.apartLineBytes);
+    assert.equal(cutLine(line), line);
     assert.ok(serializedBytes(resolved.op) <= 5_120, `the stored op is ${serializedBytes(resolved.op)} bytes`);
   });
 });

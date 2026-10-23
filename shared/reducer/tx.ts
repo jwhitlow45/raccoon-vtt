@@ -1,5 +1,5 @@
 import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
-import { cutDmLine, DM_LINE_BASE, droppedLines, MAX_LOG, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
+import { cutLine, DM_LINE_BASE, droppedLines, MAX_LOG, neverRead, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
 import { logsByAudience } from "../migrate.ts";
 import type {
   Actor,
@@ -14,7 +14,7 @@ import type {
   TokenKind,
   Viewer,
 } from "../model.ts";
-import { hashValue, lineReaders, seenByNonOwners } from "../project.ts";
+import { hashValue, lineReach, seenByNonOwners } from "../project.ts";
 import type { ActorTarget, RefusalCode, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { decodeTile } from "../rules/fog.ts";
@@ -89,8 +89,15 @@ export class Tx {
   private readonly bookkeeping = new Set<EntityKey>();
   private logIndex = 0;
   private dmLineIndex = 0;
-  /** Each reader's party lines this op has written (Tx.addLog). */
-  private readonly partyLines = new Map<string, number>();
+  /**
+   * The lines this op wrote whose readers wait for its end (settleLog), in
+   * the order written: each line some player may read, numbered with the
+   * shared lines for now, an event line with the DM's number it takes should
+   * no player or only some read it then, and the players' trap lines, which
+   * count with the shared lines.
+   */
+  private readonly unsettled: ({ line: LogEntry; dmIndex: number } | { trapSeen: LogEntry })[] = [];
+  private settled = false;
 
   constructor(state: RoomState, actor: Viewer, env: Env) {
     this.state = { ...state };
@@ -104,6 +111,7 @@ export class Tx {
    * writes, so the rules' caches may keep answers about them (writable.ts).
    */
   finish(): void {
+    this.settleLog();
     markFinished(this.state);
     for (const name of this.copied) markFinished(this.state[name] as object);
   }
@@ -214,24 +222,12 @@ export class Tx {
   /**
    * Appends a log entry with an id derived from the envelope, so a replay
    * never inserts it twice. The log keeps each audience's lines apart
-   * (shared/logRings.ts), each fixed by who could read the line now
-   * (lineReaders), the room as the op has left it so far:
-   *
-   * - A line every player may read counts on from 0 in the op.
-   * - A line no player could read counts on from DM_LINE_BASE, as the DM's
-   *   trap lines do, so it never moves the id of a later line a player
-   *   gets, and is cut to its ring's bound (cutDmLine).
-   * - A line only some players could read is written once for each, in
-   *   that reader's own run from PARTY_LINE_BASE, so the ids each player
-   *   gets in one op count on without a gap whatever the op wrote for
-   *   others. Its first reader's copy stands for it in the DM's log and is
-   *   the one returned. A reader's 2,000th line in one op, which no op
-   *   comes near, would leave their run, so such a line goes to the DM
-   *   alone.
-   *
-   * Each ring then drops only its own oldest, so a line never pushes out
-   * one a viewer holds who could not read it. Ops stored before op version
-   * 19 kept one ring for every line, numbered in order, and replay so.
+   * (shared/logRings.ts), each fixed by who reads the line in the room as
+   * the op leaves it (settleLog). Until then the op reads its lines in the
+   * order it wrote them, a line no player could ever read (neverRead) the
+   * DM's at once, and the rest counted with the shared lines. Ops stored
+   * before op version 19 kept one ring for every line, numbered in order,
+   * and replay so.
    */
   addLog(entry: Omit<LogEntry, "id" | "at">): LogEntry {
     if (!logsByAudience(this.env.opVersion)) {
@@ -240,28 +236,95 @@ export class Tx {
       while (log.length > MAX_LOG) this.write(keys.log(log[0]!.id), null);
       return full;
     }
-    let readers = entry.kind === "whisper" ? "all" : lineReaders(this.state, entry);
-    if (readers !== "all" && readers.some((id) => (this.partyLines.get(id) ?? 0) >= PARTY_SLOT)) readers = [];
-    let first: LogEntry;
-    if (readers === "all") first = this.appendLine(entry, this.logIndex++);
-    else if (readers.length === 0) first = this.appendLine(entry, DM_LINE_BASE + this.dmLineIndex++, cutDmLine);
-    else {
+    const event = entry.kind === "event" && entry.data !== undefined;
+    if (event && neverRead(entry.data!)) return this.appendLine(entry, DM_LINE_BASE + this.dmLineIndex++, cutLine);
+    const line = this.appendLine(entry, this.logIndex++);
+    this.unsettled.push({ line, dmIndex: event ? DM_LINE_BASE + this.dmLineIndex++ : -1 });
+    return line;
+  }
+
+  /**
+   * Fixes the audience of every line the op wrote by the real projection of
+   * the room as the op leaves it (lineReach), so a line counts for exactly
+   * the players who read it when it arrives:
+   *
+   * - A line every player may read counts on from 0 in the op, with the
+   *   players' trap lines.
+   * - A line no player could read counts on from DM_LINE_BASE, as the DM's
+   *   trap lines do, so it never moves the id of a line a player gets, and
+   *   is cut to its ring's bound (cutLine). Each event line took its number
+   *   there when written, so the DM's lines keep the op's order.
+   * - A line only some players could read is such a DM line, and each
+   *   reader gets a copy of their own: the line as they read it, cut as DM
+   *   lines are, in that reader's own run from PARTY_LINE_BASE, so the ids
+   *   each player gets in one op count on without a gap whatever the op
+   *   wrote for others. A reader's 2,000th copy in one op, which no op comes
+   *   near, would leave their run, so such a line stays the DM's alone.
+   *
+   * Each ring then drops only its own oldest, once, so a line never pushes
+   * out one a viewer holds who could not read it.
+   */
+  private settleLog(): void {
+    if (this.settled || !logsByAudience(this.env.opVersion)) return;
+    this.settled = true;
+    const reaches = this.unsettled.map((u) => ("line" in u && u.line.kind === "event" ? lineReach(this.state, u.line) : null));
+    if (reaches.some((r) => r !== null && r.audience !== "shared")) {
+      // Only an op whose trap step wrote a players' line meets their log, which a room from before traps lacks.
+      const held = new Set<LogEntry>(this.unsettled.some((u) => "trapSeen" in u) ? this.collection("trapSeen") : []);
+      for (const u of this.unsettled) {
+        if ("line" in u) this.write(keys.log(u.line.id), null);
+        else if (held.has(u.trapSeen)) this.write(keys.trapSeen(u.trapSeen.id), null);
+      }
       const ranks = rosterRanks(this.state.members);
-      const copies = readers.map((reader, i) => {
-        const count = this.partyLines.get(reader) ?? 0;
-        this.partyLines.set(reader, count + 1);
-        return this.appendLine({ ...entry, to: i === 0 ? [reader] : [reader, readers[0]!] }, partyIndex(ranks.get(reader)!, count));
+      const copies = new Map<string, number>();
+      const settled = new Map<LogEntry, LogEntry[]>();
+      let index = 0;
+      this.unsettled.forEach((u, i) => {
+        if (!("line" in u)) {
+          // A trap line its ring dropped in this same op stays dropped.
+          if (held.has(u.trapSeen)) this.write(keys.trapSeen(`${this.env.seq}:${index}`), { ...u.trapSeen, id: `${this.env.seq}:${index}` });
+          index++;
+          return;
+        }
+        const { id: _id, at: _at, ...entry } = u.line;
+        const reach = reaches[i] ?? { audience: "shared" };
+        if (reach.audience === "shared") {
+          settled.set(u.line, [this.writeLine(entry, index++)]);
+          return;
+        }
+        const lines = [this.writeLine(entry, u.dmIndex, cutLine)];
+        if (reach.audience === "party" && reach.views.every(([reader]) => (copies.get(reader) ?? 0) < PARTY_SLOT)) {
+          for (const [reader, view] of reach.views) {
+            const count = copies.get(reader) ?? 0;
+            copies.set(reader, count + 1);
+            lines.push(this.writeLine({ kind: entry.kind, to: [reader], data: view }, partyIndex(ranks.get(reader)!, count), cutLine));
+          }
+        }
+        settled.set(u.line, lines);
       });
-      first = copies[0]!;
+      this.log = this.log.flatMap((e) => settled.get(e) ?? [e]);
+      // A number a line held only until now was never in the room, so the op never touched it.
+      const unused = new Set<EntityKey>();
+      for (const u of this.unsettled) {
+        const key = "line" in u ? keys.log(u.line.id) : keys.trapSeen(u.trapSeen.id);
+        if (this.before.get(key) === null && readEntity(this.state, key) === null) unused.add(key);
+      }
+      for (const key of unused) this.before.delete(key);
+      for (let i = this.order.length - 1; i >= 0; i--) if (unused.has(this.order[i]!)) this.order.splice(i, 1);
     }
     for (const id of droppedLines(this.collection("log"), this.state.members)) this.write(keys.log(id), null);
-    return first;
   }
 
   /** Writes a log line numbered `index` in this op, as `fit` makes it, and keeps it for the archive. */
   private appendLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
-    const full = fit({ id: `${this.env.seq}:${index}`, at: this.env.at, ...entry });
+    const full = this.writeLine(entry, index, fit);
     this.log.push(full);
+    return full;
+  }
+
+  /** Writes a log line numbered `index` in this op, as `fit` makes it. */
+  private writeLine(entry: Omit<LogEntry, "id" | "at">, index: number, fit: (line: LogEntry) => LogEntry = (line) => line): LogEntry {
+    const full = fit({ id: `${this.env.seq}:${index}`, at: this.env.at, ...entry });
     this.write(keys.log(full.id), full);
     return full;
   }
@@ -279,13 +342,17 @@ export class Tx {
    * only the DM sees never moves the id of a later line a player gets, and
    * the DM's merged log never meets two lines with one id. Each log keeps
    * only its own newest `keep`, so a line one audience cannot see never
-   * pushes out one it could. Trap lines never reach the stored log.
+   * pushes out one it could. Trap lines never reach the stored log. A
+   * players' line may take a new number when the op is done, with the
+   * shared lines it counts among (settleLog), so only the DM's are named
+   * elsewhere, as an occurrence names its line.
    */
   addTrapLine(ring: "trapLog" | "trapSeen", data: LogEvent, keep: number): LogEntry {
     const index = ring === "trapLog" ? DM_LINE_BASE + this.dmLineIndex++ : this.logIndex++;
     const line: LogEntry = { id: `${this.env.seq}:${index}`, at: this.env.at, kind: "event", data };
     const key = ring === "trapLog" ? keys.trapLog : keys.trapSeen;
     this.write(key(line.id), line);
+    if (ring === "trapSeen") this.unsettled.push({ trapSeen: line });
     const lines = this.collection(ring);
     while (lines.length > keep) this.write(key(lines[0]!.id), null);
     return line;

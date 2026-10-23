@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "./keys.ts";
+import { eventLines } from "./logRings.ts";
 import type { JournalPage, Pin, RollRequest, RoomState, Viewer } from "./model.ts";
 import { dependents, projectEntity, projectState, visibleAssetIds, type ProjectedToken } from "./project.ts";
 import { applyOp } from "./reducer.ts";
@@ -266,7 +267,7 @@ describe("roll requests", () => {
     const ops: [Parameters<typeof applyOp>[1], Viewer][] = [[answer(12), P1], [mark("pass"), DM], [mark("fail", "vex"), DM]];
     const hiddenDc = play(asked({ dcShown: false }), ops);
     assert.deepEqual(
-      hiddenDc.log.map((e) => e.data),
+      eventLines(hiddenDc.log).map((e) => e.data),
       [
         { type: "roll", test: hiddenDc.rolls.r1!.test, characterId: "thorn", total: 12, result: "fail", dc: 15 },
         { type: "roll", test: hiddenDc.rolls.r1!.test, characterId: "thorn", total: 12, result: "pass", dc: 15 },

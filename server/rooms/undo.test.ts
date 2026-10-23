@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "#shared/keys.ts";
+import { eventLines } from "#shared/logRings.ts";
 import type { Token, Viewer } from "#shared/model.ts";
 import { MAX_RESTORE_ENTRIES, type ClientOp, type Op, type RestoreEntry } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -617,7 +618,7 @@ describe("asks for saves and undo (docs/design-v1-player-save-spell.md 5.6)", ()
     const { rev: _rev, ...back } = undone.casts.k1!;
     const { rev: _was, ...was } = before.casts.k1!;
     assert.deepEqual(back, was);
-    assert.equal(undone.log.filter((e) => e.data?.type === "cast").length, 1, "the undo writes no line of its own, so no toast");
+    assert.equal(eventLines(undone.log).filter((e) => e.data?.type === "cast").length, 1, "the undo writes no line of its own, so no toast");
   });
 });
 

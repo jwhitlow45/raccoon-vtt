@@ -5,28 +5,28 @@ import { isWritable } from "./writable.ts";
 
 /**
  * The room log's rings (design 7.3, Log). The log the room holds in memory
- * is one list in id order, and each line has one audience, fixed when it
- * is written by who could read it then (shared/project.ts lineReaders):
+ * is one list in id order, and each line has one audience, fixed when its
+ * op is done by who reads it in the room the op leaves (shared/project.ts
+ * lineReach, Tx.settleLog):
  *
  * - A shared line may reach every player, each by what they see when they
  *   read it. The shared lines keep their newest MAX_LOG.
  * - A DM line reaches no player: no player could read it when it was
  *   written, and none who could later, such as one lent its creature, ever
- *   gets it. The DM lines keep their newest `dmLogLines`, each cut to
- *   `dmLogLineBytes` when written (cutDmLine). So the size guard can leave
- *   every one of them out of its measure (server/rooms/sizeGuard.ts), and
- *   such a line never changes whether an op passes.
- * - A party line reaches only some players: those who could read it then,
- *   each of whom holds a copy of their own (`to`, its reader first), so one
- *   player's lines never push out another's. Each player's copies keep
- *   their newest `partyLinesKept`, fewer as the room grows. The first
- *   reader's copy (`to` of one) stands for the line in the DM's log, and
- *   once its reader leaves the roster such copies keep their newest
- *   `partyLinesKept` together.
- * - A whisper reaches only its sender and its recipients. Each member's
- *   whispers keep their newest `whispersKept`, fewer in a room of more than
- *   8 members, and a whisper stays while it is among the newest of a
- *   current member it reaches.
+ *   gets it. The DM lines keep their newest `dmLogLines`.
+ * - A party line reaches only some players: those who could read it then.
+ *   The line itself is a DM line, and each reader holds a copy of their own
+ *   (`to`, the reader alone), the line as they read it then, so one
+ *   player's lines never push out another's and no copy holds anything its
+ *   reader could not read. A copy whose reader leaves the roster goes.
+ * - A whisper reaches only its sender and its recipients, and stays while
+ *   it is among the newest of a current member it reaches.
+ *
+ * Each member's whispers keep their newest `whispersKept`, and each
+ * player's copies their newest `partyLinesKept`, fewer as the room grows.
+ * A DM line and a copy are cut to `apartLineBytes` when written (cutLine),
+ * and neither is in the room's measures (server/rooms/sizeGuard.ts), so
+ * neither decides whether an op passes.
  *
  * Each audience keeps its own newest lines and drops only its own oldest,
  * so a line one viewer never receives never pushes out a line they hold. A
@@ -52,7 +52,7 @@ import { isWritable } from "./writable.ts";
 export const MAX_LOG = 200;
 
 /** The most lines the log holds with every ring full: what a room's state, an import's included, may hold. */
-export const MAX_LOG_LINES = MAX_LOG + LIMITS.dmLogLines + LIMITS.whispersPerRoom + LIMITS.partyLinesPerRoom + LIMITS.partyLinesKept;
+export const MAX_LOG_LINES = MAX_LOG + LIMITS.dmLogLines + LIMITS.whispersPerRoom + LIMITS.partyLinesPerRoom;
 
 /**
  * The whispers each member keeps in a room of `members` members: their
@@ -63,7 +63,7 @@ export function whispersKept(members: number): number {
   return Math.min(LIMITS.whispersKept, Math.floor(LIMITS.whispersPerRoom / Math.max(1, members)));
 }
 
-/** The party lines each member keeps in a room of `members` members, as whispersKept does with `partyLinesPerRoom`. */
+/** The copies of party lines each player keeps in a room of `members` members, as whispersKept does with `partyLinesPerRoom`. */
 export function partyLinesKept(members: number): number {
   return Math.min(LIMITS.partyLinesKept, Math.floor(LIMITS.partyLinesPerRoom / Math.max(1, members)));
 }
@@ -103,11 +103,12 @@ export type LineAudience = "shared" | "dm" | "party" | "whisper";
 
 /**
  * Who a log line is for (see above). A line written from op version 19 on
- * says so itself: a party line by its `to`, a DM line by its number from
- * DM_LINE_BASE. A line from before then has neither, and keeps the class its
- * kind gives it: a DM line when no player's projection carries it whatever
- * the room holds (neverRead), else shared. The class decides which lines a
- * logged op keeps and drops, so changing it needs a new op version.
+ * says so itself: a party line's copy by its `to`, a DM line, a party
+ * line's own included, by its number from DM_LINE_BASE. A line from before
+ * then has neither, and keeps the class its kind gives it: a DM line when no
+ * player's projection carries it whatever the room holds (neverRead), else
+ * shared. The class decides which lines a logged op keeps and drops, so
+ * changing it needs a new op version.
  */
 export function lineAudience(entry: Pick<LogEntry, "id" | "kind" | "data" | "to">): LineAudience {
   if (entry.kind === "whisper") return "whisper";
@@ -195,17 +196,18 @@ export function countedApart(id: string): boolean {
 }
 
 /**
- * A DM line cut to `dmLogLineBytes`, as trap lines are cut when written
- * (shared/reducer/traps.ts), so it keeps its place in the live log with no
- * hole: text no event line uses first, then what only a take-back needs (an
- * HP line's `revert`), a rolled answer's dice and what it changed, and a
- * dice line's rolls from the end. The longest line an op writes, a dice
- * line of 20 rolls at about 4.5 KB, fits whole, so in play only a
- * take-back's record of many effects is cut, and that change can no longer
- * be taken back. What is left is bounded by the protocol, far inside.
+ * A DM line or a party line's copy cut to `apartLineBytes`, as trap lines
+ * are cut when written (shared/reducer/traps.ts), so it keeps its place in
+ * the live log with no hole: text no event line uses first, then what only
+ * a take-back needs (an HP line's `revert`), a rolled answer's dice and
+ * what it changed, and a dice line's rolls from the end. The longest line
+ * an op writes, a dice line of 20 rolls at about 4.5 KB, fits whole, so in
+ * play only a take-back's record of many effects is cut, and that change
+ * can no longer be taken back. What is left is bounded by the protocol, far
+ * inside.
  */
-export function cutDmLine(line: LogEntry): LogEntry {
-  const fits = (e: LogEntry) => serializedBytes(e) <= LIMITS.dmLogLineBytes;
+export function cutLine(line: LogEntry): LogEntry {
+  const fits = (e: LogEntry) => serializedBytes(e) <= LIMITS.apartLineBytes;
   if (fits(line)) return line;
   let out = line;
   if (out.kind === "event" && (out.text !== undefined || out.from !== undefined)) {
@@ -236,6 +238,12 @@ export function whisperParties(entry: Pick<LogEntry, "from" | "to">): string[] {
   return [...out];
 }
 
+/** The members whose ring holds a line: a whisper's parties, a copy's reader, or none. */
+function ringMembers(e: LogEntry): readonly string[] {
+  if (e.kind === "whisper") return whisperParties(e);
+  return lineAudience(e) === "party" ? e.to!.slice(0, 1) : [];
+}
+
 /**
  * The lines the log drops (the log in id order, `members` the room's
  * roster): each ring's oldest past its bound, and once the shared lines are
@@ -246,7 +254,7 @@ export function whisperParties(entry: Pick<LogEntry, "from" | "to">): string[] {
  * first new line brings each down.
  */
 export function droppedLines(log: readonly LogEntry[], members: Roster): string[] {
-  const drop = new Set<string>([...whispersOutside(log, members), ...partyOutside(log, members)]);
+  const drop = new Set<string>(outsideMemberRings(log, members));
   for (const [audience, bound] of [["shared", MAX_LOG], ["dm", LIMITS.dmLogLines]] as const) {
     let over = -bound;
     for (const e of log) if (lineAudience(e) === audience) over++;
@@ -276,50 +284,31 @@ export function ringed(log: readonly LogEntry[], members: Roster): LogEntry[] {
 }
 
 /**
- * The whispers among no current member's newest: for each member it reaches,
- * at least `whispersKept` newer ones reach them too. A member no longer on
- * the roster keeps none, so a whisper only they and those gone were party to
- * goes, and the rest stay by the members left.
+ * The whispers and copies outside every member ring: each ring holds its
+ * member's newest `whispersKept` whispers or `partyLinesKept` copies. A
+ * whisper stays while any current member it reaches holds it. A member no
+ * longer on the roster holds none, so a whisper only they and those gone
+ * were party to goes, and so does a copy of theirs.
  */
-function whispersOutside(log: readonly LogEntry[], members: Roster): string[] {
-  const keep = whispersKept(Object.keys(members).length);
+function outsideMemberRings(log: readonly LogEntry[], members: Roster): string[] {
+  const size = Object.keys(members).length;
+  const bounds = { whisper: whispersKept(size), party: partyLinesKept(size) };
   const held = new Map<string, number>();
   const out: string[] = [];
   for (let i = log.length - 1; i >= 0; i--) {
     const e = log[i]!;
-    if (e.kind !== "whisper") continue;
+    const ring = ringMembers(e);
+    if (ring.length === 0) continue;
+    const kind = e.kind === "whisper" ? "whisper" : "party";
     let kept = false;
-    for (const id of whisperParties(e)) {
+    for (const id of ring) {
       if (!Object.hasOwn(members, id)) continue;
-      const n = held.get(id) ?? 0;
-      held.set(id, n + 1);
-      if (n < keep) kept = true;
+      const key = `${kind}|${id}`;
+      const n = held.get(key) ?? 0;
+      held.set(key, n + 1);
+      if (n < bounds[kind]) kept = true;
     }
     if (!kept) out.push(e.id);
-  }
-  return out;
-}
-
-/**
- * The party lines outside their ring: a copy past its reader's newest
- * `partyLinesKept`, and once its reader leaves the roster, a copy no one
- * holds any more, except the first reader's copies, the DM's, which keep
- * their newest `partyLinesKept` together.
- */
-function partyOutside(log: readonly LogEntry[], members: Roster): string[] {
-  const keep = partyLinesKept(Object.keys(members).length);
-  const held = new Map<string, number>();
-  let gone = 0;
-  const out: string[] = [];
-  for (let i = log.length - 1; i >= 0; i--) {
-    const e = log[i]!;
-    if (lineAudience(e) !== "party") continue;
-    const reader = e.to![0];
-    if (reader !== undefined && Object.hasOwn(members, reader)) {
-      const n = held.get(reader) ?? 0;
-      held.set(reader, n + 1);
-      if (n >= keep) out.push(e.id);
-    } else if (e.to!.length !== 1 || gone++ >= LIMITS.partyLinesKept) out.push(e.id);
   }
   return out;
 }
@@ -331,19 +320,19 @@ const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, Map<string, stri
 /**
  * The oldest line of a viewer's live log, or null for all of it: the
  * oldest of the newest full ring they hold. A player holds their own
- * whispers and party lines. A DM holds their own whispers, the DM lines and
- * every party line's first copy, so every member's party lines and those of
- * members gone. It reads only lines the viewer gets and the roster, which
- * every viewer holds, so what their live log holds depends on nothing they
- * never receive. A line before it reaches them through the archive's
- * pages, as any line older than the live log does.
+ * whispers and copies, and a DM their own whispers and the DM lines. It
+ * reads only lines the viewer gets and the roster, which every viewer
+ * holds, so what their live log holds depends on nothing they never
+ * receive. A line before it reaches them through the archive's pages, as
+ * any line older than the live log does.
  *
  * A member's bounds grow when one leaves, and lines dropped under the
  * smaller bound do not come back, so a ring may have dropped lines and
  * still be short of its bound. A ring counts as full here at the bound of a
  * roster as large as it may have been since the oldest shared line: this
- * one with every member the log says left added back. A line a ring dropped
- * after that line then always lies before where the live log starts.
+ * one with every member the log says left added back. A line a ring
+ * dropped after that line then always lies before where the live log
+ * starts.
  */
 export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   const { log, members } = room;
@@ -352,31 +341,22 @@ export function liveStart(room: LogRoom, viewer: Viewer): string | null {
   if (cached !== undefined) return cached;
   let largest = Object.keys(members).length;
   for (const e of log) if (e.data?.type === "member" && e.data.action === "remove") largest++;
-  const whisperBound = whispersKept(largest);
-  const partyBound = partyLinesKept(largest);
   const dmViewer = viewer.role === "dm";
+  const bounds = { whisper: whispersKept(largest), party: partyLinesKept(largest) };
+  const rings = { whisper: 0, party: 0 };
   let start: string | null = null;
   let dm = 0;
-  let whispers = 0;
-  let gone = 0;
-  const party = new Map<string, number>();
   // Newest first, so the first ring to fill is the newer start.
   for (let i = log.length - 1; i >= 0 && start === null; i--) {
     const e = log[i]!;
     const audience = lineAudience(e);
     if (audience === "dm") {
       if (dmViewer && ++dm === LIMITS.dmLogLines) start = e.id;
-    } else if (audience === "whisper") {
-      if (whisperParties(e).includes(viewer.memberId) && ++whispers === whisperBound) start = e.id;
-    } else if (audience === "party") {
-      const reader = e.to![0];
-      if (reader !== undefined && Object.hasOwn(members, reader)) {
-        if (!dmViewer && reader !== viewer.memberId) continue;
-        const n = (party.get(reader) ?? 0) + 1;
-        party.set(reader, n);
-        if (n === partyBound) start = e.id;
-      } else if (dmViewer && e.to!.length === 1 && ++gone === LIMITS.partyLinesKept) start = e.id;
+      continue;
     }
+    const kind = audience === "whisper" ? "whisper" : audience === "party" ? "party" : null;
+    if (kind === null || !ringMembers(e).includes(viewer.memberId)) continue;
+    if (++rings[kind] === bounds[kind]) start = e.id;
   }
   if (!isWritable(log) && !isWritable(members)) {
     let byRoster = starts.get(log);
@@ -422,4 +402,28 @@ export function linesPastStart(beforeRoom: LogRoom, afterRoom: LogRoom, viewers:
     }
   }
   return [...out];
+}
+
+/**
+ * The log's lines one per event, for the reducer's reads of what happened.
+ * A party line's copy is its reader's view of a DM line of the same op
+ * (Tx.addLog), so a copy is left out while the log holds a DM line of its
+ * op. Where it holds none, the copies stand for their lines: on a player's
+ * own projection, which the client replays ops on (design 7.4) and which
+ * holds no DM line, and once the DM ring has dropped the op's lines. A copy
+ * keeps only what its reader read, a dice line's tag only for its roller,
+ * so the reads that count lines, such as a cast's damage roll, meet one.
+ *
+ * In id order, so by op, and within an op each audience in the order it
+ * was written. What was written before what across audiences in one op is
+ * not kept, so a read goes by op (shared/reducer/areaTriggers.ts).
+ */
+export function eventLines(log: readonly LogEntry[]): LogEntry[] {
+  const withDmLines = new Set<number>();
+  for (const e of log) if (dmNumbered(e.id)) withDmLines.add(seqOf(e.id));
+  return log.filter((e) => lineAudience(e) !== "party" || !withDmLines.has(seqOf(e.id)));
+}
+
+function seqOf(id: string): number {
+  return Number(id.slice(0, id.indexOf(":")));
 }

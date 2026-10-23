@@ -270,10 +270,11 @@ describe("who reads a rolled answer (5.2)", () => {
     assert.deepEqual(mine.targets[0]?.dice?.faces, [16]);
     assert.equal(mine.targets[0]?.previous, undefined);
     assert.equal(projectEntity("roll:r1", replaced.state, P2, { sceneId: "s1" }), null);
-    const lineId = replaced.state.log.at(-1)!.id;
+    // Only the owl's players read the line: the DM's, with Bree's player's copy.
+    const lineId = replaced.state.log.filter((e) => e.to?.[0] === "p1").at(-1)!.id;
     const line = projectEntity(`log:${lineId}`, replaced.state, P1, { sceneId: "s1" }) as { data: Extract<LogEvent, { type: "roll" }> };
     assert.deepEqual(line.data.dice?.faces, [16]);
-    assert.equal(projectEntity(`log:${lineId}`, replaced.state, P2, { sceneId: "s1" }), null, "no other player gets it, rolled or typed");
+    for (const e of replaced.state.log) assert.equal(projectEntity(`log:${e.id}`, replaced.state, P2, { sceneId: "s1" }), null, "no other player gets it, rolled or typed");
   });
 
   test("a rolled save its condition failed is no mark line, so it reaches its players with pass or fail hidden", () => {
@@ -281,7 +282,8 @@ describe("who reads a rolled answer (5.2)", () => {
     const owl = state.tokens.owl!;
     state.tokens.owl = { ...owl, actor: { inline: { ...(owl.actor as { inline: ReturnType<typeof actor> }).inline, effects: [effect("e1", { key: "paralyzed" })] } } };
     const done = ok(roll(state, P1, { target: { tokenId: "owl" } }, [20]));
-    const line = projectEntity(`log:${done.state.log.at(-1)!.id}`, done.state, P1, { sceneId: "s1" }) as { data: Extract<LogEvent, { type: "roll" }> } | null;
+    const copy = done.state.log.filter((e) => e.to?.[0] === "p1").at(-1)!;
+    const line = projectEntity(`log:${copy.id}`, done.state, P1, { sceneId: "s1" }) as { data: Extract<LogEvent, { type: "roll" }> } | null;
     assert.ok(line, "the line reaches Bree");
     assert.equal(line.data.result, undefined, "with the result hidden");
   });

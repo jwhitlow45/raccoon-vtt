@@ -4,7 +4,7 @@ import { compareLogIds, keys, type EntityKey } from "./keys.ts";
 import { LIMITS, serializedBytes } from "./limits.ts";
 import {
   countedApart,
-  cutDmLine,
+  cutLine,
   DM_LINE_BASE,
   dmNumbered,
   droppedLines,
@@ -20,7 +20,7 @@ import {
   whispersKept,
 } from "./logRings.ts";
 import type { LogEntry, LogEvent, RoomState, Viewer } from "./model.ts";
-import { applyChanges, dependents, diffProjection, heldOf, lineReaders, projectArchivedLog, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
+import { applyChanges, dependents, diffProjection, heldOf, lineReach, projectArchivedLog, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { Tx } from "./reducer/tx.ts";
@@ -32,12 +32,12 @@ import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, t
  * while members come and go, and checks after them what must always hold:
  *
  * 1. Bounds: the shared lines are at most MAX_LOG, the DM lines at most
- *    `dmLogLines`, each player's party lines at most partyLinesKept, those
- *    of members gone at most `partyLinesKept`, and every whisper held is
- *    among the newest whispersKept of a current member it reaches.
- * 2. Own newest: the shared lines, the DM lines and each player's party
- *    lines are their ring's newest, less those older than the oldest
- *    shared line once the shared lines are full.
+ *    `dmLogLines`, each player's copies of party lines at most
+ *    partyLinesKept, no copy of a member gone, and the whispers at most
+ *    `whispersPerRoom`.
+ * 2. Own newest: the shared lines, the DM lines, each player's copies and
+ *    each member's whispers are their ring's newest, less those older than
+ *    the oldest shared line once the shared lines are full.
  * 3. Audience: every viewer's live log is the same as in a room that was
  *    never written a line they do not receive, by the real projection of
  *    the room the op left: a whisper they are not party to, a line about a
@@ -114,16 +114,20 @@ function randomStep(r: () => number, state: RoomState): Step {
   return { lines: [first, ...more] };
 }
 
-/** Writes lines as one op does, at `seq`: the room after it, what the op touched, every line it wrote and each line's copies. */
+/**
+ * Writes lines as one op does, at `seq`: the room after it, what the op touched, every line it wrote and each line's
+ * own, in the order written: the line, and a party line's copies after it.
+ */
 function write(state: RoomState, lines: readonly Line[], seq: number): { state: RoomState; touched: EntityKey[]; written: LogEntry[]; copies: LogEntry[][] } {
   const tx = new Tx(state, DM, { seq, at: AT });
-  const copies: LogEntry[][] = [];
-  for (const line of lines) {
-    const from = tx.log.length;
-    tx.addLog(line);
-    copies.push(tx.log.slice(from));
-  }
+  for (const line of lines) tx.addLog(line);
   tx.finish();
+  const copies: LogEntry[][] = [];
+  for (const e of tx.log) {
+    if (lineAudience(e) === "party") copies.at(-1)!.push(e);
+    else copies.push([e]);
+  }
+  assert.equal(copies.length, lines.length);
   return { state: tx.state, touched: tx.touched(), written: tx.log, copies };
 }
 
@@ -180,6 +184,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
         return { viewer, held: heldOf(view), view };
       });
       const history: LogEntry[] = [];
+      const joinedAt = new Map<string, number>();
       let joins = 0;
       for (let step = 0; step < steps; step++) {
         const seq = step + 1;
@@ -192,7 +197,10 @@ describe("the log's rings (shared/logRings.ts)", () => {
           for (const [viewer, room] of alone) alone.set(viewer, write(room, plan.lines.filter((_, i) => receives(viewer, wrote.copies[i]!, wrote.state)), seq).state);
         } else {
           out = churn(state, plan, seq);
-          if ("join" in plan) joins++;
+          if ("join" in plan) {
+            joins++;
+            joinedAt.set(plan.join, seq);
+          }
           for (const [viewer, room] of alone) alone.set(viewer, churn(room, plan, seq).state);
         }
         state = out.state;
@@ -227,18 +235,25 @@ describe("the log's rings (shared/logRings.ts)", () => {
         const party = state.log.filter((e) => lineAudience(e) === "party");
         for (const reader of roster) {
           const held = party.filter((e) => e.to![0] === reader);
-          assert.ok(held.length <= partyLinesKept(roster.length), `${where}: ${reader} holds ${held.length} party lines`);
+          assert.ok(held.length <= partyLinesKept(roster.length), `${where}: ${reader} holds ${held.length} copies`);
           const theirs = history.filter((e) => lineAudience(e) === "party" && e.to![0] === reader && sinceFloor(e));
-          assert.deepEqual(held.map((e) => e.id), theirs.slice(theirs.length - held.length).map((e) => e.id), `${where}: ${reader}'s party lines are their newest`);
+          assert.deepEqual(held.map((e) => e.id), theirs.slice(theirs.length - held.length).map((e) => e.id), `${where}: ${reader}'s copies are their newest`);
         }
-        const gone = party.filter((e) => !roster.includes(e.to![0]!));
-        assert.ok(gone.length <= LIMITS.partyLinesKept && gone.every((e) => e.to!.length === 1), `${where}: ${gone.length} lines of members gone`);
+        assert.ok(party.every((e) => e.to!.length === 1 && roster.includes(e.to![0]!)), `${where}: every copy names one current member`);
         const whispers = state.log.filter((e) => e.kind === "whisper");
         assert.ok(whispers.length <= LIMITS.whispersPerRoom, `${where}: ${whispers.length} whispers`);
-        for (const e of whispers) {
-          const newer = (m: string) => whispers.filter((w) => compareLogIds(w.id, e.id) > 0 && whisperParties(w).includes(m)).length;
-          assert.ok(whisperParties(e).some((m) => roster.includes(m) && newer(m) < whispersKept(roster.length)), `${where}: whisper ${e.id} is among a current member's newest`);
+        // Each ring keeps at least its bound at the largest roster the run can have, of the lines since its member last joined.
+        const largest = MEMBERS.length + GUESTS.length;
+        for (const m of roster) {
+          const since = (e: LogEntry) => sinceFloor(e) && Number(e.id.slice(0, e.id.indexOf(":"))) > (joinedAt.get(m) ?? 0);
+          const newest = [
+            ...history.filter((e) => e.kind === "whisper" && whisperParties(e).includes(m) && since(e)).slice(-whispersKept(largest)),
+            ...history.filter((e) => lineAudience(e) === "party" && e.to![0] === m && since(e)).slice(-partyLinesKept(largest)),
+          ];
+          const held = new Set(state.log);
+          assert.deepEqual(newest.filter((e) => !held.has(e)).map((e) => e.id), [], `${where}: ${m}'s newest whispers and copies stay`);
         }
+        assert.deepEqual(droppedLines(state.log, state.members), [], `${where}: the rings hold what they keep`);
 
         // 6. Fan-out, every step, so each copy's held map stays the server's.
         const candidates = new Set([...out.touched, ...dependents(before, out.touched), ...dependents(state, out.touched), ...linesPastStart(before, state, VIEWERS).map((id) => keys.log(id))]);
@@ -275,7 +290,8 @@ describe("the log's rings (shared/logRings.ts)", () => {
       assert.ok(VIEWERS.some((v) => liveStart(state, v) !== null), `seed ${seed}: a live log started at a ring's bound`);
       assert.ok(MEMBERS.some((m) => history.filter((e) => e.kind === "whisper" && whisperParties(e).includes(m)).length > LIMITS.whispersKept), `seed ${seed}: whispers`);
       assert.ok(history.filter((e) => lineAudience(e) === "party" && e.to![0] === "p1").length > LIMITS.partyLinesKept, `seed ${seed}: party lines`);
-      assert.ok(history.some((e) => lineAudience(e) === "party" && e.to!.length === 2), `seed ${seed}: a line two players read`);
+      const mounts = history.filter((e) => lineAudience(e) === "party" && e.data?.type === "hp" && e.data.tokenId === "mount");
+      assert.ok(mounts.some((e) => e.to![0] === "p1") && mounts.some((e) => e.to![0] === "p2"), `seed ${seed}: a line two players read`);
       assert.ok(joins > 2 && history.some((e) => lineAudience(e) === "party" && GUESTS.includes(e.to![0]!)), `seed ${seed}: members came and went`);
     }
   });
@@ -313,19 +329,30 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.deepEqual(both.state.log.map((e) => e.id), ["7:0", "7:1", "7:900000", "7:900001"], "the DM lines sort after the op's shared lines");
   });
 
+  test("the players' trap lines count with the shared lines, so a line that settles apart leaves no gap in either", () => {
+    const tx = new Tx({ ...base(), trapSeen: [] }, DM, { seq: 5, at: AT });
+    tx.addEvent({ type: "hp", tokenId: "gob", change: "damage", amount: 2 });
+    tx.addTrapLine("trapSeen", { type: "trapSeen", by: [], message: "Darts fly from the wall." }, LIMITS.trapSeenLines);
+    tx.addLog({ kind: "chat", from: "dm1", text: "Ouch." });
+    tx.finish();
+    assert.deepEqual(tx.state.trapSeen.map((e) => e.id), ["5:0"]);
+    assert.deepEqual(tx.state.log.map((e) => [e.id, e.kind]), [["5:1", "chat"], ["5:900000", "event"]], "the goblin's line is the DM's, numbered when it was written");
+    assert.deepEqual(tx.touched().filter((k) => k.startsWith("log:") || k.startsWith("trapSeen:")).sort(), ["log:5:1", "log:5:900000", "trapSeen:5:0"]);
+  });
+
   test("a DM line too long for its ring is cut, as trap lines are, and keeps its place in the live log", () => {
     const vitals = (cur: number) => ({ hp: { cur, max: 7, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
-    const removed = Array.from({ length: 60 }, (_, i) => effect(`e${i}`, { key: "custom", label: "x".repeat(60) }));
+    const removed = Array.from({ length: 80 }, (_, i) => effect(`e${i}`, { key: "custom", label: "x".repeat(60) }));
     const hp: Line = { kind: "event", data: { type: "hp", tokenId: "gob", change: "damage", amount: 7, revert: { before: vitals(7), after: vitals(0), removed } } };
     const chat = (text: string): Line => ({ kind: "chat", from: "dm1", text });
     const out = write(base(), [chat("a"), hp, chat("b")], 3);
     const cut = out.state.log.find((e) => e.data?.type === "hp")!;
-    assert.ok(serializedBytes(cut) <= LIMITS.dmLogLineBytes);
+    assert.ok(serializedBytes(cut) <= LIMITS.apartLineBytes);
     assert.deepEqual(cut.data, { type: "hp", tokenId: "gob", change: "damage", amount: 7 }, "only the take-back's record went");
     assert.deepEqual(out.written.find((e) => e.id === cut.id), cut, "the archive holds the same line");
     assert.deepEqual(liveLog(out.state, DM).map((e) => e.id), ["3:0", "3:1", cut.id]);
     // Text no event line uses goes first, as from a hand-made file.
-    const stray = cutDmLine({ id: "4:900000", at: AT, kind: "event", text: "x".repeat(7000), data: { type: "teleport", tokenId: "gob", past: "wall" } });
+    const stray = cutLine({ id: "4:900000", at: AT, kind: "event", text: "x".repeat(9000), data: { type: "teleport", tokenId: "gob", past: "wall" } });
     assert.deepEqual(stray, { id: "4:900000", at: AT, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } });
   });
 
@@ -338,7 +365,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
   });
 });
 
-describe("a line's readers, fixed when it is written (shared/project.ts lineReaders)", () => {
+describe("a line's readers, fixed when it is written (shared/project.ts lineReach)", () => {
   /** A room with 200 chat lines, every player's live log full. */
   function full(): RoomState {
     const state = base();
@@ -405,22 +432,33 @@ describe("a line's readers, fixed when it is written (shared/project.ts lineRead
     assert.equal(liveLog(now, P2).length, 1);
   });
 
-  test("a line two players read is a copy for each, the first one the DM's, and each player's ids count on in their own run", () => {
+  test("a line two players read is the DM's, with a copy for each reader as they read it, each player's ids counting on in their own run", () => {
     const out = write(base(), [{ kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 1 } }, { kind: "event", data: { type: "hp", tokenId: "mount", change: "damage", amount: 2 } }, { kind: "event", data: { type: "hp", tokenId: "hero", change: "damage", amount: 3, seen: true } }], 9);
     const ranks = rosterRanks(base().members);
     const run = (id: string) => PARTY_LINE_BASE + ranks.get(id)! * PARTY_SLOT;
     assert.deepEqual(out.written.map((e) => [e.id, e.to]), [
+      ["9:900000", undefined],
       [`9:${run("p1")}`, ["p1"]],
+      ["9:900001", undefined],
       [`9:${run("p1") + 1}`, ["p1"]],
-      [`9:${run("p2")}`, ["p2", "p1"]],
+      [`9:${run("p2")}`, ["p2"]],
       ["9:0", undefined],
     ]);
     assert.deepEqual(liveLog(out.state, P2).map((e) => [e.id, e.to]), [["9:0", undefined], [`9:${run("p2")}`, ["p2"]]]);
-    assert.deepEqual(liveLog(out.state, DM).map((e) => e.id), ["9:0", `9:${run("p1")}`, `9:${run("p1") + 1}`], "the DM reads the mount's line once");
-    assert.deepEqual(lineReaders(out.state, { kind: "event", data: { type: "hp", tokenId: "mount", change: "damage" } }), ["p1", "p2"]);
+    assert.deepEqual(liveLog(out.state, DM).map((e) => e.id), ["9:0", "9:900000", "9:900001"], "the DM reads the mount's line once");
+    const reach = lineReach(out.state, { kind: "event", data: { type: "hp", tokenId: "mount", change: "damage" } });
+    assert.deepEqual(reach.audience === "party" ? reach.views.map(([id]) => id) : reach, ["p1", "p2"]);
   });
 
-  test("a player's own party lines start their live log once they hold their bound, with no gap", () => {
+  test("a copy holds only what its reader read, and the DM's line all of it", () => {
+    const vitals = (cur: number) => ({ hp: { cur, max: 7, temp: 0 }, life: "alive" as const, deathSaves: { ok: 0, fail: 0 } });
+    const out = write(base(), [{ kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 4, left: { cur: 3, max: 7, temp: 0 }, label: "Bloodied", revert: { before: vitals(7), after: vitals(3) } } }], 4);
+    const [dm, copy] = out.written;
+    assert.ok(dm!.data?.type === "hp" && dm!.data.revert !== undefined, "the DM's line keeps the take-back's record");
+    assert.deepEqual(copy!.data, { type: "hp", tokenId: "pet", change: "damage", amount: 4, left: { cur: 3, max: 7, temp: 0 }, label: "Bloodied" });
+  });
+
+  test("a player's own copies start their live log once they hold their bound, with no gap", () => {
     let state = base();
     const keep = partyLinesKept(Object.keys(state.members).length);
     for (let i = 0; i < keep + 10; i++) state = write(state, [{ kind: "chat", from: "dm1", text: `c${i}` }, { kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 1 } }], i + 1).state;
@@ -432,44 +470,30 @@ describe("a line's readers, fixed when it is written (shared/project.ts lineRead
     assert.equal(liveLog(state, P2).length, keep + 10, "P2's, which holds none, keeps every chat line");
   });
 
-  test("a member who leaves takes their copies, and the DM keeps the first copies of those gone, 50 of them, with no gap", () => {
+  test("a member who leaves takes their copies, and the DM keeps every line, with no gap", () => {
     let state = base();
     state.members.g1 = member("g1");
-    state.members.z1 = member("z1");
     state.tokens.gpet = token("gpet", { visibility: "dm", ownerIds: ["g1"] });
     state.tokens.shared = token("shared", { visibility: "dm", ownerIds: ["p1", "g1"] });
-    // z1 sorts after p1, so z1's copy of this one's lines is not the DM's.
-    state.tokens.zshared = token("zshared", { visibility: "dm", ownerIds: ["p1", "z1"] });
     let seq = 1;
     for (let i = 0; i < 40; i++) state = write(state, [{ kind: "event", data: { type: "hp", tokenId: i % 2 === 0 ? "gpet" : "shared", change: "damage", amount: 1 } }, { kind: "chat", from: "dm1", text: `c${i}` }], ++seq).state;
-    for (let i = 0; i < 5; i++) state = write(state, [{ kind: "event", data: { type: "hp", tokenId: "zshared", change: "damage", amount: 1 } }], ++seq).state;
-    assert.equal(state.log.filter((e) => e.to?.[0] === "z1").length, 5);
-    const z = applyOp(state, { t: "sys.memberRemove", memberId: "z1" }, DM, { seq: ++seq, at: AT });
-    assert.ok(z.ok);
-    assert.equal(z.state.log.filter((e) => e.to?.[0] === "z1").length, 0, "a copy no one reads goes with its reader");
-    assert.equal(z.state.log.filter((e) => e.to?.[0] === "p1" && e.data?.type === "hp" && e.data.tokenId === "zshared").length, 5, "P1's and the DM's stay");
-    const r = applyOp(z.state, { t: "sys.memberRemove", memberId: "g1" }, DM, { seq: ++seq, at: AT });
+    assert.equal(state.log.filter((e) => e.to?.[0] === "g1").length, 40);
+    const r = applyOp(state, { t: "sys.memberRemove", memberId: "g1" }, DM, { seq: ++seq, at: AT });
     assert.ok(r.ok);
-    const party = r.state.log.filter((e) => lineAudience(e) === "party");
-    assert.ok(party.every((e) => e.to![0] === "p1" || e.to!.length === 1), "no copy of g1's is left that no one reads");
-    // g1 sorts before p1, so g1's copy of the shared creature's lines is the DM's too, as many as g1 kept with six members.
-    assert.equal(party.filter((e) => e.to![0] === "g1").length, partyLinesKept(6), "the DM's copies stay");
-    assert.equal(party.filter((e) => e.to![0] === "p1" && e.data?.type === "hp" && e.data.tokenId === "shared").length, 20, "P1's copies of the shared creature's lines stay");
-    // Twelve more members' worth of lines would pass the bound for those gone: the DM's live log starts at its newest 50.
-    for (const g of ["g2", "g3"]) {
-      let next = applyOp(r.state, { t: "sys.memberJoin", member: { id: g, name: g, color: "#ff0000", kind: "player", createdAt: AT } }, DM, { seq: ++seq, at: AT });
-      assert.ok(next.ok);
-      let s2 = { ...next.state, tokens: { ...next.state.tokens, [`pet-${g}`]: token(`pet-${g}`, { visibility: "dm", ownerIds: [g] }) } };
-      for (let i = 0; i < 20; i++) s2 = write(s2, [{ kind: "event", data: { type: "hp", tokenId: `pet-${g}`, change: "damage", amount: 1 } }], ++seq).state;
-      next = applyOp(s2, { t: "sys.memberRemove", memberId: g }, DM, { seq: ++seq, at: AT });
-      assert.ok(next.ok);
-      r.state = next.state;
-    }
-    const gone = r.state.log.filter((e) => lineAudience(e) === "party" && e.to![0] !== "p1");
-    assert.ok(gone.every((e) => e.to!.length === 1));
-    assert.equal(gone.length, LIMITS.partyLinesKept);
+    assert.equal(r.state.log.filter((e) => e.to?.[0] === "g1").length, 0, "a copy no one reads goes with its reader");
+    assert.equal(r.state.log.filter((e) => e.to?.[0] === "p1").length, 20, "P1's copies of the shared creature's lines stay");
+    assert.equal(r.state.log.filter((e) => dmNumbered(e.id)).length, 40, "the DM keeps every line");
     const live = liveLog(r.state, DM);
-    assert.equal(live[0]!.id, gone[0]!.id, "the DM's live log starts at the oldest kept, so no line inside it is missing");
+    assert.equal(live.filter((e) => e.kind === "chat").length, 40);
+    assert.equal(live.filter((e) => e.data?.type === "hp").length, 40);
+  });
+
+  test("a copy is cut as a DM line is, by what its reader read", () => {
+    const rolls = Array.from({ length: 20 }, (_, i) => ({ ...die(), label: `${"x".repeat(500)}${i}`, tokenId: "pet" }));
+    const out = write(base(), [{ kind: "event", data: { type: "dice", by: "dm1", to: "all", rolls } }], 6);
+    const copy = out.written.find((e) => e.to?.[0] === "p1")!;
+    assert.ok(serializedBytes(copy) <= LIMITS.apartLineBytes);
+    assert.ok(copy.data?.type === "dice" && copy.data.rolls.length < 20 && copy.data.rolls.length > 0, "rolls went from the end");
   });
 });
 
@@ -482,7 +506,7 @@ describe("whispers, bounded by the room (shared/logRings.ts)", () => {
     return state;
   }
 
-  const whisper = (n: number, from: string, to: string): LogEntry => ({ id: `${n}:0`, at: AT, kind: "whisper", from, to: [to], text: `w${n}` });
+  const whisper = (n: number, from: string, to: string, text = `w${n}`): LogEntry => ({ id: `${n}:0`, at: AT, kind: "whisper", from, to: [to], text });
 
   test("each member keeps 50, fewer past 8 members, so a room never holds more than 400", () => {
     assert.equal(whispersKept(8), 50);
@@ -528,4 +552,3 @@ describe("whispers, bounded by the room (shared/logRings.ts)", () => {
     assert.deepEqual(kept.map((e) => e.id), [...state.log.slice(10, 60), ...state.log.slice(60, 70)].map((e) => e.id), "the DM's newest 50 and P2's 10, and none of P3's");
   });
 });
-

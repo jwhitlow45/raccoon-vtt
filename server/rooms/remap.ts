@@ -1,7 +1,7 @@
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
-import { cutDmLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
+import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type {
   AreaTemplate,
   Character,
@@ -540,12 +540,12 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   };
   // Log ids are `"<seq>:<index>"`. The new room's ops start at seq 1, so seq 0 can never collide. Lines are numbered as
   // the reducer writes them (Tx.addLog), each audience in the old room's order: the shared lines from 0, each reader's
-  // party lines in their own run, and the DM's from DM_LINE_BASE with the traps' (dmLineIdsOf). So the lines a player
-  // gets have no gap where one only others hold was. All of them share seq 0, so the import cannot keep the order across
-  // audiences: it reads audience by audience, and the archive holds every line (importRoom).
+  // copies of party lines in their own run, and the DM's from DM_LINE_BASE with the traps' (dmLineIdsOf). So the lines a
+  // player gets have no gap where one only others hold was. All of them share seq 0, so the import cannot keep the order
+  // across audiences: it reads audience by audience, and the archive holds every line (importRoom).
   const dmLineIds = dmLineIdsOf(state, scenes);
   const ranks = rosterRanks(out.members);
-  const partyLines = new Map<string, number>();
+  const copies = new Map<string, number>();
   let shared = 0;
   for (const e of state.log) {
     let id: string;
@@ -553,16 +553,13 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (e.from !== undefined) next.from = members.of(e.from);
     if (e.to !== undefined) next.to = e.to.map((member) => members.of(member));
     const audience = lineAudience(e);
-    if (dmLineIds.has(e.id)) {
-      id = dmLineIds.get(e.id)!;
-      // A party line whose reader did not come through: the first reader's copy stays as the DM's line.
-      if (audience === "party") delete next.to;
-    } else if (audience === "party") {
+    if (dmLineIds.has(e.id)) id = dmLineIds.get(e.id)!;
+    else if (audience === "party") {
       const reader = next.to![0];
-      // Another reader's copy whose reader did not come through, which no one here could read.
-      if (reader === undefined || !ranks.has(reader)) continue;
-      const count = partyLines.get(reader) ?? 0;
-      partyLines.set(reader, count + 1);
+      // A copy whose reader did not come through, which no one here reads.
+      if (e.to!.length !== 1 || reader === undefined || !ranks.has(reader)) continue;
+      const count = copies.get(reader) ?? 0;
+      copies.set(reader, count + 1);
       id = `0:${partyIndex(ranks.get(reader)!, count)}`;
     } else id = `0:${shared++}`;
     next.id = id;
@@ -571,8 +568,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (!data) continue;
       next.data = data;
     }
-    // Each DM line is cut to its bound, as the reducer cuts them, so the size measures may leave every one out.
-    out.log.push(dmLineIds.has(e.id) ? cutDmLine(next) : next);
+    // Each DM line and copy is cut to its bound, as the reducer cuts them, so every ring keeps its bytes.
+    out.log.push(dmLineIds.has(e.id) || audience === "party" ? cutLine(next) : next);
   }
   out.log.sort((a, b) => compareLogIds(a.id, b.id));
   remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId, dmLineIds, sharedLines: shared });
@@ -603,20 +600,15 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
 
 /**
  * The new ids of every line only the DM holds: the room log's DM lines
- * (shared/logRings.ts) and party lines whose reader is gone, the trap
- * log's and the occurrences that name them,
- * each ring in the old room's order, all counting on from DM_LINE_BASE
- * together, as the reducer writes them (docs/design-v1-traps.md 6.3).
- * Numbered with the lines players get, each would leave a gap in theirs.
+ * (shared/logRings.ts), party lines' own among them, the trap log's and the
+ * occurrences that name them, each ring in the old room's order, all
+ * counting on from DM_LINE_BASE together, as the reducer writes them
+ * (docs/design-v1-traps.md 6.3). Numbered with the lines players get, each
+ * would leave a gap in theirs.
  */
 function dmLineIdsOf(state: RoomState, scenes: { has(id: string): boolean }): Map<string, string> {
   const dmIds = new Set<string>();
-  for (const line of state.log) {
-    const audience = lineAudience(line);
-    // The first reader's copy of a party line stands for it in the DM's log, so one whose reader is gone is the DM's.
-    const orphan = audience === "party" && line.to!.length === 1 && !Object.hasOwn(state.members, line.to![0]!);
-    if (audience === "dm" || orphan) dmIds.add(line.id);
-  }
+  for (const line of state.log) if (lineAudience(line) === "dm") dmIds.add(line.id);
   for (const trap of Object.values(state.traps ?? {})) if (scenes.has(trap.sceneId)) for (const d of trap.rig?.due ?? []) dmIds.add(d.id);
   for (const line of state.trapLog ?? []) dmIds.add(line.id);
   const out = new Map<string, string>();

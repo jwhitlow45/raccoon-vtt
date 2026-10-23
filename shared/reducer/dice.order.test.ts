@@ -43,10 +43,14 @@ function fight(reveal: OrderReveal): RoomState {
 }
 
 const lastLine = (state: RoomState) => state.log.at(-1)!;
-/** The last line's dice as a viewer gets them, or null when the line does not reach them. */
+/**
+ * The last op's dice line as a viewer gets it, or null when it does not reach them: a line only some players read is
+ * the DM's, with a copy for each reader (shared/logRings.ts).
+ */
 function diceFor(state: RoomState, viewer: typeof DM): Extract<LogEvent, { type: "dice" }> | null {
   const id = lastLine(state).id;
-  const line = projectState(state, viewer, { sceneId: "s1" }).log.find((l) => l.id === id);
+  const seq = id.slice(0, id.indexOf(":") + 1);
+  const line = projectState(state, viewer, { sceneId: "s1" }).log.filter((l) => l.id.startsWith(seq)).at(-1);
   return line?.data?.type === "dice" ? line.data : null;
 }
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { checkLimits, LIMITS } from "../limits.ts";
+import { eventLines } from "../logRings.ts";
 import type { JournalPage, Pin, RollRequest, RoomState } from "../model.ts";
 import type { Op, RollRequestInput } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
@@ -278,7 +279,8 @@ describe("roll requests", () => {
 
   test("an answer writes a log line with the test and both switches", () => {
     const after = run(asked({ dcShown: false }), answer({ characterId: "thorn" }, { total: 17 }), 2, P1);
-    assert.deepEqual(after.log.map((e) => e.data), [{ type: "roll", test: { kind: "save", choices: [{ ability: "dex" }] }, characterId: "thorn", total: 17, result: "pass", dc: 15, resultShown: true }]);
+    // Only Thorn's players read it, so the line is the DM's, with a copy of what Thorn's player read.
+    assert.deepEqual(eventLines(after.log).map((e) => e.data), [{ type: "roll", test: { kind: "save", choices: [{ ability: "dex" }] }, characterId: "thorn", total: 17, result: "pass", dc: 15, resultShown: true }]);
   });
 
   test("with two choices the answer says which was rolled, the first when it says nothing", () => {

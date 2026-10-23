@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, type EntityKey } from "./keys.ts";
-import { linesPastStart } from "./logRings.ts";
+import { lineAudience, linesPastStart } from "./logRings.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
-import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, hash128, hashValue, heldOf, projectEntity, projectState, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
+import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, hash128, hashValue, heldOf, projectArchivedLog, projectEntity, projectState, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
 import { clearVisionCache } from "./rules/vision.ts";
@@ -67,6 +67,18 @@ function runSequence(seed: number, ops: number): { applied: number; refused: num
       continue;
     }
     applied++;
+    // Each line's readers are fixed by the room as the op leaves it (shared/project.ts lineReach, Tx.settleLog), so
+    // every player a line counts for reads it when it arrives: a shared event line every player, and a copy its
+    // reader. A line that reached one and read as nothing would move their log for nothing they see.
+    for (const line of result.log) {
+      const audience = lineAudience(line);
+      if (line.kind !== "event" || (audience !== "shared" && audience !== "party")) continue;
+      const readers: string[] = audience === "party" ? [line.to![0]!] : Object.values(result.state.members).filter((m) => m.kind === "player").map((m) => m.id);
+      for (const memberId of readers) {
+        const read = projectArchivedLog(result.state, [line], { memberId, role: "player" }, { sceneId: null });
+        assert.equal(read.length, 1, `seed ${seed} op ${i} (${op.t}): ${memberId} cannot read ${line.id} ${line.data?.type} when it arrives`);
+      }
+    }
     const candidates = candidatesFor(state, result.state, result.touched, result.global, connections);
     for (const c of connections) {
       const next = new Map<EntityKey, unknown>();

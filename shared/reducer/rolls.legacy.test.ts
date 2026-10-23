@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { keys } from "../keys.ts";
+import { eventLines } from "../logRings.ts";
 import { migrateOp, migrateSnapshot } from "../migrate.ts";
 import type { LogEntry, RoomState, Viewer } from "../model.ts";
 import { hash128, projectEntity, stableStringify } from "../project.ts";
@@ -133,11 +134,12 @@ describe("a DM's Pass mark from before wave 7", () => {
     assert.deepEqual(old.hashes, fixture.steps.map((s) => s.after), "version 6 keeps the old rule whatever the op holds");
     const today = replay(fixture.state, 0, undefined, tagged);
     assert.notEqual(today.refusals.at(-1), null, "today's rule writes the tag and the mark, so the stored undo refuses");
-    // Today each log line keeps its readers (op version 19, shared/logRings.ts), so its id and `to` differ: the rest is compared.
+    // Today each log line keeps its readers (op version 19, shared/logRings.ts): one only some read is the DM's, with a
+    // copy for each reader, and its id differs. So the lines are compared one per event, without their ids.
     const plain = (run: ReturnType<typeof replay>) =>
       run.states.map((state, i) => {
-        const line = ({ id: _id, to: _to, ...rest }: LogEntry) => stableStringify(rest);
-        return stableStringify({ state: asThatBuild({ ...state, log: [] }), log: state.log.map(line).sort(), wrote: run.logs[i]!.map(line) });
+        const line = ({ id: _id, ...rest }: LogEntry) => stableStringify(rest);
+        return stableStringify({ state: asThatBuild({ ...state, log: [] }), log: eventLines(state.log).map(line).sort(), wrote: eventLines(run.logs[i]!).map(line) });
       });
     assert.deepEqual(plain(replay(fixture.state, 0, undefined)), plain(replay(fixture.state, 0, fixture.opVersion)), "an untagged live op is judged by the old rule too");
   });

@@ -9,7 +9,7 @@ import { visionRules } from "#shared/ruleHooks.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { actor, character, companionBlock, room, scene, template, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
-import { checkWholeScenes, growthBound, SizeGuard } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, measuredLog, SizeGuard } from "./sizeGuard.ts";
 
 const DM: Viewer = { memberId: "dm", role: "dm" };
 
@@ -257,8 +257,9 @@ describe("SizeGuard's room-level part (docs/design-v1-dm-tools.md 2.4)", () => {
     const ask: Op = { t: "cast.ask", cast: { id: "k1", caster: "thorn", sceneId: "s1", spell: "A".repeat(60), targets: Array.from({ length: 50 }, (_, i) => `target-${i}`), damage: { tag: "dmg", parts: 1 } } };
     const r = applyOp(state, ask, { memberId: "p1", role: "player" }, { seq: 9, at: "2026-10-18T20:00:00.000Z" });
     assert.ok(r.ok);
+    // The ask's own line only its caster's players read is the DM's, outside the measures.
     for (const sceneId of ["s1", "s2"]) {
-      const bytes = serializedBytes(projectState({ ...r.state, sight: {} } as unknown as RoomState, DM, { sceneId }));
+      const bytes = serializedBytes(projectState({ ...r.state, log: [...measuredLog(r.state.log)], sight: {} } as unknown as RoomState, DM, { sceneId }));
       assert.equal(new SizeGuard({ sceneLimit: bytes }).check(r.state, [sceneId], 0).ok, true, sceneId);
       assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(r.state, [sceneId], 0).ok, false, sceneId);
     }

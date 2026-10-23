@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "../keys.ts";
-import { partyIndex, rosterRanks } from "../logRings.ts";
+import { lineAudience, partyIndex, rosterRanks } from "../logRings.ts";
 import type { CastAsk, DiceRoll, LogEntry, RoomState } from "../model.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import type { CastInput, Op } from "../protocol.ts";
@@ -36,10 +36,12 @@ describe("an ask for saves", () => {
   test("is stored with its asker and time from the envelope, and its line first in the op", () => {
     const r = run(castTable(), ask());
     assert.deepEqual(r.state.casts.k1, { id: "k1", rev: 1, by: "p1", caster: "thorn", sceneId: "s1", spell: "Fireball", slot: 3, area: "a1", at: env(50).at });
-    // Only the caster's players read it, so it counts in Thorn's player's own run.
-    assert.equal(r.log[0]!.id, theirs());
-    assert.deepEqual(r.log[0]!.data, { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3 });
-    assert.deepEqual(r.touched, [keys.log(theirs()), keys.cast("k1")]);
+    // Only the caster's players read it: the line is the DM's, and Thorn's player's copy counts in their own run.
+    assert.deepEqual(r.log.map((e) => [e.id, e.data]), [
+      ["50:900000", { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3 }],
+      [theirs(), { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3 }],
+    ]);
+    assert.deepEqual(r.touched, [keys.cast("k1"), keys.log("50:900000"), keys.log(theirs())], "the lines take their numbers when the op is done");
   });
 
   test("a targets ask keeps its targets and the roll's key, and an ask with no level has none on its line", () => {
@@ -139,7 +141,7 @@ describe("closing an ask", () => {
     ] as const) {
       const r = run(open(), { t: "cast.close", castId: "k1", end }, who);
       assert.equal(r.state.casts.k1, undefined, end);
-      assert.equal(r.log[0]!.id, theirs());
+      assert.deepEqual(r.log.map((e) => e.id), ["50:900000", theirs()]);
       assert.deepEqual(r.log[0]!.data, { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3, end });
     }
   });
@@ -154,8 +156,9 @@ describe("closing an ask", () => {
     const before = open();
     const r = run(before, { t: "actor.outcome", plan: "pl1", label: "Fireball", cast: "k1", targets: [{ target: { tokenId: "g1" }, amount: 14 }] }, DM);
     assert.equal(r.state.casts.k1, undefined);
-    assert.deepEqual(r.log[0]!.data, { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3, end: "done" });
-    assert.equal(r.log[1]!.data?.type, "hp");
+    const lines = r.log.filter((e) => lineAudience(e) !== "party");
+    assert.deepEqual(lines[0]!.data, { type: "cast", castId: "k1", tokenId: "thorn", spell: "Fireball", slot: 3, end: "done" });
+    assert.equal(lines[1]!.data?.type, "hp");
     const restore = r.inverse!.find((e) => e.key === keys.cast("k1"));
     assert.deepEqual(restore?.value, before.casts.k1, "the ask with its rolled");
     const undone = run(r.state, { t: "sys.restore", entries: r.inverse!, from: "undo", deps: true }, DM, 51);
