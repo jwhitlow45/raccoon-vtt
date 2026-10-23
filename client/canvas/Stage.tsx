@@ -27,6 +27,7 @@ import {
   fitRect,
   keepInView,
   NO_INSETS,
+  panBy,
   rectClear,
   sameCamera,
   sceneMinScale,
@@ -446,6 +447,16 @@ export function MapStage(props: {
     pendingCamRef.current = null;
     setCam(controlled(size));
   }, [controlled, size, scene.id]);
+
+  // An upright phone's larger token bar moves the map up or down to make its room by its token (barDock.ts largerShift), in the chrome's pixels.
+  const shiftForBar = useCallback((dy: number) => {
+    const c = pendingCamRef.current ?? camRef.current;
+    if (!c) return;
+    pendingCamRef.current = null;
+    const next = panBy(c, 0, dy * uiScale());
+    camRef.current = next;
+    setCam(next);
+  }, []);
 
   // A tap on an initiative row brings its token into view, keeping the zoom, and clear of the token bar it opens.
   useEffect(
@@ -1352,6 +1363,7 @@ export function MapStage(props: {
               anchor={inZoomed(worldAnchor(cam, selected), zoom)}
               viewport={sizeInZoomed(size, zoom)}
               onClose={() => ui.select(null)}
+              onShift={shiftForBar}
             />
           ) : barShown && selected ? (
             <TokenActionBar
@@ -1362,6 +1374,7 @@ export function MapStage(props: {
               viewport={sizeInZoomed(size, zoom)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
+              onShift={shiftForBar}
               onClose={() => {
                 if (barDismiss(store.getState().local, props.tokenPanelShown === true) === "hide") (props.onHideBar ?? (() => ui.showActions(false)))();
                 else ui.select(null);

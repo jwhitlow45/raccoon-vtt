@@ -86,6 +86,7 @@ import {
   keySize,
   keySpot,
   laneLeft,
+  largerShift,
   limitMet,
   NO_SIZE,
   placeBar,
@@ -95,7 +96,9 @@ import {
   resizeBox,
   resizeLimits,
   sizeWords,
+  smallerShift,
   spotWords,
+  writeLarger,
   writeSize,
   writeSpot,
   type BarFacts,
@@ -169,12 +172,16 @@ export function TokenActionBar(props: {
   fullAccess: boolean;
   onDetails(): void;
   onClose(): void;
+  /** Moves the map down by this many of the chrome's pixels, or up when negative, for an upright phone's larger bar (barDock.ts largerShift). */
+  onShift?(dy: number): void;
 }) {
   const { token } = props;
   return (
     <BarFrame
       anchor={props.anchor}
       viewport={props.viewport}
+      opening={token.id}
+      onShift={props.onShift}
       label={`${displayName(token)} actions`}
       dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
     >
@@ -488,6 +495,7 @@ export function GroupActionBar(props: {
   anchor: Point;
   viewport: Size;
   onClose(): void;
+  onShift?(dy: number): void;
 }) {
   const { tokens } = props;
   const ui = useRoomUi();
@@ -521,6 +529,9 @@ export function GroupActionBar(props: {
     <BarFrame
       anchor={props.anchor}
       viewport={props.viewport}
+      // One opening while the group grows and shrinks, which keeps this bar mounted.
+      opening="group"
+      onShift={props.onShift}
       label={`${tokens.length} selected tokens`}
       dock={{ text: `${tokens.length} selected`, show: `Show actions for ${tokens.length} selected tokens`, closeLabel: "Deselect all", close: props.onClose }}
     >
@@ -688,13 +699,16 @@ function CountLegButton(props: { token: ViewToken }) {
 /**
  * What a bar's frame hands its header and its rows: the header's handle,
  * with its grip, and stickiness, Reset while the window docks away from
- * its default (docs/design-v1-token-window.md 4.4), the narrow header's
+ * its default (docs/design-v1-token-window.md 4.4), an upright phone's
+ * Larger or Smaller (docs/design-v1-bar-dock.md 1.5), the narrow header's
  * grip and badge (7.1), and whether the bar is short.
  */
 type FrameControls = {
   handle: PaneHandle | null;
   sticky: boolean;
   place: { moved: boolean; reset(): void; closeRef: RefObject<HTMLButtonElement | null>; onResetFocus(focused: boolean): void } | null;
+  /** The bar spans an upright phone, where its button left of Close picks its size. */
+  size: { larger: boolean; toggle(): void } | null;
   /** The grip a button or its dots, and where an elevation badge goes, by the docked window's width (barDock.ts headerLayout). */
   header: { grip: "button" | "dots"; badgeInHeader: boolean };
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
@@ -708,7 +722,7 @@ const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: t
 
 const NO_RAISE = () => {};
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, size: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE });
 
 /** Reset's name and tooltip, on every device. */
 const RESET_LABEL = "Reset window position and size";
@@ -716,20 +730,24 @@ const RESET_LABEL = "Reset window position and size";
 /**
  * The bar's header: the grip while it docks, its name on at most two
  * lines, the elevation badge, Reset while the window is away from its
- * default, and Close. Sticky while it docks or spans.
+ * default, Larger or Smaller while it spans an upright phone, and Close.
+ * Sticky while it docks or spans.
  */
 function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
   const frame = useContext(FrameContext);
-  const { place } = frame;
-  const reset = place?.moved ? (
+  const { place, size } = frame;
+  // Reset shows only while the window docks, and the size only while the bar spans, so the two never stand together.
+  const beforeClose = place?.moved ? (
     <IconButton icon="windowHome" label={RESET_LABEL} onClick={place.reset} onFocus={() => place.onResetFocus(true)} onBlur={() => place.onResetFocus(false)} />
+  ) : size ? (
+    <IconButton icon={size.larger ? "chevronDown" : "chevronUp"} label={size.larger ? "Smaller" : "Larger"} onClick={size.toggle} />
   ) : null;
   const handle = frame.handle && frame.header.grip === "dots" ? { ...frame.handle, grip: { ...frame.handle.grip, dots: true } } : frame.handle;
   return (
     <PaneHeader
       title={props.title}
       actions={props.actions}
-      beforeClose={reset}
+      beforeClose={beforeClose}
       onClose={props.onClose}
       closeLabel={props.closeLabel}
       closeRef={place?.closeRef}
@@ -783,6 +801,9 @@ type Drag = { kind: "move" | ResizePart; pointerId: number; el: HTMLElement; x: 
 function BarFrame(props: {
   anchor: Point;
   viewport: Size;
+  /** What the bar opened for: the token's id, or "group". */
+  opening: string;
+  onShift?(dy: number): void;
   label: string;
   dock: { text: string; show: string; closeLabel: string; close(): void };
   children: ReactNode;
@@ -810,6 +831,8 @@ function BarFrame(props: {
   const contentRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [barHeight, setBarHeight] = useState(() => dockStore.getState().lastHeight);
+  // The content has been measured, not taken from the last bar's height.
+  const [contentMeasured, setContentMeasured] = useState(false);
   const [clipped, setClipped] = useState(false);
   const [pad, setPad] = useState({ top: 0, bottom: 0 });
   const [status, setStatus] = useState("");
@@ -863,6 +886,7 @@ function BarFrame(props: {
     if (!scroller || !content || content.offsetHeight === 0) return;
     const height = content.offsetHeight + 2;
     setBarHeight(height);
+    setContentMeasured(true);
     if (dockStore.getState().lastHeight !== height) dockStore.setState({ lastHeight: height });
     const cut = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 4;
     setClipped(cut);
@@ -922,6 +946,54 @@ function BarFrame(props: {
     dockStore.setState({ size: next });
     if (!preview) writeSize(next);
   };
+
+  /*
+   * An upright phone's Larger or Smaller (docs/design-v1-bar-dock.md 1.5).
+   * Larger moves the map once as the bar opens, after its content is
+   * measured, and once at the press. A map the viewer pans meanwhile is
+   * left alone, so the bar never fights a pan. Smaller moves the map back
+   * by what Larger moved it for this opening.
+   */
+  const larger = useStore(dockStore, (s) => s.larger);
+  const roomStore = useRoomStore();
+  const spanRoom = { layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, column };
+  const shift = (dy: number) => {
+    if (dy !== 0) props.onShift?.(dy);
+  };
+  const toggleSize = () => {
+    const next = !larger;
+    if (!preview) writeLarger(next);
+    const dock = dockStore.getState();
+    if (next) {
+      const dy = largerShift({ ...spanRoom, height: barHeight });
+      dockStore.setState({ larger: true, largerFor: props.opening, largerMoved: dy });
+      shift(dy);
+    } else {
+      const dy = dock.largerFor === props.opening ? smallerShift({ ...spanRoom, moved: dock.largerMoved }) : 0;
+      dockStore.setState({ larger: false, largerMoved: 0 });
+      shift(dy);
+    }
+  };
+  const openChecked = useRef(false);
+  useLayoutEffect(() => {
+    if (!contentMeasured || openChecked.current) return;
+    openChecked.current = true;
+    const dock = dockStore.getState();
+    // Back after a token drag, which hides the bar, the map stays where the drop left it.
+    if (dock.largerFor === props.opening) return;
+    const dy = dock.larger && !folded ? largerShift({ ...spanRoom, height: barHeight }) : 0;
+    dockStore.setState({ largerFor: props.opening, largerMoved: dy });
+    shift(dy);
+    // Once per opening, on the first render with the content measured.
+  }, [contentMeasured]);
+  useLayoutEffect(
+    () => () => {
+      const { local } = roomStore.getState();
+      // A token drag hides the bar and keeps the selection. Anything else that takes the bar away ends the opening.
+      if (!local.actionBar || local.selectedId === null) dockStore.setState({ largerFor: null, largerMoved: 0 });
+    },
+    [roomStore, dockStore],
+  );
   /*
    * Escape or a cancelled pointer during a drag or a resize puts the window
    * back as the drag began and keeps it open, storing nothing. A press on
@@ -1104,7 +1176,8 @@ function BarFrame(props: {
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
   const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer });
   const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place, header, short, raise: setRaised };
+  const sizeControl = mode === "span" ? { larger, toggle: toggleSize } : null;
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place, size: sizeControl, header, short, raise: setRaised };
 
   const { hang } = placed;
   const where = dragBox
