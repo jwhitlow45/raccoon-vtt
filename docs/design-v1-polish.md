@@ -1,0 +1,103 @@
+# raccoon-vtt v1: the polish pass
+
+Status: draft 1, for design review. An audit by measurement, with the fixes it calls for. Code is cited from the second look pass's merge preview (`5a1dfe33`, main at `51dbc2e2` with the look pass's three lanes).
+
+The project owner asked on 2026-10-23: "Please do a ui pass on any features that were added the past couple days to ensure it is polished. For example the traps ui is not vertically centered in a lot of places and looks inconsistent". The second look pass (docs/design-v1-look-pass-2.md) made these screens follow the visual system. It did not measure alignment. This pass does: every number below comes from the page, not from looking.
+
+## How it was measured
+
+A Playwright script played a real room on the production build: the DM, and Pat playing Thorn, a fight on Thorn's turn, a Hidden Pit made with the Trap tool, a long-named needle trap with every section filled (three damage parts, three conditions, two checks, a disarm check, a door and a creature to show), a door trap, a found trip wire, the attach set (a warhorse, a torch, a grappled kobold, a cart, a goblin carrying a lantern and dragging a prisoner), and walls with a door. Traps went off by hand and on Pat's walks, so toasts, cards, the summary row and the alerts over the screen all showed. Re-sync ran through the stub of e2e/resync.e2e.ts, at its own sizes (390 x 844, 360 x 780, 390 x 844 at 130%, 844 x 390, 1280 x 800, 1440 x 900).
+
+Every screen was measured at 390 x 844, 360 x 740, 320 x 568, 844 x 390, 820 x 1180 and 1440 x 900, at 100% and 130%, in Chrome. For every button, chip, tag, row, list item, switch row, segmented option, card header, toast and pill it reads:
+
+1. **Centering.** The middle of each column of content (text line boxes from a `Range`, icons, nested controls) against the middle of the box inside its border.
+2. **One row.** Items side by side in a flex or grid row share a middle, and controls among them share a height. Rows set on their baseline are left out.
+3. **Same kind.** Sibling controls of one tag and role share a height, side padding and gap.
+4. **Edges.** A column of rows starts its content at one left edge.
+5. **Wrapping.** A label alone on its line above its control, or one part alone on a wrapped row's last line.
+
+Anything over 1 px is a finding. Board text was read from the code (Konva's `Text` puts the baseline at the line's middle plus half of ascent less descent, Pill.tsx sizes its `Tag` to its `Text`) and checked as ink: the rows of bright pixels in a 2x shot of each pill's body against the body's middle.
+
+Pictures: `screenshots/polish/final/` (`shots/` for whole screens, `crops/` for each finding), and `screenshots/polish/main/` for main as deployed.
+
+## 1. Findings
+
+Severity: **P1** looks broken. **P2** visibly off. **P3** polish. Counted: 0 P1, 9 P2, 5 P3.
+
+| ID | Screen and size | Element | Measured | Crop | Code | Sev |
+|---|---|---|---|---|---|---|
+| PL1 | Trap pane, Goes off when, all 12 | The last trigger's tick, which carries its help line | Box 3.5 px below its label's first line, 4.9 px at 130% | `trap-pane-pit-p390-row-center` | components/Checkbox.tsx:65, :95 | P2 |
+| PL2 | Re-sync review and the editor's D&D Beyond review, every size it ran | Every tick with a help line: "Max HP 45, now 38", "AC 12, now 15", "Sheet link" | The same 3.5 px, 4.9 px at 130% | `resync-resync-review-1280x800-row-center` | features/pcstats/SyncReview.tsx:203 through Checkbox | P2 |
+| PL3 | Trap pane as a card (1440, 820, 844 x 390, both scales), as a sheet at 130% (390, 360, 320) | "DC", "On a pass", "Uses left" | The label alone on its line, its field 25 to 32 px lower at the right | `trap-pane-card-d1440-dc`, `-on-a-pass`, `-uses-left` | components/Field.tsx:149-152 | P2 |
+| PL4 | Trap pane, Save and damage: the card at every size, sheets at 130% and at 320 | Each damage part's remove | Alone on a line under its dice and type, 52 to 68 px lower | `trap-pane-card-d1440-damage` | features/traps/TrapPane.tsx:756 | P2 |
+| PL5 | Trap pane, Finding and disarming: the card, 390, sheets at 130% | Each check's remove | Alone under its check, DC and words | `trap-pane-card-d1440-check` | TrapPane.tsx:866 | P2 |
+| PL6 | Trap pane, It also: 390 and 360. The card and 130% also put "A door" alone above its choice | "Remove this effect" | Alone under "A door" and Close, Open, Lock | `trap-pane-long-p390-wrap-orphan-2` | TrapPane.tsx:836-837 | P2 |
+| PL7 | Trap pane, conditions at 390 | "rounds" | Alone under its field. "ft deep" after the pit's depth has the same shape | `trap-pane-long-p390-wrap-orphan` | TrapPane.tsx:707-726, :292 | P2 |
+| PL8 | Trap pane foot: the card, 360, 130% | Set it off | Alone under Ask to search and Ask to disarm | `trap-pane-long-p390-130-wrap-orphan-4` | TrapPane.tsx:359-373 | P3 |
+| PL9 | Board on phones: 390, 360, both scales | A trap's name near the right edge | Runs past the screen by 18 px (390), 24 (360), 55 (390 at 130%), 62 (360 at 130%), cut with no ellipsis in view | `trap-names-p390-130-edge` | features/measure/Pill.tsx:83-90, features/traps/TrapLayer.tsx:96 | P2 |
+| PL10 | Token window, a holder's line: 390 and 360 at 100% | "Carrying Lantern Put down Dragging", then "Prisoner Let go" | "Dragging" ends the first line at 237 px and its names start the next at 0. At the other sizes the break falls before "Dragging" by width alone | `bar-holder-p390-group-line` | features/attach/BarParts.tsx:101 | P2 |
+| PL11 | Token window's play row: a rider at 320, 390 at 130%, 844 x 390, 820, and a 291 px window at 1280 | Attach | Alone on the row's last line. The older Delete does the same | `bar-rider-p390-130-wrap-orphan` | canvas/TokenActionBar.tsx:115 | P3 |
+| PL12 | Docked windows: token, rider, group, every size | Header | Title and Close 2 px higher than a map pane's: Close 5 px under the frame's top against 7, the title's middle 27 against 29. Its band is 4 px above the row, 0 below | `token-window-header-d1440`, `trap-pane-header-d1440` | components/SheetHeader.tsx:396-408 | P3 |
+| PL13 | Trap and Ruler options line at 130%: 1440, 844 x 390, 820 | A hint's words | 2.0 px above the line's middle (0.7 at 100%, under the limit) | `ruler-options-l844-130-center` | features/measure/controls.tsx:718-735, :782 | P3 |
+| PL14 | A toast under the alerts column's first card, phones | Its edges | Spans the map, not the column: 70 px left of the cards at 390, 40 at 360, 4 px short of their right edge at every phone size, over the cards below | `toast-lane-p390-lane` | pages/Room.tsx:1547, canvas/barDock.ts:1063 | P3 |
+
+Crops are in `screenshots/polish/final/crops/`, each named as above with `.png`.
+
+### 1.1 Checked, within 1 px
+
+- **Measured with no finding**, at all 12 sizes unless a count says otherwise: the Trap tool's options and Start from, the trap pane's header, folds, switches, Who and Hits, the alerts column folded and open, the cards' Save and damage, Apply and Dismiss, the summary row at the lane's top (5 sizes where it shows) and on a sheet pane's edge (6), the alerts over the screen and their header (5), every toast (the DM's, Pat's, under a pane's header, under the column's first card), the Attach list and Ride's question, the rider's and holder's windows apart from PL10 to PL12, the group window, the Ruler's options, its live and kept readings, the kept rulers' list, the Measure chip's pop-up (6), the stop note, and the re-sync review apart from PL2. 314 board pills were read as ink: the median offset of each kind is within 0.5 px (trap names 0.0, -0.5 and -0.1, drag labels -0.2 to -0.3, ruler totals -0.5, "Wall in the way" -0.3). Pills that missed were under another pill or a token, not off center. The trap badge's wolf trap sits 0.3 px low in its disc. Switch knobs are centered by their numbers (Switch.tsx:112).
+- **Rounding, not offsets.** At 130% a few switch rows with help and the ruler's reading read 1.0 px, from layout rounding. They pass a limit of over 1 px.
+- **Left as designed.** The AC shield sets its number above its middle on purpose (AcBadge.tsx:29). A disclosure's body starts under its chevron, not its title, in the trap cards and the pane's groups alike. Hit points sit on a shared baseline. A token panel's portrait stands at the top of its header. A section label puts its action under itself when both do not fit (Panel.tsx:34 says why), as Overwrite all does at 360. A pane card pads 4 px above and 12 below, since its header's 48 px row already stands its Close 7 px under the frame's top.
+- **Seen, left for a later pass.** Readouts never keep off one another: a kept ruler's "No way through" lies under a drag's label at a wall, and kept rulers' pills lie over trap names. Trap names draw under tokens, as area names do. Both need a placement pass for readouts, larger than this one.
+
+### 1.2 What the deployed app shows
+
+The owner's words came from main, which lacks the look pass. The same sweep on main's build, at 390 x 844 and 1440 x 900 at both scales, finds two more misplaced ticks with help ("Only creatures on the floor" and the Passive Perception hint, 3.5 px), Who's three options two over one, and the save's DC field alone under its save (`screenshots/polish/main/`). The look pass already turns those into switches, an even Segmented and a FieldRow. PL1 to PL14 remain after it.
+
+## 2. Root causes
+
+Each cause is fixed once, where it lives.
+
+- **R1. A checkbox with help drops its box below the first line** (PL1, PL2: 2 findings, every Checkbox with help in the app). Checkbox.tsx sets the row to `flex-start` and the 22 px box to a 2 px top margin, so the box's middle is 13 px down while a 14 px label's first line has its middle at 9.8: 3.2 px by these numbers, 3.5 as drawn. The box instead stands in a slot as tall as the label's first line (`theme.font.body14 * theme.leading.body`, 19.6 px), centered in it, so it meets the first line's middle at every interface size with no number of its own.
+- **R2. FieldRow wraps at 278 px** (PL3: 1 finding). Its label grows from 110 px and its controls from 160 px, so any body under 278 px wraps, though "DC" and a 96 px field need 214. The controls take their own width as their basis (`flex: "1 1 auto"`), and the label keeps `1 1 110px`. A row then wraps only where the label and the control really do not fit. Rows that fit today look the same, since their controls already sit at the right. Lane 1 runs the e2e files that show FieldRow's other callers (size, tokenpanel, groupsave).
+- **R3. The trap pane writes one wrapping row nine times** (PL4 to PL8: 5 findings). TrapPane.tsx builds its rows by hand nine times (:292, :309, :520, :634, :694, :707, :756, :836, :866), each a wrapping flex row of fixed widths. Where the last part is a remove or a unit (:292, :707, :756, :836, :866), it wraps alone. One `PartRow` in the pane takes their place: a grid of `minmax(0, 1fr) auto`, the fields wrapping inside the first cell, the remove holding the second, set against the first line. A field and its unit ("3 rounds", "10 ft deep") become one pair that never parts. The foot's asks and Set it off take an even grid, two to a line.
+- **R4. A pointed pill never slides into view** (PL9: 1 finding). `pillPlace` slides a plain pill inside the board's clear part, but one `above` or `below` its point stays centered on it, so a name near the edge runs off the screen. The body slides inside the view like any pill, and its pointer moves along the body's edge to stay on its point, within the corner radius. The name keeps its 240 px cap and its ellipsis.
+- **R5. A holder's line is one wrapping row** (PL10: 1 finding). GroupLine puts "Carrying", its names and actions, "Dragging" and its own in one flex row. Each kind gets a row of its own: its word in a fixed first cell, its names and actions wrapping beside it.
+- **R6. A window's button row wraps one button alone** (PL11: 1 finding). `BUTTON_ROW` lets buttons keep their own widths, so a fourth or fifth falls to a line of its own. Buttons in these rows grow to share their line (`flex: 1 1 auto`), as the window's Damage, Heal, Set and Temp already fill theirs. Question 2.
+- **R7. A docked window's header band is 4 px above its row and none below** (PL12: 1 finding). The sticky PaneHeader takes back the frame's 4 px padding and adds 4, where a pane's own header has the frame's 4 and centers its 44 px row in 48. The sticky one takes `PANE_TOP_SPACE` (6) above and 2 below, 52 px in all, so every pane's and window's Close stands 7 px under its frame's top and their titles share a middle.
+- **R8. The options line puts a hint at the top of a reading's box** (PL13: 1 finding). OptionsLine holds the box at a 14 px reading's height so the map's reserve never changes, and lays a 13 px hint in it as a block. The line centers its words in that height (a one-cell grid, `alignContent: "center"`), so a hint and a reading share a middle.
+- **R9. A toast under the column spans the map** (PL14: 1 finding). The toast layer is the map's width less 12 px each side. Under a card, it takes the column's left and right edges, which `toastTop` already reads beside its top, so the toast lines up with the card above it.
+
+## 3. The fixes
+
+Three lanes from the stacked tip, each one builder in its own workspace. No protocol, op, stored data, snapshot or server change, and no feature removed. FEATURES.md and the guide's words do not change. Lane 1's fixes show in the guide's `trap-pane.webp` and `resync.webp`, lane 2's in `action-bar.webp` and `mounted-turn.webp`, to retake at the next guide pass.
+
+| Lane | Fixes | Commits, in order | Files it owns |
+|---|---|---|---|
+| 1. The kit and the trap pane | R1, R2, R3, R7, R8 | `fix(ui): a checkbox with help sits on its label's first line`, `fix(ui): a field row keeps its label beside a field that fits`, `fix(ui): a docked window's header stands where a pane's does`, `fix(ruler): the options line centers its words`, `fix(traps): the pane's rows keep their remove and units in place` | components/Checkbox.tsx, Field.tsx, SheetHeader.tsx and their cases in controls.test.ts and SheetHeader.test.ts, features/measure/controls.tsx (OptionsLine only) and controls.test.ts, features/traps/TrapPane.tsx, e2e/traps.e2e.ts |
+| 2. Windows, board text and toasts | R4, R5, R6, R9 | `fix(board): a pointed pill slides into view and keeps its pointer on its point`, `fix(attach): a holder's line gives each kind of link its own row`, `fix(ui): a window's buttons share each line they wrap onto`, `fix(ui): a toast under the alerts column takes the column's edges` | features/measure/Pill.tsx and Pill.test.ts, features/attach/BarParts.tsx, canvas/TokenActionBar.tsx, pages/Room.tsx (the toast layer only), canvas/barDock.ts and barDock.test.ts, e2e/attach.e2e.ts, e2e/bardock.e2e.ts |
+| 3. The lasting check | section 4 | `test(e2e): an alignment helper that measures centers, rows, kin, edges and wraps`, `test(e2e): the alignment sweep over the new screens` | e2e/helpers/alignment.ts, e2e/alignment.e2e.ts, e2e/durations.json, e2e/resync.e2e.ts (its calls to the helper only) |
+
+Notes per lane:
+
+- **Lane 1.** R1's slot is a `span` of the first line's height around the `input`, only when there is help. A tick with no help stays centered on its row as today. R3's `PartRow` lives in TrapPane.tsx: no other screen has these rows. Unit cases: a Checkbox with help renders the slot at the label's line height, a FieldRow's controls take `1 1 auto`, the sticky header's padding is `PANE_TOP_SPACE` over 2. e2e: a `pl-1a` step in traps.e2e.ts opens the needle trap's pane as a card at 1440 x 900 and as a sheet at 320 x 568 at 130%, and asserts each remove's middle within 1 px of its row's first line and each FieldRow's label and field on one line. Run traps, resync (Checkbox), size, tokenpanel, groupsave (FieldRow), options and reach.
+- **Lane 2.** R4 is a pure function: `pillPlace` returns the body's box slid into the view and the pointer's offset along it, and the Label draws the pointer there. Pill.test.ts covers a pill above a point 10 px from each edge at 100% and 130%: the body inside the view, the pointer's tip on the point. R6 changes only the rows' buttons' `flex`, so their order, names and focus stay. R9 adds the column's `left` and `right` to `toastTop`'s answer, and barDock.test.ts covers a toast under a card at 390, 360 and 320 taking its edges. e2e: a `pl-2a` step in attach.e2e.ts reads the goblin's line as two rows, one per kind, and `pl-2b` in bardock.e2e.ts reads a toast under the first card with the card's left and right edges within 1 px. Run attach, bardock, dmphone, options, vision, areas and reach.
+- **Lane 3.** Built from the same base in parallel with lanes 1 and 2. On its own tree its spec must fail on PL1 to PL14 and nothing else, which proves it catches them. On the stacked tip of the three lanes it must pass.
+
+## 4. A lasting check
+
+Lane 3 turns the measuring script into `e2e/helpers/alignment.ts` and `e2e/alignment.e2e.ts`.
+
+- **The helper.** `measureAlignment(locator)` runs the five checks of "How it was measured" in the page over everything under a root and returns findings with the element's role and name, the check, the offset and the box. `assertAligned(findings, screen)` fails with one readable line per finding over 1 px, values rounded to 0.1 px. Three named checks cover what the five do not: `assertPillsInView` (every board pill's body, read from Konva, inside the canvas's visible part: PL9), `assertHeaderPlace` (every pane's and window's Close the same distance under its frame's top: PL12) and `assertToastLane` (a toast under a card takes the card's left and right: PL14). The exceptions are written in the helper with their reasons: rows set on a baseline, a `role="img"` counted as one picture (the AC shield), a disclosure's body under its chevron, a part that asks for a line of its own (`flex-basis: 100%`), a ChipRow or a grid of tiles wrapping its chips or tiles, a pane header's band (placed by `assertHeaderPlace` instead), and kin with different lines of text left out of the same-kind check.
+- **The spec.** One room built by ops as above, the DM on a touch context and a mouse context, Pat on a touch context. For each of the 12 sizes it measures the Trap tool and Start from, the four traps' panes with every group unfolded, the alerts column folded and open, the summary rows, the alerts over the screen, the toasts (DM, Pat, under a pane, under the column), the Attach list and Ride, the holder's, rider's and group windows (their header, play row and group line: the window's older rows are not this pass's), the Ruler's options, readings and kept list, the stop note, and the board's pills. The holder's line is read row by row: each kind's word starts its row (PL10). It shoots only on a failure. e2e/resync.e2e.ts calls `assertAligned` on its review, its D&D Beyond step and its 46-roll sizes, where the stub already stands.
+- **Its time and port.** E2E_PORT plus 27. About 4 minutes, with no waits but for what each screen needs, entered in e2e/durations.json. Inter is bundled, so the Linux shards draw the same line boxes. If a Linux run differs from font metrics alone, the file goes in e2e/macos-only.json with that reason, as its rule allows.
+
+## 5. Questions for the project owner
+
+Asking is off: the coordinator decides each by the recommendation.
+
+1. **A switch beside a name with help.** A switch stays centered on its name and help together, as phone settings do, while a checkbox meets its first line (R1)? Recommended: yes. A switch row is one target with the switch at its end, and a checkbox marks its own line in a list.
+2. **A window's button rows.** Buttons in the token window's rows grow to share each line they wrap onto, so no button stands alone (R6)? Recommended: yes, as Damage, Heal, Set and Temp already fill their line. Rejected: a two-column grid for every row, which halves short labels' rows for no gain.
+3. **A trap's name at the screen's edge.** Its pill slides into view with its pointer kept on the trap, rather than being cut shorter (R4)? Recommended: slide. The name stays whole up to its usual cap, and the pointer still marks which trap it names.
+
+Assumptions and gaps: Chrome only. iOS Safari draws the same bundled Inter, but its rounding was not measured. Sizes follow the brief, with re-sync at the sizes its stub already uses. The Passive Perception hint did not come up in the run: it is the same toast with an action as Save and damage, which measured clean. Players' trap lines were measured as toasts and as log rows.
