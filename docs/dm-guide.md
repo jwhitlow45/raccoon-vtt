@@ -612,7 +612,7 @@ A few more details follow from this. A creature added mid-fight waits for its ow
 
 Every roll in the app happens on the server, so everyone sees the same result and nobody can fake one. Players who prefer real dice can still roll at the table and type their totals wherever the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is open to everyone.
 
-![The Dice panel with a goblin selected: the formula field, quick dice, Adv, Dis and Secret, and the goblin's roll options with its saves, checks and Initiative.](dm-guide/dice.webp)
+![The Dice panel with the Goblin Boss selected: its last roll at the top, the formula field and quick dice, Adv and Dis joined under Next roll beside Secret, and the boss's card with Initiative above its open Saves and checks and its folded Skills.](dm-guide/dice.webp)
 
 **Typing a roll.** Type a formula in the field and press **Roll** or Enter. A few examples of what it understands:
 
@@ -624,9 +624,9 @@ Every roll in the app happens on the server, so everyone sees the same result an
 
 The line under the field reads back the roll and its range before you roll it ("2d6+3, fire: 5 to 15"), so you can catch a typo. The quick dice add a die to the field, and the Up and Down keys step back through the formulas you have rolled.
 
-**Adv**, **Dis** and **Secret** apply to the next roll only, then turn themselves off. A secret roll shows in full to the DMs, while the other players read only "Dana rolled in secret." Your rolls for monsters start secret: with a monster selected, even a formula you type starts secret. With nothing selected, or a character selected, it starts in the open.
+Under the quick dice sits the **Next roll** row. **Adv** and **Dis** are joined into one control, because a roll takes one or the other, never both, and **Secret** stands on its own beside them, since it decides who sees the roll rather than how it is rolled. On a narrow phone with a larger interface size, Secret moves to a line of its own under the other two. All three apply to the next roll only, then turn themselves off. A secret roll shows in full to the DMs, while the other players read only "Dana rolled in secret." Your rolls for monsters start secret: with a monster selected, even a formula you type starts secret. With nothing selected, or a character selected, it starts in the open.
 
-The newest roll stays at the top of the panel with its dice, and **Again** rolls it once more. This line is the one place in the panel where a result appears, even for a roll you made from a creature's roll options further down, so the panel never grows under your finger as rolls land. An answer you send to a request and a Death Saving Throw show there too, without Again, since neither can be sent again as it was. On a narrow screen the line keeps the total and Again whole, shows as many dice as fit, and counts the rest as "+2". Tap the line to see the whole roll in Recent rolls. **Recent rolls** lists the rolls in the log, newest first. Other people's rolls pop up as short notices while your Dice panel isn't on screen. To turn those off, open the Menu, then **This device**, and turn off **Show others' rolls as they happen**.
+The newest roll stays at the top of the panel with its dice, and **Again** rolls it once more. This line is the one place in the panel where a result appears, even for a roll you made from a creature's roll options further down, so the panel never grows under your finger as rolls land. An answer you send to a request and a Death Saving Throw show there too, without Again, since neither can be sent again as it was. On a narrow screen the line keeps the total and Again whole, shows as many dice as fit, and counts the rest as "+2". Tap the line to see the whole roll in Recent rolls. **Recent rolls** lists the rolls in the log, newest first, at the foot of the panel. Like the other groups in the panel, it folds away with a tap on its name, and while it is folded its row still names your newest roll, such as "Thorn 20 Longsword". Tapping the newest roll at the top opens the list again for the moment and scrolls to that roll, without changing how your device remembers it. Other people's rolls pop up as short notices while your Dice panel isn't on screen. To turn those off, open the Menu, then **This device**, and turn off **Show others' rolls as they happen**.
 
 **Dice you can watch.** When you roll from the Dice panel, the dice tumble out of the button or field you used and land in a band just under the newest roll, about a second after the server answers. The total appears as they land. The server has already decided the roll by then, so the dice only show what happened: they never change it, and everyone else reads your result in the log straight away. A Natural 20, or a Critical Hit, rings in your color as the die lands, and a Natural 1 is ringed in red. A big roll shows two rows of dice and counts the rest on a "+9" disc.
 
@@ -636,28 +636,45 @@ To choose how your dice look, open the Menu, then **This device**, and pick a se
 
 ### Roll options
 
-Rather than typing a monster's bonuses, let the app read them from its stat block. Select one token, or press **Roll** in its action bar, and the Dice panel lists its rolls under **Rolls for Goblin Warrior 1**:
+Rather than typing a monster's bonuses, let the app read them from its stat block. Select one token, or press **Roll** in its action bar, and the Dice panel shows that creature's rolls below a line that sets them apart from the formula field. When you open the panel from a token's **Roll**, it lands on the **Next roll** row, so you can press Advantage on the way to the attack.
 
-- **Saves**, **Checks** and **Skills**, each with its bonus. Conditions apply on their own, and the roll says so ("Dis: Restrained", "+1d4: Blessed", "Fails: Stunned").
-- **Initiative**, which sets the creature's row in a running fight ("Initiative +2, sets its row", or "replaces 14").
-- **Death Save**, while the creature is dying.
-- Its traits, actions, Bonus Actions, Reactions and Legendary Actions. Each one reads the way a stat block prints it, such as "Scimitar +4 to hit, 1d6+2 Slashing", with its buttons on the line underneath: **Attack**, **Damage** and **Critical**. A natural 20 on the attack turns on **Critical** for the damage that follows, which then rolls by the room's **Critical Hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)). Riders such as **Sneak Attack** are chips you can add, and the line above names them with their dice. An action that calls for a saving throw reads like "DC 13 DEX, 2d6 Fire" and has a **Group save** button, which opens the [group save](#the-group-save). Multiattack appears as a note at the head of the actions: roll each attack it names in turn.
+First comes the creature's card: its picture, its name and a short line such as "Monster, CR 1 · Small (5 ft)", so you can see at a glance whose rolls these are. The card also holds what you reach for at the start of a fight or when a life is at stake:
+
+- **Initiative**, which sets the creature's row in a running fight. Its tag tells you what a tap will do, and then any bonus or penalty it carries ("replaces 12 · −4").
+- **Death Save**, while the creature is dying, at the top of the card.
+- **Ask Thorn to roll**, for a creature a player plays (more on that below).
+
+Under the card, the creature's options are sorted into groups that fold, in the order a stat block prints them. Tap a group's name to fold it or open it again. While a group is folded, its row gives a one-line summary, so you can often read what you need without opening it, such as a monster's saving throw bonuses.
+
+- **Saves and checks**, each with its bonus. Conditions apply on their own, and the roll says so ("Dis: Restrained", "+1d4: Blessed", "Fails: Stunned").
+- **Skills**, for the moments outside combat.
+- Its **Traits**, **Actions**, **Bonus Actions**, **Reactions** and **Legendary Actions**. Each one reads the way a stat block prints it, such as "Scimitar +4 to hit, 1d6+2 Slashing", with its buttons on the line underneath: **Attack**, **Damage** and **Critical**. A natural 20 on the attack turns on **Critical** for the damage that follows, which then rolls by the room's **Critical Hit damage** rule (see [Room settings](#room-settings-for-fights-and-maps)). Riders such as **Sneak Attack** are chips you can add, and the line above names them with their dice. An action that calls for a saving throw reads like "DC 13 DEX, 2d6 Fire" and has a **Group save** button, which opens the [group save](#the-group-save). Multiattack appears as a note at the head of the actions: roll each attack it names in turn.
 - An action that recharges shows **Recharge 5–6** and a **Used** switch. Rolling its damage or its group save marks it used. **Recharge 1d6** rolls the recharge, and the app reminds you at the start of the monster's turn. See [Alerts during a fight](#alerts-during-a-fight).
-- For a character with a stat block: its weapons and spells, each save spell with its DC in its line ("DC 14 WIS"), **Spell save DC**, **Spell attack**, and a slot level for spells that scale, which you step with its minus and plus buttons on either side of "Level 2".
+- For a character with a stat block: its weapons and **Spells**, each save spell with its DC in its line ("DC 14 WIS"), **Spell save DC**, **Spell attack**, and a slot level for spells that scale, which you step with its minus and plus buttons on either side of "Level 2". When the spells span more than one level, they are sorted under **Cantrips**, **Level 1** and so on, as a character sheet lists them.
+
+The groups that matter in a fight start open, and the rest start folded. On a computer, Saves and checks start open. On a phone, where room is tight, they start folded, one tap away. Skills and Traits start folded everywhere. Once you fold or open a group, your device remembers it, separately for characters, companions and monsters, so folding a monster's Saves and checks never folds them for a player's character. Viewing the room as a player never changes what your device remembers.
+
+A group also opens on its own when it matters. When you ask a player for a save and their creature's Saves and checks are folded, that group opens once so the asked save is in view. If you fold it again while the ask waits, its row leads with the ask ("Asked: DEX save"), so you don't lose track of it.
 
 Whenever someone rolls damage, its total appears in every HP entry as **Use 9**, so you can apply it with one tap.
+
+Your players see the same panel for their own creatures. A player with more than one, such as a character and its companion, picks between them with tabs across the top of the card, each with the creature's picture and name, and the arrow keys move between those tabs too.
 
 For a creature a player plays, **Ask Thorn to roll** (on by default) changes what a tap on a save or check does: instead of rolling it yourself, it opens [Request a roll](#asking-for-rolls) for that player. Turn it off when you would rather roll for them.
 
 ### Several creatures
 
-With several tokens selected, the Dice panel offers rolls for the whole group:
+With several tokens selected, the Dice panel offers rolls for the whole group. Its card shows up to three of their pictures, how many you have selected ("4 selected") and their names, and holds what acts on all of them together: an optional **DC**, **Initiative for the 4 in the fight**, and **Set up a group save** for when you want to fill in the save yourself.
 
-- One save or check for all of them, against an optional **DC** ("DEX save for 4").
-- **Initiative for the 4 in the fight**.
-- **Shared attacks**: an attack every selected monster has ("Scimitar for 4"), rolled against a **Target's AC**, followed by **Roll damage for 2 hits** for the ones that hit.
+Under the card, the rolls fold into groups, as they do for one creature:
 
-A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll.
+- **Saves and checks**: one save or check for all of them. The buttons read simply "DEX" under the label "Saves for 4", so they stay on one line on any screen, but each is still named in full ("DEX save for 4") for screen readers and voice control.
+- **Skills**, folded to start with.
+- **Shared attacks**: an attack every selected monster has ("Scimitar for 4"), each rolled with that monster's own bonus against a **Target's AC**, followed by **Roll damage for 2 hits** for the ones that hit.
+
+A shared attack keeps its result while you work. You can fold the group between the attack and its damage, or select another creature or let one go, and as long as two or more stay selected, the hits and **Roll damage** are waiting when you come back. While the group is folded, its row reminds you of them ("Scimitar: 2 hits"). Selecting fewer than two clears them.
+
+A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll. If you step back from that page before it is finished, the panel shows a notice above the card, such as "Fire Breath's save: set up.", with **Open** to return to it.
 
 ## Asking for rolls
 
