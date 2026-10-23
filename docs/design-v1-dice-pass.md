@@ -1,6 +1,15 @@
 # raccoon-vtt v1: a dice page pass, with collapsible sections and a creature card
 
-Status: draft 3, for design review. Revised after round 1 (DP-O1 to DP-O14, DP-ASTRA-01 to 05) and round 2 (DP-O15, DP-O16, DP-ASTRA-06, DP-ASTRA-07). Code is cited from main at `ac82b9e3`.
+Status: built. Draft 3 reached consensus in design review round 3, after round 1 (DP-O1 to DP-O14, DP-ASTRA-01 to 05) and round 2 (DP-O15, DP-O16, DP-ASTRA-06, DP-ASTRA-07), and the build follows it with the differences under "As built" below. Code is cited from main at `ac82b9e3`.
+
+**As built.** Where the build differs from the text below:
+
+- The roll field's hint is measured, not set by width (7.9). The field shows "1d20+5 or 2d6+3 fire" wherever that fits inside it in its own font, and "1d20+5" where it does not. Every field measured was under 300 px, so the fixed rule would never have shown the long hint.
+- Not every folded line comes from `foldSummary` (6.5). Recent rolls' line comes from `recentSummary` in `RecentRolls.tsx`. Several selected's lines come from `GroupOptions.tsx`: Saves and checks reads "DC 13" or "No DC", Skills has none, and Shared attacks names the attacks with the hits that wait ("Scimitar: 2 hits").
+- Several selected's buttons are a local `Cell` in `OptionCell`'s look (5.3, 7.3), since `OptionCell` is private to `RollOptions.tsx`. The card's own actions, Initiative and Set up a group save, center their words.
+- A shared attack's state is kept by a watch on the room's selection (`watchSelection` in `GroupOptions.tsx`), which outlives the view of several, so a phone's Dice sheet closed to pick on the map keeps it (5.3). Fewer than two selected clears every attack. A selection that no longer shares an attack drops that one, even while the view of several is away.
+- The creature tabs draw their focus ring inside each tab, and the strip leaves no room at its ends (5.2, 6.6), so the first tab starts on the card's column. Their pictures take no disposition ring.
+- A group's grid rows share one height (`gridAutoRows: "1fr"`), so a cell whose words wrap at 130% keeps its neighbors level.
 
 The project owner asked on 2026-10-23: "Also the dice page should have collapsible sections, and the player/companion section should be more distinct from the adv/dis/secret tiles. I think in general the dice section could use a ui ux pass". Two earlier rulings bound it. The D&D Beyond look applies to the dice ("The dnd beyond look was mainly around the dice everything else can be relative to have we've decided before"), so this page may follow D&D Beyond's dice and roll screens more closely than the rest of the app. And alignment is measured in the browser: nothing may be off by more than 1 px.
 
@@ -169,7 +178,7 @@ One line, 13 px muted, cut with "…", read by a screen reader as the fold's des
 - **Spells**: "DC 14 · +6 to hit · 13 spells".
 - **Recent rolls**: the newest, "Thorn 20 Longsword".
 
-A pure `foldSummary` in `options.ts` builds them, with unit tests.
+A pure `foldSummary` in `options.ts` builds a creature's groups' lines, with unit tests. Recent rolls' line and several selected's are built where they draw (see As built).
 
 ### 6.6 Keyboard and screen reader
 
