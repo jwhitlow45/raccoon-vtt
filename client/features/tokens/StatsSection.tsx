@@ -208,7 +208,7 @@ function Stat(props: { label: string; value: string | number | undefined; editab
     );
   }
   return (
-    <FieldRow label={props.label} hint={props.hint}>
+    <FieldRow label={props.label} hint={props.hint} fill={props.wide}>
       {props.children}
     </FieldRow>
   );

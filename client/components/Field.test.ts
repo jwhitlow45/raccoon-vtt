@@ -87,6 +87,21 @@ describe("FieldRow", () => {
     assert.match(cell[2]!, /justify-content:flex-end/);
   });
 
+  /*
+   * A control that stretches asks for its own width too, which is its widest
+   * option or its default size, so a Size select over a Name field started
+   * 15 px further right. With `fill` its cell asks for 160 px whatever it
+   * holds, so stretching controls share one left edge.
+   */
+  test("a fill row's cell asks for 160 px whatever it holds, and its controls still fill it", () => {
+    const markup = html(createElement(FieldRow, { label: "Size", fill: true, children: createElement(Input, { "aria-label": "Size", style: { flex: 1 } }) }));
+    const cell = /<\/label><div style="([^"]*)"><div style="([^"]*)"><input/.exec(markup);
+    assert.ok(cell, "the controls are not a cell holding one inner box");
+    assert.match(cell[1]!, /(^|;)flex:1 1 160px(;|$)/);
+    assert.match(cell[2]!, /min-width:100%/);
+    assert.match(markup, /<label[^>]*flex:1 1 min\(110px, 40%\)/, "the label's basis is the same with fill");
+  });
+
   test("a dialog's scope ends the hint, so a picker a row opens is not described by it", () => {
     const markup = html(createElement(FieldRow, { label: "Image", hint: "They differ.", children: createElement(RowHintScope, { children: createElement(Input, { "aria-label": "Image address" }) }) }));
     assert.equal(describedBy(inputs(markup)[0]), undefined);

@@ -669,12 +669,12 @@ function TestPicker(props: { page: Page; onChange(page: Page): void }) {
       />
       {kind === "none" ? <Note>No save: everyone takes it.</Note> : null}
       {kind !== "none" ? (
-        <FieldRow label="Ability">
+        <FieldRow label="Ability" fill>
           <Select<AbilityKey> label="Ability" value={ability} options={ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_NAMES[a] }))} onChange={(a) => set(kind === "save" ? { kind: "save", ability: a } : { kind: "check", ability: a })} />
         </FieldRow>
       ) : null}
       {kind === "check" ? (
-        <FieldRow label="Skill">
+        <FieldRow label="Skill" fill>
           <Select<SkillKey | "">
             label="Skill"
             value={skill ?? ""}
@@ -800,7 +800,7 @@ function OutcomePanel(props: {
         ) : null}
         {page.outcome.conditions.length > 0 ? (
           <>
-            <FieldRow label="It lasts">
+            <FieldRow label="It lasts" fill>
               <Select<"none" | "turnStart" | "turnEnd" | "rounds">
                 label="It lasts"
                 value={page.outcome.lasts.mode}
@@ -814,7 +814,7 @@ function OutcomePanel(props: {
               />
             </FieldRow>
             {page.outcome.lasts.mode !== "none" ? (
-              <FieldRow label="Whose turn">
+              <FieldRow label="Whose turn" fill>
                 <Select<string>
                   label="Whose turn"
                   value={page.outcome.lasts.anchor}

@@ -1518,6 +1518,40 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await shots.take(dm, "tokenpanel-dm-group-bar");
   });
 
+  test("pl1-e. the panel's rows that stretch their control share one left edge, whatever each control's own width: the goblin's Size and Senses in Stats and its Name, Kind, Ring, Layer and Players see HP as in Token settings, at 320 x 568, 390 x 844 and 1440 x 900, at 100% and 130% (docs/design-v1-polish.md R2)", async () => {
+    for (const width of [320, 390, 1440]) {
+      for (const scale of [1, 1.3]) {
+        const view: View = { width, height: width === 1440 ? 900 : width === 390 ? 844 : 568, scale };
+        const label = `${view.width} x ${view.height} at ${Math.round(scale * 100)}%`;
+        await setUp(dm, dmCdp, view, null);
+        await tapToken(dm, run.goblin.at);
+        const goblin = bar(dm, "Goblin 4");
+        await goblin.waitFor();
+        // A short bar keeps Details with the rest behind More stats.
+        const more = goblin.getByRole("button", { name: "More stats", exact: true });
+        if ((await more.count()) > 0) await more.click();
+        await goblin.getByRole("button", { name: "Details", exact: true }).click();
+        const panel = tokenPanel(dm);
+        await panel.getByRole("heading", { name: "Goblin 4" }).waitFor();
+        await openGroup(panel, "Stats");
+        await openGroup(panel, "Token settings");
+        const controls = [
+          ...["Size"].map((name) => panel.getByRole("combobox", { name, exact: true })),
+          ...["Senses", "Name"].map((name) => panel.getByRole("textbox", { name, exact: true })),
+          ...["Kind", "Disposition", "Layer", "Players see HP as"].map((name) => panel.getByRole("combobox", { name, exact: true })),
+        ];
+        const lefts: number[] = [];
+        for (const control of controls) {
+          await control.scrollIntoViewIfNeeded();
+          lefts.push((await rectOf(control)).left);
+        }
+        assert.ok(Math.max(...lefts) - Math.min(...lefts) <= 1, `${label}: Size, Senses, Name, Kind, Ring, Layer and Players see HP as start at ${lefts.map((l) => l.toFixed(1)).join(", ")}`);
+        await shots.take(dm, `tokenpanel-pl1-e-${view.width}x${view.height}-${Math.round(scale * 100)}`);
+      }
+    }
+    await setUp(dm, dmCdp, DESK, null);
+  });
+
   test("9c. sizes on the fly (docs/design-v1-token-window.md 8): the DM's steps and Stats, Pat's growth away from walls and back, no room in a corridor, undo keeping damage, an unchecked scene, a locked and a Custom token, a turn's trail kept through a resize, and the row on phones", async () => {
     const SIZES = { w: 20, h: 14 };
     const sizes = { sceneId: randomUUID(), thorn: randomUUID(), goblin: randomUUID(), owl: randomUUID() };

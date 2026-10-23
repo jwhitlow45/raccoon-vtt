@@ -188,7 +188,7 @@ function NameField(props: { name: string; onSave(name: string): void }) {
     }
   };
   return (
-    <FieldRow label="Scene name" htmlFor={id}>
+    <FieldRow label="Scene name" fill htmlFor={id}>
       <Input
         id={id}
         value={text}

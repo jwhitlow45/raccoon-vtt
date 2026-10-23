@@ -427,10 +427,10 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       <ImageField value={image ?? undefined} onChange={setImage} shape="circle" aspect={1} canEdit ring={theme.color.ally} />
-      <FieldRow label="Name">
+      <FieldRow label="Name" fill>
         <Input aria-label="Name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} error={error !== null} style={{ flex: 1 }} />
       </FieldRow>
-      <FieldRow label="Size">
+      <FieldRow label="Size" fill>
         <Select aria-label="Size" value={size} onChange={(e) => setSize(e.target.value as CreatureSize)} style={{ flex: 1, maxWidth: "100%" }}>
           {SIZE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>

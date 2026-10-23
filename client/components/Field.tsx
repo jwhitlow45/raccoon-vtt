@@ -141,27 +141,35 @@ export function Field(
  * alone. Only the field controls read it (Input, Select, TextArea and the
  * token panel's text and number fields, Stepper's included). A row of
  * buttons keeps its hint as text under them, unread as a description.
+ *
+ * `fill` is for a control that stretches to fill the row (`flex: 1` or
+ * `width: 100%`): a text field or a select. Its cell always asks for
+ * 160 px, so every stretching control in a column starts at one left edge
+ * whatever its own width. Without it the controls ask for their own width.
  */
-export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
+export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; children: ReactNode }) {
   const hintId = useId();
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
       {/*
        * A row wraps only where its label and its controls really do not fit
-       * (docs/design-v1-polish.md R2). The controls ask for their own width,
-       * up to 160 px: a text field or select would ask for its 213 px default,
-       * so the inner box caps what it asks, and its least width of the whole
-       * cell, which wins over the cap, still lets it fill the cell once the
-       * line is laid out. The label asks for 110 px, or 40% of a row narrower
-       * than 275. Next to 160 px of controls 110 fits only from 278 up, where
-       * 40% is more than 110, so those rows lay out and wrap as they did, and
-       * a narrow control takes the room: "DC" and its field share a 214 px
-       * line, as "On a pass" and its 119 px choice do.
+       * (docs/design-v1-polish.md R2). Fixed-width controls ask for their
+       * own width, up to 160 px: the inner box caps what they ask, and its
+       * least width of the whole cell, which wins over the cap, still lets
+       * them fill the cell once the line is laid out. A stretching control's
+       * own width is its widest option or its default size, which differs
+       * from row to row, so a `fill` row asks for 160 px whatever it holds,
+       * and its label and cell split the rest as before. The label asks for
+       * 110 px, or 40% of a row narrower than 275. Next to 160 px of controls
+       * 110 fits only from 278 up, where 40% is more than 110, so `fill`
+       * rows lay out and wrap as they did, and a narrow control takes the
+       * room: "DC" and its field share a 214 px line, as "On a pass" and its
+       * 119 px choice do.
        */}
       <label htmlFor={props.htmlFor} style={{ flex: `1 1 min(${LABEL_BASIS}px, 40%)`, minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}>
         {props.label}
       </label>
-      <div style={{ flex: "1 1 auto", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ flex: props.fill ? `1 1 ${CONTROLS_BASIS}px` : "1 1 auto", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
         <div style={{ minWidth: "100%", maxWidth: CONTROLS_BASIS, display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
           <RowHint.Provider value={props.hint ? hintId : undefined}>{props.children}</RowHint.Provider>
         </div>
@@ -176,7 +184,7 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
   );
 }
 
-/** What a FieldRow's label and, at most, its controls ask for on one line before the row wraps. */
+/** What a FieldRow's label and its controls (at most, or always with `fill`) ask for on one line before the row wraps. */
 const LABEL_BASIS = 110;
 const CONTROLS_BASIS = 160;
 

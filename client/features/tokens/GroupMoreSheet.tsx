@@ -96,7 +96,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
             grow
           />
         </FieldRow>
-        <FieldRow label="Size">
+        <FieldRow label="Size" fill>
           <Select<string>
             label="Size"
             value={size === undefined || size === "custom" ? MIXED : size}
@@ -121,7 +121,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
         </FieldRow>
       </Section>
       <Section title="What players see">
-        <FieldRow label="Players see HP as">
+        <FieldRow label="Players see HP as" fill>
           <Select<string>
             label="Players see HP as"
             value={hpVisibility ?? MIXED}

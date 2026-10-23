@@ -55,7 +55,7 @@ export function SaveEndsFields(props: { form: SaveEndsForm; onChange(form: SaveE
       />
       {form.on ? (
         <>
-          <FieldRow label="Save">
+          <FieldRow label="Save" fill>
             <Select<AbilityKey> label="Save that ends it" value={form.ability} options={ABILITY_OPTIONS} onChange={(ability) => props.onChange({ ...form, ability })} />
           </FieldRow>
           <FieldRow label="DC">

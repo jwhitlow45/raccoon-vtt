@@ -173,12 +173,12 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return (
           <Group key={id} label="Stats" {...fold("page.stats")}>
             {access.canEdit("name") ? (
-              <FieldRow label="Name">
+              <FieldRow label="Name" fill>
                 <TextField label="Character name" value={character.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
               </FieldRow>
             ) : null}
             {access.dm ? (
-              <FieldRow label="Size">
+              <FieldRow label="Size" fill>
                 <Select aria-label="Size" value={character.size} onChange={(e) => update({ size: e.target.value as CreatureSize })} style={{ flex: 1, maxWidth: "100%" }}>
                   {SIZE_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -195,7 +195,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
             ) : null}
             <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor)} fromBlock={character.stats !== undefined} />
             {access.canEditActor("sheetUrl") ? (
-              <FieldRow label="Sheet link">
+              <FieldRow label="Sheet link" fill>
                 <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />
               </FieldRow>
             ) : null}

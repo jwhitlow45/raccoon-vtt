@@ -188,7 +188,7 @@ function TokenDetails(props: PanelProps) {
             <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
             <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} fromBlock={character?.stats !== undefined} />
             {access.canEditActor("sheetUrl") ? (
-              <FieldRow label="Sheet link">
+              <FieldRow label="Sheet link" fill>
                 <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />
               </FieldRow>
             ) : null}
@@ -343,11 +343,11 @@ function OwnerNames(props: { token: Token; access: TokenAccess; update(patch: To
   const { token, update } = props;
   return (
     <>
-      <FieldRow label="Name">
+      <FieldRow label="Name" fill>
         <TextField label="Name" value={token.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
       </FieldRow>
       {props.access.canEditToken("publicName") ? (
-        <FieldRow label="Name others see" hint="Used when the DM hides the name">
+        <FieldRow label="Name others see" fill hint="Used when the DM hides the name">
           <TextField label="Name others see" value={token.publicName ?? ""} maxLength={80} onCommit={(v) => update({ publicName: v.trim() || null })} />
         </FieldRow>
       ) : null}
@@ -366,12 +366,12 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
   const encounter = useRoomView((s) => s.view?.encounter);
   return (
     <>
-      <FieldRow label="Name">
+      <FieldRow label="Name" fill>
         <TextField label="Name" value={token.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
       </FieldRow>
       <Switch checked={token.nameHidden} onChange={(nameHidden) => update({ nameHidden })} label="Hide the name from players" />
       {token.nameHidden ? (
-        <FieldRow label="Name players see" hint="Empty shows “Unknown creature”">
+        <FieldRow label="Name players see" fill hint="Empty shows “Unknown creature”">
           <TextField
             label="Name players see"
             value={token.publicName ?? ""}
@@ -381,10 +381,10 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
           />
         </FieldRow>
       ) : null}
-      <FieldRow label="Kind">
+      <FieldRow label="Kind" fill>
         <Select<TokenKind> label="Kind" value={token.kind} options={KIND_OPTIONS} onChange={(kind) => update({ kind })} />
       </FieldRow>
-      <FieldRow label="Ring">
+      <FieldRow label="Ring" fill>
         <Select<Token["disposition"]>
           label="Disposition"
           value={token.disposition}
@@ -396,7 +396,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
           onChange={(disposition) => update({ disposition })}
         />
       </FieldRow>
-      <FieldRow label="Layer">
+      <FieldRow label="Layer" fill>
         <Select<Token["layer"]>
           label="Layer"
           value={token.layer}
@@ -407,7 +407,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
           onChange={(layer) => update({ layer })}
         />
       </FieldRow>
-      <FieldRow label="Players see HP as">
+      <FieldRow label="Players see HP as" fill>
         {followsParty ? (
           <span style={{ flex: 1, color: theme.color.textMuted }}>Follows Players see the party's HP</span>
         ) : (
@@ -473,7 +473,7 @@ function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAc
   const options = access.dm ? SIZE_OPTIONS : SIZE_OPTIONS.filter((o) => o.value !== "custom");
   return (
     <>
-      <FieldRow label="Size" hint={refused ? <span role="alert">{refused}</span> : undefined}>
+      <FieldRow label="Size" fill hint={refused ? <span role="alert">{refused}</span> : undefined}>
         <Select<CreatureSize>
           label="Size"
           value={token.size}
