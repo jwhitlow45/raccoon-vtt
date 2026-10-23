@@ -304,14 +304,14 @@ async function setWall(long: boolean): Promise<void> {
   await ops.send({ t: "build.edge", sceneId: run.sceneId, edges });
 }
 
-/** The page's own toasts with these words, not the hidden live regions. */
+/** The page's own toasts with these words, by their mark: the live region that speaks them is hidden and holds the same words. */
 function toasts(page: Page, words: RegExp): Locator {
-  return page.locator('[role="status"]').filter({ hasText: words }).filter({ visible: true });
+  return page.locator("[data-toast]").filter({ hasText: words }).filter({ visible: true });
 }
 
 async function dismissToasts(page: Page): Promise<void> {
   for (let i = 0; i < 8; i++) {
-    const t = page.locator('button[role="status"], div[role="status"] > button').filter({ visible: true });
+    const t = page.locator("button[data-toast], div[data-toast] > button").filter({ visible: true });
     if ((await t.count()) === 0) return;
     await t.first().click({ timeout: 1000 }).catch(() => {});
   }
@@ -881,7 +881,7 @@ const CASES = `
 </div>
 <div data-case="toasts" style="position: relative; width: 390px; height: 300px">
   <div style="position: absolute; left: 82px; right: 8px; top: 0; display: flex; flex-direction: column; gap: 8px"><div data-alert="rolls" style="display: contents"><section style="height: 60px; background: #333">Trip Wire went off</section></div></div>
-  <div style="position: absolute; top: 72px; left: 12px; right: 12px"><div role="status" style="background: #444; height: 44px">Trip Wire went off: Thorn.</div></div>
+  <div style="position: absolute; top: 72px; left: 12px; right: 12px"><div data-toast="" style="background: #444; height: 44px">Trip Wire went off: Thorn.</div></div>
 </div>
 `;
 
@@ -1078,7 +1078,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
 
       const lanes = await toastLaneLines(page, "toasts");
       assert.equal(lanes.length, 1, `the toast spanning the map under the card is caught: ${JSON.stringify(lanes)}`);
-      await page.locator('[data-case="toasts"] [role="status"]').evaluate((el) => {
+      await page.locator('[data-case="toasts"] [data-toast]').evaluate((el) => {
         (el.parentElement as unknown as { style: { left: string; right: string } }).style.left = "82px";
         (el.parentElement as unknown as { style: { left: string; right: string } }).style.right = "8px";
       });

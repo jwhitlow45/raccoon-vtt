@@ -197,7 +197,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   if (!doc) return [];
   const win = doc.defaultView;
   const CONTROL =
-    'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="option"], [role="status"], [role="alert"], li, label, summary, input, select, textarea, [data-alert], [role="group"], [role="radiogroup"]';
+    'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="option"], [role="status"], [role="alert"], li, label, summary, input, select, textarea, [data-alert], [data-toast], [role="group"], [role="radiogroup"]';
   // What takes a tap is one box to the eye, painted or not. A live region, a list item or a group with no box of its own is looked into.
   const INTERACTIVE =
     'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="option"], summary, input, select, textarea';
@@ -984,7 +984,8 @@ function toastsInPage(): ToastSeen[] {
     return r.width > 1.5 && r.height > 1.5 && style(el).visibility !== "hidden";
   };
   const painted = (el: DomElement) => !/rgba\(0, 0, 0, 0\)|transparent/.test(style(el).backgroundColor);
-  const toasts = Array.from(doc.querySelectorAll('[role="status"]')).filter((el) => shown(el) && painted(el) && el.closest("[data-alert]") === null);
+  // Found by their mark, not their live role: the announcements live in a region of their own, so a toast may carry no role at all.
+  const toasts = Array.from(doc.querySelectorAll("[data-toast]")).filter((el) => shown(el) && painted(el));
   // The alerts column holds a card of each kind marked `data-alert`, and the rolls' cards inside a wrapper with no box of its own (InitiativeStrip.tsx): its cards are its children as drawn.
   const columns = new Set<DomElement>();
   for (const marked of Array.from(doc.querySelectorAll("[data-alert]"))) {
