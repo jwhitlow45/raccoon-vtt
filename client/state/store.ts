@@ -52,22 +52,14 @@ export const TOAST_MS = 5_000;
 export const ACTION_TOAST_MS = 12_000;
 
 /**
- * How long each toast showing has left, counted from when it first showed,
- * so a toast that comes or goes never gives the others more time: TOAST_MS,
- * or ACTION_TOAST_MS for one with a button. Counted from each change
- * instead, a stack that keeps changing, as whispers and refusals arriving
- * in turn, kept every toast up long past its time. `shown` holds when each
- * showed, by id, and is brought up to date here: a new id starts now, and
- * an id no longer showing is dropped.
+ * How long each toast showing has left, counted from when it first showed
+ * (`shownAt`), so a toast that comes or goes never gives the others more
+ * time: TOAST_MS, or ACTION_TOAST_MS for one with a button. Counted from
+ * each change instead, a stack that keeps changing, as whispers and
+ * refusals arriving in turn, kept every toast up long past its time.
  */
-export function toastsLeft(toasts: readonly Toast[], shown: Map<number, number>, now: number): { id: number; ms: number }[] {
-  const showing = new Set(toasts.map((t) => t.id));
-  for (const id of shown.keys()) if (!showing.has(id)) shown.delete(id);
-  return toasts.map((t) => {
-    const at = shown.get(t.id) ?? now;
-    shown.set(t.id, at);
-    return { id: t.id, ms: Math.max(0, at + (t.action ? ACTION_TOAST_MS : TOAST_MS) - now) };
-  });
+export function toastsLeft(toasts: readonly Toast[], now: number): { id: number; ms: number }[] {
+  return toasts.map((t) => ({ id: t.id, ms: Math.max(0, t.shownAt + (t.action ? ACTION_TOAST_MS : TOAST_MS) - now) }));
 }
 
 /** Options for one dispatched op. */
@@ -413,7 +405,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}) }].slice(-MAX_TOASTS) });
+    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), shownAt: Date.now() }].slice(-MAX_TOASTS) });
   }
 
   // ------------------------------------------------------------ sending
@@ -629,12 +621,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       let trapped = s.trapped;
       let toasts = s.toasts;
       const toast = (text: string, tone: Toast["tone"]) => {
-        if (!toasts.some((t) => t.text === text)) toasts = [...toasts, { id: ++toastSeq, text, tone }].slice(-MAX_TOASTS);
+        if (!toasts.some((t) => t.text === text)) toasts = [...toasts, { id: ++toastSeq, text, tone, shownAt: Date.now() }].slice(-MAX_TOASTS);
       };
       // Two undos of one kind of change read the same. The answer to the
       // second replaces the first as a new toast, so each press visibly lands.
       const renew = (text: string, tone: Toast["tone"]) => {
-        toasts = [...toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone }].slice(-MAX_TOASTS);
+        toasts = [...toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone, shownAt: Date.now() }].slice(-MAX_TOASTS);
       };
       if (settled.size > 0) {
         const restored = new Map((msg.restored ?? []).map((r) => [r.n, r.what]));

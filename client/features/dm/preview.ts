@@ -83,7 +83,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     if (options.onRefuse) return options.onRefuse();
     const toasts = store.getState().toasts;
     if (toasts.some((t) => t.text === notice)) return;
-    store.setState({ toasts: [...toasts, { id: ++toastSeq, text: notice, tone: "info" as const }].slice(-3) });
+    store.setState({ toasts: [...toasts, { id: ++toastSeq, text: notice, tone: "info" as const, shownAt: Date.now() }].slice(-3) });
   };
 
   const setLocal = (patch: Partial<RoomView["local"]>) => {
@@ -114,7 +114,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     crossWide: (wide) => store.setState({ local: crossWide(store.getState().local, wide) }),
     notify: (text, tone = "info") => {
       const toasts = store.getState().toasts;
-      if (!toasts.some((t) => t.text === text)) store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone }].slice(-3) });
+      if (!toasts.some((t) => t.text === text)) store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, shownAt: Date.now() }].slice(-3) });
     },
     dismissToast: (id) => store.setState({ toasts: store.getState().toasts.filter((t) => t.id !== id) }),
     // The preview has no socket, so no X-card ever reaches it.

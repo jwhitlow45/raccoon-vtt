@@ -1531,10 +1531,9 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     if (slot) return;
     for (const [id, place] of placed.current.places) if (place === "sheet") ui.dismissToast(id);
   }, [slot, ui]);
-  // When each toast showed, so one that comes or goes never restarts the others' time (store.ts toastsLeft).
-  const shownAt = useRef(new Map<number, number>());
+  // Each toast's time counts from when it first showed (store.ts toastsLeft), so one that comes or goes, or a blackout that takes them all off screen, never restarts it.
   useEffect(() => {
-    const timers = toastsLeft(toasts, shownAt.current, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
+    const timers = toastsLeft(toasts, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   if (toasts.length === 0) return null;
