@@ -1145,7 +1145,8 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * place after a turn may come from the card as it stood before, until
  * the column measures it again. So does a toast that comes under the
  * card while the turn lasts (review FU22B-ASTRA-03). A card that arrives at another time moves
- * no toast, so nothing jumps under a finger. A toast never leaves the layer or the sheet, and leaves the
+ * no toast, so nothing jumps under a finger. A pane that stops standing as
+ * the screen turns leaves its toasts to be placed anew (review LP18-TO-3). A toast never leaves the layer or the sheet, and leaves the
  * notices only for a pane's header or a turned screen's card.
  */
 export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean }): ToastPlaces {
@@ -1163,6 +1164,8 @@ export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[];
       turning.add(id);
       continue;
     }
+    // A pane that stops standing as the screen turns is a card now, or gone, and its header's last place was read on the screen before the turn, perhaps above this one: its toasts take their places anew (review LP18-TO-3).
+    if (freeze && turned && place === "pane") continue;
     if (now.pane !== null && (inToastLayer(place) || (place === "map" && now.layer))) places.set(id, "pane");
     else if (freeze && place === "pane") places.set(id, paneLast !== null ? { low: paneLast, column: false } : "map");
     else places.set(id, place);

@@ -1175,6 +1175,24 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.deepEqual(s.places.get(2), { low: 240, column: true });
   });
 
+  test("a pane that stops standing as the screen turns leaves its toasts to take their places anew, never the header's place read before the turn (review LP18-TO-3)", () => {
+    // Upright, the trap's toast under the pane's header. The first render sideways still has the sheet, its header measured above the screen.
+    let s = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
+    s = step(s, [1], { paneStands: true, pane: -272, turned: true });
+    // Sideways the pane is a card: the toast goes to the notices' top, as one that came now would.
+    s = step(s, [1], { paneStands: false, turned: true });
+    assert.equal(s.places.get(1), "map");
+    assert.equal(toastLayerPlace(s, [1], sideways), null, "no stack is left above the screen");
+    // Under the column's card, where one shows.
+    let t = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
+    t = step(t, [1], { paneStands: false, turned: true, low: 140 });
+    assert.deepEqual(t.places.get(1), { low: 140, column: true });
+    // With no turn, the pane going away still freezes the stack where its header stood.
+    let u = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 182 });
+    u = step(u, [1], { paneStands: false });
+    assert.deepEqual(u.places.get(1), { low: 182, column: false });
+  });
+
   test("a card that arrives with no turn moves no toast, so nothing jumps under a finger", () => {
     let s = step(NO_TOAST_PLACES, [1]);
     s = step(s, [1], { low: 250 });
