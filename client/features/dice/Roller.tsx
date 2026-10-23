@@ -1,4 +1,4 @@
-import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
 import { labelText } from "#shared/logText.ts";
 import type { DiceRoll, LogEntry } from "#shared/model.ts";
@@ -8,6 +8,8 @@ import { Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Loading } from "../../components/Loading.tsx";
+import { choiceLook } from "../../components/looks.ts";
+import { sectionLabelLook } from "../../components/Panel.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -45,6 +47,36 @@ const ROLLING = "Rolling…";
 const NOTE_LINE = 1.3;
 // The d20 leads, as the die rolled most: at 130% on a phone the strip scrolls after d10, and at 100% after d12.
 const QUICK_DICE = [20, 4, 6, 8, 10, 12, 100] as const;
+/**
+ * The quick dice strip's room at each end for its first and last focus
+ * ring. The strip stands this much wider on each side, in the pane's
+ * padding, so the d20 starts on the field's edge (docs/design-v1-dice-pass.md
+ * 7.7). The second box allowed past the content box, after the sticky
+ * line's top, for the same reason: it must be wider than what it shows.
+ */
+const QUICK_EDGE = 3;
+
+/**
+ * The field's hint, shortened where the long one would be cut, as it was at
+ * 320 x 568 at 130% (docs/design-v1-dice-pass.md 7.9).
+ */
+const PLACEHOLDER = { long: "1d20+5 or 2d6+3 fire", short: "1d20+5" } as const;
+
+let measurer: CanvasRenderingContext2D | null = null;
+
+/**
+ * Whether the long hint fits inside the field's padding, by its words'
+ * width in the field's own font. The field's own px and the font's are
+ * both before the interface size's zoom, so the answer holds at any size.
+ */
+function longHintFits(field: HTMLInputElement): boolean {
+  measurer ??= document.createElement("canvas").getContext("2d");
+  if (!measurer) return true;
+  const style = getComputedStyle(field);
+  measurer.font = style.font;
+  const room = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  return measurer.measureText(PLACEHOLDER.long).width <= room;
+}
 
 /** The header line's verdict: an answer's pass or fail as its player reads it, else a dice line's against its DC or AC. */
 function shownVerdict(roll: DiceRoll, data: LogEntry["data"]): string | null {
@@ -131,8 +163,9 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         top: `calc(-1 * ${PAD_TOP})`,
         zIndex: theme.z.stickyHeader,
         // Only the top takes the pane's padding back, so nothing scrolls past above the line. Sideways it keeps to the column, as every row does (docs/design-v1-dice-ui.md 3.1).
+        // The padding taken back is given half above the row and half below it, so the row sits in the middle of the painted box, resting or stuck (docs/design-v1-dice-pass.md 7.4).
         margin: `calc(-1 * ${PAD_TOP}) 0 0`,
-        padding: `${PAD_TOP} 0 0`,
+        padding: `calc(${PAD_TOP} / 2) 0`,
         background: theme.color.surface,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
         // A grid item's floor is its content's width, and one line of a long label would widen the whole panel sideways. This lets it ellipsize instead.
@@ -273,6 +306,21 @@ export function Roller() {
   const readingId = useId();
   const blockedId = useId();
   const field = useRef<HTMLInputElement>(null);
+  const [shortPlaceholder, setShortPlaceholder] = useState(false);
+  useLayoutEffect(() => {
+    const el = field.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    // Only while the field is empty does the hint show, and a clear button's padding never narrows it.
+    const measure = () => {
+      if (el.value === "") setShortPlaceholder(!longHintFits(el));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    // A web font that loads after the first measure changes the words' width, and no resize says so.
+    void document.fonts?.ready.then(measure);
+    return () => observer.disconnect();
+  }, []);
 
   const change = (next: string) => {
     setText(next);
@@ -324,7 +372,7 @@ export function Roller() {
             aria-label="Dice formula"
             aria-describedby={blocked !== null ? blockedId : reading || error ? readingId : undefined}
             aria-invalid={error ? true : undefined}
-            placeholder="1d20+5 or 2d6+3 fire"
+            placeholder={shortPlaceholder ? PLACEHOLDER.short : PLACEHOLDER.long}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -368,27 +416,123 @@ export function Roller() {
           </span>
         ) : null}
       </div>
-      <ScrollStrip aria-label="Quick dice" gap={theme.space(1)}>
+      <ScrollStrip aria-label="Quick dice" gap={theme.space(1)} edge={QUICK_EDGE} style={{ marginInline: -QUICK_EDGE }}>
         {QUICK_DICE.map((sides) => (
           <Button key={sides} size="sm" aria-label={`Add a d${sides}`} onClick={() => change(addDie(text, sides))} style={{ flex: "none", minWidth: theme.touch }}>
             d{sides}
           </Button>
         ))}
       </ScrollStrip>
-      <div role="group" aria-label="For the next roll" data-dice-modes="" style={{ display: "flex", gap: theme.space(1), flexWrap: "wrap" }}>
-        <Chip pressed={panel.adv} aria-label="Advantage" onClick={() => panel.press("adv")}>
+      <RollModes adv={panel.adv} dis={panel.dis} secret={panel.secret} dm={dm} onPress={panel.press} />
+    </div>
+  );
+}
+
+/** Where a toggle of the roll modes stands: the start or end of the joined Adv and Dis, or a pill of its own. */
+type ModeShape = "start" | "end" | "pill";
+
+const MODE_RADIUS: Record<ModeShape, string> = {
+  start: `${theme.radius.pill}px 0 0 ${theme.radius.pill}px`,
+  end: `0 ${theme.radius.pill}px ${theme.radius.pill}px 0`,
+  pill: `${theme.radius.pill}px`,
+};
+
+/**
+ * One half of the joined Adv and Dis: a chip's look (components/Chip.tsx)
+ * with its outer corners round. The end half lies over the start half's
+ * edge, so one 1 px line splits them. A pressed or focused half stands
+ * above the other, so its accent outline and its focus ring show whole,
+ * and the split line takes the pressed half's accent.
+ */
+function ModeHalf(props: { shape: Exclude<ModeShape, "pill">; pressed: boolean; label: string; focused: boolean; onFocus(on: boolean): void; onPress(): void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={props.pressed}
+      aria-label={props.label}
+      onClick={props.onPress}
+      onFocus={() => props.onFocus(true)}
+      onBlur={() => props.onFocus(false)}
+      style={{
+        position: "relative",
+        zIndex: props.focused ? 2 : props.pressed ? 1 : 0,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: "none",
+        minHeight: theme.touch,
+        minWidth: theme.touch,
+        padding: `0 ${theme.space(3)}px`,
+        marginInlineStart: props.shape === "end" ? -theme.line.border : 0,
+        borderRadius: MODE_RADIUS[props.shape],
+        fontSize: theme.font.body14,
+        fontWeight: theme.weight.strong,
+        fontFamily: theme.font.body,
+        whiteSpace: "nowrap",
+        cursor: "pointer",
+        ...choiceLook(props.pressed),
+      }}
+    >
+      {props.children}
+    </button>
+  );
+}
+
+/**
+ * The one-roll choices (docs/design-v1-dice-pass.md 4): "Next roll" in the
+ * section label's look, Advantage and Disadvantage joined as one choice of
+ * two, as D&D Beyond's roll menu puts them, and Secret apart, since it
+ * answers who sees the roll. The visible words sit inside the group's name,
+ * "For the next roll", so the group is named once and a voice user who
+ * says what they see still finds it.
+ *
+ * Where the row has no room for all three, Secret wraps under the pair and
+ * fills its line, which a lone part may (docs/design-v1-polish.md 4). A
+ * flex item grows only once it is known to be alone, and its growing never
+ * moves where the line breaks, which its own width decides. Exported for
+ * its render test.
+ */
+export function RollModes(props: { adv: boolean; dis: boolean; secret: boolean; dm: boolean; onPress(mode: "adv" | "dis" | "secret"): void }) {
+  const pair = useRef<HTMLDivElement>(null);
+  const secret = useRef<HTMLSpanElement>(null);
+  const [wrapped, setWrapped] = useState(false);
+  const [focused, setFocused] = useState<"adv" | "dis" | null>(null);
+  useLayoutEffect(() => {
+    const row = pair.current?.parentElement;
+    if (!row || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const a = pair.current?.getBoundingClientRect();
+      const b = secret.current?.getBoundingClientRect();
+      if (a && b) setWrapped(b.top >= a.bottom);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+  const focus = (mode: "adv" | "dis") => (on: boolean) => setFocused((f) => (on ? mode : f === mode ? null : f));
+  return (
+    <div role="group" aria-label="For the next roll" data-dice-modes="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+      <span aria-hidden="true" style={{ ...sectionLabelLook(), flex: "none" }}>
+        Next roll
+      </span>
+      <div ref={pair} style={{ display: "flex", flex: "none" }}>
+        <ModeHalf shape="start" pressed={props.adv} label="Advantage" focused={focused === "adv"} onFocus={focus("adv")} onPress={() => props.onPress("adv")}>
           Adv
-        </Chip>
-        <Chip pressed={panel.dis} aria-label="Disadvantage" onClick={() => panel.press("dis")}>
+        </ModeHalf>
+        <ModeHalf shape="end" pressed={props.dis} label="Disadvantage" focused={focused === "dis"} onFocus={focus("dis")} onPress={() => props.onPress("dis")}>
           Dis
-        </Chip>
-        <Chip pressed={panel.secret} aria-label={dm ? "Hide from players" : "Only the DM sees it"} onClick={() => panel.press("secret")}>
+        </ModeHalf>
+      </div>
+      {/* A grid stretches the chip to the span's width, so the chip fills the line once the span grows. */}
+      <span ref={secret} data-dice-secret="" style={{ display: "grid", flex: wrapped ? "1 1 auto" : "none" }}>
+        <Chip pressed={props.secret} aria-label={props.dm ? "Hide from players" : "Only the DM sees it"} onClick={() => props.onPress("secret")}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
             <Icon name="hidden" size="sm" />
             Secret
           </span>
         </Chip>
-      </div>
+      </span>
     </div>
   );
 }
