@@ -11,7 +11,7 @@ import { describe, test } from "node:test";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { HideButton, SheetHeader } = await import("./SheetHeader.tsx");
+const { HideButton, PaneHeader, SheetHeader } = await import("./SheetHeader.tsx");
 const { Icon } = await import("./Icon.tsx");
 
 const svg = (markup: string) => /<svg[\s\S]*?<\/svg>/.exec(markup)?.[0] ?? "";
@@ -51,5 +51,35 @@ describe("a compact header", () => {
     const markup = header(false);
     assert.match(markup, /^<header style="[^"]*min-height:56px/);
     assert.match(markup, /<h2[^>]*font-size:18px/);
+  });
+});
+
+/*
+ * A docked window's header sticks to the top of its scrolling frame, so it
+ * takes back the frame's 4 px top padding to cover what scrolls under it.
+ * It gives that back with a 48 px row's 2 px above and below its buttons,
+ * so its Close and title stand where a map pane's header puts them, 6 px
+ * under the frame's top edge inside its border, not 4
+ * (docs/design-v1-polish.md R7).
+ */
+describe("a sticky pane header", () => {
+  const row = (markup: string) => /^<div[^>]*style="([^"]*)"/.exec(markup)?.[1] ?? "";
+
+  test("pads 6 px above its buttons and 2 below, 52 px in all, over the frame's 4 px it takes back", () => {
+    const style = row(renderToStaticMarkup(createElement(PaneHeader, { title: "Goblin", onClose() {}, sticky: true })));
+    assert.match(style, /margin:-4px -12px 0/);
+    assert.match(style, /padding:6px 12px 2px/);
+    assert.match(style, /min-height:52px/);
+  });
+
+  test("stands its buttons where a pane's own header does: 2 px under the frame's padding, as a 48 px row centers 44 px buttons", () => {
+    const own = row(renderToStaticMarkup(createElement(PaneHeader, { title: "Label", onClose() {} })));
+    assert.match(own, /min-height:48px/);
+    assert.match(own, /align-items:center/);
+    const sticky = row(renderToStaticMarkup(createElement(PaneHeader, { title: "Goblin", onClose() {}, sticky: true })));
+    const [top, , bottom] = (/padding:(\d+)px (\d+)px (\d+)px/.exec(sticky) ?? []).slice(1).map(Number);
+    const reach = Number(/margin:-(\d+)px/.exec(sticky)?.[1]);
+    assert.equal(top! - reach, (48 - 44) / 2, "the sticky header's buttons stand higher or lower than a pane's");
+    assert.equal(bottom, (48 - 44) / 2);
   });
 });
