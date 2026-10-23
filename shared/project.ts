@@ -1511,27 +1511,38 @@ export type LineReach = { audience: "shared"; parts?: LineParts } | { audience: 
 type Read = { id: string; ctx: Ctx; view: LogEvent | null };
 
 export function lineReach(state: RoomState, entry: Pick<LogEntry, "kind" | "data">): LineReach {
-  if (entry.kind !== "event" || !entry.data) return { audience: "shared" };
-  const data = entry.data;
+  return lineReader(state)(entry);
+}
+
+/**
+ * lineReach for every line of one room: the players' reads share one fog
+ * and sight reader and one context each, so an op of many lines judges
+ * them all against the same room for about the cost of reading each.
+ */
+export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "data">) => LineReach {
   const fogged = fogReader(state);
   const sight = sightReader(state);
-  const read = (viewer: Viewer): Read => {
-    // Any player stands for a member who owns nothing, so it reads a dice line as members do.
-    const ctx: Ctx = { state, viewer, sceneId: viewerSceneId(state, viewer, { sceneId: null }), paused: paused(state, viewer), member: true, fogged, sight };
-    return { id: viewer.memberId, ctx, view: projectEventCtx(ctx, data) };
-  };
+  // Any player stands for a member who owns nothing, so it reads a dice line as members do.
+  const ctxOfReader = (viewer: Viewer): Ctx => ({ state, viewer, sceneId: viewerSceneId(state, viewer, { sceneId: null }), paused: paused(state, viewer), member: true, fogged, sight });
   const players = Object.values(state.members)
     .filter((m) => m.kind === "player")
     .map((m) => m.id)
-    .sort();
-  const reads = players.map((id) => read({ memberId: id, role: "player" }));
-  const readers = reads.filter((r) => r.view !== null);
-  const anyone = read(ANY_PLAYER);
-  if (anyone.view === null || readers.length < players.length) {
-    return readers.length === 0 ? { audience: "dm" } : { audience: "party", views: readers.map((r) => [r.id, r.view!]) };
-  }
-  const parts = partsOf(data, anyone, reads);
-  return parts ? { audience: "shared", parts } : { audience: "shared" };
+    .sort()
+    .map((id) => ctxOfReader({ memberId: id, role: "player" }));
+  const anyPlayer = ctxOfReader(ANY_PLAYER);
+  return (entry) => {
+    if (entry.kind !== "event" || !entry.data) return { audience: "shared" };
+    const data = entry.data;
+    const read = (ctx: Ctx): Read => ({ id: ctx.viewer.memberId, ctx, view: projectEventCtx(ctx, data) });
+    const reads = players.map(read);
+    const readers = reads.filter((r) => r.view !== null);
+    const anyone = read(anyPlayer);
+    if (anyone.view === null || readers.length < players.length) {
+      return readers.length === 0 ? { audience: "dm" } : { audience: "party", views: readers.map((r) => [r.id, r.view!]) };
+    }
+    const parts = partsOf(data, anyone, reads);
+    return parts ? { audience: "shared", parts } : { audience: "shared" };
+  };
 }
 
 /**

@@ -14,7 +14,7 @@ import type {
   TokenKind,
   Viewer,
 } from "../model.ts";
-import { hashValue, lineReach, seenByNonOwners } from "../project.ts";
+import { hashValue, lineReader, seenByNonOwners } from "../project.ts";
 import type { ActorTarget, RefusalCode, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { decodeTile } from "../rules/fog.ts";
@@ -270,7 +270,8 @@ export class Tx {
   private settleLog(): void {
     if (this.settled || !logsByAudience(this.env.opVersion)) return;
     this.settled = true;
-    const reaches = this.unsettled.map((u) => ("line" in u && u.line.kind === "event" ? lineReach(this.state, u.line) : null));
+    const reachOf = lineReader(this.state);
+    const reaches = this.unsettled.map((u) => ("line" in u && u.line.kind === "event" ? reachOf(u.line) : null));
     if (reaches.some((r) => r !== null && (r.audience !== "shared" || r.parts !== undefined))) {
       // Only an op whose trap step wrote a players' line meets their log, which a room from before traps lacks.
       const held = new Set<LogEntry>(this.unsettled.some((u) => "trapSeen" in u) ? this.collection("trapSeen") : []);
