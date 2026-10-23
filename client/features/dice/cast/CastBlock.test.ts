@@ -119,7 +119,8 @@ describe("the sends leading the options", () => {
 
   test("while the block's creature's options load, the block does not draw, so its send shows in the list", () => {
     const markup = render({ picked: "c:thorn-c", cast: { spell: "Fireball", area: "a1", sent: "f1" }, shaped: true });
-    assert.doesNotMatch(markup, /Rolls for Thorn/, "the options still load");
+    assert.match(markup, /aria-label="Rolls for Thorn"/, "the card's frame and header draw at once");
+    assert.doesNotMatch(markup, /aria-label="Spells"/, "the options still load");
     assert.doesNotMatch(markup, /aria-label="Ask for saves: Fireball"/, "no block yet");
     assert.match(markup, /Fireball: not asked\./);
     assert.match(markup, /Hold Person: not asked\./);

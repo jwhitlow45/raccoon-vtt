@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
 import { critRuleOf } from "#shared/dice/crit.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type RoomState, type SkillKey } from "#shared/model.ts";
@@ -8,23 +8,28 @@ import type { ActorTarget } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
-import { Chip, ChipRow } from "../../components/Chip.tsx";
+import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
+import { Group, Help, sectionLabelLook } from "../../components/Panel.tsx";
+import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { tabKeyIndex } from "../../lib/a11y.ts";
 import { startInScrollBox } from "../../lib/reveal.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { PanelProps } from "../panels.ts";
+import { ImagePreview } from "../images/IconDisk.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
 import { d20Text, parseBonus } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
-import { Note, Section, SmallButton } from "../tokens/ui.tsx";
-import { sectionLabelLook } from "../../components/Panel.tsx";
-import type { RollPreset } from "#shared/rules/rollReminders.ts";
+import { Note, SmallButton } from "../tokens/ui.tsx";
 import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
+import { CreatureCard } from "./CreatureCard.tsx";
+import { creatureLook } from "./creatureLook.ts";
+import { foldKey, foldKind, useDiceFolds, type CreatureGroup } from "./diceFolds.ts";
 import {
   creatureKey,
   critical,
@@ -32,10 +37,13 @@ import {
   commonTags,
   cutLabel,
   damageRolls,
+  foldSummary,
+  groupAsks,
   groupNote,
   initiativeRow,
   namedRoll,
   noNumbersNote,
+  openForAsks,
   playerCreatures,
   presetLine,
   presetTag,
@@ -45,15 +53,17 @@ import {
   routedTest,
   rowSummary,
   routeOf,
+  sameSpell,
   scoreOf,
   signedText,
-  skillAsks,
+  spellLevels,
   spendOnStart,
   testLabel,
   typedTap,
   typedText,
   withUsed,
   writeUsed,
+  type Pickable,
   type TypedBonus,
 } from "./options.ts";
 import { useOption, useOptionStore } from "./optionState.ts";
@@ -64,7 +74,6 @@ import { useStartGroupSave } from "./groupSave/start.ts";
 import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, WaitingAsks } from "./cast/CastBlock.tsx";
-import { sameSpell } from "./cast/cast.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
 /** Room above the options when the panel opens on them: the sticky line's height and a little. */
@@ -73,9 +82,11 @@ const OPTIONS_MARGIN = 48;
 /**
  * A creature's roll options, between the roller and Recent rolls
  * (docs/design-v1-roll-options.md 4): the DM's selected token, or the
- * character or companion a player picks. Every button is 44 px and rolls on
- * the server at once, shows busy until its line lands, and its row then
- * shows the newest result in place. The stat block views stay text.
+ * character or companion a player picks, in a card that says whose rolls
+ * these are, then its groups, each folding (docs/design-v1-dice-pass.md 5
+ * and 6). Every button is 44 px and rolls on the server at once, shows busy
+ * until its line lands, and its result shows in the panel's sticky line.
+ * The stat block views stay text.
  */
 export function RollOptions(_props: PanelProps) {
   const role = useRoomView((s) => s.you?.role ?? null);
@@ -99,25 +110,25 @@ export function RollOptions(_props: PanelProps) {
   if (role === "dm") {
     const id = selected.length === 1 ? selected[0] : undefined;
     const token = id !== undefined ? view.tokens[id] : undefined;
-    if (selected.length === 0) body = <Note>Select a token to roll for it.</Note>;
-    else if (selected.length > 1) body = <GroupOptions tokenIds={selected} />;
-    else if (!token) body = <Note>Select a token to roll for it.</Note>;
-    else body = <CreatureOptions key={token.id} creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token)} />;
+    if (selected.length > 1) body = <GroupOptions tokenIds={selected} />;
+    else if (!token) body = <CreatureCard><Note>Select a token to roll for it.</Note></CreatureCard>;
+    else body = <CreatureOptions creature={{ tokenId: token.id }} tokenId={token.id} name={displayName(token)} />;
   } else body = <PlayerOptions view={view} selected={selected} />;
   return (
-    <div ref={ref} data-roll-options="" style={{ display: "grid", gap: theme.space(2), scrollMarginTop: OPTIONS_MARGIN }}>
+    <div ref={ref} data-roll-options="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), scrollMarginTop: OPTIONS_MARGIN }}>
       {body}
     </div>
   );
 }
 
 /**
- * A player's creatures (4.1, `playerCreatures`) by chips: their
- * characters, those characters' companions, and every other token they
- * own on the scene. The first pick is the selected token when it is
- * theirs, so a bar's Roll lands on it, else their character, and a tap
- * keeps its pick for the page. Other creatures are never offered, since
- * the server refuses them.
+ * A player's creatures (4.1, `playerCreatures`): their characters, those
+ * characters' companions, and every other token they own on the scene,
+ * as tabs across the card's top where there are two or more
+ * (docs/design-v1-dice-pass.md 5.2). The first pick is the selected token
+ * when it is theirs, so a bar's Roll lands on it, else their character, and
+ * a pick lasts for the page. Other creatures are never offered, since the
+ * server refuses them.
  */
 /** Exported for its render test. */
 export function PlayerOptions(props: { view: RoomState; selected: readonly string[] }) {
@@ -125,6 +136,7 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
   const sceneId = useRoomView((s) => s.sceneId);
   const picked = useOption((s) => s.picked);
   const store = useOptionStore();
+  const regionId = useId();
   const { view } = props;
   const options = useMemo(() => playerCreatures(view, me, sceneId, displayName), [view, me, sceneId]);
   const last = props.selected[props.selected.length - 1];
@@ -136,7 +148,9 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
     return (
       <>
         <WaitingAsks view={view} pickedKey={null} blockDraws={false} />
-        <Note>Your character's rolls show here once you play one.</Note>
+        <CreatureCard>
+          <Note>Your character's rolls show here once you play one.</Note>
+        </CreatureCard>
       </>
     );
   }
@@ -144,17 +158,83 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
     <>
       {/* The open block draws only with its creature's options, so while they load or after a load failed its send shows here. */}
       <WaitingAsks view={view} pickedKey={current.key} blockDraws={loaded.dice !== null && loaded.rolls !== null && !loaded.failed} />
-      {options.length > 1 ? (
-        <ChipRow label="Roll for">
-          {options.map((o) => (
-            <Chip key={o.key} wrap pressed={o.key === current.key} onClick={() => store.setState({ picked: o.key })}>
-              {o.name}
-            </Chip>
-          ))}
-        </ChipRow>
-      ) : null}
-      <LoadedOptions key={current.key} loaded={loaded} creature={current.creature} tokenId={current.tokenId} name={current.name} />
+      <CreatureFrame
+        loaded={loaded}
+        creature={current.creature}
+        tokenId={current.tokenId}
+        name={current.name}
+        regionId={regionId}
+        tabs={options.length > 1 ? <CreatureTabs view={view} options={options} current={current} regionId={regionId} onPick={(key) => store.setState({ picked: key })} /> : null}
+      />
     </>
+  );
+}
+
+/**
+ * A player's creatures as tabs (5.2, 6.6): one Tab stop on the picked one,
+ * Left and Right to the one beside, wrapping at the ends, and Home and End,
+ * each picking as it moves. They sit above the options, which remount for
+ * each pick, so focus stays on the tab just picked. Tabs, not pills, so
+ * nothing here looks like Adv, Dis or Secret.
+ */
+function CreatureTabs(props: { view: RoomState; options: readonly Pickable[]; current: Pickable; regionId: string; onPick(key: string): void }) {
+  const { options, current } = props;
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const index = tabKeyIndex(e.key, options.indexOf(current), options.length);
+    const next = index === null ? undefined : options[index];
+    if (!next) return;
+    e.preventDefault();
+    props.onPick(next.key);
+    e.currentTarget.querySelector<HTMLElement>(`[data-tab-key="${CSS.escape(next.key)}"]`)?.focus();
+  };
+  return (
+    // No room at the strip's ends, so the first tab starts on the card's column, as its kind line does: each tab draws its focus ring inside itself, and its picture takes no ring the strip would clip.
+    <ScrollStrip role="tablist" aria-label="Roll for" active={current.key} onKeyDown={onKey} gap={theme.space(4)} edge={0}>
+      {options.map((o) => {
+        const chosen = o.key === current.key;
+        const look = creatureLook({ view: props.view, creature: o.creature, tokenId: o.tokenId, name: o.name });
+        return (
+          <button
+            key={o.key}
+            type="button"
+            role="tab"
+            aria-selected={chosen}
+            aria-controls={props.regionId}
+            tabIndex={chosen ? 0 : -1}
+            data-tab-key={o.key}
+            data-active={chosen ? "true" : undefined}
+            onClick={() => props.onPick(o.key)}
+            style={{
+              flex: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: theme.space(2),
+              minHeight: theme.touch,
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              outlineOffset: -theme.line.strong,
+              // The line under the picked tab, and a clear one under the rest, so every tab is one height.
+              borderBottom: `${theme.line.strong}px solid ${chosen ? theme.color.accent : "transparent"}`,
+              color: chosen ? theme.color.text : theme.color.textMuted,
+              fontFamily: theme.font.body,
+              fontSize: theme.font.input,
+              fontWeight: theme.weight.strong,
+              whiteSpace: "nowrap",
+              cursor: "pointer",
+            }}
+          >
+            {look ? (
+              <span aria-hidden style={{ display: "flex" }}>
+                <ImagePreview image={look.picture.image} shape={look.picture.shape} aspect={look.picture.aspect} width={24} initials={look.picture.initials} />
+              </span>
+            ) : null}
+            {o.name}
+          </button>
+        );
+      })}
+    </ScrollStrip>
   );
 }
 
@@ -168,15 +248,39 @@ function useCreatureRolls(creature: ActorTarget | null): Loaded {
 }
 
 function CreatureOptions(props: { creature: ActorTarget; tokenId?: string | undefined; name: string }) {
-  return <LoadedOptions loaded={useCreatureRolls(props.creature)} {...props} />;
+  return <CreatureFrame loaded={useCreatureRolls(props.creature)} {...props} />;
 }
 
-function LoadedOptions(props: { loaded: Loaded; creature: ActorTarget; tokenId?: string | undefined; name: string }) {
-  const { dice, rolls, failed } = props.loaded;
-  if (failed) return <SrdLoadFailed what="The roll options" inline />;
-  if (!dice || !rolls) return <Loading text="Loading the roll options…" />;
-  return <OptionsList dice={dice} rolls={rolls} creature={props.creature} tokenId={props.tokenId} name={props.name} />;
+/** Exported for its render test: the options of a creature whose rolls have loaded. */
+export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string }) {
+  return <CreatureFrame loaded={{ dice: props.dice, rolls: props.rolls, failed: false }} creature={props.creature} tokenId={props.tokenId} name={props.name} />;
 }
+
+/**
+ * The region "Rolls for Thorn": the creature's card, then its groups
+ * (docs/design-v1-dice-pass.md 5). The card's frame, header and tabs draw
+ * here, at once, while the options load. What the loaded options hold
+ * draws keyed by the creature, inside the card and under it, so a pick
+ * starts each afresh while the tabs keep their focus.
+ */
+function CreatureFrame(props: { loaded: Loaded; creature: ActorTarget; tokenId?: string | undefined; name: string; tabs?: ReactNode; regionId?: string }) {
+  const view = useRoomView((s) => s.view);
+  const { dice, rolls, failed } = props.loaded;
+  const look = view ? creatureLook({ view, creature: props.creature, tokenId: props.tokenId, name: props.name }) : null;
+  const key = view ? creatureKey(view, props.creature) : "";
+  const shown = !failed && dice !== null && rolls !== null ? { dice, rolls, creature: props.creature, tokenId: props.tokenId, name: props.name } : null;
+  const tabbed = props.tabs !== undefined && props.tabs !== null;
+  return (
+    <section id={props.regionId} aria-label={`Rolls for ${props.name}`} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+      <CreatureCard pictures={tabbed || !look ? undefined : [look.picture]} badge={look?.badge ?? null} name={tabbed ? undefined : props.name} line={look?.line} tabs={props.tabs}>
+        {failed ? <SrdLoadFailed what="The roll options" inline /> : shown ? <CardBody key={key} {...shown} /> : <Loading text="Loading the roll options…" />}
+      </CreatureCard>
+      {shown ? <OptionGroups key={key} {...shown} /> : null}
+    </section>
+  );
+}
+
+type Shown = { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string };
 
 type Ctx = {
   dice: DiceView;
@@ -192,8 +296,8 @@ type Ctx = {
   castRow: string | null;
 };
 
-/** Exported for its render test. */
-export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string }) {
+/** What the card and the groups both read of a creature's options. */
+function useCtx(props: Shown) {
   const { dice, rolls, creature } = props;
   const state = dice.view;
   const dm = dice.you.role === "dm";
@@ -203,114 +307,232 @@ export function OptionsList(props: { dice: DiceView; rolls: CreatureRolls; creat
   const character = characterId !== undefined ? state.characters[characterId] : undefined;
   const played = dm && (token ? playersToken(state, token) : character !== undefined && character.ownerIds.some((id) => state.members[id]?.kind === "player"));
   const askOff = useOption((s) => s.askOff[key] === true);
-  const store = useOptionStore();
   const blocked = useRollBlocked();
-  const openPcStats = useOpenPcStats();
   const cast = useOption((s) => (s.cast?.key === key ? s.cast : null));
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  /*
-   * A new ask for a skill opens the fold over its Asked button, as a tap
-   * would, so the fold stays open once it is answered. Set in render, not
-   * in an effect, so the closed fold never draws first.
-   */
-  const skillAsked = skillAsks(state, creature);
-  const [seenAsks, setSeenAsks] = useState<readonly string[]>([]);
-  if (skillAsked.length !== seenAsks.length || skillAsked.some((id) => !seenAsks.includes(id))) {
-    setSeenAsks(skillAsked);
-    if (skillAsked.some((id) => !seenAsks.includes(id))) setSkillsOpen(true);
-  }
   const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
-  const numbers = rolls.numbers;
-  const named = rolls.named.filter((r) => r.section !== "spells");
-  const spells = rolls.named.filter((r) => r.section === "spells");
   // Every named roll draws a row. A block opens under its roll's row, else under the spell's found by name. A roll with no row, as for an area whose spell has none or a row gone since, opens the block at the top (3.1), so an open block always draws for its creature (WaitingAsks leaves its send to it).
   const drawn = new Set(rolls.named.map((r) => r.key));
   const castRow = cast ? ((cast.roll !== undefined && drawn.has(cast.roll) ? cast.roll : undefined) ?? rolls.named.find((r) => sameSpell(r.name, cast.spell))?.key ?? null) : null;
   const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
+  return { ctx, actor, character, askOff, cast };
+}
+
+/**
+ * The card's own parts under its header (docs/design-v1-dice-pass.md 5.1),
+ * none of which fold: why rolls are blocked, the Ask switch, the Death
+ * Save while dying, what a creature without numbers needs, and Initiative,
+ * which starts a fight.
+ */
+function CardBody(props: Shown) {
+  const { ctx, actor, character, askOff } = useCtx(props);
+  const store = useOptionStore();
+  const openPcStats = useOpenPcStats();
+  const { rolls, dice } = ctx;
+  const numbers = rolls.numbers;
+  const typed = parseBonus(useOption((s) => s.bonus[ctx.key] ?? ""));
+  const init = rolls.initBonus;
+  return (
+    <>
+      {ctx.blocked ? <Note tone="info">{ctx.blocked}</Note> : null}
+      {ctx.played ? <Switch label={`Ask ${props.name} to roll saves and checks`} checked={!askOff} onChange={(on) => store.setState((s) => ({ askOff: { ...s.askOff, [ctx.key]: !on } }))} /> : null}
+      {/* While dying, its death save is the one roll it makes, so it leads (W7B-P-19). */}
+      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={init === null ? null : (numbers?.deathSave ?? 0)} /> : null}
+      {numbers ? null : (
+        <BonusField
+          ctx={ctx}
+          typed={typed}
+          addBlock={character && actor?.srdId === undefined && init !== null && editsPcStats(dice.you, character) ? () => openPcStats(character.id) : null}
+        />
+      )}
+      {numbers ? (
+        init !== null ? <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} /> : null
+      ) : init !== null ? (
+        <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
+      ) : (
+        // With no known bonus it rolls by the one typed, and waits for it.
+        <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? d20Text(typed.bonus) : "d20"} />
+      )}
+    </>
+  );
+}
+
+/**
+ * The groups under the card (docs/design-v1-dice-pass.md 6.1), in the
+ * order players know, each folding as this device last left it for this
+ * kind of creature (6.3). What newly waits in a group opens it once, on the
+ * render that first sees it (6.4), and a folded group's line leads with
+ * what still waits there.
+ */
+function OptionGroups(props: Shown) {
+  const { ctx, cast } = useCtx(props);
+  const { fold, store: folds } = useDiceFolds();
+  const roomId = useRoomView((s) => s.roomId);
+  const { dice, rolls, creature } = ctx;
+  const state = dice.view;
+  const kind = foldKind(state, creature);
+  const asks = groupAsks({ state, creature, named: rolls.named, cast });
+  // In render, not an effect, so a group that newly holds an ask never draws folded first.
+  openForAsks(folds, kind, asks);
+  const groupFold = (group: CreatureGroup) => fold(foldKey(kind, group));
+  const numbers = rolls.numbers;
+  const typed = parseBonus(useOption((s) => s.bonus[ctx.key] ?? ""));
+  const named = rolls.named.filter((r) => r.section !== "spells");
+  const spells = rolls.named.filter((r) => r.section === "spells");
+  const used = readUsed(roomId)[ctx.key] ?? [];
 
   // The effects that bear on a group's rolls, named once in its label rather than under each of its buttons.
   const presetOf = (test: D20Test) => presetFor(dice, creature, test, { rolls });
   const noteOf = (tests: readonly D20Test[]) => groupNote(tests.map(presetOf));
-  const asks = ctx.ask ? `asks ${props.name}` : "";
+  const asksNote = ctx.ask ? `asks ${props.name}` : "";
   const saveTests = ABILITY_KEYS.map((a): D20Test => ({ kind: "save", ability: a }));
   const checkTests = ABILITY_KEYS.map((a): D20Test => ({ kind: "check", ability: a }));
+  const saveNote = [asksNote, noteOf(saveTests)].filter(Boolean).join(". ");
+  const checkNote = [asksNote, noteOf(checkTests)].filter(Boolean).join(". ");
   const saveCommon = commonTags(saveTests.map(presetOf));
   const checkCommon = commonTags(checkTests.map(presetOf));
   const attackNote = presetLine(presetOf({ kind: "attack" }));
   const spellNote = presetLine(presetOf({ kind: "attack", spell: true }));
+  const sharedNote = [...new Set([saveNote, checkNote].flatMap((n) => n.split(". ")).filter(Boolean))].join(". ");
+  const unknown = numbers ? null : { typed };
 
   return (
-    <section aria-label={`Rolls for ${props.name}`} style={{ display: "grid", gap: theme.space(3) }}>
-      <div style={{ display: "grid", gap: theme.space(1) }}>
-        <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong }}>Rolls for {props.name}</div>
-        {blocked ? <Note tone="info">{blocked}</Note> : null}
-        {played ? <Switch label={`Ask ${props.name} to roll saves and checks`} checked={!askOff} onChange={(on) => store.setState((s) => ({ askOff: { ...s.askOff, [key]: !on } }))} /> : null}
-      </div>
-      {cast && castRow === null ? <RowCast dice={dice} creatureKey={key} creature={creature} name={props.name} blocked={blocked} named={null} rowSlot={null} blockHere /> : null}
-      {/* While dying, its death save is the one roll it makes, so it leads (W7B-P-19). */}
-      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={rolls.initBonus === null ? null : (numbers?.deathSave ?? 0)} /> : null}
-      {numbers ? (
-        <>
-          <Grid label="Saves" note={[asks, noteOf(saveTests)].filter(Boolean).join(". ")}>
-            {ABILITY_KEYS.map((a) => (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {cast && ctx.castRow === null ? (
+        <div style={{ paddingBottom: theme.space(2) }}>
+          <RowCast dice={dice} creatureKey={ctx.key} creature={creature} name={props.name} blocked={ctx.blocked} named={null} rowSlot={null} blockHere />
+        </div>
+      ) : null}
+      <Group label="Saves and checks" {...groupFold("saves")} summary={foldSummary({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves)}>
+        <Grid label="Saves" note={unknown ? undefined : saveNote}>
+          {ABILITY_KEYS.map((a) =>
+            unknown || !numbers ? (
+              <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={0} unknown={{ typed }} text={typedText(ABILITY_SHORT[a], typed)} />
+            ) : (
               <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={numbers.abilities[a].save} text={`${ABILITY_SHORT[a]} ${signedText(numbers.abilities[a].save)}`} common={saveCommon} />
-            ))}
-          </Grid>
-          <Grid label="Checks" note={[asks, noteOf(checkTests)].filter(Boolean).join(". ")}>
-            {ABILITY_KEYS.map((a) => {
-              const bonus = bonusFor(numbers, { kind: "check", ability: a }) ?? 0;
-              return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={bonus} text={`${ABILITY_SHORT[a]} ${signedText(bonus)}`} common={checkCommon} />;
-            })}
-          </Grid>
-          <Section title="Skills" fold={{ open: skillsOpen, onToggle: () => setSkillsOpen((o) => !o) }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: theme.space(1) }}>
-              {SKILL_KEYS.map((s: SkillKey) => {
-                const ability: AbilityKey = SKILLS[s].ability;
-                const bonus = bonusFor(numbers, { kind: "check", ability, skill: s }) ?? 0;
-                return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={bonus} text={`${SKILLS[s].name} ${signedText(bonus)}`} common={checkCommon} />;
-              })}
-            </div>
-          </Section>
-          {rolls.initBonus !== null ? <InitiativeCell ctx={ctx} bonus={rolls.initBonus} bonusText={signedText(rolls.initBonus)} /> : null}
-        </>
-      ) : (
-        <UnknownNumbers
-          ctx={ctx}
-          name={props.name}
-          skillsOpen={skillsOpen}
-          onSkills={() => setSkillsOpen((o) => !o)}
-          addBlock={character && actor?.srdId === undefined && rolls.initBonus !== null && editsPcStats(dice.you, character) ? () => openPcStats(character.id) : null}
-        />
-      )}
+            ),
+          )}
+        </Grid>
+        <Grid label="Checks" note={unknown ? undefined : checkNote}>
+          {ABILITY_KEYS.map((a) => {
+            if (unknown || !numbers) return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={0} unknown={{ typed }} text={typedText(ABILITY_SHORT[a], typed)} />;
+            const bonus = bonusFor(numbers, { kind: "check", ability: a }) ?? 0;
+            return <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={bonus} text={`${ABILITY_SHORT[a]} ${signedText(bonus)}`} common={checkCommon} />;
+          })}
+        </Grid>
+      </Group>
+      <Group
+        label="Skills"
+        {...groupFold("skills")}
+        summary={foldSummary(
+          {
+            group: "skills",
+            skills: numbers ? SKILL_KEYS.map((s) => ({ name: SKILLS[s].name, bonus: bonusFor(numbers, { kind: "check", ability: SKILLS[s].ability, skill: s }) ?? 0, check: bonusFor(numbers, { kind: "check", ability: SKILLS[s].ability }) ?? 0 })) : [],
+          },
+          asks.skills,
+        )}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: theme.space(1) }}>
+          {SKILL_KEYS.map((s: SkillKey) => {
+            const ability: AbilityKey = SKILLS[s].ability;
+            if (unknown || !numbers) return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={0} unknown={{ typed }} text={typedText(SKILLS[s].name, typed)} />;
+            const bonus = bonusFor(numbers, { kind: "check", ability, skill: s }) ?? 0;
+            return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={bonus} text={`${SKILLS[s].name} ${signedText(bonus)}`} common={checkCommon} />;
+          })}
+        </div>
+      </Group>
       {ACTION_SECTIONS.map(([section, title]) => {
         const these = named.filter((r) => r.section === section);
         const multiattack = section === "actions" ? rolls.multiattack : null;
         if (these.length === 0 && multiattack === null) return null;
+        const note = [these.some((r) => r.attack !== undefined) && attackNote ? `Attacks ${attackNote}` : "", multiattack !== null ? `Multiattack. ${multiattack}` : ""].filter(Boolean).join(". ");
         return (
-          <div key={section} role="group" aria-label={title} style={{ display: "grid" }}>
-            <GroupLabel note={[these.some((r) => r.attack !== undefined) && attackNote ? `Attacks ${attackNote}` : "", multiattack !== null ? `Multiattack. ${multiattack}` : ""].filter(Boolean).join(". ") || undefined}>{title}</GroupLabel>
-            {these.map((r) => (
-              <NamedRow key={r.key} ctx={ctx} named={r} />
-            ))}
-          </div>
+          <Group key={section} label={title} {...groupFold(section)} summary={foldSummary({ group: "rows", rows: these.map((r) => ({ name: r.name, used: used.includes(r.key) })) }, asks[section])}>
+            <div role="group" aria-label={title} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+              {note ? <Help style={{ paddingBottom: theme.space(2) }}>{note}</Help> : null}
+              {these.map((r) => (
+                <NamedRow key={r.key} ctx={ctx} named={r} />
+              ))}
+            </div>
+          </Group>
         );
       })}
       {numbers?.spellAttack !== undefined || numbers?.spellDc !== undefined || spells.length > 0 ? (
-        <div role="group" aria-label="Spells" style={{ display: "grid" }}>
-          <GroupLabel note={[numbers?.spellDc !== undefined ? `Save DC ${numbers.spellDc}` : "", spellNote ? `Attacks ${spellNote}` : ""].filter(Boolean).join(". ") || undefined}>Spells</GroupLabel>
-          {numbers?.spellAttack !== undefined ? (
-            <div style={{ ...ROW, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", display: "grid", gap: theme.space(1) }}>
-              <div style={{ gridColumn: "span 2" }}>
-                <D20Cell ctx={ctx} test={{ kind: "attack", spell: true }} bonus={numbers.spellAttack} text={`Spell attack ${signedText(numbers.spellAttack)}`} label="Spell attack" />
+        <Group label="Spells" {...groupFold("spells")} summary={foldSummary({ group: "spells", dc: numbers?.spellDc, attack: numbers?.spellAttack, count: spells.length }, asks.spells)}>
+          <div role="group" aria-label="Spells" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+            {numbers?.spellDc !== undefined || spellNote ? (
+              <Help style={{ paddingBottom: theme.space(2) }}>{[numbers?.spellDc !== undefined ? `Save DC ${numbers.spellDc}` : "", spellNote ? `Attacks ${spellNote}` : ""].filter(Boolean).join(". ")}</Help>
+            ) : null}
+            {numbers?.spellAttack !== undefined ? (
+              <div style={{ ...ROW, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", display: "grid", gap: theme.space(1) }}>
+                <div style={{ gridColumn: "span 2" }}>
+                  <D20Cell ctx={ctx} test={{ kind: "attack", spell: true }} bonus={numbers.spellAttack} text={`Spell attack ${signedText(numbers.spellAttack)}`} label="Spell attack" />
+                </div>
               </div>
-            </div>
-          ) : null}
-          {spells.map((r) => (
-            <NamedRow key={r.key} ctx={ctx} named={r} />
-          ))}
+            ) : null}
+            {spellLevels(spells).map((level) => (
+              <div key={level.label ?? "all"} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+                {level.label ? <h4 style={{ margin: 0, ...ROW, ...sectionLabelLook() }}>{level.label}</h4> : null}
+                {level.rows.map((r) => (
+                  <NamedRow key={r.key} ctx={ctx} named={r} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </Group>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What a creature whose numbers this viewer lacks needs before a roll
+ * (docs/design-v1-pc-stats.md 4.2): why no bonus shows, Add a stat block
+ * where the viewer may, and the one Bonus field every save, check, skill
+ * and Initiative here rolls by. It stands in the card, above the groups
+ * that fold, so its text lives in the option store.
+ */
+function BonusField(props: { ctx: Ctx; typed: TypedBonus; addBlock: (() => void) | null }) {
+  const { ctx, typed } = props;
+  const store = useOptionStore();
+  const text = useOption((s) => s.bonus[ctx.key] ?? "");
+  const hidden = ctx.rolls.initBonus === null;
+  const state = ctx.dice.view;
+  const dm = ctx.dice.you.role === "dm";
+  // The field shows where some tap rolls here. A DM's Ask on a player's creature needs none, its initiative aside.
+  const rollsHere =
+    hidden || TESTS.some((test) => routeOf({ state, creature: ctx.creature, test, dm, played: ctx.played, ask: ctx.ask }).kind !== "ask");
+  return (
+    <>
+      <Note>{noNumbersNote({ name: ctx.name, hidden, rollsHere })}</Note>
+      {props.addBlock ? (
+        <div>
+          <SmallButton wrap onClick={props.addBlock}>
+            Add a stat block
+          </SmallButton>
         </div>
       ) : null}
-    </section>
+      {rollsHere ? (
+        <>
+          <label style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontWeight: theme.weight.strong }}>
+            Bonus
+            <Input
+              value={text}
+              placeholder="+0"
+              enterKeyHint="done"
+              autoComplete="off"
+              maxLength={3}
+              error={typed?.ok === false}
+              onChange={(e) => {
+                const next = e.target.value;
+                store.setState((s) => ({ bonus: { ...s.bonus, [ctx.key]: next } }));
+              }}
+              style={{ width: 88, flex: "none", textAlign: "center" }}
+            />
+          </label>
+          {typed?.ok === false ? <Note tone="error">{typed.error}</Note> : null}
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -328,13 +550,14 @@ const ACTION_SECTIONS: readonly (readonly [Exclude<NamedRoll["section"], "spells
 ];
 
 /**
- * A group's label in the panel's one label look (docs/design-v1-dice-ui.md 3.2), with what bears on all of its
- * rolls after it on the same line, wrapping under it where the line is full: "SAVES  +1d4: Blessed".
+ * A grid's label in the panel's one label look (docs/design-v1-dice-ui.md 3.2), with what bears on all of its
+ * rolls after it on the same line, wrapping under it where the line is full: "SAVES  +1d4: Blessed". An h4
+ * under its group's h3, as in the token panel (docs/design-v1-dice-pass.md 6.6).
  */
 function GroupLabel(props: { children: ReactNode; note?: string | undefined }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2), rowGap: 0, paddingBottom: theme.space(1) }}>
-      <span style={sectionLabelLook()}>{props.children}</span>
+      <h4 style={{ margin: 0, ...sectionLabelLook() }}>{props.children}</h4>
       {props.note ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, minWidth: 0 }}>{props.note}</span> : null}
     </div>
   );
@@ -456,80 +679,6 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   );
 }
 
-/**
- * The saves, checks, skills and initiative of a creature whose numbers this
- * viewer does not hold: one with no stat block, or a character rolled for
- * through a token lent to them, whose numbers go only to the DM and its own
- * players (docs/design-v1-pc-stats.md 4.2). Each is listed with no bonus
- * shown. A tap that asks a player needs none, and any other waits for the
- * bonus typed in the one field, which serves the roll tapped next.
- */
-function UnknownNumbers(props: { ctx: Ctx; name: string; skillsOpen: boolean; onSkills(): void; addBlock: (() => void) | null }) {
-  const { ctx } = props;
-  const [text, setText] = useState("");
-  const typed = parseBonus(text);
-  const unknown = { typed };
-  const init = ctx.rolls.initBonus;
-  const hidden = init === null;
-  const state = ctx.dice.view;
-  const dm = ctx.dice.you.role === "dm";
-  // The field shows where some tap rolls here. A DM's Ask on a player's creature needs none, its initiative aside.
-  const rollsHere =
-    hidden || TESTS.some((test) => routeOf({ state, creature: ctx.creature, test, dm, played: ctx.played, ask: ctx.ask }).kind !== "ask");
-  return (
-    <>
-      <Note>{noNumbersNote({ name: props.name, hidden, rollsHere })}</Note>
-      {props.addBlock ? (
-        <div>
-          <SmallButton wrap onClick={props.addBlock}>
-            Add a stat block
-          </SmallButton>
-        </div>
-      ) : null}
-      {rollsHere ? (
-        <>
-          <label style={{ display: "flex", alignItems: "center", gap: theme.space(2), fontWeight: theme.weight.strong }}>
-            Bonus
-            <Input
-              value={text}
-              placeholder="+0"
-              enterKeyHint="done"
-              autoComplete="off"
-              maxLength={3}
-              error={typed?.ok === false}
-              onChange={(e) => setText(e.target.value)}
-              style={{ width: 88, flex: "none", textAlign: "center" }}
-            />
-          </label>
-          {typed?.ok === false ? <Note tone="error">{typed.error}</Note> : null}
-        </>
-      ) : null}
-      <Grid label="Saves">
-        {ABILITY_KEYS.map((a) => (
-          <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={0} unknown={unknown} text={typedText(ABILITY_SHORT[a], typed)} />
-        ))}
-      </Grid>
-      <Grid label="Checks">
-        {ABILITY_KEYS.map((a) => (
-          <D20Cell key={a} ctx={ctx} test={{ kind: "check", ability: a }} bonus={0} unknown={unknown} text={typedText(ABILITY_SHORT[a], typed)} />
-        ))}
-      </Grid>
-      <Section title="Skills" fold={{ open: props.skillsOpen, onToggle: props.onSkills }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: theme.space(1) }}>
-          {SKILL_KEYS.map((s: SkillKey) => (
-            <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability: SKILLS[s].ability, skill: s }} bonus={0} unknown={unknown} text={typedText(SKILLS[s].name, typed)} />
-          ))}
-        </div>
-      </Section>
-      {init !== null ? (
-        <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
-      ) : (
-        <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? d20Text(typed.bonus) : "d20"} />
-      )}
-    </>
-  );
-}
-
 /** Every save, check and skill a creature lists, for whether any tap of one rolls here. */
 const TESTS: readonly D20Test[] = [
   ...ABILITY_KEYS.map((ability): D20Test => ({ kind: "save", ability })),
@@ -539,9 +688,9 @@ const TESTS: readonly D20Test[] = [
 
 /**
  * Initiative (4.2, 4.3): "Initiative +2" with what its tap does to the
- * tracker as its tag ("sets row", "replaces 15"), two of the grid's three
- * columns, and a monster in a room that uses scores "Score 12" beside
- * "Roll instead". The value is written only to a row that still holds what
+ * tracker as its tag ("sets row", "replaces 15"), across the card
+ * (docs/design-v1-dice-pass.md 5.1), and a monster in a room that uses
+ * scores "Score 12" beside "Roll instead". The value is written only to a row that still holds what
  * it held at the tap, by the room's listener, so the cell may close first.
  */
 function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
@@ -568,13 +717,13 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   const tag = [scored ? "" : entry ? (entry.value === null ? "sets row" : `replaces ${entry.value}`) : "", presetTag(preset)].filter(Boolean).join(" ");
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>
+      <div style={{ display: "grid", gridTemplateColumns: scored ? "repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)", gap: theme.space(1) }}>
         {scored ? (
           <SmallButton wrap disabled={ctx.blocked !== null} onClick={() => option.setInitiative(entry.id, score, dm)} label={`Score ${score}, sets its row`}>
             {`Score ${score}`}
           </SmallButton>
         ) : null}
-        <div style={{ gridColumn: "span 2", minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
           <OptionCell
             text={scored ? "Roll instead" : `Initiative ${bonus}`}
             tag={tag || undefined}
@@ -597,19 +746,16 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
   const test: D20Test = { kind: "deathSave" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const row = `deathSave:${"tokenId" in ctx.creature ? ctx.creature.tokenId : ctx.creature.characterId}`;
+  // Across the card, above Initiative (docs/design-v1-dice-pass.md 5.1).
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: theme.space(1) }}>
-      <div style={{ gridColumn: "span 2", minWidth: 0 }}>
-        <OptionCell
-          text={props.bonus === null ? "Death Save" : `Death Save ${signedText(props.bonus)}`}
-          tag={presetTag(preset) || undefined}
-          name={["Death Save", presetLine(preset)].filter(Boolean).join(", ")}
-          row={row}
-          disabled={ctx.blocked}
-          onTap={() => option.deathSave(ctx.creature, preset, row)}
-        />
-      </div>
-    </div>
+    <OptionCell
+      text={props.bonus === null ? "Death Save" : `Death Save ${signedText(props.bonus)}`}
+      tag={presetTag(preset) || undefined}
+      name={["Death Save", presetLine(preset)].filter(Boolean).join(", ")}
+      row={row}
+      disabled={ctx.blocked}
+      onTap={() => option.deathSave(ctx.creature, preset, row)}
+    />
   );
 }
 
