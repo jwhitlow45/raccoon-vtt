@@ -1241,7 +1241,82 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
     }
   });
+
+  test("sm-1. on a 440 or 430 px phone the Setup tools menu holds all five setup tools in one row, on narrower phones three and two with no tool alone, each name on one line and the box as wide as its rows", async () => {
+    try {
+      for (const view of [
+        { width: 440, height: 956, rows: [5] },
+        { width: 430, height: 932, rows: [5] },
+        { width: 402, height: 874, rows: [3, 2] },
+        { width: 375, height: 667, rows: [3, 2] },
+      ]) {
+        const at = `${view.width} x ${view.height}`;
+        await setUp({ width: view.width, height: view.height, scale: 1 });
+        await pickTool(dm, "Select");
+        await dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: /^Setup tools/ }).tap();
+        const menu = dm.getByRole("menu", { name: "Setup tools" });
+        await menu.waitFor();
+        const items = await menuTiles(menu);
+        assert.deepEqual(
+          items.map((i) => i.name),
+          ["Add token", "Pin", "Trap", "Map builder", "Line up grid"],
+          `${at}: the menu holds ${items.map((i) => i.name).join(", ")}`,
+        );
+        for (const i of items) assert.equal(i.lines, 1, `${at}: "${i.name}" takes ${i.lines} lines`);
+        // Rows by their tops, in order: a tile within a pixel of the row before stands in it.
+        const rows: (typeof items)[] = [];
+        for (const i of items) {
+          const last = rows[rows.length - 1];
+          if (last && Math.abs(last[0]!.top - i.top) < 1) last.push(i);
+          else rows.push([i]);
+        }
+        assert.deepEqual(
+          rows.map((r) => r.length),
+          view.rows,
+          `${at}: the tiles stand ${rows.map((r) => r.map((i) => i.name).join(" + ")).join(" / ")}`,
+        );
+        const box = await rectOf(dm.locator("[data-rvtt-popover]").filter({ has: menu }));
+        assert.ok(box.left >= 0 && box.right <= view.width, `${at}: the menu runs past the window, ${JSON.stringify(box)}`);
+        // The box hugs its widest row: its 12 px padding and 1 px border at each side, no more.
+        const widest = Math.max(...rows.map((r) => r[r.length - 1]!.right - r[0]!.left));
+        assert.ok(Math.abs(box.right - box.left - (widest + 26)) < 1.5, `${at}: the box is ${box.right - box.left} px wide around rows ${widest} px wide`);
+        await shots.take(dm, `dmphone-sm1-setup-menu-${view.width}`);
+        await dm.keyboard.press("Escape");
+        await menu.waitFor({ state: "detached" });
+      }
+    } finally {
+      await setUp({ width: 390, height: 844, scale: 1 });
+    }
+  });
 });
+
+/**
+ * An open tile menu's items: each one's name, its box's top, left and
+ * right, and how many lines its name takes, counted from its words' line
+ * boxes, so a name that breaks onto a second line counts two however tall
+ * its tile is.
+ */
+function menuTiles(menu: Locator): Promise<{ name: string; top: number; left: number; right: number; lines: number }[]> {
+  return menu.evaluate((el) => {
+    type Box = { top: number; left: number; right: number; height: number };
+    type Node = { textContent: string | null; getBoundingClientRect(): Box; querySelector(s: string): Node | null; querySelectorAll(s: string): ArrayLike<Node> };
+    const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: Node): void; getClientRects(): ArrayLike<Box> } } }).document;
+    return Array.from((el as unknown as Node).querySelectorAll('[role="menuitemradio"]')).map((item) => {
+      // The words are the tile's one span that is neither its glyph (aria-hidden) nor its description (hidden).
+      const words = item.querySelector(":scope > span:not([aria-hidden]):not([hidden])");
+      const { top, left, right } = item.getBoundingClientRect();
+      if (!words) return { name: "", top, left, right, lines: 0 };
+      const range = doc.createRange();
+      range.selectNodeContents(words);
+      const lines = new Set(
+        Array.from(range.getClientRects())
+          .filter((r) => r.height > 0)
+          .map((r) => Math.round(r.top)),
+      );
+      return { name: words.textContent ?? "", top, left, right, lines: lines.size };
+    });
+  });
+}
 
 /** Pat, joined once from a device of their own, whose cookies send a whisper to the DM. */
 let patCookie = "";

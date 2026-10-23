@@ -21,7 +21,8 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * pane filled, a door trap and a found trip wire, the attach set (a
  * warhorse, a goblin carrying a lantern and dragging a prisoner), and
  * walls with a door. For each of 6 sizes at 100% and 130% the DM measures
- * the Trap tool, the four traps' panes with every group unfolded, the
+ * the toolbar's Setup tools or Tools menu where it has one, the Trap
+ * tool, the four traps' panes with every group unfolded, the
  * alerts as traps go off on Pat's walks (the toast under a pane, the
  * column, a toast under its first card, the summary row and the alerts
  * over the screen), the board's pills, the Attach list and Ride, and the
@@ -160,6 +161,9 @@ const SOME_SIZES: Record<string, number> = {
   "request-roll": 4,
   "group-save": 6,
   "group-save-row": 6,
+  // Setup on the phone layout (the upright phones, the tablet and 844 x 390 at 100%), Tools in the pair (844 x 390 at 130%).
+  "setup-menu": 9,
+  "tools-menu": 1,
 };
 
 /**
@@ -443,12 +447,43 @@ async function measureWindow(sweep: Sweep, page: Page, screen: string, bar: Loca
   headers.push(...places);
 }
 
+/**
+ * The toolbar's menu of tool tiles where it has one (docs/design-v1-tool-options.md
+ * 5.1 and 5.2): Setup tools on the phone layout, Tools in the pair, whose
+ * second button opens it once its own tool is active.
+ */
+async function toolMenuScreen(sweep: Sweep, page: Page): Promise<void> {
+  const nav = page.locator('nav[aria-label="Tools"]').first();
+  const setup = nav.getByRole("button", { name: /^Setup tools/ });
+  const buttons = nav.locator("button[data-active]");
+  // The toolbar draws its buttons once it has measured its room.
+  await waitFor("the toolbar's buttons", async () => ((await visible(setup)) || (await buttons.count()) > 1 ? true : null), 3_000);
+  let name = "Setup tools";
+  if (await visible(setup)) await setup.first().click();
+  else if ((await buttons.count()) <= 3) {
+    name = "Tools";
+    const second = buttons.nth(1);
+    if ((await second.getAttribute("data-active")) !== "true") await second.click();
+    await second.click();
+  } else return;
+  const menu = page.getByRole("menu", { name });
+  if (!(await showsWithin(menu, 3_000))) {
+    await sweep.missing(page, name === "Tools" ? "tools-menu" : "setup-menu", `${name} opened no menu`);
+    await escapeAll(page);
+    return;
+  }
+  await sweep.measure(page, name === "Tools" ? "tools-menu" : "setup-menu", page.locator("[data-rvtt-popover]").filter({ has: menu }));
+  await escapeAll(page);
+  await menu.waitFor({ state: "detached" });
+}
+
 /** The DM's screens at one size. */
 async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const headers: HeaderPlace[] = [];
   // Pat's walk left a springing waiting, whose card could cover a trap.
   await settleTraps();
   await sweep.pills(page, "board", { points: await trapPoints(page, true), needPills: true });
+  await toolMenuScreen(sweep, page);
 
   // The Trap tool's options, its Start from, and its More where the row has one.
   await pickTool(page, "Trap");
