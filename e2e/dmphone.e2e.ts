@@ -856,6 +856,51 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await setUp({ width: 390, height: 844, scale: 1 });
     }
   });
+
+  test("fu21b-1. at 390 x 844 a trap that goes off while its pane is open toasts 8 px under the pane's header, so the header, its Close and the alerts row on the pane's edge stay in reach (LP15-FU-8)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const walker = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
+    try {
+      await pickTool(dm, "Trap");
+      const pane = dm.getByRole("dialog", { name: "Edit trap" });
+      const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      assert.equal(await hit(dm, p), "CANVAS", "the trap is under something");
+      await dm.touchscreen.tap(p.x, p.y);
+      await pane.getByText("Needle Plate", { exact: true }).first().waitFor();
+      // The pane settles at its measured height before the trap goes off.
+      await dm.waitForTimeout(300);
+      // Not the DM's own Set it off, which toasts nothing: the scout walks onto the plate.
+      await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
+      const toast = dm.locator('[role="status"]').filter({ hasText: "Needle Plate went off: Scout." }).first();
+      await toast.waitFor();
+      const t = await rectOf(toast);
+      const head = await rectOf(pane.locator("[data-sheet-grab]").first());
+      const bars = await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }));
+      assert.ok(head.top >= bars.bottom - 0.5, `the pane's header (top ${head.top}) runs under the top bars (foot ${bars.bottom})`);
+      assert.ok(Math.abs(t.top - (head.bottom + 8)) < 1.5, `the toast starts at ${t.top}, not 8 px under the pane's header at ${head.bottom}`);
+      assert.ok(!intersects(t, head), `the toast covers the pane's header: ${JSON.stringify({ t, head })}`);
+      assert.ok(await wholeInReach(pane.getByRole("button", { name: "Close", exact: true })), "the pane's Close is out of reach");
+      const row = dm.locator("[data-rvtt-pane-dock]").getByRole("button");
+      if ((await row.count()) > 0) assert.ok(await wholeInReach(row.first()), "the alerts row on the pane's edge is out of reach");
+      // The toast's own Save and damage takes a tap too.
+      assert.ok(await wholeInReach(toast.getByRole("button", { name: "Save and damage", exact: true })), "the toast's Save and damage is out of reach");
+      await shots.take(dm, "dmphone-fu21b-pane-toast");
+    } finally {
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await ops.send({ t: "token.delete", tokenId: walker });
+      await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
+      await pickTool(dm, "Select");
+    }
+  });
+
 });
 
 function goblin() {

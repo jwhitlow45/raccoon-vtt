@@ -62,6 +62,7 @@ import {
   closeAlertsOverlay,
   TOAST_MIN,
   toastTop,
+  paneToastTop,
   readSpot,
   releaseSpot,
   restingBar,
@@ -893,5 +894,18 @@ describe("a toast on a phone whose alerts column shows a card (fu16 item 8)", ()
     const top = 122 + 120 + EDGE;
     assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
     assert.equal(toastTop({ ...phone, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
+  });
+});
+
+describe("a toast while a map pane stands as a bottom sheet (LP15-FU-8)", () => {
+  test("starts 8 px under the pane's header, over the pane's body", () => {
+    assert.equal(paneToastTop({ head: 300, optionsTop: 700 }), 300 + EDGE);
+  });
+
+  test("keeps the top of the notices before the header is measured, or with no room left for it", () => {
+    assert.equal(paneToastTop({ head: null, optionsTop: 700 }), null);
+    const top = 300 + EDGE;
+    assert.equal(paneToastTop({ head: 300, optionsTop: top + TOAST_MIN }), top, "44 px left is enough");
+    assert.equal(paneToastTop({ head: 300, optionsTop: top + TOAST_MIN - 1 }), null, "under 44 px it falls back to the top");
   });
 });

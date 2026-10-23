@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, toastTop, type Chrome } from "../canvas/barDock.ts";
+import { barDockSlot, DEFAULT_CHROME, EDGE, freeArea, noticePlace, paneToastTop, toastTop, type Chrome } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
@@ -777,11 +777,18 @@ function RoomPage() {
    * shows a card, 8 px under its first card, so a toast never covers the
    * card's buttons. Each toast takes its place once, as it shows (Toasts),
    * in a layer of its own beside the notices, whose stack would move it.
+   * While a map pane stands as a bottom sheet, which folds the column, 8 px
+   * under the pane's header instead, which the toast follows while the
+   * pane stands, so its header and Close stay in reach (barDock.ts
+   * paneToastTop).
    */
   const columnNow = useStore(barDock, (s) => s.column);
   const alertsOverlay = useStore(barDock, (s) => s.alertsOverlay);
+  const paneHead = useStore(dockStore, (s) => s.paneHead);
   const cardsShow = !folded && !underPane && !columnSummary && !alertsOverlay;
-  const toastLow = chrome ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop: height - chrome.bottom }) : null;
+  const optionsTop = chrome ? height - chrome.bottom : 0;
+  const toastLow = chrome && !underPane ? toastTop({ spanning: !besideLane, column: columnNow, cards: cardsShow, optionsTop }) : null;
+  const toastUnderPane = chrome && underPane ? paneToastTop({ head: paneHead, optionsTop }) : null;
   const [toastLayer, setToastLayer] = useState<HTMLDivElement | null>(null);
   // Where the row and its line would stand above the last lasting notice's foot, they stand over it, so the tool's controls stay in reach (8).
   const lastingBottom = useStore(barDock, (s) => s.lasting);
@@ -908,7 +915,7 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts low={toastLow} layer={toastLayer} />
+          <Toasts low={toastLow} pane={toastUnderPane} layer={toastLayer} />
         </div>
         <div ref={setToastLayer} {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
@@ -1481,8 +1488,8 @@ function Banner() {
   );
 }
 
-/** Where a toast first showed: at the top of the map's notices, under the alerts column's first card (at `low`, in the chrome's px), or in the very short sheet. */
-type ToastPlace = "map" | "sheet" | { low: number };
+/** Where a toast first showed: at the top of the map's notices, under the alerts column's first card (at `low`, in the chrome's px), under a map pane's header, or in the very short sheet. */
+type ToastPlace = "map" | "sheet" | "pane" | { low: number };
 
 /**
  * Refusals and notices from the store (design 7.4), each gone after a few
@@ -1496,17 +1503,28 @@ type ToastPlace = "map" | "sheet" | { low: number };
  * below it, so their stack keeps the place its first took. Each toast
  * stays where it first showed until it ends, so it is never moved and
  * never announced again: one shown in the sheet goes with the sheet.
+ *
+ * While a map pane stands as a bottom sheet, a new toast starts under the
+ * pane's header instead (`pane`, barDock.ts paneToastTop), and that stack
+ * keeps under the header while the pane stands. The pane moves the header
+ * as it grows, shrinks and makes room for the alerts row on its edge,
+ * which a trap going off brings in the same moment as its toast, and a
+ * toast left where it showed would then cover the header and Close. Once
+ * the pane is gone, the stack stays where the header last stood.
  */
-function Toasts(props: { low: number | null; layer: HTMLElement | null }) {
+function Toasts(props: { low: number | null; pane: number | null; layer: HTMLElement | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
-  // Where each toast first showed, by id. Set once, so a toast never moves.
+  // Where each toast first showed, by id. Set once, so a toast moves only with a pane's header.
   const places = useRef(new Map<number, ToastPlace>());
+  const paneLast = useRef<number | null>(null);
+  if (props.pane !== null) paneLast.current = props.pane;
   for (const t of toasts) {
     if (places.current.has(t.id)) continue;
-    const below = [...places.current.values()].find((p): p is { low: number } => typeof p === "object");
-    places.current.set(t.id, slot ? "sheet" : props.low !== null && props.layer ? (below ?? { low: props.low }) : "map");
+    const below = [...places.current.values()].find(inLayer);
+    const fresh: ToastPlace = props.pane !== null ? "pane" : props.low !== null ? { low: props.low } : "map";
+    places.current.set(t.id, slot ? "sheet" : props.layer && fresh !== "map" ? (below ?? fresh) : "map");
   }
   useEffect(() => {
     for (const id of places.current.keys()) if (!toasts.some((t) => t.id === id)) places.current.delete(id);
@@ -1523,8 +1541,9 @@ function Toasts(props: { low: number | null; layer: HTMLElement | null }) {
   if (toasts.length === 0) return null;
   const overMap = toasts.filter((t) => places.current.get(t.id) === "map");
   const inSheet = slot ? toasts.filter((t) => places.current.get(t.id) === "sheet") : [];
-  const low = toasts.filter((t) => typeof places.current.get(t.id) === "object");
-  const lowAt = low.length > 0 ? (places.current.get(low[0]!.id) as { low: number }).low : null;
+  const low = toasts.filter((t) => inLayer(places.current.get(t.id)));
+  const first = low.length > 0 ? places.current.get(low[0]!.id) : undefined;
+  const lowAt = first === "pane" ? paneLast.current : typeof first === "object" ? first.low : null;
   return (
     <>
       {overMap.map((t) => (
@@ -1548,6 +1567,11 @@ function Toasts(props: { low: number | null; layer: HTMLElement | null }) {
         : null}
     </>
   );
+}
+
+/** A place in the toasts' own layer, under the column's first card or a pane's header, rather than in the notices' stack or the sheet. */
+function inLayer(place: ToastPlace | undefined): boolean {
+  return place === "pane" || typeof place === "object";
 }
 
 function ToastNote(props: { toast: Toast; onDismiss(): void }) {

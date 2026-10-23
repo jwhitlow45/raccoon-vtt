@@ -1026,6 +1026,22 @@ export function toastTop(input: { spanning: boolean; column: ColumnFacts | null;
   return input.optionsTop - top >= TOAST_MIN ? top : null;
 }
 
+/**
+ * Where a toast that shows now starts while a map pane stands as a bottom
+ * sheet (docs/design-v1-bar-dock.md 1.3): 8 px under the pane's header,
+ * `head` being its foot, so the toast lies over the pane's body and never
+ * over its header and Close. Null keeps it at the top of the notices: no
+ * header measured yet, or under 44 px left above the tool's options
+ * (`optionsTop`). In the chrome's own px from the page's top. Unlike
+ * toastTop's place, a stack placed here keeps under the header while the
+ * pane stands (pages/Room.tsx Toasts), since the pane moves its header.
+ */
+export function paneToastTop(input: { head: number | null; optionsTop: number }): number | null {
+  if (input.head === null) return null;
+  const top = input.head + EDGE;
+  return input.optionsTop - top >= TOAST_MIN ? top : null;
+}
+
 /** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
 export function columnTop(laneTop: number, lastingBottom: number | null): number {
   return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);

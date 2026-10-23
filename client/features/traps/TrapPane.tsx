@@ -111,9 +111,9 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
   }, []);
 
   const box = trapScreenBox(trap, chunks, camera);
-  // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars (pages/RoomDock.tsx usePaneDock).
+  // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars, and a toast that shows meanwhile starts under its header (pages/RoomDock.tsx usePaneDock).
   const sheet = props.viewport.width < SHEET_BELOW_PX;
-  const dock = usePaneDock(sheet && !hidden, paneDockFits({ viewport: props.viewport, insets: props.insets }));
+  const dock = usePaneDock(sheet && !hidden, paneDockFits({ viewport: props.viewport, insets: props.insets }), paneRef);
   const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
   const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
 

@@ -4,9 +4,9 @@ import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { useAlertsSummaryEntry } from "../components/sheetFocus.ts";
 import { SHEET_MAX_WIDTH } from "../components/sheetCap.ts";
-import { chromeZoom, smallUi } from "../features/device/layout.ts";
+import { chromeZoom, effectiveZoom, smallUi } from "../features/device/layout.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
-import { GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
+import { GRAB_ATTR, GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { alertsSummary, DOCK_PX, dockSlot, useFoldUnderPane, type AlertsSummary, type SummaryHides } from "./fold.ts";
@@ -141,15 +141,54 @@ export function DockRow(props: {
  * (`fits`, fold.ts paneDockFits), the pane keeps no row, and the alerts
  * come back as it closes. The row rides the pane's swipe as a panel
  * sheet's dock does (`row` for PaneDockRow's ref, `riders` for
- * useSheetSwipe).
+ * useSheetSwipe). A toast that shows while the pane stands there starts
+ * under its header (`pane`, usePaneHead).
  */
-export function usePaneDock(on: boolean, fits: boolean): { reserve: number; summary: AlertsSummary | null; row: (el: HTMLDivElement | null) => void; riders: readonly (HTMLElement | null)[] } {
+export function usePaneDock(on: boolean, fits: boolean, pane: RefObject<HTMLElement | null>): { reserve: number; summary: AlertsSummary | null; row: (el: HTMLDivElement | null) => void; riders: readonly (HTMLElement | null)[] } {
   useFoldUnderPane(on);
+  usePaneHead(on, pane);
   const summary = useDockSummary("pane");
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const riders = useMemo(() => [row], [row]);
   const shows = on && fits && summary !== null;
   return { reserve: shows ? DOCK_PX : 0, summary: shows ? summary : null, row: setRow, riders };
+}
+
+/**
+ * Publishes the foot of a map pane's header while the pane stands as a
+ * bottom sheet (`on`), so a toast that shows meanwhile starts under it
+ * (fold.ts DockState.paneHead, canvas/barDock.ts paneToastTop). The header
+ * is the sheet's grab area (SheetHeader.tsx PaneHeader `grab`). The pane
+ * stands on the toolbar and grows upward, so the header moves as the pane
+ * changes size or place: read after each of the pane's renders and as its
+ * size changes. The pane's place is read from the layout, not the screen,
+ * so a swipe that moves the pane does not move a toast, and the header is
+ * read where it stands with the pane's body scrolled back to its top.
+ */
+function usePaneHead(on: boolean, pane: RefObject<HTMLElement | null>): void {
+  const store = useScoped(dockSlot);
+  const read = useCallback(() => {
+    const el = pane.current;
+    const head = el?.querySelector(`[${GRAB_ATTR}]`);
+    if (!el || !head) return;
+    const zoom = effectiveZoom(el);
+    const parentTop = (el.offsetParent?.getBoundingClientRect().top ?? 0) / zoom;
+    const foot = parentTop + el.offsetTop + (head.getBoundingClientRect().bottom - el.getBoundingClientRect().top) / zoom + el.scrollTop;
+    if (store.getState().paneHead !== foot) store.setState({ paneHead: foot });
+  }, [pane, store]);
+  useLayoutEffect(() => {
+    if (on) read();
+  });
+  useLayoutEffect(() => {
+    const el = pane.current;
+    if (!on || !el) return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      store.setState({ paneHead: null });
+    };
+  }, [on, pane, store, read]);
 }
 
 /**
