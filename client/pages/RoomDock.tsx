@@ -42,7 +42,8 @@ export function useDockSummary(hides: SummaryHides = "sheet"): AlertsSummary | n
   const name = rolls?.name ?? null;
   const waiting = rolls?.waiting ?? false;
   const requests = rolls?.requests ?? 0;
-  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests } : null, alerts, hides), [alerts, text, name, waiting, requests, hides]);
+  const unnamed = rolls?.unnamed ?? 0;
+  return useMemo(() => alertsSummary(text !== null && name !== null ? { text, name, waiting, requests, unnamed } : null, alerts, hides), [alerts, text, name, waiting, requests, unnamed, hides]);
 }
 
 /**

@@ -188,8 +188,8 @@ export type ColumnAlert =
   | { id: string; kind: "timeUp"; says: string }
   | { id: string; kind: "notice"; text: string; says: string };
 
-/** The rolls' line, as features/rolls publishes it (components/sheetFocus.ts AlertsSummaryEntry). */
-export type RollsLine = { text: string; name: string; waiting: boolean; requests: number };
+/** The rolls' line, as features/rolls publishes it (components/sheetFocus.ts AlertsSummaryEntry). `unnamed`: how many of its requests its words leave out. */
+export type RollsLine = { text: string; name: string; waiting: boolean; requests: number; unnamed?: number };
 
 export type SummaryKind = "rolls" | ColumnAlert["kind"];
 
@@ -228,7 +228,10 @@ function phrase(text: string): string {
  * checks concentration, time is up, rolls 1 of 3 answered. Close the
  * sheet to see them." It says "see them" whenever the summary stands for
  * more than one thing, the rolls' line of several requests included, and
- * "see it" for one. Null while nothing waits.
+ * "see it" for one. Null while nothing waits. A rolls' line whose words
+ * name only what leads it, as the DM desk's "Dart plate went off" over
+ * two asks for saves, adds what they leave out (`unnamed`) to the count:
+ * "Dart plate went off +2".
  *
  * `hides` is what stands over the alerts: the sheet that folded them, or
  * the docked token window that leaves the column only this summary row
@@ -258,7 +261,9 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
   }
   const [first] = items;
   if (!first) return null;
-  const more = items.length > 1 ? `+${items.length - 1}` : "";
+  // The rolls' line may stand for things its words leave out, such as asks for saves under a trap that went off: they wait too, so they count.
+  const others = items.length - 1 + (rolls ? Math.max(0, rolls.unnamed ?? 0) : 0);
+  const more = others > 0 ? `+${others}` : "";
   const several = items.length > 1 || (rolls !== null && rolls.requests > 1);
   const way = hides === "bar" ? "Hide the window" : hides === "room" ? "Tap" : hides === "pane" ? "Close the pane" : "Close the sheet";
   const advice = first.kind === "rolls" && rolls?.waiting ? `${way} to answer.` : several ? `${way} to see them.` : `${way} to see it.`;

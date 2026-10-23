@@ -212,3 +212,26 @@ describe("summaryFor (docs/design-v1-look-pass-2.md 2.8)", () => {
     assert.equal(summaryFor({ paneLane: "summary", barLane: "summary" }), "pane");
   });
 });
+
+describe("a rolls' line whose words name only its lead (LP16-PT-3)", () => {
+  const desk = { text: "Dart plate went off", name: "Dart plate went off, 2 asks for saves", waiting: true, requests: 3, unnamed: 2 };
+
+  test("counts what its words leave out in +N, as for the other kinds", () => {
+    const s = alertsSummary(desk, []);
+    assert.equal(s?.text, "Dart plate went off");
+    assert.equal(s?.more, "+2");
+    assert.equal(s?.name, "Dart plate went off +2: Dart plate went off, 2 asks for saves. Close the sheet to answer.");
+  });
+
+  test("and adds them to the column's own alerts, wherever the line stands", () => {
+    assert.equal(alertsSummary(desk, [prompt("p1", "Thorn")])?.more, "+3");
+    const notWaiting = alertsSummary({ ...desk, waiting: false }, [prompt("p1", "Thorn")]);
+    assert.equal(notWaiting?.text, "Concentration save");
+    assert.equal(notWaiting?.more, "+3");
+  });
+
+  test("a line that names everything it stands for adds nothing", () => {
+    assert.equal(alertsSummary({ ...desk, text: "Rolls 1/3", unnamed: 0 }, [])?.more, "");
+    assert.equal(alertsSummary({ text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 3 }, [])?.more, "");
+  });
+});

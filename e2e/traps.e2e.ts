@@ -580,11 +580,16 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
         await pickTool(dm, "Trap");
         await tapCell(dm, BOUNDS, { x: 13, y: 1 });
         await pane(dm).getByText("Corner Darts", { exact: true }).first().waitFor();
+        // A roll request open on the DM's desk as well, which the summary's words leave out and its +1 counts (LP16-PT-3).
+        const requestId = randomUUID();
+        await ops.send({ t: "roll.ask", request: { id: requestId, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thornChar }] } });
         await ops.send({ t: "trap.spring", trapId: cornerId, tokenIds: [run.thorn] });
         await waitFor(`the springing waits, ${label}`, () => ((state(dmSocket)?.traps?.[cornerId]?.rig?.due?.length ?? 0) > 0 ? true : null));
         const row = dm.getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
         const card = dm.getByRole("group", { name: "Corner Darts went off" });
-        await waitFor(`the card or the row, ${label}`, async () => ((await row.count()) > 0 || (await card.isVisible()) ? true : null));
+        // Or the column's own row, where the screen is too short for its first card whatever the pane does.
+        const roomRow = dm.getByRole("button", { name: /went off.*Tap to answer\.$/ });
+        await waitFor(`the card or a row, ${label}`, async () => ((await row.count()) > 0 || (await roomRow.count()) > 0 || (await card.isVisible()) ? true : null));
         await dm.waitForTimeout(400);
         const mode = (await row.count()) > 0 ? "summary" : "beside";
         seen.add(mode);
@@ -615,6 +620,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
           const r = await rectOf(row);
           assert.ok(r.right <= paneBox.left || paneBox.top >= r.bottom, `${label}: the pane runs under the summary row: ${JSON.stringify({ r, paneBox })}`);
           assert.equal(await card.isVisible(), false, `${label}: the row stands for the cards, which still show`);
+          assert.match((await row.textContent()) ?? "", /^Corner Darts went off\s*\+1/, `${label}: the row does not count the roll request its words leave out`);
           await row.click();
           await pane(dm).waitFor({ state: "detached" });
           await card.first().waitFor();
@@ -628,6 +634,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
           await pane(dm).waitFor({ state: "detached" });
         }
         await pickTool(dm, "Select");
+        await ops.send({ t: "roll.close", rollIds: [requestId] });
         for (const due of state(dmSocket)?.traps?.[cornerId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: cornerId, due: due.id });
         await waitFor(`the springing settled, ${label}`, () => (state(dmSocket)?.traps?.[cornerId]?.rig?.due === undefined ? true : null));
       }

@@ -112,6 +112,8 @@ export type AlertsSummaryEntry = {
   waiting: boolean;
   /** How many requests the line stands for, so the dock's closing advice says "see them" for several. */
   requests: number;
+  /** How many of those its words leave out, such as two asks for saves under "Dart plate went off", which the summary counts in its "+N". None when absent. */
+  unnamed?: number;
   /**
    * Shows what waits: the card of the request to answer, focused (3.3.1).
    * The dock closes the sheets first, then calls it, and the token bar
@@ -165,10 +167,11 @@ export function useAlertsSummary(entry: AlertsSummaryEntry | null): void {
   const name = entry?.name ?? null;
   const waiting = entry?.waiting ?? false;
   const requests = entry?.requests ?? 0;
+  const unnamed = entry?.unnamed ?? 0;
   useLayoutEffect(() => {
     if (text === null || name === null) return;
-    return publishAlertsSummary(registry, { text, name, waiting, requests, open: (options) => open.current?.(options) });
-  }, [registry, text, name, waiting, requests]);
+    return publishAlertsSummary(registry, { text, name, waiting, requests, unnamed, open: (options) => open.current?.(options) });
+  }, [registry, text, name, waiting, requests, unnamed]);
 }
 
 /**
