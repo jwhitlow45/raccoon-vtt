@@ -901,6 +901,70 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
   });
 
+  test("fu21b-2. at 480 x 320 at 130%, where the bars leave a trap's pane less than its least height, the pane stands over the top bar with its header, Close and a toast in reach (FU20B-PANE-480)", async () => {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    const made = { trapId: "", walker: "" };
+    const clear = async () => {
+      const { trapId, walker } = made;
+      if (trapId) {
+        for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+        await ops.send({ t: "trap.delete", trapId });
+      }
+      if (walker && dmSocket.state?.tokens[walker]) await ops.send({ t: "token.delete", tokenId: walker });
+      await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
+      made.trapId = "";
+      made.walker = "";
+    };
+    try {
+      for (const view of [
+        { width: 480, height: 320, scale: 1.3 },
+        { width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 },
+      ]) {
+        const label = `480 x 320 at 130%${view.side ? " with 47 px at the sides and 21 at the foot" : ""}`;
+        made.trapId = randomUUID();
+        made.walker = randomUUID();
+        const { trapId, walker } = made;
+        await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Tripwire", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+        await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+        await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
+        await setUp(view);
+        await pickTool(dm, "Trap");
+        const pane = dm.getByRole("dialog", { name: "Edit trap" });
+        const p = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+        await dm.touchscreen.tap(p.x, p.y);
+        await pane.getByText("Tripwire", { exact: true }).first().waitFor();
+        await dm.waitForTimeout(300);
+        const bars = await rectOf(dm.locator("header").filter({ has: dm.locator("h1") }));
+        const s = await rectOf(pane);
+        const head = pane.locator("[data-sheet-grab]").first();
+        const h = await rectOf(head);
+        assert.ok(s.top < bars.bottom, `${label}: the pane (top ${s.top}) fits under the top bar (foot ${bars.bottom}), so this step shows nothing`);
+        assert.ok(h.top >= -0.5, `${label}: the pane's header (top ${h.top}) runs off the screen`);
+        assert.ok(s.bottom - s.top >= 120 * 1.3 - 1, `${label}: the pane is ${s.bottom - s.top} px, under its least height`);
+        const close = pane.getByRole("button", { name: "Close", exact: true });
+        assert.ok(await wholeInReach(close), `${label}: the pane's Close is out of reach`);
+        assert.ok(await wholeInReach(head.locator("strong").first()), `${label}: the pane's title is covered`);
+        // A toast still shows over the pane, under its header.
+        await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
+        const toast = dm.locator('[role="status"]').filter({ hasText: "Tripwire went off: Scout." }).first();
+        await toast.waitFor();
+        await dm.waitForTimeout(200);
+        assert.ok(await wholeInReach(toast.getByRole("button", { name: "Save and damage", exact: true })), `${label}: the toast's Save and damage is covered`);
+        assert.ok(!intersects(await rectOf(toast), await rectOf(head)), `${label}: the toast covers the pane's header`);
+        assert.ok(await wholeInReach(close), `${label}: the toast took the pane's Close out of reach`);
+        await shots.take(dm, `dmphone-fu21b-pane-480${view.side ? "-insets" : ""}`);
+        await close.tap();
+        await pane.waitFor({ state: "detached" });
+        await pickTool(dm, "Select");
+        await clear();
+      }
+    } finally {
+      await clear();
+      await setUp({ width: 390, height: 844, scale: 1 });
+    }
+  });
 });
 
 function goblin() {

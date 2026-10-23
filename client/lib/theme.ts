@@ -148,6 +148,8 @@ export const theme = {
     bars: 15,
     /** The token action bar on a screen too short to dock it (docs/design-v1-bar-dock.md 1.4): over the toolbar and the options it covers, under the notices. */
     barOverlay: 16,
+    /** A map pane's bottom sheet on a screen too short for it under the top bars (features/builder/labelEdit.ts panePlacement): over the bars, so its header and Close show, and under the notices, so a toast still shows over it. */
+    paneOverBars: 17,
     notices: 20,
     /**
      * An open popover or menu and the element that holds it (docs/design-v1-tool-options.md 7.6): over
