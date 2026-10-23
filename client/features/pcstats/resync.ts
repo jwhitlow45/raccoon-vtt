@@ -111,12 +111,15 @@ export function sayValue(key: FieldKey, value: FieldValue): string {
  * What Overwrite takes (3.3): D&D Beyond's value, named with its field where
  * the value alone would be a bare number, as "Overwrite with level 6". A
  * flag, and a value D&D Beyond does not have, say whose instead, so a box
- * never reads "Overwrite with none" or "Overwrite with not proficient".
+ * never reads "Overwrite with none" or "Overwrite with not proficient". A 0
+ * bonus and critical hits on a 20 alone are such values too (note 2.2,
+ * review RS-O-36): the merge holds them as 0 and 20 for none.
  */
 export function overwriteWords(item: Pick<FieldItem, "key" | "theirs">): string {
   const { key, theirs } = item;
-  if (key in FLAG_LABELS || theirs === undefined || theirs === null || theirs === false || theirs === "") return "Overwrite with D&D Beyond’s";
   const [part, sub] = key.split(".");
+  const none = theirs === undefined || theirs === null || theirs === false || theirs === "" || (part === "adjust" && theirs === 0) || (part === "critOn" && theirs === 20);
+  if (key in FLAG_LABELS || none) return "Overwrite with D&D Beyond’s";
   const bare = bareValue(key, theirs);
   switch (part) {
     case "abilities":

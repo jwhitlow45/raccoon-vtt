@@ -123,6 +123,13 @@ describe("the review's lines (3.3)", () => {
     }
   });
 
+  test("a 0 bonus and critical hits on a 20 alone are values D&D Beyond does not have, so Overwrite says whose (RS-O-36)", () => {
+    const say = (key: string, theirs: unknown) => overwriteWords({ key, theirs } as Parameters<typeof overwriteWords>[0]);
+    assert.deepEqual([say("adjust.init", 0), say("adjust.skills.stealth", 0), say("adjust.saves.dex", 0), say("critOn", 20)], ["Overwrite with D&D Beyond’s", "Overwrite with D&D Beyond’s", "Overwrite with D&D Beyond’s", "Overwrite with D&D Beyond’s"]);
+    // Any other bonus, a negative one too, and an Improved Critical's range are named.
+    assert.deepEqual([say("adjust.init", -1), say("critOn", 18)], ["Overwrite with initiative bonus −1", "Overwrite with critical hits on 18 to 20"]);
+  });
+
   test("a roll kept, removed by the player, and gone from D&D Beyond", () => {
     const first = synced(fillOf({ rolls: [shillelagh({ id: "r1" }), sling({ id: "r2" })] }));
     const edited = { ...first, stats: { ...first.stats!, rolls: [{ ...first.stats!.rolls[0]!, attack: { prof: true, bonus: 1 } }] } };
