@@ -33,4 +33,10 @@ describe("the dice set picker's tiles", () => {
     assert.equal(tileStyle(true, true).border, `${theme.line.strong}px solid ${theme.color.accent}`);
     assert.equal(tileStyle(false, true).border, `${theme.line.border}px solid ${theme.color.border}`);
   });
+
+  test("with the switch off the chosen tile keeps its mark, a dim outline with no tint, as a chosen option that cannot change now does (docs/design-v1-look-pass-2.md D37)", () => {
+    assert.equal(tileStyle(true, false).border, `${theme.line.strong}px solid ${theme.color.textDisabled}`);
+    assert.equal(tileStyle(true, false).background, "transparent");
+    assert.equal(tileStyle(false, false).border, `${theme.line.border}px solid ${theme.color.border}`);
+  });
 });

@@ -29,10 +29,14 @@ const TILE_MIN_PX = 72;
  * A tile's look, chosen or not, with the switch on or off. The chosen
  * tile's heavier border takes its extra width out of its padding, so every
  * tile is one size and a pick never makes its row taller than the other.
+ * With the switch off the chosen tile keeps a dim outline and no tint, as
+ * every chosen option that cannot change now does (components/looks.ts),
+ * so it still reads as the one chosen.
  */
 export function tileStyle(picked: boolean, on: boolean): CSSProperties {
   const line = picked ? theme.line.strong : theme.line.border;
   const extra = line - theme.line.border;
+  const edge = !picked ? theme.color.border : on ? theme.color.accent : theme.color.textDisabled;
   return {
     position: "relative",
     display: "grid",
@@ -41,7 +45,7 @@ export function tileStyle(picked: boolean, on: boolean): CSSProperties {
     minHeight: theme.touch,
     padding: `${theme.space(2) - extra}px ${theme.space(1) - extra}px`,
     borderRadius: theme.radius.md,
-    border: `${line}px solid ${picked && on ? theme.color.accent : theme.color.border}`,
+    border: `${line}px solid ${edge}`,
     background: picked && on ? theme.color.accentTint : "transparent",
     color: on ? theme.color.text : theme.color.textDisabled,
     cursor: on ? "pointer" : "default",
