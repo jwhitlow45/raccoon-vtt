@@ -11,7 +11,7 @@ import { useBackClose } from "../../lib/backClose.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
-import { paneDockFits } from "../../pages/fold.ts";
+import { paneDockFits, useAlertsLane, usePublishPaneLane } from "../../pages/fold.ts";
 import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
@@ -73,10 +73,13 @@ export default function LightPane(props: { light: Light; camera: Camera; viewpor
 
   const box = lightScreenBox(light, camera);
   // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars, and a toast that shows meanwhile starts under its header (pages/RoomDock.tsx usePaneDock).
+  // As a card it keeps left of the column's cards, or under the summary row it has the column show where the lane leaves it no room (labelEdit.ts panePlacement).
   const sheet = props.viewport.width < SHEET_BELOW_PX;
   const dock = usePaneDock(sheet, paneDockFits({ viewport: props.viewport, insets: props.insets }), paneRef);
   const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
-  const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
+  const lane = useAlertsLane(props.viewport);
+  const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED, lane });
+  usePublishPaneLane(place.kind === "card" ? (place.lane ?? null) : null, () => closeRef.current());
 
   // A bottom sheet brings its light into view above it, once per light, so a later pan away is the DM's to keep.
   const scope = useRoomScope();

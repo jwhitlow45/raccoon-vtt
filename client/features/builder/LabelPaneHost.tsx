@@ -6,6 +6,7 @@ import { LoadBoundary } from "../../components/LoadBoundary.tsx";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { theme } from "../../lib/theme.ts";
+import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -62,10 +63,11 @@ export function LabelPaneHost(props: { scene: Scene; tool: string; camera: Camer
   );
 }
 
-/** While the pane's code downloads, the shared loading notice takes the box the pane will appear in. */
+/** While the pane's code downloads, the shared loading notice takes the box the pane will appear in, beside the fight's alerts as the pane will stand. */
 function PaneLoading(props: { label: Label; camera: Camera; viewport: Size; insets: Insets }) {
   const box = labelScreenBox(props.label, props.camera);
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box, height: PANE_HEIGHT_UNMEASURED });
+  const lane = useAlertsLane(props.viewport);
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box, height: PANE_HEIGHT_UNMEASURED, lane });
   // Even padding: the pane's slight top padding is for its header, which a loading notice does not have.
   return <Loading text="Loading the label editor…" style={{ ...labelPaneFrame(place), padding: theme.space(3) }} />;
 }

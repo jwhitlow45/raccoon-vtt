@@ -1,6 +1,7 @@
 import type { Label } from "#shared/model.ts";
 import { MAX_NAME } from "#shared/protocol.ts";
 import type { LabelBox } from "#shared/rules/labels.ts";
+import { paneLane, SUMMARY_ROW, type PaneLane, type PaneLaneBox } from "../../canvas/barDock.ts";
 import type { Insets, Size } from "../../lib/camera.ts";
 import type { BuildMode } from "./store.ts";
 
@@ -147,10 +148,16 @@ const MARGIN = 8;
 /** A pane squeezed past this scrolls rather than shrinking further. */
 export const PANE_MIN_HEIGHT = 120;
 
-/** `overBars`: a bottom sheet that stands over the top bars, where they leave it less than its least height (labelPaneFrame draws it over them). */
+/**
+ * `overBars`: a bottom sheet that stands over the top bars, where they
+ * leave it less than its least height (labelPaneFrame draws it over
+ * them). `lane`: a card's place against the alerts column while it shows
+ * a card (canvas/barDock.ts paneLane), which the pane publishes so the
+ * column shows its summary row for "summary".
+ */
 export type PanePlacement =
   | { kind: "sheet"; bottom: number; maxHeight: number; overBars?: true }
-  | { kind: "card"; left: number; top: number; width: number; maxHeight: number };
+  | { kind: "card"; left: number; top: number; width: number; maxHeight: number; lane?: PaneLane };
 
 /** The height between the bars (`insets`) that a bottom sheet pane may take, less its margins. Where that is under PANE_MIN_HEIGHT, the pane keeps PANE_MIN_HEIGHT all the same, over the top bars. */
 export function sheetPaneRoom(input: { viewport: Size; insets: Insets }): number {
@@ -170,10 +177,17 @@ export function sheetPaneRoom(input: { viewport: Size; insets: Insets }): number
  * no room left to edit in. So there it stands over the top bars instead
  * (`overBars`), which would otherwise hide its header and Close, up to the
  * screen's top at most.
+ *
+ * A card keeps out of the fight's alerts while their column shows a card
+ * (`lane`, canvas/barDock.ts paneLaneBox), whose cards would otherwise
+ * cover its header, Close and folds (docs/design-v1-look-pass-2.md 2.8):
+ * left of the lane where the room there holds it, else under the
+ * column's summary row where it meets the lane across. A bottom sheet
+ * leaves the lane to usePaneDock (pages/RoomDock.tsx), which folds the
+ * column.
  */
-export function panePlacement(input: { viewport: Size; insets: Insets; box: LabelBox; height: number }): PanePlacement {
-  const { viewport, insets, box, height } = input;
-  const topLimit = insets.top + MARGIN;
+export function panePlacement(input: { viewport: Size; insets: Insets; box: LabelBox; height: number; lane: PaneLaneBox | null }): PanePlacement {
+  const { viewport, insets, box, height, lane } = input;
   const bottomLimit = viewport.height - insets.bottom - MARGIN;
   if (viewport.width < SHEET_BELOW_PX) {
     const room = sheetPaneRoom(input);
@@ -181,14 +195,20 @@ export function panePlacement(input: { viewport: Size; insets: Insets; box: Labe
     return { kind: "sheet", bottom: insets.bottom, maxHeight: Math.max(0, Math.min(PANE_MIN_HEIGHT, viewport.height - insets.bottom)), overBars: true };
   }
   const width = Math.min(PANE_WIDTH, viewport.width - insets.left - insets.right - 2 * MARGIN);
+  const side = lane ? paneLane({ laneLeft: lane.left, roomLeft: insets.left, width }) : null;
+  const rightLimit = Math.min(viewport.width - insets.right, side === "beside" && lane ? lane.left : Infinity) - MARGIN;
   const center = (box.x0 + box.x1) / 2;
-  const left = Math.max(insets.left + MARGIN, Math.min(center - width / 2, viewport.width - insets.right - MARGIN - width));
+  const left = Math.max(insets.left + MARGIN, Math.min(center - width / 2, rightLimit - width));
+  // Under the summary row only where the card reaches across into the lane: elsewhere the row is not in its way.
+  const underRow = side === "summary" && lane !== null && left + width > lane.left;
+  const topLimit = underRow ? Math.max(insets.top, lane.top + SUMMARY_ROW) + MARGIN : insets.top + MARGIN;
   const belowTop = Math.max(topLimit, box.y1 + GAP);
   const spaceBelow = bottomLimit - belowTop;
   const aboveBottom = Math.min(bottomLimit, box.y0 - GAP);
   const spaceAbove = aboveBottom - topLimit;
+  const placed = side === null ? null : { lane: side };
   if (height <= spaceBelow || spaceBelow >= spaceAbove) {
-    return { kind: "card", left, top: belowTop, width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceBelow) };
+    return { kind: "card", left, top: belowTop, width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceBelow), ...placed };
   }
-  return { kind: "card", left, top: Math.max(topLimit, aboveBottom - height), width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceAbove) };
+  return { kind: "card", left, top: Math.max(topLimit, aboveBottom - height), width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceAbove), ...placed };
 }

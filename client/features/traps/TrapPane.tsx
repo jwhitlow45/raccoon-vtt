@@ -19,7 +19,7 @@ import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { displayName } from "../../lib/scene.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { paneDockFits } from "../../pages/fold.ts";
+import { paneDockFits, useAlertsLane, usePublishPaneLane } from "../../pages/fold.ts";
 import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -112,10 +112,14 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
 
   const box = trapScreenBox(trap, chunks, camera);
   // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars, and a toast that shows meanwhile starts under its header (pages/RoomDock.tsx usePaneDock).
+  // As a card it keeps left of the column's cards, or under the summary row it has the column show where the lane leaves it no room (labelEdit.ts panePlacement).
   const sheet = props.viewport.width < SHEET_BELOW_PX;
   const dock = usePaneDock(sheet && !hidden, paneDockFits({ viewport: props.viewport, insets: props.insets }), paneRef);
   const insets = dock.reserve > 0 ? { ...props.insets, top: props.insets.top + dock.reserve } : props.insets;
-  const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED });
+  const lane = useAlertsLane(props.viewport);
+  const place = panePlacement({ viewport: props.viewport, insets, box, height: height ?? PANE_HEIGHT_UNMEASURED, lane });
+  // Hidden while the map picks for it, it stands over nothing.
+  usePublishPaneLane(place.kind === "card" && !hidden ? (place.lane ?? null) : null, () => closeRef.current());
 
   // A bottom sheet brings its trap into view above it, once per trap.
   const scope = useRoomScope();

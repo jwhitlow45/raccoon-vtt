@@ -129,6 +129,37 @@ function focusAt(page: Page): Promise<{ role: string | null; name: string; side:
   });
 }
 
+type Rect = { left: number; top: number; right: number; bottom: number };
+
+function intersects(a: Rect, b: Rect): boolean {
+  return a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+}
+
+async function rectOf(locator: Locator): Promise<Rect> {
+  const b = await locator.boundingBox();
+  assert.ok(b, "nothing on screen to measure");
+  return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+}
+
+/** Whether no alert card stands over the element, at its middle and its edges. */
+async function clearOfAlerts(target: Locator): Promise<boolean> {
+  const b = await target.boundingBox();
+  if (!b) return false;
+  const points = [
+    [b.x + b.width / 2, b.y + b.height / 2],
+    [b.x + 3, b.y + b.height / 2],
+    [b.x + b.width - 3, b.y + b.height / 2],
+  ] as const;
+  return target.evaluate(
+    (el, at) =>
+      at.every(([x, y]) => {
+        const top = el.ownerDocument.elementFromPoint(x, y);
+        return top !== null && (el.contains(top) || top.closest("[data-alert]") === null);
+      }),
+    points,
+  );
+}
+
 /** Whether any frame Pat's page received names the trap. */
 function patHeardOfTrap(): boolean {
   return patSocket.received.some((frame) => frame.includes(run.trapId));
@@ -525,5 +556,84 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-lp15-dm-pit-picture");
     assert.deepEqual(drawn, { x: stopped.x, y: stopped.y }, `the goblin stands at ${stopped.x}, ${stopped.y}, its picture is drawn elsewhere`);
     for (const due of state(dmSocket)?.traps?.[pitId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: pitId, due: due.id });
+  });
+
+  test("lp2-1a. a trap goes off while its pane is open as a card: at 1280 x 800, 844 x 390 and 820 x 1180, at 85% and 130%, the pane's header, Close and folds stay in reach and no card covers it, beside the lane or under the column's summary row, whose tap closes the pane and puts focus on the card (docs/design-v1-look-pass-2.md 2.8)", async () => {
+    // In the board's top right corner, where the alerts column hangs, so its pane would meet the cards.
+    const cornerId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: cornerId, sceneId: run.sceneId, name: "Corner Darts", zone: { cells: [{ x: 13, y: 1, w: 2, h: 1 }] }, rig } });
+    await waitFor("the corner trap on the DM's copy", () => state(dmSocket)?.traps?.[cornerId] ?? null);
+    const seen = new Set<string>();
+    for (const size of [
+      { width: 1280, height: 800 },
+      { width: 844, height: 390 },
+      { width: 820, height: 1180 },
+    ]) {
+      for (const scale of [0.85, 1.3]) {
+        const label = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
+        await dm.setViewportSize(size);
+        await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await reopenRoom(dm);
+        await waitFor("the DM's snapshot again", () => state(dmSocket)?.traps?.[cornerId] ?? null);
+        await dm.locator(".konvajs-content").first().waitFor();
+        await pickTool(dm, "Trap");
+        await tapCell(dm, BOUNDS, { x: 13, y: 1 });
+        await pane(dm).getByText("Corner Darts", { exact: true }).first().waitFor();
+        await ops.send({ t: "trap.spring", trapId: cornerId, tokenIds: [run.thorn] });
+        await waitFor(`the springing waits, ${label}`, () => ((state(dmSocket)?.traps?.[cornerId]?.rig?.due?.length ?? 0) > 0 ? true : null));
+        const row = dm.getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
+        const card = dm.getByRole("group", { name: "Corner Darts went off" });
+        await waitFor(`the card or the row, ${label}`, async () => ((await row.count()) > 0 || (await card.isVisible()) ? true : null));
+        await dm.waitForTimeout(400);
+        const mode = (await row.count()) > 0 ? "summary" : "beside";
+        seen.add(mode);
+        await shots.take(dm, `traps-lp2-1a-${size.width}x${size.height}-${Math.round(scale * 100)}-${mode}`);
+        const paneBox = await rectOf(pane(dm));
+        for (const [name, target] of [
+          ["the title", pane(dm).getByText("Corner Darts", { exact: true }).first()],
+          ["Close", pane(dm).getByRole("button", { name: "Close", exact: true })],
+        ] as const) {
+          assert.ok(await wholeInReach(target), `${label}: the pane's ${name} is out of reach`);
+        }
+        // The folds, the pane scrolling inside to its lower ones. At 844 x 390 at 130% the tool's hint line may cover the foot of a pane at its least height, as before, so this asks only that no alert does.
+        for (const fold of ["Name", "Hits"]) {
+          const target = pane(dm).getByRole("button", { name: fold, exact: true });
+          await target.scrollIntoViewIfNeeded();
+          assert.ok(await clearOfAlerts(target), `${label}: an alert covers the pane's ${fold} fold`);
+        }
+        await pane(dm).evaluate((el) => el.scrollTo(0, 0));
+        const cards = await dm.evaluate(() => {
+          const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<{ getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number } }> } };
+          return Array.from(g.document.querySelectorAll('[data-alert]:not([data-alert="rolls"]), [data-alert="rolls"] > *'))
+            .map((el) => el.getBoundingClientRect())
+            .filter((r) => r.width > 0)
+            .map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
+        });
+        for (const c of cards) assert.ok(!intersects(c, paneBox), `${label}: a card covers the pane: ${JSON.stringify({ c, paneBox })}`);
+        if (mode === "summary") {
+          const r = await rectOf(row);
+          assert.ok(r.right <= paneBox.left || paneBox.top >= r.bottom, `${label}: the pane runs under the summary row: ${JSON.stringify({ r, paneBox })}`);
+          assert.equal(await card.isVisible(), false, `${label}: the row stands for the cards, which still show`);
+          await row.click();
+          await pane(dm).waitFor({ state: "detached" });
+          await card.first().waitFor();
+          const at = await waitFor(`focus on the card, ${label}`, async () => {
+            const f = await focusAt(dm);
+            return f.name.includes("Corner Darts went off") ? f : null;
+          }).catch(async () => assert.fail(`${label}: focus is not on the card: ${JSON.stringify(await focusAt(dm))}`));
+          assert.ok(at, label);
+        } else {
+          await pane(dm).getByRole("button", { name: "Close", exact: true }).click();
+          await pane(dm).waitFor({ state: "detached" });
+        }
+        await pickTool(dm, "Select");
+        for (const due of state(dmSocket)?.traps?.[cornerId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId: cornerId, due: due.id });
+        await waitFor(`the springing settled, ${label}`, () => (state(dmSocket)?.traps?.[cornerId]?.rig?.due === undefined ? true : null));
+      }
+    }
+    assert.deepEqual([...seen].sort(), ["beside", "summary"], "the sizes never put the pane beside the lane and under its row both");
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
   });
 });

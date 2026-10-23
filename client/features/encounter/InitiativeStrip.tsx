@@ -13,7 +13,7 @@ import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { dockSlot, drawn, focusAlert, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
+import { dockSlot, drawn, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useUiScale } from "../device/settings.ts";
@@ -490,6 +490,9 @@ type Notice = { id: string; text: string };
  * summary as the dock in one 44 px row, with its cards hidden as under a
  * sheet, and a tap on the row hides the bar and shows them. It starts
  * below the notices that last when they span the map over it (Room.tsx).
+ * A map pane drawn as a card keeps left of the lane the same way, and
+ * where the lane leaves it no room the same row stands for the cards,
+ * whose tap closes the pane (docs/design-v1-look-pass-2.md 2.8).
  *
  * It stops at the active tool's options, so it never covers Select
  * several's Actions. Where that leaves it under one whole card, as with
@@ -574,9 +577,21 @@ function FightAlerts() {
   const [asked, setAsked] = useState<AskedAlerts | null>(null);
   const toOptions = chrome ? height - chrome.top - chrome.bottom - push : Infinity;
   const cramped = !folded && roomSummary !== null && firstHeight > 0 && toOptions < EDGE + firstHeight;
-  const forRoom = cramped && !asked && !forFootCard;
-  const summary = forRoom ? roomSummary : barSummary;
-  const summarized = forFootCard || forRoom || (!folded && bar?.lane === "summary" && summary !== null);
+  /*
+   * A map pane drawn as a card where the lane leaves it no room beside the
+   * cards has the row stand for them, with the pane's words, which win
+   * over the token window's (pages/fold.ts summaryFor), and over the room's
+   * since a tap must clear the pane first. Not while the cards were asked
+   * for, as they then show where they are or over the screen.
+   */
+  const alertsDock = useScoped(dockSlot);
+  const paneSummary = useDockSummary("pane");
+  const paneLane = useStore(alertsDock, (s) => s.paneLane);
+  const laneRow = summaryFor({ paneLane: folded || asked !== null ? null : (paneLane?.lane ?? null), barLane: bar?.lane ?? null });
+  const forPane = laneRow === "pane" && paneSummary !== null;
+  const forRoom = cramped && !asked && !forFootCard && !forPane;
+  const summary = forPane ? paneSummary : forRoom ? roomSummary : barSummary;
+  const summarized = forFootCard || forRoom || forPane || (!folded && laneRow === "bar" && summary !== null);
   useLayoutEffect(() => {
     if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
   }, [dock, forRoom]);
@@ -828,7 +843,6 @@ function FightAlerts() {
    * whole card, then the roll opens or the alert takes focus. The bar stays
    * where the cards show beside it.
    */
-  const alertsDock = useScoped(dockSlot);
   const showAsk = useStore(alertsDock, (s) => s.showAsk);
   useLayoutEffect(() => {
     if (!showAsk || folded) return;
@@ -976,6 +990,12 @@ function FightAlerts() {
           ref={rowRef}
           summary={summary}
           onClick={() => {
+            // As the row on a sheet pane's edge (pages/RoomDock.tsx PaneDockRow): the pane closes, and once the cards are back the column meets the ask.
+            if (forPane) {
+              alertsDock.setState({ showAsk: summary.first.kind === "rolls" && rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: summary.first } });
+              paneLane?.close();
+              return;
+            }
             ui.showActions(false);
             // A card at a phone's foot opens at once, since it may stay folded for want of room until asked for, and the column has no room to show it.
             if (forFootCard || (forRoom && rolls?.waiting && footRolls)) {

@@ -19,6 +19,7 @@ import {
   sheetPanAnchor,
   tapDelete,
 } from "./labelEdit.ts";
+import { LANE_WIDTH, paneLaneBox, SUMMARY_ROW } from "../../canvas/barDock.ts";
 
 const dm = { role: "dm" as const, tool: "select", mode: "paint" as const };
 
@@ -183,24 +184,24 @@ describe("panePlacement", () => {
   const insets = { top: 52, right: 0, bottom: 120, left: 0 };
 
   test("a phone gets a bottom sheet above the bars", () => {
-    const p = panePlacement({ viewport: { width: 390, height: 844 }, insets, box: { x0: 100, y0: 300, x1: 200, y1: 330 }, height: 200 });
+    const p = panePlacement({ viewport: { width: 390, height: 844 }, insets, box: { x0: 100, y0: 300, x1: 200, y1: 330 }, height: 200, lane: null });
     assert.deepEqual(p, { kind: "sheet", bottom: 120, maxHeight: 844 - 120 - 8 - (52 + 8) });
   });
 
   test("a wide screen hangs it under the label, centered on it", () => {
-    const p = panePlacement({ viewport: { width: 1280, height: 800 }, insets, box: { x0: 500, y0: 200, x1: 600, y1: 230 }, height: 200 });
+    const p = panePlacement({ viewport: { width: 1280, height: 800 }, insets, box: { x0: 500, y0: 200, x1: 600, y1: 230 }, height: 200, lane: null });
     assert.deepEqual(p, { kind: "card", left: 550 - PANE_WIDTH / 2, top: 240, width: PANE_WIDTH, maxHeight: 800 - 120 - 8 - 240 });
   });
 
   test("near the bottom it goes over the label instead", () => {
-    const p = panePlacement({ viewport: { width: 1280, height: 800 }, insets, box: { x0: 500, y0: 600, x1: 600, y1: 630 }, height: 200 });
+    const p = panePlacement({ viewport: { width: 1280, height: 800 }, insets, box: { x0: 500, y0: 600, x1: 600, y1: 630 }, height: 200, lane: null });
     assert.equal(p.kind, "card");
     if (p.kind !== "card") return;
     assert.equal(p.top, 600 - 10 - 200);
   });
 
   test("it stays on screen beside an edge, and below the top bar for a label scrolled off the top", () => {
-    const p = panePlacement({ viewport: { width: 1280, height: 800 }, insets, box: { x0: -80, y0: -60, x1: -20, y1: -40 }, height: 200 });
+    const p = panePlacement({ viewport: { width: 1280, height: 800 }, insets, box: { x0: -80, y0: -60, x1: -20, y1: -40 }, height: 200, lane: null });
     assert.equal(p.kind, "card");
     if (p.kind !== "card") return;
     assert.equal(p.left, 8);
@@ -211,20 +212,100 @@ describe("panePlacement", () => {
     // 480 x 320 at 130% with the Trap tool: 369 x 246 layout px, a 53 px top bar, and 99 px of toolbar and tool's options, so 78 px between the bars.
     const short = { top: 53, right: 0, bottom: 99, left: 0 };
     const box = { x0: 60, y0: 120, x1: 90, y1: 150 };
-    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 246 }, insets: short, box, height: 400 }), { kind: "sheet", bottom: 99, maxHeight: PANE_MIN_HEIGHT, overBars: true });
+    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 246 }, insets: short, box, height: 400, lane: null }), { kind: "sheet", bottom: 99, maxHeight: PANE_MIN_HEIGHT, overBars: true });
     // Exactly its least height between the bars: it keeps under them.
     const exact = { ...short, bottom: 246 - 53 - 16 - PANE_MIN_HEIGHT };
-    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 246 }, insets: exact, box, height: 400 }), { kind: "sheet", bottom: exact.bottom, maxHeight: PANE_MIN_HEIGHT });
+    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 246 }, insets: exact, box, height: 400, lane: null }), { kind: "sheet", bottom: exact.bottom, maxHeight: PANE_MIN_HEIGHT });
     // Shorter still above the bottom bars than its least height: it stops at the screen's top.
-    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 200 }, insets: short, box, height: 400 }), { kind: "sheet", bottom: 99, maxHeight: 200 - 99, overBars: true });
+    assert.deepEqual(panePlacement({ viewport: { width: 369, height: 200 }, insets: short, box, height: 400, lane: null }), { kind: "sheet", bottom: 99, maxHeight: 200 - 99, overBars: true });
   });
 
   test("a pane taller than either side takes the roomier one and scrolls", () => {
-    const p = panePlacement({ viewport: { width: 700, height: 500 }, insets, box: { x0: 300, y0: 150, x1: 400, y1: 170 }, height: 400 });
+    const p = panePlacement({ viewport: { width: 700, height: 500 }, insets, box: { x0: 300, y0: 150, x1: 400, y1: 170 }, height: 400, lane: null });
     assert.equal(p.kind, "card");
     if (p.kind !== "card") return;
     assert.equal(p.top, 180);
     assert.equal(p.maxHeight, 500 - 120 - 8 - 180);
+  });
+});
+
+describe("panePlacement beside the alerts lane (docs/design-v1-look-pass-2.md 2.8)", () => {
+  // The lane as the panes read it: the chrome and the column's facts in the zoomed layout px the panes are placed in.
+  const chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: { top: 0, right: 0, bottom: 0, left: 0 }, sheet: 0 };
+  const insets = { top: 52, right: 0, bottom: 60, left: 0 };
+  const column = { top: 60, content: 180, first: 160 };
+  const laneOf = (viewport: { width: number; height: number }) => paneLaneBox({ viewport, chrome, column, folded: false });
+
+  test("with no column, nothing changes", () => {
+    const viewport = { width: 1440, height: 900 };
+    const box = { x0: 1200, y0: 100, x1: 1260, y1: 160 };
+    assert.deepEqual(panePlacement({ viewport, insets, box, height: 300, lane: null }), { kind: "card", left: 1230 - PANE_WIDTH / 2, top: 170, width: PANE_WIDTH, maxHeight: 900 - 60 - 8 - 170 });
+  });
+
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 844, height: 390 },
+    { width: 820, height: 1180 },
+  ]) {
+    test(`at ${viewport.width} x ${viewport.height}, a card by a thing under the cards keeps its right edge 8 px left of the lane`, () => {
+      const lane = laneOf(viewport);
+      assert.ok(lane);
+      // The lane is the token window's: the free area's right 312 px.
+      assert.equal(lane.left, viewport.width - 8 - LANE_WIDTH);
+      const box = { x0: viewport.width - 120, y0: 70, x1: viewport.width - 60, y1: 110 };
+      const p = panePlacement({ viewport, insets, box, height: 200, lane });
+      assert.equal(p.kind, "card");
+      if (p.kind !== "card") return;
+      assert.equal(p.lane, "beside");
+      assert.equal(p.left + p.width, lane.left - 8);
+      assert.equal(p.width, PANE_WIDTH);
+      // Beside, it stands as high as the bars let it, by its thing.
+      assert.equal(p.top, 120);
+    });
+  }
+
+  test("a card by a thing left of the lane stays where it was, beside", () => {
+    const viewport = { width: 1440, height: 900 };
+    const lane = laneOf(viewport);
+    const box = { x0: 300, y0: 100, x1: 360, y1: 160 };
+    const p = panePlacement({ viewport, insets, box, height: 200, lane });
+    assert.deepEqual(p, { kind: "card", left: 330 - PANE_WIDTH / 2, top: 170, width: PANE_WIDTH, maxHeight: 900 - 60 - 8 - 170, lane: "beside" });
+  });
+
+  test("at 600 px at 130% (a 780 x 1040 tablet) the lane leaves no room beside it, so the card keeps under the column's summary row", () => {
+    const viewport = { width: 600, height: 800 };
+    const lane = laneOf(viewport);
+    assert.ok(lane);
+    assert.equal(lane.left, 600 - 8 - LANE_WIDTH);
+    assert.equal(lane.top, 60);
+    const box = { x0: 400, y0: 40, x1: 460, y1: 70 };
+    const p = panePlacement({ viewport, insets, box, height: 200, lane });
+    assert.equal(p.kind, "card");
+    if (p.kind !== "card") return;
+    assert.equal(p.lane, "summary");
+    // Under the row's 44 px and the 8 px margin, where without the lane it would hang 10 px under its thing.
+    assert.equal(p.top, 60 + SUMMARY_ROW + 8);
+    const without = panePlacement({ viewport, insets, box, height: 200, lane: null });
+    assert.equal(without.kind === "card" ? without.top : null, 80);
+    // Over its thing near the foot, it still stops under the row.
+    const low = panePlacement({ viewport, insets, box: { x0: 400, y0: 300, x1: 460, y1: 330 }, height: 600, lane });
+    assert.equal(low.kind, "card");
+    if (low.kind !== "card") return;
+    assert.ok(low.top >= 60 + SUMMARY_ROW + 8, `the card reaches over the row: ${JSON.stringify(low)}`);
+  });
+
+  test("a summary row that rose over the bars moves the card's limit with it", () => {
+    const viewport = { width: 600, height: 800 };
+    const lane = paneLaneBox({ viewport, chrome, column: { ...column, row: 20 }, folded: false });
+    assert.equal(lane?.top, 20);
+    const p = panePlacement({ viewport, insets, box: { x0: 400, y0: 40, x1: 460, y1: 70 }, height: 200, lane });
+    assert.equal(p.kind === "card" ? p.top : null, 80, "the row's foot is above the top bars' limit, which then holds");
+  });
+
+  test("a phone keeps its bottom sheet, which leaves the column to fold under it", () => {
+    const viewport = { width: 390, height: 844 };
+    const p = panePlacement({ viewport, insets, box: { x0: 300, y0: 80, x1: 340, y1: 120 }, height: 200, lane: laneOf(viewport) });
+    assert.deepEqual(p, { kind: "sheet", bottom: 60, maxHeight: 844 - 60 - 52 - 16 });
   });
 });
 

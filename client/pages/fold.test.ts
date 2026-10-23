@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_CHROME } from "../canvas/barDock.ts";
-import { alertsSummary, dockFits, foldsUnderSheet, paneDockFits, sideSheetRoom, type ColumnAlert } from "./fold.ts";
+import { alertsSummary, dockFits, foldsUnderSheet, paneDockFits, sideSheetRoom, summaryFor, type ColumnAlert } from "./fold.ts";
 
 describe("foldsUnderSheet", () => {
   test("a phone in portrait folds while a sheet is open", () => {
@@ -192,5 +192,23 @@ describe("paneDockFits", () => {
     // 52 + 8 + 48 + 120 + 8 + 120
     assert.equal(paneDockFits({ viewport: { width: 390, height: 356 }, insets }), true);
     assert.equal(paneDockFits({ viewport: { width: 390, height: 355 }, insets }), false);
+  });
+});
+
+describe("summaryFor (docs/design-v1-look-pass-2.md 2.8)", () => {
+  test("no row with nothing that wants it", () => {
+    assert.equal(summaryFor({ paneLane: null, barLane: null }), null);
+    assert.equal(summaryFor({ paneLane: "beside", barLane: "stacked" }), null);
+    assert.equal(summaryFor({ paneLane: null, barLane: "beside" }), null);
+  });
+
+  test("the token window's row, and a pane beside the lane leaves it so", () => {
+    assert.equal(summaryFor({ paneLane: null, barLane: "summary" }), "bar");
+    assert.equal(summaryFor({ paneLane: "beside", barLane: "summary" }), "bar");
+  });
+
+  test("a pane with no room beside the lane, whose words win when the window wants the row too", () => {
+    assert.equal(summaryFor({ paneLane: "summary", barLane: null }), "pane");
+    assert.equal(summaryFor({ paneLane: "summary", barLane: "summary" }), "pane");
   });
 });
