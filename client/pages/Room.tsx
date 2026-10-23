@@ -650,7 +650,7 @@ function RoomPage() {
   const summaryRef = useRef<HTMLButtonElement>(null);
   useDockSummaryButton(summaryRef);
   /** What the tap that closed the sheets asked to show, for where focus goes once they are gone. */
-  const showing = useRef<{ kind: "bar" } | null>(null);
+  const showing = useRef<DockShowing | null>(null);
   const rolls = useAlertsSummaryEntry();
   const dockActions: DockActions = {
     showBar: () => {
@@ -671,7 +671,7 @@ function RoomPage() {
        * waiting for this viewer's answer opens with focus in its card
        * (features/rolls, 3.3.1), else the alert it names takes focus.
        */
-      showing.current = null;
+      showing.current = { kind: "alerts" };
       dockStore.setState({ showAsk: rolls?.waiting ? { kind: "rolls" } : { kind: "alert", first: s.first } });
       closeSheets();
     },
@@ -1072,6 +1072,9 @@ function RoomPage() {
   );
 }
 
+/** What a dock button's tap asked to show as it closed the sheets: the token bar, or the alerts column. */
+type DockShowing = { kind: "bar" } | { kind: "alerts" };
+
 /**
  * Where focus goes as the dock comes and goes (docs/design-v1-visual.md
  * 3.2.1):
@@ -1095,7 +1098,7 @@ function useDockFocus(input: {
   sheetOpen: boolean;
   store: ReturnType<typeof dockSlot.create>;
   registry: ReturnType<typeof sheetFocusSlot.create>;
-  showing: { current: { kind: "bar" } | null };
+  showing: { current: DockShowing | null };
   showRef: { current: HTMLButtonElement | null };
   summaryRef: { current: HTMLButtonElement | null };
 }): void {
@@ -1139,6 +1142,8 @@ function useDockFocus(input: {
     if (!was || sheetOpen) return;
     const asked = showing.current;
     showing.current = null;
+    // The column places focus itself once its cards show, so nothing here may take it first, where a screen reader would read that out on the way.
+    if (asked?.kind === "alerts") return;
     if (asked?.kind === "bar") {
       const frame = store.getState().bar?.frame.current;
       if (frame && drawn(frame)) {
