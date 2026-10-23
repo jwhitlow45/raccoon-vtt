@@ -77,6 +77,12 @@ describe("choices are native radios", () => {
       assert.ok(id, "the radiogroup names its description");
       assert.match(markup, new RegExp(`<p id="${id}"[^>]*>Warhorse moves on Thorn&#x27;s turn.</p>`));
     }
+    // Its style places the whole choice: on the outer box with the Help line, never inside it, even or not (review P3-3).
+    for (const even of [false, true]) {
+      const markup = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, even, description: "Warhorse moves on Thorn's turn.", style: { marginTop: 7 }, onChange() {} }));
+      assert.match(markup, /^<div style="display:grid;[^"]*margin-top:7px">/, `the outer box takes the style${even ? ", even" : ""}`);
+      assert.equal(markup.match(/margin-top:7px/g)?.length, 1, `only the outer box${even ? ", even" : ""}`);
+    }
     const plain = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, onChange() {} }));
     assert.doesNotMatch(plain, /aria-describedby/);
     assert.match(plain, /^<div role="radiogroup"/, "without a description the group is drawn as before");

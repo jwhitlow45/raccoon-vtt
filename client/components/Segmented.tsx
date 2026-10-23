@@ -83,7 +83,7 @@ export function Segmented<T extends string | number>(props: {
       aria-describedby={described ? descriptionId : undefined}
       aria-disabled={props.disabled ? true : undefined}
       className={props.even ? (props.options.length === 6 ? "rvtt-even-choices rvtt-even-six" : "rvtt-even-choices") : undefined}
-      style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even ? null : props.style) }}
+      style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even || described ? null : props.style) }}
     >
       {props.options.map((o) => {
         const chosen = o.value === props.value;
@@ -132,8 +132,9 @@ export function Segmented<T extends string | number>(props: {
   // Even options measure the room they share, so where four cannot fit side by side they go two by two (globals.css).
   const choice = props.even ? <div style={{ containerType: "inline-size", minWidth: 0, ...(described ? null : props.style) }}>{group}</div> : group;
   if (!described) return choice;
+  // `style` places the whole choice, so with its Help line it goes on the outermost box, even or not.
   return (
-    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, ...(props.even ? props.style : null) }}>
+    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, ...props.style }}>
       {choice}
       <Help id={descriptionId}>{props.description}</Help>
     </div>
