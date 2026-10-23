@@ -331,6 +331,31 @@ describe("a rider's row some player cannot see leads no mount (op version 18)", 
     assert.equal(old.row("horse").value, 4, "op version 17 gave the horse's row the goblin's value");
   });
 
+  test("so the warhorse's row, left ahead of the goblin's, acts on its own turn and on the goblin's each round, until the DM moves it after its rider (review FU22A-OPUS-3)", () => {
+    const onHorse: Op = { t: "token.attach", tokenId: "gob", to: "horse", kind: "ride", steer: true, x: 5, y: 5, elevation: 0 };
+    const f = rows({ order: "allies" }).next().run(onHorse);
+    const turns = (n: number): string[] =>
+      Array.from({ length: n }, () => {
+        f.next();
+        const e = f.state.encounter!;
+        const row = e.entries.find((x) => x.id === e.activeEntryId)!;
+        return `${e.round}:${row.id}${row.markRound === e.round ? " marks time" : ""}${f.mounts() ? ` with ${f.mounts()!.join()}` : ""}`;
+      });
+    // The horse's own row acts, and so does the horse on the goblin's turn, round after round.
+    assert.deepEqual(turns(8), ["1:eb", "1:eh", "1:eg with horse", "2:et", "2:eb", "2:eh", "2:eg with horse", "3:et"]);
+    // "Move after Goblin" on the horse's own turn (client/features/attach/tags.ts moveAfterRider) puts its row right after the
+    // rider's, and from then on the horse acts once a round, on the goblin's turn, its own row marking time.
+    turns(2);
+    assert.equal(f.state.encounter!.activeEntryId, "eh");
+    f.run({ t: "encounter.setValue", entryId: "eh", value: 4 }).run({ t: "encounter.reorder", entryIds: ["et", "eb", "eg", "eh"] });
+    const after = turns(12);
+    assert.ok(
+      after.every((t) => !t.includes(":eh") || t.endsWith("marks time")),
+      after.join(", "),
+    );
+    for (const round of [4, 5]) assert.deepEqual(after.filter((t) => t.startsWith(`${round}:`)), [`${round}:et`, `${round}:eb`, `${round}:eg with horse`, `${round}:eh marks time`]);
+  });
+
   test("on a chain the rider's own row gives the value and the acting row the sharing: Bree's controlled horse gets on an elephant (review FU21A-OP-6)", () => {
     const elephant = (s: RoomState) => {
       s.tokens.elephant = token("elephant", { name: "Elephant", kind: "npc", size: "huge", disposition: "ally", ownerIds: ["p1"], x: 4, y: 4, actor: { inline: actor({ speeds: { walk: 40 } }) } });
