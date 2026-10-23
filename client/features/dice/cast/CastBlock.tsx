@@ -98,6 +98,24 @@ function useSends(): Record<string, CastSend> {
 /** The roll options' button outline (RollOptions.tsx OptionCell). */
 const OPTION_OUTLINE = `${theme.line.border}px solid ${theme.color.controlBorder}`;
 
+/**
+ * Closes the open block once its ask waits in the view, or settled and
+ * went, when the block becomes the row's waiting line (3.2). Run above the
+ * options, never in the block, so a block its folded group or another
+ * creature's tab keeps from drawing still closes, and the folded line
+ * stops naming it (docs/design-v1-dice-pass.md 6.6).
+ */
+export function useCloseSettledBlock(view: Pick<RoomState, "casts"> | null): void {
+  const store = useOptionStore();
+  const tracker = useCastTracker();
+  const cast = useOption((s) => s.cast);
+  const sent = cast?.sent;
+  const phase = sent !== undefined && view ? phaseOf(tracker.state(sent), view.casts[sent] !== undefined) : null;
+  useEffect(() => {
+    if (cast && (phase === "asked" || phase === "closed")) store.setState((s) => (s.cast === cast ? { cast: null } : {}));
+  }, [cast, phase, store]);
+}
+
 /** The row's own Ask for saves (3.1), where the DM's Group save stands. */
 export function AskForSavesButton(props: { spec: CastBlock; ref?: RefObject<HTMLButtonElement | null> }) {
   const store = useOptionStore();
@@ -275,11 +293,6 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
     });
     return () => cancelAnimationFrame(frame);
   }, []);
-  // Once its ask waits in the view, or settled and went, the block is the row's waiting line (3.2).
-  useEffect(() => {
-    if (sentPhase === "asked" || sentPhase === "closed") store.setState((s) => (s.cast === spec ? { cast: null } : {}));
-  }, [sentPhase, spec, store]);
-
   const ask = () => {
     const now = room.getState().view;
     const at = now ? casterToken(now, spec.creature, sceneId) : undefined;

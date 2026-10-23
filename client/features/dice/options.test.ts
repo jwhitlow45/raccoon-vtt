@@ -446,6 +446,14 @@ describe("what waits in a creature's groups (docs/design-v1-dice-pass.md 6.4)", 
     assert.deepEqual(groupAsks({ state: state(), creature: { tokenId: "gob" }, named, cast: { ...base, spell: "Fireball", opened: 6 } }), {}, "another creature's block");
   });
 
+  test("a block names its spell in the folded line only until its send settles, and still opens its group by its stamp and send", () => {
+    const cast = { key: "c:bree", creature: { characterId: "bree" }, spell: "Hold Person", roll: "s:hold", opened: 7, sent: "ask-7" };
+    const at = (castPhase: Parameters<typeof groupAsks>[0]["castPhase"]) => groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast, castPhase }).spells;
+    assert.deepEqual(at(null), { ids: ["open:7", "ask-7"], asked: [], casts: ["Hold Person"] }, "not sent yet");
+    assert.deepEqual(at("sending"), { ids: ["open:7", "ask-7"], asked: [], casts: ["Hold Person"] });
+    for (const phase of ["refused", "unknown", "asked", "closed"] as const) assert.deepEqual(at(phase), { ids: ["open:7", "ask-7"], asked: [], casts: [] }, phase);
+  });
+
   test("an ask for saves waiting in the view opens its row's group by its id, once with its block's send", () => {
     const casts = {
       k1: castAsk("k1", { caster: "breeTok", spell: "Fireball", area: "a1" }),

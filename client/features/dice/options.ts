@@ -11,6 +11,7 @@ import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
 import type { CastBlock } from "./optionState.ts";
+import type { CastPhase } from "./cast/cast.ts";
 import { foldKey, type CreatureGroup, type DiceFoldsStore, type FoldKind } from "./diceFolds.ts";
 import { d20Text, parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 
@@ -676,19 +677,34 @@ export function initiativeTag(row: { value: number | null } | null, preset: Roll
 export type GroupAsks = Partial<Record<CreatureGroup, { ids: string[] } & GroupWaiting>>;
 
 /**
+ * The row a player's ask for saves goes under: its roll's row by key, else
+ * the row of its spell by name. None puts an open block at the top of the
+ * options (docs/design-v1-player-save-spell.md 3.1).
+ */
+export function castRowOf<R extends Pick<NamedRoll, "key" | "name">>(named: readonly R[], ask: { roll?: string | undefined; spell: string }): R | undefined {
+  return (ask.roll !== undefined ? named.find((r) => r.key === ask.roll) : undefined) ?? named.find((r) => sameSpell(r.name, ask.spell));
+}
+
+/**
  * What waits in each of a creature's groups (6.4): an open request it can
  * answer opens Saves and checks for a save or a plain check, and Skills
  * for a skill, by the request's id. A player's open ask for saves opens
  * the group that holds its row, by the opening's stamp, as does an ask
  * waiting in the view, by its id. The block's own sent ask counts as the
  * block, so an ask sent from it opens nothing again once it waits, and
- * one first seen after a reload opens its group once.
+ * one first seen after a reload opens its group once. The block names its
+ * spell in the folded line only while it waits for the player or for the
+ * server's answer (`castPhase` null or sending): once refused or unknown,
+ * the list above the card says so, and once it waits in the view, the
+ * view's ask names it, until the DM settles it.
  */
 export function groupAsks(input: {
   state: Pick<RoomState, "tokens" | "rolls" | "casts">;
   creature: ActorTarget;
   named: readonly Pick<NamedRoll, "key" | "name" | "section">[];
   cast: CastBlock | null;
+  /** Where the block's send stands, null before it sends. */
+  castPhase?: CastPhase | null;
 }): GroupAsks {
   const { state, creature } = input;
   const out: GroupAsks = {};
@@ -708,16 +724,16 @@ export function groupAsks(input: {
       else add("saves", request.id, { asked: `${ABILITY_ABBR[choice.ability]} ${request.test.kind}` });
     }
   }
-  const rowOf = (ask: { roll?: string | undefined; spell: string }) => (ask.roll !== undefined ? input.named.find((r) => r.key === ask.roll) : undefined) ?? input.named.find((r) => sameSpell(r.name, ask.spell));
   const cast = input.cast?.key === key ? input.cast : null;
-  const castRow = cast ? rowOf(cast) : undefined;
+  const castRow = cast ? castRowOf(input.named, cast) : undefined;
   if (cast && castRow) {
-    add(castRow.section, `open:${cast.opened ?? 0}`, { cast: cast.spell });
+    const waits = input.castPhase === undefined || input.castPhase === null || input.castPhase === "sending";
+    add(castRow.section, `open:${cast.opened ?? 0}`, waits ? { cast: cast.spell } : {});
     if (cast.sent !== undefined) add(castRow.section, cast.sent, {});
   }
   for (const ask of Object.values(state.casts ?? {})) {
     if (creatureKey(state, { tokenId: ask.caster }) !== key) continue;
-    const row = rowOf(ask);
+    const row = castRowOf(input.named, ask);
     if (row) add(row.section, ask.id, { cast: ask.spell });
   }
   return out;

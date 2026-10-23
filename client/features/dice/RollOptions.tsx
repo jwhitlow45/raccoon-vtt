@@ -32,6 +32,7 @@ import { CreatureCard, DICE_CARD } from "./CreatureCard.tsx";
 import { creatureLook } from "./creatureLook.ts";
 import { foldKey, foldKind, useDiceFolds, type CreatureGroup } from "./diceFolds.ts";
 import {
+  castRowOf,
   creatureKey,
   critical,
   CRIT_WORDS,
@@ -55,7 +56,6 @@ import {
   routedTest,
   rowSummary,
   routeOf,
-  sameSpell,
   scoreOf,
   signedText,
   spellLevels,
@@ -75,7 +75,9 @@ import { GroupOptions } from "./groupSave/GroupOptions.tsx";
 import { useStartGroupSave } from "./groupSave/start.ts";
 import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
-import { AskForSavesButton, RowCast, WaitingAsks } from "./cast/CastBlock.tsx";
+import { AskForSavesButton, RowCast, useCloseSettledBlock, WaitingAsks } from "./cast/CastBlock.tsx";
+import { useCastTracker } from "./cast/alerts.ts";
+import { phaseOf } from "./cast/cast.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
 /** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design-v1-dice-pass.md 8), found from the Dice panel's root (DicePanel.tsx). */
@@ -99,6 +101,7 @@ export function RollOptions(_props: PanelProps) {
   const focus = useOption((s) => s.focus);
   const options = useOptionStore();
   const ref = useRef<HTMLDivElement>(null);
+  useCloseSettledBlock(view);
   // A bar's Roll opens the panel on its tokens and scrolls it, after the render that lists them, once per tap (4.1).
   useEffect(() => {
     if (focus === 0 || options.getState().focused === focus) return;
@@ -172,6 +175,8 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
   const selectedKey = last !== undefined ? creatureKey(view, { tokenId: last }) : null;
   const current = options.find((o) => o.key === picked) ?? options.find((o) => o.key === selectedKey) ?? options[0];
   const loaded = useCreatureRolls(current?.creature ?? null);
+  const cast = useOption((s) => s.cast);
+  const { folds } = useDiceFolds();
   // An ask stays in reach with no creature to pick, as for a lent token off the players' scene (docs/design-v1-player-save-spell.md 3.2).
   if (!current) {
     return (
@@ -183,10 +188,12 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
       </>
     );
   }
+  // The open block draws only with its creature's options, and under a row only while that row's group is open, so while they load, after a load failed, or with the group folded, its send shows above the card.
+  const castRow = cast && cast.key === current.key && loaded.rolls ? castRowOf(loaded.rolls.named, cast) : undefined;
+  const blockDraws = loaded.dice !== null && loaded.rolls !== null && !loaded.failed && (castRow === undefined || folds[foldKey(foldKind(view, current.creature), castRow.section)]);
   return (
     <>
-      {/* The open block draws only with its creature's options, so while they load or after a load failed its send shows here. */}
-      <WaitingAsks view={view} pickedKey={current.key} blockDraws={loaded.dice !== null && loaded.rolls !== null && !loaded.failed} />
+      <WaitingAsks view={view} pickedKey={current.key} blockDraws={blockDraws} />
       <CreatureFrame
         loaded={loaded}
         creature={current.creature}
@@ -339,9 +346,8 @@ function useCtx(props: Shown) {
   const blocked = useRollBlocked();
   const cast = useOption((s) => (s.cast?.key === key ? s.cast : null));
   const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
-  // Every named roll draws a row. A block opens under its roll's row, else under the spell's found by name. A roll with no row, as for an area whose spell has none or a row gone since, opens the block at the top (3.1), so an open block always draws for its creature (WaitingAsks leaves its send to it).
-  const drawn = new Set(rolls.named.map((r) => r.key));
-  const castRow = cast ? ((cast.roll !== undefined && drawn.has(cast.roll) ? cast.roll : undefined) ?? rolls.named.find((r) => sameSpell(r.name, cast.spell))?.key ?? null) : null;
+  // Every named roll draws a row. A block opens under its roll's row, else under the spell's found by name. A roll with no row, as for an area whose spell has none or a row gone since, opens the block at the top (3.1), so an open block always draws for its creature while its group is open (WaitingAsks leaves its send to it then).
+  const castRow = cast ? (castRowOf(rolls.named, cast)?.key ?? null) : null;
   const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
   return { ctx, actor, character, askOff, cast };
 }
@@ -399,7 +405,9 @@ function OptionGroups(props: Shown) {
   const { dice, rolls, creature } = ctx;
   const state = dice.view;
   const kind = foldKind(state, creature);
-  const asks = groupAsks({ state, creature, named: rolls.named, cast });
+  const tracker = useCastTracker();
+  const castPhase = cast?.sent !== undefined ? phaseOf(tracker.state(cast.sent), state.casts[cast.sent] !== undefined) : null;
+  const asks = groupAsks({ state, creature, named: rolls.named, cast, castPhase });
   // In render, not an effect, so a group that newly holds an ask never draws folded first.
   openForAsks(folds, kind, asks);
   const groupFold = (group: CreatureGroup) => fold(foldKey(kind, group));
