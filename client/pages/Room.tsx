@@ -2,7 +2,28 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, columnEdges, DEFAULT_CHROME, EDGE, fitToasts, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, TOAST_MIN, toastLayerPlace, toastTop, type Chrome, type ToastEdges, type ToastPlaces } from "../canvas/barDock.ts";
+import {
+  barDockSlot,
+  barToastTop,
+  columnEdges,
+  DEFAULT_CHROME,
+  EDGE,
+  fitToasts,
+  freeArea,
+  inToastLayer,
+  nextToastPlaces,
+  NO_TOAST_PLACES,
+  noticePlace,
+  paneToastTop,
+  spanToastSlot,
+  TOAST_MIN,
+  toastLayerPlace,
+  toastsOverHead,
+  toastTop,
+  type Chrome,
+  type ToastEdges,
+  type ToastPlaces,
+} from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SCROLL_FOR_MORE_PX, ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
@@ -921,7 +942,7 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} foot={chrome ? height - chrome.controls : null} />
+          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} foot={chrome ? height - chrome.controls : null} optionsTop={chrome ? optionsTop : null} />
         </div>
         <div ref={setToastLayer} data-rvtt-toast-layer="" {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
@@ -1518,6 +1539,14 @@ function Banner() {
  * Once the pane goes away, the stack stays where the header last stood,
  * until another pane stands (barDock.ts nextToastPlaces).
  *
+ * On an upright phone, a toast that shows over the header of the spanning
+ * token bar, which reaches the top of its room when it hangs over its
+ * token, is placed again as if it came now, under that header, so Close
+ * and Larger or Smaller stay in reach (review LP19-BS-2). Its box is read
+ * once it is drawn, since only then is its height known, and the move
+ * happens before the browser paints. A toast already showing as the bar
+ * opens or moves keeps its place, so no toast moves under a finger.
+ *
  * When the screen turns, a toast at the top of the notices that now
  * meets the column's first card is placed again as if it came now, under
  * that card, and again as the column measures the card anew while the
@@ -1543,7 +1572,7 @@ function Banner() {
  * FU22B-OP-4). `foot` is null until the bars are measured, as on the
  * first render after a blackout, and nothing is fitted until then.
  */
-function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null; foot: number | null }) {
+function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null; foot: number | null; optionsTop: number | null }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
@@ -1565,7 +1594,10 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
   const cardMs = cardWaitMs();
   const recent = new Set(showing.filter((t) => Date.now() - t.shownAt < cardMs).map((t) => t.id));
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent });
+  // The toasts that just showed over a spanning token bar's header, as last drawn, and the place under it (review LP19-BS-2).
+  const spanToast = useScoped(spanToastSlot);
+  const [overBar, setOverBar] = useState<{ ids: ReadonlySet<number>; at: number | null }>(NOT_OVER_BAR);
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;
@@ -1622,6 +1654,15 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     }
     const notices = stacks.notices.box.current;
     mapFoot.current = overMap.length > 0 && notices ? notices.getBoundingClientRect().bottom / zoom : null;
+    // A toast that just showed over the bar's header takes its place again under it, on a render before the browser paints.
+    const boxes = drawn.flatMap((t) => {
+      const r = recent.has(t.id) ? hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect() : undefined;
+      return r && r.height > 0 ? [{ id: t.id, top: r.top / zoom, bottom: r.bottom / zoom }] : [];
+    });
+    const over = toastsOverHead(boxes, spanToast.head);
+    const at = over.size > 0 && props.optionsTop !== null ? barToastTop({ head: spanToast.head, optionsTop: props.optionsTop }) : null;
+    const next = at === null ? NOT_OVER_BAR : { ids: over, at };
+    if (next.at !== overBar.at || next.ids.size !== overBar.ids.size || [...next.ids].some((id) => !overBar.ids.has(id))) setOverBar(next);
   });
   return (
     <>
@@ -1644,6 +1685,8 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     </>
   );
 }
+
+const NOT_OVER_BAR: { ids: ReadonlySet<number>; at: number | null } = { ids: new Set(), at: null };
 
 /** How long after the screen turns a toast at the top of the notices may still be placed again under the column's card. */
 const TURN_MS = 600;

@@ -1242,14 +1242,44 @@ export function paneToastTop(input: { head: number | null; optionsTop: number })
   return input.optionsTop - top >= TOAST_MIN ? top : null;
 }
 
+/** A box's top and foot, in the chrome's px from the page's top. */
+export type Band = { top: number; bottom: number };
+
+/**
+ * Where a toast that showed over an upright phone's spanning token bar's
+ * header moves (docs/design-v1-bar-dock.md 1.3, review LP19-BS-2): 8 px
+ * under the header, `head` being its box, so the toast never covers the
+ * bar's Close or its Larger and Smaller. Null where no bar spans, or where
+ * under 44 px would be left above the tool's options (`optionsTop`), and
+ * the toast keeps its place. In the chrome's own px from the page's top.
+ */
+export function barToastTop(input: { head: Band | null; optionsTop: number }): number | null {
+  if (input.head === null) return null;
+  const top = input.head.bottom + EDGE;
+  return input.optionsTop - top >= TOAST_MIN ? top : null;
+}
+
+/**
+ * The toasts, of those that just showed, whose boxes meet a spanning bar's
+ * header (`head`): each takes its place again under the header
+ * (barToastTop, nextToastPlaces). Read from the boxes as drawn, since a
+ * toast's height is known only then. Half a pixel of rounding never meets.
+ */
+export function toastsOverHead(boxes: readonly ({ id: number } & Band)[], head: Band | null): Set<number> {
+  const over = new Set<number>();
+  if (head === null) return over;
+  for (const b of boxes) if (b.top < head.bottom - 0.5 && b.bottom > head.top + 0.5) over.add(b.id);
+  return over;
+}
+
 /**
  * Where a toast stands: at the top of the map's notices, in the toasts' own
  * layer under the column's first card (`low`, in the chrome's px, and
- * `column`) or where a map pane's header last stood (across the map), or
- * under that header while the pane stands ("pane"), or in the very short
- * sheet.
+ * `column`), under a spanning token bar's header (`bar`, across the map) or
+ * where a map pane's header last stood (across the map), or under that
+ * header while the pane stands ("pane"), or in the very short sheet.
  */
-export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean };
+export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean; bar?: true };
 
 /**
  * The toasts' places by id, the pane header's last place, whether a pane
@@ -1313,7 +1343,19 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  */
 export function nextToastPlaces(
   was: ToastPlaces,
-  now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean; mapFoot?: number | null; recent?: ReadonlySet<number> },
+  now: {
+    ids: readonly number[];
+    pane: number | null;
+    paneStands: boolean;
+    low: number | null;
+    layer: boolean;
+    slot: boolean;
+    turned?: boolean;
+    mapFoot?: number | null;
+    recent?: ReadonlySet<number>;
+    /** The toasts that just showed over a spanning bar's header, and barToastTop's place under it (review LP19-BS-2). */
+    overBar?: { ids: ReadonlySet<number>; at: number | null };
+  },
 ): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
   const paneLast = now.pane ?? was.paneLast;
@@ -1325,9 +1367,19 @@ export function nextToastPlaces(
   const cardRoom = now.layer && !now.slot && !now.paneStands;
   const recent = now.recent ?? new Set<number>();
   const awaitCard = new Set(now.ids.filter((id) => was.awaitCard.has(id) && recent.has(id)));
+  // A toast that just showed over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since the new toast would join it over the header again.
+  const barAt = cardRoom ? (now.overBar?.at ?? null) : null;
+  const overBar = barAt !== null ? (now.overBar?.ids ?? new Set<number>()) : new Set<number>();
   for (const id of now.ids) {
     const place = was.places.get(id);
     if (place === undefined) continue;
+    if (overBar.has(id) && place !== "sheet" && place !== "pane") continue;
+    if (barAt !== null && overBar.size > 0 && typeof place === "object") {
+      places.set(id, { low: barAt, column: false, bar: true });
+      continue;
+    }
+    // Its header's place was read on the screen before the turn, where the bar spanned: it takes its place anew, as a pane's toasts do (review LP18-TO-3).
+    if (turned && typeof place === "object" && place.bar) continue;
     // Left without a place, so the loop below places it as a new toast.
     if (underCard && (place === "map" || turning.has(id))) {
       turning.add(id);
@@ -1344,7 +1396,17 @@ export function nextToastPlaces(
     if (places.has(id)) continue;
     // Toasts already at the notices' top that reach down past the card, as a trap's toast that came with its card does, would be covered by a stack started under the card, so the new toast joins them below instead (review LP18-TO-4).
     const mapReaches = now.low !== null && now.mapFoot != null && now.mapFoot + EDGE > now.low && [...places.values()].includes("map");
-    const fresh: ToastPlace = now.slot ? "sheet" : !now.layer ? "map" : now.pane !== null ? "pane" : now.low !== null && !mapReaches ? { low: now.low, column: true } : "map";
+    const fresh: ToastPlace = now.slot
+      ? "sheet"
+      : !now.layer
+        ? "map"
+        : now.pane !== null
+          ? "pane"
+          : barAt !== null && overBar.has(id)
+            ? { low: barAt, column: false, bar: true }
+            : now.low !== null && !mapReaches
+              ? { low: now.low, column: true }
+              : "map";
     const below = fresh === "sheet" || !now.layer ? undefined : [...places.values()].find(inToastLayer);
     const at = below !== undefined && (inToastLayer(fresh) || now.paneStands) ? below : fresh;
     places.set(id, at);
@@ -1405,6 +1467,16 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
 }
 
 // ------------------------------------------------------------ the Room's slot
+
+/*
+ * What an upright phone's spanning token bar tells the toasts as it moves,
+ * never by drawing them again, so a pan that moves the bar draws no toast:
+ * the box of the bar's header while it spans (`head`), which a toast that
+ * shows over it moves under (barToastTop, review LP19-BS-2). In the
+ * chrome's px from the page's top, null while no bar spans. Per Room page,
+ * as the dock store is.
+ */
+export const spanToastSlot = scopeSlot(() => ({ head: null as Band | null }));
 
 /** The bar as it shows, for the column, the notices and the camera. `freeRight` is the free area's right edge (barCover). */
 export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number };

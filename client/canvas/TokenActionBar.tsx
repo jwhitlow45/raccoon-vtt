@@ -98,6 +98,7 @@ import {
   resizeLimits,
   sizeWords,
   smallerShift,
+  spanToastSlot,
   spotWords,
   writeLarger,
   writeSize,
@@ -965,6 +966,7 @@ function BarFrame(props: {
    */
   const larger = useStore(dockStore, (s) => s.larger);
   const roomStore = useRoomStore();
+  const spanToast = useScoped(spanToastSlot);
   const spanRoom = { layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, column, tokenHeight: props.tokenHeight };
   const shift = (dy: number) => {
     if (dy !== 0) props.onShift?.(dy);
@@ -997,6 +999,24 @@ function BarFrame(props: {
     shift(dy);
     // Once per opening, on the first render with the content measured.
   }, [contentMeasured]);
+  /*
+   * Where the header stands while the bar spans an upright phone, for the
+   * toasts (barDock.ts spanToastSlot): a toast that shows over it moves
+   * under it, so Close and Larger or Smaller stay in reach (review
+   * LP19-BS-2). Read after each render, as the bar moves with its token,
+   * without drawing anything again.
+   */
+  useLayoutEffect(() => {
+    const header = mode === "span" && !folded ? barRef.current?.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`) : null;
+    const box = header?.getBoundingClientRect();
+    spanToast.head = box && box.height > 0 ? { top: box.top / zoom, bottom: box.bottom / zoom } : null;
+  });
+  useLayoutEffect(
+    () => () => {
+      spanToast.head = null;
+    },
+    [spanToast],
+  );
   useLayoutEffect(
     () => () => {
       const { local } = roomStore.getState();
