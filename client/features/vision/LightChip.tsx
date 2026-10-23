@@ -32,7 +32,8 @@ export function LightChip(props: { token: Pick<Token, "id" | "sceneId" | "light"
   const set = (light: TokenLight | null) => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { light } });
   return (
     <>
-      <Button size="sm" pressed={open || lit} aria-label={lit ? `Light: ${lightText(token.light, feetPerCell)}` : undefined} title={lit ? `Light: ${lightText(token.light, feetPerCell)}` : "Light"} onClick={() => setOpen(!open)}>
+      {/* It stands only in the bar's play row, whose buttons grow to share their line (canvas/TokenActionBar.tsx ButtonRow). */}
+      <Button size="sm" pressed={open || lit} aria-label={lit ? `Light: ${lightText(token.light, feetPerCell)}` : undefined} title={lit ? `Light: ${lightText(token.light, feetPerCell)}` : "Light"} onClick={() => setOpen(!open)} style={{ flex: "1 1 auto" }}>
         Light
       </Button>
       {open ? <LightChoices light={token.light} onChoose={set} reveal style={{ order: -1 }} /> : null}

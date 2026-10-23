@@ -144,6 +144,29 @@ async function patDevice(viewport: { width: number; height: number }, scale = 1,
   return { context, page, route };
 }
 
+/** The little of an element a measure in the page reads, since e2e has no DOM types. */
+type Elem = {
+  getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number };
+  querySelector(selector: string): Elem | null;
+  getAttribute(name: string): string | null;
+  children: ArrayLike<Elem>;
+  textContent: string | null;
+};
+
+/** The DM on a phone of their own at its size and interface size, signed in as the DM. */
+async function dmPhone(viewport: { width: number; height: number }, scale: number): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await context.addCookies(await dmContext.cookies(server.origin));
+  const page = await context.newPage();
+  if (scale !== 1) {
+    await page.goto(`${server.origin}/`);
+    await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+  }
+  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await page.locator(".konvajs-content").first().waitFor();
+  return { context, page };
+}
+
 /** Which of the Attach list's rows has the focus, by its place among them, or -1. */
 function focusedRow(list: Locator): Promise<number> {
   return list.evaluate((el) => {
@@ -552,24 +575,17 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       [{ width: 360, height: 740 }, 1],
       [PHONE, 1.3],
     ] as const) {
-      const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+      const { context, page } = await dmPhone(viewport, scale);
       try {
-        await context.addCookies(await dmContext.cookies(server.origin));
-        const page = await context.newPage();
-        if (scale !== 1) {
-          await page.goto(`${server.origin}/`);
-          await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-        }
-        await page.goto(`${server.origin}/r/${run.roomId}`);
-        await page.locator(".konvajs-content").first().waitFor();
         // The hobgoblin's top-right quarter, clear of the lantern in its bottom-left one.
         const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
         const line = b.getByRole("group", { name: "Attached tokens" });
         await line.scrollIntoViewIfNeeded();
         const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
         await shots.take(page, `attach-pl2-a-holder-line-${viewport.width}-${Math.round(scale * 100)}`);
-        const rows = await line.evaluate((el) => {
-          const box = (e: Element) => {
+        const rows = await line.evaluate((node) => {
+          const el = node as unknown as Elem;
+          const box = (e: Elem) => {
             const r = e.getBoundingClientRect();
             return { left: r.left, top: r.top, bottom: r.bottom, middle: (r.top + r.bottom) / 2 };
           };
@@ -597,6 +613,51 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
         assert.deepEqual(dragging!.items.map((i) => i.text), ["Prisoner", "Let go"], `${where}: the dragging row`);
         const carriedFoot = Math.max(...carrying!.items.map((i) => i.bottom));
         assert.ok(dragging!.word!.top >= carriedFoot - 0.5, `${where}: "Dragging" starts at ${dragging!.word!.top}, inside the carrying row (foot ${carriedFoot})`);
+      } finally {
+        await context.close();
+      }
+    }
+  });
+
+  test("pl2-c. the hobgoblin's window on the DM's phone at 320 px and 390 px at 130%, and at 360 px: every row of its buttons fills each line it wraps onto, so Attach or Delete never stands alone (docs/design-v1-polish.md R6)", async () => {
+    for (const [viewport, scale] of [
+      [{ width: 320, height: 568 }, 1.3],
+      [PHONE, 1.3],
+      [{ width: 360, height: 740 }, 1],
+    ] as const) {
+      const { context, page } = await dmPhone(viewport, scale);
+      try {
+        const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
+        const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        await b.locator('[data-bar-row="less"]').scrollIntoViewIfNeeded();
+        await shots.take(page, `attach-pl2-c-rows-${viewport.width}-${Math.round(scale * 100)}`);
+        const rows = await b.locator("[data-bar-row]").evaluateAll((nodes) =>
+          nodes.map((node) => {
+            const el = node as unknown as Elem;
+            const row = el.getBoundingClientRect();
+            // Its buttons by line.
+            const lines = new Map<number, { left: number; right: number; text: string }[]>();
+            for (const child of Array.from(el.children)) {
+              const r = child.getBoundingClientRect();
+              if (r.width === 0) continue;
+              const key = Math.round(r.top);
+              lines.set(key, [...(lines.get(key) ?? []), { left: r.left, right: r.right, text: child.textContent || child.getAttribute("aria-label") || "" }]);
+            }
+            return { row: el.getAttribute("data-bar-row"), left: row.left, right: row.right, lines: [...lines.values()] };
+          }),
+        );
+        assert.ok(rows.some((r) => r.row === "play" && r.lines.length > 0), `${where}: no play row`);
+        let wrapped = false;
+        for (const r of rows) {
+          if (r.lines.length > 1) wrapped = true;
+          for (const line of r.lines) {
+            const items = [...line].sort((a, z) => a.left - z.left);
+            const names = items.map((i) => i.text).join(", ");
+            assert.ok(Math.abs(items[0]!.left - r.left) <= 1, `${where}: the ${r.row} row's line "${names}" starts ${(items[0]!.left - r.left).toFixed(1)} px in`);
+            assert.ok(Math.abs(items[items.length - 1]!.right - r.right) <= 1, `${where}: the ${r.row} row's line "${names}" stops ${(r.right - items[items.length - 1]!.right).toFixed(1)} px short of the row's end`);
+          }
+        }
+        if (viewport.width === 320) assert.ok(wrapped, `${where}: no row wrapped, so the check saw no line but the first`);
       } finally {
         await context.close();
       }

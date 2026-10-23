@@ -61,7 +61,8 @@ export function DetachButton(props: { token: Token; detach: DetachState | null; 
       onClick={() => {
         if (!detach.stuck) actions.dispatch(detachOp(props.token.id, detach.place));
       }}
-      style={{ flex: "none", ...(detach.stuck ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
+      // It stands only in the bar's play row, whose buttons grow to share their line (canvas/TokenActionBar.tsx ButtonRow).
+      style={{ flex: "1 1 auto", ...(detach.stuck ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
     >
       {DETACH_WORDS[detach.choice]}
     </Button>

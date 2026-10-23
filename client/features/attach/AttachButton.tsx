@@ -56,7 +56,8 @@ function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
           setSide(r.top + r.height / 2 > window.innerHeight / 2 ? "above" : "below");
           onClick(e);
         }}
-        style={{ flex: "none" }}
+        // It stands only in the bar's play row, whose buttons grow to share their line (canvas/TokenActionBar.tsx ButtonRow).
+        style={{ flex: "1 1 auto" }}
       >
         Attach
       </Button>
@@ -72,7 +73,7 @@ function AttachSheet(props: { token: Token }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button ref={opener} size="sm" aria-haspopup="dialog" expanded={open} onClick={() => setOpen(true)} style={{ flex: "none" }}>
+      <Button ref={opener} size="sm" aria-haspopup="dialog" expanded={open} onClick={() => setOpen(true)} style={{ flex: "1 1 auto" }}>
         Attach
       </Button>
       {open ? (
