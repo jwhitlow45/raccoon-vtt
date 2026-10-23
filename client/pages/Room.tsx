@@ -2,8 +2,9 @@ import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useR
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { barDockSlot, columnEdges, DEFAULT_CHROME, EDGE, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, toastLayerPlace, toastTop, type Chrome, type ToastEdges, type ToastPlaces } from "../canvas/barDock.ts";
+import { barDockSlot, columnEdges, DEFAULT_CHROME, EDGE, fitToasts, freeArea, inToastLayer, nextToastPlaces, NO_TOAST_PLACES, noticePlace, paneToastTop, TOAST_MIN, toastLayerPlace, toastTop, type Chrome, type ToastEdges, type ToastPlaces } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
+import { SCROLL_FOR_MORE_PX, ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { SceneLoadingOverlay } from "../canvas/SceneLoading.tsx";
 import { MapStage } from "../canvas/Stage.tsx";
 import { Button } from "../components/Button.tsx";
@@ -920,9 +921,9 @@ function RoomPage() {
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
           </div>
-          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} />
+          <Toasts low={toastLow} edges={toastEdges} pane={toastUnderPane} paneStands={underPane} layer={toastLayer} foot={chrome ? height - chrome.controls : 0} />
         </div>
-        <div ref={setToastLayer} {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
+        <div ref={setToastLayer} data-rvtt-toast-layer="" {...smallUi(zoom)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, pointerEvents: "none", zIndex: theme.z.notices, ...chromeZoom(zoom) }} />
         {mounted ? (
           <Sheet
             // Each panel gets a sheet of its own, so one that replaces another in place, as the turn strip's Initiative replaces Token, never opens at the other's scroll (features/panels.ts usePanelScroll).
@@ -1504,24 +1505,37 @@ function Banner() {
  * barDock.ts toastTop), in `layer`, and joins any toast already there,
  * below it, so their stack keeps the top its first took, and across the
  * cards' edges as they stand now (`edges`, barDock.ts columnEdges). A toast
- * never moves from the notices, the layer or the sheet to another of them,
- * so it is never announced again: one shown in the sheet goes with the
- * sheet.
+ * shown in the sheet goes with the sheet.
  *
  * While a map pane stands as a bottom sheet (`paneStands`), a new toast
  * starts under the pane's header instead (`pane`, barDock.ts
  * paneToastTop), and the layer's one stack keeps under the header: a
- * column stack moves there once, as the pane opens. The pane moves the
+ * column stack moves there once, as the pane opens, and so do the toasts
+ * at the top of the notices (review FU21B-OP-7). The pane moves the
  * header as it grows, shrinks and makes room for the alerts row on its
  * edge, which a trap going off brings in the same moment as its toast, and
  * a toast left where it showed would then cover the header and Close.
  * Once the pane goes away, the stack stays where the header last stood,
  * until another pane stands (barDock.ts nextToastPlaces).
+ *
+ * Each toast over the map renders through a portal into a host of its
+ * own, an element with no box, which this moves into the notices' stack
+ * or the layer's. So a toast that moves from the notices to the layer is
+ * the same toast, never mounted again, and is announced once.
+ *
+ * A stack that runs past its room, down to the highest of the tool's
+ * controls at the screen's foot (`foot`, in the chrome's px, so a hint
+ * under them may be covered, as the alerts' summary row may cover it),
+ * first drops its oldest toasts with no button, and then scrolls there,
+ * the newest in view, with "Scroll for more" on the edge that hides
+ * toasts but never over the newest (barDock.ts fitToasts, review
+ * LP16-PT-2).
  */
-function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null }) {
+function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | null; paneStands: boolean; layer: HTMLElement | null; foot: number }) {
   const toasts = useRoomView((s) => s.toasts);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
+  const zoom = useUiScale();
   const ids = toasts.map((t) => t.id);
   // The places from the render before, the same again when a render repeats, so this stays pure.
   const placed = useRef<ToastPlaces>(NO_TOAST_PLACES);
@@ -1536,27 +1550,63 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     const timers = toastsLeft(toasts, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
-  if (toasts.length === 0) return null;
+  const hosts = useRef(new Map<number, HTMLElement>());
+  const hostOf = (id: number): HTMLElement => {
+    let host = hosts.current.get(id);
+    if (!host) {
+      host = document.createElement("div");
+      host.style.display = "contents";
+      hosts.current.set(id, host);
+    }
+    return host;
+  };
+  const stacks = { notices: useToastStack(), layer: useToastStack() };
   const overMap = toasts.filter((t) => places.get(t.id) === "map");
   const inSheet = slot ? toasts.filter((t) => places.get(t.id) === "sheet") : [];
   const low = toasts.filter((t) => inToastLayer(places.get(t.id)));
   const lowAt = toastLayerPlace(placed.current, ids, props.edges);
+  const drawn = toasts.filter((t) => places.get(t.id) === "map" || inToastLayer(places.get(t.id)));
+  useLayoutEffect(() => {
+    // A host already in its place stays put: moving one that holds focus would blur it.
+    const put = (stack: HTMLElement | null, list: readonly Toast[]) => {
+      if (!stack) return;
+      let at: ChildNode | null = stack.firstChild;
+      for (const t of list) {
+        const host = hosts.current.get(t.id);
+        if (!host) continue;
+        if (host !== at) stack.insertBefore(host, at);
+        at = host.nextSibling;
+      }
+    };
+    put(stacks.notices.stack.current, overMap);
+    put(stacks.layer.stack.current, low);
+    const kept = new Set(drawn.map((t) => t.id));
+    for (const [id, host] of hosts.current) {
+      if (kept.has(id)) continue;
+      host.remove();
+      hosts.current.delete(id);
+    }
+    const height = (t: Toast) => hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect().height ?? 0;
+    for (const [stack, list] of [
+      [stacks.notices, overMap],
+      [stacks.layer, low],
+    ] as const) {
+      const drop = stack.fit(list, height, props.foot, zoom);
+      for (const id of drop) ui.dismissToast(id);
+    }
+  });
+  if (toasts.length === 0) return null;
   return (
     <>
-      {overMap.map((t) => (
-        <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
-      ))}
+      {overMap.length > 0 ? <ToastStack stack={stacks.notices} style={{ width: "100%" }} /> : null}
       {props.layer && lowAt !== null
         ? createPortal(
             // Under the column's first card, the card's edges, so the toast lines up with it. Under a pane's header, across the map as the notices are.
-            <div style={{ position: "absolute", top: lowAt.top, ...(lowAt.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }), display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }}>
-              {low.map((t) => (
-                <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />
-              ))}
-            </div>,
+            <ToastStack stack={stacks.layer} style={{ position: "absolute", top: lowAt.top, ...(lowAt.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }) }} />,
             props.layer,
           )
         : null}
+      {drawn.map((t) => createPortal(<ToastNote toast={t} onDismiss={() => ui.dismissToast(t.id)} />, hostOf(t.id), `toast-${t.id}`))}
       {slot && inSheet.length > 0
         ? createPortal(
             inSheet.map((t) => <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />),
@@ -1564,6 +1614,91 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
           )
         : null}
     </>
+  );
+}
+
+/** How a stack of toasts over the map fits its room: the height it scrolls in, in the chrome's px, or none while it fits, and whether toasts hide above and below. */
+type StackFit = { max: number | null; above: boolean; below: boolean };
+
+const FITS: StackFit = { max: null, above: false, below: false };
+
+/** One stack's scroller and the stack inside it, which Toasts fills with the toasts' hosts, and how it fits its room. */
+function useToastStack() {
+  const box = useRef<HTMLDivElement>(null);
+  const stack = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<StackFit>(FITS);
+  const newest = useRef<number | null>(null);
+  const zoomAt = useRef(1);
+  const update = (next: StackFit) => setShown((was) => (was.max === next.max && was.above === next.above && was.below === next.below ? was : next));
+  /*
+   * "Scroll for more" on the edge that hides toasts. The top's lies only
+   * over toasts above the newest, never over the newest kept in view,
+   * whose button it would hide: a newest taller than the room shows its
+   * foot, cut at the top. The foot's stands where the box holds it over a
+   * whole touch target, as on a short screen the newest's button would
+   * sit under it.
+   */
+  const edges = () => {
+    const el = box.current;
+    if (!el) return;
+    const fade = SCROLL_FOR_MORE_PX * zoomAt.current;
+    const last = stack.current?.lastElementChild?.firstElementChild?.getBoundingClientRect();
+    const above = el.scrollTop > 1 && (last === undefined || last.top - el.getBoundingClientRect().top >= fade);
+    const below = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+    setShown((was) => {
+      if (was.max === null) return was;
+      const foot = below && was.max >= SCROLL_FOR_MORE_PX + TOAST_MIN;
+      return was.above === above && was.below === foot ? was : { ...was, above, below: foot };
+    });
+  };
+  /** After the hosts are placed: what to drop from `list` (barDock.ts fitToasts), and otherwise the room it scrolls in and its fades, the newest kept in view. */
+  const fit = (list: readonly Toast[], height: (t: Toast) => number, foot: number, zoom: number): number[] => {
+    const el = box.current;
+    if (!el || list.length === 0) {
+      newest.current = null;
+      if (shown.max !== null) update(FITS);
+      return [];
+    }
+    zoomAt.current = zoom;
+    const room = foot * zoom - el.getBoundingClientRect().top;
+    const { drop, scrolls } = fitToasts(
+      list.map((t) => ({ id: t.id, height: height(t), action: t.action !== undefined })),
+      theme.space(2) * zoom,
+      room,
+    );
+    if (drop.length > 0) return drop;
+    if (!scrolls) {
+      newest.current = null;
+      if (shown.max !== null) update(FITS);
+      return [];
+    }
+    // At least a toast's least height, so a stack on too short a room still shows one whole touch target.
+    const max = Math.round((Math.max(room, TOAST_MIN * zoom) / zoom) * 2) / 2;
+    if (shown.max !== max) {
+      update({ ...shown, max });
+      return [];
+    }
+    const last = list[list.length - 1]!.id;
+    if (newest.current !== last) {
+      newest.current = last;
+      el.scrollTop = el.scrollHeight;
+    }
+    edges();
+    return [];
+  };
+  return { box, stack, shown, fit, edges };
+}
+
+/** A stack of toasts over the map: a box that scrolls while it runs past its room, its fades, and the stack the toasts' hosts go into. */
+function ToastStack(props: { stack: ReturnType<typeof useToastStack>; style: CSSProperties }) {
+  const { box, stack, shown, edges } = props.stack;
+  const scrolls = shown.max !== null;
+  return (
+    <div ref={box} onScroll={edges} style={{ ...props.style, ...(scrolls ? { maxHeight: shown.max!, overflowY: "auto", overscrollBehavior: "contain", pointerEvents: "auto" } : null) }}>
+      {scrolls && shown.above ? <ScrollForMore edge="top" /> : null}
+      <div ref={stack} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: theme.space(2) }} />
+      {scrolls && shown.below ? <ScrollForMore /> : null}
+    </div>
   );
 }
 

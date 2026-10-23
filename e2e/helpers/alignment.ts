@@ -994,8 +994,19 @@ function toastsInPage(): ToastSeen[] {
   }
   const drawn = (el: DomElement): DomElement[] => Array.from(el.children).flatMap((c) => (style(c).display === "contents" ? drawn(c) : shown(c) ? [c] : []));
   const cards = [...columns].flatMap(drawn).map(rect);
+  // What shows of a toast: a stack that runs past its room scrolls there, its newest kept in view, so a toast taller than the room shows its foot under the card (pages/Room.tsx Toasts).
+  const cut = (el: DomElement): Box => {
+    let b = rect(el);
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      const cs = style(n);
+      if (cs.getPropertyValue("overflow-x") === "visible" && cs.getPropertyValue("overflow-y") === "visible") continue;
+      const c = rect(n);
+      b = { l: Math.max(b.l, c.l), r: Math.min(b.r, c.r), t: Math.max(b.t, c.t), b: Math.min(b.b, c.b) };
+    }
+    return b;
+  };
   return toasts.map((el) => {
-    const t = rect(el);
+    const t = cut(el);
     // The card it stands under: across from it, its bottom at most a row's height above the toast's top.
     const above = cards.filter((c) => c.l < t.r && t.l < c.r && c.b <= t.t + 1 && t.t - c.b < 44).sort((a, c) => c.b - a.b)[0] ?? null;
     return { text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 48), toast: t, card: above };

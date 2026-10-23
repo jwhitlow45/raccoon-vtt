@@ -1261,21 +1261,24 @@ export const SCROLL_FOR_MORE_PX = theme.space(12);
  * its cards short (features/encounter/InitiativeStrip.tsx), and a popover
  * (components/Popover.tsx). Its fade ends in `surface`, the color of the
  * boxes it covers. As wide as its box, so in a row that wraps it takes a
- * line of its own.
+ * line of its own. At `edge` "top", first in its box, it lies over the
+ * box's top instead, for a stack of toasts that keeps its newest, at its
+ * foot, in view and hides the older above (pages/Room.tsx Toasts).
  */
-export function ScrollForMore(props: { inset?: number }) {
+export function ScrollForMore(props: { inset?: number; edge?: "top" | "foot" }) {
   // A sticky box keeps inside its scroller's padding: `inset` is that box's bottom padding, so the fade still lies on its foot.
   const inset = props.inset ?? 0;
+  const top = props.edge === "top";
   return (
-    <div aria-hidden style={{ position: "sticky", bottom: -inset, width: "100%", height: 0, pointerEvents: "none" }}>
+    <div aria-hidden style={{ position: "sticky", ...(top ? { top: -inset } : { bottom: -inset }), width: "100%", height: 0, pointerEvents: "none" }}>
       <div
         style={{
           position: "absolute",
           left: 0,
           right: 0,
-          bottom: 0,
-          padding: `${theme.space(6)}px ${theme.space(3)}px ${theme.space(2)}px`,
-          background: `linear-gradient(transparent, ${theme.color.surface} 60%)`,
+          ...(top ? { top: 0 } : { bottom: 0 }),
+          padding: top ? `${theme.space(2)}px ${theme.space(3)}px ${theme.space(6)}px` : `${theme.space(6)}px ${theme.space(3)}px ${theme.space(2)}px`,
+          background: `linear-gradient(${top ? "to top, " : ""}transparent, ${theme.color.surface} 60%)`,
           color: theme.color.textMuted,
           fontSize: theme.font.small,
           lineHeight: `${SCROLL_FOR_MORE_PX - theme.space(8)}px`,
