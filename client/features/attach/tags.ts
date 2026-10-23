@@ -56,6 +56,21 @@ export function steerChoice(view: RightsView, viewer: AttachViewer, rider: Token
 }
 
 /**
+ * What a ride's Controlled or Independent means, as the Help line under the
+ * two words (docs/design-v1-look-pass-2.md 2.7), which is also the
+ * choice's description: "Warhorse moves on Thorn's turn."
+ */
+export function steerWords(controlled: boolean, holderName: string, riderName: string): string {
+  return controlled ? `${holderName} moves on ${riderName}'s turn.` : `${holderName} keeps its own turn.`;
+}
+
+/** Ride's two words, the same in the Attach list and the rider's panel. */
+export const STEER_OPTIONS = [
+  { value: "controlled", label: "Controlled" },
+  { value: "independent", label: "Independent" },
+] as const;
+
+/**
  * Changing it: a plain `token.attach` of the same ride where the rider
  * sits, which the reducer takes as a change of control, with no mounting
  * cost (shared/reducer/attach.ts withMountCost).

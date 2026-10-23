@@ -19,6 +19,7 @@ import { letterOf } from "../../state/shortcuts.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { AttachSends, asksControl, attachOp, attachRows, emptyWords, waitsForServer, type AttachRow } from "./list.ts";
 import type { AttachViewer } from "./rights.ts";
+import { STEER_OPTIONS, steerWords } from "./tags.ts";
 
 /**
  * Attach in the token's bar (docs/design-v1-attach.md 4.1): a popover from
@@ -215,12 +216,10 @@ export function AttachList(props: { token: Token; capped?: boolean; onDone(): vo
             <Segmented<"controlled" | "independent">
               label={`How ${holderName(row)} moves`}
               value={steer}
-              options={[
-                { value: "controlled", label: `Controlled: moves on ${displayName(view?.tokens[row.carriedId] ?? props.token)}'s turn` },
-                { value: "independent", label: "Independent: keeps its own turn" },
-              ]}
+              options={STEER_OPTIONS}
               onChange={setSteer}
-              wrap
+              even
+              description={steerWords(steer === "controlled", holderName(row), displayName(view?.tokens[row.carriedId] ?? props.token))}
             />
             <Button size="sm" variant="primary" busy={rowBusy && busy} onClick={() => send(row, steer === "controlled")} style={{ justifySelf: "start" }}>
               Ride

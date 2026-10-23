@@ -246,6 +246,53 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     assert.equal(token(patSocket, run.imp), undefined, "the hidden imp reached Pat");
   });
 
+  test("lp2-3a. Pat's Attach list on a 430 px phone, an upright tablet's card and a 320 px phone at 130%: its rows span the list, and Ride asks Controlled or Independent side by side, under them a line saying what the chosen one does (docs/design-v1-look-pass-2.md 2.5 and 2.7)", async () => {
+    for (const view of [
+      { name: "p430", viewport: { width: 430, height: 932 }, scale: 1 },
+      { name: "t820", viewport: { width: 820, height: 1180 }, scale: 1 },
+      { name: "p320-130", viewport: { width: 320, height: 568 }, scale: 1.3 },
+    ]) {
+      const device = await patDevice(view.viewport, view.scale);
+      try {
+        const thorn = await select(device.page, "Thorn", { x: 3, y: 5 });
+        await thorn.getByRole("button", { name: "Attach", exact: true }).tap();
+        const sheet = device.page.getByRole("dialog", { name: "Attach Thorn" });
+        await sheet.waitFor();
+        const row = sheet.getByRole("button", { name: "Ride Warhorse" });
+        await row.waitFor();
+        const card = (await sheet.locator(":scope > section").boundingBox())!;
+        const box = (await row.boundingBox())!;
+        const left = box.x - card.x;
+        const right = card.x + card.width - (box.x + box.width);
+        assert.ok(Math.abs(left - right) <= 1.5, `${view.name}: the row stops short of the card's right edge (${left.toFixed(1)} px at its left, ${right.toFixed(1)} at its right)`);
+        await row.tap();
+        assert.equal(await row.getAttribute("aria-expanded"), "true");
+        const controlled = sheet.getByRole("radio", { name: "Controlled", exact: true });
+        const independent = sheet.getByRole("radio", { name: "Independent", exact: true });
+        await controlled.waitFor();
+        const a = (await controlled.boundingBox())!;
+        const b = (await independent.boundingBox())!;
+        assert.ok(Math.abs(a.y - b.y) <= 1 && b.x >= a.x + a.width - 1, `${view.name}: the two words stack (${JSON.stringify([a, b])})`);
+        const group = sheet.getByRole("radiogroup", { name: "How Warhorse moves" });
+        const described = async () => {
+          const id = await group.getAttribute("aria-describedby");
+          return id ? device.page.locator(`[id="${id}"]`).innerText() : null;
+        };
+        assert.equal(await described(), "Warhorse moves on Thorn's turn.");
+        await shots.take(device.page, `attach-lp2-3a-${view.name}-ride`);
+        await independent.tap();
+        await waitFor("the line for Independent", async () => ((await described()) === "Warhorse keeps its own turn." ? true : null));
+        const scrolls = await sheet.locator(":scope > section > div").first().evaluate((el) => {
+          const body = el as unknown as { scrollWidth: number; clientWidth: number };
+          return body.scrollWidth > body.clientWidth + 1;
+        });
+        assert.equal(scrolls, false, `${view.name}: the sheet scrolls sideways`);
+      } finally {
+        await device.context.close();
+      }
+    }
+  });
+
   test("lp2-3c-busy. in the fight, on another of Pat's phones, Ride Warhorse, Controlled, waits on the server: after 200 ms its row and its Ride show busy, and a second tap sends nothing (docs/design-v1-look-pass-2.md 2.5)", async () => {
     const device = await patDevice(PHONE);
     try {
@@ -278,7 +325,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     const sheet = pat.getByRole("dialog", { name: "Attach Thorn" });
     await sheet.waitFor();
     await sheet.getByRole("button", { name: "Ride Warhorse" }).tap();
-    await sheet.getByRole("radio", { name: "Controlled: moves on Thorn's turn" }).waitFor();
+    await sheet.getByRole("radio", { name: "Controlled", exact: true }).waitFor();
     await shots.take(pat, "attach-ride-sheet");
     await sheet.getByRole("button", { name: "Ride", exact: true }).tap();
     const rider = await waitFor("Thorn on the warhorse", () => (token(patSocket, run.thorn)?.attached?.to === run.horse ? token(patSocket, run.thorn) : null));
