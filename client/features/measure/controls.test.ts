@@ -8,7 +8,8 @@ const { MeasuringContext } = await import("../../components/measuring.ts");
 const { Segmented } = await import("../../components/Segmented.tsx");
 const { Swatches } = await import("../../components/Swatches.tsx");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { ConfirmButton, OptButton, shortName, StableWords, ValueChip } = await import("./controls.tsx");
+const { ConfirmButton, OptButton, OptionsStrip, shortName, StableWords, ValueChip } = await import("./controls.tsx");
+const { theme } = await import("../../lib/theme.ts");
 
 /*
  * The options kit's controls (docs/design-v1-tool-options.md 6.2 and 11),
@@ -107,5 +108,30 @@ describe("a kept ruler's remove (docs/design-v1-look-pass-2.md D17)", () => {
 
   test("outside a popover's rows a kit button keeps the centered look", () => {
     assert.doesNotMatch(remove(false), /justify-content:flex-start/);
+  });
+});
+
+/*
+ * The line keeps a 14 px reading's height, so the map's reserve never
+ * changes as a hint turns into a reading. A 13 px hint laid at the top of
+ * that height stood above its middle, 2 px at 130%. The line is a column
+ * that centers its words in its height (docs/design-v1-polish.md R8).
+ */
+describe("the options line (8)", () => {
+  const line = (tone: "hint" | "reading", content: string) => {
+    const markup = inRoom(createElement(OptionsStrip, { tool: "Ruler", line: { tone, content }, slots: [] }));
+    return /<div[^>]*data-options-line="shown"[^>]*style="([^"]*)"/.exec(markup)?.[1] ?? "";
+  };
+
+  test("centers a hint's words in a reading's height", () => {
+    const hint = line("hint", "Drag to measure.");
+    assert.match(hint, /display:flex/);
+    assert.match(hint, /flex-direction:column/);
+    assert.match(hint, /justify-content:center/);
+    assert.match(hint, new RegExp(`font-size:${theme.font.small}px`));
+    // Its least height is a reading's line, its padding and its border, as a reading's is.
+    const least = /min-height:([\d.]+)px/.exec(hint)?.[1];
+    assert.equal(Number(least), theme.font.body14 * theme.leading.body + 2 * theme.space(1.5) + 2 * theme.line.border);
+    assert.equal(/min-height:([\d.]+)px/.exec(line("reading", "30 ft"))?.[1], least, "a hint and a reading stand at different heights");
   });
 });

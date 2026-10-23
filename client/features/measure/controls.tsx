@@ -717,6 +717,10 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
   const floating = frame?.line ?? null;
   const look: CSSProperties = {
     boxSizing: "border-box",
+    // A column that centers its words in the height below, so a 13 px hint shares a 14 px reading's middle rather than its top.
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
     maxWidth: floating ? floating.maxWidth : "100%",
     width: "fit-content",
     padding: `${LINE_PAD.y}px ${LINE_PAD.x}px`,
