@@ -467,7 +467,7 @@ export function clampMove(box: Box, free: Box, resizable: boolean): Box {
 
 export type ResizePart = "corner" | "width" | "height";
 
-/** The limits a resize meets, from the window's anchored edges (5.6): the default width and 148 px at least, the room and the content at most. */
+/** The limits a resize meets, from the window's anchored edges (5.6): the default width and `MIN_WINDOW_HEIGHT` at least, the room and the content at most. */
 export type ResizeLimits = { minWidth: number; maxWidth: number; minHeight: number; maxHeight: number };
 
 /**

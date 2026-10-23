@@ -91,7 +91,8 @@ function lookOf(trap: SeenTrap, dm: boolean): Look {
  * shows none. Squares name the trap over their top edge, as an area does,
  * clear of the name a creature standing in it shows below itself. A wire
  * or a door names it under its badge. Published to the board's label pass
- * (canvas/boardView.ts) as drawn, so token labels keep off it.
+ * (canvas/boardView.ts), which keeps token labels off every place the view
+ * can slide it to (canvas/useBoardText.ts pillObstacles).
  */
 export function trapNamePill(trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec | null {
   if (!trapNameShown(scale)) return null;

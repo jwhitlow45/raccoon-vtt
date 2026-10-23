@@ -168,7 +168,7 @@ The window resizes only while it docks on a computer. The compact overlay, a spa
 ### 5.4 A pointer resize
 
 - A primary press on the handle or a band takes pointer capture. Nothing changes until the pointer passes the 8 px slop, and a press that never passes it does nothing, by the project owner's answer.
-- The anchored edges stay put and the far edges follow the pointer. The width runs from the default width to its room (5.3). The height runs from 148 px to the smaller of its room and the content's own height, so a drag never opens empty space, and a drag past all the content stops there.
+- The anchored edges stay put and the far edges follow the pointer. The width runs from the default width to its room (5.3). The height runs from 152 px (`MIN_WINDOW_HEIGHT`, the header and two button rows) to the smaller of its room and the content's own height, so a drag never opens empty space, and a drag past all the content stops there.
 - During the drag the window takes exactly the dragged box, is clamped to its room alone, may pass under the column, publishes nothing new to the Room scope, and keeps its short layout as it was at the start, so nothing reflows under the pointer. Escape (the drag's capture listener, as for a move) or `pointercancel` puts the size back and stores nothing.
 - **On release**, from the box as drawn:
   - A dimension the drag changed by no more than the 8 px slop keeps its stored value. So a clamped stored width is never written down as the clamp, and a drag along one edge leaves the other dimension alone.
