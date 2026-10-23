@@ -173,9 +173,7 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
   const regionId = useId();
   const { view } = props;
   const options = useMemo(() => playerCreatures(view, me, sceneId, displayName), [view, me, sceneId]);
-  const last = props.selected[props.selected.length - 1];
-  const selectedKey = last !== undefined ? creatureKey(view, { tokenId: last }) : null;
-  const current = options.find((o) => o.key === picked) ?? options.find((o) => o.key === selectedKey) ?? options[0];
+  const current = currentPick(view, options, picked, props.selected);
   const loaded = useCreatureRolls(current?.creature ?? null);
   const cast = useOption((s) => s.cast);
   const { folds } = useDiceFolds();
@@ -206,6 +204,39 @@ export function PlayerOptions(props: { view: RoomState; selected: readonly strin
       />
     </>
   );
+}
+
+/** The creature a player's options show: the one picked on this page, else the selected token where it is theirs, else their first. */
+function currentPick(view: RoomState, options: readonly Pickable[], picked: string | null, selected: readonly string[]): Pickable | undefined {
+  const last = selected[selected.length - 1];
+  const selectedKey = last !== undefined ? creatureKey(view, { tokenId: last }) : null;
+  return options.find((o) => o.key === picked) ?? options.find((o) => o.key === selectedKey) ?? options[0];
+}
+
+/**
+ * Whether the options end on a group's fold, so Recent rolls follows them
+ * with no gap, as the groups follow each other (docs/design-v1-dice-pass.md
+ * 6.1): several selected, or one creature whose options have loaded.
+ * Ending on the creature card, with nobody selected or while the options
+ * load, the panel's gap stays, as between the card and its first group.
+ * Read from what RollOptions draws by, never measured from the page, so it
+ * holds however the panel came to show the options, the group save page
+ * before them included (DicePanel.tsx).
+ */
+export function useOptionsEndOnGroup(): boolean {
+  const role = useRoomView((s) => s.you?.role ?? null);
+  const selected = useRoomView((s) => s.local.selectedIds);
+  const view = useRoomView((s) => s.view);
+  const me = useRoomView((s) => s.you?.memberId ?? "");
+  const sceneId = useRoomView((s) => s.sceneId);
+  const picked = useOption((s) => s.picked);
+  const player = view !== null && role !== null && role !== "dm";
+  const options = useMemo(() => (view && player ? playerCreatures(view, me, sceneId, displayName) : []), [view, player, me, sceneId]);
+  const token = view && role === "dm" && selected.length === 1 ? view.tokens[selected[0]!] : undefined;
+  const creature: ActorTarget | null = token ? { tokenId: token.id } : view && player ? (currentPick(view, options, picked, selected)?.creature ?? null) : null;
+  const loaded = useCreatureRolls(creature);
+  if (role === "dm" && selected.length > 1) return true;
+  return creature !== null && loaded.dice !== null && loaded.rolls !== null && !loaded.failed;
 }
 
 /**

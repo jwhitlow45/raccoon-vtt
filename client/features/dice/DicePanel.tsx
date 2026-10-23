@@ -1,14 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
 import { usePanelHere, type PanelProps } from "../panels.ts";
-import { GROUP_BOX } from "../../components/Panel.tsx";
 import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { useDiceFolds } from "./diceFolds.ts";
 import { RecentRolls } from "./RecentRolls.tsx";
-import { RollOptions } from "./RollOptions.tsx";
+import { RollOptions, useOptionsEndOnGroup } from "./RollOptions.tsx";
 import { LastResult, Roller } from "./Roller.tsx";
 import { useDicePanel } from "./useDicePanel.ts";
 import { GroupSave, OpenGroupSave } from "./groupSave/GroupSave.tsx";
@@ -88,32 +87,6 @@ function revealUnderLine(row: HTMLElement, line: HTMLElement | null): void {
 }
 
 /**
- * Whether the options above Recent rolls end on a group's fold, which
- * Recent rolls then follows with no gap, as the groups follow each other
- * (docs/design-v1-dice-pass.md 6.1). Ending on the creature card, as with
- * nobody selected or while the options load, the gap stays, as between
- * the card and its first group.
- */
-function useEndsOnGroup() {
-  const recent = useRef<HTMLDivElement>(null);
-  const [joined, setJoined] = useState(false);
-  useLayoutEffect(() => {
-    const before = recent.current?.previousElementSibling;
-    if (!before || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const groups = before.querySelectorAll(GROUP_BOX);
-      const last = groups[groups.length - 1];
-      setJoined(last !== undefined && Math.abs(last.getBoundingClientRect().bottom - before.getBoundingClientRect().bottom) < 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(before);
-    return () => observer.disconnect();
-  }, []);
-  return { ref: recent, joined };
-}
-
-/**
  * The Dice panel (docs/design-v1-dice.md 8), for everyone: the newest
  * panel roll stuck at the top, the formula field with its quick dice and
  * one-roll choices, a creature's roll options, then Recent rolls. Every
@@ -164,7 +137,8 @@ export default function DicePanel(props: PanelProps) {
     const row = root.current?.querySelector<HTMLElement>(`[data-roll-row~="${CSS.escape(lineId)}"]`);
     if (row) revealUnderLine(row, root.current?.querySelector<HTMLElement>("[data-dice-last]") ?? null);
   }, [asked, recentOpen, root]);
-  const recent = useEndsOnGroup();
+  // Recent rolls follows the options' last group with no gap, as the groups follow each other (6.1).
+  const joined = useOptionsEndOnGroup();
   if (groupShown && group) {
     return (
       // The page shows its own results, and its rolls never become the panel's last roll, so the sticky line would only take room.
@@ -194,7 +168,7 @@ export default function DicePanel(props: PanelProps) {
           />
         ) : null}
         <RollOptions {...props} />
-        <div ref={recent.ref} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", marginTop: recent.joined ? -theme.space(2) : 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", marginTop: joined ? -theme.space(2) : 0 }}>
           <RecentRolls names={names} me={me} open={open} again={(rolls, to, origin) => void panel.again(rolls, to, origin)} />
         </div>
       </div>

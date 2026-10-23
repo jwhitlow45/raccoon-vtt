@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { LogEntry, PcStats, RollRequest, RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { DM, P1, character, room, token } from "#shared/testutil.ts";
+import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
 import { creatureRolls, type DiceView } from "./creature.ts";
 import { DICE_FOLD_KEYS, diceFoldsSlot } from "./diceFolds.ts";
 import { optionSlot } from "./optionState.ts";
@@ -22,7 +22,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { OptionsList, PlayerOptions } = await import("./RollOptions.tsx");
+const { OptionsList, PlayerOptions, useOptionsEndOnGroup } = await import("./RollOptions.tsx");
 const { LastResult } = await import("./Roller.tsx");
 
 const THORN: PcStats = {
@@ -273,5 +273,52 @@ describe("the creature's card and groups", () => {
     options.setState(openedBlock(options.getState(), spec));
     options.getInitialState = options.getState;
     assert.match(draw({ scope, state: room2({}, false), body: "list" }), /aria-label="Ask for saves: Sacred Flame"/, "reopened, it opens again");
+  });
+});
+
+describe("whether the options end on a group, which Recent rolls joins (docs/design-v1-dice-pass.md 6.1)", () => {
+  /** What the hook says for this viewer and selection, read from the data alone, as the panel reads it on any page it starts on. */
+  function ends(viewer: Viewer, selectedIds: string[], edit?: (state: RoomState) => void): boolean {
+    const state = table();
+    state.tokens.gob = token("gob", { kind: "monster", name: "Goblin" });
+    state.tokens.gob2 = token("gob2", { kind: "monster", name: "Goblin" });
+    edit?.(state);
+    const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
+    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds, multi: false }, ephemeral: { drags: {} } }));
+    const Probe = () => createElement("i", null, String(useOptionsEndOnGroup()));
+    const markup = renderToStaticMarkup(
+      createElement(RoomProvider, {
+        store: store as never,
+        actions: { dispatch: () => 1, newId: () => "x" } as never,
+        ui: { notify() {} } as never,
+        assets: { url: () => "" } as never,
+        children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(Probe) }),
+      }),
+    );
+    return markup === "<i>true</i>";
+  }
+
+  test("the DM with nobody selected ends on the card", () => {
+    assert.equal(ends(DM, []), false);
+  });
+
+  test("several selected always end on their groups", () => {
+    assert.equal(ends(DM, ["gob", "gob2"]), true);
+  });
+
+  test("one creature ends on its groups once its options have loaded, and on its card while they load", () => {
+    assert.equal(ends(DM, ["gob"]), true);
+    assert.equal(ends(DM, ["tt"]), true, "Thorn's token, by his stat block");
+    // A block from the SRD waits for its chunk, which a server render never loads.
+    assert.equal(ends(DM, ["gob"], (s) => (s.tokens.gob!.actor = { inline: { ...actor(), srdId: "goblin-warrior" } })), false);
+    assert.equal(ends(DM, ["missing"]), false, "a selected token gone from the view");
+  });
+
+  test("a player ends on their creature's groups, and on the card with no creature to pick", () => {
+    assert.equal(ends(P1, []), true);
+    assert.equal(ends(P1, [], (s) => {
+      s.characters.thorn!.ownerIds = [];
+      s.tokens.tt!.ownerIds = [];
+    }), false);
   });
 });
