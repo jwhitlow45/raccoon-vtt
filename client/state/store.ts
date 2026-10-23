@@ -62,6 +62,23 @@ export function toastsLeft(toasts: readonly Toast[], now: number): { id: number;
   return toasts.map((t) => ({ id: t.id, ms: Math.max(0, t.shownAt + (t.action ? ACTION_TOAST_MS : TOAST_MS) - now) }));
 }
 
+/**
+ * The toasts with one more added, at most MAX_TOASTS of them. Past that,
+ * the oldest whose words the log keeps and that has no button gives way
+ * first, as when a stack runs past its room (canvas/barDock.ts fitToasts,
+ * review FU22B-OP-4), so a refusal, an error or a trap's Save and damage
+ * is not pushed off by the rolls and whispers that follow it (review
+ * LP18-TO-1). With none such, the oldest goes. The new toast always stays.
+ */
+export function withToast(toasts: readonly Toast[], toast: Toast): Toast[] {
+  let out = [...toasts, toast];
+  while (out.length > MAX_TOASTS) {
+    const plain = out.slice(0, -1).findIndex((t) => t.logged === true && t.action === undefined);
+    out = out.filter((_, i) => i !== (plain === -1 ? 0 : plain));
+  }
+  return out;
+}
+
 /** Options for one dispatched op. */
 export type DispatchOptions = {
   /**
@@ -406,7 +423,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction, logged = false): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), shownAt: Date.now(), ...(logged ? { logged: true as const } : {}) }].slice(-MAX_TOASTS) });
+    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), shownAt: Date.now(), ...(logged ? { logged: true as const } : {}) }) });
   }
 
   // ------------------------------------------------------------ sending
@@ -622,12 +639,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       let trapped = s.trapped;
       let toasts = s.toasts;
       const toast = (text: string, tone: Toast["tone"]) => {
-        if (!toasts.some((t) => t.text === text)) toasts = [...toasts, { id: ++toastSeq, text, tone, shownAt: Date.now() }].slice(-MAX_TOASTS);
+        if (!toasts.some((t) => t.text === text)) toasts = withToast(toasts, { id: ++toastSeq, text, tone, shownAt: Date.now() });
       };
       // Two undos of one kind of change read the same. The answer to the
       // second replaces the first as a new toast, so each press visibly lands.
       const renew = (text: string, tone: Toast["tone"]) => {
-        toasts = [...toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone, shownAt: Date.now() }].slice(-MAX_TOASTS);
+        toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone, shownAt: Date.now() });
       };
       if (settled.size > 0) {
         const restored = new Map((msg.restored ?? []).map((r) => [r.n, r.what]));

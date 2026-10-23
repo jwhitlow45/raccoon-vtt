@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ACTION_TOAST_MS, TOAST_MS, toastsLeft } from "./store.ts";
+import { ACTION_TOAST_MS, TOAST_MS, toastsLeft, withToast } from "./store.ts";
 import type { Toast } from "./types.ts";
 
 const note = (id: number, shownAt: number): Toast => ({ id, text: `Pat whispers: ${id}`, tone: "info", shownAt });
@@ -39,5 +39,31 @@ describe("toastsLeft (review LP16-PT-1)", () => {
   test("its time counts from when it showed, not from when it was drawn again, so a blackout that takes the toasts off screen never restarts it (review LP16-R1-1)", () => {
     // Shown at 0, off screen from 1 s for a pause, back at 4 s: one second left, not five.
     assert.deepEqual(toastsLeft([note(8, 0)], 4_000), [{ id: 8, ms: 1_000 }]);
+  });
+});
+
+describe("withToast: three toasts at most (review LP18-TO-1)", () => {
+  const logged = (id: number): Toast => ({ ...note(id, id), logged: true });
+  const refusal = (id: number): Toast => ({ id, text: `Could not undo moving Thorn ${id}.`, tone: "error", shownAt: id });
+  const ids = (list: readonly Toast[]) => list.map((t) => t.id);
+
+  test("a fourth toast pushes off the oldest whisper or roll first, so a refusal and a trap's Save and damage stay", () => {
+    // The DM's phone: the trap's toast, a refusal, then a roll and a whisper.
+    let list = withToast([], { ...withButton(1, 1), logged: true });
+    list = withToast(list, refusal(2));
+    list = withToast(list, logged(3));
+    list = withToast(list, logged(4));
+    assert.deepEqual(ids(list), [1, 2, 4]);
+    list = withToast(list, logged(5));
+    assert.deepEqual(ids(list), [1, 2, 5]);
+  });
+
+  test("with no whisper or roll to give way, the oldest goes, and the newest always stays", () => {
+    let list = withToast([], refusal(1));
+    list = withToast(list, refusal(2));
+    list = withToast(list, withButton(3, 3));
+    list = withToast(list, logged(4));
+    assert.deepEqual(ids(list), [2, 3, 4]);
+    assert.deepEqual(ids(withToast([logged(5), logged(6), logged(7)], logged(8))), [6, 7, 8]);
   });
 });
