@@ -115,6 +115,44 @@ function boardTexts(page: Page): Promise<string[]> {
   });
 }
 
+/**
+ * Another of Pat's devices, at its own size and interface size, signed in
+ * as Pat. While `route.hold` is on, an attach the page sends never leaves
+ * it, so the list waits on an answer that never comes, and the server
+ * never hears of it.
+ */
+async function patDevice(viewport: { width: number; height: number }, scale = 1, touch = true) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: touch, hasTouch: touch });
+  await context.addCookies(await patContext.cookies(server.origin));
+  const page = await context.newPage();
+  const route = { hold: false, held: 0 };
+  await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+    const upstream = ws.connectToServer();
+    ws.onMessage((m) => {
+      if (route.hold && typeof m === "string" && m.includes('"token.attach"')) route.held++;
+      else upstream.send(m);
+    });
+    upstream.onMessage((m) => ws.send(m));
+  });
+  if (scale !== 1) {
+    await page.goto(`${server.origin}/`);
+    await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+  }
+  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  await page.locator(".konvajs-content").first().waitFor();
+  return { context, page, route };
+}
+
+/** Which of the Attach list's rows has the focus, by its place among them, or -1. */
+function focusedRow(list: Locator): Promise<number> {
+  return list.evaluate((el) => {
+    const root = el as unknown as { querySelectorAll(selector: string): ArrayLike<unknown> };
+    const active = (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement;
+    return Array.from(root.querySelectorAll("[data-attach-row]")).indexOf(active);
+  });
+}
+
 /** Whether any frame a page received names the token. */
 function everNamed(socket: SocketWatch, id: string): boolean {
   return socket.received.some((frame) => frame.includes(id));
@@ -206,6 +244,32 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     }
     await dm.locator(".konvajs-content").first().waitFor();
     assert.equal(token(patSocket, run.imp), undefined, "the hidden imp reached Pat");
+  });
+
+  test("lp2-3c-busy. in the fight, on another of Pat's phones, Ride Warhorse, Controlled, waits on the server: after 200 ms its row and its Ride show busy, and a second tap sends nothing (docs/design-v1-look-pass-2.md 2.5)", async () => {
+    const device = await patDevice(PHONE);
+    try {
+      const thorn = await select(device.page, "Thorn", { x: 3, y: 5 });
+      await thorn.getByRole("button", { name: "Attach", exact: true }).tap();
+      const sheet = device.page.getByRole("dialog", { name: "Attach Thorn" });
+      await sheet.waitFor();
+      const row = sheet.getByRole("button", { name: "Ride Warhorse" });
+      await row.tap();
+      device.route.hold = true;
+      const ride = sheet.getByRole("button", { name: "Ride", exact: true });
+      await ride.tap();
+      await waitFor("the attach held on the device", () => (device.route.held === 1 ? true : null));
+      await waitFor("Ride busy", async () => ((await ride.getAttribute("aria-busy")) === "true" ? true : null));
+      assert.equal(await row.getAttribute("aria-busy"), "true", "the row waits with its Ride");
+      assert.equal(await row.getAttribute("data-attach-row"), "", "the busy row keeps its key hook");
+      await shots.take(device.page, "attach-lp2-3c-ride-busy");
+      await ride.tap();
+      await device.page.waitForTimeout(300);
+      assert.equal(device.route.held, 1, "a second tap sent another attach");
+      assert.equal(token(patSocket, run.thorn)?.attached, undefined, "the held ride reached the server");
+    } finally {
+      await device.context.close();
+    }
   });
 
   test("at-1. on Thorn's turn Pat opens Attach on Thorn's bar, picks Ride Warhorse, Controlled, and pays half Thorn's Speed", async () => {
@@ -391,6 +455,37 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       const fade = (await more.boundingBox())!;
       assert.ok(r.y + r.height <= fade.y + 1, `Ride (foot ${r.y + r.height}) sits under "Scroll for more" (top ${fade.y})`);
     }
+    await dm.keyboard.press("Escape");
+  });
+
+  test("lp2-3c-keys. in the DM's pop-up for the scout, Down, Up, Home and End move through the near rows and Farther away as one list, wrapping at the ends (docs/design-v1-look-pass-2.md 3, lane 3)", async () => {
+    const b = await select(dm, "Scout", { x: 1, y: 1 });
+    await b.getByRole("button", { name: "Attach", exact: true }).click();
+    const popover = dm.getByRole("dialog", { name: "Attach Scout" });
+    await popover.waitFor();
+    const farther = popover.getByRole("group", { name: "Farther away" });
+    await farther.waitFor();
+    const rows = popover.locator("[data-attach-row]");
+    const count = await rows.count();
+    const near = count - (await farther.locator("[data-attach-row]").count());
+    assert.ok(near >= 1 && near < count, `near ${near} of ${count}`);
+    await rows.first().focus();
+    const list = popover;
+    for (let i = 1; i < near; i++) await dm.keyboard.press("ArrowDown");
+    assert.equal(await focusedRow(list), near - 1, "Down walks the near rows");
+    await dm.keyboard.press("ArrowDown");
+    assert.equal(await focusedRow(list), near, "Down from the last near row goes on to Farther away's first");
+    await dm.keyboard.press("ArrowUp");
+    assert.equal(await focusedRow(list), near - 1, "Up goes back across the heading");
+    await dm.keyboard.press("End");
+    assert.equal(await focusedRow(list), count - 1, "End goes to the last row, in Farther away");
+    await dm.keyboard.press("ArrowDown");
+    assert.equal(await focusedRow(list), 0, "Down from the last row wraps to the first");
+    await dm.keyboard.press("ArrowUp");
+    assert.equal(await focusedRow(list), count - 1, "Up from the first row wraps to the last");
+    await dm.keyboard.press("Home");
+    assert.equal(await focusedRow(list), 0, "Home goes to the first row");
+    await shots.take(dm, "attach-lp2-3c-keys");
     await dm.keyboard.press("Escape");
   });
 });

@@ -791,6 +791,47 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     }
   });
 
+  test("lp2-3a-size. on a 320 x 568 phone at 100% and 130%, the Attach sheet's rows span it, a long name wraps whole, and nothing in it scrolls sideways (docs/design-v1-look-pass-2.md 2.5)", async () => {
+    // A cart with a long name beside the goblin, so its row must wrap to read whole.
+    const cart = randomUUID();
+    await ops.send({ t: "token.create", token: { id: cart, sceneId: run.sceneId, size: "large", visibility: "all", kind: "object", layer: "object", name: "Treasure chest of the drowned king", x: run.goblin.x, y: run.goblin.y + 1, actor: { inline: actor() } } });
+    await waitFor("the cart in the DM's view", () => socket.state?.tokens[cart] ?? null);
+    for (const scale of [1, 1.3]) {
+      const label = `320 x 568 at ${Math.round(scale * 100)}%`;
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      await clickToken(run.goblin);
+      const bar = page.getByRole("dialog", { name: "Goblin actions" });
+      await bar.waitFor();
+      await bar.getByRole("button", { name: "Attach", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: "Attach Goblin" });
+      await sheet.waitFor();
+      const row = sheet.getByRole("button", { name: "Get on Treasure chest of the drowned king" });
+      await row.waitFor();
+      const card = (await sheet.locator(":scope > section").boundingBox())!;
+      const box = (await row.boundingBox())!;
+      assert.ok(Math.abs(box.x - card.x - (card.x + card.width - box.x - box.width)) <= 1.5, `${label}: the row does not span the sheet: ${JSON.stringify({ card, box })}`);
+      const title = await row.evaluate((el) => {
+        type Span = { textContent: string | null; scrollWidth: number; clientWidth: number };
+        const spans = Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<Span> }).querySelectorAll("span"));
+        const span = spans.filter((x) => x.textContent === "Get on Treasure chest of the drowned king").at(-1);
+        return span ? { cut: span.scrollWidth > span.clientWidth + 1 } : null;
+      });
+      assert.ok(title, `${label}: no title span`);
+      assert.equal(title.cut, false, `${label}: the row's name is cut`);
+      const body = await sheet.locator(":scope > section > div").first().evaluate((el) => ({ scroll: (el as unknown as { scrollWidth: number }).scrollWidth, client: (el as unknown as { clientWidth: number }).clientWidth }));
+      assert.ok(body.scroll <= body.client + 1, `${label}: the Attach sheet scrolls sideways, ${body.scroll} px of content in ${body.client}`);
+      await shots.take(page, `size-lp2-3a-attach-320-${Math.round(scale * 100)}`);
+      await closeDialog(sheet);
+      await page.keyboard.press("Escape");
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+  });
+
   test("3. no page errors along the way", () => {
     assert.deepEqual(consoleWatch.errors.filter((e) => e.startsWith("uncaught")), []);
   });
