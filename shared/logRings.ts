@@ -29,7 +29,7 @@ import { isWritable } from "./writable.ts";
  * when written (cutLine), and the longest whisper fits it. An import's
  * lines outside the measures are cut the same way. None of these
  * lines is in the room's measures (server/rooms/sizeGuard.ts), so none
- * decides whether an op passes, and their bounds keep them to about 2 MiB.
+ * decides whether an op passes, and their bounds keep them to about 2.8 MiB.
  *
  * Each audience keeps its own newest lines and drops only its own oldest,
  * so a line one viewer never receives never pushes out a line they hold. A

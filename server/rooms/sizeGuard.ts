@@ -69,7 +69,7 @@ import { isWritable } from "#shared/writable.ts";
  *
  * So do the log's lines that only some viewers or none read
  * (shared/logRings.ts): DM lines, party lines' copies and whispers. Each
- * ring bounds them on its own, by count and by bytes, about 2 MiB together
+ * ring bounds them on its own, by count and by bytes, about 2.8 MiB together
  * (shared/limits.ts), and the measure leaves them out. A hidden area's
  * reminder, another player's aura or a whisper between others then never
  * changes whether a player's op passes.

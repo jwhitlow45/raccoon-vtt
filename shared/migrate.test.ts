@@ -1099,13 +1099,20 @@ describe("follow-up batch 23: op version 19, snapshot version 21 (design 7.3, Lo
     ];
     for (const [name, line] of layouts) {
       const state = room();
-      state.tokens.g1 = token("g1", { name: "Goblin", visibility: "dm" });
+      state.tokens.g1 = token("g1", { name: "Goblin", visibility: "dm", actor: { inline: actor({ hp: { cur: 1_000, max: 1_000, temp: 0 } }) } });
       state.log = Array.from({ length: 200 }, (_, i) => line(i));
       // Ops wrote every line to the archive as they came, so a line before a live log reaches its viewer from there.
       const archive = [...state.log];
       let next = migrateSnapshot(JSON.parse(JSON.stringify(state)), 20);
       for (let i = 0; i < 40; i++) {
         const r = applyOp(next, i % 2 === 0 ? { t: "log.whisper", to: ["dm1"], text: `more ${i}` } : { t: "log.chat", text: `back ${i}` }, P1, env(300 + i));
+        assert.ok(r.ok);
+        archive.push(...r.log);
+        next = r.state;
+      }
+      // An old room held 200 lines in all, so the DM's own hits on the goblin since bring their lines past the ring's bound.
+      for (let i = 0; i < 100; i++) {
+        const r = applyOp(next, { t: "actor.damageMany", hits: [{ target: { tokenId: "g1" }, amount: 1 }] }, DM, env(400 + i));
         assert.ok(r.ok);
         archive.push(...r.log);
         next = r.state;

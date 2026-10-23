@@ -406,8 +406,8 @@ export const LIMITS = {
    * (server/rooms/sizeGuard.ts), so a line a player cannot read never
    * decides whether their op passes:
    *
-   * - The DM's own lines, a party line's own included, their newest 100,
-   *   each cut to `apartLineBytes`: 800 KiB at most.
+   * - The DM's own lines, a party line's own included, their newest 200,
+   *   each cut to `apartLineBytes`: 1,600 KiB at most.
    * - Each member's newest whispers and each player's newest copies of
    *   party lines, the lines only some players read: 50 of each, and at
    *   most 640 KiB of each over the whole roster. A member keeps a share of
@@ -418,13 +418,13 @@ export const LIMITS = {
    *
    * Each byte budget is about what the old single ring could hold: 200
    * lines of the longest text, 1,000 letters of three bytes, about 3.2 KB a
-   * line, took about 620 KiB. So the log keeps at most about 2 MiB outside
-   * the measures, beside the shared lines the measures count.
+   * line, took about 620 KiB. So the log keeps at most about 2.8 MiB
+   * outside the measures, beside the shared lines the measures count.
    *
    * These bounds decide which lines a logged op keeps and drops, so changing
    * one changes how ops replay: it needs a new op version (shared/migrate.ts).
    */
-  dmLogLines: 100,
+  dmLogLines: 200,
   apartLineBytes: 8 * 1024,
   whispersKept: 50,
   whispersPerRoom: 400,
