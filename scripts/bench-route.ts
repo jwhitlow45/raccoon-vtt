@@ -22,13 +22,21 @@
  * longest slice, true distance's included, under 8 ms, and the board's
  * longest frame of route work, for a drag's aims, 40 rulers and the two
  * together, under 8 ms.
+ *
+ * One gate is an outcome, not a time (review MV-BENCH-1): a Large creature
+ * within 30 squares on 3 ft rises under 5-10-5 settles more than
+ * MAX_SETTLED states, so the search gives up and a long drag there reads
+ * "Too far to work out a way around". The cap stays at 200,000, since it
+ * bounds a phone's search, never a time (shared/rules/walk.ts), and the row
+ * is met while the search still gives up. Should it ever finish, the cap or
+ * the search changed, and the row says so.
  */
 import type { BuildChunk, EdgeFeature, FreeWall, RoomState, Scene, TerrainId } from "../shared/model.ts";
 import { LIMITS } from "../shared/limits.ts";
 import { footprintGround } from "../shared/rules/heights.ts";
 import { ownWalk, type MovingToken } from "../shared/rules/movement.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
-import { forgetStepCaches, WalkSearch, WalkWorld, type WalkInput } from "../shared/rules/walk.ts";
+import { forgetStepCaches, MAX_SETTLED, WalkSearch, WalkWorld, type WalkInput } from "../shared/rules/walk.ts";
 import { seenAtEvery } from "../shared/project.ts";
 import { atCap, chunksOf, mulberry32, randomWalls, type Build } from "./bench-walls.ts";
 import { capRoom } from "./bench-vision.ts";
@@ -66,7 +74,8 @@ function stairs(rise: number): Build {
 }
 
 type Ms = { median: number; max: number };
-export type RouteRow = { row: string; budget?: number; settled: number; ms: Ms };
+/** A row's search, and for an outcome gate (`gives up`) what the search ended with: given up at MAX_SETTLED or finished. */
+export type RouteRow = { row: string; budget?: number; settled: number; ms: Ms; givesUp?: true; outcome?: "capped" | "done" };
 
 function stats(times: number[]): Ms {
   const sorted = [...times].sort((a, b) => a - b);
@@ -82,7 +91,17 @@ function stateOf(build: Build, sceneId: string, blockMovement = true): Pick<Room
   return state;
 }
 
-type Case = { row: string; budget?: number; state: Pick<RoomState, "scenes" | "buildChunks">; token: Omit<MovingToken, "sceneId">; diagonal?: "five" | "fiveTen"; limit?: number; to?: { x: number; y: number } };
+type Case = {
+  row: string;
+  budget?: number;
+  /** The search is gated to give up at MAX_SETTLED, which a drag reads as "Too far to work out a way around". */
+  givesUp?: true;
+  state: Pick<RoomState, "scenes" | "buildChunks">;
+  token: Omit<MovingToken, "sceneId">;
+  diagonal?: "five" | "fiveTen";
+  limit?: number;
+  to?: { x: number; y: number };
+};
 
 /** Half feet: the search's own units on the grid rules. */
 const squares = (n: number) => n * 5 * 2;
@@ -107,23 +126,31 @@ export function cases(): Case[] {
     { row: "Medium within a Dash on 1 ft rises, 5-10-5", state: stateOf(stairs(1), "bench-route-stairs-1", false), token: { size: "medium", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(12) },
     { row: "Medium within 30 squares on 3 ft rises, 5-10-5", state: stateOf(stairs(3), "bench-route-stairs-3", false), token: { size: "medium", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(30) },
     { row: "Large within a Dash on 3 ft rises, 5-10-5", state: stateOf(stairs(3), "bench-route-stairs-3ld", false), token: { size: "large", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(12) },
-    { row: "Large within 30 squares on 3 ft rises, 5-10-5", state: stateOf(stairs(3), "bench-route-stairs-3l", false), token: { size: "large", x: 45, y: 47, elevation: 0 }, diagonal: "fiveTen", limit: squares(30) },
+    {
+      row: `Large within 30 squares on 3 ft rises, 5-10-5: gives up at ${MAX_SETTLED.toLocaleString("en-US")} settled, "Too far to work out a way around"`,
+      givesUp: true,
+      state: stateOf(stairs(3), "bench-route-stairs-3l", false),
+      token: { size: "large", x: 45, y: 47, elevation: 0 },
+      diagonal: "fiveTen",
+      limit: squares(30),
+    },
   ];
 }
 
 /** One search as a drag runs it: the world built, then settled to a spot and its route traced, or flooded to a cost. */
-function runCase(c: Case): number {
+function runCase(c: Case): { settled: number; outcome: "capped" | "done" } {
   const sceneId = Object.keys(c.state.scenes)[0]!;
   // On its own ground, so a walker on the stairs stands on them.
   const token = ownWalk({ ...c.token, sceneId, elevation: footprintGround(c.state.buildChunks, { ...c.token, sceneId }) });
   const input: WalkInput = { build: c.state, token, rules: { feetPerCell: 5, diagonal: c.diagonal ?? "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } };
   const search = new WalkSearch(new WalkWorld(input));
   // A spot's row times the completed route, the trace with the fewest corners included (review ASTRA-08).
+  let outcome: "capped" | "done" = "done";
   if (c.to) {
-    search.settle(c.to);
+    if (search.settle(c.to) === "capped") outcome = "capped";
     search.routeTo(c.to);
-  } else search.flood(c.limit ?? Infinity);
-  return search.settled;
+  } else if (search.flood(c.limit ?? Infinity) === "capped") outcome = "capped";
+  return { settled: search.settled, outcome };
 }
 
 export function runRouteBench(runs = 15, only?: (c: Case) => boolean): RouteRow[] {
@@ -132,14 +159,15 @@ export function runRouteBench(runs = 15, only?: (c: Case) => boolean): RouteRow[
     if (only && !only(raw)) continue;
     const c = raw;
     let settled = 0;
+    let outcome: "capped" | "done" = "done";
     const times: number[] = [];
     for (let r = 0; r < runs + 3; r++) {
       forgetStepCaches();
       const t = performance.now();
-      settled = runCase(c);
+      ({ settled, outcome } = runCase(c));
       if (r >= 3) times.push(performance.now() - t);
     }
-    rows.push({ row: c.row, ...(c.budget !== undefined ? { budget: c.budget } : {}), settled, ms: stats(times) });
+    rows.push({ row: c.row, ...(c.budget !== undefined ? { budget: c.budget } : {}), settled, ms: stats(times), ...(c.givesUp ? { givesUp: true as const, outcome } : {}) });
   }
   return rows;
 }
@@ -262,7 +290,11 @@ export function runRouteSeenRow(runs = 15): RouteRow {
 export function formatRouteBench(rows: readonly RouteRow[], where = "laptop"): string {
   const lines = [`search (${where}) | settled | ms (median / max) | budget`, "--- | --- | --- | ---"];
   for (const r of rows) {
-    const verdict = r.budget === undefined ? "" : `${r.budget} ms ${r.ms.median <= r.budget ? "met" : "MISSED"}`;
+    const verdict = r.givesUp
+      ? `gives up ${r.outcome === "capped" ? "met" : "MISSED: the search finished"}`
+      : r.budget === undefined
+        ? ""
+        : `${r.budget} ms ${r.ms.median <= r.budget ? "met" : "MISSED"}`;
     lines.push(`${r.row} | ${r.settled.toLocaleString("en-US")} | ${r.ms.median.toFixed(2)} / ${r.ms.max.toFixed(2)} | ${verdict}`);
   }
   return lines.join("\n");
