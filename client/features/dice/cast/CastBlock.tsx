@@ -278,10 +278,14 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const preset = !spec.area && targets.length === 0 ? areaPresetOf(spec.spell) : undefined;
 
   // Focus goes to its first button that takes a tap, which with no target yet is Cancel (6, Accessibility), once the panel has drawn, with the block brought into its scroll box: a phone's sheet opening on an area's ask starts at its top.
+  // Only for a new opening, so a group reopened or a tab picked back keeps the focus on the control the viewer used (docs/design-v1-dice-pass.md 6.6).
   useEffect(() => {
+    if (spec.opened !== undefined && store.getState().castFocused === spec.opened) return;
     const frame = requestAnimationFrame(() => {
       const box = group.current;
       if (!box) return;
+      // Marked when it acts, not before: React's development double mount cancels the first frame.
+      store.setState({ castFocused: spec.opened ?? 0 });
       // reveal.ts reads the DOM through a type of its own. The panel's scroller is not on the block's offset chain, so the block's foot is set from the head, as RollOptions sets its start.
       const scroller = scrollBox(box as unknown as Parameters<typeof scrollBox>[0]) as unknown as HTMLElement | null;
       if (scroller) {

@@ -238,7 +238,7 @@ describe("initiative written by the room, not the surface that rolled (ASTRA-08)
     const log: LogEntry[] = [];
     const tracker = new ReceiptTracker();
     tracker.env = { lookup: () => Promise.resolve({ parts: [] }), log: () => log };
-    const store = createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, bonus: {} }));
+    const store = createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, castFocused: 0, bonus: {} }));
     const sent: ClientOp[] = [];
     const env: InitiativeEnv = { tracker, store, view: () => view, dispatch: (op) => sent.push(op), dm: true };
     const land = (tag: string, total: number) => {

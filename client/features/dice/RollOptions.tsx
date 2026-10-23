@@ -102,6 +102,8 @@ export function RollOptions(_props: PanelProps) {
   const options = useOptionStore();
   const ref = useRef<HTMLDivElement>(null);
   useCloseSettledBlock(view);
+  // A panel shown afresh, as a phone's Dice sheet reopened after picking targets on the map, brings the open block back into view and takes the focus to it, as its opening did.
+  useEffect(() => () => options.setState({ castFocused: 0 }), [options]);
   // A bar's Roll opens the panel on its tokens and scrolls it, after the render that lists them, once per tap (4.1).
   useEffect(() => {
     if (focus === 0 || options.getState().focused === focus) return;

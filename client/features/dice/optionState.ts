@@ -45,6 +45,13 @@ export type OptionState = {
   /** How many blocks this page has opened, each opening's stamp (cast.ts openedBlock). */
   openings: number;
   /**
+   * The opening the block last took the focus for, so only a new opening
+   * moves it: the block drawn again by a group reopened or a tab picked
+   * back leaves the focus where the viewer put it (docs/design-v1-dice-pass.md 6.6).
+   * 0 once the options go, so a panel shown again brings the block back as an opening would.
+   */
+  castFocused: number;
+  /**
    * The bonus typed for a creature whose numbers this viewer lacks, by its
    * key. The field stands in the creature's card and its cells in the
    * groups below, which fold, so the text lives here and not in either.
@@ -72,7 +79,7 @@ export type CastBlock = {
 };
 
 export const optionSlot = scopeSlot(() =>
-  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, bonus: {} })),
+  createStore<OptionState>(() => ({ tags: {}, since: {}, critical: {}, riders: {}, askOff: {}, picked: null, acted: {}, slots: {}, focus: 0, focused: 0, cast: null, openings: 0, castFocused: 0, bonus: {} })),
 );
 
 export function useOptionStore() {
