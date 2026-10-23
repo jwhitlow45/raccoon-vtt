@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { MapPhase, Scene } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { Button } from "../../components/Button.tsx";
-import { Input } from "../../components/Field.tsx";
+import { ErrorText, Input } from "../../components/Field.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { Help, Note, Section } from "../../components/Panel.tsx";
+import { Help, Section } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { accessibleName } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
@@ -138,12 +139,8 @@ export function PhasesSection(props: { scene: Scene }) {
           <UvttAddPhase scene={scene} />
         </div>
       ) : null}
-      {upload.waiting ? <Help>Waiting for the server…</Help> : null}
-      {upload.error ? (
-        <div role="alert">
-          <Note>{upload.error}</Note>
-        </div>
-      ) : null}
+      <Loading text="Waiting for the server…" active={upload.waiting} />
+      <ErrorText>{upload.error}</ErrorText>
     </Section>
   );
 }

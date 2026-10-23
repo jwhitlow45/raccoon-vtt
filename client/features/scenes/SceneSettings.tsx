@@ -5,7 +5,8 @@ import { autoWallsOf } from "#shared/rules/autoWalls.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
-import { FieldRow, Input } from "../../components/Field.tsx";
+import { ErrorText, FieldRow, Input } from "../../components/Field.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
@@ -490,12 +491,8 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   const status = (
     <>
       <PasteStatus paste={paste} />
-      {upload.waiting ? <Help>Waiting for the server…</Help> : null}
-      {upload.error ? (
-        <div role="alert">
-          <Note>{upload.error}</Note>
-        </div>
-      ) : null}
+      <Loading text="Waiting for the server…" active={upload.waiting} />
+      <ErrorText>{upload.error}</ErrorText>
     </>
   );
 

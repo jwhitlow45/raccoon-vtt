@@ -1,9 +1,9 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { ImageRef } from "#shared/model.ts";
-import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { Loading } from "../../components/Loading.tsx";
+import { Row } from "../../components/Row.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -64,6 +64,9 @@ export function RoomPasteHost() {
 /** How long a handed-off picture waits for its entry to open and take it. */
 const HANDOFF_WAIT_MS = 10_000;
 
+/** The offer's preview of the picture, the width of a field in the tool options (theme.layout.options.field). */
+const PREVIEW_PX = theme.layout.options.field;
+
 /**
  * A picture handed to an entry is used now or not at all, never by itself
  * later: it goes, with a note, when Stamp mode closes before the stamp
@@ -114,7 +117,6 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
   const [url, setUrl] = useState<string | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
-  const helpId = useId();
   useEffect(() => {
     const made = URL.createObjectURL(file);
     setUrl(made);
@@ -165,11 +167,11 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
               alt="The pasted image"
               onLoad={(e) => setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
               onError={() => setFailed(true)}
-              style={{ flex: "none", width: 96, height: 96, objectFit: "contain", borderRadius: theme.radius.sm, background: theme.color.bg }}
+              style={{ flex: "none", width: PREVIEW_PX, height: PREVIEW_PX, objectFit: "contain", borderRadius: theme.radius.sm, background: theme.color.bg }}
             />
           ) : null}
           <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-            <strong style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{file.name}</strong>
+            <strong style={{ fontSize: theme.font.input, overflowWrap: "anywhere" }}>{file.name}</strong>
             {size ? (
               <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
                 {size.width} × {size.height} px
@@ -182,14 +184,10 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
           </div>
         </div>
         {several ? <Help>{several}</Help> : null}
-        <div role="group" aria-label="Use it for" style={{ display: "grid", gap: theme.space(3) }}>
+        {/* Card rows, each named by its title and described by its line, as a list of actions in a sheet is (docs/design-v1-look-pass-2.md 2.5). */}
+        <div role="group" aria-label="Use it for" style={{ display: "grid", gap: theme.space(1) }}>
           {rows.map((row) => (
-            <div key={row.id} style={{ display: "grid", gap: theme.space(1) }}>
-              <Button block disabled={row.disabled} aria-describedby={`${helpId}-${row.id}`} onClick={() => choose(row.id)}>
-                {row.label}
-              </Button>
-              <Help id={`${helpId}-${row.id}`}>{row.help}</Help>
-            </div>
+            <Row key={row.id} title={row.label} detail={row.help} fullDetail disabled={row.disabled} onClick={() => choose(row.id)} />
           ))}
         </div>
       </div>

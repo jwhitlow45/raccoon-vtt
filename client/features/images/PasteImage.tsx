@@ -1,6 +1,7 @@
-import { useEffect, useReducer, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useReducer, useRef, useState, type RefObject } from "react";
 import { Button } from "../../components/Button.tsx";
-import { fieldStyle } from "../../components/Field.tsx";
+import { ErrorText, fieldStyle } from "../../components/Field.tsx";
+import { Help } from "../../components/Panel.tsx";
 import { isAppleDevice, isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScopedIfAny } from "../../state/scope.ts";
@@ -90,19 +91,23 @@ export function usePasteTarget(ref: RefObject<HTMLElement | null>, spec: PasteSp
   return { ...view, press: () => control.press(), closeBox: () => control.closeBox(), disabled: spec.disabled || closed || view.reading, control };
 }
 
+const PASTING = "Pasting…";
+
 /**
  * "Paste an image", a secondary button beside the entry's file control
  * (2.2). Busy while the browser answers, which may include its permission
- * prompt or iOS's own Paste callout, and a second press waits.
+ * prompt or iOS's own Paste callout, and a second press waits. A busy
+ * button names its wait (docs/design-v1-look-pass-2.md 2.2).
  */
 export function PasteButton(props: { paste: PasteHandle; label?: string; size?: "md" | "sm" }) {
   const { paste } = props;
   return (
     <Button size={props.size ?? "sm"} disabled={!paste.reading && paste.disabled} busy={paste.reading} onClick={paste.press}>
-      {props.label ?? "Paste an image"}
+      {paste.reading ? PASTING : (props.label ?? "Paste an image")}
     </Button>
   );
 }
+
 
 /**
  * What a paste left under its entry: its note, and the paste box while it
@@ -113,13 +118,15 @@ export function PasteStatus(props: { paste: PasteHandle; only?: "note" | "box" }
   const { paste } = props;
   return (
     <>
+      {/* An error in the one look every paste error has, and anything else as help (docs/design-v1-look-pass-2.md 2.9). */}
       {paste.note && props.only !== "box" ? (
-        <p
-          role={paste.note.tone === "error" ? "alert" : "status"}
-          style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: paste.note.tone === "error" ? theme.color.dangerText : theme.color.textMuted }}
-        >
-          {paste.note.text}
-        </p>
+        paste.note.tone === "error" ? (
+          <ErrorText>{paste.note.text}</ErrorText>
+        ) : (
+          <div role="status">
+            <Help>{paste.note.text}</Help>
+          </div>
+        )
       ) : null}
       {paste.box && props.only !== "note" ? <PasteBox paste={paste} /> : null}
     </>
@@ -141,6 +148,7 @@ export function PasteStatus(props: { paste: PasteHandle; only?: "note" | "box" }
 function PasteBox(props: { paste: PasteHandle }) {
   const { paste } = props;
   const box = useRef<HTMLDivElement>(null);
+  const lineId = useId();
   const control = paste.control;
   const line = boxLine({ touch: isCoarsePointer(), apple: isAppleDevice() });
   useEffect(() => {
@@ -163,13 +171,15 @@ function PasteBox(props: { paste: PasteHandle }) {
       el.removeEventListener("drop", refuse);
     };
   }, [control]);
+  // Its words stand over it as its label, never inside it, where they read as a placeholder with nothing to type.
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-      <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+    <div style={{ display: "grid", gap: theme.space(1) }}>
+      <Help id={lineId}>{line}</Help>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
         <div
           ref={box}
           role="textbox"
-          aria-label={line}
+          aria-labelledby={lineId}
           aria-multiline={false}
           contentEditable
           suppressContentEditableWarning
@@ -179,30 +189,12 @@ function PasteBox(props: { paste: PasteHandle }) {
           onInput={(e) => {
             e.currentTarget.textContent = "";
           }}
-          style={{ ...fieldStyle(), minHeight: theme.touch, width: "100%", boxSizing: "border-box", caretColor: "transparent", cursor: "text", overflow: "hidden", whiteSpace: "nowrap" }}
+          style={{ ...fieldStyle(), flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, boxSizing: "border-box", caretColor: "transparent", cursor: "text", overflow: "hidden", whiteSpace: "nowrap" }}
         />
-        <span
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            padding: `0 ${theme.space(3)}px`,
-            color: theme.color.textMuted,
-            fontSize: theme.font.body14,
-            pointerEvents: "none",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {line}
-        </span>
+        <Button size="sm" onClick={paste.closeBox}>
+          Cancel
+        </Button>
       </div>
-      <Button size="sm" onClick={paste.closeBox}>
-        Cancel
-      </Button>
     </div>
   );
 }

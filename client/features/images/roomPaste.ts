@@ -92,7 +92,7 @@ export function roomPasteRows(input: RoomPasteInput): RoomPasteRow[] {
       help: full
         ? `A room holds at most ${LIMITS.scenesPerRoom} scenes. Delete one to add another.`
         : input.busy.scene
-          ? "Wait for New scene's upload to finish."
+          ? "Wait for New scene’s upload to finish."
           : "Make a scene with it as the map.",
       disabled: full || input.busy.scene,
     },
@@ -102,7 +102,7 @@ export function roomPasteRows(input: RoomPasteInput): RoomPasteRow[] {
   rows.push({
     id: "handout",
     label: "Handout",
-    help: input.busy.handout ? "Wait for the handout's upload to finish." : "Then choose who sees it.",
+    help: input.busy.handout ? "Wait for the handout’s upload to finish." : "Then choose who sees it.",
     disabled: input.busy.handout,
   });
   const first: RoomPasteRowId = input.stampMode && input.onScene ? "stamp" : input.token !== null ? "token" : "scene";

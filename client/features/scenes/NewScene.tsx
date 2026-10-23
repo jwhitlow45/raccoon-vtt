@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_SCENE_CELLS } from "#shared/protocol.ts";
 import type { FoundWork } from "#shared/starter.ts";
 import { Button } from "../../components/Button.tsx";
-import { Input } from "../../components/Field.tsx";
+import { ErrorText, Input } from "../../components/Field.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { api, type AssetRow } from "../../lib/api.ts";
@@ -312,12 +313,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   {status.finding ? "Looking for a grid…" : status.busy ? "Uploading…" : "Upload and create"}
                 </Button>,
               )}
-              {status.waiting ? <Help>Waiting for the server…</Help> : null}
-              {status.error ? (
-                <p role="alert" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText }}>
-                  {status.error}
-                </p>
-              ) : null}
+              <Loading text="Waiting for the server…" active={status.waiting} />
+              <ErrorText>{status.error}</ErrorText>
               <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
                 <Help>Or start from a map in the starter packs</Help>
                 <Button ref={starterButton} size="sm" disabled={status.busy} onClick={() => setStarter(true)}>

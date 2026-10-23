@@ -476,7 +476,7 @@ function ShowHandout(props: {
             ) : null}
           </>
         )}
-        {status ? <Loading text={status} delay={0} /> : null}
+        {status ? <Loading text={status} /> : null}
       </div>
       <Field label="Title" value={title} maxLength={TITLE_FIELD_MAX} onChange={(e) => draftStore.setState(withTypedTitle(draftStore.getState(), e.target.value))} placeholder="The old map" />
       <RadioGroup<"all" | "some">
