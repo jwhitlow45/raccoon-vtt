@@ -67,13 +67,18 @@ import type { Locator, Page } from "playwright-core";
  *   name on two lines over one line of help), or different rows of
  *   boxes, are compared only among themselves, since the one is meant to
  *   be taller. An icon beside the words changes nothing.
- * - An edge is where two rows or more start. A row that is itself a box
- *   (a control, a notice, a chosen option) starts at its box's edge, not
- *   at the words it holds (a stacked foot's full-width buttons center
- *   theirs). What is set centered or at the end, as a field row's field
- *   at its right, is no edge. Three rows that each start apart share
- *   none. A nested list or group inset by its own padding or margin is a
- *   column of its own.
+ * - An edge is where two rows or more start. A row starts where what it
+ *   holds starts. A row that draws a box (a notice, a chosen option, a
+ *   full-width button) may start at its box's edge instead: a stacked
+ *   foot's full-width buttons center their words, and a chosen option's
+ *   fill stands its padding outside words that line up with its unchosen
+ *   kin. A label, list item or group that draws nothing starts only where
+ *   what it holds starts. What is set centered or at the end, as a
+ *   field row's field at its right, is no edge. Three rows that each
+ *   start apart share none. A nested list or group set in by its own
+ *   padding or margin is a column of its own when it sits an indent step
+ *   (INDENT_PX) or more past the column's edge. Set in by less, it has
+ *   drifted.
  *
  * Three named checks cover what the five cannot see: pillLines (board
  * pills drawn by Konva inside the canvas's visible part, a pointed one
@@ -93,6 +98,9 @@ import type { Locator, Page } from "playwright-core";
 
 /** The most a part may be off, in CSS px. Offsets are rounded to 0.1 px first, so layout rounding at 130% (1.0 px) passes. */
 export const LIMIT_PX = 1;
+
+/** The interface's indent step (theme.space(3)), in CSS px: the least a nested list or group is set in to make a column of its own. */
+export const INDENT_PX = 12;
 
 export type Box = { l: number; r: number; t: number; b: number };
 
@@ -158,7 +166,7 @@ type DomDocument = {
   defaultView: { getComputedStyle(el: DomElement): DomStyle; innerWidth: number; innerHeight: number };
 };
 
-type PageOptions = { limit: number; stickyHeader: string; debug: boolean };
+type PageOptions = { limit: number; indent: number; stickyHeader: string; debug: boolean };
 
 /** The marks of components/SheetHeader.tsx's sticky header (STICKY_HEADER_ATTR), whose band the frame places. */
 const STICKY_HEADER = "[data-sticky-header]";
@@ -169,6 +177,7 @@ const STICKY_HEADER = "[data-sticky-header]";
  */
 function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   const LIMIT = opts.limit;
+  const INDENT_PX = opts.indent;
   const doc = roots[0]?.ownerDocument;
   if (!doc) return [];
   const win = doc.defaultView;
@@ -460,29 +469,34 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   }
 
   /**
-   * Where a row of a column starts, for the edge check, as the eye follows
-   * it down: a row that is itself a box (a control, or a painted box such
-   * as a notice or a chosen option) by its box's edge, never by the words
-   * it holds (a stacked foot's full-width buttons center theirs), and any
-   * other row by the left of what it holds (boxes, pictures and words) set
-   * at its line's start. What is centered or set at the end, as a field
-   * row's field at its right, is no edge. Null for a
-   * disclosure, whose body starts under its chevron, for a nested list or
-   * group inset by its own padding or margin, whose rows make a column of
-   * their own, and for a row with nothing to start.
+   * Where a row of a column may start, for the edge check, as the eye
+   * follows it down. Any row starts at the left of what it holds (boxes,
+   * pictures and words) set at its line's start. What is centered or set
+   * at the end, as a field row's field at its right, is no start. A row
+   * that draws a box (a painted notice, a chosen option, a full-width
+   * button) may start at its box's edge as well: a stacked foot's
+   * full-width buttons center their words, and a chosen option's fill
+   * stands its padding outside words that line up with its unchosen kin.
+   * A label, list item or group that draws nothing starts only at what it
+   * holds, since its box is not seen. `inset` marks a nested list or
+   * group whose content starts at its own padding or margin, which the
+   * column takes as a column of its own only when it sits an indent step
+   * past the column's edge. Null for a disclosure, whose body starts under
+   * its chevron, and for a row with nothing to start.
    */
-  function edgeOf(row: DomElement): number | null {
+  function edgeOf(row: DomElement): { lefts: number[]; inset: boolean } | null {
     if (row.matches("[aria-expanded]") || row.querySelector(":scope > [aria-expanded], :scope > * > [aria-expanded]")) return null;
+    const parts = atomsOf(row).filter((a) => a.start);
+    const left = parts.length ? Math.min(...parts.map((a) => a.l)) : null;
+    if (paints(row)) return { lefts: [round(rectOf(row).l), ...(left === null ? [] : [round(left)])], inset: false };
+    if (left === null) return null;
+    let inset = false;
     if (row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]')) {
       const b = boxes(row);
       const own = b.inner.l + b.pad.l;
-      const parts = atomsOf(row);
-      const start = parts.length ? Math.min(...parts.map((a) => a.l)) : own;
-      if (Math.abs(start - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT)) return null;
+      inset = Math.abs(left - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT);
     }
-    if (row.matches(CONTROL) || row.matches(INTERACTIVE) || paints(row)) return round(rectOf(row).l);
-    const parts = atomsOf(row).filter((a) => a.start);
-    return parts.length ? round(Math.min(...parts.map((a) => a.l))) : null;
+    return { lefts: [round(left)], inset };
   }
 
   const spread = (xs: readonly number[]) => Math.max(...xs) - Math.min(...xs);
@@ -673,14 +687,23 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         let stacked = true;
         for (let i = 1; i < rs.length; i++) if (rs[i]!.t < rs[i - 1]!.b - 1) stacked = false;
         if (stacked) {
-          const rows = kids.map((c) => ({ c, left: edgeOf(c) }));
-          const known = rows.filter((x): x is { c: DomElement; left: number } => x.left !== null);
+          const known = kids.flatMap((c) => {
+            const edge = edgeOf(c);
+            return edge ? [{ c, ...edge }] : [];
+          });
           if (known.length >= 3) {
-            // The edge is where the most rows start, each within the limit of it.
+            // The edge is where the most rows may start, each within the limit of it, read from the rows that are no nested list or group when two or more are.
             const near = (a: number, b: number) => Math.abs(a - b) <= LIMIT;
-            const mode = known.map((x) => x.left).sort((a, b) => known.filter((y) => near(y.left, b)).length - known.filter((y) => near(y.left, a)).length)[0]!;
-            const shared = known.filter((x) => near(x.left, mode)).length;
-            const odd = known.filter((x) => !near(x.left, mode));
+            const meets = (x: { lefts: number[] }, at: number) => x.lefts.some((l) => near(l, at));
+            const plain = known.filter((x) => !x.inset);
+            const voters = plain.length >= 2 ? plain : known;
+            const mode = voters.flatMap((x) => x.lefts).sort((a, b) => voters.filter((y) => meets(y, b)).length - voters.filter((y) => meets(y, a)).length)[0]!;
+            // A nested list or group an indent step or more past the edge is a column of its own. Set in by less, it has drifted.
+            const step = INDENT_PX * zoomOf(el) - LIMIT;
+            const counted = known.filter((x) => !(x.inset && x.lefts[0]! - mode >= step));
+            const shared = counted.filter((x) => meets(x, mode)).length;
+            const off = (x: { lefts: number[] }) => x.lefts.reduce((a, l) => (Math.abs(l - mode) < Math.abs(a - mode) ? l : a)) - mode;
+            const odd = counted.filter((x) => !meets(x, mode)).map((x) => ({ c: x.c, left: mode + off(x) }));
             // An edge is where two rows or more start: three rows that each start apart, as a dialog's header, body and foot, share none.
             if (shared >= 2 && odd.length) {
               push({ check: "edge", role: roleOf(el), name: nameOf(el), offset: round(Math.max(...odd.map((x) => Math.abs(x.left - mode)))), box: union(odd.map((x) => rectOf(x.c))), what: odd.map((x) => `${say(x.c)} at ${round(x.left - mode)}`).join(" | "), detail: `most start at ${round(mode)}` });
@@ -697,7 +720,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
 
 /** The five checks over everything under each element `root` matches. Nothing found when it matches nothing. */
 export async function measureAlignment(root: Locator): Promise<Finding[]> {
-  return root.evaluateAll(measureInPage, { limit: LIMIT_PX, stickyHeader: STICKY_HEADER, debug: process.env.E2E_ALIGN_DEBUG === "1" });
+  return root.evaluateAll(measureInPage, { limit: LIMIT_PX, indent: INDENT_PX, stickyHeader: STICKY_HEADER, debug: process.env.E2E_ALIGN_DEBUG === "1" });
 }
 
 /** One readable line per finding over the limit, for `screen`. */

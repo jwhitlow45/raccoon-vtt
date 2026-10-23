@@ -716,6 +716,14 @@ const CASES = `
 <div data-case="edge-end"><div>First row</div><div>Second row</div><div style="display: flex; justify-content: flex-end"><input style="width: 96px"></div><div>Last row</div></div>
 <div data-case="edge-group"><div>First row</div><div>Second row</div><ul style="margin: 0; padding-left: 24px"><li>A nested item</li></ul><div>Last row</div></div>
 <div data-case="edge-indent"><div>First row</div><div>Second row</div><div style="padding-left: 24px">An indented row</div><div>Last row</div></div>
+<div data-case="labels-inner"><label style="display: flex; gap: 8px"><input type="checkbox" style="margin: 0">One</label><label style="display: flex; gap: 8px"><input type="checkbox" style="margin: 0">Two</label><label style="display: flex; gap: 8px"><input type="checkbox" style="margin: 0 0 0 6px">Three</label></div>
+<div data-case="li-inner"><ul style="list-style: none; padding: 0; margin: 0"><li><span>One</span></li><li><span>Two</span></li><li><span style="margin-left: 6px">Three</span></li></ul></div>
+<div data-case="mixed-rows"><div>Plain one</div><label style="display: flex"><span style="margin-left: 6px">Label two</span></label><div>Plain three</div></div>
+<div data-case="chosen-option" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="padding: 0 12px">The creature that set it off</label><label style="padding: 0 12px; background: #445">Everyone in an area</label><label style="padding: 0 12px">No one</label></div>
+<div data-case="chosen-option-drift" role="radiogroup" aria-label="Hits" style="display: grid; gap: 2px"><label style="padding: 0 12px">The creature that set it off</label><label style="padding: 0 12px; margin-left: 3px; background: #445">Everyone in an area</label><label style="padding: 0 12px">No one</label></div>
+<div data-case="ul-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><ul style="padding-left: 14px; margin: 0; list-style: none"><li>Item</li></ul></div>
+<div data-case="group-pad"><div style="padding-left: 12px">Row one</div><div style="padding-left: 12px">Row two</div><div role="group" aria-label="Grouped" style="padding-left: 16px"><span>Grouped</span></div></div>
+<div data-case="group-step"><div>Row one</div><div>Row two</div><div role="group" aria-label="Grouped" style="padding-left: 12px"><span>Grouped</span></div><div>Row four</div></div>
 <div data-case="edge-disclosure"><div>First row</div><div>Second row</div><div><button aria-expanded="true" style="border: none; background: none; padding: 0 0 0 20px">Folded group</button></div><div>Last row</div></div>
 <div data-case="shift-outer">
   <div class="box" style="height: 44px; padding: 12px 10px; line-height: 20px"><span style="position: relative; top: 3px"><span>Shifted words</span></span></div>
@@ -938,6 +946,17 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await passes("edge-group");
       await caught("edge-indent", "edge");
       await passes("edge-disclosure");
+      // A label, list item or group that draws nothing starts where what it holds starts, so drift inside it is an edge.
+      await caught("labels-inner", "edge");
+      await caught("li-inner", "edge");
+      await caught("mixed-rows", "edge");
+      // A chosen option's fill may stand outside words that meet its kin's. Moved with its words, it has drifted.
+      await passes("chosen-option");
+      await caught("chosen-option-drift", "edge");
+      // A nested list or group set in by less than an indent step has drifted. Set in by a step, it is a column of its own.
+      await caught("ul-pad", "edge");
+      await caught("group-pad", "edge");
+      await passes("group-step");
       // Words moved on purpose, on an outer span or by a vertical alignment, are never snapped back to their line. A font's rounding is.
       await caught("shift-outer", "center");
       await caught("shift-two", "center");
