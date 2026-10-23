@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds, keys, type EntityKey } from "./keys.ts";
 import { LIMITS } from "./limits.ts";
-import { DM_LINE_BASE, dmNumbered, lineAudience, linesPastStart, liveStart, MAX_LOG, whisperParties } from "./logRings.ts";
+import { DM_LINE_BASE, dmNumbered, droppedLines, lineAudience, linesPastStart, liveStart, MAX_LOG, whisperParties, whispersKept } from "./logRings.ts";
 import type { LogEntry, LogEvent, RoomState, Viewer } from "./model.ts";
 import { applyChanges, dependents, diffProjection, heldOf, projectArchivedLog, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
 import { Tx } from "./reducer/tx.ts";
-import { AT, DM, P1, P2, chance, pick, randomState, rng, room, token } from "./testutil.ts";
+import { AT, DM, P1, P2, chance, member, pick, randomState, rng, room, token } from "./testutil.ts";
 
 /**
  * The room log's rings (shared/logRings.ts, design 7.3). The randomized
@@ -147,7 +147,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
         }
 
         // 6. Fan-out, every step, so each copy's held map stays the server's.
-        const candidates = new Set([...out.touched, ...dependents(before, out.touched), ...dependents(state, out.touched), ...linesPastStart(before.log, state.log, VIEWERS).map((id) => keys.log(id))]);
+        const candidates = new Set([...out.touched, ...dependents(before, out.touched), ...dependents(state, out.touched), ...linesPastStart(before, state, VIEWERS).map((id) => keys.log(id))]);
         for (const copy of copies) {
           const next = new Map<EntityKey, unknown>();
           for (const key of candidates) next.set(key, projectEntity(key, state, copy.viewer, { sceneId: "s1" }));
@@ -173,7 +173,7 @@ describe("the log's rings (shared/logRings.ts)", () => {
       }
       // The run reached every bound, so each rule above was tested where it bites.
       assert.ok(history.filter((e) => lineAudience(e) === "shared").length > MAX_LOG, `seed ${seed}: shared lines`);
-      assert.ok(VIEWERS.some((v) => liveStart(state.log, v) !== null), `seed ${seed}: a live log started at a ring's bound`);
+      assert.ok(VIEWERS.some((v) => liveStart(state, v) !== null), `seed ${seed}: a live log started at a ring's bound`);
       assert.ok(MEMBERS.some((m) => history.filter((e) => e.kind === "whisper" && whisperParties(e).includes(m)).length > LIMITS.whispersKept), `seed ${seed}: whispers`);
     }
   });
@@ -219,3 +219,60 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.equal(dmNumbered("12:900000"), true);
   });
 });
+
+describe("whispers, bounded by the room (shared/logRings.ts)", () => {
+  /** A room of the DM and `players` players, p1 to pN. */
+  function roster(players: number): RoomState {
+    const state = room();
+    state.members = { dm1: member("dm1", "dm") };
+    for (let i = 1; i <= players; i++) state.members[`p${i}`] = member(`p${i}`);
+    return state;
+  }
+
+  const whisper = (n: number, from: string, to: string): LogEntry => ({ id: `${n}:0`, at: AT, kind: "whisper", from, to: [to], text: `w${n}` });
+
+  test("each member keeps 50, fewer past 8 members, so a room never holds more than 400", () => {
+    assert.equal(whispersKept(8), 50);
+    assert.equal(whispersKept(9), 44);
+    assert.equal(whispersKept(50), 8);
+    for (const players of [3, 7, 19, 49]) {
+      const state = roster(players);
+      const keep = whispersKept(players + 1);
+      // Every player whispers the DM, and the next player, more than they keep.
+      state.log = [];
+      let n = 0;
+      for (let round = 0; round < 60; round++) {
+        for (let i = 1; i <= players; i++) {
+          state.log.push(whisper(++n, `p${i}`, "dm1"));
+          state.log.push(whisper(++n, `p${i}`, `p${(i % players) + 1}`));
+        }
+      }
+      const dropped = new Set(droppedLines(state.log, state.members));
+      const held = state.log.filter((e) => !dropped.has(e.id));
+      assert.ok(held.length <= LIMITS.whispersPerRoom, `${players} players: ${held.length} whispers`);
+      for (const id of Object.keys(state.members)) {
+        const theirs = state.log.filter((e) => whisperParties(e).includes(id));
+        for (const e of theirs.slice(-keep)) assert.ok(!dropped.has(e.id), `${players} players: ${id}'s newest ${keep} stay`);
+        const start = liveStart({ log: held, members: state.members }, { memberId: id, role: id === "dm1" ? "dm" : "player" });
+        assert.equal(start, theirs.at(-keep)!.id, `${players} players: ${id}'s live log starts at their own bound`);
+      }
+    }
+  });
+
+  test("a removed member keeps none, so each whisper stays by the members left, and one only those gone were party to goes", () => {
+    const state = roster(3);
+    state.log = [];
+    let n = 0;
+    for (let i = 0; i < 60; i++) state.log.push(whisper(++n, "p1", "dm1"));
+    for (let i = 0; i < 10; i++) state.log.push(whisper(++n, "p1", "p2"));
+    for (let i = 0; i < 5; i++) state.log.push(whisper(++n, "p1", "p3"));
+    const before = new Set(droppedLines(state.log, state.members));
+    // The DM's 10 oldest are outside both the DM's newest 50 and P1's, and P2's and P3's are each one's own newest.
+    assert.deepEqual([...before], state.log.slice(0, 10).map((e) => e.id).reverse());
+    const { p1: _p1, p3: _p3, ...left } = state.members;
+    const dropped = new Set(droppedLines(state.log, left));
+    const kept = state.log.filter((e) => !dropped.has(e.id));
+    assert.deepEqual(kept.map((e) => e.id), [...state.log.slice(10, 60), ...state.log.slice(60, 70)].map((e) => e.id), "the DM's newest 50 and P2's 10, and none of P3's");
+  });
+});
+

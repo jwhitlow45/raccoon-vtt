@@ -404,11 +404,19 @@ export const LIMITS = {
   /**
    * The room log's lines held in memory beside its newest 200 shared ones
    * (shared/logRings.ts): the DM's own lines, each held only while its JSON
-   * fits `dmLogLineBytes`, and each member's newest whispers.
+   * fits `dmLogLineBytes`, and each member's newest whispers: 50, or fewer
+   * in a room of more than 8 members, so a room keeps at most 400 however
+   * many join. They are measured like any line (server/rooms/sizeGuard.ts):
+   * 400 whispers of 1,000 plain letters are about 460 KB, half of what 200
+   * dice lines at their 4.5 KB took in the one ring before.
+   *
+   * These bounds decide which lines a logged op keeps and drops, so changing
+   * one changes how ops replay: it needs a new op version (shared/migrate.ts).
    */
   dmLogLines: 100,
   dmLogLineBytes: 1_536,
   whispersKept: 50,
+  whispersPerRoom: 400,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

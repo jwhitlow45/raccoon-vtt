@@ -234,7 +234,7 @@ export class Tx {
     }
     if (dm && serializedBytes(full) > LIMITS.dmLogLineBytes) return full;
     this.write(keys.log(full.id), full);
-    for (const id of droppedLines(this.collection("log"), full)) this.write(keys.log(id), null);
+    for (const id of droppedLines(this.collection("log"), this.state.members)) this.write(keys.log(id), null);
     return full;
   }
 

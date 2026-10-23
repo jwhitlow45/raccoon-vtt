@@ -1594,13 +1594,13 @@ function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): Lo
  * than where it starts reach them through the archive's pages.
  */
 function projectLiveLineCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
-  return inLiveLog(ctx.state.log, ctx.viewer, entry.id) ? projectLogEntryCtx(ctx, entry) : null;
+  return inLiveLog(ctx.state, ctx.viewer, entry.id) ? projectLogEntryCtx(ctx, entry) : null;
 }
 
 /** The live log as the viewer may read it: from where their live log starts, each line by its own rules. */
 function projectLiveLogCtx(ctx: Ctx): LogEntry[] {
   const log = ctx.state.log;
-  const start = liveStart(log, ctx.viewer);
+  const start = liveStart(ctx.state, ctx.viewer);
   let from = 0;
   if (start !== null) while (from < log.length && compareLogIds(log[from]!.id, start) < 0) from++;
   const out: LogEntry[] = [];

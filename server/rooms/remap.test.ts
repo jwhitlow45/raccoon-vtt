@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { compareLogIds } from "#shared/keys.ts";
-import { DM_LINE_BASE, dmNumbered, lineAudience } from "#shared/logRings.ts";
+import { DM_LINE_BASE, dmNumbered, lineAudience, MAX_LOG_LINES, whispersKept } from "#shared/logRings.ts";
+import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { stableStringify, visibleAssetIds } from "#shared/project.ts";
-import { AT, DM, P1, actor, apply, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
+import { AT, DM, P1, actor, apply, env, castAsk, castTable, character, companionBlock, customMonster, drawing, entry, imageRef, randomState, rng, room, srdImage, token, trap } from "#shared/testutil.ts";
 import type { AssetKind } from "../assets/kinds.ts";
+import { exportableState } from "./exportRoom.ts";
+import { assertWithinLimits } from "./importRoom.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
@@ -676,3 +680,31 @@ describe("traps in an import (docs/design-v1-traps.md 6.8)", () => {
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
 });
+
+describe("whispers through an export (shared/logRings.ts)", () => {
+  test("56 members who join, whisper the DM and leave stay within an import's limit, and the export imports", () => {
+    let state = room();
+    let seq = 0;
+    const run = (op: Op, who: { memberId: string; role: "dm" | "player" }) => {
+      const r = applyOp(state, op, who, env(++seq));
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    };
+    for (let i = 0; i < 56; i++) {
+      const id = `guest${i}`;
+      run({ t: "sys.memberJoin", member: { id, name: id, color: "#ff0000", kind: "player", createdAt: AT } }, DM);
+      for (let w = 0; w < 52; w++) run({ t: "log.whisper", to: ["dm1"], text: `${i}.${w}` }, { memberId: id, role: "player" });
+      run({ t: "sys.memberRemove", memberId: id }, DM);
+    }
+    assert.ok(state.log.length <= MAX_LOG_LINES, `${state.log.length} lines`);
+    // Only the DM, still on the roster, keeps any: their newest.
+    assert.equal(state.log.filter((e) => e.kind === "whisper").length, whispersKept(Object.keys(state.members).length));
+    const exported = parseRoomState(JSON.parse(JSON.stringify(exportableState(state, DM))));
+    assert.ok(exported.ok, exported.ok ? "" : exported.message);
+    const imported = remapState(exported.state, { assets: new Map() });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(imported)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assertWithinLimits(imported);
+  });
+});
+

@@ -1,6 +1,6 @@
 import { compareLogIds } from "./keys.ts";
 import { LIMITS } from "./limits.ts";
-import type { LogEntry, Viewer } from "./model.ts";
+import type { LogEntry, RoomState, Viewer } from "./model.ts";
 import { isWritable } from "./writable.ts";
 
 /**
@@ -17,10 +17,12 @@ import { isWritable } from "./writable.ts";
  *   `dmLogLineBytes` is left to the archive. So the size guard can leave
  *   every one of them out of its measure (server/rooms/sizeGuard.ts), and a
  *   hidden line never changes whether an op passes.
- * - Each member's whispers keep their newest `whispersKept`, and a whisper
- *   stays while it is among the newest of anyone it reaches. A viewer's
- *   live log holds only their own newest (liveStart), so whispers between
- *   others never change which of theirs it holds.
+ * - Each member's whispers keep their newest `whispersKept`, fewer in a room
+ *   of more than 8 members (whispersKept), and a whisper stays while it is
+ *   among the newest of a current member it reaches. A viewer's live log
+ *   holds only their own newest (liveStart), so whispers between others
+ *   never change which of theirs it holds. The roster is public, so a bound
+ *   that moves with it tells no one anything.
  *
  * One ring may reach back further than another, and the archive's pages
  * start before a live log's oldest line, so a ring reaching back past the
@@ -36,7 +38,18 @@ import { isWritable } from "./writable.ts";
 export const MAX_LOG = 200;
 
 /** The most lines the log holds with every ring full: what a room's state, an import's included, may hold. */
-export const MAX_LOG_LINES = MAX_LOG + LIMITS.dmLogLines + LIMITS.whispersKept * LIMITS.membersPerRoom;
+export const MAX_LOG_LINES = MAX_LOG + LIMITS.dmLogLines + LIMITS.whispersPerRoom;
+
+/**
+ * The whispers each member keeps in a room of `members` members: their
+ * newest `whispersKept`, or fewer once the room is large enough that every
+ * member's would pass `whispersPerRoom` together.
+ */
+export function whispersKept(members: number): number {
+  return Math.min(LIMITS.whispersKept, Math.floor(LIMITS.whispersPerRoom / Math.max(1, members)));
+}
+
+type Roster = Readonly<Record<string, unknown>>;
 
 /**
  * Where the DM's lines start counting within an op (Tx.addLog,
@@ -90,17 +103,18 @@ export function whisperParties(entry: Pick<LogEntry, "from" | "to">): string[] {
 }
 
 /**
- * The lines the log drops once `added` is in it (the log in id order, with
- * `added` already there): the oldest of `added`'s own audience past its
- * bound, and once the shared lines are full, every line older than the
- * oldest of them. A room from before the rings may hold more of an audience
- * than its bound, and its first new line of that audience brings it down.
+ * The lines the log drops (the log in id order, `members` the room's
+ * roster): each ring's oldest past its bound, and once the shared lines are
+ * full, every line older than the oldest of them. A line written or a
+ * member come or gone moves only the bounds it names, so a room whose rings
+ * already hold their bounds drops only from the ring that grew. A room from
+ * before the rings may hold more of an audience than its bound, and its
+ * first new line brings each down.
  */
-export function droppedLines(log: readonly LogEntry[], added: Pick<LogEntry, "kind" | "data">): string[] {
-  const audience = lineAudience(added);
-  const drop = new Set<string>(audience === "whisper" ? whispersOutside(log) : []);
-  if (audience !== "whisper") {
-    let over = -(audience === "dm" ? LIMITS.dmLogLines : MAX_LOG);
+export function droppedLines(log: readonly LogEntry[], members: Roster): string[] {
+  const drop = new Set<string>(whispersOutside(log, members));
+  for (const [audience, bound] of [["shared", MAX_LOG], ["dm", LIMITS.dmLogLines]] as const) {
+    let over = -bound;
     for (const e of log) if (lineAudience(e) === audience) over++;
     for (const e of log) {
       if (over <= 0) break;
@@ -121,8 +135,14 @@ export function droppedLines(log: readonly LogEntry[], added: Pick<LogEntry, "ki
   return [...drop];
 }
 
-/** The whispers among no one's newest: for each it reaches, at least `whispersKept` newer ones reach them too. */
-function whispersOutside(log: readonly LogEntry[]): string[] {
+/**
+ * The whispers among no current member's newest: for each member it reaches,
+ * at least `whispersKept` newer ones reach them too. A member no longer on
+ * the roster keeps none, so a whisper only they and those gone were party to
+ * goes, and the rest stay by the members left.
+ */
+function whispersOutside(log: readonly LogEntry[], members: Roster): string[] {
+  const keep = whispersKept(Object.keys(members).length);
   const held = new Map<string, number>();
   const out: string[] = [];
   for (let i = log.length - 1; i >= 0; i--) {
@@ -130,29 +150,34 @@ function whispersOutside(log: readonly LogEntry[]): string[] {
     if (e.kind !== "whisper") continue;
     let kept = false;
     for (const id of whisperParties(e)) {
+      if (!Object.hasOwn(members, id)) continue;
       const n = held.get(id) ?? 0;
       held.set(id, n + 1);
-      if (n < LIMITS.whispersKept) kept = true;
+      if (n < keep) kept = true;
     }
     if (!kept) out.push(e.id);
   }
   return out;
 }
 
-const starts = new WeakMap<readonly LogEntry[], Map<string, string | null>>();
+type LogRoom = Pick<RoomState, "log" | "members">;
+
+const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, Map<string, string | null>>>();
 
 /**
  * The oldest line of a viewer's live log, or null for all of it: the
  * oldest of a full ring of their own, their own whispers or, for a DM, the
- * DM lines, whichever is newer. It reads only lines the viewer gets, so
- * what their live log holds depends on nothing they never receive. A line
- * before it reaches them through the archive's pages, as any line older
- * than the live log does.
+ * DM lines, whichever is newer. It reads only lines the viewer gets and
+ * the roster, which every viewer holds, so what their live log holds
+ * depends on nothing they never receive. A line before it reaches them
+ * through the archive's pages, as any line older than the live log does.
  */
-export function liveStart(log: readonly LogEntry[], viewer: Viewer): string | null {
+export function liveStart(room: LogRoom, viewer: Viewer): string | null {
+  const { log, members } = room;
   const key = `${viewer.role}|${viewer.memberId}`;
-  const cached = starts.get(log)?.get(key);
+  const cached = starts.get(log)?.get(members)?.get(key);
   if (cached !== undefined) return cached;
+  const whisperBound = whispersKept(Object.keys(members).length);
   let start: string | null = null;
   let dm = 0;
   let whispers = 0;
@@ -161,38 +186,42 @@ export function liveStart(log: readonly LogEntry[], viewer: Viewer): string | nu
     const e = log[i]!;
     const audience = lineAudience(e);
     if (audience === "dm" && viewer.role === "dm" && ++dm === LIMITS.dmLogLines) start = e.id;
-    else if (audience === "whisper" && whisperParties(e).includes(viewer.memberId) && ++whispers === LIMITS.whispersKept) start = e.id;
+    else if (audience === "whisper" && whisperParties(e).includes(viewer.memberId) && ++whispers === whisperBound) start = e.id;
   }
-  if (!isWritable(log)) {
-    let byViewer = starts.get(log);
-    if (!byViewer) starts.set(log, (byViewer = new Map()));
+  if (!isWritable(log) && !isWritable(members)) {
+    let byRoster = starts.get(log);
+    if (!byRoster) starts.set(log, (byRoster = new WeakMap()));
+    let byViewer = byRoster.get(members);
+    if (!byViewer) byRoster.set(members, (byViewer = new Map()));
     byViewer.set(key, start);
   }
   return start;
 }
 
 /** Whether a line is in a viewer's live log by where it starts (liveStart). Each line's own rules still apply. */
-export function inLiveLog(log: readonly LogEntry[], viewer: Viewer, id: string): boolean {
-  const start = liveStart(log, viewer);
+export function inLiveLog(room: LogRoom, viewer: Viewer, id: string): boolean {
+  const start = liveStart(room, viewer);
   return start === null || compareLogIds(id, start) >= 0;
 }
 
 /**
- * The lines whose place in some viewer's live log a change of the log may
- * have moved, by moving where that log starts: every line of either log
- * between the start before and the start after (fan-out, design 7.3). A
- * line the change wrote or dropped is touched anyway.
+ * The lines whose place in some viewer's live log a change of the log or
+ * the roster may have moved, by moving where that log starts: every line
+ * of either log between the start before and the start after (fan-out,
+ * design 7.3). A line the change wrote or dropped is touched anyway.
  */
-export function linesPastStart(before: readonly LogEntry[], after: readonly LogEntry[], viewers: Iterable<Viewer>): string[] {
-  if (before === after) return [];
+export function linesPastStart(beforeRoom: LogRoom, afterRoom: LogRoom, viewers: Iterable<Viewer>): string[] {
+  const before = beforeRoom.log;
+  const after = afterRoom.log;
+  if (before === after && beforeRoom.members === afterRoom.members) return [];
   const out = new Set<string>();
   const done = new Set<string>();
   for (const viewer of viewers) {
     const key = `${viewer.role}|${viewer.memberId}`;
     if (done.has(key)) continue;
     done.add(key);
-    const a = liveStart(before, viewer);
-    const b = liveStart(after, viewer);
+    const a = liveStart(beforeRoom, viewer);
+    const b = liveStart(afterRoom, viewer);
     if (a === b) continue;
     const [lo, hi] = a === null ? [null, b!] : b === null ? [null, a] : compareLogIds(a, b) < 0 ? [a, b] : [b, a];
     for (const log of [before, after]) {

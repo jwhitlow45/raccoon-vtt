@@ -29,7 +29,7 @@ function connect(state: RoomState, viewer: Viewer, sceneId: string): Connection 
 function candidatesFor(before: RoomState, after: RoomState, touched: EntityKey[], global: boolean, connections: readonly Connection[] = []): Set<EntityKey> {
   if (global) return new Set([...allKeys(before), ...allKeys(after)]);
   const all = [...touched, ...changedSightKeys(before, after, watched(after, connections))];
-  const passed = linesPastStart(before.log, after.log, connections.map((c) => c.viewer)).map((id) => keys.log(id));
+  const passed = linesPastStart(before, after, connections.map((c) => c.viewer)).map((id) => keys.log(id));
   return new Set([...all, ...dependents(before, all), ...dependents(after, all), ...passed]);
 }
 

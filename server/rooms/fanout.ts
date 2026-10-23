@@ -50,8 +50,8 @@ function viewerClass(conn: Connection, state: RoomState): string {
 export function candidateKeys(batch: CommittedBatch, watched: Iterable<string> = [], viewers: Iterable<Viewer> = []): Set<EntityKey> {
   if (batch.global) return new Set([...allKeys(batch.before), ...allKeys(batch.after)]);
   const touched = [...batch.touched, ...changedSightKeys(batch.before, batch.after, watched)];
-  // A viewer's live log starts where a ring of their own fills (shared/logRings.ts), so the lines it passed over come and go.
-  const passed = linesPastStart(batch.before.log, batch.after.log, viewers).map((id) => keys.log(id));
+  // A viewer's live log starts where a ring of their own fills (shared/logRings.ts), which the roster bounds, so the lines it passed over come and go.
+  const passed = linesPastStart(batch.before, batch.after, viewers).map((id) => keys.log(id));
   return new Set([...touched, ...dependents(batch.before, touched), ...dependents(batch.after, touched), ...passed]);
 }
 
