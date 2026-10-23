@@ -1159,7 +1159,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
     };
     try {
-      // The trap's toast and its card come together, so the toast stands at the notices' top, over the card.
+      // The trap's toast and its card come together. With no moment to wait for the card's measure, the toast stays at the notices' top, over the card, as a card measured late leaves it (review LP18-TO-5 places it under the card otherwise).
+      await dm.evaluate(() => ((globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs = 0));
       await springs();
       const toast = dm.locator("[data-toast]").filter({ hasText: "Tripstone went off: Scout." }).first();
       await toast.waitFor();
@@ -1175,6 +1176,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await toast.locator("button").first().click();
       await whisper.click();
       await toast.waitFor({ state: "detached" });
+      await dm.evaluate(() => delete (globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs);
 
       // Under the trap's pane, open as a sheet, the trap goes off again. Then the phone turns sideways, where the pane is a card.
       await pickTool(dm, "Trap");
@@ -1199,6 +1201,44 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
       await setUp({ width: 390, height: 844, scale: 1 });
       await pickTool(dm, "Select");
+    }
+  });
+
+  test("fu23b-to5. at 390 x 844 a trap's toast that comes with its card, with no card in the column before, stands 8 px under that card once the column measures it, never over the card's buttons (review LP18-TO-5)", async () => {
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: 3, y: Math.floor(bounds.h / 2) };
+    const trapId = randomUUID();
+    const walker = randomUUID();
+    const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Stepstone", zone: { cells: [{ x: cell.x, y: cell.y, w: 1, h: 1 }] }, rig } });
+    await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: cell.x, y: cell.y - 3, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
+    try {
+      assert.equal((await column(dm)).cards.length, 0, "the column shows no card before the trap goes off");
+      await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
+      const toast = dm.locator("[data-toast]").filter({ hasText: "Stepstone went off: Scout." }).first();
+      const card = dm.getByRole("group", { name: "Stepstone went off" }).first();
+      await toast.waitFor();
+      await card.waitFor();
+      // Read as both show and again once nothing is moving, so a toast that slid under the card late, or moved again after, is caught.
+      for (const when of ["as they show", "after 900 ms"]) {
+        if (when !== "as they show") await dm.waitForTimeout(900);
+        const t = await rectOf(toast);
+        const c = await rectOf(card);
+        assert.ok(!intersects(t, c), `${when}, the trap's toast ${JSON.stringify(t)} covers its card ${JSON.stringify(c)}`);
+        assert.ok(Math.abs(t.top - (c.bottom + 8)) < 1.5, `${when}, the toast starts at ${t.top}, not 8 px under the card's foot at ${c.bottom}`);
+      }
+      // The phone folds the card to its header, whose tap unfolds it: every button it shows takes a tap, and so does the toast's Save and damage.
+      const buttons = [toast.getByRole("button", { name: "Save and damage", exact: true }), ...(await card.getByRole("button").all())];
+      assert.ok(buttons.length > 1, "the card shows no button");
+      for (const b of buttons) assert.ok(await wholeInReach(b), `${(await b.textContent()) ?? "a button"} is out of reach`);
+      await shots.take(dm, "dmphone-fu23b-trap-toast-under-its-card");
+    } finally {
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await ops.send({ t: "trap.delete", trapId });
+      await ops.send({ t: "token.delete", tokenId: walker });
+      await waitFor("the trap and the scout gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
     }
   });
 });

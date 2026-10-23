@@ -1109,10 +1109,16 @@ export function paneToastTop(input: { head: number | null; optionsTop: number })
  */
 export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean };
 
-/** The toasts' places by id, the pane header's last place, whether a pane stood on the render before, and the toasts a turn of the screen is placing under the column's card. */
-export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean; turning: ReadonlySet<number> };
+/**
+ * The toasts' places by id, the pane header's last place, whether a pane
+ * stood on the render before, the toasts a turn of the screen is placing
+ * under the column's card, and the toasts at the notices' top that came
+ * with no card measured to start under (`awaitCard`), which a card the
+ * column measures while they are new still takes under it.
+ */
+export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean; turning: ReadonlySet<number>; awaitCard: ReadonlySet<number> };
 
-export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false, turning: new Set() };
+export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false, turning: new Set(), awaitCard: new Set() };
 
 /** A place in the toasts' own layer, rather than in the notices' stack or the sheet. */
 export function inToastLayer(place: ToastPlace | undefined): boolean {
@@ -1152,15 +1158,31 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * screen turns leaves its toasts to be placed anew (review LP18-TO-3). A
  * toast leaves the layer only when a pane stops standing as the screen
  * turns (review LP18-TO-3), never leaves the sheet, and leaves the notices
- * only for a pane's header or a turned screen's card.
+ * only for a pane's header, a turned screen's card or a card that came
+ * with it.
+ *
+ * A trap's toast comes in the same render as its card, before the column
+ * has measured the card, so it starts at the notices' top, over that card
+ * (review LP18-TO-5). So a toast that starts there with no card to start
+ * under, while it is still new (`recent`, the ids that came moments ago),
+ * takes its place again, as if it came now, on the first render that has
+ * a place under the card (`low`), as the turn's rule does. Once it is
+ * placed anew, or no longer new, a card moves it no more.
  */
-export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean; mapFoot?: number | null }): ToastPlaces {
+export function nextToastPlaces(
+  was: ToastPlaces,
+  now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean; mapFoot?: number | null; recent?: ReadonlySet<number> },
+): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
   const paneLast = now.pane ?? was.paneLast;
   const places = new Map<number, ToastPlace>();
   const turned = now.turned === true;
   const turning = new Set(turned ? now.ids.filter((id) => was.turning.has(id)) : []);
   const underCard = turned && now.low !== null && now.layer && !now.slot && !now.paneStands;
+  // A card can take a toast under it only in the layer, with no sheet's slot and no pane standing.
+  const cardRoom = now.layer && !now.slot && !now.paneStands;
+  const recent = now.recent ?? new Set<number>();
+  const awaitCard = new Set(now.ids.filter((id) => was.awaitCard.has(id) && recent.has(id)));
   for (const id of now.ids) {
     const place = was.places.get(id);
     if (place === undefined) continue;
@@ -1169,6 +1191,7 @@ export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[];
       turning.add(id);
       continue;
     }
+    if (cardRoom && now.low !== null && place === "map" && awaitCard.has(id)) continue;
     // A pane that stops standing as the screen turns is a card now, or gone, and its header's last place was read on the screen before the turn, perhaps above this one: its toasts take their places anew (review LP18-TO-3).
     if (freeze && turned && place === "pane") continue;
     if (now.pane !== null && (inToastLayer(place) || (place === "map" && now.layer))) places.set(id, "pane");
@@ -1185,8 +1208,10 @@ export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[];
     places.set(id, at);
     // A toast that comes while the turn lasts takes the card's place as it reads now, which may be the card as it stood before, or joins a stack that does: it moves with that stack as the column measures again, rather than holding it there (review FU22B-ASTRA-03).
     if (underCard && typeof at === "object" && at.column) turning.add(id);
+    if (at === "map" && now.low === null && cardRoom && recent.has(id)) awaitCard.add(id);
   }
-  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands, turning };
+  for (const id of awaitCard) if (places.get(id) !== "map") awaitCard.delete(id);
+  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands, turning, awaitCard };
 }
 
 /**

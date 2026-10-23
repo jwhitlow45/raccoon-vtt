@@ -1522,6 +1522,8 @@ function Banner() {
  * meets the column's first card is placed again as if it came now, under
  * that card, and again as the column measures the card anew while the
  * turn lasts (review LP17-AW-1), so it never covers the card's buttons.
+ * So is a toast that came with its card, as a trap's does, once the
+ * column measures that card (review LP18-TO-5).
  *
  * Each toast over the map renders through a portal into a host of its
  * own, an element with no box, which this moves into the notices' stack
@@ -1560,7 +1562,10 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   const placed = useRef<ToastPlaces>(NO_TOAST_PLACES);
   // The foot of the toasts at the notices' top as last drawn, in the chrome's px, so a toast never starts under the column's card over them (review LP18-TO-4).
   const mapFoot = useRef<number | null>(null);
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current });
+  // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
+  const cardMs = cardWaitMs();
+  const recent = new Set(showing.filter((t) => Date.now() - t.shownAt < cardMs).map((t) => t.id));
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;
@@ -1642,6 +1647,20 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
 
 /** How long after the screen turns a toast at the top of the notices may still be placed again under the column's card. */
 const TURN_MS = 600;
+
+/** How long after a toast shows at the top of the notices, with no card to start under, a card the column measures may still take it under that card, as long as a turn's. */
+const CARD_MS = 600;
+
+/**
+ * CARD_MS, or the page's `rvttToastCardMs` where a run sets it: a test
+ * hook, so e2e/dmphone.e2e.ts can leave a trap's toast at the notices'
+ * top, as a card measured late leaves it, to see what comes after it
+ * there (review LP18-TO-4). Nothing in the app sets it.
+ */
+function cardWaitMs(): number {
+  const hook = (globalThis as { rvttToastCardMs?: unknown }).rvttToastCardMs;
+  return typeof hook === "number" && hook >= 0 ? hook : CARD_MS;
+}
 
 /** The widest a toast stands, and a stack that scrolls with it, so the map either side still takes a tap. */
 const TOAST_MAX_PX = 520;

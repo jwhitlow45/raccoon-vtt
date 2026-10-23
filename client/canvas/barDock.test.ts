@@ -1194,7 +1194,7 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
   });
 
   test("a toast that would start under the column's card while a toast at the notices' top reaches down past it joins that toast below, so the two never overlap (review LP18-TO-4)", () => {
-    // The trap's toast came with its card, at the notices' top, 68 to 174. The card ends at 123, so a stack under it would start at 131.
+    // A trap's toast whose card the column measured too late to take it, at the notices' top, 68 to 174. The card ends at 123, so a stack under it would start at 131.
     let s = step(NO_TOAST_PLACES, [1]);
     assert.equal(s.places.get(1), "map");
     s = step(s, [1, 2], { low: 131, mapFoot: 174 });
@@ -1215,6 +1215,104 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     let s = step(NO_TOAST_PLACES, [1]);
     s = step(s, [1], { low: 250 });
     assert.equal(s.places.get(1), "map");
+  });
+
+  test("a toast that came with the column's card, before the column measured it, takes its place under the card once the column does, and then keeps it (review LP18-TO-5)", () => {
+    const fresh = new Set([1, 2]);
+    // The trap's toast and its card in one render: no place under the card yet.
+    let s = step(NO_TOAST_PLACES, [1], { recent: fresh });
+    assert.equal(s.places.get(1), "map");
+    assert.deepEqual([...s.awaitCard], [1]);
+    s = step(s, [1], { recent: fresh, low: 131 });
+    assert.deepEqual(s.places.get(1), { low: 131, column: true });
+    assert.equal(s.awaitCard.size, 0);
+    // Placed, a card that moves moves it no more, and a whisper after it joins it below.
+    s = step(s, [1], { recent: fresh, low: 160 });
+    assert.deepEqual(s.places.get(1), { low: 131, column: true });
+    s = step(s, [1, 2], { recent: fresh, low: 160 });
+    assert.deepEqual(s.places.get(2), { low: 131, column: true });
+    // Two that came before the card was measured go under it together, in order.
+    let t = step(NO_TOAST_PLACES, [1], { recent: fresh });
+    t = step(t, [1, 2], { recent: fresh });
+    t = step(t, [1, 2], { recent: fresh, low: 131 });
+    assert.deepEqual(t.places.get(1), { low: 131, column: true });
+    assert.deepEqual(t.places.get(2), { low: 131, column: true });
+  });
+
+  test("a card measured once the toast is no longer new moves it no more, nor one where no card can take it", () => {
+    const fresh = new Set([1]);
+    let s = step(NO_TOAST_PLACES, [1], { recent: fresh });
+    s = step(s, [1], { recent: new Set(), low: 131 });
+    assert.equal(s.places.get(1), "map");
+    s = step(s, [1], { recent: fresh, low: 131 });
+    assert.equal(s.places.get(1), "map", "it waits for a card only from when it came");
+    // A toast that came while a pane stood, in the very short sheet or with no layer never waits for a card.
+    for (const at of [{ paneStands: true }, { slot: true }, { layer: false }] as const) {
+      let t = step(NO_TOAST_PLACES, [1], { recent: fresh, ...at });
+      assert.equal(t.awaitCard.size, 0, JSON.stringify(at));
+      t = step(t, [1], { recent: fresh, low: 131, ...("slot" in at ? at : {}), ...("layer" in at ? at : {}) });
+      assert.equal(inToastLayer(t.places.get(1)), false, JSON.stringify(at));
+    }
+    // A toast at the notices' top that came before and reaches past the card keeps the new one with it there (review LP18-TO-4).
+    let u = step(NO_TOAST_PLACES, [1]);
+    u = step(u, [1, 2], { recent: new Set([2]) });
+    u = step(u, [1, 2], { recent: new Set([2]), low: 131, mapFoot: 226 });
+    assert.equal(u.places.get(2), "map");
+  });
+
+  test("random renders move a toast from the notices' top to the layer only for a pane's header, or once, while new, for a card measured after it came with none", () => {
+    let seed = 23;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let run = 0; run < 400; run++) {
+      let s = NO_TOAST_PLACES;
+      let ids: number[] = [];
+      let next = 1;
+      let paneStands = false;
+      // Each toast's renders left while new, and whether it came where a card could take it with none measured.
+      const left = new Map<number, number>();
+      const cameBare = new Set<number>();
+      const moved = new Set<number>();
+      for (let render = 0; render < 40; render++) {
+        const roll = random();
+        if (roll < 0.3) {
+          ids = [...ids, next];
+          left.set(next, 1 + Math.floor(random() * 4));
+          next++;
+        } else if (roll < 0.4 && ids.length > 0) {
+          const gone = ids[Math.floor(random() * ids.length)]!;
+          ids = ids.filter((id) => id !== gone);
+        } else if (roll < 0.47) paneStands = !paneStands;
+        const pane = paneStands && random() < 0.6 ? 100 + Math.floor(random() * 400) : null;
+        const slot = random() < 0.08;
+        const layer = random() < 0.95;
+        const low = paneStands || random() < 0.5 ? null : 120 + Math.floor(random() * 100);
+        const recent = new Set(ids.filter((id) => (left.get(id) ?? 0) > 0));
+        const now: Now = { ids, pane, paneStands, low, layer, slot, recent, ...(random() < 0.3 ? { mapFoot: 60 + Math.floor(random() * 200) } : {}) };
+        const was = s;
+        s = nextToastPlaces(was, now);
+        const label = `run ${run}, render ${render}`;
+        for (const id of ids) {
+          assert.ok(s.places.has(id), `${label}: toast ${id} has no place`);
+          const from = was.places.get(id);
+          const to = s.places.get(id);
+          if (from === undefined) {
+            if (to === "map" && low === null && layer && !slot && !paneStands) cameBare.add(id);
+            continue;
+          }
+          if (inToastLayer(from)) assert.ok(inToastLayer(to), `${label}: toast ${id} left the layer`);
+          if (from === "map" && inToastLayer(to) && pane === null) {
+            assert.ok(cameBare.has(id) && recent.has(id), `${label}: toast ${id} moved under a card it did not come with`);
+            assert.ok(!moved.has(id), `${label}: toast ${id} moved under a card twice`);
+            assert.ok(low !== null && layer && !slot && !paneStands, `${label}: toast ${id} moved with no card to go under`);
+            moved.add(id);
+          }
+        }
+        const tops = new Set(ids.filter((id) => inToastLayer(s.places.get(id))).map((id) => JSON.stringify(s.places.get(id))));
+        assert.ok(tops.size <= 1, `${label}: ${tops.size} stacks in the layer`);
+        for (const id of s.awaitCard) assert.ok(recent.has(id) && s.places.get(id) === "map", `${label}: toast ${id} waits for a card while old or off the notices' top`);
+        for (const [id, n] of left) left.set(id, n - 1);
+      }
+    }
   });
 
   test("with no layer to go to, a toast at the notices' top stays there under a pane", () => {
