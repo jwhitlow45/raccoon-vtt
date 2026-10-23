@@ -745,37 +745,48 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await ops.send({ t: "encounter.end" });
   });
 
-  test("lp2-2b. a walking ruler keeps its total while its walk is searched, on a slowed page", async () => {
+  test("lp2-2b. a walking ruler keeps its total while its walk is searched, and the search shows on its line and ends", async () => {
     // The DM's own ruler, which stays on the DM's screen, so no frame of it reaches the player.
     await dm.getByRole("button", { name: "Ruler", exact: true }).click();
     await pickOption(dm, "Ruler", "Measure", "Walking");
-    // A slower page, so a walk round the walls takes more than a frame's share of route work and searches over several frames.
-    const cdp = await dmContext.newCDPSession(dm);
-    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+    const line = dm.getByRole("toolbar", { name: "Ruler options" }).locator("[data-options-line]");
+    // What each frame shows: the line marked while a walk is searched, the board's total, and its wait.
+    await dm.evaluate(() => {
+      type Node = { text(): string; isVisible(): boolean };
+      const g = globalThis as unknown as {
+        Konva: { stages: { find(selector: string): Node[] }[] };
+        document: { querySelector(s: string): { hasAttribute(name: string): boolean } | null };
+        requestAnimationFrame(cb: () => void): number;
+        lp2Frames: { finding: boolean; walk: boolean; waiting: boolean }[];
+        lp2Stop: boolean;
+      };
+      g.lp2Frames = [];
+      g.lp2Stop = false;
+      const read = () => {
+        const texts = g.Konva.stages[0]!.find("Text")
+          .filter((t) => t.isVisible())
+          .map((t) => t.text());
+        g.lp2Frames.push({
+          finding: g.document.querySelector("[data-options-line]")?.hasAttribute("data-finding") === true,
+          walk: texts.some((t) => t.startsWith("Walking ")),
+          waiting: texts.includes("Finding the way…"),
+        });
+        if (!g.lp2Stop) g.requestAnimationFrame(read);
+      };
+      g.requestAnimationFrame(read);
+    });
+    const at = (x: number, y: number) => pagePoint(dm, BOUNDS, { x: x + 0.5, y: y + 0.5 });
+    const start = await at(13, 3);
+    await dm.mouse.move(start.x, start.y);
+    // For the drag only, the page's clock runs 20 times fast, so a frame's share of route work (features/movement/routeWork.ts) runs out
+    // after a sliver of real work and every walk is searched over several frames, on any machine.
+    await dm.evaluate(() => {
+      const perf = (globalThis as unknown as { performance: { now(): number } }).performance;
+      const real = perf.now.bind(perf);
+      const t0 = real();
+      perf.now = () => t0 + (real() - t0) * 20;
+    });
     try {
-      // What the board shows at each frame: the total, or the wait.
-      await dm.evaluate(() => {
-        type Node = { text(): string; isVisible(): boolean };
-        const g = globalThis as unknown as {
-          Konva: { stages: { find(selector: string): Node[] }[] };
-          requestAnimationFrame(cb: () => void): number;
-          lp2Frames: { walk: boolean; finding: boolean }[];
-          lp2Stop: boolean;
-        };
-        g.lp2Frames = [];
-        g.lp2Stop = false;
-        const read = () => {
-          const texts = g.Konva.stages[0]!.find("Text")
-            .filter((t) => t.isVisible())
-            .map((t) => t.text());
-          g.lp2Frames.push({ walk: texts.some((t) => t.startsWith("Walking ")), finding: texts.includes("Finding the way…") });
-          if (!g.lp2Stop) g.requestAnimationFrame(read);
-        };
-        g.requestAnimationFrame(read);
-      });
-      const at = (x: number, y: number) => pagePoint(dm, BOUNDS, { x: x + 0.5, y: y + 0.5 });
-      const start = await at(13, 3);
-      await dm.mouse.move(start.x, start.y);
       await dm.mouse.down();
       // Round the room and through the wall's door, up onto the platform and back, so each stop's walk is searched anew.
       for (const [x, y] of [
@@ -791,22 +802,31 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         await dm.mouse.move(p.x, p.y, { steps: 6 });
         await dm.waitForTimeout(120);
       }
-      await dm.waitForTimeout(400);
-      const frames = await dm.evaluate(() => {
-        const g = globalThis as unknown as { lp2Frames: { walk: boolean; finding: boolean }[]; lp2Stop: boolean };
-        g.lp2Stop = true;
-        return g.lp2Frames;
-      });
-      await shots.take(dm, "lp2-2b-walking-ruler");
       await dm.mouse.up();
-      const first = frames.findIndex((f) => f.walk);
-      assert.ok(first >= 0, "the walking ruler never read a total");
-      const blank = frames.slice(first).filter((f) => !f.walk && !f.finding).length;
-      assert.equal(blank, 0, `the total went blank in ${blank} of ${frames.length - first} frames while the walk was searched`);
     } finally {
-      await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-      await cdp.detach();
+      // The page's own clock again: the instance's override goes, and the prototype's shows through.
+      await dm.evaluate(() => delete (globalThis as unknown as { performance: { now?: unknown } }).performance.now);
     }
+    // The last walk is found, and the line no longer says it is searching.
+    await waitFor("the walk found", async () => ((await line.getAttribute("data-finding")) === null ? true : null));
+    await dm.waitForTimeout(200);
+    const frames = await dm.evaluate(() => {
+      const g = globalThis as unknown as { lp2Frames: { finding: boolean; walk: boolean; waiting: boolean }[]; lp2Stop: boolean };
+      g.lp2Stop = true;
+      return g.lp2Frames;
+    });
+    await shots.take(dm, "lp2-2b-walking-ruler");
+    assert.ok(
+      frames.some((f) => f.finding),
+      "no frame showed a walk being searched, so nothing here was tested",
+    );
+    assert.equal(frames.at(-1)?.finding, false, "the search ended");
+    const first = frames.findIndex((f) => f.walk);
+    assert.ok(first >= 0, "the walking ruler never read a total");
+    const searchedAfter = frames.slice(first).filter((f) => f.finding).length;
+    assert.ok(searchedAfter > 0, "no walk was searched once the ruler had a total");
+    const blank = frames.slice(first).filter((f) => !f.walk && !f.waiting).length;
+    assert.equal(blank, 0, `the total went blank in ${blank} of ${frames.length - first} frames, ${searchedAfter} of them searching`);
     await pickOption(dm, "Ruler", "Measure", "Straight");
     await dm.getByRole("button", { name: "Select", exact: true }).click();
   });

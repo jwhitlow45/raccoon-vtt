@@ -250,6 +250,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
       tool="Ruler"
       line={{
         tone: stops.length > 1 ? "reading" : "hint",
+        finding: walked?.searching === true,
         content: (
           <>
             {info}

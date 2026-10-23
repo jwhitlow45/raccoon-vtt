@@ -204,7 +204,8 @@ export type Slot = {
 /** The line's tone (8): a hint, a reading, a warning, or a status such as "Grid saved". */
 export type LineTone = "hint" | "reading" | "warning" | "status";
 
-export type StripLine = { tone: LineTone; content: ReactNode };
+/** `finding`: the reading is being worked out, such as a walking ruler's search, marked `data-finding` on the line so a run can see the search happen. */
+export type StripLine = { tone: LineTone; content: ReactNode; finding?: boolean };
 
 /**
  * A tool's options as one row and its line (6): the slots that fit
@@ -749,6 +750,7 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
       // How Room's measure reads it (pages/Room.tsx useOptionsBox): only a line shown on one line sets its reserve.
       data-options-line={props.hidden ? "hidden" : open ? "open" : "shown"}
       data-options-reading={reading ? "" : undefined}
+      data-finding={line?.finding ? "" : undefined}
       style={props.hidden ? VISUALLY_HIDDEN : look}
     >
       {pill ? (
