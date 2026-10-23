@@ -520,6 +520,48 @@ export function walkText(m: WalkMeasure): string {
   return m.extra ? `Walking ${formatFeet(m.totalFt)}\n${m.extra}` : `Walking ${formatFeet(m.totalFt)}`;
 }
 
+/** The last walk a ruler finished, and that ruler (heldKey), kept while a later walk of it searches (walkShown). */
+export type HeldWalk = { ruler: string; walk: WalkMeasure } | null;
+
+/**
+ * Which ruler a held walk belongs to: its id and where it starts. A drag
+ * that does not carry on from the last stop starts the ruler afresh under
+ * the same id (ruler.ts dragTo), so the start tells a new ruler from the
+ * old one (review LP2L2-OPUS-9).
+ */
+export function heldKey(id: string, stops: readonly RulerStop[]): string {
+  const first = stops[0];
+  return first ? `${id}|${first.x},${first.y}` : id;
+}
+
+/**
+ * The held walk after a render that measured `m` for `ruler`: a finished
+ * walk is held, a searching one keeps the walk held for the same ruler, and
+ * nothing measured (the ruler cleared or kept, a Straight measure, a single
+ * stop) or another ruler (heldKey) lets it go. So a new ruler never reads
+ * the last one's distance while its own first walk searches (review
+ * LP2L2-ASTRA-1).
+ */
+export function nextHeld(prev: HeldWalk, m: WalkMeasure | null, ruler: string): HeldWalk {
+  if (!m) return null;
+  if (!m.searching) return { ruler, walk: m };
+  return prev?.ruler === ruler ? prev : null;
+}
+
+/**
+ * What a walking ruler's total and the Ruler's line say while its walk is
+ * worked out, as a drag's label does (docs/design-v1-look-pass-2.md D16): a
+ * walk still searching keeps the last walk's reading, and only once the
+ * search has run past the shared loading delay (`slow`) does it wait grey,
+ * "Finding the way…". So a ruler dragged over a large map never blinks.
+ * `held` is the last walk this ruler finished (nextHeld), null before its first.
+ */
+export function walkShown(m: WalkMeasure, held: WalkMeasure | null, slow: boolean): { reading: WalkMeasure | null; finding: boolean } {
+  if (!m.searching) return { reading: m, finding: false };
+  if (slow) return { reading: null, finding: true };
+  return { reading: held, finding: false };
+}
+
 const STORE_KEY = "rvtt.ruler.measure";
 
 /** The ruler's Measure choice as this device remembers it, Straight when it remembers nothing or cannot (3.3). */

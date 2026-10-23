@@ -1,7 +1,7 @@
-import { useLayoutEffect, useMemo, useReducer } from "react";
+import { useLayoutEffect, useMemo, useReducer, useRef } from "react";
 import { WorkBudget } from "#shared/rules/walk.ts";
 import { BOARD_WORK } from "../movement/boardWork.ts";
-import { measureWalk, walkJob, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
+import { measureWalk, nextHeld, walkJob, type HeldWalk, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 
 /**
  * A walking ruler's walk, worked through the board's route work
@@ -32,4 +32,17 @@ export function useWalkMeasure(input: WalkInput | null, live = false): WalkMeasu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input?.view, input?.sceneId, input?.stops, input?.viewer.role, input?.everything, searching]);
   return m;
+}
+
+/**
+ * The last walk `ruler` (walkRuler.ts heldKey) finished, kept while a
+ * later walk of it searches (walkRuler.ts nextHeld, walkShown). `m` is what
+ * this render measured, null when it measured nothing, which lets the held
+ * walk go.
+ */
+export function useHeldWalk(m: WalkMeasure | null, ruler: string): WalkMeasure | null {
+  const held = useRef<HeldWalk>(null);
+  // Read and written in the render on purpose: it follows `m` and never asks for a render of its own.
+  held.current = nextHeld(held.current, m, ruler);
+  return held.current?.walk ?? null;
 }

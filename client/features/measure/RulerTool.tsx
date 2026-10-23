@@ -26,9 +26,8 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { useHeldWalk, walkShown } from "./RulerLayer.tsx";
-import { useWalkMeasure } from "./useWalkMeasure.ts";
-import { saveWalk, savedWalk, walkText } from "./walkRuler.ts";
+import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
+import { heldKey, saveWalk, savedWalk, walkShown, walkText } from "./walkRuler.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -200,7 +199,7 @@ const MEASURES = [
  * and what terrain added (docs/design-v1-movement.md 3.3). While a walk is
  * searching the line keeps the last walk, and past the shared loading
  * delay it says "Finding the way…" beside a spinner, as Loading does
- * (RulerLayer.tsx walkShown).
+ * (walkRuler.ts walkShown).
  */
 function RulerOptions(props: { role: "dm" | "player" }) {
   const tool = useScoped(rulerSlot);
@@ -215,7 +214,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   if (stops.length === 1) info = "Tap or drag to the next point.";
   const walked = useWalkMeasure(walk && view && tool.activeCtx && stops.length > 1 ? { view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share } : null, true);
   const slow = useDelayed(walked?.searching === true);
-  const held = useHeldWalk(walked);
+  const held = useHeldWalk(walked, heldKey(ruler?.id ?? "", stops));
   const shown = walked ? walkShown(walked, held, slow) : null;
   // The diagonal rule follows a reading only, never the hint or the wait.
   let reading = false;
