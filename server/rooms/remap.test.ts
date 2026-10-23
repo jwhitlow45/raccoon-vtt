@@ -806,6 +806,32 @@ describe("an imported log (importRoom)", () => {
     reachable(out, archive, "m-dm", "dm", "full of notes");
   });
 
+  test("a file's lines outside the measures lose their part readers and fit their bound, however many readers it lists, and all stay in the live log", () => {
+    const state = room();
+    state.tokens.pet = token("pet", { visibility: "dm", ownerIds: ["p1"] });
+    const readers = Array.from({ length: LIMITS.membersPerRoom }, (_, i) => `r${String(i).padStart(63, "0")}`);
+    const parts = { exact: readers, label: readers, to: readers, rolls: Array.from({ length: LIMITS.diceRollsPerOp }, () => readers) };
+    const hp = { type: "hp" as const, tokenId: "pet", change: "damage" as const, amount: 1 };
+    state.log = [
+      ...Array.from({ length: LIMITS.dmLogLines - 1 }, (_, i) => ({ id: `${i + 1}:900000`, at: AT, kind: "event" as const, data: { type: "encounter" as const, action: "start" as const }, parts })),
+      { id: "200:802000", at: AT, kind: "event", to: ["p1"], copyOf: "200:900000", data: hp, parts },
+      { id: "200:900000", at: AT, kind: "event", data: hp, parts },
+      { id: "201:0", at: AT, kind: "whisper", from: "p1", to: ["dm1"], text: "psst", data: hp, parts },
+    ];
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.ok(serializedBytes(parsed.state.log[0]) > 4 * LIMITS.apartLineBytes, "each line of the file is far past the bound");
+    const { room: out, archive } = imported(parsed.state);
+    assert.equal(out.log.length, archive.length, "the rings hold every line");
+    for (const e of out.log) {
+      assert.equal(e.parts, undefined, e.id);
+      assert.ok(serializedBytes(e) <= LIMITS.apartLineBytes, e.id);
+    }
+    assert.deepEqual(out.log.find((e) => e.kind === "whisper"), { id: "0:0", at: AT, kind: "whisper", from: "m-p1", to: ["m-dm"], text: "psst" }, "a whisper is who it is from and for and what it says");
+    assert.ok(serializedBytes(out) - measuredStateBytes(out) <= (LIMITS.dmLogLines + 2) * LIMITS.apartLineBytes);
+    assertWithinLimits(out);
+  });
+
   test("a member's whispers past their bound keep their newest, and the rest are on Show older's pages", () => {
     const state = room();
     state.log = Array.from({ length: 120 }, (_, i) => (i % 3 === 0 ? chat(`${i + 1}:0`) : { id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: "p1", to: ["dm1"], text: `w${i}` }));

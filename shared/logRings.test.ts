@@ -375,6 +375,15 @@ describe("the log's rings (shared/logRings.ts)", () => {
     assert.deepEqual(stray, { id: "4:900000", at: AT, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } });
   });
 
+  test("a line outside the measures keeps no part readers, and one nothing else brings inside its bound keeps only its place", () => {
+    const teleport: LogEvent = { type: "teleport", tokenId: "gob", past: "wall" };
+    assert.deepEqual(cutLine({ id: "4:900000", at: AT, kind: "event", data: teleport, parts: { exact: ["p1"] } }), { id: "4:900000", at: AT, kind: "event", data: teleport }, "however small the line");
+    const copy: LogEntry = { id: "4:802000", at: AT, kind: "chat", from: "dm1", to: ["p1"], copyOf: "4:900001", text: "x".repeat(9000), data: teleport };
+    assert.deepEqual(cutLine(copy), { id: "4:802000", at: AT, kind: "chat", from: "dm1", to: ["p1"], copyOf: "4:900001" });
+    const whisper: LogEntry = { id: "5:0", at: AT, kind: "whisper", from: "p1", to: ["dm1"], text: "x".repeat(9000) };
+    assert.deepEqual(cutLine(whisper), { id: "5:0", at: AT, kind: "whisper", from: "p1", to: ["dm1"] }, "a whisper keeps who it is from and for, so its rings still hold it");
+  });
+
   test("an op's lines leave memory a ring at a time, so a lookup of them reads the archive once one the viewer reads may have gone", () => {
     const pet: Line = { kind: "event", data: { type: "hp", tokenId: "pet", change: "damage", amount: 1 } };
     let state = write(base(), [{ kind: "chat", from: "dm1", text: "first" }], 1).state;

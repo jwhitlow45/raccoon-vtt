@@ -551,12 +551,15 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   let shared = 0;
   for (const e of state.log) {
     let id: string;
-    const { copyOf, ...rest } = e;
-    const next: LogEntry = rest;
+    const audience = lineAudience(e);
+    const apart = audience !== "shared" || dmLineIds.has(e.id);
+    const { copyOf, parts, ...rest } = e;
+    // A whisper holds who it is from and for and what it says, as log.whisper writes it.
+    const next: LogEntry = e.kind === "whisper" ? { id: e.id, at: e.at, kind: e.kind, ...(e.from !== undefined ? { from: e.from } : {}), ...(e.to !== undefined ? { to: e.to } : {}), ...(e.text !== undefined ? { text: e.text } : {}) } : rest;
     if (e.from !== undefined) next.from = members.of(e.from);
     if (e.to !== undefined) next.to = e.to.map((member) => members.of(member));
-    if (e.parts !== undefined) next.parts = remapParts(e.parts, memberList);
-    const audience = lineAudience(e);
+    // Only a shared line has part readers (LineParts).
+    if (parts !== undefined && !apart) next.parts = remapParts(parts, memberList);
     if (dmLineIds.has(e.id)) id = dmLineIds.get(e.id)!;
     else if (audience === "party") {
       const reader = next.to![0];
@@ -569,13 +572,13 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (copyOf !== undefined && dmLines.has(copyOf)) next.copyOf = dmLineIds.get(copyOf)!;
     } else id = `0:${shared++}`;
     next.id = id;
-    if (e.data) {
-      const data = event(e.data);
+    if (next.data) {
+      const data = event(next.data);
       if (!data) continue;
       next.data = data;
     }
-    // Each DM line and copy is cut to its bound, as the reducer cuts them, so every ring keeps its bytes.
-    out.log.push(dmLineIds.has(e.id) || audience === "party" ? cutLine(next) : next);
+    // Each line outside the measures is cut to its bound, as the reducer cuts them, so every ring keeps its bytes.
+    out.log.push(apart ? cutLine(next) : next);
   }
   out.log.sort((a, b) => compareLogIds(a.id, b.id));
   remapTraps(state, out, { scenes, tokens, stampIds, lightIds, newId, dmLineIds, sharedLines: shared });

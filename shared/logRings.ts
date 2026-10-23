@@ -26,7 +26,8 @@ import { isWritable } from "./writable.ts";
  * Each member's whispers and each player's copies keep their newest,
  * bounded by count and by bytes (memberRing), each a share of the room's
  * by the roster's size. A DM line and a copy are cut to `apartLineBytes`
- * when written (cutLine), and the longest whisper fits it. None of these
+ * when written (cutLine), and the longest whisper fits it. An import's
+ * lines outside the measures are cut the same way. None of these
  * lines is in the room's measures (server/rooms/sizeGuard.ts), so none
  * decides whether an op passes, and their bounds keep them to about 2 MiB.
  *
@@ -200,38 +201,49 @@ export function countedApart(id: string): boolean {
 }
 
 /**
- * A DM line or a party line's copy cut to `apartLineBytes`, as trap lines
- * are cut when written (shared/reducer/traps.ts), so it keeps its place in
- * the live log with no hole: text no event line uses first, then what only
- * a take-back needs (an HP line's `revert`), a rolled answer's dice and
- * what it changed, and a dice line's rolls from the end. The longest line
- * an op writes, a dice line of 20 rolls at about 4.5 KB, fits whole, so in
- * play only a take-back's record of many effects is cut, and that change
- * can no longer be taken back. What is left is bounded by the protocol, far
- * inside.
+ * A line outside the measures cut to `apartLineBytes`, as trap lines are cut
+ * when written (shared/reducer/traps.ts), so it keeps its place in the live
+ * log with no hole. Only a shared line has part readers (LineParts), so
+ * those go first, whatever the line's size. Then text no event line uses,
+ * what only a take-back needs (an HP line's `revert`), a rolled answer's
+ * dice and what it changed, and a dice line's rolls from the end. The
+ * longest line an op writes, a dice line of 20 rolls at about 4.5 KB, fits
+ * whole, as does the longest whisper, so in play only a take-back's record
+ * of many effects is cut, and that change can no longer be taken back.
+ *
+ * A line an import brings may still not fit: the state schema bounds each
+ * field, not the line. Such a line keeps only its place: its id, time and
+ * kind, who it is from and for, and the DM line it copies, which the
+ * schema bounds well inside it.
  */
 export function cutLine(line: LogEntry): LogEntry {
   const fits = (e: LogEntry) => serializedBytes(e) <= LIMITS.apartLineBytes;
-  if (fits(line)) return line;
   let out = line;
+  if (out.parts !== undefined) {
+    const { parts: _parts, ...rest } = out;
+    out = rest;
+  }
+  if (fits(out)) return out;
   if (out.kind === "event" && (out.text !== undefined || out.from !== undefined)) {
     const { text: _text, from: _from, ...rest } = out;
     out = rest;
   }
   const data = out.data;
-  if (fits(out) || !data) return out;
-  if (data.type === "hp" && data.revert) {
+  if (fits(out)) return out;
+  if (data?.type === "hp" && data.revert) {
     const { revert: _revert, ...rest } = data;
     out = { ...out, data: rest };
-  } else if (data.type === "roll") {
+  } else if (data?.type === "roll") {
     const { dice: _dice, changed: _changed, ...rest } = data;
     out = { ...out, data: rest };
-  } else if (data.type === "dice") {
+  } else if (data?.type === "dice") {
     let rolls = data.rolls;
     while (rolls.length > 0 && !fits({ ...out, data: { ...data, rolls } })) rolls = rolls.slice(0, -1);
     out = { ...out, data: { ...data, rolls } };
   }
-  return out;
+  if (fits(out)) return out;
+  const { id, at, kind, from, to, copyOf } = out;
+  return { id, at, kind, ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}), ...(copyOf !== undefined ? { copyOf } : {}) };
 }
 
 /** Everyone a whisper reaches: its sender and its recipients, each once. */
