@@ -163,7 +163,7 @@ Rolls 1d20+3 with disadvantage (Restrained).   its reading
 
 - The DC joins the question's line: "…saving throw, DC 15: against the poison." or "…, DC hidden." One line less on every card.
 - With two choices, each names its bonus where the device knows it, "Dexterity +3", and the higher bonus starts picked, the first on a tie or with none known. The creature picks, and the better one is its usual pick.
-- **The roll row's fit**: Roll, Adv and Dis share its first line at every supported size (at most 224 px, Appendix A). Each field follows on that line while it fits whole at its width, else starts a second line, the bonus field (5.2) before the extra field.
+- **The roll row's fit**: Roll, Adv and Dis share its first line at every supported size (at most 224 px, Appendix A). The bonus field (5.2) and the extra field, in that order, follow on that line together while both fit whole at their widths, else start a second line together, so the extra field never stands alone under the rest. Roll and the fields grow to share the line they stand on, as a window's buttons do (docs/design-v1-polish.md R6).
 
 ### 5.2 Roll, and one answer path
 
@@ -488,10 +488,10 @@ Six options need 6 x 44 + 5 x 4 = 284 px, and beside the label 332 px. The skill
 
 | Inside the card (screen, size) | First line | Extra beside it (Roll +3) | Bonus and extra beside it (Roll d20+5) |
 | --- | --- | --- | --- |
-| 358 (390 x 844, 100%) | fits | fits (286) | bonus fits (289), extra wraps |
-| 343 (375 x 667, 100%) | fits | fits | bonus fits, extra wraps |
+| 358 (390 x 844, 100%) | fits | fits (286) | both wrap to the second line (392 with them) |
+| 343 (375 x 667, 100%) | fits | fits | both wrap to the second line |
 | 288 (320 wide, 100%) | fits | fits (286) | both wrap to the second line (160) |
-| 256 (375 x 667, 130%) | fits | wraps | both wrap to the second line (160) |
+| 256 (375 x 667, 130%) | fits | wraps, and fills the second line | both wrap to the second line (160) |
 
 ## Appendix B. Worked examples
 
