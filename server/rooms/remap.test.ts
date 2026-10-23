@@ -723,6 +723,16 @@ describe("party lines in an import (shared/logRings.ts)", () => {
     const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
+
+  test("a shared line's part readers follow their new ids, and those who did not come through go", () => {
+    const state = room();
+    state.log = [{ id: "1:0", at: AT, kind: "event", data: { type: "hp", tokenId: "t1", change: "damage", amount: 2, label: "Healthy" }, parts: { exact: ["p1", "gone1"], rolls: [null, ["p2"]] } }];
+    state.tokens.t1 = token("t1", { ownerIds: ["p1"] });
+    const out = remapState(state, { assets: new Map(), memberIds: new Map([["dm1", "m-dm"], ["p1", "m-p1"], ["p2", "m-p2"]]) });
+    assert.deepEqual(out.log[0]!.parts, { exact: ["m-p1"], rolls: [null, ["m-p2"]] });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(out)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
 });
 
 describe("an imported log (importRoom)", () => {

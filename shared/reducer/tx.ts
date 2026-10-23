@@ -249,7 +249,8 @@ export class Tx {
    * the players who read it when it arrives:
    *
    * - A line every player may read counts on from 0 in the op, with the
-   *   players' trap lines.
+   *   players' trap lines, and with the readers of each part not all of them
+   *   could read (LineParts).
    * - A line no player could read counts on from DM_LINE_BASE, as the DM's
    *   trap lines do, so it never moves the id of a line a player gets, and
    *   is cut to its ring's bound (cutLine). Each event line took its number
@@ -268,7 +269,7 @@ export class Tx {
     if (this.settled || !logsByAudience(this.env.opVersion)) return;
     this.settled = true;
     const reaches = this.unsettled.map((u) => ("line" in u && u.line.kind === "event" ? lineReach(this.state, u.line) : null));
-    if (reaches.some((r) => r !== null && r.audience !== "shared")) {
+    if (reaches.some((r) => r !== null && (r.audience !== "shared" || r.parts !== undefined))) {
       // Only an op whose trap step wrote a players' line meets their log, which a room from before traps lacks.
       const held = new Set<LogEntry>(this.unsettled.some((u) => "trapSeen" in u) ? this.collection("trapSeen") : []);
       for (const u of this.unsettled) {
@@ -289,7 +290,7 @@ export class Tx {
         const { id: _id, at: _at, ...entry } = u.line;
         const reach = reaches[i] ?? { audience: "shared" };
         if (reach.audience === "shared") {
-          settled.set(u.line, [this.writeLine(entry, index++)]);
+          settled.set(u.line, [this.writeLine(reach.parts ? { ...entry, parts: reach.parts } : entry, index++)]);
           return;
         }
         const lines = [this.writeLine(entry, u.dmIndex, cutLine)];

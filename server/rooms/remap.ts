@@ -17,6 +17,7 @@ import type {
   ImageRef,
   InitEntry,
   JournalPage,
+  LineParts,
   LogEntry,
   LogEvent,
   Member,
@@ -552,6 +553,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const next: LogEntry = { ...e };
     if (e.from !== undefined) next.from = members.of(e.from);
     if (e.to !== undefined) next.to = e.to.map((member) => members.of(member));
+    if (e.parts !== undefined) next.parts = remapParts(e.parts, memberList);
     const audience = lineAudience(e);
     if (dmLineIds.has(e.id)) id = dmLineIds.get(e.id)!;
     else if (audience === "party") {
@@ -596,6 +598,16 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
   if (!active || !phaseGrid) return rest;
   const next: Scene = { ...rest, phases: kept, phaseId: active.id, phaseGrid, map: active.id === scene.phaseId && scene.map ? scene.map : phaseMap(phaseGrid, active) };
   return active.id === scene.phaseId ? next : withPhaseLight(next, active);
+}
+
+/** A shared line's part readers named after their new ids, each list keeping only members who came through. */
+function remapParts(parts: LineParts, memberList: (ids: string[]) => string[]): LineParts {
+  const out: LineParts = {};
+  if (parts.exact) out.exact = memberList(parts.exact);
+  if (parts.label) out.label = memberList(parts.label);
+  if (parts.to) out.to = memberList(parts.to);
+  if (parts.rolls) out.rolls = parts.rolls.map((ids) => (ids === null ? null : memberList(ids)));
+  return out;
 }
 
 /**

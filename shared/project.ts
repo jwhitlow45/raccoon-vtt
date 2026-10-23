@@ -23,6 +23,7 @@ import {
   type JournalPage,
   type Label,
   type Light,
+  type LineParts,
   type LogEntry,
   type LogEvent,
   type Member,
@@ -1497,14 +1498,15 @@ const ANY_PLAYER: Viewer = { memberId: "", role: "player" };
  * drift from them.
  *
  * - "shared" when every player reads it, and so would any player who owns
- *   nothing, one who joins later included.
+ *   nothing, one who joins later included. `parts` names who read each part
+ *   of it that not all of them did (LineParts).
  * - "party" when only some do: each reader, in id order, with the line as
  *   they read it then.
  * - "dm" when none does.
  *
  * A chat line reaches all. A whisper is its parties' (whisperParties).
  */
-export type LineReach = { audience: "shared" } | { audience: "party"; views: [string, LogEvent][] } | { audience: "dm" };
+export type LineReach = { audience: "shared"; parts?: LineParts } | { audience: "party"; views: [string, LogEvent][] } | { audience: "dm" };
 
 type Read = { id: string; ctx: Ctx; view: LogEvent | null };
 
@@ -1528,7 +1530,86 @@ export function lineReach(state: RoomState, entry: Pick<LogEntry, "kind" | "data
   if (anyone.view === null || readers.length < players.length) {
     return readers.length === 0 ? { audience: "dm" } : { audience: "party", views: readers.map((r) => [r.id, r.view!]) };
   }
-  return { audience: "shared" };
+  const parts = partsOf(data, anyone, reads);
+  return parts ? { audience: "shared", parts } : { audience: "shared" };
+}
+
+/**
+ * Who read each part of a shared line that not every player did, nor any
+ * player who owns nothing: those parts its readers' views kept, by the
+ * rules that keep them apart (projectEventCtx, keptRolls).
+ */
+function partsOf(data: LogEvent, anyone: Read, reads: readonly Read[]): LineParts | undefined {
+  const parts: LineParts = {};
+  const narrow = (has: (r: Read) => boolean): string[] | null => (has(anyone) && reads.every(has) ? null : reads.filter(has).map((r) => r.id));
+  const field = (name: string) => (r: Read) => r.view !== null && (r.view as Record<string, unknown>)[name] !== undefined;
+  const set = (key: "exact" | "label" | "to", ids: string[] | null) => {
+    if (ids) parts[key] = ids;
+  };
+  switch (data.type) {
+    case "hp":
+    case "rest":
+      if (data.amount !== undefined || data.left !== undefined) set("exact", narrow((r) => field("amount")(r) || field("left")(r)));
+      if (data.label !== undefined) set("label", narrow(field("label")));
+      break;
+    case "concentration":
+      if (data.dc !== undefined) set("exact", narrow(field("dc")));
+      break;
+    case "deathSave":
+      if (data.ok !== undefined || data.fail !== undefined) set("exact", narrow((r) => field("ok")(r) || field("fail")(r)));
+      break;
+    case "turn":
+      if (data.to !== undefined) set("to", narrow(field("to")));
+      break;
+    case "dice": {
+      const kept = new Map([anyone, ...reads].map((r) => [r, new Set(keptRolls(r.ctx, data))]));
+      const rolls = data.rolls.map((_, i) => narrow((r) => kept.get(r)!.has(i)));
+      if (rolls.some((ids) => ids !== null)) parts.rolls = rolls;
+      break;
+    }
+    default:
+      break;
+  }
+  return Object.keys(parts).length > 0 ? parts : undefined;
+}
+
+/** A shared line's event without the parts a player was not among the readers of (LineParts), before their read's own rules. */
+function withinParts(data: LogEvent, parts: LineParts, memberId: string): LogEvent {
+  const lacks = (ids: readonly string[] | undefined) => ids !== undefined && !ids.includes(memberId);
+  switch (data.type) {
+    case "hp":
+    case "rest": {
+      const out = { ...data };
+      if (lacks(parts.exact)) {
+        delete out.amount;
+        delete out.left;
+      }
+      if (lacks(parts.label)) delete out.label;
+      return out;
+    }
+    case "concentration": {
+      if (!lacks(parts.exact)) return data;
+      const { dc: _dc, ...rest } = data;
+      return rest;
+    }
+    case "deathSave": {
+      if (!lacks(parts.exact)) return data;
+      const { ok: _ok, fail: _fail, ...rest } = data;
+      return rest;
+    }
+    case "turn": {
+      if (!lacks(parts.to)) return data;
+      const { to: _to, toSeen: _toSeen, ...rest } = data;
+      return rest;
+    }
+    case "dice": {
+      const rolls = parts.rolls;
+      if (!rolls) return data;
+      return { ...data, rolls: data.rolls.filter((_, i) => !lacks(rolls[i] ?? undefined)) };
+    }
+    default:
+      return data;
+  }
 }
 
 /** The creature a log event is about, as a player in sight of it now may have it: null when its token is gone or out of their sight. */
@@ -1779,7 +1860,8 @@ export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[],
  * A log line as a viewer reads it, by its audience (shared/logRings.ts): a
  * whisper by its parties, a DM line, a party line's own included, by the DM
  * alone, and a party line's copy by its one reader. A player then reads an
- * event by its own rules (projectEventCtx).
+ * event by its own rules (projectEventCtx), a shared line's without the
+ * parts they were not among the readers of when it was written (LineParts).
  */
 function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
   const me = ctx.viewer.memberId;
@@ -1789,11 +1871,12 @@ function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
     if (ctx.viewer.role === "dm" || entry.to![0] !== me) return null;
   } else if (ctx.viewer.role === "dm") return entry;
   else if (audience === "dm") return null;
-  if (entry.kind === "chat") return entry;
+  const { parts, ...line } = entry;
+  if (entry.kind === "chat") return parts ? line : entry;
   if (!entry.data) return null;
-  const data = projectEventCtx(ctx, entry.data, audience === "party");
+  const data = projectEventCtx(ctx, parts ? withinParts(entry.data, parts, me) : entry.data, audience === "party");
   if (!data) return null;
-  return data === entry.data ? entry : { ...entry, data };
+  return data === entry.data && !parts ? entry : { ...line, data };
 }
 
 function projectMemberCtx(_ctx: Ctx, member: Member): Member {

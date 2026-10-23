@@ -2141,6 +2141,23 @@ export type LogEntry = {
   to?: MemberId[];
   text?: string;
   data?: LogEvent;
+  /** The readers of each part of a shared event line that not every player could read when it was written. The DM's alone. */
+  parts?: LineParts;
+};
+
+/**
+ * Who could read each part of a shared event line when it was written, for
+ * the parts that not every player could (shared/project.ts lineReach), so
+ * later ownership or access only narrows them: an HP, rest, concentration
+ * or death save line's numbers (`exact`), an HP or rest line's label, the
+ * row a turn's take-back resumed (`to`), and each roll of a dice line by
+ * its place, null for a roll every player could read.
+ */
+export type LineParts = {
+  exact?: MemberId[];
+  label?: MemberId[];
+  to?: MemberId[];
+  rolls?: (MemberId[] | null)[];
 };
 
 /** Who is looking: used by projection and permissions. */

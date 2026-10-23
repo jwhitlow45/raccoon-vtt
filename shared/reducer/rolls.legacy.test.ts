@@ -138,7 +138,7 @@ describe("a DM's Pass mark from before wave 7", () => {
     // copy for each reader, and its id differs. So the lines are compared one per event, without their ids.
     const plain = (run: ReturnType<typeof replay>) =>
       run.states.map((state, i) => {
-        const line = ({ id: _id, ...rest }: LogEntry) => stableStringify(rest);
+        const line = ({ id: _id, parts: _parts, ...rest }: LogEntry) => stableStringify(rest);
         return stableStringify({ state: asThatBuild({ ...state, log: [] }), log: eventLines(state.log).map(line).sort(), wrote: eventLines(run.logs[i]!).map(line) });
       });
     assert.deepEqual(plain(replay(fixture.state, 0, undefined)), plain(replay(fixture.state, 0, fixture.opVersion)), "an untagged live op is judged by the old rule too");

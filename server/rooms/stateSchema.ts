@@ -689,6 +689,9 @@ const trapLine = z.discriminatedUnion("type", [
 ]);
 const trapLogEntry = z.strictObject({ id: lineId, at: iso, kind: z.literal("event"), data: trapLine });
 
+/** Who read a part of a shared line (LineParts): members of the room, which holds at most `membersPerRoom`. */
+const partReaders = z.array(id).max(LIMITS.membersPerRoom);
+
 const logEntry = z.strictObject({
   id: z.string().regex(/^\d{1,18}:\d{1,6}$/),
   at: iso,
@@ -697,6 +700,14 @@ const logEntry = z.strictObject({
   to: z.array(id).max(MAX_OWNERS).optional(),
   text: longText.optional(),
   data: logEvent.optional(),
+  parts: z
+    .strictObject({
+      exact: partReaders.optional(),
+      label: partReaders.optional(),
+      to: partReaders.optional(),
+      rolls: z.array(partReaders.nullable()).max(LIMITS.diceRollsPerOp).optional(),
+    })
+    .optional(),
 });
 
 const record = <T extends z.ZodType>(value: T) => z.record(z.string().min(1).max(120), value);
