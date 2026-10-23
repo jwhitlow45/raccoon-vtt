@@ -350,6 +350,11 @@ describe("a rider's row some player cannot see leads no mount (op version 18)", 
     // Both seen: the elephant takes the horse's value, goes right after it, and joins.
     const c = withRow(rows({ setup: elephant })).next().next().run(controlled).run(horseOn);
     assert.deepEqual([c.row("elephant").value, c.mounts()], [15, ["horse", "elephant"]]);
+    // Stored at op version 17, the tokens alone decided: whichever row was hidden, the elephant took the horse's value, Bree's, and joined her turn.
+    for (const hidden of [["eh"], ["eb"], []]) {
+      const old = withRow(rows({ hidden, setup: elephant, opVersion: 17 })).next().next().run(controlled).run(horseOn);
+      assert.deepEqual([old.row("elephant").value, old.mounts(), old.row("elephant").markRound], [15, ["horse", "elephant"], 1], `op version 17, hidden: ${hidden.join() || "none"}`);
+    }
   });
 
   test("a turn's start reads the rows it is about to write: a monster rider on its first turn under the default order, and a row its turn reveals, share their mount (review FU21A-OP-7)", () => {
@@ -364,6 +369,13 @@ describe("a rider's row some player cannot see leads no mount (op version 18)", 
     const revealed = rows({ hidden: ["eg"], reveal: true, setup: goblinRides }).next().next().next().next();
     assert.equal(revealed.row("gob").hidden, false);
     assert.deepEqual(revealed.mounts(), ["horse"]);
+    // Stored at op version 17, the tokens alone decided, and the reveal changed the row in place: both shared the mount too.
+    const oldParty = rows({ order: "party", setup: goblinRides, opVersion: 17 }).next().next().next().next();
+    assert.equal(oldParty.state.encounter!.activeEntryId, "eg");
+    assert.deepEqual([oldParty.mounts(), oldParty.row("horse").markRound], [["horse"], 1]);
+    const oldRevealed = rows({ hidden: ["eg"], reveal: true, setup: goblinRides, opVersion: 17 }).next().next().next().next();
+    assert.equal(oldRevealed.row("gob").hidden, false);
+    assert.deepEqual([oldRevealed.mounts(), oldRevealed.row("horse").markRound], [["horse"], 1]);
   });
 
   test("Next reveals a row anew, so Previous puts the hidden row back, where an older op changed the state it was given (review FU21A-OP-8)", () => {
