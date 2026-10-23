@@ -3,15 +3,36 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { PillProps } from "../features/measure/Pill.tsx";
 import type { Box } from "../lib/boardText.ts";
+import { NO_INSETS, type Camera, type Insets, type Size } from "../lib/camera.ts";
 import { scopeSlot, useScoped } from "../state/scope.ts";
 
 /**
- * The part of the scene in view, in cells, so a pill near the screen's edge
- * can slide back into it (Pill.tsx). Null until the canvas has a size.
+ * The scene in view, in cells, two ways: `clear`, the part the bars over
+ * the map leave (`insets`, in screen px), which a readout near the screen's
+ * edge slides back into (Pill.tsx), and `canvas`, the whole canvas, which
+ * what is drawn culls by, since the map shows beside a bar's narrower parts
+ * such as the options line (features/builder/heights/HeightLayer.tsx).
  */
-export const BoardViewContext = createContext<Box | null>(null);
+export type BoardViews = { clear: Box; canvas: Box };
 
-export function useBoardView(): Box | null {
+/** The part of the scene in `insets` of the canvas, in cells. */
+export function boardViewOf(cam: Camera, size: Size, insets: Insets): Box {
+  return {
+    x0: (insets.left - cam.x) / cam.scale,
+    y0: (insets.top - cam.y) / cam.scale,
+    x1: (size.width - insets.right - cam.x) / cam.scale,
+    y1: (size.height - insets.bottom - cam.y) / cam.scale,
+  };
+}
+
+export function boardViewsOf(cam: Camera, size: Size, insets: Insets): BoardViews {
+  return { clear: boardViewOf(cam, size, insets), canvas: boardViewOf(cam, size, NO_INSETS) };
+}
+
+/** Null until the canvas has a size. */
+export const BoardViewContext = createContext<BoardViews | null>(null);
+
+export function useBoardView(): BoardViews | null {
   return useContext(BoardViewContext);
 }
 

@@ -4,7 +4,8 @@ import { describe, test } from "node:test";
 import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import type { Box } from "../../lib/boardText.ts";
 
-const { boardViewOf, pillGeometry, pillPlace, pillStackPlace } = await import("./Pill.tsx");
+const { boardViewOf } = await import("../../canvas/boardView.ts");
+const { pillGeometry, pillPlace, pillStackPlace } = await import("./Pill.tsx");
 
 /*
  * The board's readouts (docs/design-v1-look-pass-2.md 2.11): one size at

@@ -3,7 +3,6 @@ import { useBoardView } from "../../canvas/boardView.ts";
 import { measurePill } from "../../canvas/measureText.ts";
 import { boardSizes, screenPx } from "../../lib/boardScale.ts";
 import type { Box } from "../../lib/boardText.ts";
-import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
 import { pillLines } from "./readout.ts";
 
@@ -56,20 +55,6 @@ export function pillGeometry(props: Omit<PillProps, "x" | "y" | "color">): { lin
   const width = Math.max(0, ...lines.map((l) => measurePill(l, fontSize, theme.font.body))) + 2 * padding;
   const height = lines.length * fontSize * LEADING + 2 * padding;
   return { lines, fontSize, padding, width, height, pointer: screenPx(POINTER_PX) };
-}
-
-/**
- * The part of the scene a pill slides back into, in cells: the canvas less
- * the bars over it (`insets`, in screen px), so a readout at the screen's
- * edge stays in the part of the map the bars leave clear.
- */
-export function boardViewOf(cam: Camera, size: Size, insets: Insets): Box {
-  return {
-    x0: (insets.left - cam.x) / cam.scale,
-    y0: (insets.top - cam.y) / cam.scale,
-    x1: (size.width - insets.right - cam.x) / cam.scale,
-    y1: (size.height - insets.bottom - cam.y) / cam.scale,
-  };
 }
 
 /** A box `w` by `h` cells with its top-left corner at `x`, `y`, slid back inside `view` where it would cross its edge. */
@@ -142,13 +127,14 @@ export function pillStackPlace(input: { x: number; y: number; scale: number; off
 
 /** A label in a rounded box over the map: a distance, a movement, a name. */
 export function Pill(props: PillProps) {
-  const view = useBoardView();
+  // A readout slides into the part of the map the bars leave clear (canvas/boardView.ts).
+  const view = useBoardView()?.clear ?? null;
   return <PillShape {...props} at={pillPlace(props, view)} />;
 }
 
 /** Readouts that stand together, drawn and slid back into view as one (pillStackPlace). A pill left out (`null` or `false`) takes no room. */
 export function PillStack(props: { x: number; y: number; scale: number; offsetPx?: number; pills: readonly (StackPill | null | false)[] }) {
-  const view = useBoardView();
+  const view = useBoardView()?.clear ?? null;
   const pills = props.pills.filter((p): p is StackPill => !!p);
   const place = pillStackPlace({ x: props.x, y: props.y, scale: props.scale, offsetPx: props.offsetPx, pills }, view);
   return (

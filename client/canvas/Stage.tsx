@@ -47,8 +47,7 @@ import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../l
 import { groupFollowers, tokensInBox } from "../lib/group.ts";
 import { displayName, drawsAboveFog, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { boardViewOf } from "../features/measure/Pill.tsx";
-import { BoardViewContext, useBoardPills } from "./boardView.ts";
+import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";
 import { useBoardText, type TokenText } from "./useBoardText.ts";
 import { ownsToken as memberOwns } from "../features/tokens/access.ts";
@@ -1289,8 +1288,8 @@ export function MapStage(props: {
   // The placed labels and plates, for the layers under them to keep clear of (features/layers.ts LayerProps).
   const labelBoxes = useMemo(() => placedTextBoxes(tokens, boardText, scale), [tokens, boardText, scale]);
   const layerProps: LayerProps = { scene, role, scale: cam?.scale ?? 1, fog, labelBoxes };
-  // The part of the scene the bars leave clear, in cells, so readouts near an edge slide back into view there rather than under a bar (Pill.tsx).
-  const boardView = useMemo(() => (cam && size ? boardViewOf(cam, size, { top, right, bottom, left }) : null), [cam, size, top, right, bottom, left]);
+  // The scene on screen and the part of it the bars leave clear, in cells (boardView.ts): readouts slide into the clear part, and drawing culls by the whole.
+  const boardView = useMemo(() => (cam && size ? boardViewsOf(cam, size, { top, right, bottom, left }) : null), [cam, size, top, right, bottom, left]);
   const overlay = fog || OVERLAY_LAYERS.length > 0 || UNDER_DECOR_LAYERS.length > 0;
 
   return (
