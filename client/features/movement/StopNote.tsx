@@ -1,13 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { Help } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { worldToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { PANE_WIDTH } from "../builder/labelEdit.ts";
 import { noteDoor } from "../doors/doors.ts";
 import { cardPlace } from "./anchor.ts";
 import { dropView, stopText } from "./drop.ts";
@@ -16,9 +18,10 @@ import { runTeleport } from "./teleport.ts";
 
 const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 const NO_FOG: Readonly<Record<string, FogTile>> = {};
-const WIDTH = 288;
 /** The note's height until it has been laid out and measured. */
-const UNMEASURED = 112;
+const UNMEASURED = 156;
+/** Lines the stopping sentence may take: more than the longest ("Too far to work out a way around. Stopped at a wall. …") needs at the note's width, so it always shows whole. */
+const TITLE_LINES = 6;
 
 /**
  * The note after a stopped drop (docs/design-v1-maps-vision.md 4.1), beside
@@ -45,6 +48,7 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   const store = useRoomStore();
   const ref = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(UNMEASURED);
+  const helpId = useId();
 
   const stale = note !== null && (!token || token.sceneId !== note.sceneId || token.x !== note.at.x || token.y !== note.at.y);
   useEffect(() => {
@@ -64,8 +68,9 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
 
   const fp = footprint(token);
   const anchor = worldToScreen(props.camera, { x: note.ghost.x + fp.w / 2, y: note.ghost.y + fp.h });
-  const width = Math.min(WIDTH, props.viewport.width - 16);
-  const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height, gap: 12, prefer: "below" });
+  // A card over the map as wide as a map pane, inside the canvas's 8 px margins.
+  const width = Math.min(PANE_WIDTH, props.viewport.width - 2 * theme.space(2));
+  const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height, gap: theme.space(3), prefer: "below" });
   const close = () => slot.setState({ note: null, busy: false });
   const teleport = () => {
     if (slot.getState().busy) return;
@@ -106,19 +111,15 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
     >
       <PaneHeader
         // The whole sentence, wrapped: it says what stopped the walk.
-        title={<span style={{ display: "block", whiteSpace: "normal" }}>{stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}</span>}
+        title={stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}
+        lines={TITLE_LINES}
         onClose={close}
       />
       {/* The note's one action, so the primary (docs/design-v1-visual.md 2.3). */}
-      <Button
-        variant="primary"
-        size="sm"
-        busy={busy}
-        onClick={teleport}
-        title="For Misty Step and anything else that passes walls: the walk to the wall is taken back, and the teleport does not count against Speed"
-      >
+      <Button variant="primary" size="sm" busy={busy} onClick={teleport} aria-describedby={helpId}>
         {busy ? "Teleporting…" : "Teleport here"}
       </Button>
+      <Help id={helpId}>For Misty Step and anything else that passes walls. The walk to the wall is taken back, and the teleport does not count against Speed.</Help>
     </div>
   );
 }
