@@ -1149,8 +1149,10 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * the card while toasts at the notices' top reach down past it (`mapFoot`,
  * their foot as last drawn) joins them there instead, so the two stacks
  * never overlap (review LP18-TO-4). A pane that stops standing as the
- * screen turns leaves its toasts to be placed anew (review LP18-TO-3). A toast never leaves the layer or the sheet, and leaves the
- * notices only for a pane's header or a turned screen's card.
+ * screen turns leaves its toasts to be placed anew (review LP18-TO-3). A
+ * toast leaves the layer only when a pane stops standing as the screen
+ * turns (review LP18-TO-3), never leaves the sheet, and leaves the notices
+ * only for a pane's header or a turned screen's card.
  */
 export function nextToastPlaces(was: ToastPlaces, now: { ids: readonly number[]; pane: number | null; paneStands: boolean; low: number | null; layer: boolean; slot: boolean; turned?: boolean; mapFoot?: number | null }): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;

@@ -63,18 +63,21 @@ export function toastsLeft(toasts: readonly Toast[], now: number): { id: number;
 }
 
 /**
- * The toasts with one more added, at most MAX_TOASTS of them. Past that,
- * the oldest whose words the log keeps and that has no button gives way
- * first, as when a stack runs past its room (canvas/barDock.ts fitToasts,
- * review FU22B-OP-4), so a refusal, an error or a trap's Save and damage
- * is not pushed off by the rolls and whispers that follow it (review
- * LP18-TO-1). With none such, the oldest goes. The new toast always stays.
+ * The toasts with one more added. Past MAX_TOASTS, only the oldest whose
+ * words the log keeps and that has no button gives way, as when a stack
+ * runs past its room (canvas/barDock.ts fitToasts, review FU22B-OP-4), so
+ * a refusal, an error or a trap's Save and damage is never pushed off by
+ * the toasts that follow it (reviews LP18-TO-1 and LP18-ASTRA-01). With
+ * none such older than the new one, the stack grows past three instead,
+ * and scrolls where it runs past its room. Each still goes with its own
+ * time. The new toast always stays.
  */
 export function withToast(toasts: readonly Toast[], toast: Toast): Toast[] {
   let out = [...toasts, toast];
   while (out.length > MAX_TOASTS) {
     const plain = out.slice(0, -1).findIndex((t) => t.logged === true && t.action === undefined);
-    out = out.filter((_, i) => i !== (plain === -1 ? 0 : plain));
+    if (plain === -1) break;
+    out = out.filter((_, i) => i !== plain);
   }
   return out;
 }

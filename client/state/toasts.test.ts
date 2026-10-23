@@ -42,7 +42,7 @@ describe("toastsLeft (review LP16-PT-1)", () => {
   });
 });
 
-describe("withToast: three toasts at most (review LP18-TO-1)", () => {
+describe("withToast: past three toasts, only whispers and rolls give way (reviews LP18-TO-1 and LP18-ASTRA-01)", () => {
   const logged = (id: number): Toast => ({ ...note(id, id), logged: true });
   const refusal = (id: number): Toast => ({ id, text: `Could not undo moving Thorn ${id}.`, tone: "error", shownAt: id });
   const ids = (list: readonly Toast[]) => list.map((t) => t.id);
@@ -58,12 +58,27 @@ describe("withToast: three toasts at most (review LP18-TO-1)", () => {
     assert.deepEqual(ids(list), [1, 2, 5]);
   });
 
-  test("with no whisper or roll to give way, the oldest goes, and the newest always stays", () => {
+  test("with no older whisper or roll to give way, nothing goes: refusals and buttons stay past three, and the newest always stays (review LP18-ASTRA-01)", () => {
     let list = withToast([], refusal(1));
     list = withToast(list, refusal(2));
     list = withToast(list, withButton(3, 3));
     list = withToast(list, logged(4));
-    assert.deepEqual(ids(list), [2, 3, 4]);
-    assert.deepEqual(ids(withToast([logged(5), logged(6), logged(7)], logged(8))), [6, 7, 8]);
+    assert.deepEqual(ids(list), [1, 2, 3, 4]);
+    // The next whisper pushes off the one before it, never a refusal.
+    list = withToast(list, logged(5));
+    assert.deepEqual(ids(list), [1, 2, 3, 5]);
+    list = withToast(list, refusal(6));
+    assert.deepEqual(ids(list), [1, 2, 3, 6]);
+    list = withToast(list, refusal(7));
+    assert.deepEqual(ids(list), [1, 2, 3, 6, 7]);
+    assert.deepEqual(ids(withToast([logged(8), logged(9), logged(10)], logged(11))), [9, 10, 11]);
+  });
+
+  test("a trap's toast with Save and damage, two refusals and then a roll: all four stay (review LP18-OPUS-1)", () => {
+    let list = withToast([], { ...withButton(1, 1), logged: true });
+    list = withToast(list, refusal(2));
+    list = withToast(list, refusal(3));
+    list = withToast(list, { ...logged(4), die: { face: 17, ring: false, fumble: false, verdict: null } });
+    assert.deepEqual(ids(list), [1, 2, 3, 4]);
   });
 });
