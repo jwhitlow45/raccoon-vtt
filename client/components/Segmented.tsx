@@ -3,6 +3,7 @@ import { accessibleName } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
 import { choiceLook } from "./looks.ts";
 import { useMeasuring } from "./measuring.ts";
+import { Help } from "./Panel.tsx";
 
 export type SegmentedOption<T extends string | number> = {
   value: T;
@@ -61,9 +62,17 @@ export function Segmented<T extends string | number>(props: {
   even?: boolean;
   /** Labels wrap inside their option, for a choice that names something of any length, such as a creature. */
   wrap?: boolean;
+  /**
+   * What the chosen option means, as a Help line under the group that is
+   * also its description, so short option words such as "Controlled" keep
+   * their meaning for a screen reader too (docs/design-v1-look-pass-2.md 2.7).
+   */
+  description?: ReactNode;
   style?: CSSProperties;
 }) {
   const name = useId();
+  const descriptionId = useId();
+  const described = props.description !== undefined && props.description !== null;
   // A measuring copy draws the options alone: a radio there would join this group's name and uncheck the real choice.
   const measuring = useMeasuring();
   const group = (
@@ -71,6 +80,7 @@ export function Segmented<T extends string | number>(props: {
       role="radiogroup"
       aria-label={props.labelledBy ? undefined : props.label}
       aria-labelledby={props.labelledBy}
+      aria-describedby={described ? descriptionId : undefined}
       aria-disabled={props.disabled ? true : undefined}
       className={props.even ? (props.options.length === 6 ? "rvtt-even-choices rvtt-even-six" : "rvtt-even-choices") : undefined}
       style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even ? null : props.style) }}
@@ -120,5 +130,12 @@ export function Segmented<T extends string | number>(props: {
     </div>
   );
   // Even options measure the room they share, so where four cannot fit side by side they go two by two (globals.css).
-  return props.even ? <div style={{ containerType: "inline-size", minWidth: 0, ...props.style }}>{group}</div> : group;
+  const choice = props.even ? <div style={{ containerType: "inline-size", minWidth: 0, ...(described ? null : props.style) }}>{group}</div> : group;
+  if (!described) return choice;
+  return (
+    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, ...(props.even ? props.style : null) }}>
+      {choice}
+      <Help id={descriptionId}>{props.description}</Help>
+    </div>
+  );
 }

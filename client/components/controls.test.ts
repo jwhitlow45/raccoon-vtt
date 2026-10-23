@@ -66,6 +66,22 @@ describe("choices are native radios", () => {
     assert.equal(names.size, 2);
   });
 
+  test("Segmented: a description is a Help line the radiogroup points at, and without one there is none", () => {
+    const options = [
+      { value: "c", label: "Controlled" },
+      { value: "i", label: "Independent" },
+    ];
+    for (const even of [false, true]) {
+      const markup = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, even, description: "Warhorse moves on Thorn's turn.", onChange() {} }));
+      const id = /role="radiogroup"[^>]* aria-describedby="([^"]+)"/.exec(markup)?.[1];
+      assert.ok(id, "the radiogroup names its description");
+      assert.match(markup, new RegExp(`<p id="${id}"[^>]*>Warhorse moves on Thorn&#x27;s turn.</p>`));
+    }
+    const plain = html(createElement(Segmented<string>, { label: "Ride", value: "c", options, onChange() {} }));
+    assert.doesNotMatch(plain, /aria-describedby/);
+    assert.match(plain, /^<div role="radiogroup"/, "without a description the group is drawn as before");
+  });
+
   test("a glyph option is named by its title", () => {
     const markup = html(createElement(Segmented<number>, { label: "Size", value: 1, options: [{ value: 1, label: "+", title: "Bigger" }], onChange() {} }));
     assert.match(radios(markup)[0]!, /aria-label="Bigger"/);
