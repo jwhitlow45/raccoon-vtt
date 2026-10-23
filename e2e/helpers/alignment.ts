@@ -49,12 +49,14 @@ import type { Locator, Page } from "playwright-core";
  *   it, so its parts are compared by their first lines: a checkbox's box
  *   against its label's first line, a remove against its fields' first
  *   line. A part that lays out its own row has the first line it lays
- *   out, controls included. A row set in its middle compares middles,
- *   which is how a switch stands against its name and help together. In
- *   a mixed row the alignment most parts take decides, and a tie is
- *   judged both ways. A row whose parts all stretch places none of them,
- *   so it passes when they share either their middles or their first
- *   lines.
+ *   out, controls included, and a line it lays out with one part alone
+ *   is that part's own first line, so a box meets the first line of a
+ *   label wrapped onto two lines above its help. A row set in its middle
+ *   compares middles, which is how a switch stands against its name and
+ *   help together. In a mixed row the alignment most parts take decides,
+ *   and a tie is judged both ways. A row whose parts all stretch places
+ *   none of them, so it passes when they share either their middles or
+ *   their first lines.
  * - A `role="img"` is one picture, its insides drawn on purpose (the AC
  *   shield sets its number above its middle).
  * - Content placed absolutely beside content in the flow (a badge, a
@@ -484,19 +486,27 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
    * on that line, or its whole content box when it lays one line of words
    * alone. A part stands in its line as its container sets it, so a name
    * centered in a 44 px line meets a 44 px button beside it there, though
-   * its own words run over two lines. Null for any other element.
+   * its own words run over two lines. A line that holds one part alone is
+   * that part's own first line: a label stacked over its help in a grid
+   * starts its words at its top, so a label wrapped onto two lines has its
+   * first line where its first words stand, not across both. Null for any
+   * other element.
    */
   function laidFirstLine(el: DomElement): Box | null {
     const cs = style(el);
     const flex = (cs.display === "flex" || cs.display === "inline-flex") && !cs.flexDirection.startsWith("column");
     if (!flex && cs.display !== "grid" && cs.display !== "inline-grid") return null;
-    const parts = Array.from(el.children).filter((c) => shown(c) && !placedApart(c)).map(rectOf);
+    const parts = Array.from(el.children)
+      .filter((c) => shown(c) && !placedApart(c))
+      .map((c) => ({ ...rectOf(c), c }));
     if (parts.length === 0) {
       if (!flex) return null;
       const b = boxes(el);
       return { l: b.inner.l + b.pad.l, r: b.inner.r - b.pad.r, t: b.inner.t + b.pad.t, b: b.inner.b - b.pad.b };
     }
-    return linesOf(parts)[0]!.box;
+    const first = linesOf(parts)[0]!;
+    const sole = first.items.length === 1 ? seen(first.items[0]!.c) : null;
+    return sole ? sole.first : first.box;
   }
 
   /** The first line: the topmost part, and what stands beside it, the parts whose middles fall within it. Lines of tight leading may overlap, so overlap alone would join them. */

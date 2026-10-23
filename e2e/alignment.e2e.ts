@@ -813,6 +813,18 @@ const CASES = `
     <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A creature steps onto it</span><span style="font-size: 13px; line-height: 1.4">A trap on squares goes off at least one way.</span></span>
   </label>
 </div>
+<div data-case="tick-wrapped" style="width: 250px">
+  <label style="display: flex; align-items: flex-start; gap: 12px; padding: 4px 0">
+    <span style="display: flex; align-items: center; height: 19.6px; flex: none"><input type="checkbox" style="width: 22px; height: 22px; margin: 0"></span>
+    <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A Dexterity save at the end of each of its turns ends it</span><span style="font-size: 13px; line-height: 1.4">Rolled for each creature it holds.</span></span>
+  </label>
+</div>
+<div data-case="tick-wrapped-middle" style="width: 250px">
+  <label style="display: flex; align-items: flex-start; gap: 12px; padding: 4px 0">
+    <span style="display: flex; align-items: center; height: 39.2px; flex: none"><input type="checkbox" style="width: 22px; height: 22px; margin: 0"></span>
+    <span style="display: grid; gap: 2px"><span style="line-height: 1.4">A Dexterity save at the end of each of its turns ends it</span><span style="font-size: 13px; line-height: 1.4">Rolled for each creature it holds.</span></span>
+  </label>
+</div>
 <div data-case="zoom-narrow" style="zoom: 1.3"><div role="button" style="display: flex; align-items: center; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; background: #eee"></span></div></div>
 <div data-case="zoom-narrow-off" style="zoom: 1.3"><div role="button" style="display: flex; align-items: flex-start; justify-content: center; width: 10.5px; height: 60px; border-top: 40px solid #888"><span style="width: 4px; height: 6px; margin-top: 5px; background: #eee"></span></div></div>
 <div data-case="hidden-row"><div data-bar-row="play" style="display: none"><button>Attach</button></div></div>
@@ -931,6 +943,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       const passes = async (name: string) => assert.deepEqual(await lines(name), [], `${name} should pass`);
       await caught("tick-dropped", "row");
       await passes("tick-on-first-line");
+      // A label wrapped onto two lines over its help is met at its first line, so a box there passes and a box centered on both lines is caught.
+      await passes("tick-wrapped");
+      await caught("tick-wrapped-middle", "row");
       await caught("label-alone", "wrap-label");
       await passes("label-beside");
       await caught("remove-alone", "wrap-orphan");
