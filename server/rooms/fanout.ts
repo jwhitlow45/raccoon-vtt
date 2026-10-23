@@ -102,11 +102,14 @@ const SAME_FOR_EVERY_PLAYER = new Set(["chunk", "fog", "sight", "scene", "label"
  */
 export function publishBatch(batch: CommittedBatch, connections: Iterable<Connection>, current: (key: ClientKey) => Connection | undefined): void {
   const all = [...connections];
-  const candidates = candidateKeys(
-    batch,
-    watchedScenes(batch.after, all),
-    all.filter((conn) => !conn.closed && conn.held !== null).map((conn) => conn.viewer),
-  );
+  // In key order, never the order the reducer wrote them, so the order of a viewer's changes says nothing of work they never see.
+  const candidates = [
+    ...candidateKeys(
+      batch,
+      watchedScenes(batch.after, all),
+      all.filter((conn) => !conn.closed && conn.held !== null).map((conn) => conn.viewer),
+    ),
+  ].sort();
   const projections = new Map<string, Map<EntityKey, unknown>>();
   const forPlayers = new Map<EntityKey, unknown>();
   for (const conn of all) {

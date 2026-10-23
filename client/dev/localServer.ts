@@ -154,7 +154,8 @@ export class LocalServer {
     // The lines a live log's start passed come and go with no key touched (shared/logRings.ts), as the actor's fan-out has them.
     const passed = linesPastStart(before, this.state, [this.viewer]).map((id) => keys.log(id));
     if (touched.length === 0 && !global && passed.length === 0) return [];
-    const candidates = new Set<EntityKey>(global ? [...allKeys(this.state), ...this.held.keys()] : [...touched, ...dependents(this.state, touched), ...passed]);
+    // In key order, as the actor's fan-out sends them, never the order the reducer wrote them.
+    const candidates = [...new Set<EntityKey>(global ? [...allKeys(this.state), ...this.held.keys()] : [...touched, ...dependents(this.state, touched), ...passed])].sort();
     const projected = new Map<EntityKey, unknown>();
     for (const key of candidates) projected.set(key, projectEntity(key, this.state, this.viewer, { sceneId: this.snapshotScene }));
     const { changes, held } = diffProjection(this.held, projected);

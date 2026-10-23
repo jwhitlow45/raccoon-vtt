@@ -5,7 +5,7 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, changedSightKeys, hashValue, heldOf, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, P1, P2, env, randomOp, randomState, reveal, rng, room, scene, token } from "#shared/testutil.ts";
+import { DM, P1, P2, actor, effect, entry, env, randomOp, randomState, reveal, rng, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch } from "./fanout.ts";
@@ -95,7 +95,12 @@ function run(seed: number, batches: number, tally: Tally): void {
     if (!global && changedSightKeys(before, state, ["s1", "s2"]).length > 0) tally.narrowSight++;
     publishBatch({ seq, before, after: state, touched, global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
     for (const v of viewers) {
-      for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
+      for (const msg of v.inbox.splice(0)) {
+        if (msg.t !== "ev") continue;
+        const changed = (msg.changes as Change[]).map((c) => c.key);
+        assert.deepEqual(changed, [...changed].sort(), `seed ${seed} batch ${b}: changes in key order`);
+        v.view = applyChanges(v.view, msg.changes as Change[]);
+      }
       const fresh = projectState(state, v.conn.viewer, { sceneId: v.conn.sceneId });
       if (stableStringify(v.view) !== stableStringify(fresh)) {
         assert.deepEqual(JSON.parse(JSON.stringify(v.view)), JSON.parse(JSON.stringify(fresh)), `seed ${seed} batch ${b} viewer ${v.conn.memberId}@${v.conn.sceneId}`);
@@ -114,6 +119,37 @@ describe("the server's fan-out with the explore step", () => {
     assert.ok(tally.batches > 1_000, `only ${tally.batches} batches`);
     assert.ok(tally.explores > 50, `only ${tally.explores} explores`);
     assert.ok(tally.narrowSight > 100, `sight changed outside a global batch only ${tally.narrowSight} times`);
+  });
+});
+
+describe("what hidden work leaves in a player's message", () => {
+  /** P1's hero, P2's cleric and a goblin no player sees, on P1's turn in a fight, published to both players. */
+  function messages(op: Op, hidden: boolean): string[] {
+    const ending = effect("e1", { key: "prone", duration: { remaining: 1, boundary: "turnEnd", anchor: { entryId: "e-hero" } } });
+    const state = room({
+      tokens: {
+        hero: token("hero", { name: "Ayla", kind: "pc", ownerIds: ["p1"], x: 2, y: 2 }),
+        cleric: token("cleric", { name: "Bree", kind: "pc", ownerIds: ["p2"], x: 4, y: 2 }),
+        gob: token("gob", { name: "Goblin", visibility: "dm", x: 8, y: 8, actor: { inline: actor({ effects: hidden ? [ending] : [] }) } }),
+      },
+    });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-hero", entries: [entry("e-hero", { tokenId: "hero", value: 15 }), entry("e-cleric", { tokenId: "cleric", value: 10, tieOrder: 1 })] };
+    const viewers = [open(state, P1, "s1"), open(state, P2, "s1")];
+    const result = applyOp(state, op, DM, env(2));
+    assert.ok(result.ok, result.ok ? "" : result.message);
+    publishBatch({ seq: 2, before: state, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+    return viewers.map((v) => JSON.stringify(v.inbox));
+  }
+
+  test("a hidden creature's effect ending as a turn passes leaves each player's whole message as it is without it", () => {
+    const plain = messages({ t: "encounter.next" }, false);
+    assert.ok(plain.every((m) => m.includes('"log:2:0"') && m.includes('"encounter"')), "the turn line and the fight reach both");
+    assert.deepEqual(messages({ t: "encounter.next" }, true), plain);
+  });
+
+  test("a hit on a hidden creature beside one on the hero leaves each player's whole message as the hero's alone does", () => {
+    const hit = (ids: string[]): Op => ({ t: "actor.damageMany", hits: ids.map((tokenId) => ({ target: { tokenId }, amount: 2 })) });
+    assert.deepEqual(messages(hit(["gob", "hero"]), false), messages(hit(["hero"]), false));
   });
 });
 
