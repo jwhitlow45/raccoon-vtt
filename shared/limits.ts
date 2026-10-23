@@ -439,9 +439,16 @@ export const LIMITS = {
    * reminds about a few pairs, and a heavy one about tens: a horde of 30
    * the DM moves on one count through Spirit Guardians and a Web makes 60.
    * Each cap is well past that, and past it an audience records no more new
-   * pairs that turn, so only its own readers can be reminded twice. With
-   * the longest ids a pair takes about 140 bytes, so a room of 49 players
-   * holds at most about 1.6 MiB of it, outside the measures as DM lines are.
+   * pairs that turn, so only its own readers can be reminded twice.
+   *
+   * Each audience's pairs are held to their bytes as stored too, since an
+   * id may be any 64 letters, which JSON may write as up to 384 bytes. With
+   * the ids the app makes, 36 letters, a pair takes at most about 83 bytes,
+   * so every count cap fits: 1,000 pairs in 128 KiB and 200 in 24 KiB.
+   * Each audience's bytes come from its own reminders alone, so the bounds
+   * keep the audiences apart as the counts do. A room of 49 players then
+   * holds at most about 1.4 MiB of the record, outside the measures as DM
+   * lines are.
    *
    * They decide which reminders a logged op writes, so changing one needs a
    * new op version (shared/migrate.ts).
@@ -449,6 +456,9 @@ export const LIMITS = {
   remindedShared: 1_000,
   remindedPerPlayer: 200,
   remindedDm: 1_000,
+  remindedSharedBytes: 128 * 1024,
+  remindedPerPlayerBytes: 24 * 1024,
+  remindedDmBytes: 128 * 1024,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

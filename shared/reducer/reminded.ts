@@ -1,4 +1,4 @@
-import { LIMITS } from "../limits.ts";
+import { LIMITS, utf8Bytes } from "../limits.ts";
 import type { AreaTrigger, Member, Reminded, RemindedPairs } from "../model.ts";
 import type { LineReach } from "../project.ts";
 
@@ -29,8 +29,9 @@ import type { LineReach } from "../project.ts";
  * only some players read goes to those who still need it, each in their
  * own copy, which counts only their own. A reminder only the DM read never
  * holds back one a player would read. Each audience records its pairs
- * under a cap of its own (LIMITS.remindedShared, remindedPerPlayer and
- * remindedDm) and past it records no new pair, so a player is only ever
+ * under caps of its own, a count (LIMITS.remindedShared, remindedPerPlayer
+ * and remindedDm) and its bytes as stored (remindedSharedBytes and the
+ * rest), and past either records no new pair, so a player is only ever
  * reminded twice because of reminders they read themselves.
  *
  * A turn that starts (Next, the removal of the acting row, Previous)
@@ -44,6 +45,14 @@ const BIT: Record<AreaTrigger, number> = { enter: 1, turnStart: 2, turnEnd: 4 };
 /** A reminder an op wrote: its area and creature, its trigger, and whether its area hits once a turn. */
 export type Reminder = { templateId: string; tokenId: string; trigger: AreaTrigger; once: boolean };
 
+/** A pair's caps: how many pairs, and how many bytes of JSON they take as stored. */
+type Caps = { pairs: number; bytes: number };
+
+/** The bytes an id takes in JSON as stored: any 64 letters, which JSON may write as up to 384 bytes. */
+function idBytes(id: string): number {
+  return utf8Bytes(JSON.stringify(id));
+}
+
 /**
  * One audience's pairs as an op changes them. The room's own record is
  * shared with the state the op started from, so each map is copied on its
@@ -54,6 +63,7 @@ class Pairs {
   private copied = false;
   private readonly copiedAreas = new Set<string>();
   private size: number | null = null;
+  private stored: number | null = null;
 
   constructor(value: RemindedPairs = {}) {
     this.value = value;
@@ -64,13 +74,21 @@ class Pairs {
     return r.once ? mask !== 0 : (mask & BIT[r.trigger]) !== 0;
   }
 
-  /** Records the reminder, unless it is a new pair past `cap`. Whether anything changed. */
-  add(r: Reminder, cap: number): boolean {
+  /** Records the reminder, unless it is a new pair past either cap. Whether anything changed. */
+  add(r: Reminder, caps: Caps): boolean {
     const mask = this.value[r.templateId]?.[r.tokenId];
     const bit = BIT[r.trigger];
     if (mask !== undefined && (mask & bit) !== 0) return false;
     const count = this.count();
-    if (mask === undefined && count >= cap) return false;
+    const bytes = this.bytes();
+    let grown = 0;
+    if (mask === undefined) {
+      // `"token":7` and a comma within its area's map, or a new area's `"area":{"token":7}` and a comma in the record.
+      const area = this.value[r.templateId];
+      const pair = idBytes(r.tokenId) + 2;
+      grown = area ? pair + 1 : idBytes(r.templateId) + 3 + pair + (Object.keys(this.value).length > 0 ? 1 : 0);
+      if (count >= caps.pairs || bytes + grown > caps.bytes) return false;
+    }
     if (!this.copied) {
       this.value = { ...this.value };
       this.copied = true;
@@ -80,8 +98,17 @@ class Pairs {
       this.copiedAreas.add(r.templateId);
     }
     this.value[r.templateId]![r.tokenId] = (mask ?? 0) | bit;
-    if (mask === undefined) this.size = count + 1;
+    if (mask === undefined) {
+      this.size = count + 1;
+      this.stored = bytes + grown;
+    }
     return true;
+  }
+
+  /** The bytes of the pairs' JSON as stored. A mask is one digit, so only a new pair moves it. */
+  bytes(): number {
+    this.stored ??= utf8Bytes(JSON.stringify(this.value));
+    return this.stored;
   }
 
   count(): number {
@@ -93,6 +120,10 @@ class Pairs {
     return this.count() === 0 ? undefined : this.value;
   }
 }
+
+const SHARED: Caps = { pairs: LIMITS.remindedShared, bytes: LIMITS.remindedSharedBytes };
+const PLAYER: Caps = { pairs: LIMITS.remindedPerPlayer, bytes: LIMITS.remindedPerPlayerBytes };
+const DM: Caps = { pairs: LIMITS.remindedDm, bytes: LIMITS.remindedDmBytes };
 
 /** The record of one turn's reminders, as an op reads and adds to it. */
 export class Book {
@@ -150,9 +181,9 @@ export class Book {
 
   /** Records who read the reminder: every player, the DM alone, or these players' copies. */
   record(r: Reminder, readers: "shared" | "dm" | readonly string[]): void {
-    if (readers === "shared") this.changed = this.shared.add(r, LIMITS.remindedShared) || this.changed;
-    else if (readers === "dm") this.changed = this.dm.add(r, LIMITS.remindedDm) || this.changed;
-    else for (const id of readers) this.changed = this.player(id).add(r, LIMITS.remindedPerPlayer) || this.changed;
+    if (readers === "shared") this.changed = this.shared.add(r, SHARED) || this.changed;
+    else if (readers === "dm") this.changed = this.dm.add(r, DM) || this.changed;
+    else for (const id of readers) this.changed = this.player(id).add(r, PLAYER) || this.changed;
   }
 
   /** The record to keep, only players still on the roster keeping theirs, or undefined when it holds nothing. */

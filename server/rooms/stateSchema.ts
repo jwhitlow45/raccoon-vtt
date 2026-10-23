@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
-import { LIMITS } from "#shared/limits.ts";
+import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
@@ -714,18 +714,19 @@ const logEntry = z.strictObject({
 
 const record = <T extends z.ZodType>(value: T) => z.record(z.string().min(1).max(120), value);
 
-/** One audience's pairs of the record of a turn's reminders (RoomState.reminded), each under its cap. */
-const remindedPairs = (cap: number) =>
+/** One audience's pairs of the record of a turn's reminders (RoomState.reminded), each under its caps. */
+const remindedPairs = (cap: number, bytes: number) =>
   z
     .record(id, z.record(id, z.number().int().min(1).max(7)))
-    .refine((pairs) => Object.values(pairs).reduce((n, tokens) => n + Object.keys(tokens).length, 0) <= cap, `at most ${cap} reminders`);
+    .refine((pairs) => Object.values(pairs).reduce((n, tokens) => n + Object.keys(tokens).length, 0) <= cap, `at most ${cap} reminders`)
+    .refine((pairs) => serializedBytes(pairs) <= bytes, `at most ${bytes} bytes of reminders`);
 const reminded = z.strictObject({
-  shared: remindedPairs(LIMITS.remindedShared).optional(),
+  shared: remindedPairs(LIMITS.remindedShared, LIMITS.remindedSharedBytes).optional(),
   players: z
-    .record(id, remindedPairs(LIMITS.remindedPerPlayer))
+    .record(id, remindedPairs(LIMITS.remindedPerPlayer, LIMITS.remindedPerPlayerBytes))
     .refine((players) => Object.keys(players).length <= LIMITS.membersPerRoom, `at most ${LIMITS.membersPerRoom} players`)
     .optional(),
-  dm: remindedPairs(LIMITS.remindedDm).optional(),
+  dm: remindedPairs(LIMITS.remindedDm, LIMITS.remindedDmBytes).optional(),
 });
 
 export const roomStateSchema = z.strictObject({

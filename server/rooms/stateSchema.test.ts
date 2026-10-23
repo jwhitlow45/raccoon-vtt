@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createInitialState } from "#shared/initial.ts";
+import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { migrateSnapshot } from "#shared/migrate.ts";
 import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
@@ -458,6 +459,18 @@ describe("roomStateSchema", () => {
       phaseGrid: { refWidthPx: 1, refHeightPx: 1, cellPx: 16_384 * 16_384, originPx: { x: 0, y: 0 } },
     };
     assert.equal(refused(crafted), message);
+  });
+});
+
+describe("roomStateSchema, the record of a turn's reminders (shared/reducer/reminded.ts)", () => {
+  test("a player's pairs are held to their count and to their bytes as stored", () => {
+    // Ids 64 letters long, 60 of which JSON writes as six bytes apiece.
+    const long = (i: number) => `${"\ud800".repeat(60)}${String(i).padStart(4, "0")}`;
+    const pairs = (n: number) => ({ a: Object.fromEntries(Array.from({ length: n }, (_, i) => [long(i), 1])) });
+    const fits = Math.floor((LIMITS.remindedPerPlayerBytes - 6) / (serializedBytes(long(0)) + 3));
+    const parsed = (n: number) => parseRoomState({ ...room(), reminded: { players: { p1: pairs(n) } } }).ok;
+    assert.deepEqual([parsed(fits), parsed(fits + 1)], [true, false]);
+    assert.equal(parseRoomState({ ...room(), reminded: { shared: { a: Object.fromEntries(Array.from({ length: LIMITS.remindedShared + 1 }, (_, i) => [`t${i}`, 1])) } } }).ok, false, "and the shared pairs to their count");
   });
 });
 

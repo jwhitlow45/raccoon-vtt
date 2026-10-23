@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { LIMITS } from "../limits.ts";
+import { LIMITS, serializedBytes } from "../limits.ts";
 import { eventLines, lineAudience } from "../logRings.ts";
 import type { AreaTemplate, RoomState, Viewer } from "../model.ts";
 import { projectState } from "../project.ts";
@@ -129,6 +129,35 @@ describe("each audience's own reminders hold back a matching one this turn (remi
       s = r.state;
     }
     assert.deepEqual(again, { a: [0, 0], c: [100, 0], d: [0, 0] }, "only the pairs P1's cap left out remind again, and only P1");
+  });
+});
+
+describe("each audience's record is held to its bytes as stored as well", () => {
+  test("ids JSON writes long fill a player's bytes before their count, and each player's bytes are their own", () => {
+    // A hundred goblins every player sees, each id 64 letters, 60 of which JSON writes as six bytes apiece.
+    const state = goblinTurn({ ownerId: "dm1", origin: { x: 35, y: 25, z: 0 } });
+    delete state.tokens.g1;
+    state.tokens.orc = { ...state.tokens.orc!, x: 38, y: 2 };
+    state.encounter = { ...state.encounter!, activeEntryId: "e-orc", entries: [state.encounter!.entries[1]!] };
+    const long = (i: number) => `${"\ud800".repeat(60)}${String(i).padStart(4, "0")}`;
+    for (let i = 0; i < 100; i++) state.tokens[long(i)] = token(long(i), { name: "Goblin", number: i + 1, x: i % 10, y: Math.floor(i / 10) });
+    for (const [id, ownerId] of [["a", "p1"], ["d", "p2"]] as const) {
+      state.templates[id] = template(id, { shape: "sphere", size: 40, origin: { x: 30, y: 25, z: 0 }, ownerId, triggers: ["enter"] });
+    }
+    let s = run(state, place("a", 5, 5), DM, 2).state;
+    s = run(s, place("d", 5, 5), DM, 3).state;
+    const players = s.reminded!.players!;
+    const pairs = (id: string) => Object.keys(players[id]!.a ?? players[id]!.d ?? {}).length;
+    const kept = pairs("p1");
+    assert.ok(kept > 0 && kept < 100, `P1 kept ${kept}`);
+    assert.equal(pairs("p2"), kept, "P2's bytes are their own, so P2 keeps as many");
+    for (const id of ["p1", "p2"]) {
+      const bytes = serializedBytes(players[id]);
+      assert.ok(bytes <= LIMITS.remindedPerPlayerBytes && bytes + serializedBytes(long(0)) + 3 > LIMITS.remindedPerPlayerBytes, `${id}: ${bytes} bytes`);
+    }
+    s = run(s, place("a", 30, 25), DM, 4).state;
+    const again = run(s, place("a", 5, 5), DM, 5);
+    assert.deepEqual([read(again, P1).length, read(again, P2).length], [100 - kept, 0], "only the goblins past P1's bytes remind P1 again");
   });
 });
 
