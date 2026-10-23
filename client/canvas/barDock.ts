@@ -1190,6 +1190,8 @@ type BarDockState = {
   footYields: boolean;
   /** The room between the top bars and the tool's options is under one whole alert card, and the column's summary row stands for its cards. */
   columnCramped: boolean;
+  /** The column draws a map pane's summary row in place of its cards (pages/fold.ts drawsPaneRow). */
+  columnPaneRow: boolean;
   /** The column's alerts show over the screen (askedAlerts), so the top bars rise over the notices with them. */
   alertsOverlay: boolean;
   /** Asks for the alerts over the screen to close (closeAlertsOverlay), counted so each ask is heard, and the panel the ask opened, which then takes focus. */
@@ -1201,7 +1203,7 @@ type BarDockState = {
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
 );
 
 /**

@@ -13,7 +13,7 @@ import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { dockSlot, drawn, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
+import { dockSlot, drawn, drawsPaneRow, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
 import { SheetHeader } from "../../components/SheetHeader.tsx";
 import { useScoped } from "../../state/scope.ts";
@@ -589,7 +589,7 @@ function FightAlerts() {
   const paneSummary = useDockSummary("pane");
   const paneLane = useStore(alertsDock, (s) => s.paneLane);
   const laneRow = summaryFor({ paneLane: folded || asked !== null ? null : (paneLane?.lane ?? null), barLane: bar?.lane ?? null });
-  const forPane = laneRow === "pane" && paneSummary !== null;
+  const forPane = drawsPaneRow({ paneLane: paneLane?.lane ?? null, barLane: bar?.lane ?? null, folded, asked: asked !== null, waiting: paneSummary !== null });
   const forRoom = cramped && !asked && !forFootCard && !forPane;
   const summary = forPane ? paneSummary : forRoom ? roomSummary : barSummary;
   const summarized = forFootCard || forRoom || forPane || (!folded && laneRow === "bar" && summary !== null);
@@ -597,6 +597,11 @@ function FightAlerts() {
     if (dock.getState().columnCramped !== forRoom) dock.setState({ columnCramped: forRoom });
   }, [dock, forRoom]);
   useLayoutEffect(() => () => dock.setState({ columnCramped: false }), [dock]);
+  // Room reads out what arrives under the pane's row as under the others (pages/fold.ts drawsPaneRow).
+  useLayoutEffect(() => {
+    if (dock.getState().columnPaneRow !== forPane) dock.setState({ columnPaneRow: forPane });
+  }, [dock, forPane]);
+  useLayoutEffect(() => () => dock.setState({ columnPaneRow: false }), [dock]);
   // What waits changed: the cards are measured again, which a hidden card cannot be. Asked for, they stay shown while anything waits, since opening a roll's card changes the summary's words too.
   const waits = roomSummary?.name ?? null;
   // The last alert answered over the screen takes the alerts and the row with it: focus goes to the map, never to the page (pages/mapFocus.ts).

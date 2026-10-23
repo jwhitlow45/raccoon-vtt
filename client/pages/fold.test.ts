@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_CHROME } from "../canvas/barDock.ts";
-import { alertsSummary, dockFits, foldsUnderSheet, paneDockFits, sideSheetRoom, summaryFor, type ColumnAlert } from "./fold.ts";
+import { alertsSummary, dockFits, drawsPaneRow, foldsUnderSheet, paneDockFits, sideSheetRoom, summaryFor, type ColumnAlert } from "./fold.ts";
 
 describe("foldsUnderSheet", () => {
   test("a phone in portrait folds while a sheet is open", () => {
@@ -233,5 +233,22 @@ describe("a rolls' line whose words name only its lead (LP16-PT-3)", () => {
   test("a line that names everything it stands for adds nothing", () => {
     assert.equal(alertsSummary({ ...desk, text: "Rolls 1/3", unnamed: 0 }, [])?.more, "");
     assert.equal(alertsSummary({ text: "Rolls 1/3", name: "rolls 1 of 3 answered", waiting: false, requests: 3 }, [])?.more, "");
+  });
+});
+
+describe("drawsPaneRow, the flag Room reads (docs/design-v1-look-pass-2.md 2.8)", () => {
+  const base = { paneLane: "summary" as const, barLane: null, folded: false, asked: false, waiting: true };
+
+  test("the pane's row while a pane card has no room beside the lane and something waits", () => {
+    assert.equal(drawsPaneRow(base), true);
+    assert.equal(drawsPaneRow({ ...base, barLane: "summary" }), true, "over the window's");
+  });
+
+  test("none while the DM asked for the cards, folded under a sheet, with nothing waiting, or with the pane beside", () => {
+    assert.equal(drawsPaneRow({ ...base, asked: true }), false);
+    assert.equal(drawsPaneRow({ ...base, folded: true }), false);
+    assert.equal(drawsPaneRow({ ...base, waiting: false }), false);
+    assert.equal(drawsPaneRow({ ...base, paneLane: "beside" }), false);
+    assert.equal(drawsPaneRow({ ...base, paneLane: null, barLane: "summary" }), false, "the window's row is not the pane's");
   });
 });

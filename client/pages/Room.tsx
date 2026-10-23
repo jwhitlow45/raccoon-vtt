@@ -770,9 +770,8 @@ function RoomPage() {
     return () => observer.disconnect();
     // The observer hears the stack's size only, so what moves it measures again: the turn band coming or going, the notch, the preview's notice.
   }, [barDock, besideLane, previewBottom, zoom, role, topInset, safe.top, laneTop]);
-  // A map pane's card with no room beside the lane has the column's row stand for its cards too (fold.ts usePublishPaneLane), so what arrives meanwhile is read out here.
-  const paneRow = useStore(dockStore, (s) => s.paneLane?.lane === "summary");
-  const columnSummary = (useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields || s.columnCramped) || paneRow) && summary !== null;
+  // A map pane's card with no room beside the lane has the column's row stand for its cards too (fold.ts drawsPaneRow), so what arrives meanwhile is read out here.
+  const columnSummary = useStore(barDock, (s) => s.bar?.lane === "summary" || s.footYields || s.columnCramped || s.columnPaneRow) && summary !== null;
   /*
    * Where a toast that shows now starts (barDock.ts toastTop): on a phone,
    * where the notices span the map over the alerts column and the column

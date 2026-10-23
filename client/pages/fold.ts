@@ -173,6 +173,23 @@ export function summaryFor(input: { paneLane: PaneLane | null; barLane: Lane | n
   return null;
 }
 
+/**
+ * Whether the alerts column draws the pane's summary row in place of its
+ * cards (summaryFor): a pane drawn as a card with no room beside the lane,
+ * while something waits, the column unfolded and its cards not asked for.
+ * The column publishes it (canvas/barDock.ts `columnPaneRow`), so Room
+ * reads out what arrives under the row as under any other.
+ *
+ * While the DM has asked for the cards, they show where they are or over
+ * the screen, and may cover a pane in a summary layout. That is accepted:
+ * the DM asked to see them, and closing them brings the row back, so the
+ * pane does not move for them.
+ */
+export function drawsPaneRow(input: { paneLane: PaneLane | null; barLane: Lane | null; folded: boolean; asked: boolean; waiting: boolean }): boolean {
+  if (input.folded || input.asked || !input.waiting) return false;
+  return summaryFor({ paneLane: input.paneLane, barLane: input.barLane }) === "pane";
+}
+
 /** The dock's row height, and the gap kept above it under the top bars. */
 export const DOCK_PX = 48;
 export const DOCK_GAP = theme.space(2);
