@@ -702,6 +702,72 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await ops.send({ t: "encounter.end" });
   });
 
+  test("lp2-2b. a walking ruler keeps its total while its walk is searched, on a slowed page", async () => {
+    // The DM's own ruler, which stays on the DM's screen, so no frame of it reaches the player.
+    await dm.getByRole("button", { name: "Ruler", exact: true }).click();
+    await pickOption(dm, "Ruler", "Measure", "Walking");
+    // A slower page, so a walk round the walls takes more than a frame's share of route work and searches over several frames.
+    const cdp = await dmContext.newCDPSession(dm);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+    try {
+      // What the board shows at each frame: the total, or the wait.
+      await dm.evaluate(() => {
+        type Node = { text(): string; isVisible(): boolean };
+        const g = globalThis as unknown as {
+          Konva: { stages: { find(selector: string): Node[] }[] };
+          requestAnimationFrame(cb: () => void): number;
+          lp2Frames: { walk: boolean; finding: boolean }[];
+          lp2Stop: boolean;
+        };
+        g.lp2Frames = [];
+        g.lp2Stop = false;
+        const read = () => {
+          const texts = g.Konva.stages[0]!.find("Text")
+            .filter((t) => t.isVisible())
+            .map((t) => t.text());
+          g.lp2Frames.push({ walk: texts.some((t) => t.startsWith("Walking ")), finding: texts.includes("Finding the way…") });
+          if (!g.lp2Stop) g.requestAnimationFrame(read);
+        };
+        g.requestAnimationFrame(read);
+      });
+      const at = (x: number, y: number) => pagePoint(dm, BOUNDS, { x: x + 0.5, y: y + 0.5 });
+      const start = await at(13, 3);
+      await dm.mouse.move(start.x, start.y);
+      await dm.mouse.down();
+      // Round the room and through the wall's door, up onto the platform and back, so each stop's walk is searched anew.
+      for (const [x, y] of [
+        [13, 7],
+        [6, 8],
+        [2, 13],
+        [5, 15],
+        [10, 15],
+        [12, 17],
+        [4, 12],
+      ] as const) {
+        const p = await at(x, y);
+        await dm.mouse.move(p.x, p.y, { steps: 6 });
+        await dm.waitForTimeout(120);
+      }
+      await dm.waitForTimeout(400);
+      const frames = await dm.evaluate(() => {
+        const g = globalThis as unknown as { lp2Frames: { walk: boolean; finding: boolean }[]; lp2Stop: boolean };
+        g.lp2Stop = true;
+        return g.lp2Frames;
+      });
+      await shots.take(dm, "lp2-2b-walking-ruler");
+      await dm.mouse.up();
+      const first = frames.findIndex((f) => f.walk);
+      assert.ok(first >= 0, "the walking ruler never read a total");
+      const blank = frames.slice(first).filter((f) => !f.walk && !f.finding).length;
+      assert.equal(blank, 0, `the total went blank in ${blank} of ${frames.length - first} frames while the walk was searched`);
+    } finally {
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+      await cdp.detach();
+    }
+    await pickOption(dm, "Ruler", "Measure", "Straight");
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+  });
+
   test("11. no frame the player received held anything out of the party's sight, and every ruler stood on its measurer's ground", () => {
     const frames = framesFrom(0);
     const start = run.startSight;

@@ -754,10 +754,12 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
       {pill ? (
         <button type="button" onClick={() => frame?.show()} style={LINE_BUTTON}>
           {inner}
+          <span aria-hidden data-touch-reach="" style={LINE_REACH} />
         </button>
       ) : cut || open ? (
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={LINE_BUTTON}>
           {inner}
+          <span aria-hidden data-touch-reach="" style={LINE_REACH} />
         </button>
       ) : (
         inner
@@ -784,6 +786,7 @@ const LINE_MIN = theme.font.body14 * theme.leading.body + 2 * LINE_PAD.y;
  * and height what its words alone give it.
  */
 const LINE_BUTTON: CSSProperties = {
+  position: "relative",
   display: "block",
   boxSizing: "border-box",
   width: `calc(100% + ${2 * LINE_PAD.x}px)`,
@@ -796,6 +799,22 @@ const LINE_BUTTON: CSSProperties = {
   font: "inherit",
   textAlign: "left",
   cursor: "pointer",
+};
+
+/**
+ * The line button's touch target: 44 px tall however short its one line
+ * is, reaching past the pill's top and foot rather than growing it, since
+ * the pill's height is the map's reserve (pages/Room.tsx useOptionsBox).
+ * The 6 px gap above the row holds what it reaches down, so it never takes
+ * a tap meant for the row.
+ */
+const LINE_REACH: CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: "50%",
+  height: `max(100%, ${theme.touch}px)`,
+  transform: "translateY(-50%)",
 };
 
 // ------------------------------------------------------------ value chips (6.2, 7.2)

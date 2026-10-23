@@ -19,7 +19,7 @@ import { dragLabel, remoteReading, type DragRead, type SpeedLeft, type Speeds } 
 import { Pill, PillStack } from "./Pill.tsx";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { useWalkMeasure } from "./useWalkMeasure.ts";
-import { walkText, type WalkInput } from "./walkRuler.ts";
+import { walkText, type WalkInput, type WalkMeasure } from "./walkRuler.ts";
 import { useTrapCrossing } from "../traps/Crossing.tsx";
 
 /**
@@ -169,19 +169,43 @@ function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rul
 }
 
 /**
+ * What a walking ruler's total and the Ruler's line say while its walk is
+ * worked out, as a drag's label does (docs/design-v1-look-pass-2.md D16): a
+ * walk still searching keeps the last walk's reading, and only once the
+ * search has run past the shared loading delay (`slow`) does it wait grey,
+ * "Finding the way…". So a ruler dragged over a large map never blinks.
+ * `held` is the last walk this ruler finished, null before its first.
+ */
+export function walkShown(m: WalkMeasure, held: WalkMeasure | null, slow: boolean): { reading: WalkMeasure | null; finding: boolean } {
+  if (!m.searching) return { reading: m, finding: false };
+  if (slow) return { reading: null, finding: true };
+  return { reading: held, finding: false };
+}
+
+/** The last walk a ruler finished, kept while a later one searches (walkShown). */
+export function useHeldWalk(m: WalkMeasure | null): WalkMeasure | null {
+  const held = useRef<WalkMeasure | null>(null);
+  // Read and written in the render on purpose: it follows `m` and never asks for a render of its own.
+  if (m && !m.searching) held.current = m;
+  return held.current;
+}
+
+/**
  * A walking ruler (docs/design-v1-movement.md 3.3): each leg along the
  * route the creature would walk, between its footprint's centers, with a
  * dot at each stop, each leg's cost, and "Walking 40 ft" at the end with
  * what terrain added. A leg with no route runs straight in red, "No way
- * through". While a leg's search runs, it waits grey and straight, and past
- * the shared loading delay the label says "Finding the way…", as a drag's
- * does.
+ * through". While a leg's search runs it is drawn straight, and the total
+ * keeps the last walk (walkShown). Past the shared loading delay the leg
+ * waits grey and the label says "Finding the way…", as a drag's does.
  */
 function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale: number; color: string; owner: string | null; kept?: boolean; live?: boolean }) {
   const { stops, walk, scale, color } = props;
   const m = useWalkMeasure({ ...walk, stops }, props.live === true);
   const slow = useDelayed(m?.searching === true);
+  const held = useHeldWalk(m);
   if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
+  const shown = walkShown(m, held, slow);
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
   const last = mid(m.legs[m.legs.length - 1]!.to);
   return (
@@ -189,7 +213,7 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
       {m.legs.map((leg, i) => {
         const pts = [leg.from, ...leg.corners, leg.to].map(mid);
         const flat = pts.flatMap((p) => [p.x, p.y]);
-        const stroke = leg.searching ? theme.color.textMuted : leg.none ? theme.color.danger : color;
+        const stroke = leg.searching && shown.finding ? theme.color.textMuted : leg.none ? theme.color.danger : color;
         const a = pts[0]!;
         const b = pts[pts.length - 1]!;
         const labelled = !leg.searching && (leg.none || (m.legs.length > 1 && Math.hypot(b.x - a.x, b.y - a.y) * scale >= LEG_LABEL_MIN_PX));
@@ -205,11 +229,11 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
         const c = mid(p);
         return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
       })}
-      {m.searching ? (
-        slow ? <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={theme.color.textMuted} offsetPx={18} /> : null
-      ) : (
-        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(m)} size="screen" color={color} offsetPx={18} />
-      )}
+      {shown.finding ? (
+        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={theme.color.textMuted} offsetPx={18} />
+      ) : shown.reading ? (
+        <Pill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(shown.reading)} size="screen" color={color} offsetPx={18} />
+      ) : null}
     </>
   );
 }

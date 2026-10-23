@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { EphEvent } from "#shared/protocol.ts";
-import { useDelayed } from "../../components/Loading.tsx";
+import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { theme } from "../../lib/theme.ts";
 import { groundSource, seenGround } from "../builder/heights/ground.ts";
@@ -26,6 +26,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
+import { useHeldWalk, walkShown } from "./RulerLayer.tsx";
 import { useWalkMeasure } from "./useWalkMeasure.ts";
 import { saveWalk, savedWalk, walkText } from "./walkRuler.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
@@ -196,7 +197,10 @@ const MEASURES = [
  * The Ruler's row (docs/design-v1-tool-options.md 9.2): Shared for the DM,
  * Measure, Keep and Clear, and the kept rulers behind a chip. Its line is
  * the hint, or the reading with the diagonal rule: a walking ruler's walk
- * and what terrain added (docs/design-v1-movement.md 3.3).
+ * and what terrain added (docs/design-v1-movement.md 3.3). While a walk is
+ * searching the line keeps the last walk, and past the shared loading
+ * delay it says "Finding the way…" beside a spinner, as Loading does
+ * (RulerLayer.tsx walkShown).
  */
 function RulerOptions(props: { role: "dm" | "player" }) {
   const tool = useScoped(rulerSlot);
@@ -210,20 +214,31 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   let info: ReactNode = "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.";
   if (stops.length === 1) info = "Tap or drag to the next point.";
   const walked = useWalkMeasure(walk && view && tool.activeCtx && stops.length > 1 ? { view, sceneId: tool.activeCtx.scene.id, stops, viewer: { role: props.role }, everything: props.role === "dm" && !share } : null, true);
-  const finding = useDelayed(walked?.searching === true);
-  if (walked?.searching) {
-    if (finding) info = "Finding the way…";
-  } else if (walked) {
-    const [first, extra] = walkText(walked).split("\n");
+  const slow = useDelayed(walked?.searching === true);
+  const held = useHeldWalk(walked);
+  const shown = walked ? walkShown(walked, held, slow) : null;
+  // The diagonal rule follows a reading only, never the hint or the wait.
+  let reading = false;
+  if (shown?.finding) {
+    info = (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
+        <Spinner size={16} />
+        Finding the way…
+      </span>
+    );
+  } else if (shown?.reading) {
+    const [first, extra] = walkText(shown.reading).split("\n");
+    reading = true;
     info = (
       <>
         <strong>{first}</strong>
         {extra ? ` · ${extra}` : null}
-        {walked.legs.some((l) => l.none) ? " · No way through" : null}
+        {shown.reading.legs.some((l) => l.none) ? " · No way through" : null}
       </>
     );
-  } else if (stops.length > 1 && tokens && settings) {
+  } else if (!walked && stops.length > 1 && tokens && settings) {
     const { totalFt, legsFt } = measureStops(stops, tokens, settings);
+    reading = true;
     info = (
       <>
         <strong>{formatFeet(totalFt)}</strong>
@@ -239,7 +254,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
         content: (
           <>
             {info}
-            {settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal)}</span> : null}
+            {reading && settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal)}</span> : null}
           </>
         ),
       }}

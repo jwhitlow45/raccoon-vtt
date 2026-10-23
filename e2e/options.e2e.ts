@@ -843,8 +843,24 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
       }
       const pct = Math.round(ui * 100);
 
-      // A ruler measured up under the top bar: its total, 18 px down and right of its end, would stand under the bar.
       await selectTool(player, "r");
+      // The hint names no diagonal rule, which follows a reading only (D29).
+      const line = options(player).locator("[data-options-line]");
+      assert.equal((await line.innerText()).trim(), "Drag to measure. Tap to add a waypoint. Double-tap to keep a ruler on the map.");
+      if (ui === 1) {
+        // Cut short on the phone, the line opens from a tap anywhere 44 px tall around it, though it stands shorter.
+        const lineButton = line.getByRole("button");
+        await lineButton.waitFor();
+        const lineBox = (await line.boundingBox())!;
+        const reach = (await line.locator("[data-touch-reach]").boundingBox())!;
+        assert.ok(lineBox.height < 44, `the line stands ${lineBox.height} px tall`);
+        assert.ok(reach.height >= 44 - 0.5, `the line takes taps ${reach.height} px tall`);
+        await player.mouse.click(lineBox.x + lineBox.width / 2, lineBox.y - 3);
+        assert.equal(await lineButton.getAttribute("aria-expanded"), "true", "a tap just over the cut line opens it");
+        await lineButton.click();
+        assert.equal(await lineButton.getAttribute("aria-expanded"), "false");
+      }
+      // A ruler measured up under the top bar: its total, 18 px down and right of its end, would stand under the bar.
       const start = await pagePoint(player, { w: 0, h: 0 }, { x: 11.5, y: 8.5 });
       const beforeRuler = (await boardBoxes(player)).pills;
       await player.mouse.move(start.x, start.y);
