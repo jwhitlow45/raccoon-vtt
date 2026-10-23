@@ -6,9 +6,9 @@ import { createRoomActions } from "../state/actions.ts";
 import { browserEnv, createRoomSocket, roomSocketUrl } from "../state/socket.ts";
 import { createRoomStore, type RoomStore } from "../state/store.ts";
 import type { RoomActions, You } from "../state/types.ts";
-import { RoomProvider } from "../state/view.ts";
 import { XCardHost } from "../features/xcard/XCardHost.tsx";
 import { Room } from "./Room.tsx";
+import { RoomTree } from "./RoomTree.tsx";
 
 /**
  * Who this device is in the room, asked again after a 4001 close. A grant
@@ -67,9 +67,9 @@ export default function LiveRoom(props: { roomId: string; me: Me }) {
   // The page color, as the room's own wait before it (RoomRoute.tsx), so the room opens without a black flash.
   if (!live) return <div style={{ position: "fixed", inset: 0, background: theme.color.bg }} />;
   return (
-    <RoomProvider store={live.room.store} actions={live.actions} ui={live.room.ui}>
+    <RoomTree room={live.room} actions={live.actions}>
       <Room />
       <XCardHost />
-    </RoomProvider>
+    </RoomTree>
   );
 }
