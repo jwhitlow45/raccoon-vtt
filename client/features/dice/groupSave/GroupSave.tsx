@@ -11,6 +11,7 @@ import { Button } from "../../../components/Button.tsx";
 import { Checkbox } from "../../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../../components/Chip.tsx";
 import { Input } from "../../../components/Field.tsx";
+import { Notice } from "../../../components/Notice.tsx";
 import { Segmented } from "../../../components/Segmented.tsx";
 import { stickyPaneFoot } from "../../../components/Sheet.tsx";
 import { Section } from "../../../components/Panel.tsx";
@@ -999,17 +1000,32 @@ function GroupRow(props: {
 
 export { DAMAGE_TYPES, type DamageType };
 
-/** The Dice panel's row for the open group save (5.1): "Fireball's save: 2 waiting. Open". */
+/** The open group save's notice, for the alignment sweep and the e2e suites. */
+export const OPEN_GROUP_SAVE = "[data-open-group-save]";
+
+/**
+ * The Dice panel's notice of the open group save (5.1): "Fireball's save: 2
+ * waiting." with Open. An info notice between the roll modes and the
+ * creature card, so the DM reads an unfinished group save as a status
+ * rather than one more line of the panel (docs/design-v1-dice-pass.md 7.8).
+ */
 export function OpenGroupSave(props: { page: Page; onOpen(): void }) {
   const { page } = props;
   const waiting = page.phase === "setup" ? 0 : [...results(page).values()].filter((r) => r === null).length;
   const state = openSaveState(page, waiting);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-      <span style={{ flex: 1, minWidth: 0 }}>{`${pageTitle(page)}: ${state}.`}</span>
-      <Button size="sm" onClick={props.onOpen}>
-        Open
-      </Button>
+    // A notice draws no marks of its own, so a plain box carries it.
+    <div data-open-group-save="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+      <Notice
+        tone="info"
+        action={
+          <Button size="sm" onClick={props.onOpen}>
+            Open
+          </Button>
+        }
+      >
+        {`${pageTitle(page)}: ${state}.`}
+      </Notice>
     </div>
   );
 }
