@@ -34,7 +34,7 @@ import { requestPan } from "../encounter/pan.ts";
 import { ChoiceRows, ConfirmButton, type RowOption } from "../measure/controls.tsx";
 import { openAsk } from "../rolls/open.ts";
 import { NumberInput } from "../scenes/controls.tsx";
-import { diceLeft, diceTyped, lineLeft, lineTyped, type DiceState, type LineState } from "./fieldNote.ts";
+import { diceLeft, diceRested, diceTyped, lineLeft, lineRested, lineTyped, NOTE_REST_MS, type DiceState, type LineState } from "./fieldNote.ts";
 import { trapScreenBox } from "./paneBox.ts";
 import { Pair, PartRow, Words } from "./PartRow.tsx";
 import {
@@ -428,17 +428,21 @@ const SOUND_NAMES: Record<TrapSound, string> = { click: "Click", rumble: "Rumble
 /**
  * A line of text sent when its field is left or Enter is pressed, never
  * letter by letter. Empty sends null, unless the line is `required`: then
- * the field goes back to the saved text and says why, in those words, as
- * the label pane does, so an empty field never stands for a name the trap
- * still has.
+ * the field goes back to the saved text, so an empty field never stands for
+ * a name the trap still has. It says why in those words, as the label pane
+ * does, once typing rests or on Enter, never on the blur (fieldNote.ts).
  */
 function TextField(props: { label: string; value: string; max: number; placeholder?: string; required?: string; onSave(value: string | null): void }) {
   const [field, setField] = useState<LineState>({ text: props.value, refused: false });
   const { text, refused } = field;
   const noteId = useId();
+  const rest = useRest();
   useEffect(() => setField((was) => ({ ...was, text: props.value })), [props.value]);
-  const save = () => {
-    const next = lineLeft(field, props.value, props.max, props.required !== undefined);
+  // Enter keeps the field focused, so it may say why at once: no press waits below it.
+  const save = (entered: boolean) => {
+    rest.stop();
+    const required = props.required !== undefined;
+    const next = lineLeft(entered ? lineRested(field, props.max, required) : field, props.value, props.max, required);
     setField(next.state);
     if (next.send !== undefined) props.onSave(next.send);
   };
@@ -451,10 +455,13 @@ function TextField(props: { label: string; value: string; max: number; placehold
         placeholder={props.placeholder}
         maxLength={props.max}
         value={text}
-        onChange={(e) => setField(lineTyped(e.target.value))}
-        onBlur={save}
+        onChange={(e) => {
+          setField(lineTyped(e.target.value));
+          rest.start(() => setField((was) => lineRested(was, props.max, props.required !== undefined)));
+        }}
+        onBlur={() => save(false)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") save();
+          if (e.key === "Enter") save(true);
         }}
         style={{ width: "100%" }}
       />
@@ -761,17 +768,21 @@ function SaveFields(props: { rig: TrapRig; setRig(patch: RigPatch): void }) {
 /**
  * One part of the damage: its dice, sent when they read as a formula, its
  * type and its remove. Dice that do not read keep the last good ones, and
- * say why in a line under the row, as every field's error does
- * (docs/design-v1-look-pass-2.md 2.9), not only in an outline and a title.
+ * say why in a line under the row once typing rests or on Enter, as every
+ * field's error does (docs/design-v1-look-pass-2.md 2.9), not only in an
+ * outline and a title.
  */
 function DamagePart(props: { part: { formula: string; type: DamageType }; onFormula(formula: string): void; onType(type: DamageType): void; onRemove(): void }) {
   const [field, setField] = useState<DiceState>({ text: props.part.formula, bad: false });
   const { text, bad } = field;
   const errorId = useId();
+  const rest = useRest();
   // Dice saved from here or elsewhere replace what was typed, and any error with it.
   useEffect(() => setField({ text: props.part.formula, bad: false }), [props.part.formula]);
-  const save = () => {
-    const next = diceLeft(field, props.part.formula);
+  // Enter keeps the field focused, so it may say why at once: no press waits below it.
+  const save = (entered: boolean) => {
+    rest.stop();
+    const next = diceLeft(entered ? diceRested(field) : field, props.part.formula);
     setField(next.state);
     if (next.send !== undefined) props.onFormula(next.send);
   };
@@ -785,10 +796,13 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
           aria-describedby={bad ? errorId : undefined}
           error={bad}
           value={text}
-          onChange={(e) => setField(diceTyped(field, e.target.value))}
-          onBlur={save}
+          onChange={(e) => {
+            setField(diceTyped(field, e.target.value));
+            rest.start(() => setField(diceRested));
+          }}
+          onBlur={() => save(false)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") save();
+            if (e.key === "Enter") save(true);
           }}
           style={{ width: theme.layout.options.field }}
         />
@@ -807,6 +821,30 @@ function DamagePart(props: { part: { formula: string; type: DamageType }; onForm
       ) : null}
     </div>
   );
+}
+
+/**
+ * The rest after a field's last keystroke, after which it says what is
+ * wrong (fieldNote.ts NOTE_REST_MS). Each keystroke starts it again, and
+ * leaving the field stops it, so no note comes on or after a blur.
+ */
+function useRest(): { start(then: () => void): void; stop(): void } {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  useEffect(() => stop, []);
+  return {
+    start(then) {
+      stop();
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        then();
+      }, NOTE_REST_MS);
+    },
+    stop,
+  };
 }
 
 /** "It also" (4.1): each thing it does when it goes off, in order, with its choice and a way to take it out. */
