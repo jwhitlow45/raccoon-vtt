@@ -84,8 +84,20 @@ export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
   );
 });
 
-/** The name pill's pointer, which areaLabelSpot counts in its height. */
-const POINTER_PX = 6;
+/**
+ * The room an area's name takes for areaLabelSpot: its pill with the
+ * pill's pointer, on two lines, and on one where that is shorter. The
+ * pointer scales with the interface size as the pill does (pillGeometry),
+ * so the spot is picked for the pill as drawn at every size.
+ */
+export function areaNameRoom(scale: number, name: string): { size: { width: number; height: number }; oneLineSize: { width: number; height: number } | undefined } {
+  const pill = pillGeometry({ scale, name, size: "map", small: true });
+  const short = pillGeometry({ scale, name, size: "map", small: true, maxLines: 1 });
+  return {
+    size: { width: pill.width, height: pill.height + pill.pointer },
+    oneLineSize: short.height < pill.height ? { width: short.width, height: short.height + short.pointer } : undefined,
+  };
+}
 
 /** How far an area's name may slide along its top or bottom edge each way, in cells: half its width. */
 function outlineReach(o: Outline): number {
@@ -125,15 +137,14 @@ function PlacedArea(props: {
   const hidden = t.visibility === "dm";
   const name = `${areaTitle(t)}${hidden && props.dm ? " (hidden)" : ""}`;
   const origin = liveOrigin(t, ctx);
-  const pill = pillGeometry({ scale, name, size: "map", small: true });
-  const short = pillGeometry({ scale, name, size: "map", small: true, maxLines: 1 });
+  const room = areaNameRoom(scale, name);
   const spot = areaLabelSpot({
     top: outline ? outlineTop(outline) : origin,
     bottom: outline ? outlineBottom(outline) : origin,
     reach: outline ? outlineReach(outline) : 0,
     edge: outline ? (dx, side) => outlineEdge(outline, dx, side) : undefined,
-    size: { width: pill.width, height: pill.height + POINTER_PX },
-    oneLineSize: short.height < pill.height ? { width: short.width, height: short.height + POINTER_PX } : undefined,
+    size: room.size,
+    oneLineSize: room.oneLineSize,
     scale,
     avoid: props.avoid,
     ...(props.fogged ? { fogged: props.fogged } : {}),
