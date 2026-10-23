@@ -800,8 +800,10 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
 
     // The buttons that follow the choice still start the map's pick and the area tool.
     await hits.getByRole("radio", { name: "Everyone in these squares" }).click();
-    // The last one is Hits': the trap's own squares have an Add squares of their own above.
-    await pane(dm).getByRole("button", { name: "Add squares", exact: true }).last().click();
+    // Named apart from the Add squares that grows the trap itself, which keeps its own name (F5).
+    await unfold(dm, "Goes off when");
+    assert.equal(await pane(dm).getByRole("button", { name: "Add squares", exact: true }).count(), 1);
+    await pane(dm).getByRole("button", { name: "Add squares it hits", exact: true }).click();
     await waitFor("the pane steps aside for the pick", async () => ((await pane(dm).isVisible()) ? null : true));
     const options = dm.getByRole("toolbar", { name: "Trap options" });
     await options.getByText("Drag across the squares Hidden Pit hits, or tap one square.").waitFor();

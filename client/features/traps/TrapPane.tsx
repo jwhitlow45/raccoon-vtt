@@ -597,7 +597,8 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
           <Button size="sm" onClick={() => props.pick("hits", true)}>
             Draw them again
           </Button>
-          <Button size="sm" icon="plus" onClick={() => props.pick("hits")}>
+          {/* Named apart from Goes off when's Add squares, which grows the trap itself. */}
+          <Button size="sm" icon="plus" aria-label="Add squares it hits" onClick={() => props.pick("hits")}>
             Add squares
           </Button>
         </div>
