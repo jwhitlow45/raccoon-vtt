@@ -1724,7 +1724,7 @@ function ToastNote(props: { toast: Toast; onDismiss(): void }) {
   if (action) {
     // A button cannot hold another, so the words dismiss as a button of their own beside the action's.
     return (
-      <div role="status" style={{ ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }}>
+      <div role="status" data-toast="" style={{ ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }}>
         <button type="button" onClick={props.onDismiss} style={{ flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, padding: 0, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }}>
           {t.text}
         </button>
@@ -1742,7 +1742,7 @@ function ToastNote(props: { toast: Toast; onDismiss(): void }) {
     );
   }
   return (
-    <button type="button" role="status" onClick={props.onDismiss} style={{ ...look, padding: `${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" }}>
+    <button type="button" role="status" data-toast="" onClick={props.onDismiss} style={{ ...look, padding: `${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" }}>
       {t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
     </button>
   );
