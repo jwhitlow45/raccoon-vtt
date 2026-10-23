@@ -70,7 +70,7 @@ type DdbBase = Omit<PcFillStats, 'rolls'> & { level?: number, ac?: number, hpMax
 
 ### 2.2 The three-way rule for a field
 
-`b` is the record's base for the field, `c` the character now, `n` D&D Beyond now. An absent value ("none", 0 for a bonus, off for a flag) is a value. A part the fill left out is not read.
+`b` is the record's base for the field, `c` the character now, `n` D&D Beyond now. An absent value ("none", 0 for a bonus, 20 for critical hits, off for a flag) is a value. A part the fill left out is not read.
 
 | Base | The player changed it (`c` ≠ `b`) | D&D Beyond changed it (`n` ≠ `b`) | Outcome | Listed under |
 | --- | --- | --- | --- | --- |
