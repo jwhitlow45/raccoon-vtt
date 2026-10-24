@@ -1628,8 +1628,12 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     // No toast, or a bar over its token, which stands between the toasts and the token: as before.
     assert.equal(largerShift({ ...room(391, 586), toastFoot: null }), largerShift(room(391, 586)));
     assert.equal(largerShift({ ...room(640, 586), toastFoot: foot }), largerShift(room(640, 586)));
-    // Toasts that reach past the room the token needs leave the bar as it is.
-    assert.equal(largerShift({ ...room(391, 586), toastFoot: 700 }), 0);
+    // A stack that ends 8 px above the token's top still counts, and leaves the bar as it is. One that reaches past it, as a stack in the middle of the screen does, leaves Larger as with no toast (review LP19-OPUS-1).
+    const tokenTop = 391 - FLIP_CLEARANCE;
+    assert.equal(largerShift({ ...room(391, 586), toastFoot: tokenTop - EDGE }), 0);
+    assert.equal(largerShift({ ...room(391, 586), toastFoot: tokenTop - EDGE + 1 }), largerShift(room(391, 586)));
+    assert.equal(largerShift({ ...room(391, 586), toastFoot: 700 }), largerShift(room(391, 586)));
+    assert.equal(largerShift({ ...room(450, 586, null, 128), toastFoot: 450 - 128 - EDGE + 1 }), largerShift(room(450, 586, null, 128)), "the tall token's top, not 40 px above its foot");
   });
 
   test("a tall or zoomed token keeps its top in the free area: Larger asks for less under a 128 px token, Smaller moves back less over a 64 px one, and a token too tall for more room moves nothing (review BS-ASTRA-01)", () => {

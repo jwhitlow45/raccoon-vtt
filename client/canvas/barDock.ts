@@ -1027,8 +1027,11 @@ export function largerShift(input: SpanRoom): number {
  * under its token, which the map moves up, asks for no more than leaves its
  * token below the toasts over the map as they stand (`toastFoot`), at the
  * notices' top, under the column's card or under a header, so a trap's
- * toast never covers the token (review LP19-BS-3). Over its token the bar
- * stands between the toasts and the token, so they never meet.
+ * toast never covers the token (review LP19-BS-3). Only a stack that ends
+ * above the token's top counts. One that already reaches past it, as a
+ * stack in the middle of the screen does, would leave Larger nothing to
+ * do (review LP19-OPUS-1). Over its token the bar stands between the
+ * toasts and the token, so they never meet.
  */
 function largerHang(input: SpanRoom): { free: Box; top: number; want: number; hang: Hang } | null {
   const room = spanRoom(input);
@@ -1036,7 +1039,7 @@ function largerHang(input: SpanRoom): { free: Box; top: number; want: number; ha
   const { free, top } = room;
   const want = Math.min(input.height, largerRoom(input.layout, free, top, input.tokenHeight));
   const hang = spanHang(input.anchor, free, want, top);
-  if (hang.anchor !== "top" || input.toastFoot == null) return { free, top, want, hang };
+  if (hang.anchor !== "top" || input.toastFoot == null || input.toastFoot + EDGE > input.anchor.y - input.tokenHeight) return { free, top, want, hang };
   return { free, top, want: Math.min(want, largerRoom(input.layout, free, Math.max(top, input.toastFoot + EDGE), input.tokenHeight)), hang };
 }
 
