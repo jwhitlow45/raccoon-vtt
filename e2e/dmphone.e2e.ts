@@ -1242,16 +1242,20 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
   });
 
-  test("sm-1. on a 440 or 430 px phone the Setup tools menu holds all five setup tools in one row, on narrower phones three and two with no tool alone, each name on one line and the box as wide as its rows", async () => {
+  test("sm-1. on a 440 or 430 px phone the Setup tools menu holds all five setup tools in one row, on narrower phones three and two with no tool alone, each name on one line and the box as wide as its rows, and at 85%, 115% and 130% a row with the room stays one", async () => {
     try {
       for (const view of [
-        { width: 440, height: 956, rows: [5] },
-        { width: 430, height: 932, rows: [5] },
-        { width: 402, height: 874, rows: [3, 2] },
-        { width: 375, height: 667, rows: [3, 2] },
+        { width: 440, height: 956, scale: 1, rows: [5] },
+        { width: 430, height: 932, scale: 1, rows: [5] },
+        { width: 402, height: 874, scale: 1, rows: [3, 2] },
+        { width: 375, height: 667, scale: 1, rows: [3, 2] },
+        // The browser snaps a zoomed gap to its layout unit, so a row the box hugs is a hair narrower than its computed gaps add up to (FU25-OPUS-1).
+        { width: 390, height: 844, scale: 0.85, rows: [5] },
+        { width: 500, height: 900, scale: 1.15, rows: [5] },
+        { width: 560, height: 900, scale: 1.3, rows: [5] },
       ]) {
-        const at = `${view.width} x ${view.height}`;
-        await setUp({ width: view.width, height: view.height, scale: 1 });
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp({ width: view.width, height: view.height, scale: view.scale });
         await pickTool(dm, "Select");
         await dm.locator('nav[aria-label="Tools"]').getByRole("button", { name: /^Setup tools/ }).tap();
         const menu = dm.getByRole("menu", { name: "Setup tools" });
@@ -1277,10 +1281,10 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
         );
         const box = await rectOf(dm.locator("[data-rvtt-popover]").filter({ has: menu }));
         assert.ok(box.left >= 0 && box.right <= view.width, `${at}: the menu runs past the window, ${JSON.stringify(box)}`);
-        // The box hugs its widest row: its 12 px padding and 1 px border at each side, no more.
+        // The box hugs its widest row: its 12 px padding and 1 px border at each side, no more, scaled with the interface.
         const widest = Math.max(...rows.map((r) => r[r.length - 1]!.right - r[0]!.left));
-        assert.ok(Math.abs(box.right - box.left - (widest + 26)) < 1.5, `${at}: the box is ${box.right - box.left} px wide around rows ${widest} px wide`);
-        await shots.take(dm, `dmphone-sm1-setup-menu-${view.width}`);
+        assert.ok(Math.abs(box.right - box.left - (widest + 26 * view.scale)) < 1.5, `${at}: the box is ${box.right - box.left} px wide around rows ${widest} px wide`);
+        await shots.take(dm, `dmphone-sm1-setup-menu-${view.width}-${Math.round(view.scale * 100)}`);
         await dm.keyboard.press("Escape");
         await menu.waitFor({ state: "detached" });
       }

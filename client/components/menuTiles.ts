@@ -27,6 +27,27 @@ export function tileRows(widths: readonly number[], gap: number, room: number): 
   return { rows: best.rows, width: best.width };
 }
 
+/** A tile's box as the browser laid it out, in the unit its width is measured in. */
+export type TileRect = { left: number; right: number; top: number };
+
+/**
+ * The gap between the tiles as the browser laid it out: the space between
+ * the first two tiles that stand side by side in one row, their tops
+ * within a pixel, else `fallback`, the computed gap times the zoom. The
+ * browser snaps a zoomed gap to its layout unit (Chrome's is 1/64 px), so
+ * at 130% a 4 px gap is laid 5.1875 px wide but computes as 5.2. Over the
+ * gaps of a row that hugs its box, that runs past EPSILON and would split
+ * a row that fits.
+ */
+export function laidGap(rects: readonly TileRect[], fallback: number): number {
+  for (let i = 1; i < rects.length; i++) {
+    const before = rects[i - 1]!;
+    const tile = rects[i]!;
+    if (Math.abs(tile.top - before.top) < 1 && tile.left >= before.right) return tile.left - before.right;
+  }
+  return fallback;
+}
+
 /**
  * A hundredth of a pixel, so a row whose measured widths add up a hair past
  * its room by floating point still fits. The headroom for the browser's own

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { tileRows } from "./menuTiles.ts";
+import { laidGap, tileRows, type TileRect } from "./menuTiles.ts";
 
 /*
  * The rows of Setup's and Tools' tiles (docs/design-v1-tool-options.md
@@ -39,6 +39,30 @@ describe("a menu's tile rows", () => {
     assert.equal(tileRows(SETUP, GAP, 378.495).width, null, "a sum of measured widths a hair past");
     assert.deepEqual(sizes(tileRows(SETUP, GAP, 378.45).rows), [3, 2], "0.05 px past");
     assert.deepEqual(sizes(tileRows(SETUP, GAP, 378.2).rows), [3, 2], "0.3 px past");
+  });
+
+  test("the gap comes from the tiles as laid out, which the browser snaps under the computed one at 130%, so a row its box hugs still fits", () => {
+    // Chrome lays a 4 px gap at 130% 5.1875 px wide, and computes it as 5.2 (FU25-OPUS-1).
+    const widths = SETUP.map((w) => w * 1.3);
+    const rects: TileRect[] = [];
+    for (const w of widths) {
+      const left = rects.length > 0 ? rects[rects.length - 1]!.right + 5.1875 : 0;
+      rects.push({ left, right: left + w, top: 10 });
+    }
+    const room = rects[rects.length - 1]!.right;
+    assert.equal(laidGap(rects, 5.2), 5.1875);
+    assert.deepEqual(tileRows(widths, laidGap(rects, 5.2), room), { rows: [[0, 1, 2, 3, 4]], width: null });
+    assert.deepEqual(sizes(tileRows(widths, 5.2, room).rows), [3, 2], "the computed gap runs 0.05 px over the room");
+  });
+
+  test("the gap is read only between two tiles side by side in one row, and is the computed one without them", () => {
+    const tile = (left: number, top: number): TileRect => ({ left, right: left + 60, top });
+    assert.equal(laidGap([tile(0, 0), tile(0, 40), tile(64.5, 40.4)], 4), 4.5, "the first tile alone, the next two side by side");
+    assert.equal(laidGap([tile(0, 0), tile(0, 40), tile(0, 80)], 4), 4, "each in a row of its own");
+    assert.equal(laidGap([tile(0, 0), tile(66, 1)], 4), 4, "tops a pixel apart");
+    assert.equal(laidGap([tile(0, 0), tile(30, 0)], 4), 4, "two that overlap, which no row lays out, give no gap");
+    assert.equal(laidGap([tile(0, 0)], 4), 4);
+    assert.equal(laidGap([], 4), 4);
   });
 
   test("six play tools that do not fit one row stand three and three, and in three rows two to a row", () => {

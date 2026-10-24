@@ -6,7 +6,7 @@ import { letterOf } from "../state/shortcuts.ts";
 import { Icon } from "./Icon.tsx";
 import { buttonLook } from "./looks.ts";
 import { menuAction, openingIndex, typeahead, type Typed } from "./menuKeys.ts";
-import { tileRows } from "./menuTiles.ts";
+import { laidGap, tileRows } from "./menuTiles.ts";
 import { sectionLabelLook } from "./Panel.tsx";
 import { focusInView, usePopoverContext } from "./Popover.tsx";
 
@@ -112,8 +112,10 @@ export function Menu(props: {
       for (const row of menu.querySelectorAll<HTMLElement>("[data-rvtt-tiles]")) {
         row.style.removeProperty(TILES_WIDTH);
         const zoom = effectiveZoom(row);
-        const widths = [...row.children].map((tile) => tile.getBoundingClientRect().width);
-        const { width } = tileRows(widths, (parseFloat(getComputedStyle(row).columnGap) || 0) * zoom, menu.getBoundingClientRect().width);
+        const rects = [...row.children].map((tile) => tile.getBoundingClientRect());
+        // The gap as laid out between two tiles of one row: the browser snaps a zoomed gap to its layout unit, so the computed one runs over under zoom.
+        const gap = laidGap(rects, (parseFloat(getComputedStyle(row).columnGap) || 0) * zoom);
+        const { width } = tileRows(rects.map((r) => r.width), gap, menu.getBoundingClientRect().width);
         // Half a pixel over the widest row, so rounding never sends its last tile down. The next tile is a whole tile wider.
         if (width !== null) row.style.setProperty(TILES_WIDTH, `${width / zoom + 0.5}px`);
       }
