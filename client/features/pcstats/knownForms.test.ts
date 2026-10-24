@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 import { loadMonsters, type SrdMonster } from "#shared/srd/monsters.ts";
 import { actor } from "#shared/testutil.ts";
-import { formLabel, formMark, knownFormCountWords, knownFormPatch, knownFormsIn, missingFormText, rememberDruidLevel, rememberedDruidLevel, startDruidLevel, toggleKnownForm } from "./knownForms.ts";
+import { isCurrentForm, formLabel, formMark, knownFormCountWords, knownFormPatch, knownFormsIn, missingFormText, rememberDruidLevel, rememberedDruidLevel, startDruidLevel, toggleKnownForm } from "./knownForms.ts";
 import { shapeLimit } from "./shapeLevel.ts";
 import { shapeTempHp } from "./shape.ts";
 
@@ -115,5 +115,15 @@ describe("a Druid's known forms", () => {
     assert.deepEqual(knownFormPatch(wolf, bree(0), undefined).hp, { temp: 9 });
     assert.deepEqual(knownFormPatch(wolf, bree(0), null).hp, { temp: 9 }, "Any picked names no Druid level");
     assert.equal(knownFormPatch(wolf, bree(9), 4).hp, undefined, "Bree's 9 stay");
+  });
+});
+
+describe("the form a druid is in (5.3)", () => {
+  test("only Wild Shape's own form counts as current, so a tap on it does nothing and Polymorph's never does", () => {
+    const wolf = (over: Record<string, unknown>) => ({ actor: actor({ srdId: "wolf", ...over }) });
+    assert.equal(isCurrentForm(wolf({ wildShape: true }), "wolf"), true);
+    assert.equal(isCurrentForm(wolf({ wildShape: true }), "owl"), false);
+    assert.equal(isCurrentForm(wolf({}), "wolf"), false, "Polymorph is another shape");
+    assert.equal(isCurrentForm({ actor: actor({}) }, "wolf"), false, "no shape");
   });
 });

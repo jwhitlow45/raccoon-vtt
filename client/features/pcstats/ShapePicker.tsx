@@ -1,3 +1,4 @@
+import { pcShape } from "#shared/rules/pcStats.ts";
 import { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Character } from "#shared/model.ts";
 import { MAX_KNOWN_FORMS } from "#shared/protocol.ts";
@@ -19,7 +20,7 @@ import { editsPcStats } from "../tokens/access.ts";
 import { whose } from "../tokens/companionBlocks.ts";
 import { SmallButton } from "../tokens/ui.tsx";
 import { monsterMatcher } from "../tokens/monsterSearch.ts";
-import { formLabel, formMark, knownFormCountWords, knownFormPatch, knownFormsIn, missingFormText, rememberDruidLevel, rememberedDruidLevel, startDruidLevel, toggleKnownForm } from "./knownForms.ts";
+import { formLabel, formMark, knownFormCountWords, isCurrentForm, knownFormPatch, knownFormsIn, missingFormText, rememberDruidLevel, rememberedDruidLevel, startDruidLevel, toggleKnownForm } from "./knownForms.ts";
 import { byCrThenName, DRUID_LEVELS, fitsShapeLimit, shapeLimit } from "./shapeLevel.ts";
 import { shapePatch, shapeTempHp, wildShapeDetail, type ShapeKind } from "./shape.ts";
 
@@ -40,12 +41,12 @@ function isBeast(m: SrdMonster): boolean {
  * "Change" opens the step that chooses them, sharing the search and both
  * filters with the first page (docs/design-v1-known-forms.md 5.1 and 5.2).
  *
- * `start="forms"` opens on that step alone, for the panel's Change, which a
- * druid in Wild Shape reaches without ending the shape. It has no Back, so
- * its Close is the one way out, and nothing in it leads to the creatures
- * (docs/design-v1-look-pass-2.md 3, lane 3, D19).
+ * A druid in Wild Shape reaches it from the row's button too: the form she
+ * is in shows pressed and does nothing when tapped, the rest change her form,
+ * and only Wild Shape is offered, since Polymorph waits for End the shape
+ * (D-261024-29, D-261024-32).
  */
-export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats" | "knownForms">; start?: "forms"; onClose(): void }) {
+export function ShapePicker(props: { character: Pick<Character, "id" | "name" | "level" | "actor" | "ownerIds" | "stats" | "knownForms">; onClose(): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
@@ -57,10 +58,10 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   const [remembered, setRemembered] = useState(() => rememberedDruidLevel(roomId, characterId));
   const [druidLevel, setDruidLevel] = useState<number | null>(() => startDruidLevel(remembered, props.character));
   const [picked, setPicked] = useState<SrdMonster | null>(null);
-  const formsOnly = props.start === "forms";
-  const [choosing, setChoosing] = useState(formsOnly);
+  const [choosing, setChoosing] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [kind, setKind] = useState<ShapeKind>("wild");
+  const inWildShape = pcShape(props.character) === "wild";
   const [gainTemp, setGainTemp] = useState(true);
   const mounted = useRef(true);
   useEffect(() => {
@@ -161,7 +162,11 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
         <UnsavedInput unsaved={kind !== "wild" || !gainTemp} />
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
           {refusalLine}
-          <ShapeChoice name={name} creature={picked.name} wild={wildShapeDetail(props.character, picked.name, editsPcStats(you, props.character))} value={kind} onChange={setKind} />
+          {inWildShape ? (
+            <Help>{wildShapeDetail(props.character, picked.name, editsPcStats(you, props.character))}</Help>
+          ) : (
+            <ShapeChoice name={name} creature={picked.name} wild={wildShapeDetail(props.character, picked.name, editsPcStats(you, props.character))} value={kind} onChange={setKind} />
+          )}
           {holding >= temp ? (
             <Help>{`${whose(name)} ${holding} Temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
           ) : (
@@ -214,7 +219,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
       <Dialog
         title={`${whose(name)} known forms`}
         onClose={props.onClose}
-        back={formsOnly ? null : { label: "Back to the creatures", onBack: leaving(() => setChoosing(false)) }}
+        back={{ label: "Back to the creatures", onBack: leaving(() => setChoosing(false)) }}
         phone="fill"
         width="md"
       >
@@ -255,12 +260,13 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
 
   const takeForm = (srdId: string) => {
     const m = monsters?.find((x) => x.srdId === srdId);
-    if (!m) return;
+    if (!m || isCurrentForm(props.character, srdId)) return;
     if (actions.dispatch({ t: "character.update", characterId, patch: { actor: knownFormPatch(m, props.character, remembered) } }) !== null) props.onClose();
   };
   const knownRows = known.forms.map((m): ListedRow => {
     const mark = formMark(limit, m);
-    return { key: m.srdId, view: m, source: "srd", tag: mark?.tag, label: formLabel(m.name, mark) };
+    const current = isCurrentForm(props.character, m.srdId);
+    return { key: m.srdId, view: m, source: "srd", tag: mark?.tag, label: formLabel(m.name, mark), ...(current ? { pressed: true, disabled: true } : {}) };
   });
   const none = (knownIds?.length ?? 0) === 0;
   return (
@@ -299,8 +305,8 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   );
 }
 
-/** What a druid's known forms read with none chosen yet, in Take a shape and in the panel. */
-export function noFormsText(name: string): string {
+/** What a druid's known forms read with none chosen yet, in Take a shape. */
+function noFormsText(name: string): string {
   return `${name} knows no forms yet. A Druid knows 4 Beast forms at level 2, 6 at level 4 and 8 at level 8.`;
 }
 

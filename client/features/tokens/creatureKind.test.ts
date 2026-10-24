@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, CompanionBlock, CustomMonster, PcStats } from "#shared/model.ts";
-import { characterKind, kindLine, kindLineText, linkedBlockSummary, pcBlockSummary, sizeText, tokenKind } from "./creatureKind.ts";
+import { takeShapeWords, characterKind, kindLine, kindLineText, linkedBlockSummary, pcBlockSummary, sizeText, tokenKind } from "./creatureKind.ts";
 
 const MEDIUM = sizeText("medium", { w: 1, h: 1 }, 5);
 
@@ -69,6 +69,14 @@ describe("a token's kind, from the viewer's copy", () => {
     assert.deepEqual(tokenKind({ token: { kind: "monster" }, cr: "10" }), { kind: "monster", cr: "10" });
     assert.deepEqual(tokenKind({ token: { kind: "npc" } }), { kind: "npc" });
     assert.deepEqual(tokenKind({ token: { kind: "object" }, cr: "1" }), { kind: "object" });
+  });
+});
+
+describe("the Take a shape button's words", () => {
+  test("no known forms: Take a shape with no separate name, else the count, named to begin with its words", () => {
+    assert.deepEqual(takeShapeWords(0), { text: "Take a shape", name: undefined });
+    assert.deepEqual(takeShapeWords(1), { text: "1 shape", name: "1 shape, take a shape" });
+    assert.deepEqual(takeShapeWords(4), { text: "4 shapes", name: "4 shapes, take a shape" });
   });
 });
 

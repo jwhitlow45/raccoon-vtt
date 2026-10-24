@@ -121,6 +121,17 @@ export function pcBlockSummary(character: Pick<Character, "level" | "stats" | "a
 }
 
 /**
+ * The Take a shape button's words and its name: "Take a shape" with no known
+ * forms, else the count, "4 shapes" or "1 shape", named "4 shapes, take a
+ * shape" so the name begins with what shows (D-261024-27, D-261024-32).
+ */
+export function takeShapeWords(forms: number): { text: string; name: string | undefined } {
+  if (forms <= 0) return { text: "Take a shape", name: undefined };
+  const text = `${forms} ${forms === 1 ? "shape" : "shapes"}`;
+  return { text, name: `${text}, take a shape` };
+}
+
+/**
  * A companion's or a monster's folded Stat block (3.3): the linked block's
  * name and CR, "Wolf, CR 1/4". An SRD block the page has not loaded, or
  * failed to, names itself from its id alone, so folding never loads the

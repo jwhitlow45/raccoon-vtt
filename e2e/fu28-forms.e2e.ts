@@ -12,7 +12,7 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, w
 /**
  * Take a shape on a Druid's folded Stat block row (D-261024-26 and
  * D-261024-27): the summary never counts known forms, the button reads
- * "4 shapes" with the name "Take a shape, 4 known forms", and the row
+ * "4 shapes" with the name "4 shapes, take a shape", and the row
  * stays on one line and in line at 320 x 568 and 390 x 844, at 130%.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT itself, its own file after the
@@ -96,7 +96,7 @@ async function checkRow(summary: string, label: string): Promise<void> {
     const panel = await breesPage(ana);
     const fold = panel.getByRole("button", { name: "Stat block", exact: true });
     if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
-    const take = panel.getByRole("button", { name: "Take a shape, 4 known forms", exact: true });
+    const take = panel.getByRole("button", { name: "4 shapes, take a shape", exact: true });
     await take.waitFor();
     assert.equal((await take.textContent())?.trim(), "4 shapes");
     assert.equal(await panel.getByText(/known forms?$/).count(), 0, `${at}: the summary counts no forms`);

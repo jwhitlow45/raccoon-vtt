@@ -494,7 +494,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
 
     // knownforms-a (D-261024-29): the panel draws no Known forms section, and in Wild Shape the Take a shape button stays, as the way to change the form.
     assert.equal(await sheetPanel.getByRole("heading", { name: "Known forms" }).count(), 0, "the Stat block group draws no Known forms section");
-    await sheetPanel.getByRole("button", { name: "Take a shape, 3 known forms", exact: true }).click();
+    await sheetPanel.getByRole("button", { name: "3 shapes, take a shape", exact: true }).click();
     const again = ana.getByRole("dialog", { name: "Take a shape" });
     await again.getByRole("button", { name: "Wild Shape as Black Bear", exact: true }).click();
     await again.waitFor({ state: "detached" });
@@ -507,7 +507,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
 
     // knownforms-a: the DM's panel shows the same row, and Cy's device never receives the list.
     const dmPanel = await showBree(dm);
-    await dmPanel.getByRole("button", { name: "Take a shape, 3 known forms", exact: true }).waitFor();
+    await dmPanel.getByRole("button", { name: "3 shapes, take a shape", exact: true }).waitFor();
     await waitFor("Cy's view of Bree", () => cySocket.state?.characters[run.bree.characterId] ?? null);
     assert.equal("knownForms" in cySocket.state!.characters[run.bree.characterId]!, false, "Cy's device never receives the known forms");
 
@@ -617,7 +617,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const step = ana.getByRole("dialog", { name: "Bree's known forms" });
     const openPicker = async () => {
       if (await picker.isVisible()) return;
-      await panel.getByRole("button", { name: /^Take a shape/ }).click();
+      await panel.getByRole("button", { name: /take a shape$/i }).click();
       await picker.waitFor();
     };
     await openPicker();
@@ -625,7 +625,23 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await picker.waitFor({ state: "detached" });
     await waitFor("Bree as a wolf", () => (breeActor()?.srdId === "wolf" && breeActor()?.wildShape ? true : null));
     const stillWolf = () => assert.ok(breeActor()?.srdId === "wolf" && breeActor()?.wildShape, "the shape ended");
-    assert.equal(await panel.getByRole("button", { name: /^Take a shape/ }).count(), 1, "Take a shape stays in Wild Shape");
+    assert.equal(await panel.getByRole("button", { name: /take a shape$/i }).count(), 1, "Take a shape stays in Wild Shape");
+    // The form she is in shows pressed and a tap on it does nothing, so it never refills the Temporary HP (FU28-OPUS-1).
+    await openPicker();
+    const wolfRow = picker.getByRole("button", { name: "Wild Shape as Wolf", exact: true });
+    assert.equal(await wolfRow.getAttribute("aria-pressed"), "true");
+    assert.equal(await wolfRow.isDisabled(), true);
+    // Only Wild Shape is offered while shaped: a creature from the whole list has no Polymorph choice (D-261024-32).
+    await picker.getByRole("searchbox", { name: "Search creatures" }).fill("owl");
+    await picker.getByRole("button", { name: /^Owl/ }).last().click();
+    const taking = ana.getByRole("dialog", { name: /^Take the shape of/ });
+    await taking.waitFor();
+    assert.equal(await taking.getByText("Polymorph or another shape").count(), 0);
+    await taking.getByRole("button", { name: "Back to the creatures" }).click();
+    await picker.waitFor();
+    await ana.keyboard.press("Escape");
+    await picker.waitFor({ state: "detached" });
+    stillWolf();
     const open = async (words: string) => {
       await openPicker();
       await picker.getByRole("button", { name: words, exact: true }).click();
@@ -638,6 +654,12 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
 
     await open("Change");
     await shots.take(ana, "pcstats-lp2-3b-change-step");
+    // Back leads to the picker, and the druid is still in her shape.
+    await step.getByRole("button", { name: "Back to the creatures" }).click();
+    await step.waitFor({ state: "detached" });
+    await picker.waitFor();
+    stillWolf();
+    await open("Change");
     await close();
     stillWolf();
 

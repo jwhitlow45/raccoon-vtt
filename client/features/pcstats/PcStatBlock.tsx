@@ -10,7 +10,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
-import { pcBlockSummary } from "../tokens/creatureKind.ts";
+import { pcBlockSummary, takeShapeWords } from "../tokens/creatureKind.ts";
 import { useSrdList } from "../tokens/StatSummary.tsx";
 import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
@@ -50,11 +50,11 @@ export function PcStatBlock(props: {
   const [picking, setPicking] = useState(false);
   const shaped = pcShape(character) !== "none";
   // In another shape, such as Polymorph, the button is hidden: End the shape first. In Wild Shape it stays, as the way to change form or forms.
-  const formCount = edits && pcShape(character) !== "other" ? (character.knownForms?.length ?? 0) : 0;
-  // The count lives on the button, not in the folded summary, which would crowd the row (D-261024-26, D-261024-27). The name stays an action.
+  // The count lives on the button, not in the folded summary, which would crowd the row (D-261024-26, D-261024-27).
+  const words = takeShapeWords(character.knownForms?.length ?? 0);
   const take = !edits || pcShape(character) === "other" ? null : (
-    <SmallButton wrap label={formCount > 0 ? `Take a shape, ${formCount} known ${formCount === 1 ? "form" : "forms"}` : undefined} onClick={() => setPicking(true)}>
-      {formCount > 0 ? `${formCount} ${formCount === 1 ? "shape" : "shapes"}` : "Take a shape"}
+    <SmallButton wrap ariaLabel={words.name} onClick={() => setPicking(true)}>
+      {words.text}
     </SmallButton>
   );
   const add = () =>
@@ -63,18 +63,14 @@ export function PcStatBlock(props: {
         Add a stat block
       </SmallButton>
     ) : null;
-  const picker = (
-    <>
-      {picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null}
-    </>
-  );
+  const picker = picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null;
   // Folded, the row says what the block holds, so it reads without opening (docs/design-v1-look-pass.md 3.3).
   const summary = pcBlockSummary(character);
   if (!character.stats && !shaped) {
     return (
       <>
         <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
-            {edits ? (
+          {edits ? (
             <>
               <Help>Add this character's stat block, or take a shape such as Wild Shape.</Help>
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>

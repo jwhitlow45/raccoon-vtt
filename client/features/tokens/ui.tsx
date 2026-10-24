@@ -294,6 +294,8 @@ export function SmallButton(props: {
   children?: ReactNode;
   icon?: IconName;
   label?: string;
+  /** A name with no tooltip, for a button whose visible words are short: it begins with them (WCAG 2.5.3). */
+  ariaLabel?: string;
   tone?: "default" | "primary" | "danger";
   /** A `danger` button waiting for its second tap (components/Button.tsx). */
   armed?: boolean;
@@ -321,7 +323,7 @@ export function SmallButton(props: {
       variant={variant}
       type={props.type ?? "button"}
       onClick={onClick && !props.unavailable ? () => onClick() : undefined}
-      aria-label={props.label}
+      aria-label={props.ariaLabel ?? props.label}
       title={props.label}
       icon={props.icon}
       iconOnly={props.icon && props.children === undefined ? "always" : undefined}

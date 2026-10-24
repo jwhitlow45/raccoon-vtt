@@ -1,4 +1,5 @@
 import type { Character } from "#shared/model.ts";
+import { pcShape } from "#shared/rules/pcStats.ts";
 import { MAX_KNOWN_FORMS, type ActorPatch } from "#shared/protocol.ts";
 import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
 import { shapePatch, shapeTempHp } from "./shape.ts";
@@ -76,6 +77,11 @@ export function formMark(limit: ShapeLimit | null, m: StatBlockMonster): FormMar
 /** A known form's accessible name in Take a shape: what one tap does, and its mark's reason. */
 export function formLabel(name: string, mark: FormMark | null): string {
   return `Wild Shape as ${name}${mark ? `, ${mark.reason}` : ""}`;
+}
+
+/** The form a druid in Wild Shape is in: its row is pressed and a tap does nothing, as a second tap would refill the Temporary HP (5.3). */
+export function isCurrentForm(character: Pick<Character, "actor">, srdId: string): boolean {
+  return pcShape(character) === "wild" && character.actor.srdId === srdId;
 }
 
 /**
