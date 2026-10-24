@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The Dice panel's folds (docs/design-v1-dice-pass.md 6), on the real
@@ -541,7 +541,8 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
       const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
       // Thorn, then the goblin he targets.
       await tapCell(page, bounds, run.thorn);
-      await page.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      // An upright phone's resting strip keeps Multi-select behind Expand (docs/design-v1-bar-compact.md 3.3).
+      await (await barControl(page.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
       await tapCell(page, bounds, run.goblin);
       await page.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
       const dice = await openDiceSheet(page);
