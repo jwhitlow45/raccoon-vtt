@@ -350,7 +350,7 @@ function RemoveCharacter(props: { character: Character; dm: boolean; onDelete():
           {warning}
         </Note>
       )}
-      <ConfirmButton confirm="Tap again to delete" busy={waiting} describedBy={id} wrap onConfirm={() => setSent(props.onDelete())}>
+      <ConfirmButton icon="delete" confirm="Tap again to delete" busy={waiting} describedBy={id} wrap onConfirm={() => setSent(props.onDelete())}>
         {waiting ? "Deleting…" : `Delete ${character.name}`}
       </ConfirmButton>
     </Section>

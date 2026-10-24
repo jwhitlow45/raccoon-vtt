@@ -154,7 +154,7 @@ export default function CharactersPanel(props: PanelProps) {
   return (
     <div ref={root} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), fontSize: theme.font.body14 }}>
       {dm || own?.allowed ? (
-        <Button variant="primary" size="sm" block onClick={() => openForm(pageStore, { kind: "new" })} data-opener="new-character">
+        <Button variant="primary" size="sm" block icon="plus" onClick={() => openForm(pageStore, { kind: "new" })} data-opener="new-character">
           New character
         </Button>
       ) : null}

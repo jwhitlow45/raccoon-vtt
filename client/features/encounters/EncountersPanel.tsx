@@ -114,7 +114,7 @@ function EncounterList(props: { srd: SrdList; onOpen(id: string | null): void })
   return (
     <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
       {/* The editor's openers carry ids, so Back finds the one pressed even after a save renames its row and moves it in the list (features/panels.ts useSubpageFocus). */}
-      <Button variant="primary" size="sm" block onClick={() => props.onOpen(null)} disabled={full} data-opener="encounter-new">
+      <Button variant="primary" size="sm" block icon="plus" onClick={() => props.onOpen(null)} disabled={full} data-opener="encounter-new">
         New encounter
       </Button>
       {full ? <Help>This room holds at most {LIMITS.savedEncountersPerRoom} encounters. Delete one to build another.</Help> : null}

@@ -106,7 +106,7 @@ function PageList(props: { pages: Record<string, JournalPage>; dm: boolean; onOp
       {dm ? (
         <div style={{ display: "grid", gap: theme.space(1) }}>
           {/* Saving a new page opens it, so Back from there finds this button by its id (features/panels.ts useSubpageFocus). */}
-          <Button variant="primary" size="sm" block disabled={full} onClick={props.onNew} data-opener="journal-new">
+          <Button variant="primary" size="sm" block icon="plus" disabled={full} onClick={props.onNew} data-opener="journal-new">
             New page
           </Button>
           {list.length >= LIMITS.journalPagesPerRoom * 0.9 ? (

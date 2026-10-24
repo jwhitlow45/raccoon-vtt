@@ -144,7 +144,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
       {props.canAdd ? (
         // Side by side where the width holds both, else one under the other.
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <Button size="sm" onClick={props.onAdd} data-opener={`companion:${props.character.id}`}>
+          <Button size="sm" icon="plus" onClick={props.onAdd} data-opener={`companion:${props.character.id}`}>
             Add a companion
           </Button>
           {props.onBlocks ? (
