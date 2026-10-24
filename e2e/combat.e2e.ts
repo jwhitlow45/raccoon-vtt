@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { LogEvent } from "#shared/model.ts";
 import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -1639,6 +1640,89 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
       for (const id of [wolf, limb, old]) await ops.send({ t: "token.delete", tokenId: id });
     }
+  });
+
+  test("s1-c-a. the DM's row options lead with the creature's uses, its pips wrapping, Reaction used and Ready, then the row's own from Row hidden from players to Remove, and a companion's sub-row lists its uses first, in line at 1280 x 800, 390 x 844 at 130% and 320 x 568 at 130% (docs/design-v1-token-sections.md 4)", async () => {
+    const boss = randomUUID();
+    const skitter = randomUUID();
+    await ops.send({ t: "token.create", token: { id: boss, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 3, resistMax: 10, resistUsed: 1 } } } } });
+    await ops.send({ t: "token.create", token: { id: skitter, sceneId: run.sceneId, kind: "monster", name: "Skitter", size: "small", x: 19, y: 15, visibility: "all", disposition: "ally", companion: { of: run.bree.characterId, turn: "shared" }, actor: { inline: actor(11) } } });
+    await ops.send({ t: "actor.use", target: { tokenId: skitter }, use: { kind: "ability", key: "actions:web", name: "Web", limit: "recharge", min: 5, max: 1 } });
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "encounter.start", entries: [{ id: "s1-boss", tokenId: boss, value: 18 }, { id: "s1-bree", tokenId: run.bree.id, value: 12 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the boss's turn", () => (dmSocket.state?.encounter?.activeEntryId === "s1-boss" ? true : null));
+    /** Each control's top in the options, which stack in one column, so a top below another's is after it. */
+    const tops = async (scope: Locator, parts: [string, Locator][]) => {
+      const out: [string, number][] = [];
+      for (const [name, part] of parts) {
+        const box = await part.first().boundingBox();
+        assert.ok(box, `no ${name}`);
+        out.push([name, box.y]);
+      }
+      const sorted = [...out].sort((a, b) => a[1] - b[1]).map(([n]) => n);
+      assert.deepEqual(sorted, parts.map(([n]) => n), "the options' order");
+      return scope;
+    };
+    const off: string[] = [];
+    try {
+      for (const view of [
+        { ...DESK, scale: 1 },
+        { width: 390, height: 844, scale: 1.3 },
+        { width: 320, height: 568, scale: 1.3 },
+      ]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(dm, dmCdp, view);
+        const tracker = await openTracker(dm);
+        const toggle = tracker.getByRole("button", { name: "Goblin Boss options", exact: true });
+        if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+        // A filter's inner locator is read inside each row, so it starts from the page, not the tracker.
+        const row = tracker.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: "Goblin Boss options", exact: true }) });
+        const uses = row.locator('[data-uses-group][aria-label="Goblin Boss\'s uses"]');
+        await uses.getByRole("group", { name: "Legendary Actions used", exact: true }).waitFor();
+        await tops(row, [
+          ["Uses", uses],
+          ["Reaction used", row.getByRole("switch", { name: /^Reaction used/ })],
+          ["Ready", row.getByRole("textbox", { name: "Trigger for the Ready action" })],
+          ["Row hidden from players", row.getByRole("switch", { name: /^Row hidden from players/ })],
+          ["In lair", row.getByRole("switch", { name: /^In lair/ })],
+          ["Initiative roll reminder", row.getByRole("group", { name: "Initiative roll reminder" })],
+          ["Remove", row.getByRole("button", { name: "Remove from the fight" })],
+        ]);
+        // The pips at 10 wrap inside the row: none past its right edge.
+        const rowBox = (await row.boundingBox())!;
+        for (const pip of await uses.locator("[data-pips] button").all()) {
+          const b = (await pip.boundingBox())!;
+          assert.ok(b.x + b.width <= rowBox.x + rowBox.width + 0.5, `${at}: a pip at ${b.x + b.width} past the row's ${rowBox.x + rowBox.width}`);
+        }
+        await row.scrollIntoViewIfNeeded();
+        // Its options, which S1 reordered. The row's own line is logged: at 320 x 568 at 130% its AC, HP and tags stand one to a line, and the edge check reads the tags' words, inside their pills, as the column's start (the row's line is parts.tsx's, unchanged here).
+        off.push(...alignmentLines(await measureAlignment(row.locator("[data-row-options]")), `the boss's row options at ${at}`));
+        const line = alignmentLines(await measureAlignment(row.locator("[data-row-button]")), `the boss's row line at ${at}`);
+        if (line.length > 0) console.log(`known, outside S1: ${line.join("; ")}`);
+        await shots.take(dm, `s1-c-row-options-${view.width}-${Math.round(view.scale * 100)}`);
+        await toggle.click();
+
+        // Skitter, sharing Bree's turn, under her row: its uses, then its own Reaction, then its Ready.
+        const subToggle = tracker.getByRole("button", { name: "Skitter options", exact: true });
+        await subToggle.click();
+        const sub = tracker.locator("li[data-companion-row]").filter({ has: dm.getByRole("button", { name: "Skitter options", exact: true }) });
+        await tops(sub, [
+          ["Uses", sub.locator("[data-uses-group]")],
+          ["Reaction used", sub.getByRole("switch", { name: /^Reaction used/ })],
+          ["Ready", sub.getByRole("textbox", { name: "Trigger for the Ready action" })],
+        ]);
+        await sub.scrollIntoViewIfNeeded();
+        off.push(...alignmentLines(await measureAlignment(sub), `Skitter's sub-row with its options at ${at}`));
+        await subToggle.click();
+      }
+    } finally {
+      await dm.keyboard.press("Escape");
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      for (const id of [boss, skitter]) await ops.send({ t: "token.delete", tokenId: id });
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
   test("14. no page logged an error", () => {

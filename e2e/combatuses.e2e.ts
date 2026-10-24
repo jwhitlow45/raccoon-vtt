@@ -10,7 +10,7 @@ import type { Actor, LogEvent, RoomState } from "#shared/model.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "#shared/srd/monsters.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment, toastsUnderCards } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Combat uses (docs/design-v1-combat-controls.md 4 to 6 and 11), on the
@@ -895,4 +895,179 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
   });
+
+  test("s1-cu-a. the DM's legendary pips at maxima of 1 to 10 wrap under their words with fixed 44 px targets in the dragon's row, none past its row, each dot centered, in line at 320 x 568 and 390 x 844 at 130%, and a tap sets the count (D-261024-40)", async () => {
+    const before = dragon()!.legendary!;
+    const seen: string[] = [];
+    try {
+      for (const view of [{ ...SMALL, scale: 1.3 }, { ...PHONE, scale: 1.3 }]) {
+        const at = `${view.width} x ${view.height} at 130%`;
+        await setUp(phone, phoneCdp, view);
+        const group = await rowUses(phone, DRAGON);
+        for (let max = 1; max <= 10; max++) {
+          await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: max, actionsUsed: Math.min(1, max), resistMax: max, resistUsed: 0 } } } });
+          for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) {
+            const pips = group.getByRole("group", { name, exact: true }).getByRole("button");
+            await waitFor(`${max} pips in ${name}`, async () => ((await pips.count()) === max ? true : null));
+          }
+          const blocks = await pipGeometry(group);
+          assert.equal(blocks.length, 2, "both pip blocks");
+          for (const b of blocks) {
+            const what = `${b.label} at a maximum of ${max} at ${at}`;
+            const target = theme44 * view.scale;
+            const past = b.pips.filter((p) => p.right > b.row.right + 0.5 || p.left < b.row.left - 0.5 || p.right > b.box.right + 0.5);
+            assert.deepEqual(past, [], `${what}: a pip past its row`);
+            for (const p of b.pips) assert.ok(Math.abs(p.width - target) <= 0.5 && Math.abs(p.height - target) <= 0.5, `${what}: a pip of ${p.width} x ${p.height}, not ${target}`);
+            const tops = [...new Set(b.pips.map((p) => Math.round(p.top)))];
+            const perRow = b.pips.filter((p) => Math.round(p.top) === tops[0]).length;
+            // Wrapped only where the next pip would not fit: as many to a row as the row's width holds.
+            assert.equal(perRow, Math.min(max, Math.floor((b.box.width + 0.5) / target)), `${what}: ${perRow} to a row in ${b.box.width} px`);
+            assert.equal(tops.length, Math.ceil(max / perRow), `${what}: ${tops.length} rows`);
+            const off = Math.max(...b.dots.map((d) => Math.max(Math.abs(d.x), Math.abs(d.y))));
+            assert.ok(off <= 1, `${what}: a dot ${off} px off its pip's center`);
+            const lines = Math.round(b.words.height / (b.lineHeight * view.scale));
+            seen.push(`${at} ${b.label} max ${max}: ${perRow} a row, ${tops.length} rows, words on ${lines} line(s), block ${Math.round(b.box.bottom - b.words.top)} px, dot off ${off.toFixed(2)} px`);
+          }
+          await measure(phone, group, `the row's pips at a maximum of ${max} at ${at}`);
+        }
+        await group.locator("[data-pips]").first().scrollIntoViewIfNeeded();
+        await shots.take(phone, `s1-cu-pips-10-${view.width}`);
+        // The pips are the one control for the counts used: a tap sets that many, and a tap on the last used one gives one back.
+        const actions = group.getByRole("group", { name: "Legendary Actions used", exact: true });
+        await actions.getByRole("button", { name: "3 used", exact: true }).click();
+        await waitFor("three used", () => (dragon()?.legendary?.actionsUsed === 3 ? true : null));
+        await actions.getByRole("button", { name: "3 used", exact: true }).click();
+        await waitFor("one given back", () => (dragon()?.legendary?.actionsUsed === 2 ? true : null));
+        assert.equal(await actions.getByRole("button", { name: "2 used", exact: true }).getAttribute("aria-pressed"), "true");
+        await closeSheets(phone);
+      }
+    } finally {
+      await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: before } } });
+    }
+    console.log(`s1 pips:\n${seen.join("\n")}`);
+    assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
+  test("s1-cu-b. a dying goblin's death save skipped and its turn card dismissed: Uses with Reopen in its bar and its row while the turn lasts, Reopen hands focus to the card it brings back, and both go after Next (D-261024-40, D-261024-43)", async () => {
+    await setUp(desk, deskCdp, DESK);
+    await ops.send({ t: "room.update", settings: { monstersDieAtZero: false } });
+    await ops.send({ t: "actor.hp", target: { tokenId: run.goblin }, change: { kind: "set", cur: 0 } });
+    await waitFor("the goblin dying", () => (actorOf(deskSocket.state, run.goblin)?.life === "dying" ? true : null));
+    const GOBLIN_AT = { x: 22, y: 5 };
+    const goblinBar = desk.getByRole("dialog", { name: "Goblin actions" });
+    const openDrawer = async () => {
+      await deselect(desk);
+      await tapCell(desk, run.bounds, GOBLIN_AT);
+      await goblinBar.waitFor();
+      const uses = await barControl(goblinBar, "Uses");
+      await waitFor("the goblin's Uses ready", async () => ((await uses.isEnabled()) ? true : null));
+      if ((await uses.getAttribute("aria-pressed")) !== "true") await uses.click();
+      const drawer = goblinBar.locator("[data-uses-drawer]");
+      await drawer.waitFor();
+      return drawer;
+    };
+    const skip = async () => {
+      const card = desk.getByRole("group", { name: "Death save for Goblin" });
+      await card.getByRole("button", { name: "Skip", exact: true }).click();
+      await waitFor("skipped for every device", () => (actorOf(deskSocket.state, run.goblin)?.turnRecord?.settled?.deathSave?.state === "skipped" ? true : null));
+      await card.waitFor({ state: "detached" });
+    };
+    try {
+      await turnTo("fu26-goblin");
+      await skip();
+      // Dismissed on this device, the turn card takes its Reopen with it: the bar and the row still hold one.
+      const turn = alerts(desk, "turn");
+      await turn.getByText("Death save skipped", { exact: true }).waitFor();
+      await turn.getByRole("button", { name: "Dismiss Goblin's turn" }).click();
+      await turn.waitFor({ state: "detached" });
+      const drawer = await openDrawer();
+      await drawer.getByText("Death save skipped", { exact: true }).waitFor();
+      await measure(desk, drawer, "the goblin's drawer with its skipped death save at 1440 x 900 at 100%");
+      await shots.take(desk, "s1-cu-skipped-drawer");
+      await goblinBar.getByRole("button", { name: "Close", exact: true }).first().click();
+      await goblinBar.waitFor({ state: "detached" });
+      const group = await rowUses(desk, "Goblin");
+      await group.getByRole("button", { name: "Reopen: Death save skipped" }).waitFor();
+      await measure(desk, group, "the goblin's row Uses with its skipped death save at 1440 x 900 at 100%");
+      await shots.take(desk, "s1-cu-skipped-row");
+
+      // Reopen by keyboard from the drawer, its only button: the list goes with it, and focus goes to the card it brought back.
+      const again = await openDrawer();
+      await again.getByRole("button", { name: "Reopen: Death save skipped" }).focus();
+      await desk.keyboard.press("Enter");
+      const card = desk.getByRole("group", { name: "Death save for Goblin" });
+      await card.waitFor();
+      await waitFor("focus in the reopened card", async () => ((await card.evaluate((el) => el.contains(el.ownerDocument.activeElement))) ? true : null), 3_000);
+      await waitFor("the Uses button gone with its list", async () => ((await goblinBar.getByRole("button", { name: "Uses", exact: true }).count()) === 0 ? true : null));
+
+      // Skipped again, then Next: its record is no longer current, so the row and the bar hold no Uses.
+      await skip();
+      await turnTo("fu26-troll");
+      const tracker = await openTracker(desk);
+      const toggle = tracker.getByRole("button", { name: "Goblin options" });
+      if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+      await tracker.getByRole("switch", { name: /^Row hidden from players/ }).first().waitFor();
+      assert.equal(await tracker.locator('[data-uses-group][aria-label="Goblin\'s uses"]').count(), 0, "the row's Uses went with the turn");
+      await toggle.click();
+      // From its row's own button: the troll's turn brings cards that may stand over the goblin's cell.
+      await deselect(desk);
+      await tracker.getByRole("button", { name: /^Goblin\. Show it on the map/ }).click();
+      await goblinBar.waitFor();
+      await expandBar(goblinBar);
+      assert.equal(await goblinBar.getByRole("button", { name: "Uses", exact: true }).count(), 0, "the bar's Uses went with the turn");
+    } finally {
+      await deselect(desk);
+      await ops.send({ t: "actor.hp", target: { tokenId: run.goblin }, change: { kind: "set", cur: 7 } });
+      await ops.send({ t: "room.update", settings: { monstersDieAtZero: true } });
+    }
+    assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
+  test("s1-cu-z. no console errors after the s1 steps", () => {
+    assert.deepEqual(deskConsole.errors, [], "the desk");
+    assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
+    assert.deepEqual(patConsole.errors, [], "Pat's page");
+  });
 });
+
+/** A pip's target in layout px: the touch size (client/lib/theme.ts). */
+const theme44 = 44;
+
+type Box = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+
+/**
+ * Each pip block in a Uses group as the browser lays it out: its label,
+ * its tracker row's box, its pips' box and each pip's, each dot's offset
+ * from its pip's center, and its words' box with their line height in
+ * layout px, which the interface size scales.
+ */
+function pipGeometry(group: Locator): Promise<{ label: string; row: Box; box: Box; words: Box; lineHeight: number; pips: Box[]; dots: { x: number; y: number }[] }[]> {
+  return group.evaluate((root) => {
+    type R = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+    type E = { getBoundingClientRect(): R; querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; closest(s: string): E | null; firstElementChild: E | null; getAttribute(n: string): string | null };
+    const el = root as unknown as E;
+    const box = (e: E): R => {
+      const r = e.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+    };
+    const lineHeight = (e: E) => parseFloat((globalThis as unknown as { getComputedStyle(e: E): { lineHeight: string } }).getComputedStyle(e).lineHeight);
+    return Array.from(el.querySelectorAll("[data-pips]")).map((block) => {
+      const pips = block.querySelector('[role="group"]')!;
+      const words = block.firstElementChild!;
+      const buttons = Array.from(pips.querySelectorAll("button"));
+      return {
+        label: pips.getAttribute("aria-label") ?? "",
+        row: box(block.closest("li[data-entry-row], li[data-companion-row]")!),
+        box: box(pips),
+        words: box(words),
+        lineHeight: lineHeight(words),
+        pips: buttons.map(box),
+        dots: buttons.map((b) => {
+          const p = box(b);
+          const d = box(b.firstElementChild!);
+          return { x: (d.left + d.right) / 2 - (p.left + p.right) / 2, y: (d.top + d.bottom) / 2 - (p.top + p.bottom) / 2 };
+        }),
+      };
+    });
+  });
+}
