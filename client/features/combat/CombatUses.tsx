@@ -1,0 +1,351 @@
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { LimitedUse } from "#shared/dice/uses.ts";
+import { uuidv7 } from "#shared/ids.ts";
+import type { PromptKey } from "#shared/model.ts";
+import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
+import { Button } from "../../components/Button.tsx";
+import { Loading } from "../../components/Loading.tsx";
+import { buttonLook } from "../../components/looks.ts";
+import { theme } from "../../lib/theme.ts";
+import type { OnAnswer } from "../../state/types.ts";
+import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useCardRoll } from "../encounter/CardRoll.tsx";
+import { useAnyPending } from "../encounter/hooks.ts";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { ClassResourceRows } from "../resources/ResourceRows.tsx";
+import { reasonText } from "../resources/logic.ts";
+import { useRollBlocked } from "../dice/useRollOption.ts";
+import { useCreatureUses } from "./state.ts";
+import {
+  abilityHead,
+  abilityOp,
+  abilityState,
+  actorOf,
+  characterIdOf,
+  currentRecord,
+  dayLeft,
+  holderKey,
+  legendaryHead,
+  legendaryLabel,
+  legendaryOffText,
+  legendaryOp,
+  legendaryText,
+  openRecord,
+  otherBackOp,
+  otherHead,
+  promptOp,
+  rechargeRollOp,
+  regenerationLine,
+  resistHead,
+  resistOp,
+  usesPresence,
+  usesRows,
+  type LegendaryButton,
+  type UseRow,
+  type UsesForm,
+} from "./logic.ts";
+
+/**
+ * One creature's combat uses (docs/design-v1-combat-controls.md 4.2, 5 and
+ * 6), the one list the turn card (`card`), the tracker row's Uses group and
+ * the token bar's Uses drawer (`list`) share: Legendary Resistance and
+ * legendary actions with their pips, the block's recharge, rest and X/Day
+ * abilities, the marks its block no longer lists, Regeneration's line, the
+ * turn's skipped prompts and the character's class resources. `uses` is
+ * the block's (state.ts useCreaturesUses), null while it loads, so counts
+ * on the actor show at once and the rows that need the block wait under
+ * the shared Loading.
+ *
+ * Each button waits for the server's answer, busy and deaf to a second
+ * tap, since a use's rules are the server's. One status line under the
+ * list says why a tap was refused, or why an off button cannot act now: an
+ * off button keeps its focus and its tap (`aria-disabled`), so a touch
+ * reaches its reason too.
+ */
+export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: readonly LimitedUse[] | null; loading: boolean; failed: boolean; ownTurn: boolean; name: string }) {
+  const { target, form } = props;
+  const actor = useRoomView((s) => (s.view ? actorOf(s.view, target) : undefined));
+  const encounter = useRoomView((s) => s.view?.encounter);
+  const characterId = useRoomView((s) => (s.view ? characterIdOf(s.view, target) : undefined));
+  const holder = useRoomView((s) => (s.view ? holderKey(s.view, target) : ""));
+  const record = currentRecord(encounter, actor);
+  const rows = usesRows({ form, uses: props.uses, actor, ownTurn: props.ownTurn, record });
+  const [status, setStatus] = useState<{ text: string; refused: boolean } | null>(null);
+  const waits = props.uses === null && (props.loading || props.failed);
+  if (rows.length === 0 && !waits && characterId === undefined) return null;
+  return (
+    <div data-combat-uses={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+      {rows.length > 0 ? (
+        <ul aria-label={`${props.name}'s uses`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+          {rows.map((row) => (
+            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} encounter={encounter} actor={actor} onStatus={setStatus} />
+          ))}
+        </ul>
+      ) : null}
+      {waits ? props.failed ? <SrdLoadFailed what="The uses" inline /> : <Loading text="Loading the uses…" style={{ minHeight: theme.touch }} /> : null}
+      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} /> : null}
+      {status ? (
+        <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: status.refused ? theme.color.dangerText : theme.color.textMuted }}>
+          {status.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** CombatUses for a creature, reading its block itself: the tracker row's Uses group and the token bar's Uses drawer. */
+export function CreatureUses(props: { target: ActorTarget; form: UsesForm; ownTurn: boolean; name: string }) {
+  const read = useCreatureUses(props.target);
+  return <CombatUses {...props} uses={read.uses} loading={read.loading} failed={read.failed} />;
+}
+
+/**
+ * The token bar's Uses drawer (docs/design-v1-combat-controls.md 6): the
+ * creature's off-turn list, as its tracker row's group holds it. It opens
+ * on its first button, so a keyboard lands in it, and Escape closes it
+ * alone, never the bar around it.
+ */
+export function UsesDrawer(props: { target: ActorTarget; ownTurn: boolean; name: string; onClose(): void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    // In a bar shrunk short the drawer opens above the rows, out of sight without this, as Conditions does.
+    box.scrollIntoView({ block: "nearest" });
+    box.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      role="group"
+      aria-label={`${props.name}'s uses`}
+      data-uses-drawer=""
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        props.onClose();
+      }}
+      style={{ display: "grid", gap: theme.space(1) }}
+    >
+      <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Uses</div>
+      <CreatureUses target={props.target} form="list" ownTurn={props.ownTurn} name={props.name} />
+    </div>
+  );
+}
+
+/** Whether a creature has uses to show (logic.ts usesPresence), reading its block. */
+export function useUsesPresence(target: ActorTarget | null): "yes" | "loading" | "no" {
+  const actor = useRoomView((s) => (target && s.view ? actorOf(s.view, target) : undefined));
+  const resources = useRoomView((s) => {
+    const id = target && s.view ? characterIdOf(s.view, target) : undefined;
+    return id !== undefined ? s.view?.characters[id]?.resources : undefined;
+  });
+  const read = useCreatureUses(target);
+  if (!target) return "no";
+  return usesPresence({ actor, resources, uses: read.uses, loading: read.loading });
+}
+
+function rowKey(row: UseRow): string {
+  switch (row.kind) {
+    case "ability":
+      return `ability:${row.use.key}`;
+    case "other":
+      return `other:${row.key}`;
+    case "skipped":
+      return `skipped:${row.what}`;
+    default:
+      return row.kind;
+  }
+}
+
+type LineProps = {
+  row: UseRow;
+  target: ActorTarget;
+  holder: string;
+  form: UsesForm;
+  record: number | undefined;
+  encounter: Parameters<typeof openRecord>[0];
+  actor: Parameters<typeof openRecord>[1];
+  onStatus(status: { text: string; refused: boolean } | null): void;
+};
+
+/** One row's line: its words at the start, its buttons at the end, wrapping under them where the panel is narrow. */
+function UseLine(props: LineProps) {
+  const { row, target, form } = props;
+  const send = useUseSend(props.onStatus);
+  const recharge = useRechargeRoll(props.holder, row.kind === "ability" ? row.use.key : "", props.onStatus);
+  const id = useId();
+  let head: ReactNode;
+  let state: string | null = null;
+  const buttons: ReactNode[] = [];
+  const add = (key: string, b: Omit<UseButtonProps, "busy"> & { op?: ClientOp | null }) => {
+    const { op, ...rest } = b;
+    buttons.push(<UseButton key={key} {...rest} busy={send.busy === key} onClick={rest.onClick ?? (() => op && send.send(key, op))} />);
+  };
+  switch (row.kind) {
+    case "resist":
+      head = resistHead(row);
+      add("use", { text: "Use", label: `Use Legendary Resistance, ${row.left} left`, off: row.left === 0 ? "No Legendary Resistance left." : null, offId: `${id}-off`, op: resistOp(target), onOff: props.onStatus });
+      if (form === "list" && row.left < row.max) add("back", { text: "Give one back", label: "Give back one Legendary Resistance", op: resistOp(target, true) });
+      break;
+    case "legendary":
+      head = legendaryHead(row, form);
+      for (const [i, b] of row.buttons.entries()) {
+        const off = legendaryOffText(b);
+        add(`la${i}`, { text: legendaryText(b), label: legendaryLabel(b, row.left), off: off === null ? null : `${b.name || "A legendary action"}: ${off.toLowerCase()}.`, offId: `${id}-la${i}`, op: legendaryOp(target, b), onOff: props.onStatus });
+      }
+      if (form === "list" && row.left < row.max) add("back", { text: "Give one back", label: "Give back one legendary action", op: legendaryBackOp(target, row.buttons, props.actor) });
+      break;
+    case "ability": {
+      head = abilityHead(row);
+      state = abilityState(row);
+      const { use, mark } = row;
+      if (use.kind === "day") {
+        const left = dayLeft(use, mark);
+        if (form === "card" && left === 0) break;
+        add("use", { text: "Use", label: `Use ${use.name}, ${left} left`, off: left === 0 ? `No uses of ${use.name} left.` : null, offId: `${id}-off`, op: abilityOp(target, use), onOff: props.onStatus });
+        if (form === "list" && mark) add("back", { text: "Give one back", label: `Give back one use of ${use.name}`, op: abilityOp(target, use, { back: true }) });
+        break;
+      }
+      if (!mark) {
+        add("use", { text: "Use", label: `Use ${use.name}`, op: abilityOp(target, use) });
+        break;
+      }
+      if (form === "card") break;
+      if (use.kind === "recharge" && recharge.total !== undefined && row.rolled === undefined) state = `Rolled ${recharge.total}: ${recharge.total >= use.min ? "ready" : "used"}`;
+      if (use.kind === "recharge") {
+        buttons.push(
+          <UseButton
+            key="roll"
+            text="Roll recharge"
+            label={`Roll the recharge of ${use.name}, 1d6`}
+            busy={recharge.waiting}
+            off={recharge.blocked}
+            offId={`${id}-roll`}
+            onOff={props.onStatus}
+            onClick={() => recharge.roll(target, use, openRecord(props.encounter, props.actor, `recharge:${use.key}`))}
+          />,
+        );
+      }
+      add("ready", { text: "Mark ready", label: `Mark ${use.name} ready`, op: abilityOp(target, use, { back: true }) });
+      break;
+    }
+    case "other":
+      head = otherHead(row.mark);
+      add("back", { text: "Give one back", label: `Give back ${row.mark.name}`, op: otherBackOp(target, row.key, row.mark) });
+      break;
+    case "regeneration":
+      head = regenerationLine(row.amount);
+      break;
+    case "skipped":
+      head = row.text;
+      if (props.record !== undefined) add("reopen", { text: "Reopen", label: `Reopen: ${row.text}`, op: promptOp(target, props.record, row.what as PromptKey, "open") });
+      break;
+  }
+  return (
+    <li data-use-row={row.kind} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
+      <div style={{ flex: "1 1 auto", minWidth: 0, fontSize: theme.font.body14, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
+        <span style={{ fontWeight: theme.weight.strong }}>{head}</span>
+        {state ? <span style={{ color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>{`, ${state}`}</span> : null}
+      </div>
+      {/*
+       * The buttons take a line of their own under the row's words, each growing to fill it, as a card's do. Beside
+       * the words where they fit, a row's height would follow how many buttons it holds, so a full Legendary
+       * Resistance's lone Use would stand a line shorter than its Give one back, and than the rows around it.
+       */}
+      {buttons.length > 0 ? <div style={{ flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>{buttons}</div> : null}
+    </li>
+  );
+}
+
+/**
+ * Give one back for legendary actions: the first once-a-turn action still
+ * marked, with its pips, else one pip, so a mis-tap of Fiery Rays frees
+ * Fiery Rays again.
+ */
+function legendaryBackOp(target: ActorTarget, buttons: readonly LegendaryButton[], actor: LineProps["actor"]): ClientOp {
+  const marked = buttons.find((b) => b.key !== undefined && b.off === "once");
+  if (marked?.key !== undefined && actor?.uses && Object.hasOwn(actor.uses, marked.key)) return { t: "actor.use", target, use: { kind: "legendary", cost: marked.cost, key: marked.key, name: marked.name }, back: true };
+  return { t: "actor.use", target, use: { kind: "legendary", cost: 1 }, back: true };
+}
+
+/** A use's op, busy until the server answers it, with a refusal sent to the list's status line. */
+function useUseSend(onStatus: LineProps["onStatus"]) {
+  const actions = useRoomActions();
+  const [sent, setSent] = useState<{ key: string; n: number } | null>(null);
+  const pending = useAnyPending(sent === null ? [] : [sent.n]);
+  return {
+    busy: pending ? (sent?.key ?? null) : null,
+    send(key: string, op: ClientOp) {
+      if (pending) return;
+      const onAnswer: OnAnswer = (answer, refusal) => onStatus(answer === "refused" ? { text: reasonText(refusal), refused: true } : null);
+      const n = actions.dispatch(op, { quiet: true, onAnswer });
+      if (n === null) onStatus({ text: "That could not be sent.", refused: true });
+      else setSent({ key, n });
+    },
+  };
+}
+
+/**
+ * Roll recharge from the list: `actor.rechargeRoll` on the server, on the
+ * Dice panel's own row for that recharge, so its result shows in both. It
+ * settles the turn's open prompt for the key where one is open (2.3).
+ */
+function useRechargeRoll(holder: string, key: string, onStatus: LineProps["onStatus"]) {
+  const row = `${holder}|${key}|recharge`;
+  const card = useCardRoll(row);
+  const blocked = useRollBlocked();
+  // Only the roll this line sent says its result here: the row's older rolls are the Dice panel's to show.
+  const [mine, setMine] = useState<string | null>(null);
+  const total = mine !== null && card.tag === mine ? card.rolls[0]?.total : undefined;
+  return {
+    waiting: card.waiting,
+    blocked,
+    total,
+    roll(target: ActorTarget, use: { key: string; name: string; min: number }, record: number | undefined) {
+      if (card.waiting || blocked) return;
+      const tag = uuidv7();
+      if (card.send(rechargeRollOp(tag, target, use, record)) === null) onStatus({ text: "That roll could not be sent. Try again.", refused: true });
+      else {
+        setMine(tag);
+        onStatus(null);
+      }
+    },
+  };
+}
+
+type UseButtonProps = {
+  text: string;
+  label: string;
+  busy?: boolean;
+  /** Why it cannot act now, or null: it keeps its focus, says so to a reader, and a tap puts it in the status line. */
+  off?: string | null;
+  offId?: string;
+  onOff?(status: { text: string; refused: boolean } | null): void;
+  onClick?(): void;
+};
+
+/** A use's button, 44 px. Off, it looks disabled but keeps its focus and says why (docs/design-v1-combat-controls.md 9). */
+function UseButton(props: UseButtonProps) {
+  const off = props.off !== undefined && props.off !== null;
+  return (
+    <>
+      <Button
+        size="sm"
+        aria-label={props.label}
+        aria-disabled={off || undefined}
+        aria-describedby={off ? props.offId : undefined}
+        busy={props.busy}
+        onClick={() => (off ? props.onOff?.({ text: props.off!, refused: false }) : props.onClick?.())}
+        style={{ flex: "1 1 auto", whiteSpace: "nowrap", ...(off ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
+      >
+        {props.text}
+      </Button>
+      {off ? (
+        <span id={props.offId} hidden>
+          {props.off}
+        </span>
+      ) : null}
+    </>
+  );
+}

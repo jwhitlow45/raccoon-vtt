@@ -111,6 +111,32 @@ export function srdNeeds(dice: Pick<DiceView, "you" | "view">, creature: ActorTa
 }
 
 /**
+ * The stat block this viewer reads for a creature, as its rolls read it: a
+ * shaped character's creature for the DM and its players, else the block
+ * a token's own actor links where the token panel would show it. Null for
+ * none, and while the SRD's blocks load (srdNeeds says which).
+ */
+function blockFound(dice: DiceView, found: Found): StatBlockMonster | null {
+  const { token, character, actor } = found;
+  if (character) {
+    // A character in a shape lists its creature's actions and defenses (docs/design-v1-pc-stats.md 3.6).
+    return actor.srdId !== undefined && readsCharacter(dice, character) ? (dice.srd.monsters?.find((m) => m.srdId === actor.srdId) ?? null) : null;
+  }
+  if (!token) return null;
+  const link = shownLink(dice, token, actor);
+  if (link.kind === "room") return roomView(link.monster);
+  if (link.kind === "block") return storedView(link.block);
+  if (link.kind === "srd") return dice.srd.monsters?.find((m) => m.srdId === link.srdId) ?? null;
+  return null;
+}
+
+/** blockFound for a creature by its target (docs/design-v1-combat-controls.md 2.1), for the combat uses its block prints. */
+export function creatureBlock(dice: DiceView, creature: ActorTarget): StatBlockMonster | null {
+  const found = find(dice.view, creature);
+  return found ? blockFound(dice, found) : null;
+}
+
+/**
  * A creature's rolls, or null while a chunk it needs loads or when it is
  * gone. Its numbers are doc 1's creatureNumbers, the server's own rule, so
  * the bonus shown is the one rolled. Its named rolls, its block's defenses
@@ -136,16 +162,7 @@ export function creatureRolls(dice: DiceView, creature: ActorTarget): CreatureRo
     srd: dice.srd.rolls,
   };
 
-  let view: StatBlockMonster | null = null;
-  if (character) {
-    // A character in a shape lists its creature's actions and defenses (docs/design-v1-pc-stats.md 3.6).
-    if (actor.srdId !== undefined && readsCharacter(dice, character)) view = dice.srd.monsters?.find((m) => m.srdId === actor.srdId) ?? null;
-  } else if (token) {
-    const link = shownLink(dice, token, actor);
-    if (link.kind === "room") view = roomView(link.monster);
-    else if (link.kind === "block") view = storedView(link.block);
-    else if (link.kind === "srd") view = dice.srd.monsters?.find((m) => m.srdId === link.srdId) ?? null;
-  }
+  const view = blockFound(dice, found);
   // A character's own block is read by the DM and its players. pcNamedRolls keeps only its other rolls in Wild Shape, and pcDefenses keeps Evasion there.
   const own = character && readsCharacter(dice, character) ? { named: pcNamedRolls(character), ...pcDefenses(character) } : { named: [], defenses: [], evasion: false };
   const legendary = actor.legendary;
