@@ -1,6 +1,21 @@
 # raccoon-vtt v1: combat controls
 
-Status: draft 5, 2026-10-23, revised for design review rounds 1 to 4 (findings CC-OPUS and COMBATCTL-ASTRA). Code is cited from main at `ac82b9e3`. The build rebases onto the change that keeps each log audience in its own ring (op version 19, snapshot version 21), which lands first, so this design names only that change's helper calls.
+Status: built. Draft 5, 2026-10-23, revised for design review rounds 1 to 4 (findings CC-OPUS and COMBATCTL-ASTRA), and the build follows it with the differences under "As built" below. Code is cited from main at `ac82b9e3`. The build rebases onto the change that keeps each log audience in its own ring (op version 19, snapshot version 21), which lands first, so this design names only that change's helper calls.
+
+**As built.** Where the build differs from the text below:
+
+- **Keys** (2.1): a slug is cut over 44 characters, to 37 plus `-` and 6 hex digits, not over 40 to 33. The wererat's "Hand Crossbow (Humanoid or Hybrid Form Only)" slugs to 42, so the 40 rule would have moved an SRD key. A test rebuilds the old key rule and checks that no SRD roll key moves.
+- **Spells stay out** (2.1): only entries named "Spellcasting" or "Innate Spellcasting" are spell lists. A name that merely holds the word, such as the pit fiend's "Hellfire Spellcasting (Recharge 4–6)", is the block's own recharge ability.
+- **Cost** (2.1): the uses list cuts "(Costs 2 Actions)" from the name and shows the cost on its button ("Wing Attack (2)"). The Dice panel's row keeps it in the name, as it printed before, since that row has nowhere else to show it. Keys never hold it.
+- **The recharge card** (4.5) takes the ability's name and range from its mark while there is one, else from the block's recharge entry, else the key. Once Mark ready or a roll clears the mark, the mark alone would leave only the key to show.
+- **The uses list** (4.2, 5, 6): every row's buttons take a line of their own under its words. Beside the words where they fit, a row's height followed how many buttons it held, which the alignment check caught in one list.
+- **The turn record** (2.3, 3.3): the saved step of a turn's start keeps each holder's block link (`TurnUses.link`), so Previous skips a holder relinked since. An HP take-back names the record it reopens (`HpRevert.record`). A stale record is removed at a start when the creature no longer needs one.
+- **Recharge** (3.1, 4.5): spending a recharge ability while its turn's recharge roll is open settles that roll as ready, so a rest, a manual roll or a new block never reopens it.
+- **Links** (3.2): one helper, `relinked`, drops marks whose block link changed, on a patch, a companion's detach or transfer and an import. A scene's copy keeps counted uses and drops the marks that last a turn, the damage types and the turn record, so its prompts are refused.
+- **Permissions** (3.1): a class resource spent through a token that plays a character needs that character's ownership.
+- **Log lines** (8): owners' projected `use` lines drop the `hidden` flag and keep the counts.
+- **Regeneration** (4.3) on a dead creature with "Healing brings back the dead" off settles done with a total of 0 when Apply is pressed.
+- **Class resources** (7.1, 7.2): the class level is a select of 1 to 20 rather than a stepper, which wrapped beside its label at 130%. A pool's give back is "Give back…", which opens the amount field. Update also offers the presets the new level unlocks, and Add, Update, Edit and Remove check the whole list against the server's limits before sending it.
 
 The project owner, 2026-10-23: "For anything (sans things most characters have like spells) in combat it should be in the combat section. As an example there should be a "use legendary resistance"/"use legendary action" in the combat section for creatures that have them. These should also be in the token pop up menu for creatures that have them."
 
