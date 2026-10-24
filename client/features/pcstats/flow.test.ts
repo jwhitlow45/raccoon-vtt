@@ -363,6 +363,25 @@ describe("the editor's class resources", () => {
     assert.deepEqual(use.record?.gone, [`r:${hash12("barbarian:rage")}`]);
   });
 
+  test("a second sheet read twice before Save: the resource part's source is the saved record's, so the first sheet's entries never remove its resources (DDBBUILD-ASTRA-02)", () => {
+    const saved = savedBree();
+    const b: PcFill = { ...read([{ name: "Luck Points", max: 3, reset: "long", used: 0 }]), actor: { sheetUrl: "https://www.dndbeyond.com/characters/87654321" } };
+    const start = run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state;
+    const one = review(saved, b, start);
+    const state = run(start, { t: "read", fill: b, lines: [], ticks: one.ticks }, { t: "use", sync: one.use }, { t: "open", step: "ddb" }).state;
+    assert.equal(state.record?.from, "87654321");
+    const two = review(saved, b, state);
+    const cases = two.plan.items.flatMap((i) => (i.type === "resource" ? [i.case] : []));
+    assert.ok(!cases.includes("remove"), cases.join());
+    assert.deepEqual(two.use.resources?.list?.map((r) => r.name), ["Rage", "Luck Points"]);
+    // Sheet B's own Rage meets the saved one by name, with no record between them, so it is offered as the editor offers a fill's values.
+    const withRage: PcFill = { ...b, resources: [rageRead(0, 4), ...b.resources!] };
+    const first = review(saved, withRage, start);
+    const pending = run(start, { t: "read", fill: withRage, lines: [], ticks: first.ticks }, { t: "use", sync: first.use }, { t: "open", step: "ddb" }).state;
+    const rage = review(saved, withRage, pending).plan.items.find((i) => i.type === "resource" && (i.mine ?? i.theirs!.resource).name === "Rage");
+    assert.deepEqual([rage?.type === "resource" && rage.case, rage?.section], ["sameName", "replaces"]);
+  });
+
   test("an editor splice past 40 markers drops the oldest, and the line names what dropped (OP-21)", () => {
     const saved0 = savedBree();
     const rollMarkers = Array.from({ length: 40 }, (_, i) => `o:${i.toString(16).padStart(12, "0")}`);

@@ -89,7 +89,9 @@ export function editorSyncPlan(
   const block = opened.had || state.record !== null || draftDirty(opened.draft, state.draft) ? state.draft.stats : undefined;
   // The class resources plan against the live list and the saved record's part, never a pending record, whose new ids the live list lacks (6.2 b).
   const character = { ...pendingCharacter(saved, state.also, state.record), ...(saved.resources ? { resources: saved.resources } : {}) };
-  const resourceRecord = saved.ddbSync ? { ...(saved.ddbSync.res ? { res: saved.ddbSync.res } : {}), ...(saved.ddbSync.gone ? { gone: saved.ddbSync.gone } : {}) } : null;
+  const resourceRecord = saved.ddbSync
+    ? { ...(saved.ddbSync.res ? { res: saved.ddbSync.res } : {}), ...(saved.ddbSync.gone ? { gone: saved.ddbSync.gone } : {}), ...(saved.ddbSync.from !== undefined ? { from: saved.ddbSync.from } : {}) }
+    : null;
   return planSync({ mode: "editor", stats: block, level: state.draft.level, character, fill, resourceRecord });
 }
 

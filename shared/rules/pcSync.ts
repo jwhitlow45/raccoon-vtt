@@ -143,11 +143,14 @@ export type SyncInput = {
   character: Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch; resources?: ClassResource[] };
   fill: PcFill;
   /**
-   * The record's resource part the class resources merge against, when it
-   * is not `character.ddbSync`'s: the editor's saved record, since its live
-   * list lacks the ids a pending record names (docs/design-v1-ddb-resources.md 6.2).
+   * The record the class resources merge against, when it is not
+   * `character.ddbSync`: the editor's saved record, since its live list
+   * lacks the ids a pending record names (docs/design-v1-ddb-resources.md
+   * 6.2). Its `from` decides their source too, so a pending record of
+   * another sheet never makes the saved one's entries the same source's
+   * (DDBBUILD-ASTRA-02).
    */
-  resourceRecord?: Pick<DdbSyncPatch, "res" | "gone"> | null;
+  resourceRecord?: Pick<DdbSyncPatch, "res" | "gone" | "from"> | null;
   /** The ids additions take, for a test to fix. */
   newId?: () => string;
 };
@@ -497,11 +500,16 @@ function letterOf(k: string): string {
  * character as they are now. A live change makes a new plan, whose ids
  * match the old one's where its items remain, so ticks carry over.
  */
+/** Where a record stands with the number read: none, another D&D Beyond character's, or the same source's (1.3). */
+function sourceOf(record: Pick<DdbSyncPatch, "from"> | undefined, read: string | undefined): SyncSource {
+  return !record ? "none" : record.from !== undefined && read !== undefined && record.from !== read ? "relinked" : "same";
+}
+
 export function planSync(input: SyncInput): SyncPlan {
   const { fill, character } = input;
   const record = character.ddbSync;
   const read = fillNumber(fill);
-  const source: SyncSource = input.stats === undefined ? "first" : !record ? "none" : record.from !== undefined && read !== undefined && record.from !== read ? "relinked" : "same";
+  const source: SyncSource = input.stats === undefined ? "first" : sourceOf(record, read);
   const base = source === "same" ? record?.base : undefined;
   const stats = input.stats ?? (EMPTY_PC_STATS as PcStats);
   // Without a record to tell changes apart, the dialog keeps what differs and the editor fills, as an import does (2.2).
@@ -549,15 +557,17 @@ export function planSync(input: SyncInput): SyncPlan {
   const rolls = planRolls(input, source, noBase);
   const rollItems = [...rolls.slots.flatMap((s) => (s.item ? [s.item] : [])), ...rolls.extra];
   const own = rolls.slots.filter((s) => !s.entry && !s.item).length;
+  const resourceRecord = input.resourceRecord !== undefined ? (input.resourceRecord ?? undefined) : record;
+  const resourceSource: SyncSource = input.resourceRecord === undefined || source === "first" ? source : sourceOf(resourceRecord, read);
   const resources = planResources({
     mode: input.mode,
-    source,
-    noBase,
+    source: resourceSource,
+    noBase: input.mode === "editor" && resourceSource !== "same" ? "replaces" : "different",
     resources: fill.resources,
     // Absent while the resources are there reads as not whole, so such a fill never removes one (3.1).
     whole: fill.read?.resource === true,
     list: character.resources,
-    record: input.resourceRecord !== undefined ? (input.resourceRecord ?? undefined) : record,
+    record: resourceRecord,
     newId: input.newId ?? (() => uuidv7()),
   });
   const resourceItems = [...resources.slots.flatMap((s) => (s.item ? [s.item] : [])), ...resources.extra];
