@@ -16,6 +16,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { usePanelHere, type PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
+import { ClassResourcesSection } from "../features/resources/ClassResourcesSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
@@ -28,7 +29,7 @@ import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { relationKey, usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
-import { offersMakeCompanion, panelGroups, panelRelation, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
 import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/resize.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
@@ -142,6 +143,7 @@ function TokenDetails(props: PanelProps) {
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? playsCharacter : undefined }),
     actor: actor !== undefined && (character === undefined || access.dm || playsCharacter),
     ownerRenames: !access.dm && access.canEditToken("name"),
+    classResources: holdsClassResources({ dm: access.dm, character: character !== undefined, playsCharacter }),
     notes: access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null,
     image: access.canEditToken("image"),
   });
@@ -179,7 +181,9 @@ function TokenDetails(props: PanelProps) {
           />
         );
       case "rest":
-        return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} />;
+        return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} resources={character?.resources} />;
+      case "resources":
+        return character ? <ClassResourcesSection key={id} character={character} /> : null;
       case "sight":
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":

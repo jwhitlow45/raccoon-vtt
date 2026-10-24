@@ -4,8 +4,8 @@ import type { Actor, Character, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, P2, actor, character, room, token } from "#shared/testutil.ts";
 import { statBlockShown } from "../monsters/statBlockLink.ts";
-import { characterAccess, tokenAccess } from "./access.ts";
-import { cardGroups, offersMakeCompanion, panelGroups, panelRelation, panelSections, type CardPartId, type PanelPart, type PanelSectionId } from "./panelOrder.ts";
+import { characterAccess, ownsCharacter, tokenAccess } from "./access.ts";
+import { cardGroups, holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, panelSections, type CardPartId, type PanelPart, type PanelSectionId } from "./panelOrder.ts";
 
 /**
  * The sections a viewer gets for a token, worked out from their own copy
@@ -26,6 +26,7 @@ function sectionsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId:
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a, companion }),
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
+    classResources: holdsClassResources({ dm: access.dm, character: character !== undefined, playsCharacter: character !== undefined && ownsCharacter(viewer.memberId, character) }),
   });
 }
 
@@ -44,6 +45,7 @@ function groupsFor(state: ReturnType<typeof room>, viewer: typeof DM, tokenId: s
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: t.kind, actor: a, companion }),
     actor: a !== undefined,
     ownerRenames: !access.dm && access.canEditToken("name"),
+    classResources: holdsClassResources({ dm: access.dm, character: character !== undefined, playsCharacter: character !== undefined && ownsCharacter(viewer.memberId, character) }),
     // As TokenPanel decides it, the card's notes included.
     notes: access.canEditToken("notes") || !!t.notes || access.dm || (access.full && a !== undefined && (access.canEditActor("notes") || a.notes !== undefined)),
     image: access.canEditToken("image"),
@@ -70,7 +72,7 @@ describe("the token panel's order", () => {
     const state = room();
     state.characters.c = character("c");
     state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
-    assert.deepEqual(sectionsFor(state, DM, "t"), ["name", "image", ...PLAY, "rest", "sight", "stats", "settings", "owners", "remove"]);
+    assert.deepEqual(sectionsFor(state, DM, "t"), ["name", "image", ...PLAY, "rest", "resources", "sight", "stats", "settings", "owners", "remove"]);
   });
 
   test("the DM on an object: no rest", () => {
@@ -90,15 +92,30 @@ describe("the token panel's order", () => {
     const state = room();
     state.characters.c = character("c", { ownerIds: ["p1"] });
     state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
-    assert.deepEqual(sectionsFor(state, P1, "t"), ["name", "image", ...PLAY, "rest", "sight", "stats", "settings"]);
+    assert.deepEqual(sectionsFor(state, P1, "t"), ["name", "image", ...PLAY, "rest", "resources", "sight", "stats", "settings"]);
   });
 
-  test("an owner of a character's token without the character: no stat block", () => {
+  test("an owner of a character's token without the character: no stat block and no class resources", () => {
     const state = room();
     state.characters.c = character("c", { ownerIds: ["p2"] });
     state.tokens.t = token("t", { kind: "pc", ownerIds: ["p1"], actor: { ref: "c" } });
     const sections = sectionsFor(state, P1, "t");
     assert.equal(sections.includes("statBlock"), false);
+    assert.equal(sections.includes("resources"), false);
+  });
+
+  test("Class resources only on a character's token, for the DM and its players (docs/design-v1-combat-controls.md 7.2)", () => {
+    const state = room();
+    state.characters.c = character("c", { ownerIds: ["p1"] });
+    state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
+    state.tokens.w = token("w", { kind: "npc", ownerIds: ["p1"], actor: { inline: actor() } });
+    assert.ok(sectionsFor(state, DM, "t").includes("resources"));
+    assert.ok(sectionsFor(state, P1, "t").includes("resources"));
+    assert.equal(sectionsFor(state, P2, "t").includes("resources"), false, "another player");
+    assert.equal(sectionsFor(state, DM, "w").includes("resources"), false, "a token with no character");
+    assert.equal(sectionsFor(state, P1, "w", true).includes("resources"), false, "a companion");
+    assert.equal(holdsClassResources({ dm: true, character: false, playsCharacter: false }), false);
+    assert.equal(holdsClassResources({ dm: false, character: true, playsCharacter: false }), false);
   });
 
   test("an owner of a companion: its section, Token settings for its name, and Dismiss is the bar's", () => {
@@ -158,7 +175,7 @@ describe("the token panel grouped by use (docs/design-v1-token-panel-groups.md 2
     const state = room();
     state.characters.c = character("c", { ownerIds: ["p1"] });
     state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
-    assert.deepEqual(groupsFor(state, P1, "t"), ["name", "combat: hp conditions rangeRings rest", "notes: notes", "position: position sight", "image: image", "stats", "settings"]);
+    assert.deepEqual(groupsFor(state, P1, "t"), ["name", "combat: hp conditions rangeRings rest resources", "notes: notes", "position: position sight", "image: image", "stats", "settings"]);
   });
 
   test("another player on a monster: Combat, and Notes only with the DM's note for everyone. No Position, Image or setup", () => {
@@ -185,8 +202,13 @@ describe("the token panel grouped by use (docs/design-v1-token-panel-groups.md 2
   test("every section panelSections gives the DM lands in exactly one part", () => {
     const state = room();
     state.tokens.g = token("g", { actor: { inline: actor({ srdId: "goblin-warrior" }) } });
-    const placed = groupsFor(state, DM, "g").flatMap((p) => (p.includes(": ") ? p.split(": ")[1]!.split(" ") : [p]));
-    assert.deepEqual(placed.sort(), sectionsFor(state, DM, "g").sort());
+    state.characters.c = character("c");
+    state.tokens.t = token("t", { kind: "pc", actor: { ref: "c" } });
+    for (const id of ["g", "t"]) {
+      const placed = groupsFor(state, DM, id).flatMap((p) => (p.includes(": ") ? p.split(": ")[1]!.split(" ") : [p]));
+      assert.deepEqual(placed.sort(), sectionsFor(state, DM, id).sort(), id);
+    }
+    assert.ok(groupsFor(state, DM, "t").includes("combat: hp conditions rangeRings rest resources"), "Class resources after Rest in Combat");
   });
 
   test("whose folds a tap keeps: the DM's and an owner's own, everyone else's other", () => {

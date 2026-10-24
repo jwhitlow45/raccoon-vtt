@@ -17,6 +17,7 @@ import { useAnyPending } from "../encounter/hooks.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import { PcStatBlock } from "../pcstats/PcStatBlock.tsx";
+import { ClassResourcesSection } from "../resources/ClassResourcesSection.tsx";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { characterAccess } from "./access.ts";
 import { deleteWarning, sharedNote } from "./characterDelete.ts";
@@ -136,7 +137,8 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
               name={character.name}
             />
             <EffectsSection effects={actor.effects ?? []} target={{ characterId: character.id }} self={{ characterId: character.id }} selfLabel={character.name} canEdit={access.full} />
-            <RestSection actor={actor} target={{ characterId: character.id }} />
+            <RestSection actor={actor} target={{ characterId: character.id }} resources={character.resources} />
+            <ClassResourcesSection character={character} />
           </Group>
         );
       case "companions":

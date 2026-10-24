@@ -18,6 +18,7 @@ export type PanelSectionId =
   | "rangeRings"
   | "notes"
   | "rest"
+  | "resources"
   | "sight"
   | "stats"
   | "settings"
@@ -38,6 +39,11 @@ export type PanelOrderInput = {
   actor: boolean;
   /** An owner who may rename the token, a PC's or a companion's, whose Name fields sit in Token settings. */
   ownerRenames: boolean;
+  /**
+   * The token is a character's and the viewer is the DM or plays it, so it
+   * holds the character's class resources (docs/design-v1-combat-controls.md 7.2).
+   */
+  classResources?: boolean;
 };
 
 export function panelSections(input: PanelOrderInput): PanelSectionId[] {
@@ -47,6 +53,7 @@ export function panelSections(input: PanelOrderInput): PanelSectionId[] {
   if (input.statBlockShown) out.push("statBlock");
   out.push("hp", "conditions", "position", "rangeRings", "notes");
   if (full && input.kind !== "object") out.push("rest");
+  if (input.classResources) out.push("resources");
   out.push("sight");
   if (full && input.actor) out.push("stats");
   if (dm || input.ownerRenames) out.push("settings");
@@ -65,6 +72,16 @@ export function offersMakeCompanion(input: Pick<PanelOrderInput, "dm" | "kind" |
   return input.dm && input.kind !== "pc" && !input.companion;
 }
 
+/**
+ * Whether a token's panel holds its character's Class resources: on a
+ * character's token, for the DM and the character's players
+ * (docs/design-v1-combat-controls.md 7.2). A player lent only the token
+ * holds nothing of the character's card, its resources included.
+ */
+export function holdsClassResources(input: { dm: boolean; character: boolean; playsCharacter: boolean }): boolean {
+  return input.character && (input.dm || input.playsCharacter);
+}
+
 /** The panel's groups by use (docs/design-v1-token-panel-groups.md 2). Each folds as one. */
 export type PanelGroupId = "combat" | "notes" | "position" | "image";
 
@@ -78,7 +95,7 @@ export type PanelGroupsInput = PanelOrderInput & {
   image: boolean;
 };
 
-const COMBAT: readonly PanelSectionId[] = ["hp", "conditions", "rangeRings", "rest"];
+const COMBAT: readonly PanelSectionId[] = ["hp", "conditions", "rangeRings", "rest", "resources"];
 const PLACE: readonly PanelSectionId[] = ["position", "sight"];
 const SETUP: readonly PanelSectionId[] = ["stats", "settings", "companion", "owners", "remove"];
 
