@@ -123,7 +123,8 @@ async function openPanel(page: Page, name: string): Promise<Locator> {
   return sheet;
 }
 
-describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-bar-compact.md)", { timeout: 900_000 }, () => {
+// About 850 s on a computer and 910 s on CI, br-f-5's sweep 600 of them, so the suite's limit keeps well clear of both.
+describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-bar-compact.md)", { timeout: 1_800_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
