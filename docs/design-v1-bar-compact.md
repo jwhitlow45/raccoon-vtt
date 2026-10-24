@@ -1,17 +1,17 @@
 # raccoon-vtt v1: a resting token bar on upright phones
 
-Status: draft 1, 2026-10-24. Code is cited from `28ce4977` (main with batch 24, the bar's toast and tall-token fixes). This design changes how the token action bar sits on a phone held upright, as docs/design-v1-bar-dock.md 1.1 and 1.5 set it out. A computer, a tablet and a phone on its side keep the docked window of docs/design-v1-token-window.md, which section 7 shows does not share the problem. Combat's Uses button and drawer (docs/design-v1-combat-controls.md section 6), built beside this in lane B, fit both states (section 6).
+Status: draft 2, 2026-10-24, revised for design review round 1 (findings BAR-ASTRA-01 to 04 and BC-OPUS-1 to 17, and the owner's decisions D-261024-9 to 13). Code is cited from main at `6432b496`, whose bar code is the same as `28ce4977`'s. This design changes how the token action bar sits on a phone held upright, as docs/design-v1-bar-dock.md 1.1 and 1.5 set it out. A computer, a tablet and a phone on its side keep the docked window of docs/design-v1-token-window.md, which section 7 shows does not share the problem. Combat's Uses button and drawer (docs/design-v1-combat-controls.md section 6), already built in lane B, fit both states (section 6).
 
 The project owner, 2026-10-24:
 
 > "The token pop up menu now kind of moves and grows weirdly even when collapsed such that it is impossible to get to some tokens near the edge of the map when it is open on mobile. Please do a design ui ux pass on it to come up with a way to make it a bit less intrusive while still being useful. When it is expanded it is totally fine to take up a lot of the screen just not when collapsed"
 
-**What the owner calls collapsed** is the bar's usual size: Smaller, the size every bar opens at unless this device stored Larger (`rvtt.tokenBarLarger`). "Expanded" is Larger. The two other small forms are not it. The fold under a sheet is a row on the sheet's edge, not on the map, and the compact overlay appears only where the free area is under 148 px tall, which none of the phones measured reaches at 100%, nor 320 x 568 at 130% (every bar there opened with `data-bar-mode="span"`). Section 1.4 has the numbers.
+**What the owner calls collapsed** is the bar's usual size: Smaller, the size every bar opens at unless this device stored Larger (`rvtt.tokenBarLarger`). "Expanded" is Larger. The two other small forms are not it. The fold under a sheet is a row on the sheet's edge, off the map, and the compact overlay appears only where the free area is under 148 px tall, which no phone measured reaches when it opens (section 1.4).
 
 **The answer in short.**
-- **Resting** replaces Smaller. It is a strip of a fixed 114 layout px at the foot of the map's free area, across its width: a one-line header (name, AC and HP, Expand, Close) and one row of quick actions (the HP entry's field and Apply, then Conditions, Roll, Uses and the rest that fit). It never follows the token, never changes height while it rests, and never moves the map.
-- **Reach**: the strip is a fixed cover at the map's foot. Pans keep 64 px of map clear of it, Fit, Find and every pan that opens the bar keep tokens out from under it, and any token can be panned into the band above it and tapped.
-- **Expanded** replaces Larger. It grows up from the strip's place to about two thirds of the screen, sized from its content as it expands, and moves the map once so its token stays above it. It too stays put on a pan. It lasts while the bar stays open, and every new opening rests. Nothing is stored.
+- **Resting** replaces Smaller: a strip of a fixed 114 layout px at the foot of the map's free area, across its width. It holds a header (name, a status line with AC and HP, Expand, Close) and one quick row: a Damage or Heal toggle, the HP field and Apply, then Conditions, Roll and what else fits by measured width. It never follows the token, never changes height while it rests, and moves the map only to clear its own token as it opens on a tap or comes back after a drop (3.6).
+- **Reach**: the strip is a fixed cover at the map's foot. Pans keep the map from going further under it, Fit, Find and every pan that opens the bar keep tokens out from under it, and any token can be panned into the band above it and tapped.
+- **Expanded** replaces Larger. Where the free area is at least 242 px, it grows up from the strip's place to at most two thirds of the screen, leaving 120 px for its token, and moves the map once so the token stays above it. Below 242 px Expand is not offered, and the strip scrolls instead. Expanded lasts while the bar stays open. Nothing is stored.
 
 ## 1. What happens today, measured
 
@@ -27,7 +27,7 @@ Each row says what moved or grew, by how much (close zoom, CSS px), and the code
 | A pan of 120 or 240 px | The bar follows the token on every frame (12 or 13 boxes in a 200 ms pan), and its height follows the room on that side: at 390 x 844 Pat's bar went 358, then 404, then 298, and the DM's 358 to 478, and at 375 x 667 both went 208 to 372 | Stage's anchor from the camera on every frame (Stage.tsx:1374), `spanHang`, `maxHeight: hang.room` (TokenActionBar.tsx:1240-1242) |
 | The token passes the middle | The bar flips sides: 418-776 under Thorn to 61-409 over him in one 240 px pan at 390 x 844, 347-599 to 61-339 at 375 x 667 | `spanHang`'s side rule, `height <= spaceBelow \|\| spaceBelow >= spaceAbove` (barDock.ts:810) |
 | The token leaves the screen | The bar pins to the free area's foot or top at its whole content height: 372-776 for Pat and 272-776 for the DM at 390 x 844 with Thorn below the screen | `topBelow = max(ceiling, …)` and `bottomAbove = min(bottom, …)` (barDock.ts:806-809) |
-| A roll card at Pat's foot | The free area's foot rises by the card, so the bar flips over Thorn and changes height: 418-776 to 61-289 at 390 x 844, 347-599 to 61-219 at 375 x 667, 463-867 to 61-334 at 440 x 956, and 324-480 to 147-480 at 320 x 568 at 130% (it grows, 156 to 333). It flips back as the card goes | `foot` (features/rolls/PlayerRolls.tsx:225) in `freeArea` (barDock.ts:122) |
+| A roll card at Pat's foot | The free area's foot rises by the card, so the bar flips over Thorn and changes height: 418-776 to 61-289 at 390 x 844, 347-599 to 61-219 at 375 x 667 and 463-867 to 61-334 at 440 x 956. It flips back as the card goes. At 320 x 568 at 130% the card would leave the free area under 148, so the bar turns into the compact overlay in 48 ms (324-480 to 147-480, 156 to 333 tall) and the card folds into the alerts, its kept height holding the bar compact until it goes | `foot` (features/rolls/PlayerRolls.tsx:225) in `freeArea` (barDock.ts:122), `barMode`, and the card's fold for a compact bar (`yieldsToBar`, PlayerRolls.tsx:202) |
 | An alert card in the DM's column | No change for a bar under its token. A bar over its token is held under the card, and while one stands, a pan of 200 px grew the bar under Thorn from 358 to 504 | `spanLane` (barDock.ts:838) |
 | A whisper | No change to the bar. The toast stood at 68-112, clear of it | Toasts move under a bar's header only where the header stands over them (`barToastTop`, design-v1-bar-dock.md 1.5) |
 | Larger | The map moves once: 45 px (Pat) and 145 px (DM) at 390 x 844, 167 at 375 x 667, 79 at 440 x 956, 98 at 320 x 568 at 130%, and the bar grows to 404, 504, 418, 504 and 245. Smaller moves it back. With Larger stored, every opening moves the map | `largerShift` at the press and at each opening (TokenActionBar.tsx:977-1004), Stage's `shiftForBar` (Stage.tsx:452) |
@@ -57,33 +57,33 @@ Out of reach at close zoom: the darkmantle (top left corner), the allosaurus (to
 
 ### 1.4 Collapsed, compact and folded
 
-Every bar measured on the four phones (8 runs of 9 tokens at close zoom and 8 at fit, both roles) opened with `data-bar-mode="span"`, Smaller, at the heights above, and grew only by Larger. None opened compact: that needs a free area under 148 layout px, and the smallest here is 309 (320 x 568 at 130%, the turn band and Multi-select's bar would take it to 209). The fold under a sheet is a row on the sheet's top edge, off the map, and covers no token. So the owner's "collapsed" is Smaller, and the moving and growing are Smaller's: it follows, flips, pins and resizes as in 1.1, all at its usual size.
+Every bar measured on the four phones (8 runs of 9 tokens at close zoom and 8 at fit, both roles) opened with `data-bar-mode="span"`, Smaller, at the heights above, and grew only by Larger. None opened compact: that needs a free area under 148 layout px, and the smallest here is 309 (320 x 568 at 130%, the turn band and Multi-select's bar would take it to 209). One turned compact after it opened: Pat's at 320 x 568 at 130% as a roll card came (1.1). The fold under a sheet is a row on the sheet's top edge, off the map, and covers no token. So the owner's "collapsed" is Smaller, and the moving and growing are Smaller's: it follows, flips, pins and resizes as in 1.1, all at its usual size.
 
 ## 2. States on an upright phone
 
-"Upright phone" is today's span mode (docs/design-v1-bar-dock.md 1.1): a layout under 600 px wide and no wider than tall, whose free area is at least 148 px tall. Everywhere else nothing changes.
+"Upright phone" is today's span mode (docs/design-v1-bar-dock.md 1.1): a layout under 600 px wide and no wider than tall, whose free area F is at least 148 px tall when the bar opens. Elsewhere nothing changes.
 
 | State | What it is for | Place and size | Moves the map |
 | --- | --- | --- | --- |
 | Closed | No bar | | |
-| **Resting** | The selected token's name, AC and HP, the HP entry and the few actions used most, with the map in reach | A strip at the free area's foot, its full width, 114 layout px tall (3.1) | Never |
-| **Expanded** | Everything the bar holds, with room to read it | Grows up from the same foot, as tall as its content up to about two thirds of the screen (5.1) | Once as it expands, and once for each new token it shows, so the token stays above it (5.2) |
+| **Resting** | The token's name, AC and HP, the HP entry and the actions used most, with the map in reach | A strip at the free area's foot, its full width, 114 px (3.1) | Once as it opens on a tap or comes back after a drop, only to clear its token (3.6) |
+| **Expanded**, F ≥ 242 | Everything the bar holds | From the same foot up, 114 px at least and as tall as its content up to two thirds of the screen and F − 128 (5.1) | Once as it expands, and once for each new token it shows (5.2) |
+| **Scrolling strip**, F < 242 | Everything the bar holds, where no room is left to expand | The resting strip's box, with the rest of the bar under the quick row, scrolling (5.4) | As resting |
 | Folded | A sheet is open over the map | A row on the sheet's edge, as today (pages/fold.ts) | No |
-| Hidden for a drag | A token drag is under way | Not drawn, as today | No |
-| Hidden by a tap off | Multi-select's tap on empty map (docs/design-v1-bar-dock.md 3) | Not drawn, as today | No |
+| Hidden for a drag, or by a tap off | A token drag, or Multi-select's tap on empty map | Not drawn, as today | No |
 
-The compact overlay (docs/design-v1-bar-dock.md 1.4) stays as it is for screens too short to span, upright or not. It has no resting state, since its free area (under 148 px) would leave no map above a 114 px strip.
+**The mode is held while the bar is open.** A bar that opens as a strip stays a strip, whatever the foot, the options row and the top bars do, until it closes, the screen turns or the interface size changes. It never turns into the compact overlay by itself. A roll card that would leave F under 148 folds instead (3.2). A bar that opens where F is already under 148 opens compact, as today (docs/design-v1-bar-dock.md 1.4), with no resting state, since a 114 px strip would leave no map (R9). `expanded` survives a turn to landscape and back while the bar stays open, and is ignored where the bar docks or opens compact.
 
 ## 3. The resting bar
 
-### 3.1 Place and size
+### 3.1 Place, size and the band above it
 
-- **Across**: the free area's width, as the span is today (8 px margins, safe areas out).
-- **Down**: its bottom on the free area's foot, 8 px above whatever stands at the map's foot: the toolbar, the tool's options row (Multi-select's bar), and a roll card standing at a narrow screen's foot (`foot`, features/rolls/PlayerRolls.tsx). Its top 114 layout px above that.
-- **114 px** (`REST_HEIGHT` in barDock.ts): the 1 px border, the sticky header's 52 (its 48 px row and the frame's 4 px top padding it takes in), an 8 px gap, the 44 px quick row, an 8 px bottom padding and the 1 px border. At 130% that is 148 screen px.
-- **The strip draws exactly that height** (`height`, not `maxHeight`), and its scroller does not scroll: what does not fit the header's line or the quick row is in the expanded bar, never under a fade.
+- **Across**: the free area's width (8 px margins, safe areas out).
+- **Down**: its bottom 8 px above whatever stands at the map's foot: the toolbar, the tool's options row (Multi-select's bar) and a roll card standing at a narrow screen's foot (`foot`). Its top 114 px above that.
+- **114 px** (`REST_HEIGHT`): the 1 px border, the sticky header's 52 (its 48 px row and the frame's 4 px top padding it takes in), an 8 px gap, the 44 px quick row, an 8 px bottom padding and the 1 px border. The frame's content keeps a 12 px bottom padding today and in the expanded bar. The strip's is 8, so its two rows fit. At 130% the strip is 148 screen px. Measured at 114.0 in every mockup run (Appendix B).
+- It draws exactly that height (`height`, not `maxHeight`). Above the floor its scroller does not scroll.
 
-| Phone | Free area (layout px) | Strip | Band above it |
+| Phone | Free area F | Strip | Band above it (F − 122) |
 | --- | --- | --- | --- |
 | 390 x 844, 100% | 61 to 776, 715 | 662 to 776, 16% | 593 |
 | 375 x 667, 100% | 61 to 599, 538 | 485 to 599, 21% | 416 |
@@ -91,228 +91,296 @@ The compact overlay (docs/design-v1-bar-dock.md 1.4) stays as it is for screens 
 | 320 x 568, 130% (246 x 437) | 60 to 369, 309 | 255 to 369, 37% | 187 |
 | 320 x 568, 130%, Multi-select and a turn band | 60 to 269, 209 | 155 to 269, 55% | 87 |
 
-Today's Smaller bar is 195 to 554 px tall at 390 x 844 (27% to 77% of the free area), on a side that changes with the token (1.1).
+**The smallest band guaranteed**: 26 layout px (F − 122 at F = 148), at an opening and through a roll card, since a strip opens only where F is at least 148 and a roll card that would take F under 148 folds (3.2). 26 px still takes a token's middle, of any size, for a tap. On the four phones measured the smallest is 87. Only what arrives later at the top, or in the tool's options row, can narrow it: a turn band, a lasting notice, or Multi-select's row on a phone smaller than any measured (on 320 x 480 at 130% with a turn band, playerphone test 11 sees F under 148 that way). The strip then keeps its mode and its place, and the band narrows until they go, as the compact overlay covers that map today. In Multi-select a tap on empty map hides the bar, as today. Should F ever fall under 114, the strip takes F's whole height and scrolls, its header first.
 
 ### 3.2 Still
 
-While it rests, the strip's box changes only when the map's frame changes: a rotation, a new interface size, the toolbar's or the options row's height, a turn band or lasting notice coming or going at the top (which change the free area's top, not the strip), and a roll card standing at the foot or leaving it. Each of these changes the layout around it anyway. Nothing else moves or grows it:
+While it rests, the strip's box changes only when the map's frame changes: a rotation, a new interface size, the toolbar's or the options row's height, and a roll card standing at the foot or leaving it. Top bars that come or go change F, not the strip. Nothing else moves or grows it:
 
-- **A pan, a pinch or a zoom**: the strip is placed from the free area alone and reads no anchor (`placeBar`'s rest branch, 9.1).
-- **Its content**: its height is fixed. A name of any length takes one line, with an ellipsis. The quick row never wraps (3.3). An Undo move or Doesn't count that comes after a move, a "Use 9" from a damage roll, a stat block that loads late, a death save, or new conditions change what the row holds, never its height.
-- **Toasts**: they keep above it (3.5) and it publishes no header for them to move under.
-- **Alerts**: the alerts column keeps above it or shows its summary row (3.5). A card never pushes the strip.
-- **Time**: nothing waits on a timer. The box is right on its first frame, since its height is a constant and needs no measuring.
-- **Another token tapped**: the new token's strip stands in the same box.
+- **A pan, a pinch or a zoom**: it reads no anchor (9.1).
+- **Its content**: a name of any length takes one line. The quick row never wraps. An Undo move, a "Use 9", a stat block that loads late, a death save or new conditions change what it holds, never its height.
+- **Toasts** keep above it (3.5). **Alerts**: the column keeps above it or shows its summary row (3.5).
+- **Time**: its box is right on its first frame, since its height is a constant.
 
-A roll card that comes to a narrow screen's foot lifts the strip by the card's height while it stands there, and lowers it when it goes. Recommendation R4 weighs this against the card standing on the strip.
+**A roll card at the foot.** Where the card leaves F at 148 or more, the card stands and the strip rises above it by the card's height while it stands (R4). Where it would leave F under 148, the card folds at once into the alerts' "Roll asked" row, as it folds today for a compact bar, and the strip stays above the toolbar. The fold reads the card's kept height (`foot`), so it holds until the card goes and never flickers. This is the one change outside the bar's files: `yieldsToBar` in features/rolls/PlayerRolls.tsx (line 202) also reads `stripSqueezed` (9.1), and the strip places itself as if a folded card were not there.
 
 ### 3.3 What it holds
 
-**The header**, one 48 px row, sticky as today, so Close and Expand stand where they stand in the expanded bar. Its title holds two lines: the token's name on one line with an ellipsis (the frame's name keeps the whole name), and under it, in the small muted size, the vitals the short layout keeps: AC and HP ("AC 14 · HP 24/24", or a player's "Healthy" for a creature whose numbers they lack, and "Dying", "Stable" or "Dead" where those replace HP). Where both do not fit on that line, AC goes first ("HP 195/195" at 320 x 568 at 130%), then the HP ends in an ellipsis. Then come the elevation badge where the token is off the ground, **Expand** (chevron up) and **Close**, which never shrink. A group's header reads "3 selected" with no vitals line. The mockup first put the vitals beside the name: at 320 x 568 at 130% that pushed Close off the strip and cut the name to "Th…", so they stand under it.
+**The header**, one 48 px row, sticky, so Close and Expand stand where they stand in the expanded bar. Its title holds two lines: the name on one line with an ellipsis (the frame's name keeps the whole name), and under it, in the small muted size, the **status line**. **Expand** (chevron up) and **Close** follow, and never shrink. A group's header reads "3 selected" on the first line.
 
-**The quick row**, one 44 px line, built from left to right:
+The status line shows the first of these that applies:
+1. An error or refusal from the HP entry, in the error tone, such as "Use a positive number, or start with + or -." or a player's "=20" refused.
+2. A line on the dead, such as "Healing does nothing while Thorn is dead. Revive Thorn first."
+3. The preview while the field holds text that parses: "7 damage", "Heal 5", "7 damage, to each of 3".
+4. "Critical Hit" while that box is ticked and the Crit toggle is not in the row.
+5. For a group, its standing note: "Leaves out Goblin 2: you cannot change their HP.", "Damage and healing only, since some of them are not yours." or "You cannot change the HP of any of them.".
+6. The vitals the short layout keeps: "AC 14 · HP 24/24", a player's "Healthy" for a creature whose numbers they lack, and "Dying", "Stable" or "Dead" where those replace HP. Where they do not fit, AC goes first, then HP ends in an ellipsis. Thorn's "AC 14 · HP 24/24" overflows by under 1 px at 320 x 568 at 130%, so there it reads "HP 24/24" (Appendix B.2).
 
-1. **The HP entry's field and Apply**, for a viewer who may change the token's HP. The field takes the room the buttons after it leave, never under 72 px. It has no mode buttons: it takes the entry's typed math (`7` or `-7` damage, `+5` heal, `=20` set, `t5` temporary), and its placeholder names the mode it is in, as the entry's does. It is the same entry as the expanded bar's, so a half-typed number survives Expand and Collapse.
-2. **"Use 9"**, the newest damage or healing roll the HP entry offers, while it offers one.
-3. **The passing actions**: Undo move, Doesn't count, the door's, while they apply, in the full bar's order.
-4. **Conditions**, for the DM and the token's owners. It expands the bar with the Conditions drawer open (3.4).
-5. **Roll**, for the DM and the token's owners, which opens the Dice panel as today.
-6. **Uses**, where combat lane B shows it (section 6).
-7. **Hidden**, for the DM.
-8. **Details**, then **Multi-select**, for a viewer with none of the above, such as a player on a monster.
+Items 1 and 2 may take both lines of the title, wrapping, with an ellipsis after the second. The name then steps aside visually but stays the frame's name. The status line is the field's description (`aria-describedby`), and an error or refusal is also spoken once by the frame's polite status region.
 
-Each shows only where it fits whole in what is left of the line after those before it, with the field kept at 72 px. One that does not fit is skipped, and a narrower one after it may still fit. A skipped action is in the expanded bar, where every action stays. The fit reads each button's drawn width, so the device's font, the interface size and the browser's minimum font size count (as `BarWidthProbe` measures the window's default width).
+**The quick row**, one 44 px line. Its display order, left to right:
+1. **The mode toggle**, one 44 px button. It draws the entry's mode as a sign in the mode's colour: − Damage, + Heal, = Set, T Temp. Its name and tooltip are the mode's name. A tap switches between Damage and Heal. From Set or Temp it goes to Damage. With "players apply damage" access it offers Damage and Heal only, as the entry does.
+2. **The HP field**, at least 56 px, taking the room the actions after it leave. Its placeholder is the mode's sample ("7" or "5"), since the toggle names the mode. It takes the entry's typed math too.
+3. **Apply**, in words, as the entry's primary.
+4. **Crit**, a toggle, while the entry would show "Critical Hit (two failed Death Saves)" (its name and tooltip), pressed while ticked. Where it does not fit, the box is in the expanded bar, or in the scrolling strip's content below the floor, and the status line says "Critical Hit" while it is ticked.
+5. **"Use 9"**, the newest rolled amount the entry offers for its mode. Its name and tooltip are the chip's own words, "Use 9 (Fire Bolt)".
+6. **Conditions**, for the DM and the token's owners. It expands with the Conditions drawer open (5.3).
+7. **Roll's place**: Roll, for the DM and the owners. While a passing action applies (Undo move, Doesn't count or the door's), the first of them takes this place instead where it fits whole there, and else Roll stays and it waits in the expanded bar. Undo move is drawn as the undo arrow alone, 44 px, named and tipped "Undo move", as the top bar's Undo is (R13). The others keep their words.
+8. **Multi-select**. 9. **Uses**, where lane B shows it. 10. **Hidden**, for the DM. 11. **Details**, for a viewer with no HP entry.
 
-Measured in the mockup (Appendix B), the DM and Pat on Thorn get the field and Apply, then: Conditions and Roll at 390 x 844 and 375 x 667 (348 and 333 px inside the padding), and room for one more at 440 x 956 (a Uses there, but not Hidden, at 98 px). Conditions alone fits at 390 x 844 at 130% and 320 x 568 at 100%, and Roll alone at 320 x 568 at 130%, where Conditions is too wide and Roll, after it, fits. Pat on a goblin gets Details and Multi-select.
+The toggle, field and Apply (the lead) show for a viewer who may change the token's HP, on a token that has HP. With no lead, the row starts at Conditions, or at Multi-select for a viewer with nothing before it.
+
+**Fitting** is a separate order, so a passing action can never put Conditions out: the lead, Crit, Conditions, Roll's place, "Use 9", Multi-select, Uses, Hidden, Details. Each shows where it fits whole in what is left after those before it in this order, with the field at its 56 px least. One that does not fit is skipped, and a narrower one after it may still fit. A skipped action is in the expanded bar. The fit reads each button's drawn width, so the font, the interface size and the browser's minimum font size count.
+
+**Measured** (Appendix B.2), for a creature with HP:
+
+| Phone | DM or owner | With a passing action | At 0 HP, dying |
+| --- | --- | --- | --- |
+| 390 x 844 | Conditions, Roll | Undo move takes Roll's place. Doesn't count (121 px) does not fit, so Roll stays | Crit, Conditions |
+| 375 x 667 | Conditions, Roll | Undo move takes Roll's place. Doesn't count waits | Crit, Conditions |
+| 440 x 956 | Conditions, Roll, and Uses where it applies | as 390 | Crit, Conditions, Roll |
+| 320 x 568, 130% | the lead alone | nothing fits: Undo move waits in the expanded bar | the lead alone: the status line says "Critical Hit" while ticked |
+
+At the two other alignment sizes, 390 x 844 at 130% gets Roll alone (Conditions, 99 px, is skipped), with Undo move in its place and Crit at 0 HP. 320 x 568 at 100% gets Conditions alone and Crit at 0 HP, and Undo move waits.
+
+- **Multi-select** (D-261024-11 and 13) fits after the lead at **none** of the four phones, not even 440 x 956 (108 px against 66 left). It shows where there is no lead: on every phone for a player on another's token, and from 375 x 667 up on a token with no HP. Elsewhere it is Expand, then Multi-select.
+- **Hidden** shows only for the DM on a token with no HP: at 440 x 956, and at 375 x 667 while Doesn't count takes Roll's place and leaves no room for Multi-select.
+- **A player** on a creature they do not own gets Multi-select and Details at all four phones. **A token with no HP**, for the DM or its owner: Conditions, Roll and Multi-select at 375 x 667, then Details at 390 x 844, and at 440 x 956 Hidden for the DM or Details for an owner. At 320 x 568 at 130% it is Conditions and Roll.
 
 ### 3.4 Why these
 
-The HP entry leads because HP is the change made most at the table, and because the bar's own ranking (docs/design-v1-token-panel.md 3.3) and the short layout keep "AC, HP and the HP entry at the top" with "Apply in view" on every phone (docs/design-v1-token-window.md 5.8). Conditions and Roll come next because the play row ranks them first for the DM and the owners (barButtons.ts `barButtons`). The passing actions answer the move just made, so they come before the steady ones while they apply, but after the HP entry, so the field and Apply never move under a thumb. Hidden is the DM's most-used setup toggle. Duplicate, Locked, Delete, Size, elevation, Light, Attach and the summary's saves and defenses are rarer, and they wait one tap away in the expanded bar.
-
-A drawer would grow the strip, so the actions that open one (Conditions, Uses) expand the bar with it open, and closing that drawer brings the bar back to rest (5.3).
+The HP entry leads because HP is the change made most at the table, and the bar's own ranking keeps "AC, HP and the HP entry at the top" with "Apply in view" on every phone (docs/design-v1-token-panel.md 3.3, docs/design-v1-token-window.md 5.8). The toggle makes the mode visible and lets an iPhone's number pad heal, which it cannot type with a plus sign (D-261024-10). Crit comes next because a retained tick changes what Apply sends. The bar's play row ranks Conditions, Hidden, Multi-select, then Roll (barButtons.ts `barButtons`). The strip keeps Conditions first and moves Roll ahead of the two toggles, since they set the token up and Roll is used every turn in a fight. Multi-select follows Roll (D-261024-11). The passing action takes Roll's place because a player's Undo after a mis-drop must stay one tap, and Conditions must not move (D-261024-12). Duplicate, Locked, Delete, Size, elevation, Light, Attach and the summary's saves and defenses are rarer and stay one tap away behind Expand.
 
 ### 3.5 Beside the alerts column and the toasts
 
-- **The column** keeps its cards above the strip. Where its first card ends at least 8 px above the strip's top, the column stacks there and stops 8 px above it (`columnRoom`). Where it does not, the column shows its 44 px summary row (docs/design-v1-bar-dock.md 1.3), whose tap hides the bar as today. The strip itself never moves for a card: `restLane` in barDock.ts gives "stacked" or "summary" and never pushes the box.
-- **Toasts** stop 8 px above the strip: while the bar rests, its top is the foot of the toasts' room, in place of the tool's highest control, so a stack that would reach it drops and scrolls by the existing rule (`fitToasts`, `toastTop`'s `optionsTop`). The strip publishes no header to `spanToastSlot`, so no toast moves for it (1.5's header rules apply to the expanded bar only).
+- **The column** keeps its cards above the strip (`restLane`). It stacks where at least 44 px of band are left between its first card's foot plus 8 and the strip's top less 8, so a token can still be panned in under the card. Otherwise it shows its 44 px summary row (docs/design-v1-bar-dock.md 1.3), whose tap hides the bar as today. The strip never moves for a card. Beside the column the band also stays clear left of it: 62 px at 390 x 844, none at 320 x 568 at 130%, where the column spans the band.
+- **Toasts** stop 8 px above the strip: while it rests, the strip's top less 8 is the foot of the toasts' room, in place of the tool's highest control (`toastTop` and `paneToastTop`'s `optionsTop`, and `fitToasts`' room).
+- **Stacks already placed** take their place anew, as if they came then, when resting begins and each time the strip's top rises (a roll card arriving): every stack whose drawn foot is lower than 8 px above the strip's top, a stack a pane left included (`restFloor` in `nextToastPlaces`, 9.1). Its new place is the notices' top or 8 px under the column's first card, by today's rule. Where even there the room down to the strip is under 44 px (`TOAST_MIN`), which needs F under about 150, the stack keeps today's foot and may stand over the strip's header until it goes or is tapped away.
+- The strip publishes no header to `spanToastSlot`, so no toast moves under it. The expanded bar does (5.1).
+
+### 3.6 Clearing its own token (D-261024-9 and 13)
+
+The bar never covers its own token at the two events it controls: **when it opens on a tap**, and **when it comes back after a drag's drop**. If the token's label clearance meets the strip, that is `anchor.y + OFFSET_Y` (the point under its label or plate that `belowLabel` gives today, for a group its anchor token's, `selectedId`) lower than the strip's top, the map moves up once, just enough (`clearShift`, 9.1):
+- **dy = stripTop − (anchor.y + OFFSET_Y)**, and no further than keeps the token's top, at its drawn height, inside the free area and below the toasts' foot as they stand (today's `largerHang` rule, review LP19-BS-3). A token taller than the band so clears as far as its top allows and may stay partly under the strip.
+- It respects `keepInView` with the strip's cover (4): it never moves the map further out than a pan could.
+- It runs once per showing, in the frame's first layout effect with the content measured, before paint, guarded as `openChecked` guards Larger's opening move today (TokenActionBar.tsx:991). A pan the viewer has started before it lands (a finger down on the map, or a pan's frame pending) cancels it, and nothing retries it.
+- "Opens on a tap" is the frame mounting for a token or group tapped, Actions, a tracker row's or the party bar's tap, or a tap that changes the group's anchor token. Those programmatic pans land the token clear already, so they rarely move. "Comes back after a drop" is the frame mounting again after a token drag.
+- It never runs on a pan, a pinch, Collapse, a content change, a toast, a card, an arrow-key nudge (though it moves the token as a drop does, so a run of nudges never moves the map), a fold's return or a turn of the screen. So a later pan or card may still bring the token under the strip, and only those two events guarantee it clear.
 
 ## 4. Reach
 
-**The mechanism: the strip is a fixed cover at the map's foot, which the camera keeps clear.**
+**The mechanism: the strip is a fixed cover at the map's foot.**
 
-- **Pans.** Stage's `keepInView` (lib/camera.ts) keeps 64 px of the map clear of the top bars and the toolbar. While the bar shows on an upright phone it also counts the bar's cover at the foot (`barCover`, now the bottom side for a bar across the free area), so the map's top edge never goes under the strip. The map's bottom edge may still rise to 64 px under the top bars, and the top edge come down to 64 px above the strip. So any cell can be panned into the band above the strip: a token at the top edge to the band's foot, one at the bottom edge to the band's top, corners likewise, at any zoom. The band is at least 87 layout px on the smallest case in 3.1 and about 600 on a 390 x 844 phone.
-- **Nothing follows the token**, so a pan moves the token and leaves the strip. Today's bar moved with the selected token and pinned to an edge once it left the screen (1.3), which is what kept the edge tokens covered.
-- **Fit the map, Find my token, the outliner's show on map, a tracker row, the party bar and follow the turn** fit or place into the area the cover leaves, as they do for a docked window (docs/design-v1-bar-dock.md section 4). A pan that opens the bar knows the strip's box before it exists (`restingBar`), since its place and height are fixed, so the token lands above it.
-- **The token just tapped** may stand where the strip opens, if it was in the bottom 114 px of the free area. The strip then covers it, and the map does not move (R2). A one-finger pan, which leaves the bar open, brings it above. Every programmatic opening in the item above lands it clear already.
-- The mockup (Appendix B) measured every edge and corner token reachable above the strip at all four phones, as the DM and as Pat, where today six of them are not (1.2).
-
-The expanded bar keeps the same rule: it is the cover then, and the band above it is at least 120 px less its 8 px gap (5.1), so every token can still be panned above it and tapped.
+- **Pans.** `keepInView` (lib/camera.ts) keeps 64 px of the map clear of the top bars and the toolbar. While a bar shows on an upright phone it also counts the bar's cover at the foot (`barCover`, now the bottom side for a bar across the free area). It clamps only against moving further out: a camera already past the new bound, because the strip appeared over it, may move toward the bound or stay, and never jumps to it (`keepInView`'s `from`, 9.3). So the map's bottom edge may still rise to 64 px under the top bars, and its top edge come down to 64 px above the strip. Any cell can be panned into the band: a token at the top edge to the band's foot, one at the bottom edge to the band's top, corners likewise, at any zoom.
+- **Nothing follows the token**, so a pan moves the token and leaves the strip. Today's bar followed it and pinned to an edge once it left the screen (1.3).
+- **Fit the map, Find my token, the outliner's show on map, a tracker row, the party bar and follow the turn** place into the area the cover leaves, as they do for a docked window (docs/design-v1-bar-dock.md section 4). A pan that opens the bar knows the strip's box before it exists (`restingBar`), so the token lands above it.
+- **The DM's stacked column** covers the band's top right. The band left of it and under its first card stay, by 3.5's 44 px rule, so a token behind a card is panned below the card or left of it.
+- **Measured** in the mockup: every edge and corner token was panned above the strip and took a tap, at all six phone sizes, as the DM and as Pat, where today 4 to 6 of 10 cannot (1.2).
+- **Expanded** is the cover while it shows, with a band of at least 120 px above it (5.1), so tokens stay in reach there too.
 
 ## 5. Expanded
 
 ### 5.1 Place and size
 
-- **Bottom** on the same foot as the strip. It never hangs over its token and never flips: the top edge alone moves as it expands, collapses or changes token.
-- **Height**: its content as measured when it expands, up to `largerRoom` as today: two thirds of the layout's height, but leaving at least 120 px of the free area above it (below the column's first card where the column stacks) for the token and its label, or the label gap, the token's drawn height and 12 px for a tall or zoomed token (docs/design-v1-bar-dock.md 1.5, reviews BS-F1 and BS-ASTRA-01). Content that grows after that, such as a stat block that loads late or a drawer opened inside it, scrolls under "Scroll for more" (review BS-O3).
-- At 390 x 844 that is at most 563 px (the DM's Thorn bar measures 502, so it shows whole), 418 at 375 x 667, 637 at 440 x 956 and about 189 at 320 x 568 at 130%.
-- Everything the bar holds today shows, in today's order, with the short layout ("More stats") where today's rule gives it (`barShort`, 9.3).
-- Its header publishes to `spanToastSlot` as the spanning header does today, so a toast that would cover Close or Collapse moves under the header (docs/design-v1-bar-dock.md 1.5, reviews LP19-BS-2 and FU24-OPUS-1). It changes its place only as it expands, as a card stacks above it, or as its content shrinks below its height.
+- **Offered where F ≥ 242** (`EXPAND_FLOOR` = REST_HEIGHT + LARGER_LEAVES + 8). Below that Expand is not drawn, and the scrolling strip (5.4) takes its place.
+- **Bottom** on the strip's foot. It never hangs over its token and never flips. Only its top edge moves.
+- **Height**, the frame's own, apart from the camera's move: **H = max(114, min(content, round(⅔ × layout height), F − 128, room under the column's stacked first card))**, where content is measured when it expands. F − 128 leaves 120 px for its token and label above it and the 8 px gap, so the band above an expanded bar is at least 120. Where the column's card would leave it under 114, the column shows its summary row instead.
+- **Frozen**: H is worked out at Expand and for each new token the expanded bar shows, and again only on a frame change (rotation, interface size, toolbar, options row, top bars, a roll card, a column card stacking). It reads no token height, so a pinch never changes it (BC-OPUS-8). Content that grows after, such as a stat block that loads late or a drawer opened inside, scrolls under "Scroll for more" (review BS-O3).
+- At most 563 px at 390 x 844 (the DM's Thorn bar measures 502, so it shows whole), 410 at 375 x 667 with no card, 637 at 440 x 956 and 181 at 320 x 568 at 130%.
+- Its content is today's, in today's order, with the short layout ("More stats") where `barShort` gives it (9.1).
+- Its header publishes to `spanToastSlot` as the spanning header does today, so a toast that would cover Close or Collapse moves under it (docs/design-v1-bar-dock.md 1.5, reviews LP19-BS-2 and FU24-OPUS-1).
 
 ### 5.2 The map as it expands
 
-As the bar expands, after its content is measured and before the browser paints, the map moves up just enough that the token's label clears the expanded bar's top (`expandShift`, today's `largerShift` for a bar under its token), and no more than keeps the token's top, at its drawn height, below the toasts' foot as they stand (review LP19-BS-3) and inside the free area. A token already above the bar moves nothing. The same happens once for each new token the expanded bar shows (a tap on another token, Multi-select gathering or letting go). It never happens on a pan, a pinch, a drag's return, a fold's return or a turn of the screen.
+After its content is measured and before paint, `clearShift` (3.6) runs once with the expanded bar's top in place of the strip's: the map moves up just enough that the token's label clears it, and no further than keeps the token's top in the free area and below the toasts' foot. A token already above it moves nothing. A tall token may stay partly behind the bar, and H does not shrink for it. The same happens once for each new token the expanded bar shows. Never on a pan, a pinch, a drag's return, a fold's return or a turn of the screen.
 
 ### 5.3 Between resting and expanded
 
-- **Expand** (chevron up) in the header, left of Close, expands. **Collapse** (chevron down), in the same place, rests again. Each is a 44 px icon button whose tooltip is its name, as Larger and Smaller are.
-- **Conditions or Uses** in the quick row expands with that drawer open and scrolled into view. Closing that drawer (its button again) rests again, as does Collapse.
-- **Collapse moves nothing.** The map stays where the expand left it, so the token, which now stands above the strip's top, stays in view. Today's Smaller moved the map back (R3).
-- **What is kept**: expanded lasts while the bar stays open: through a tap on another token, Multi-select gathering or letting go of tokens, a token drag (the bar comes back expanded and moves no map), a fold under a sheet and the dock's Show. Once the bar closes (Close, Escape or Back, a tap on empty map, Done), the next bar rests. Nothing is stored: `rvtt.tokenBarLarger` is no longer read and is removed once, in try and catch, as the dock store starts (R1).
+- **Expand** (chevron up) left of Close expands. **Collapse** (chevron down) in its place rests again. Each is a 44 px icon button named and tipped by its action.
+- **Conditions or Uses** in the quick row expands with that drawer open and scrolled into view. Closing that drawer, by its button again, rests again, as does Collapse. Below the floor, they open their drawer inside the scrolling strip instead.
+- **Collapse moves nothing** (R3).
+- **The HP entry is one element in both states.** The header, the vitals line (hidden while resting) and the entry keep their places in the content, and the entry's field row keeps its key, so the same input carries over: what was typed, the mode, the crit tick, the caret, focus and the phone's keyboard survive Expand and Collapse.
+- **What is kept**: expanded lasts while the bar stays open, through a tap on another token, Multi-select gathering or letting go, a drag (it comes back expanded with no map move), a fold and the dock's Show, a turn to landscape and back, and a fall below the floor (5.4). Once the bar closes, the next bar rests. Nothing is stored: `rvtt.tokenBarLarger` is no longer read, and is removed once, in try and catch, as the dock store starts (R1).
+
+### 5.4 Below the floor: the scrolling strip
+
+Where F < 242 (320 x 568 at 130% with Multi-select and a turn band is 209, and a roll card can bring 375 x 667 to about 238), the strip keeps its place and 114 px, Expand is not drawn, and its scroller scrolls one column: the header (sticky), the quick row, then everything the expanded bar holds that the strip does not, in today's order, with "Scroll for more" while any is hidden. Conditions and Uses open their drawer there, scrolled into view. The HP entry's feedback keeps its place in the status line (3.3). A bar expanded when F falls under the floor (a card arrives) shows the scrolling strip, keeps `expanded`, and expands again when F returns, with no map move.
 
 ## 6. Combat's Uses
 
-- **Resting**: Uses is the quick row's sixth action (3.3), after Roll, where lane B's rule shows it (the DM on any creature with a use, owners on theirs). After the field, Apply, Conditions and Roll, about 98 px are left at 440 x 956 and 48 at 390 x 844, so Uses (about 60) shows in the strip on the wider phones and is Expand then Uses on the narrower. In the strip, Uses expands the bar with the Uses drawer open, and closing the drawer rests again (R11). A Uses button whose block is still loading holds its place, as lane B's rule says, and the fit counts it so.
-- **Expanded**: as lane B designs it, in the play row after Roll, with the drawer where Conditions opens. Its 44 px rows scroll inside the expanded bar's room under "Scroll for more".
-- **Room**: neither state needs a new slot from lane B beyond the button's id in the quick row's order and the drawer's name for `expand` (9.4).
+- **Resting**: Uses is ninth in display order and seventh in fitting, after Multi-select (D-261024-11). Measured, it fits after the lead only at 440 x 956. Elsewhere it is Expand, then Uses. In the strip it expands with the Uses drawer open, and closing the drawer rests again (R11). A Uses button whose block is still loading holds its place, as lane B's rule says, and the fit counts it.
+- **Expanded**: as lane B built it, in the play row after Roll, with the drawer where Conditions opens.
+- **Agreed names**: the `"uses"` id in the strip's order and the drawer's name for `expand` (9.4).
 
 ## 7. Larger screens and a phone on its side
 
-The docked window stays as it is. Measured at 844 x 390 (a phone on its side) and 820 x 1180 (a tablet), with the same probe, the window never moved with a pan (one box through 12 camera frames each way, at both sizes), a toast or a drag. It changed only as the column stacked a roll card above it in the lane (61-322 to 113-322 at 844 x 390, the docked rule of docs/design-v1-bar-dock.md 1.3) and for another token's content (61-322 to 127-322 for a goblin), and its content grows it at its top edge, which stays away from its token since the window is not placed by one. Every token was in reach at 820 x 1180. At 844 x 390 the three tokens at the map's right edge stood under the window at every height the sweep tried at their own x, and a pan that brought each 80 px from the left edge reached it, as Fit and Find would. Neither the moving with the map nor the unreachable tokens happen there, so the window keeps today's rules.
+The docked window stays as it is. Measured at 844 x 390 (a phone on its side) and 820 x 1180 (a tablet), the window never moved with a pan, a toast or a drag. It changed only as the column stacked a roll card above it (61-322 to 113-322 at 844 x 390, docs/design-v1-bar-dock.md 1.3) and for another token's content. Every token was in reach at 820 x 1180, and at 844 x 390 the three tokens at the map's right edge, under the window at their own x, took a tap once panned left of it. So the window keeps today's rules.
 
 ## 8. The UI checklist
 
-- **Loading**: nothing new waits. The strip's box needs no measuring. A quick action keeps its own busy and refused states (Undo move waiting on the server, Doesn't count refusing a second press). A Uses button still loading holds its place (section 6). Expanding shows the content at once, as Larger does today.
-- **Keys and focus**: Expand and Collapse keep focus on themselves, which stay at the header's right edge. Conditions or Uses pressed in the quick row moves focus to the same button in the expanded bar, pressed, with its drawer after it, and closing the drawer from there keeps focus on the quick row's button again. Escape and Android's Back close the bar in either state, as today. Tab order: Expand, Close, then the field, Apply and the quick actions left to right. The frame stays focusable from script only (`tabIndex={-1}`). The field at the foot takes the phone's keyboard as the roll card's Total field at the foot does today, and focusing it changes nothing about the strip's box.
-- **Screen readers**: the frame keeps `role="dialog"` and its name ("Thorn actions", "3 selected tokens"). Expand and Collapse are named by their action, with no `aria-expanded`, as Larger and Smaller are. A skipped quick action is simply absent from the strip, not hidden there, and is in the expanded bar's tree once it expands. The vitals line is read as part of the header's title, after the name.
-- **Large interface sizes**: every size above is in layout px, so the strip is 148 screen px at 130% (3.1). The quick row's fit measures drawn widths inside the chrome's zoom. Alignment is measured at 390 x 844 and 320 x 568, at 100% and 130%, and at 1440 x 900 where the window docks as before. The mockup's strip had no finding over 1 px at any of the six phone sizes it ran (Appendix B).
-- **Exact words**: "Expand", "Collapse", "AC 14 · HP 24/24" (the middle dot with a space each side), the entry's own placeholder ("7 or -7" in Damage mode) and Apply, and the quick actions' existing names: "Use 9", "Undo move", "Doesn't count", "Open door", "Conditions", "Roll", "Uses", "Hidden", "Details", "Multi-select". No new sentence.
+- **Loading**: nothing new waits. The strip's box needs no measuring. Quick actions keep their busy and refused states (Undo move waiting on the server, Doesn't count refusing a second press). A Uses button still loading holds its place.
+- **Keys and focus**: Expand and Collapse keep focus, since they stay at the header's right edge. Conditions or Uses pressed in the strip moves focus to the same button in the expanded bar, pressed, and closing its drawer from there returns focus to the strip's button. The HP field keeps focus through Expand and Collapse (5.3). Escape and Back close the bar in either state. Tab order: Expand, Close, then the toggle, the field, Apply and the quick actions in display order. The field at the foot takes the phone's keyboard as the roll card's Total field at the foot does today. The frame stays focusable from script only.
+- **Screen readers**: the frame keeps `role="dialog"` and its name ("Thorn actions", "3 selected tokens"). The toggle is named by its mode ("Damage"), Expand and Collapse by their action, Crit by its full words, Undo move and "Use 9" by their full names. The status line is the field's description. An error or refusal is spoken once by the frame's polite status. A skipped action is absent from the strip, and present in the expanded bar.
+- **Large interface sizes**: every size is in layout px, so the strip is 148 screen px at 130%. The fit measures drawn widths inside the chrome's zoom. Alignment is measured at 390 x 844 and 320 x 568, 100% and 130%, plus 375 x 667 and 440 x 956: every mockup run had no finding over 1 px (Appendix B), and the window's roots at 1440 x 900 are unchanged.
+- **Exact words**: "Expand", "Collapse", "Damage", "Heal", "Set", "Temp" (the toggle's names), "Crit" (named "Critical Hit (two failed Death Saves)"), "Critical Hit" (the status line), "AC 14 · HP 24/24" (a middle dot with a space each side), the entry's own preview, error, refusal and dead-line sentences, and the existing names "Apply", "Undo move", "Doesn't count", "Open door", "Conditions", "Roll", "Multi-select", "Uses", "Hidden", "Details", and "Use 9" named "Use 9 (Fire Bolt)". No new sentence.
 
 ## 9. The rules in code
 
 ### 9.1 barDock.ts
 
-- `REST_HEIGHT = 114`.
-- `placeBar` takes `state: "rest" | "expanded"` (default "rest") and, in span mode, returns for rest `{ anchor: "bottom", at: free bottom, room: REST_HEIGHT, left, width }` with `lane` from `restLane`, and for expanded the same bottom with `room = min(expandedHeight, largerRoom(layout, free, floor, tokenHeight))`, `floor` from `spanLane`. Neither reads the anchor for its place. `spanHang` goes.
-- `restLane(column, restTop)`: "stacked" where the column's first card ends 8 px or more above `restTop`, else "summary". With no column, "none".
-- `expandShift(input)`: today's `largerShift` for a bar under its token, with its toast rule. `smallerShift`, `carriedMove`, `readLarger` and `writeLarger` go, and `LARGER_KEY` stays only for the one removal.
-- `barCover`: a bar as wide as the free area covers the bottom from its top. `restingBar` returns the strip's box in span mode (its place and height are known), so a pan that opens the bar lands clear of it.
-- `spanRoomAtWorst(free)` keeps its name and signature for barButtons.ts and returns the expanded room for a 40 px token, `largerRoom` with no column. The short layout's verdicts do not change at the four phones (Appendix A).
-- The dock store's `larger`, `largerFor` and `largerMoved` become `expanded: boolean`, `expandedFor: string | null` (the opening that moved the map) and `expandedHeight: number`. `expanded` resets where `largerFor` does today, as the bar goes away other than for a token drag.
-- `restFit(widths, room, gap, fieldMin)`: which candidates show, in order, each where it fits whole.
+- `REST_HEIGHT = 114`, `EXPAND_FLOOR = 242`.
+- `placeBar` takes `state: "rest" | "expanded"`, `expandedHeight` and `restFoot` (the foot it places by: `foot`, or 0 while the card yields). In span mode it returns for rest `{ anchor: "bottom", at: free bottom, room: REST_HEIGHT }` with `lane` from `restLane`, and for expanded (F ≥ 242) the same bottom with `room = expandedHeight`. Neither reads the anchor. `spanHang` goes.
+- `expandedRoom({ layout, free, column, content })`: H of 5.1, never under REST_HEIGHT.
+- `restLane(column, restTop)`: "stacked" where 44 px of band are left under the first card (3.5), else "summary", "none" with no column.
+- `clearShift({ anchor, tokenHeight, free, barTop, toastFoot })`: 3.6's move, used at rest and at expand. `largerShift`, `largerRoom`'s use for the frame, `smallerShift`, `carriedMove`, `readLarger` and `writeLarger` go. `LARGER_KEY` stays for the one removal.
+- `stripSqueezed({ viewport, chrome, foot })`: F with the card under 148. PlayerRolls reads it.
+- `barCover`: a bar as wide as the free area covers the bottom from its top. `restingBar` returns the strip's box in span mode.
+- `spanRoomAtWorst(free)` keeps its name and signature for barButtons.ts and returns `min(⅔ × layout height, F − 128)`, the expanded room with no content. The short layout's verdict changes at two alignment sizes: 320 x 568 at 100% (166 short, now 312) and 390 x 844 at 130% (206.5 short, now 393). It stays short at 320 x 568 at 130% (181).
+- `nextToastPlaces` takes `restFloor`, the strip's top less 8, or null: a stack whose foot is lower takes its place anew (3.5).
+- `restFit(widths, room, gap, fieldMin)` and `restOrder(ids)`: the fitting priority and display order of 3.3, apart.
+- `restStatus(input)`: the status line's choice of 3.3. `nextRestMode(mode)`: Damage to Heal, anything else to Damage.
+- The dock store's `larger`, `largerFor` and `largerMoved` become `expanded`, `expandedFor` (the opening whose move ran), `expandedHeight` and `clearedFor` (the showing whose clearing move ran).
 
-### 9.2 The frame (TokenActionBar.tsx `BarFrame`, `BarHeader`, `FrameControls`)
+### 9.2 The frame (TokenActionBar.tsx `FrameControls`, `BarHeader`, `BarFrame`)
 
-- `FrameControls.rest: { resting: boolean; expand(): void; collapse(): void } | null`, null where the bar docks or opens compact. `size` goes.
-- `BarHeader` shows Expand or Collapse in Larger's place. While resting it draws the name on one line and, under it, a `vitals` node the content passes, dropping its AC part first where the line is short (3.3).
-- `BarFrame` draws `height: REST_HEIGHT` while resting and today's `maxHeight` while expanded, from `placeBar`. On Expand it measures the content first, stores `expandedHeight`, then calls `onShift(expandShift(...))` once per opening, before paint, as the Larger opening does today (`contentMeasured`, `openChecked`). It publishes the header to `spanToastSlot` only while expanded, and its box to `barDockSlot.bar` in both states.
+- `FrameControls.rest: { resting: boolean; scrolls: boolean; expand(): void; collapse(): void } | null`, null where the bar docks or opens compact. `scrolls` is the scrolling strip. `size` goes.
+- `BarHeader` draws Expand or Collapse in Larger's place (none in the scrolling strip), and while resting the name and, under it, the `status` node the content passes.
+- `BarFrame` draws `height: REST_HEIGHT` while resting and `expandedHeight` while expanded, from `placeBar`. It runs `clearShift` in its first layout effect when it shows (3.6), and at Expand after measuring the content (5.2), each once, through Stage's `onShift`. It publishes the header to `spanToastSlot` only while expanded, and its box to `barDockSlot.bar` in both states.
 
-### 9.3 Stage.tsx and Room.tsx
+### 9.3 Stage.tsx, lib/camera.ts, Room.tsx and PlayerRolls.tsx
 
-- Stage's `barCoverRef` counts a spanning bar's box (no longer `null` for span), and `scheduleCam` passes `largerEach(insets, cover)` to `keepInView` while a bar shows on an upright phone. `shiftForBar` is unchanged.
-- Room's toasts take `min(optionsTop, rest top)` and `min(foot, rest top − 8)` while the bar rests (3.5).
+- Stage's `barCoverRef` counts a spanning bar's box. `scheduleCam` passes `largerEach(insets, cover)` and the camera before the gesture to `keepInView`, whose new optional `from` relaxes each bound to where `from` already stands, so it clamps only against moving further out (BC-OPUS-7). `shiftForBar` is unchanged.
+- Room's toasts take the strip's top as the foot of their room and `restFloor` while the bar rests (3.5).
+- PlayerRolls.tsx line 202: `yieldsToBar` adds `|| stripSqueezed(...)` for an upright bar. Nothing else there changes.
 
-### 9.4 The content (lane B's files)
+### 9.4 The content (the content lane, after lane B)
 
-- barButtons.ts `restButtons(input)`: the quick row's order of 3.3 as ids, from the same input as `barButtons`, plus whether the HP entry shows and whether Uses applies.
-- TokenActionBar.tsx `TokenBarBody` and `GroupActionBar`: while `frame.rest?.resting`, `<BarHeader>` first, as in the expanded bar so React keeps it and its focus, with `vitals` (the short line's AC and HP as two parts), then `<RestRow lead={hp entry} items={...}/>` from the frame's new file. Conditions and Uses there call `frame.rest.expand()` and open their drawer, and the drawer's closing calls `collapse()` when it was opened so.
-- features/tokens/HpSection.tsx: `HpEntry` takes `layout: "rest"`, which draws the field and Apply alone, the mode buttons and chips out (the chip comes back as the quick row's "Use 9").
+- barButtons.ts `restButtons(input)`: the quick row's candidate ids by role and token, including `"uses"`, plus the group's. Its `barCapacity` comment says the short layout now holds only on the smallest phones at a larger interface size.
+- TokenActionBar.tsx `TokenBarBody` and `GroupActionBar`: while `frame.rest?.resting`, `<BarHeader>` first with the status node, the vitals line hidden, the entry in its place with `layout: "rest"`, and `<RestRow>` from the frame's file with the candidates. While `frame.rest.scrolls`, the rest of the bar's sections follow the quick row. Conditions and Uses there open their drawer and call `expand()`, and the drawer's closing calls `collapse()` when it was opened so.
+- features/tokens/HpSection.tsx: `HpEntry` takes `layout: "rest"`: the toggle, the field and Apply in one row (its field row keeping its key), Crit and the newest chip as quick candidates, and its notes handed to the status line (`onStatus`). features/tokens/GroupHpEntry.tsx passes `layout` through and hands its standing notes to the status line.
+- The group strip: header "3 selected", status line of 3.3, the group entry as the lead, then Conditions, Roll (the DM), Multi-select, Hidden (the DM), in that order for both display and fitting. Request a roll, Locked, Start a fight, More and Delete stay behind Expand. By the widths measured for Thorn (Appendix B.2), with the group's lead as wide as one token's: Conditions and Roll at 390, 375 and 440, and the lead alone at 320 x 568 at 130%.
 
 ## 10. Cases
 
 | Case | Expected | Test |
 | --- | --- | --- |
-| Tap Thorn at 390 x 844 | The strip at 662 to 776, 114 tall, at once | e2e br-f-1 |
-| Pan 240 px, both ways, bar resting | Strip box unchanged on every frame | e2e br-f-2 |
-| Pinch zoom with the bar resting | Strip box unchanged | e2e br-f-2 |
-| A whisper arrives | Strip unchanged, toast above it | e2e br-f-3 |
-| Toasts that would reach the strip | Oldest logged ones drop, the rest scroll above it | unit `fitToasts` with the rest foot, e2e br-f-3 |
-| A concentration card in the column (DM) | Strip unchanged, the card above it, or the summary row | unit `restLane`, e2e br-f-3 |
-| A roll card at the foot (player) | Strip rises by the card's height, unchanged in height, and back after | e2e br-f-3 |
-| Thorn dragged a cell | Bar hides during the drag, the strip returns in the same box, Undo move in its row | e2e br-f-4 |
-| Undo move, Use 9, a late stat block | Row content changes, height stays 114 | unit `restFit`, e2e br-b-1 |
-| Another token tapped while resting | Same box, new content, no camera move | e2e br-f-1 |
-| A long name | One line, ellipsis, frame name whole | e2e br-b-1 |
-| Every edge and corner token, bar resting, close zoom | Panned above the strip and tapped, at the four phones, both roles | e2e br-f-5 (reach) |
-| A token in the strip's band tapped | Strip covers it, no map move, a pan reveals it | e2e br-f-5 |
-| Fit the map, Find, a tracker row with the bar opening | Token lands above the strip | unit `restingBar`, `barCover`, e2e br-f-6 |
-| Pan the map's top edge toward the strip | Stops 64 px above the strip | unit `keepInView` with the cover |
-| Expand on a token in the middle | Bar grows up to min(content, cap), map moves so the label clears its top, once | unit `expandShift`, e2e br-f-7 |
-| Expand on a token already above the cap | No map move | unit `expandShift` |
-| Expand on a tall or zoomed token | Its top stays below the toasts' foot and the free area's top | unit `expandShift` |
-| Collapse | Strip again, map unmoved, focus on Expand | e2e br-f-7 |
-| Conditions from rest | Expanded with the drawer open, focus on Conditions. Closing it rests | e2e br-b-2 |
-| Uses from rest | Expanded with the Uses drawer open. Closing it rests | lane B's combatuses e2e |
-| Expanded, tap another token | Stays expanded, resized for its content, one map move at most | e2e br-f-7 |
-| Expanded, drag, close, reopen | Comes back expanded after the drag with no move. A fresh opening rests | e2e br-f-7 |
-| Expanded under a sheet, then Show | Folds, returns expanded | e2e fold (unchanged steps) |
-| A stored `rvtt.tokenBarLarger` | Removed, bar opens resting | unit dock store start |
-| Multi-select group, resting and expanded | Same rules, the group's header "3 selected" | e2e br-b-1 |
-| Multi-select and a turn band at 320 x 568 at 130% | Strip 114, band 87, edge tokens reachable | e2e br-f-5 |
-| Compact screen (480 x 320 at 130%) | Today's compact overlay, no resting state | playerphone, dmphone (unchanged) |
-| Phone on its side, tablet, computer | Docked window as today | bardock, playerphone (unchanged) |
-| View as a player | Same states, nothing stored | e2e br-f-7 |
+| Tap Thorn mid-map at 390 x 844 | Strip at 662 to 776, 114 tall, first frame, no map move | br-f-1 |
+| Tap a token whose label meets the strip | Map moves up once, just enough, then the strip stands still | unit `clearShift`, br-f-8 |
+| Tap a Gargantuan token low on the screen | Clears as far as its top stays in the free area | unit `clearShift` |
+| Drag a token and drop it into the strip's band | Bar hides, comes back, map moves once to clear it | br-f-8 |
+| Arrow-key nudge into the band | No map move, the strip may cover it | br-f-8 |
+| A pan under way as the bar opens | No clearing move | unit, br-f-8 |
+| Pan 120 and 240 px, pinch, bar resting | Strip box unchanged on every frame | br-f-1 |
+| A whisper, and an actionable toast placed low before the strip opens | The whisper above the strip. The low one takes its place anew above it | unit `nextToastPlaces`, br-f-3 |
+| A concentration card (DM) | Strip unchanged, the card above it with 44 px of band, or the summary row | unit `restLane`, br-f-3 |
+| A roll card arrives and leaves at 390 x 844 | Strip rises by the card's height and back, height 114 | br-f-9 |
+| The same at 320 x 568 at 130% with Multi-select and a turn band | The card folds into "Roll asked", the strip stays, no compact overlay. Both come back as the card goes | unit `stripSqueezed`, br-f-9 |
+| Multi-select's row and a turn band take F under 148 at 320 x 480 at 130% | The strip stays a strip and the band narrows. A tap on empty map hides the bar | playerphone 11 |
+| A roll card brings F to 238 while expanded (375 x 667) | Scrolling strip with `expanded` kept. It expands again after, with no map move | unit, br-f-9 |
+| Expand, F ≥ 242 | H = max(114, min(content, ⅔, F − 128)), one clearing move | unit `expandedRoom`, br-f-7 |
+| Expand on a 176 px token at F = 209 | Expand not drawn. The strip scrolls | unit, br-f-7 |
+| Pinch while expanded on a Large token | H unchanged | unit, br-f-7 |
+| Collapse | Strip, map unmoved, focus on Expand | br-f-7 |
+| Type 7 in Heal mode kept from the expanded bar | Toggle shows +, Apply heals 7 | br-c-2 |
+| Type "abc", Apply | Status line shows the error, focus stays in the field | br-c-2 |
+| Pat types "=20" on a goblin with "players apply damage" | Status line shows the refusal, Apply disabled | br-c-2 |
+| Damage a dying creature with Crit ticked | Crit toggle pressed in the row (or "Critical Hit" in the status line where it does not fit), two failed saves | br-c-2 |
+| Heal a dead creature | The dead line in the status line | br-c-2 |
+| Undo move after a drag, 375 x 667 | The undo arrow in Roll's place, Conditions kept | unit `restFit`, br-c-1 |
+| Doesn't count at 390 x 844 | Roll stays, Doesn't count behind Expand | unit `restFit` |
+| Conditions from rest | Expanded with the drawer, focus on Conditions. Closing it rests | br-c-1 |
+| Uses from rest at 440 x 956 | Expanded with the Uses drawer. Closing it rests | lane B's combatuses |
+| The group's strip | "3 selected", group entry, Conditions, Roll. The exclusion note in the status line | br-c-1 |
+| Every edge and corner token, close zoom, four phones, both roles | Panned above the strip, tapped | br-f-5 |
+| The same with the DM's concentration card standing | Reached left of or under the card | br-f-5 |
+| Fit, Find, a tracker row opening the bar | Token lands above the strip | unit `restingBar`, br-f-6 |
+| The map's top edge under a strip that just opened | The next pan moves it toward its bound, never further out | unit `keepInView` |
+| A stored `rvtt.tokenBarLarger` | Removed, bar rests | unit |
+| Compact screen, phone on its side, tablet, computer | As today | playerphone, dmphone, bardock |
+| View as a player | Same states, `rvtt.tokenBarLarger` never written | br-f-7 |
 
 ## 11. Tests
 
-**Unit** (`node:test`): barDock.test.ts gains `placeBar` in span mode for rest and expanded at the four phones and with a foot card, `restLane` at 7, 8 and 9 px of gap and with no column, `expandShift` under and above the cap, with a tall token and with a toast stack, `barCover` for a bar across the free area, `restingBar` in span mode, `restFit` (fits whole, skips one and keeps a narrower next, the 72 px field, nothing at 0 room), and `keepInView` with a cover (camera.test.ts). barButtons.test.ts gains `restButtons` for the DM, an owner, a player on a monster, a dead and a dying creature, with and without the passing actions and Uses. Each new test fails with its rule taken out: the builder removes the rest branch, the cover, the 72 px floor and the gap check in turn, and says so.
+**Unit** (`node:test`): barDock.test.ts gains these cases:
+- `placeBar` for rest and expanded at the four phones, with a standing and a folded card.
+- `expandedRoom` at F of 148, 209, 242 and 715, and with a column card.
+- `restLane` at 43, 44 and 45 px of band.
+- `clearShift` under, at and over the strip, a tall token, a group's anchor, a toast stack and a camera at its bound.
+- `stripSqueezed` at F of 147 and 148. `barCover` for a bar across the free area. `restingBar` in span mode.
+- `restFit` and `restOrder`: fitting apart from display, a passing action never evicting Conditions, the skip rule, the 56 px field, no room.
+- `restStatus`'s order, `nextRestMode`, and `nextToastPlaces` with `restFloor`, a stack a pane left included.
 
-**e2e**, a new `e2e/barrest.e2e.ts` on E2E_PORT plus seven, which it shares with the phone files, run one file at a time. The frame lane's steps carry `br-f-`, the content's `br-b-`. Each step runs at 390 x 844, 375 x 667, 440 x 956 at 100% and 320 x 568 at 130%, as the DM and as Pat, with the probe of section 1 reading the bar on every frame:
-1. `br-f-1` The strip opens at its place and height on its first frame and keeps them for 2 s, on Thorn and on each sized token near each edge, and a tap on another token keeps the box.
-2. `br-f-2` Pans of 120 and 240 px both ways and a pinch leave the box unchanged on every frame, and the camera's only moves are the gestures'.
-3. `br-f-3` A whisper, a concentration card (DM) and a roll card (Pat): the box is unchanged, or for the roll card raised by the card's height and back, and no toast overlaps the strip.
-4. `br-f-4` A drag of Thorn: the bar hides and returns in the same box with Undo move in its row.
-5. `br-f-5` Reach: with the bar resting on Thorn, every edge and corner token is panned into the band above the strip and a tap at its middle opens its bar. Also with Multi-select and a turn band at 320 x 568 at 130%.
-6. `br-f-6` Fit, Find and a tracker row's tap leave the token above the strip.
-7. `br-f-7` Expand: the bar grows to min(content, cap), and the map moves once so the token's label clears its top. A pan moves nothing but the map. Collapse rests and moves nothing. A tap on another token stays expanded. A drag returns expanded with no move. Close, then a new tap, rests. In "view as a player", the same, and no `rvtt.*` key is written.
-8. `br-b-1` and `br-b-2` (content): the quick row's actions per role, a long name, Undo move after a drag, and Conditions from rest expanding with the drawer and resting again as it closes.
+camera.test.ts gains `keepInView` with `from` beyond the bound. barButtons.test.ts gains `restButtons` for the DM, an owner, a player, a token with no HP, a group, and with Uses. Each new test fails with its rule taken out, and the builder says how.
 
-`playerphone.e2e.ts` bs-1 to bs-3 and `dmphone.e2e.ts` lp19-bs2 and lp19-bs3 test Larger and Smaller. They become Expand and Collapse steps (bs-1 the button's place and size, bs-2 the drag, bs-3 the next token, lp19-bs2 a toast under the expanded header, lp19-bs3 the toast foot), with Collapse moving no map. Run them, `bardock` (docked windows unchanged), `fold`, `reach` and `alignment`.
+**e2e**: a new `e2e/barrest.e2e.ts` on E2E_PORT plus seven, which it shares with the phone files. Its 2 s probes run on Thorn only, at 390 x 844. Frame steps carry `br-f-`, content steps `br-c-`:
+1. `br-f-1` Opening, pans, a pinch and a tap on another token: the strip's box on every frame.
+2. `br-f-3` A whisper, an actionable toast placed before the strip opens, and a concentration card.
+3. `br-f-5` Reach at the four phones, as the DM and as Pat: every edge and corner token panned above the strip and tapped, once with the DM's card standing.
+4. `br-f-6` Fit, Find and a tracker row.
+5. `br-f-7` Expand, its floor at F of 209, a pinch, Collapse, another token, a drop, Close, and the preview.
+6. `br-f-8` The clearing move on a tap, a drop, an arrow nudge and a pan under way.
+7. `br-f-9` A roll card arriving and leaving at 390 x 844 and at 320 x 568 at 130% with Multi-select and a turn band.
+8. `br-c-1` The quick row per role and token, the group's, Undo move in Roll's place, Conditions from rest. `br-c-2` The HP entry: kept Heal mode, invalid input, a refusal, Crit on a dying creature, a dead line.
 
-**Alignment roots**: on the upright phones `window-thorn`, `window-goblin` and `window-group` now measure the resting strip, and `window-larger` and `group-larger` become `window-expanded` and `group-expanded`, at 390 x 844 and 320 x 568, 100% and 130%. A new root, `rest-row-pat`, measures Pat's strip on Thorn after a drag, with Undo move in its row. At 1440 x 900 the window's roots are unchanged. e2e/alignment.e2e.ts covers every screen this changes once those are in.
+**Steps that use controls outside the strip** (Appendix C, by file) take one helper, `barControl(bar, name)` in e2e/harness.ts, which presses Expand first when the control is not in the strip and the bar rests. Helpers call it too: `setTool` (reachRoom.ts:236), `measureWindow` (alignment.e2e.ts:459) and `selectGoblins` (groupsave.e2e.ts:126). Steps that assert today's span place or Larger are rewritten for the strip or Expand:
+- playerphone 7, 11, bs-1 to bs-3, fu24r1-own and fu24r1-pan.
+- dmphone 7's "keeps off the Hag", lp19-bs2, lp19-bs3, and fu24-q1 and fu24-o3 with `lowBrute`.
+- tokenpanel 6, 7b, 8's in-view checks and 9c's reach.
+- fold 9, and alignment's window-larger and group-larger.
+
+The build runs every file Appendix C names, with `reach` and `bardock`.
+
+**Alignment roots** stand in the token window's section of e2e/alignment.e2e.ts (today's 655 to 700, where window-larger is measured), apart from lane B's block at the file's end. `window-thorn`, `window-goblin` and `window-group` now measure the strip. `window-expanded` and `group-expanded` replace the Larger roots. New are `rest-row-pat` (Undo move in Roll's place where it fits) and `rest-crit` (a dying Thorn, with Crit in the row where it fits), at 390 x 844 and 320 x 568, 100% and 130%. `measureWindow` expands first for its play-row measures.
 
 ## 12. Build lanes
 
-**Lane F, the frame**, beside combat lane B. It owns:
-- client/canvas/barDock.ts and barDock.test.ts (9.1).
-- client/canvas/TokenActionBar.tsx, only `FrameControls`, `FrameContext`'s default, `BarHeader` and `BarFrame` (the file's lines from `type FrameControls` to the end of `BarFrame`, today's 708 to 1340), and their imports.
-- client/canvas/RestRow.tsx (new): `RestRow`, which lays out the lead and the candidates by `restFit`, measuring each candidate's drawn width.
-- client/canvas/Stage.tsx, client/pages/Room.tsx (the toasts' two inputs only), client/lib/camera.ts and camera.test.ts if `keepInView` needs a change for the cover.
-- e2e/barrest.e2e.ts, which its first commit creates with the room's setup, its `br-f-` steps, and an empty `br-b` block at its end for lane B. Also the Larger steps of playerphone.e2e.ts and dmphone.e2e.ts, and the alignment roots of section 11 in a block of their own at the end of alignment.e2e.ts.
-- FEATURES.md lines 49 and 50 and docs/dm-guide.md's "On a phone held upright, the bar opens under the token", in its last commit.
+Lane B has built its bar content (Uses in barButtons.ts, the drawer, its TokenActionBar.tsx regions). This work stacks on it:
 
-**Lane B, the content**, owns, as its own design already gives it: client/canvas/barButtons.ts and its test (`restButtons`), TokenActionBar.tsx's `TokenBarBody`, `GroupActionBar` and every component they draw, features/tokens/HpSection.tsx (`layout: "rest"`), and the `br-b-` steps in barrest.e2e.ts's last block. If lane B's brief is already full, a short content lane stacked on lane B builds 9.4 with the same files, after it.
+**Content lane**, after lane B, owns: client/canvas/barButtons.ts and its test, TokenActionBar.tsx's content (everything outside lane F's region: `TokenActionBar`, `TokenBarBody`, `GroupActionBar` and the components they draw), features/tokens/HpSection.tsx, features/tokens/GroupHpEntry.tsx, and barrest.e2e.ts's `br-c` block.
 
-**What the two agree on, first** (lane F's first commit, a stub B builds against):
-- `FrameControls.rest: { resting: boolean; expand(): void; collapse(): void } | null`, which replaces `size`.
-- `RestRow` exported from client/canvas/RestRow.tsx with props `{ lead: ReactNode | null; items: readonly { id: string; node: ReactNode }[] }`. The ids are `BarButtonId`s or `"useRoll"`. RestRow keeps the order given and decides only which fit.
-- `BarHeader`'s new `vitals?: { ac: ReactNode | null; hp: ReactNode }`, drawn under the name while resting.
-- `REST_HEIGHT` (barDock.ts), which content never reads, since the frame fixes the height.
-- The drawers that expand: `"conditions"` and lane B's `"uses"`, opened by content itself before it calls `expand()`.
+**Lane F, the frame**, beside the content lane from lane F's first commit, owns:
+- client/canvas/barDock.ts and its test, and a new client/canvas/RestRow.tsx (the fit's layout).
+- TokenActionBar.tsx from `type FrameControls` to the end of `BarFrame` (today's 708 to 1340) and the barDock import block (37 to 53). The content lane adds its imports as separate statements.
+- client/canvas/Stage.tsx, client/lib/camera.ts and camera.test.ts, client/pages/Room.tsx (the toasts' inputs), and features/rolls/PlayerRolls.tsx (line 202 only).
+- e2e: barrest.e2e.ts (it creates the file with the room's setup and an empty `br-c` block), the helper in harness.ts, and its alignment roots in the token window's section.
+- The steps of Appendix C in tokenpanel, playerphone, dmphone, alignment, size, attach, fold, combat, groupsave and savespell, and reachRoom.ts's `setTool`. Dicefolds, vision, regress, traps and table only run.
+- FEATURES.md lines 49 to 52, docs/dm-guide.md's line, and "Status: changed by docs/design-v1-bar-compact.md" lines under docs/design-v1-bar-dock.md 1.1 and 1.5.
 
-Landing order: lane F's stub first, then B and F in either order. Lane F's alignment block and B's block are separate hunks at the file's end.
+**Contract**, lane F's first commit, which the content lane builds against:
+- `FrameControls.rest { resting, scrolls, expand(), collapse() } | null`, replacing `size`.
+- `BarHeader`'s `status?: ReactNode`.
+- `RestRow({ items: readonly { id: string; node: ReactNode }[] })`, which lays out what fits in the room its row leaves. Its ids are strings: BarButtonIds, `"details"`, `"crit"`, `"useRoll"`, `"mode"` and the group's.
+- `REST_HEIGHT` and `restOrder`.
+
+**Landing order**: lane F's contract, lane B, the content lane, then lane F's build and its e2e and docs commits last, since only then does the strip hide controls.
 
 ## 13. Recommendations to check
 
-Each settles something the owner's words leave open, with the alternative rejected, judged by past decisions.
+Each settles something the owner's words leave open, with the alternative rejected, judged by past decisions. R2 is the owner's decision now.
 
-- **R1. Expanded lasts while the bar is open, and nothing is stored.** Rejected: remembering it per device, as Larger was (decision "token pop-up size on phones", a guess). Why: the owner now names collapsed as the state that must stay small. A stored expanded state would open every later token large and move the map each time, which is the "moves weirdly" the owner reports, and Larger stored once is how a phone gets there today.
-- **R2. A tap on a token in the strip's band does not move the map, and the strip covers that token until a pan.** Rejected: lifting the map once at opening (a map move at rest), and opening the strip at the top for such a token (the top holds the column, the toasts and the notices, and a strip there would move for a card). Why: the brief's "never moves the map by itself", and every programmatic opening lands the token clear already.
-- **R3. Collapse moves the map nowhere.** Rejected: Smaller's move back (docs/design-v1-bar-dock.md 1.5, review LP19-BS-1). Why: with the bar always at the foot, moving back would often put the token under the strip, and dropping the move removes `carriedMove`'s bookkeeping.
-- **R4. A roll card at the foot lifts the strip.** Rejected: the card standing on the strip. Why: the card's place rules (features/rolls/PlayerRolls.tsx, docs/design-v1-roll-request.md 5.7) took several review rounds and live in a third owner's file. The lift is one move as a new card arrives, when the layout changes anyway, and the strip keeps its height.
-- **R5. The expanded bar grows up from the strip's foot and never hangs over its token.** Rejected: today's Larger as it is (it follows the token on a pan and flips over it). Why: one physical model, a bar that lives at the foot, and the owner's report that the bar moves. Expanded may be large, but not restless.
-- **R6. "Expand" and "Collapse".** Rejected: keeping "Larger" and "Smaller" (decided for the chevrons in "Token bar size, review round 1"). Why: the owner's own words are expanded and collapsed, and the two states now differ in what they hold, not only in size. The chevrons stay.
-- **R7. Conditions and Uses expand the bar with their drawer, and closing the drawer rests again.** Rejected: a pop-up above the strip, and expanding without closing again. Why: a pop-up would be a second way to show the same drawer, and a bar left expanded after one condition would undo the resting default.
-- **R8. The quick row fits by measured widths.** Rejected: a fixed set per screen width, and a row that scrolls sideways. Why: labels change with font and interface size, as the window's default width already found (`BarWidthProbe`), and a sideways scroller hides actions with no hint.
-- **R9. The compact overlay keeps no resting state.** Rejected: a strip there too. Why: its free area is under 148 px, so a 114 px strip would leave no map.
-- **R10. The tool's options, the Multi-select bar included, stay under the strip as part of the foot.** Rejected: the strip covering them. Why: Actions and Done must stay in reach (docs/design-v1-bar-dock.md 3).
-- **R11. Uses ranks after Roll in the strip.** Rejected: before Conditions for a creature with uses. Why: Conditions and Roll would then change places from creature to creature, and a quick row's places should hold. Uses is one more tap (Expand) on phones under 440 px.
-- **R12. The vitals stand under the name, not beside it.** Rejected: one line with the name. Why: measured at 320 x 568 at 130%, the one line pushed Close off the strip and cut the name to two letters.
+- **R1. Expanded lasts while the bar is open, and nothing is stored.** Rejected: remembering it per device, as Larger was (decision "token pop-up size on phones"). Why: a stored expanded state would open every later token large and move the map each time, the "moves weirdly" the owner reports.
+- **R2. The bar clears its own token at a tap and a drop (D-261024-9 and 13).** Rejected: the strip covering it until a pan (draft 1), which reversed the bar-dock rule that the pane not cover creatures.
+- **R3. Collapse moves nothing.** Rejected: Smaller's move back. Why: it would often put the token back under the strip.
+- **R4. A roll card at the foot lifts the strip, or folds where it would leave F under 148.** Rejected: the card standing on the strip, and the bar turning compact. Why: the card's own rules stay, and the bar never grows by itself.
+- **R5. Expanded grows up from the strip's foot and never hangs over its token.** Rejected: today's Larger. Why: one place for the bar, and no following or flipping.
+- **R6. "Expand" and "Collapse"**, chevrons kept. Rejected: "Larger" and "Smaller". Why: the owner's own words.
+- **R7. Conditions and Uses expand with their drawer, and closing it rests again.** Rejected: a pop-up, or staying expanded.
+- **R8. The quick row fits by measured widths.** Rejected: a fixed set, or a sideways scroller.
+- **R9. The compact overlay keeps no resting state, and a strip never becomes compact by itself.**
+- **R10. The tool's options stay under the strip as part of the foot**, so Actions and Done stay in reach.
+- **R11. Uses after Multi-select.** Rejected: before Conditions. Why: D-261024-11 puts Multi-select after Roll, and the places should hold.
+- **R12. The status line under the name** carries vitals and the HP entry's feedback. Rejected: vitals beside the name (measured: Close pushed off at 320 x 568 at 130%), and expanding for each error. Why: it works below the floor too, and keeps focus and typing where they are.
+- **R13. Undo move in the strip is the undo arrow alone**, as the top bar's Undo. Rejected: its words, 103 px, against the 67 px Roll's place leaves at 390 x 844 and 52 at 375 x 667 (Appendix B.2). Why: D-261024-12's one tap at 390 and 375.
+- **R14. The field's least width is 56 px with the mode's sample as placeholder.** Rejected: 72 px, with which neither Roll nor Undo move fits at 375 x 667, and Uses does not fit at 440 x 956. Why: three digits and a sign still show, and the toggle names the mode.
+- **R15. Below 242 px of free area the strip scrolls and Expand is not drawn.** Rejected: an expanded bar under the strip's height, or a full-screen overlay on Expand. Why: the expanded form would leave no band for its token there.
+- **R16. "Use 9" ranks after Roll's place.** Rejected: before Conditions. Why: chips come and go with each roll, and Conditions must not move. By the measured widths, it fits after Roll at none of the four phones, so it is one tap behind Expand, and the typed number does the same.
 
 ## 14. FEATURES.md and the DM guide
 
-- Line 49's "On a phone held upright it spans the screen under the token." becomes: "On a phone held upright it rests as a strip at the foot of the map with the token's name, AC and HP, the HP entry and the actions used most, such as Conditions and Roll, and it stays put as you pan, so every token can be brought above it."
-- Line 50 becomes: "On a phone held upright, Expand, just left of the action bar's Close, opens the whole bar, up to about two thirds of the screen, and moves the map so the token stays in view above it. Collapse rests it again. Conditions in the resting bar expands it with the Conditions grid open, and closing the grid rests it again. A bar you open afresh rests." The toast sentences that follow keep their meaning for the expanded bar's header.
-- Line 51's "A phone held upright keeps one layout whichever token you tap, with Apply in view" holds for both states.
+- Line 49's "On a phone held upright it spans the screen under the token." becomes: "On a phone held upright it rests as a strip at the foot of the map with the token's name, AC and HP, a Damage or Heal switch, the HP entry and the actions used most that fit, such as Conditions and Roll. It stays put as you pan, so every token can be brought above it, and as it opens it moves the map just enough to keep its token in view."
+- Line 50 becomes: "On a phone held upright, Expand, just left of the action bar's Close, opens the whole bar, up to about two thirds of the screen, and moves the map so the token stays in view above it. Collapse rests it again. Conditions in the resting bar opens the bar with its grid, and closing the grid rests it again. A bar you open afresh rests. On a screen too short to expand, the resting bar scrolls to everything else. While you type an HP change, the line under the name says what Apply will do, or why it cannot." The toast sentences that follow keep their meaning for the expanded bar's header.
+- Line 51's "such as a phone held upright at a larger interface size" becomes "such as a small phone held upright at a larger interface size", and "A phone held upright keeps one layout whichever token you tap, with Apply in view" holds for both states.
+- Line 52 gains: "On a phone held upright the resting bar shows what fits of these, Undo move as its arrow in Roll's place, and Expand shows them all."
 - docs/dm-guide.md's "On a phone held upright, the bar opens under the token." becomes "On a phone held upright, the bar rests at the foot of the map, and Expand shows all of it." The guide pass after the run retakes action-bar.webp on a phone.
 
 ## As built
@@ -558,7 +626,9 @@ Close zoom, Thorn 40% down the free area. First and last box of each 2 s probe, 
 
 "Not measured": a stray tap in an earlier sweep had shrunk Thorn to Tiny before those two runs, so the tap missed him. Every run after that reset each token's size and cell first, and the runs it spoiled were made again (the tables hold the reruns). The reach sweeps at 844 x 390 tried the right-edge tokens at their own x first, then 80 px from the left edge.
 
-## Appendix B. The mockup
+## Appendix B. The mockups
+
+### B.1 Draft 1's mockup: reach and the first fit
 
 The mockup restyled the real bar in the page, keeping its own header, HP field and buttons, so the device's fonts and the interface size count: the frame fixed at the free area's foot at 114 layout px, the title as two lines (name, then vitals), and the quick row built from the bar's own field row and buttons by the fit rule of 3.3. It ran in the test browser only (a stylesheet the app's style-src would refuse), and none of it is in the commit. For each phone it then panned each of the six edge tokens to the middle of the band above the strip and hit-tested its middle, and last drew the expanded box (min(content, cap), without the map move). Screenshots: `mock-rest-*`, `mock-rest-reach-*` and `mock-expanded-*` in the `token-bar-pass` folder.
 
@@ -580,4 +650,113 @@ The mockup restyled the real bar in the page, keeping its own header, HP field a
 | 390 x 844 | Pat, a goblin | 662-776 | 114 | Details, Multi-select | 0 | 6 of 6 | 195 |
 | 390 x 844 | DM, a goblin | 662-776 | 114 | Conditions, Roll | 0 | 6 of 6 | 504 |
 
-The mockup's candidates after the field and Apply were Undo move, Doesn't count, Conditions, Roll, Hidden, Details and Multi-select, as this room offered no Uses, so its third action at 440 x 956 is Details, where the design puts Uses, or nothing for a creature with none (3.3).
+Draft 1's candidates after the field and Apply were Undo move, Doesn't count, Conditions, Roll, Hidden, Details and Multi-select, as this room offered no Uses, so its third action at 440 x 956 is Details. Draft 1 had no mode toggle and a 72 px field, so B.2 replaces its quick row column. Its expanded column used draft 1's cap, and 5.1 now gives at most 563, 410, 637 and 181 px at the four phones. Its reach column still holds, since the strip's box is the same.
+
+### B.2 Revision 1's mockup: the measured fits
+
+The same restyled bar, rebuilt for this revision: the mode toggle (44 px, the minus sign in the Damage colour), the field at its 56 px least and Apply as the lead, Undo move as the 44 px undo arrow, and the quick row filled by 3.3's fitting order and drawn in its display order. The status line drops AC where the vitals overflow by any amount, as Chrome draws the ellipsis for less than a pixel. It drew vitals only for a token with the lead. Every run measured the strip at 114.0 layout px, at (layout px from the page's top) 662-776 (390 x 844), 485-599 (375 x 667), 774-888 (440 x 956), 255-369 (320 x 568 at 130%), 467-581 (390 x 844 at 130%) and 386-500 (320 x 568), with no alignment finding with or without the passing action. The room's tokens are Thorn (Pat's, 24 HP), a goblin, a barrel with no HP and Pat's lantern with no HP. Crit, "Use 9" and Uses are drawn as bar buttons with those words: Uses stands in for lane B's button, which is not on main. "Inner" is the row's width in layout px. "Passing" is the row while Undo move (Pat) or Doesn't count (the DM) applies, and "waits" means it does not fit Roll's place, so Roll stays. "At 0 HP" adds Crit and "Use 9" to the candidates. Screenshots: `r1c-rest-*` in the `token-bar-pass` folder.
+
+| Phone | Who, token | Inner | Lead | Quick row after the lead | Passing | At 0 HP | Status line | Alignment |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 390 x 844 | DM, Thorn | 348 | yes | Conditions, Roll | waits | Crit, Conditions | AC 14 · HP 24/24 | 0 |
+| 390 x 844 | Pat, Thorn | 348 | yes | Conditions, Roll | Conditions, Undo move | Crit, Conditions | AC 14 · HP 24/24 | 0 |
+| 390 x 844 | Pat, a goblin | 348 | no | Multi-select, Details |  |  |  | 0 |
+| 390 x 844 | DM, the barrel | 348 | no | Conditions, Roll, Multi-select, Details | Conditions, Doesn't count, Multi-select |  |  | 0 |
+| 390 x 844 | Pat, his lantern | 348 | no | Conditions, Roll, Multi-select, Details | Conditions, Undo move, Multi-select, Details |  |  | 0 |
+| 390 x 844 | Pat, the barrel | 348 | no | Multi-select, Details |  |  |  | 0 |
+| 375 x 667 | DM, Thorn | 333 | yes | Conditions, Roll | waits | Crit, Conditions | AC 14 · HP 24/24 | 0 |
+| 375 x 667 | Pat, Thorn | 333 | yes | Conditions, Roll | Conditions, Undo move | Crit, Conditions | AC 14 · HP 24/24 | 0 |
+| 375 x 667 | Pat, a goblin | 333 | no | Multi-select, Details |  |  |  | 0 |
+| 375 x 667 | DM, the barrel | 333 | no | Conditions, Roll, Multi-select | Conditions, Doesn't count, Hidden |  |  | 0 |
+| 375 x 667 | Pat, his lantern | 333 | no | Conditions, Roll, Multi-select | Conditions, Undo move, Multi-select |  |  | 0 |
+| 375 x 667 | Pat, the barrel | 333 | no | Multi-select, Details |  |  |  | 0 |
+| 440 x 956 | DM, Thorn | 398 | yes | Conditions, Roll, Uses | waits | Crit, Conditions, Roll | AC 14 · HP 24/24 | 0 |
+| 440 x 956 | Pat, Thorn | 398 | yes | Conditions, Roll, Uses | Conditions, Undo move, Uses | Crit, Conditions, Roll | AC 14 · HP 24/24 | 0 |
+| 440 x 956 | Pat, a goblin | 398 | no | Multi-select, Details |  |  |  | 0 |
+| 440 x 956 | DM, the barrel | 398 | no | Conditions, Roll, Multi-select, Hidden | Conditions, Doesn't count, Multi-select |  |  | 0 |
+| 440 x 956 | Pat, his lantern | 398 | no | Conditions, Roll, Multi-select, Details | Conditions, Undo move, Multi-select, Details |  |  | 0 |
+| 440 x 956 | Pat, the barrel | 398 | no | Multi-select, Details |  |  |  | 0 |
+| 320 x 568 at 130% | DM, Thorn | 205 | yes | none | waits | none | HP 24/24 | 0 |
+| 320 x 568 at 130% | Pat, Thorn | 205 | yes | none | waits | none | HP 24/24 | 0 |
+| 320 x 568 at 130% | Pat, a goblin | 205 | no | Multi-select, Details |  |  |  | 0 |
+| 320 x 568 at 130% | DM, the barrel | 205 | no | Conditions, Roll | waits |  |  | 0 |
+| 320 x 568 at 130% | Pat, his lantern | 205 | no | Conditions, Roll | Conditions, Undo move |  |  | 0 |
+| 320 x 568 at 130% | Pat, the barrel | 205 | no | Multi-select, Details |  |  |  | 0 |
+| 390 x 844 at 130% | DM, Thorn | 258 | yes | Roll | waits | Crit | AC 14 · HP 24/24 | 0 |
+| 390 x 844 at 130% | Pat, Thorn | 258 | yes | Roll | Undo move | Crit | AC 14 · HP 24/24 | 0 |
+| 320 x 568 | DM, Thorn | 278 | yes | Conditions | waits | Crit | AC 14 · HP 24/24 | 0 |
+| 320 x 568 | Pat, Thorn | 278 | yes | Conditions | waits | Crit | AC 14 · HP 24/24 | 0 |
+
+Widths drawn, in layout px at 100% (130% within 1 px): the toggle 44, Apply 66, Crit 51, Roll 51, "Use 9" 65, Uses 60, Details 72, Hidden 98, Conditions 99, Multi-select 108, Doesn't count 121, Undo move 44 as the arrow and 103 in words. The lead takes 174 with a 4 px gap. With a 72 px field (the first run of this revision, `r1-rest-*`), 375 x 667 got Conditions alone, with Roll and Undo move both out, and 440 x 956 lost Uses (R14).
+
+## Appendix C. e2e steps that use the bar on an upright phone
+
+Every step at an upright phone size (320 x 480 to 440 x 956, at 100% to 130%) that touches a bar control or asserts the bar's place, read from the files at `6432b496`. Lines are today's. "Expand first" steps take `barControl(bar, name)`, which presses Expand when the control is not in the strip and the bar rests. "Rewrite" steps assert today's span place, Larger or Smaller, and are rewritten for the strip or Expand. "Confirm" steps should pass as they are, and the build runs them to check. Landscape, tablet and computer steps are left out.
+
+| File | Lines | Step | Size | Control or assertion | Needs |
+| --- | --- | --- | --- | --- | --- |
+| reachRoom.ts | 236 | `setTool` helper, called at reach.e2e.ts:102 and reachRoom.ts:516 | 390 x 844, 320 x 480, 100% and 130% | Multi-select | expand first |
+| reachRoom.ts | 207-211, 282-283, 380-381 | `expectBarClose`, `selectThorn`, `selectHag` | all | Close, "<name> actions" | confirm |
+| tokenpanel | 988-1004 | 5, dragon and swift bars | 390 x 844 | More stats, speeds, Details | expand first |
+| tokenpanel | 1015-1026 | 5b, an 80-letter name | 390 x 844 | the header's clamp (confirm), Details (expand first) | both |
+| tokenpanel | 1040-1060 | 6, vitals and saves on one line, Apply in view, the mode radios | 390 x 844 | span layout | rewrite |
+| tokenpanel | 1064, 1084, 1092-1093 | 6 | 390 x 844 | Details, Stat block | expand first |
+| tokenpanel | 1197-1231 | 7b, the short layout | 390 x 844 at 130% | More stats, Apply in view, saves, Stat block | rewrite |
+| tokenpanel | 1324-1341 | 8, Pat on Thorn | 390 x 844 | AC, vitals, sheet link, Details, saves (expand first), Conditions and Multi-select in view (rewrite) | both |
+| tokenpanel | 1348-1377 | 8, Bree, the goblin, the bear | 390 x 844 | vitals, Details, the mode radios with "players apply damage", saves, Stat block | expand first |
+| tokenpanel | 1397-1405 | sheetlink-a | 390 x 844 | AC, vitals link, Read more | expand first |
+| tokenpanel | 1526-1533 | pl1-e, the goblin | 320 x 568 and 390 x 844, 100% and 130% | More stats, Details | expand first |
+| tokenpanel | 1766-1787 | 9c, the size row | 320 x 480 at 130% | Size row reach | expand first, reach rewritten |
+| playerphone | 576 | 5 | 390 x 844 | Details | expand first |
+| playerphone | 588-600 | 6 | 390 x 844 | the Heal radio, kept after a blackout | expand first, or the strip's toggle |
+| playerphone | 591-628 | 6 | 390 x 844 | HP change, Apply, Close | confirm |
+| playerphone | 690-697 | 7, upright after Show | 390 x 844 | the roll card clear of the bar | rewrite |
+| playerphone | 794, 904 | 10, 12 | 320 x 480 at 130%, 390 x 844 | Multi-select | expand first |
+| playerphone | 836-885 | 11 | 320 x 480 at 130% | Multi-select (expand first), then "compact" and the summary row (rewrite: the strip stays a strip, 3.1) | both |
+| playerphone | 1266-1318 | bs-1 | 390 x 844, 440 x 956 | Larger and Smaller, `rvtt.tokenBarLarger` | rewrite |
+| playerphone | 1323-1362 | bs-2 | 390 x 844 | Larger, then a drag | rewrite |
+| playerphone | 1364-1467 | bs-3 | 390 x 844 | Larger and Smaller on Thorn, Echo and a group, Multi-select at 1425 | rewrite |
+| playerphone | 1469-1550 | fu24r1-own, fu24r1-pan | 390 x 844 | a whisper under the hanging bar's header | rewrite |
+| dmphone | 436-466 | 7 | 390 x 844, 320 x 480 at 130% | the Hag's bar, every button takes a tap (confirm), the bar keeps off the Hag (rewrite) | both |
+| dmphone | 1292-1389 | lp19-bs2, lp19-bs3 | 390 x 844 | the bar's room, Larger's map move | rewrite |
+| dmphone | 1392-1480 | `lowBrute`, fu24-q1, fu24-o3 | 390 x 844 | a bar over its token, toasts under its header | rewrite |
+| alignment | 459-467 | `measureWindow`, called at 654, 682, 692 and 708 | 390 x 844, 360 x 740, 320 x 568, 100% and 130% | the play row, Attached tokens | expand first |
+| alignment | 660-666, 693-701 | window-larger, group-larger | same | Larger and Smaller | rewrite |
+| alignment | 668-676, 683-684, 812 | attach-list, attach-ride, the goblin, dmDiceScreens | same | Attach, Multi-select | expand first |
+| alignment | 792, 823 | dmDiceScreens | same | Roll | confirm |
+| size | 545, 556, 809 | 2, lp2-3a-size | 390 x 844 at 115% and 130%, 320 x 568 | Details, Attach | expand first |
+| attach | 281, 323, 347, 385, 413-432 | lp2-3a, lp2-3c-busy, at-1, at-3, fu22b-at | 430 x 932, 390 x 844, 320 x 568 at 130% | Attach, Get off | expand first |
+| attach | 396-398 | at-3b | 390 x 844 | Undo move, in Roll's place where it fits | confirm |
+| attach | 597-757 | pl2-a, pl2-c, pl2-d | 390 x 844, 360 x 740, 320 x 568, 100% and 130% | Attached tokens, the rows' line fill | expand first |
+| fold | 441-496, 543-597, 663-711, 746-791 | 4, 6, 7, 8, 10, 11, 13 | 320 x 480 to 375 x 812 | the fold, the dock, focus | confirm |
+| fold | 599-657 | 9, too short to dock | 320 x 480 at 130% | compact over the toolbar | rewrite where it opens as a strip |
+| combat | 1277, 1287 | 13f | 390 x 844 | Details | expand first |
+| groupsave | 141, 365, 498 | `selectGoblins` (called at 547), 3, 5 | 375 x 667 at 130% | Multi-select | expand first |
+| groupsave | 182, 279, 316, 368, 482, 501, 536 | `openGroupRolls`, 2, 2b, 3, 5, 7 | 375 x 667 at 130% | the group's Roll, which fits there (about 74 px left after the lead, by the widths measured at 390 x 844 at 130%) | confirm |
+| savespell | 384, 440, 477 | ss-5, ss-7, ss-7b | 390 x 844 | Multi-select | expand first |
+| dicefolds | 399, 426, 433 | df-6, df-6c | 390 x 844 | Pat's Roll on Thorn | confirm |
+| vision | 660-679 | 9 | 390 x 844 | a stopped walk's note over the bar | confirm |
+| regress, traps, table | 252-255, 391-402, 243-258 | 5, tr-3, 4 | 390 x 844 | Undo move, Close, Back | confirm |
+
+No step needs a change in layout, bardock, bardockRoom, the bardock sweeps, stickyfoot, rolls, smoke, tools, characters or companions: their bars are on landscape, tablet or computer screens, or they open none at an upright size.
+
+## Appendix D. Where review round 1 is closed
+
+| Finding or decision | Where |
+| --- | --- |
+| BAR-ASTRA-01, BC-OPUS-4: a usable expanded floor, the smallest band | 3.1, 5.1, 5.4, R15 |
+| BAR-ASTRA-02, BC-OPUS-4, BC-OPUS-17: span to compact and back | 2 (the held mode), 3.2, 9.3, 12, R4, R9 |
+| BAR-ASTRA-03, BC-OPUS-1, BC-OPUS-2: the HP entry's feedback, crit and mode | 3.3 (the status line, the toggle, Crit), 5.3, 9.4, br-c-2 |
+| BAR-ASTRA-04: stacks already placed | 3.5, 9.1 `nextToastPlaces`, br-f-3 |
+| BC-OPUS-3, D-261024-9 and 13: the clearing move | 3.6, 5.2, 9.1 `clearShift`, br-f-8, R2 |
+| BC-OPUS-5: the group strip | 3.3, 9.4, 12 (GroupHpEntry.tsx, RestRow's string ids) |
+| BC-OPUS-6, BC-OPUS-13: the e2e inventory and a light barrest | 11, 12, Appendix C |
+| BC-OPUS-7: keepInView clamps only against moving further out | 4, 9.3 |
+| BC-OPUS-8: the expanded height frozen | 5.1 |
+| BC-OPUS-9: the short layout at two alignment sizes | 9.1 `spanRoomAtWorst`, 9.4, 14 (line 51) |
+| BC-OPUS-10: the lanes | 12 |
+| BC-OPUS-11: the ranking citation, Hidden, Multi-select | 3.3, 3.4 |
+| BC-OPUS-12: stale text | 1.1 (the roll card at 320 x 568 at 130%), 3.1 (the padding), 3.3 (AC first, "Use 9 (Fire Bolt)"), 4 (the DM's column), 10 (`rvtt.tokenBarLarger`), 12 (the status lines), 14 (line 52) |
+| BC-OPUS-14, D-261024-12: passing actions in Roll's place | 3.3, R13 |
+| BC-OPUS-15, D-261024-10, 11 and 13: the toggle and measured fits | 3.3, 6, Appendix B.2, R14 |
+| BC-OPUS-16: the move's details | 3.6 |
