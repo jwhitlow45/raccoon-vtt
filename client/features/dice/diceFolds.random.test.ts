@@ -6,7 +6,7 @@ import type { ActorTarget } from "#shared/protocol.ts";
 import { castAsk, character, room, token } from "#shared/testutil.ts";
 import { openedBlock } from "./cast/cast.ts";
 import { createDiceFolds, DICE_FOLD_KEYS, DICE_FOLDS_KEY, foldKey, foldKind, type DiceFoldKey, type DiceFoldsStore } from "./diceFolds.ts";
-import { groupAsks, openForAsks } from "./options.ts";
+import { groupAsks, markSendSeen, openForAsks } from "./options.ts";
 import type { CastBlock } from "./optionState.ts";
 
 /*
@@ -243,6 +243,12 @@ function run(seed: number, steps: number): void {
         options = { ...options, cast: { ...cast, sent: id } };
         if (shown === owner && random() < 0.5) {
           render(step);
+          state.casts[id] = castAsk(id, { caster: casterOf(owner), spell: cast.spell, roll: cast.roll, area: undefined });
+          options = { ...options, cast: null };
+          add([preview], [{ tag: id, creature: owner.key, group: section }]);
+        } else if (shown !== owner && random() < 0.5) {
+          markSendSeen(page, foldKind(state, owner.creature), id);
+          // Taken while the owner's options are not drawn (another tab, or loading): the ask then waits in the view and the block goes before the owner shows again, which must open nothing on this page.
           state.casts[id] = castAsk(id, { caster: casterOf(owner), spell: cast.spell, roll: cast.roll, area: undefined });
           options = { ...options, cast: null };
           add([preview], [{ tag: id, creature: owner.key, group: section }]);

@@ -17,7 +17,8 @@ import { useLiveTokens } from "../../areas/useLiveTokens.ts";
 import { Note } from "../../tokens/ui.tsx";
 import type { DiceView } from "../creature.ts";
 import { actionFill, areaFill } from "../groupSave/fills.ts";
-import { creatureKey, damageRolls } from "../options.ts";
+import { foldKind, useDiceFolds } from "../diceFolds.ts";
+import { creatureKey, damageRolls, markSendSeen } from "../options.ts";
 import { useOption, useOptionStore, type CastBlock } from "../optionState.ts";
 import { throwHooksSlot } from "../throw/hooks.ts";
 import { useDicePanel } from "../useDicePanel.ts";
@@ -416,6 +417,7 @@ export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; 
   const env = useCastEnv();
   const sends = useSends();
   const options = useOptionStore();
+  const { store: folds } = useDiceFolds();
   // An open block shows its own send in place, but only while it draws: for the picked creature once its options draw, never with none to pick.
   const held = useOption((s) => (props.blockDraws && s.cast !== null && s.cast.key === props.pickedKey ? (s.cast.sent ?? null) : null));
   const lines = waitingLines(props.view, sends, (id) => env.tracker.state(id), held);
@@ -440,7 +442,7 @@ export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; 
               key={line.id}
               send={send}
               lead={line.phase === "refused" ? `${what}: not asked.` : `${what}: the ask may have gone.`}
-              again={() => retryFromList(env, options, line.id)}
+              again={() => retryFromList(env, options, line.id, (retryId) => markSendSeen(folds, foldKind(props.view, { tokenId: line.caster }), retryId))}
               onClosed={() => followSend(options, line.id, null)}
             />
           );

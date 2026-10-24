@@ -393,9 +393,13 @@ export function followSend(options: Pick<StoreApi<Pick<OptionState, "cast">>, "s
 }
 
 /** Ask again in the list above the card, the open block moved to the retry, so unfolding shows it rather than offering a second ask. */
-export function retryFromList(env: CastEnv, options: Pick<StoreApi<Pick<OptionState, "cast">>, "setState">, id: string): string | null {
+export function retryFromList(env: CastEnv, options: Pick<StoreApi<Pick<OptionState, "cast">>, "setState">, id: string, seen?: (retryId: string) => void): string | null {
   const next = askAgain(env, id);
-  if (next !== null) followSend(options, id, next);
+  if (next !== null) {
+    followSend(options, id, next);
+    // Called here, before any render, so the retry is never first seen in the view.
+    seen?.(next);
+  }
   return next;
 }
 

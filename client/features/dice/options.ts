@@ -13,7 +13,7 @@ import { critSums, effectName } from "#shared/logText.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
 import type { CastBlock } from "./optionState.ts";
 import type { CastPhase } from "./cast/cast.ts";
-import { foldKey, type CreatureGroup, type DiceFoldsStore, type FoldKind } from "./diceFolds.ts";
+import { CREATURE_GROUPS, foldKey, type CreatureGroup, type DiceFoldsStore, type FoldKind } from "./diceFolds.ts";
 import { d20Text, parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 import { ownsCharacter, ownsToken } from "../tokens/access.ts";
 
@@ -754,9 +754,9 @@ export function castRowOf<R extends Pick<NamedRoll, "key" | "name">>(named: read
  * opening nothing, only when its creature's groups render with the block.
  * So an ask sent from it opens nothing again once it waits, nor does a
  * retry the block follows from the list above the card while its group is
- * folded. A send those groups never rendered is first seen in the view and
- * opens its group once: one after a reload, or a retry taken while another
- * tab is picked or the options load. The block names its spell in the
+ * folded, as the retry is marked seen when it is taken (markSendSeen), even
+ * with the options not drawn. A send those groups never rendered is first
+ * seen in the view and opens its group once, as one does after a reload. The block names its spell in the
  * folded line only while it waits for the player or for the server's
  * answer (`castPhase` null or sending): once refused or unknown, the list
  * above the card says so, and once it waits in the view, the view's ask
@@ -804,6 +804,17 @@ export function groupAsks(input: {
     if (row) add(row.section, ask.id, { cast: ask.spell });
   }
   return out;
+}
+
+/**
+ * Marks a send seen in every group of a creature's kind, opening nothing. A
+ * retry taken in the list above the card while the creature's options are
+ * not drawn would otherwise be first seen in the view, and open its folded
+ * group when they draw again. The block's row, hence its group, is not
+ * known there, and an id marked in a group it never reaches changes nothing.
+ */
+export function markSendSeen(store: Pick<DiceFoldsStore, "openForNew">, kind: FoldKind, id: string): void {
+  for (const group of CREATURE_GROUPS) store.openForNew(foldKey(kind, group), [], [id]);
 }
 
 /** Opens each of a creature's groups once for what newly waits in it (6.4), in the creature's own fold kind. */

@@ -416,6 +416,13 @@ describe("a send the list above the card changes while its block is folded or an
     assert.equal(done(), true, "settled and gone from the view");
   });
 
+  test("Ask again there tells the caller the retry's id, so it is marked seen before the options draw", () => {
+    const { p, options } = refused();
+    const seen: string[] = [];
+    assert.equal(retryFromList(p.env, options, "ask-1", (id) => seen.push(id)), "ask-2");
+    assert.deepEqual(seen, ["ask-2"]);
+  });
+
   test("Close there lets the block go, and a block whose send went any other way closes too", () => {
     const { p, options, done } = refused();
     forgetSend(p.env, "ask-1");
