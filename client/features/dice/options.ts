@@ -733,8 +733,8 @@ export function initiativeTag(row: { value: number | null } | null, preset: Roll
   return [does, presetTag(preset).replace(/-(?=\d)/g, "−")].filter(Boolean).join(" · ");
 }
 
-/** What waits in each of a creature's groups: the ids that open it once (6.4), and the words its folded line leads with. */
-export type GroupAsks = Partial<Record<CreatureGroup, { ids: string[] } & GroupWaiting>>;
+/** What waits in each of a creature's groups: the ids that open it once (6.4), those only marked seen, and the words its folded line leads with. */
+export type GroupAsks = Partial<Record<CreatureGroup, { ids: string[]; quiet?: string[] } & GroupWaiting>>;
 
 /**
  * The row a player's ask for saves goes under: its roll's row by key, else
@@ -751,12 +751,14 @@ export function castRowOf<R extends Pick<NamedRoll, "key" | "name">>(named: read
  * for a skill, by the request's id. A player's open ask for saves opens
  * the group that holds its row, by the opening's stamp, as does an ask
  * waiting in the view, by its id. The block's own sent ask counts as the
- * block, so an ask sent from it opens nothing again once it waits, and
- * one first seen after a reload opens its group once. The block names its
- * spell in the folded line only while it waits for the player or for the
- * server's answer (`castPhase` null or sending): once refused or unknown,
- * the list above the card says so, and once it waits in the view, the
- * view's ask names it, until the DM settles it.
+ * block and is only marked seen, so an ask sent from it opens nothing
+ * again once it waits, nor does a retry the block follows from the list
+ * above the card while its group is folded. One first seen after a reload
+ * opens its group once. The block names its spell in the folded line only
+ * while it waits for the player or for the server's answer (`castPhase`
+ * null or sending): once refused or unknown, the list above the card says
+ * so, and once it waits in the view, the view's ask names it, until the DM
+ * settles it.
  */
 export function groupAsks(input: {
   state: Pick<RoomState, "tokens" | "rolls" | "casts">;
@@ -789,7 +791,10 @@ export function groupAsks(input: {
   if (cast && castRow) {
     const waits = input.castPhase === undefined || input.castPhase === null || input.castPhase === "sending";
     add(castRow.section, `open:${cast.opened ?? 0}`, waits ? { cast: cast.spell } : {});
-    if (cast.sent !== undefined) add(castRow.section, cast.sent, {});
+    if (cast.sent !== undefined) {
+      const at = out[castRow.section]!;
+      (at.quiet ??= []).push(cast.sent);
+    }
   }
   for (const ask of Object.values(state.casts ?? {})) {
     if (creatureKey(state, { tokenId: ask.caster }) !== key) continue;
@@ -801,5 +806,5 @@ export function groupAsks(input: {
 
 /** Opens each of a creature's groups once for what newly waits in it (6.4), in the creature's own fold kind. */
 export function openForAsks(store: Pick<DiceFoldsStore, "openForNew">, kind: FoldKind, asks: GroupAsks): void {
-  for (const [group, at] of Object.entries(asks) as [CreatureGroup, { ids: string[] }][]) store.openForNew(foldKey(kind, group), at.ids);
+  for (const [group, at] of Object.entries(asks) as [CreatureGroup, { ids: string[]; quiet?: string[] }][]) store.openForNew(foldKey(kind, group), at.ids, at.quiet);
 }

@@ -6,7 +6,8 @@ import type { DiceRoll, LogEntry, RollRequest, RoomState } from "#shared/model.t
 import type { ClientOp } from "#shared/protocol.ts";
 import { actor, castAsk, character, entry, room, token } from "#shared/testutil.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import type { OptionState } from "./optionState.ts";
+import type { CastBlock, OptionState } from "./optionState.ts";
+import { createDiceFolds } from "./diceFolds.ts";
 import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
@@ -601,23 +602,23 @@ describe("what waits in a creature's groups (docs/design-v1-dice-pass.md 6.4)", 
     assert.deepEqual(groupAsks({ state: state({ r5: perception }), creature: { characterId: "bree" }, named, cast: null }), {}, "an answered skill check opens nothing");
   });
 
-  test("an open block opens the group of its row, by the row's key or its spell's name, by its stamp and its send", () => {
+  test("an open block opens the group of its row, by the row's key or its spell's name, by its stamp, with its send only marked seen", () => {
     const base = { key: "c:bree", creature: { characterId: "bree" } };
     const byRoll = groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "Old name", roll: "s:hold", opened: 3 } });
     assert.deepEqual(byRoll, { spells: { ids: ["open:3"], asked: [], casts: ["Old name"] } });
     const byName = groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "breath", opened: 4, sent: "ask-9" } });
-    assert.deepEqual(byName, { bonusActions: { ids: ["open:4", "ask-9"], asked: [], casts: ["breath"] } });
+    assert.deepEqual(byName, { bonusActions: { ids: ["open:4"], quiet: ["ask-9"], asked: [], casts: ["breath"] } });
     assert.deepEqual(groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "Fireball", area: "a1" } }).spells?.ids, ["open:0"], "a block opened before the stamps");
     assert.deepEqual(groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast: { ...base, spell: "Gone", roll: "s:gone", opened: 5 } }), {}, "with no row it draws at the top, in no group");
     assert.deepEqual(groupAsks({ state: state(), creature: { tokenId: "gob" }, named, cast: { ...base, spell: "Fireball", opened: 6 } }), {}, "another creature's block");
   });
 
-  test("a block names its spell in the folded line only until its send settles, and still opens its group by its stamp and send", () => {
+  test("a block names its spell in the folded line only until its send settles, and still opens its group by its stamp", () => {
     const cast = { key: "c:bree", creature: { characterId: "bree" }, spell: "Hold Person", roll: "s:hold", opened: 7, sent: "ask-7" };
     const at = (castPhase: Parameters<typeof groupAsks>[0]["castPhase"]) => groupAsks({ state: state(), creature: { characterId: "bree" }, named, cast, castPhase }).spells;
-    assert.deepEqual(at(null), { ids: ["open:7", "ask-7"], asked: [], casts: ["Hold Person"] }, "not sent yet");
-    assert.deepEqual(at("sending"), { ids: ["open:7", "ask-7"], asked: [], casts: ["Hold Person"] });
-    for (const phase of ["refused", "unknown", "asked", "closed"] as const) assert.deepEqual(at(phase), { ids: ["open:7", "ask-7"], asked: [], casts: [] }, phase);
+    assert.deepEqual(at(null), { ids: ["open:7"], quiet: ["ask-7"], asked: [], casts: ["Hold Person"] }, "not sent yet");
+    assert.deepEqual(at("sending"), { ids: ["open:7"], quiet: ["ask-7"], asked: [], casts: ["Hold Person"] });
+    for (const phase of ["refused", "unknown", "asked", "closed"] as const) assert.deepEqual(at(phase), { ids: ["open:7"], quiet: ["ask-7"], asked: [], casts: [] }, phase);
   });
 
   test("an ask for saves waiting in the view opens its row's group by its id, once with its block's send", () => {
@@ -628,16 +629,36 @@ describe("what waits in a creature's groups (docs/design-v1-dice-pass.md 6.4)", 
       k4: castAsk("k4", { caster: "breeTok", spell: "Unknown" }),
     };
     const asks = groupAsks({ state: state({}, casts), creature: { characterId: "bree" }, named, cast: { key: "c:bree", creature: { characterId: "bree" }, spell: "Fireball", opened: 2, sent: "k1" } });
-    assert.deepEqual(asks, { spells: { ids: ["open:2", "k1", "k2"], asked: [], casts: ["Fireball", "Hold Person"] } });
+    assert.deepEqual(asks, { spells: { ids: ["open:2", "k1", "k2"], quiet: ["k1"], asked: [], casts: ["Fireball", "Hold Person"] } });
+  });
+
+  test("a retry the block follows from the list above the card keeps its folded group folded, and so does that ask once it waits in the view (DB-O9)", () => {
+    const folds = createDiceFolds(null);
+    const phone = { width: 390, height: 844 };
+    folds.get(phone);
+    const block = { key: "c:bree", creature: { characterId: "bree" }, spell: "Hold Person", roll: "s:hold", opened: 1 };
+    const render = (cast: CastBlock | null, casts: RoomState["casts"] = {}) => openForAsks(folds, "pc", groupAsks({ state: state({}, casts), creature: { characterId: "bree" }, named, cast }));
+    render(block);
+    assert.equal(folds.get(phone)["pc.spells"], true, "the opening opens Spells");
+    render({ ...block, sent: "k1" });
+    // Refused, then folded: the refusal shows above the card, whose Ask again moves the block to the retry.
+    folds.tap("pc.spells", false, false);
+    render({ ...block, sent: "k1" });
+    render({ ...block, sent: "k2" });
+    assert.equal(folds.get(phone)["pc.spells"], false, "the retry opened the folded group");
+    render(null, { k2: castAsk("k2", { caster: "breeTok", spell: "Hold Person", roll: "s:hold", area: undefined }) });
+    assert.equal(folds.get(phone)["pc.spells"], false, "the retry's ask, waiting in the view, opened it");
+    render(null, { k2: castAsk("k2", { caster: "breeTok", spell: "Hold Person", roll: "s:hold", area: undefined }), k3: castAsk("k3", { caster: "breeTok", spell: "Hold Person", roll: "s:hold", area: undefined }) });
+    assert.equal(folds.get(phone)["pc.spells"], true, "an ask first seen in the view still opens it");
   });
 
   test("each group opens in the creature's own kind, once per id it has not seen", () => {
-    const calls: [string, readonly string[]][] = [];
-    const store = { openForNew: (key: string, ids: readonly string[]) => (calls.push([key, ids]), true) };
-    openForAsks(store, "monster", { saves: { ids: ["r1"], asked: ["DEX save"], casts: [] }, spells: { ids: ["open:1", "k1"], asked: [], casts: ["Fireball"] } });
+    const calls: [string, readonly string[], readonly string[] | undefined][] = [];
+    const store = { openForNew: (key: string, ids: readonly string[], quiet?: readonly string[]) => (calls.push([key, ids, quiet]), true) };
+    openForAsks(store, "monster", { saves: { ids: ["r1"], asked: ["DEX save"], casts: [] }, spells: { ids: ["open:1"], quiet: ["k1"], asked: [], casts: ["Fireball"] } });
     assert.deepEqual(calls, [
-      ["monster.saves", ["r1"]],
-      ["monster.spells", ["open:1", "k1"]],
+      ["monster.saves", ["r1"], undefined],
+      ["monster.spells", ["open:1"], ["k1"]],
     ]);
   });
 });

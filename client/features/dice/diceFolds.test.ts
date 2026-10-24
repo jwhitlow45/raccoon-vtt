@@ -246,6 +246,18 @@ describe("the app's openings (6.4)", () => {
     assert.equal(s.writes(), 1, "only the tap was stored");
   });
 
+  test("a quiet id is only marked seen: it opens nothing, then or when it comes again as an ask", () => {
+    const folds = createDiceFolds(storage());
+    folds.get(PHONE);
+    folds.openForNew("pc.spells", ["open:1"]);
+    folds.tap("pc.spells", false, false);
+    assert.equal(folds.openForNew("pc.spells", ["open:1"], ["k2"]), false, "a block's retry");
+    assert.equal(folds.get(PHONE)["pc.spells"], false);
+    assert.equal(folds.openForNew("pc.spells", ["k2"]), false, "the retry's ask in the view");
+    assert.equal(folds.openForNew("pc.spells", ["k2", "k3"], ["k3"]), false, "marked seen before the ids are read");
+    assert.equal(folds.get(PHONE)["pc.spells"], false);
+  });
+
   test("an id is seen per group, so one ask may open Saves and checks and Skills, and another kind's", () => {
     const folds = createDiceFolds(storage());
     folds.get(PHONE);

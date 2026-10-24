@@ -11,10 +11,11 @@ import type { CastBlock } from "./optionState.ts";
 
 /*
  * The Dice panel's folds under random play (docs/design-v1-dice-pass.md 6.4):
- * asks and casts arriving and closing, the same spell's block reopened, taps
- * on folds, the options remounting, the panel switching creatures, a tablet
- * turned across 900 px, and "view as a player". Each render runs what the
- * options run (options.ts groupAsks and openForAsks) on the Room's folds.
+ * asks and casts arriving and closing, the same spell's block reopened, its
+ * send retried from the list above the card, taps on folds, the options
+ * remounting, the panel switching creatures, a tablet turned across 900 px,
+ * and "view as a player". Each render runs what the options run (options.ts
+ * groupAsks and openForAsks) on the Room's folds.
  *
  * The invariants, after every step:
  * 1. An app opening never writes storage: only a tap on the page writes.
@@ -232,6 +233,21 @@ function run(seed: number, steps: number): void {
       assert.equal(viewing.get(layout === COMPUTER ? PHONE : COMPUTER), viewing.get(layout), where(step, "a crossing resolved the folds again"));
     } else if (roll < 0.9) {
       viewing = viewing === page ? preview : page;
+    } else if (roll < 0.95) {
+      // Ask again in the list above the card, which shows whatever creature the panel shows, with the block's group open or folded: the block follows the retry, nothing new to the page. Taken while its creature shows, the ask waits in the view and the block closes, new only to the preview.
+      const cast = options.cast;
+      const owner = CREATURES.find((c) => c.key === cast?.key);
+      const section = owner?.named.find((r) => r.key === cast?.roll)?.section;
+      if (cast && owner && section && viewing === page) {
+        const id = `k${++ids}`;
+        options = { ...options, cast: { ...cast, sent: id } };
+        if (shown === owner && random() < 0.5) {
+          render(step);
+          state.casts[id] = castAsk(id, { caster: casterOf(owner), spell: cast.spell, roll: cast.roll, area: undefined });
+          options = { ...options, cast: null };
+          add([preview], [{ tag: id, creature: owner.key, group: section }]);
+        }
+      }
     }
     // Anything else is the options remounting or a render with nothing new: it reads the same Room's folds.
     render(step);
