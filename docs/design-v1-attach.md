@@ -156,7 +156,7 @@ A controlled mount "moves on your turn as you direct it, and it has only three a
 - **Getting off**, or any other end of a controlled ride, changes no row and takes the mount off the turn's list at once: its later moves on the rider's turn record nothing, and getting back on shares again only if that mounting qualifies. Its initiative stays matched. A row whose `markRound` is this round keeps marking time to the round's end, and from the next round it is an ordinary turn with movement and actions again.
 - **A companion mount on its character's turn** (Find Steed, or any mount the DM makes a companion "On Bree's turn") has no row and already acts on the rider's turn. Its companion Reaction already comes back on its character's turn (combat-flow 3.6.8).
 - **An independent mount** keeps its row and place. It moves on its own turn and carries the rider then. The rider's own turn does not move it.
-- **Previous** puts back the encounter as it was, `reactionUsed`, `skipRound` and `markRound` included, since the saved step holds the whole encounter (design 9.4).
+- **Previous** puts back the encounter as it was, `reactionUsed`, `skipRound` and `markRound` included, since the saved step holds the whole encounter (design 9.4). From op version 21 (follow-up batch 26) it puts back only the turn: `markRound` and the Reactions Next gave back, as the step held them, while a ride's value, place and `skipRound` stay, so a rider the ride moved past the turn that resumes waits for the next round.
 
 ### 7.2 Whose path a move writes
 
