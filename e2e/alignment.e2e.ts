@@ -1568,15 +1568,16 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
 
   // Pat's strip after his own move, Undo move in Roll's place where it fits (docs/design-v1-bar-compact.md 3.3), on the upright phones the design measured. The row is the strip's content, measured wherever the strip draws one.
   if (PHONE_ROOTS.has(size.name)) {
+    // A cell south, which no other token takes: dropped on the warhorse's cell, Thorn's release could land on the warhorse wherever the map's hit areas are drawn late, as on a slow runner, so nothing was selected, and the tap after it opened the warhorse.
     const start = await pagePoint(page, BOUNDS, { x: 5.5, y: 5.5 });
-    const end = await pagePoint(page, BOUNDS, { x: 6.5, y: 5.5 });
+    const end = await pagePoint(page, BOUNDS, { x: 5.5, y: 6.5 });
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     for (let i = 1; i <= 8; i++) await page.mouse.move(start.x + ((end.x - start.x) * i) / 8, start.y + ((end.y - start.y) * i) / 8);
     await page.mouse.up();
-    await waitFor("Thorn a cell east", () => (dmSocket.state?.tokens[run.ids.thorn]?.x === 6 ? true : null), 5_000);
+    await waitFor("Thorn a cell south", () => (dmSocket.state?.tokens[run.ids.thorn]?.y === 6 ? true : null), 5_000);
     const moved = page.getByRole("dialog", { name: "Thorn actions" });
-    const strip = (await showsWithin(moved, 1_500)) ? moved : await selectToken(page, "Thorn", { x: 6, y: 5 });
+    const strip = (await showsWithin(moved, 1_500)) ? moved : await selectToken(page, "Thorn", { x: 5, y: 6 });
     if (strip) {
       const row = strip.locator("[data-rest-row]");
       await sweep.measure(page, "rest-row-pat", row, { optional: (await row.count()) === 0 });
