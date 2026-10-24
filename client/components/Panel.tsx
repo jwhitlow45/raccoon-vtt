@@ -236,14 +236,23 @@ export function Group(props: {
     </span>
   );
   const lead = props.icon ? (
-    <span aria-hidden style={{ color: theme.color.textMuted, display: "flex" }}>
+    <span aria-hidden data-group-icon="" style={{ color: theme.color.textMuted, display: "flex" }}>
       <Icon name={props.icon} size="sm" />
     </span>
   ) : null;
+  /*
+   * With an icon, the summary has no more width of its own than a few
+   * words, so the name, the icon and the action keep their line while the
+   * summary still says something, cut sooner rather than the action
+   * wrapping: the one cut the icon pass allows (docs/design-v1-icons-2.md
+   * 3.3). Without one, it gives way to nothing as before, since a floor
+   * there ran a long name such as the trap editor's "Finding and
+   * disarming" past a narrow phone's row (review IC2BUILD-ASTRA-01).
+   */
+  const summaryRoom: CSSProperties = props.icon ? { flex: 1, width: 0, minWidth: "4em" } : { flex: 1, minWidth: 0 };
   const summary =
     !open && props.summary ? (
-      // No more width of its own than a few words, so the name, the icon and the action keep their line while the summary still says something, cut sooner rather than the action wrapping: the one cut the icon pass allows (docs/design-v1-icons-2.md 3.3).
-      <span id={summaryId} style={{ flex: 1, width: 0, minWidth: "4em", textAlign: "right", fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <span id={summaryId} style={{ ...summaryRoom, textAlign: "right", fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {props.summary}
       </span>
     ) : null;

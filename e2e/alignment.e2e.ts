@@ -1706,6 +1706,37 @@ async function foldGroups(panel: Locator): Promise<void> {
 }
 
 /**
+ * Every folded group's header inside its row (review IC2BUILD-ASTRA-01):
+ * the chevron, the icon, the name and the summary end within the heading,
+ * and the heading within the row, which never scrolls sideways. Lines
+ * name each header that runs out, and `folded` counts those read.
+ */
+async function groupOverflowLines(root: Locator, at: string, screen: string): Promise<{ lines: string[]; folded: number }> {
+  const found = await root.evaluate((el) => {
+    type El = { textContent: string | null; scrollWidth: number; clientWidth: number; parentElement: El | null; children: ArrayLike<El>; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getBoundingClientRect(): { right: number; width: number } };
+    const out: string[] = [];
+    let folded = 0;
+    for (const group of Array.from((el as unknown as El).querySelectorAll("[data-panel-group]"))) {
+      const fold = group.querySelector(':scope > div > h3 > [data-group-fold][aria-expanded="false"]');
+      const heading = fold?.parentElement ?? null;
+      const row = heading?.parentElement ?? null;
+      if (!fold || !heading || !row || heading.getBoundingClientRect().width === 0) continue;
+      folded++;
+      const label = (fold.querySelector("span[id]")?.textContent ?? "").trim();
+      const edge = heading.getBoundingClientRect().right;
+      for (const part of Array.from(fold.children)) {
+        const r = part.getBoundingClientRect();
+        if (r.width > 0 && r.right > edge + 0.5) out.push(`${label}: a part of its header ends ${(r.right - edge).toFixed(1)} px past its heading`);
+      }
+      if (edge > row.getBoundingClientRect().right + 0.5) out.push(`${label}: its heading ends past its row`);
+      if (row.scrollWidth > row.clientWidth + 1) out.push(`${label}: its row scrolls sideways, ${row.scrollWidth} in ${row.clientWidth}`);
+    }
+    return { out, folded };
+  });
+  return { lines: found.out.map((line) => `${at} ${screen}: ${line}`), folded: found.folded };
+}
+
+/**
  * Each group header's name on one line, a folded summary never under its
  * 4em floor, and, where `actionInline`, every header's action on its
  * name's line (docs/design-v1-icons-2.md 3.3 and 5): lines naming each
@@ -1740,7 +1771,8 @@ async function groupHeaderLines(panel: Locator, at: string, screen: string, acti
       if (lines(name) !== 1) out.push(`${label}: its name takes ${lines(name)} lines`);
       const summaryId = fold?.getAttribute("aria-describedby");
       const summary = summaryId ? g.document.getElementById(summaryId) : null;
-      if (summary) {
+      // The floor is a group with an icon's: one without keeps the summary that gives way to nothing (review IC2BUILD-ASTRA-01).
+      if (summary && fold?.querySelector("[data-group-icon]")) {
         const floor = 4 * parseFloat(g.getComputedStyle(summary).fontSize) * zoom(summary);
         const width = summary.getBoundingClientRect().width;
         if (width < floor - 0.5) out.push(`${label}: its summary is ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
@@ -1874,6 +1906,7 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     }
     await foldGroups(panel);
     await sweep.add(page, `ic2-groups-${name}`, await groupHeaderLines(panel, at, `ic2-groups-${name}`, !size.touch));
+    await sweep.add(page, `ic2-groups-${name}`, (await groupOverflowLines(panel, at, `ic2-groups-${name}`)).lines);
     await sweep.measure(page, `ic2-groups-${name}`, panel.locator("[data-panel-group] > div:first-child"));
     await closeSheets(page);
     await escapeAll(page);
@@ -1893,6 +1926,9 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     await closeSheets(page);
     await escapeAll(page);
   } else await sweep.missing(page, "ic2-goblin-tags", "a tap on the goblin opened no window");
+
+  // The groups that draw no icon, folded as they start: the trap editor's and the Dice panel's (review IC2BUILD-ASTRA-01).
+  await ic2PlainGroups(sweep, page);
 
   // The tracker: the round header's clock with its timer as tall as without, and the chips' boxes.
   // The header's own box stands its padding unevenly on purpose, its fill meeting the pane's top as it sticks, so its row and the clock are measured inside it.
@@ -1939,6 +1975,47 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
   await escapeAll(page);
   await ops.send({ t: "room.update", settings: { turnTimerSec: 300 } });
   await turnTo(run.fight.thorn);
+}
+
+/**
+ * The panels whose groups draw no icon, every group folded: the trap
+ * editor on the pit, and the Dice panel with Thorn selected. Each folded
+ * header stays inside its row, as it did before the icon pass gave a
+ * summary its floor (review IC2BUILD-ASTRA-01).
+ */
+async function ic2PlainGroups(sweep: Sweep, page: Page): Promise<void> {
+  const at = sweep.at;
+  await closeSheets(page);
+  await escapeAll(page);
+  const pane = page.getByRole("dialog", { name: "Edit trap" });
+  // The Trap tool opens a trap's pane from a tap on it.
+  await pickTool(page, "Trap");
+  const p = await pagePoint(page, BOUNDS, { x: 10.5, y: 6.5 });
+  await page.mouse.click(p.x, p.y);
+  if (await showsWithin(pane, 3_000)) {
+    await foldGroups(pane);
+    const read = await groupOverflowLines(pane, at, "ic2-plain-trap");
+    if (read.folded < 5) await sweep.missing(page, "ic2-plain-trap", `read ${read.folded} folded groups, not the pane's own`);
+    await sweep.add(page, "ic2-plain-trap", read.lines);
+    await pane.getByRole("button", { name: "Done", exact: true }).click();
+    await pane.waitFor({ state: "detached" });
+  } else await sweep.missing(page, "ic2-plain-trap", "a tap on the pit opened no pane");
+  await escapeAll(page);
+  await pickTool(page, "Select");
+  const bar = await selectToken(page, "Thorn", { x: 5, y: 5 });
+  if (!bar) {
+    await sweep.missing(page, "ic2-plain-dice", "a tap on Thorn opened no window");
+    return;
+  }
+  const dice = await openDice(page);
+  await dice.locator("[data-panel-group]").first().waitFor();
+  await foldGroups(dice);
+  const read = await groupOverflowLines(dice, at, "ic2-plain-dice");
+  if (read.folded < 2) await sweep.missing(page, "ic2-plain-dice", `read ${read.folded} folded groups`);
+  await sweep.add(page, "ic2-plain-dice", read.lines);
+  await closeDiceSheet(page);
+  await closeSheets(page);
+  await escapeAll(page);
 }
 
 /**
