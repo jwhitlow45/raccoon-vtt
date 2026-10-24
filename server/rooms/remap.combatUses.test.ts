@@ -4,7 +4,7 @@ import type { Actor, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
-import { DM, actor, character, companionBlock, customMonster, env, room, token } from "#shared/testutil.ts";
+import { DM, actor, character, companionBlock, customMonster, effect, entry, env, room, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -129,6 +129,127 @@ describe("a saved step's row flags through an import (design 9.4, op version 21)
     const bad = JSON.parse(JSON.stringify(before));
     bad.encounterHistory[0].turnFlags[0].flags = ["value"];
     assert.equal(parseRoomState(bad).ok, false, "a row's value is never a flag Previous puts back");
+  });
+});
+
+describe("a saved step through an import keeps the turns that left the fight (design 9.4, reviews FU26-ASTRA-1 and FU26-OPUS-7)", () => {
+  let seq = 0;
+  const play = (state: RoomState, ops: readonly Op[], opVersion?: number): RoomState => {
+    for (const op of ops) {
+      const r = applyOp(state, op, DM, { ...env(++seq), ...(opVersion === undefined ? {} : { opVersion }) });
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    }
+    return state;
+  };
+  const imported = (state: RoomState, edit: (file: RoomState) => void = () => {}): RoomState => {
+    const file = JSON.parse(JSON.stringify(state)) as RoomState;
+    edit(file);
+    const parsed = parseRoomState(file);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    let n = 0;
+    return remapState(parsed.state, { assets: new Map(), newId: () => `n${n++}` });
+  };
+  const acting = (state: RoomState) => {
+    const row = state.encounter!.entries.find((e) => e.id === state.encounter!.activeEntryId);
+    return row ? state.tokens[row.tokenId!]!.name : null;
+  };
+  /** Every duration of the room's creatures that counts a row outside the fight. */
+  const strays = (state: RoomState) => {
+    const inFight = new Set(state.encounter?.entries.map((e) => e.id) ?? []);
+    const actors = [...Object.values(state.tokens).flatMap((t) => ("inline" in t.actor ? [t.actor.inline] : [])), ...Object.values(state.characters).map((c) => c.actor)];
+    return actors.flatMap((a) => a.effects.filter((e) => e.duration && "entryId" in e.duration.anchor && !inFight.has(e.duration.anchor.entryId)).map((e) => e.id));
+  };
+  const NEXT: Op = { t: "encounter.next" };
+  const PREV: Op = { t: "encounter.prev" };
+  /** A, B and C, with C Marked until the start of B's turn three times. */
+  function abc(): RoomState {
+    const state = room({
+      tokens: {
+        a: token("a", { name: "A" }),
+        b: token("b", { name: "B" }),
+        c: token("c", { name: "C", actor: { inline: actor({ effects: [effect("mk", { key: "custom", label: "Marked", duration: { remaining: 3, boundary: "turnStart", anchor: { entryId: "eb" } } })] }) } }),
+      },
+    });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("ea", { tokenId: "a", value: 20 }), entry("eb", { tokenId: "b", value: 15, tieOrder: 1 }), entry("ec", { tokenId: "c", value: 10, tieOrder: 2 })] };
+    return state;
+  }
+
+  test("B removed on C's turn: after an import Previous resumes A, as without one, and no duration ever counts a row outside the fight", () => {
+    const removed = play(abc(), [NEXT, NEXT, NEXT, { t: "encounter.remove", entryIds: ["eb"] }]);
+    const plain = play(removed, [PREV]);
+    assert.equal(acting(plain), "A");
+    const room1 = imported(removed);
+    assert.ok(room1.encounterHistory.every((step) => step.encounter.entries.some((e) => room1.tokens[e.tokenId!]?.name === "B")), "the saved steps keep B's row");
+    const back = play(room1, [PREV]);
+    assert.equal(acting(back), "A");
+    assert.equal(back.encounterHistory.length, plain.encounterHistory.length);
+    assert.deepEqual(strays(back), []);
+    const marked = (s: RoomState) => Object.values(s.tokens).find((t) => t.name === "C")!.actor;
+    const count = (s: RoomState) => {
+      const a = marked(s);
+      return "inline" in a ? a.inline.effects.map((e) => e.duration?.remaining) : [];
+    };
+    assert.deepEqual(count(back), count(plain), "the count B's turn lowered goes back, as without the import");
+    assert.deepEqual(count(plain), [3]);
+    const first = play(back, [PREV]);
+    assert.equal(acting(first), null);
+    assert.deepEqual(strays(first), []);
+  });
+
+  test("steps a version 20 Next saved come through with B's row, so Previous puts back the whole encounter with every duration counting a row of it", () => {
+    const removed = play(abc(), [NEXT, NEXT, NEXT, { t: "encounter.remove", entryIds: ["eb"] }], 20);
+    const back = play(imported(removed), [PREV]);
+    assert.equal(acting(back), "B");
+    assert.deepEqual(strays(back), []);
+    assert.deepEqual(strays(play(back, [PREV])), []);
+  });
+
+  test("a step whose turn was a row that did not come through says that turn left, and its encounter passes it to no row", () => {
+    const removed = play(abc(), [NEXT, NEXT, NEXT, { t: "encounter.remove", entryIds: ["eb"] }]);
+    const room1 = imported(removed, (file) => {
+      delete file.tokens.b;
+    });
+    const top = room1.encounterHistory.at(-1)!;
+    assert.equal(top.resumesGone, true);
+    assert.equal(top.encounter.activeEntryId, null);
+    assert.ok(!top.encounter.entries.some((e) => e.tokenId === "b"));
+    const back = play(room1, [PREV]);
+    assert.equal(acting(back), "A");
+    assert.deepEqual(strays(back), []);
+  });
+
+  test("a duration a saved step counts on a row that did not come through pauses on its creature, so Previous puts back none counting a row outside the fight", () => {
+    const removed = play(abc(), [NEXT, NEXT, NEXT, { t: "encounter.remove", entryIds: ["eb"] }], 20);
+    const room1 = imported(removed, (file) => {
+      delete file.tokens.b;
+    });
+    const back = play(room1, [PREV, PREV]);
+    assert.deepEqual(strays(back), []);
+    const c = Object.values(back.tokens).find((t) => t.name === "C")!.actor;
+    assert.ok("inline" in c);
+    assert.deepEqual(c.inline.effects[0]!.duration?.anchor, { tokenId: "b" }, "paused on B, whom the import did not bring");
+  });
+
+  test("a companion whose rows the import takes out, as one acting on its character's turn, is walked past too", () => {
+    const state = room({
+      characters: { hero: character("hero", { name: "Hero" }) },
+      tokens: {
+        a: token("a", { kind: "pc", name: "A", actor: { ref: "hero" } }),
+        b: token("b", { kind: "npc", name: "B", companion: { of: "hero", turn: "own" } }),
+        c: token("c", { name: "C" }),
+      },
+    });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("ea", { tokenId: "a", value: 20 }), entry("eb", { tokenId: "b", value: 15, tieOrder: 1 }), entry("ec", { tokenId: "c", value: 10, tieOrder: 2 })] };
+    const onC = play(state, [NEXT, NEXT, NEXT]);
+    const room1 = imported(onC, (file) => {
+      file.tokens.b!.companion = { of: "hero", turn: "shared" };
+    });
+    const top = room1.encounterHistory.at(-1)!;
+    assert.equal(top.resumesGone, true);
+    assert.ok(!top.encounter.entries.some((e) => e.tokenId !== undefined && room1.tokens[e.tokenId]?.name === "B"));
+    const back = play(room1, [PREV]);
+    assert.equal(acting(back), "A");
   });
 });
 

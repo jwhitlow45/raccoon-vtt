@@ -10,6 +10,7 @@ import type {
   CustomMonster,
   Drawing,
   Effect,
+  EffectChange,
   Encounter,
   EncounterSnapshot,
   Handout,
@@ -39,6 +40,7 @@ import type {
   TurnUses,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
+import { pausedAnchorForEntry } from "#shared/rules/durations.ts";
 import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
@@ -151,15 +153,22 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     return pages[0] ? { assetId: pages[0].assetId, pages } : null;
   };
   handouts.assign(Object.values(state.handouts).filter((h) => handoutImages(h) !== null).map((h) => h.id));
-  const liveEntries = (state.encounter?.entries ?? []).filter((e) => (e.tokenId === undefined || tokens.has(e.tokenId)) && (e.characterId === undefined || characters.has(e.characterId)));
-  entries.assign(liveEntries.map((e) => e.id));
+  // Every row the fight or a saved step holds, so a step keeps the rows removed since: Previous walks past the turn of
+  // one, and an ended effect it puts back pauses on its creature (design 9.4, review FU26-ASTRA-1).
+  const knownRows = new Map<string, InitEntry>();
+  for (const e of [...(state.encounter?.entries ?? []), ...state.encounterHistory.flatMap((snap) => snap.encounter.entries)]) if (!knownRows.has(e.id)) knownRows.set(e.id, e);
+  const cameThrough = (e: InitEntry) => (e.tokenId === undefined || tokens.has(e.tokenId)) && (e.characterId === undefined || characters.has(e.characterId));
+  entries.assign([...knownRows.values()].filter(cameThrough).map((e) => e.id));
 
   const memberList = (ids: string[]): string[] => ids.filter((id) => members.has(id)).map((id) => members.of(id));
   const effect = (withDue: Effect): Effect => {
     // An occurrence names a line of the old room's log, and the requests that answer it do not come through, so a save ends waits for the next turn end.
     const { due: _due, ...e } = withDue;
     if (!e.duration) return e;
-    const a = e.duration.anchor;
+    // One counting a row that did not come through pauses on its creature, as a removal pauses it, so none counts a row
+    // the new room never holds.
+    const row = "entryId" in e.duration.anchor && !entries.has(e.duration.anchor.entryId) ? knownRows.get(e.duration.anchor.entryId) : undefined;
+    const a = row ? pausedAnchorForEntry(row) : e.duration.anchor;
     const anchor =
       "entryId" in a ? { entryId: entries.of(a.entryId) } : "tokenId" in a ? { tokenId: tokens.of(a.tokenId) } : { characterId: characters.of(a.characterId) };
     return { ...e, duration: { ...e.duration, anchor } };
@@ -413,8 +422,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       const mapped = holder(holderId);
       if (mapped) effects[mapped] = list.map(effect);
     }
+    const saved = encounter(snap.encounter);
     const next: EncounterSnapshot = {
-      encounter: encounter(snap.encounter),
+      encounter: saved,
       effects,
       revealed: snap.revealed.filter((r) => tokens.has(r.tokenId)).map((r) => ({ ...r, tokenId: tokens.of(r.tokenId) })),
       at: snap.at,
@@ -438,6 +448,18 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (turnUses.length > 0) next.turnUses = turnUses;
     // Kept even when empty: a step without them is one from before op version 21, whose Previous puts back the whole encounter.
     if (snap.turnFlags) next.turnFlags = snap.turnFlags.filter((f) => entries.has(f.entryId)).map((f) => ({ ...f, entryId: entries.of(f.entryId) }));
+    // A turn whose row did not come through has left the fight, which the step's encounter, passing it to no row, cannot say.
+    if (snap.resumesGone || (snap.encounter.activeEntryId !== null && saved.activeEntryId === null)) next.resumesGone = true;
+    // The occurrences a save opened name lines of the old room's log, which go as the effects' own do.
+    const changes = (snap.effectChanges ?? []).flatMap((change): EffectChange[] => {
+      const holderId = holder(change.holderId);
+      if (holderId === null) return [];
+      const { asked: _asked, ended, ...kept } = change;
+      const out: EffectChange = { ...kept, holderId };
+      if (ended) out.ended = ended.map((e) => ({ at: e.at, effect: effect(e.effect) }));
+      return out.ended || out.counted ? [out] : [];
+    });
+    if (changes.length > 0) next.effectChanges = changes;
     return next;
   });
   for (const h of Object.values(state.handouts)) {
