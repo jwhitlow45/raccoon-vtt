@@ -666,10 +666,14 @@ function FightAlerts() {
      * Beside an upright phone's strip or its expanded bar, the row keeps 8
      * px above the band's last 44 px over the bar (barDock.ts restFloor,
      * docs/design-v1-bar-compact.md 3.5), so a token can still be panned
-     * in under it. Where no spot is left, it stands in the strip's header
-     * instead, its own tap kept, and the row here is hidden meanwhile.
+     * in under it. Where no spot is left beside the resting strip, it
+     * stands in the strip's header instead, its own tap kept, and the row
+     * here is hidden meanwhile. The expanded bar's header draws no summary,
+     * so beside it the row stands as high as its other rules allow, as with
+     * no strip (review BB-OPUS-2).
      */
     const strip = bar?.mode === "span" && !folded ? bar.box.top : null;
+    const rests = strip !== null && bar?.rests === true;
     const handTo = (handed: boolean) => {
       const was = dock.getState().headerSummary;
       const next = handed && summary ? { count: 1 + (Number.parseInt(summary.more.replace("+", ""), 10) || 0), name: summary.name, press: () => rowRef.current?.click() } : null;
@@ -714,8 +718,8 @@ function FightAlerts() {
     const overBand = strip === null ? Infinity : (strip - EDGE - theme.touch - EDGE) * zoom;
     const kept = { ...rules, floor: Math.min(rules.floor, overBand) };
     const place =
-      raisedRow({ ...kept, floor: Math.min((height - chrome.bottom - theme.space(1)) * zoom, overBand) }) ?? raisedRow(kept) ?? (strip === null ? raisedRow({ ...rules, floor: Infinity, highest: true }) : null);
-    handTo(strip !== null && place === null);
+      raisedRow({ ...kept, floor: Math.min((height - chrome.bottom - theme.space(1)) * zoom, overBand) }) ?? raisedRow(kept) ?? (!rests ? raisedRow({ ...rules, floor: Infinity, highest: true }) : null);
+    handTo(rests && place === null);
     const shift = place ? Math.max(0, Math.round((usual.left - place.left) / zoom)) : 0;
     const next = place
       ? {
