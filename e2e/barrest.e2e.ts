@@ -4,8 +4,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { barControl, ConsoleWatch, OpSocket, pagePoint, pickTool, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token action bar at rest on a phone held upright
@@ -57,9 +58,9 @@ const patSocket = new SocketWatch("pat");
 const dmConsole = new ConsoleWatch("dm");
 const patConsole = new ConsoleWatch("pat");
 
-/** A token placed in the room: its id, name and cell. */
-type Placed = { id: string; name: string; x: number; y: number };
-const placed = (name: string, x: number, y: number): Placed => ({ id: randomUUID(), name, x, y });
+/** A token placed in the room: its id, name, cell and side in cells. */
+type Placed = { id: string; name: string; x: number; y: number; cells: number };
+const placed = (name: string, x: number, y: number, cells = 1): Placed => ({ id: randomUUID(), name, x, y, cells });
 
 const run = {
   roomId: "",
@@ -73,9 +74,9 @@ const run = {
   goblin2: placed("Goblin 2", 16, 13),
   /** A token of each size at the map's edges and corners. */
   darkmantle: placed("Darkmantle", 0, 0),
-  allosaurus: placed("Allosaurus", 28, 0),
-  dragon: placed("Adult Black Dragon", 0, 17),
-  ancient: placed("Ancient Black Dragon", 26, 16),
+  allosaurus: placed("Allosaurus", 28, 0, 2),
+  dragon: placed("Adult Black Dragon", 0, 17, 3),
+  ancient: placed("Ancient Black Dragon", 26, 16, 4),
   goblinTop: placed("Goblin Top", 15, 0),
   goblinBottom: placed("Goblin Bottom", 15, 19),
   goblinLeft: placed("Goblin Left", 0, 10),
@@ -111,6 +112,15 @@ async function setUp(page: Page, view: { width: number; height: number; scale: n
   await reopenRoom(page);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
+}
+
+/** Opens a panel as a sheet from the toolbar's list of panels, as a phone shows them. */
+async function openPanel(page: Page, name: string): Promise<Locator> {
+  await page.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name, exact: true }).click();
+  const sheet = page.locator(`section[aria-label="${name}"]`);
+  await sheet.waitFor();
+  return sheet;
 }
 
 describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-bar-compact.md)", { timeout: 900_000 }, () => {
@@ -201,7 +211,993 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
 
   // ------------------------------------------------------------ br-f: the frame (lane F)
 
-  describe("br-f: the strip's place, reach and the clearing move", () => {});
+  describe("br-f: the strip's place, reach and the clearing move", () => {
+    // Close zoom, Thorn in the middle, for every frame step, and the room's own view again after them.
+    before(() => ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { defaultView: { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5, zoom: 44 } } }));
+    after(() => ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { defaultView: null } }));
+    /** A box as the page drew it, in CSS px from the page's top. */
+    type Drawn = { top: number; bottom: number; left: number; right: number };
+    type ProbeWin = {
+      rvttProbe?: { boxes: (Drawn | null)[]; stop: boolean };
+      requestAnimationFrame(fn: () => void): number;
+      document: { querySelector(s: string): { getBoundingClientRect(): Drawn } | null };
+    };
+    /** Starts reading the bar's box on every animation frame, each new box once, and null while no bar shows. */
+    async function startProbe(page: Page): Promise<void> {
+      await page.evaluate(() => {
+        const w = globalThis as unknown as ProbeWin;
+        const probe = { boxes: [] as (Drawn | null)[], stop: false, started: false };
+        w.rvttProbe = probe;
+        const read = () => {
+          if (probe.stop) return;
+          const r = w.document.querySelector('[role="dialog"][data-bar-mode]')?.getBoundingClientRect();
+          const box = r ? { top: Math.round(r.top * 10) / 10, bottom: Math.round(r.bottom * 10) / 10, left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10 } : null;
+          const last = probe.boxes[probe.boxes.length - 1];
+          // Nothing shown before the bar first draws is the opening's wait, not a gap.
+          if (box) probe.started = true;
+          const same = last === undefined ? box === null : last === null ? box === null : box !== null && last.top === box.top && last.bottom === box.bottom && last.left === box.left && last.right === box.right;
+          if (probe.started && !same) probe.boxes.push(box);
+          w.requestAnimationFrame(read);
+        };
+        read();
+      });
+    }
+    /** The boxes the probe saw, after it ran `ms` more. */
+    async function stopProbe(page: Page, ms = 2_000): Promise<(Drawn | null)[]> {
+      await sleep(ms);
+      return page.evaluate(() => {
+        const w = globalThis as unknown as ProbeWin;
+        const probe = w.rvttProbe!;
+        probe.stop = true;
+        return probe.boxes;
+      });
+    }
+    /** The map's camera once it has held still for 120 ms, and the canvas's place on the page. */
+    async function view(page: Page): Promise<{ cam: { x: number; y: number; scale: number }; box: { x: number; y: number } }> {
+      const box = await page.locator(".konvajs-content").first().boundingBox();
+      assert.ok(box, "the map canvas is not on the page");
+      let cam = await readCamera(page);
+      for (let still = 0, i = 0; still < 2 && i < 50; i++) {
+        await sleep(60);
+        const next = await readCamera(page);
+        still = cam && next && next.x === cam.x && next.y === cam.y && next.scale === cam.scale ? still + 1 : 0;
+        cam = next;
+      }
+      assert.ok(cam, "the map stage has no camera");
+      return { cam, box };
+    }
+    /** A world point, in cells, on the page as the camera stands. */
+    const onPage = (v: Awaited<ReturnType<typeof view>>, w: { x: number; y: number }) => ({ x: v.box.x + v.cam.x + w.x * v.cam.scale, y: v.box.y + v.cam.y + w.y * v.cam.scale });
+    /** The page point of a token's middle. */
+    async function middle(page: Page, t: Placed): Promise<{ x: number; y: number }> {
+      return onPage(await view(page), { x: t.x + t.cells / 2, y: t.y + t.cells / 2 });
+    }
+    type Rect = { left: number; top: number; right: number; bottom: number };
+    async function rectOf(l: Locator): Promise<Rect> {
+      const b = await l.boundingBox();
+      assert.ok(b, "not on the page");
+      return { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+    }
+    /** The bar's frame, whatever it shows. */
+    const frame = (page: Page) => page.locator('[role="dialog"][data-bar-mode]');
+    /** A token's box on screen, from the camera. */
+    async function tokenRect(page: Page, t: Placed): Promise<Rect> {
+      const v = await view(page);
+      const a = onPage(v, { x: t.x, y: t.y });
+      const b = onPage(v, { x: t.x + t.cells, y: t.y + t.cells });
+      return { left: a.x, top: a.y, right: b.x, bottom: b.y };
+    }
+    /** What takes a tap at a point: the map's canvas, or the tag of whatever covers it. */
+    function hitAt(page: Page, p: { x: number; y: number }): Promise<string | null> {
+      return page.evaluate(([x, y]) => (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document.elementFromPoint(x, y)?.tagName ?? null, [p.x, p.y] as const);
+    }
+    /** The first of these screen points that falls on an empty cell of the map, clear of every token by a fifth of a cell, or null. */
+    async function firstEmpty(page: Page, v: Awaited<ReturnType<typeof view>>, points: readonly { x: number; y: number }[]): Promise<{ x: number; y: number } | null> {
+      const all = [run.thorn, run.goblin1, run.goblin2, run.barrel, run.lantern, ...EDGE_TOKENS];
+      const clear = points.filter((p) => {
+        const w = { x: (p.x - v.box.x - v.cam.x) / v.cam.scale, y: (p.y - v.box.y - v.cam.y) / v.cam.scale };
+        return !all.some((t) => w.x > t.x - 0.2 && w.x < t.x + t.cells + 0.2 && w.y > t.y - 0.2 && w.y < t.y + t.cells + 0.6);
+      });
+      const hits = await page.evaluate(
+        (ps) => ps.map((p) => (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document.elementFromPoint(p.x, p.y)?.tagName ?? null),
+        clear,
+      );
+      const i = hits.indexOf("CANVAS");
+      return i < 0 ? null : clear[i]!;
+    }
+    /** Whether a screen point falls on an empty cell of the map, clear of every token by a fifth of a cell. */
+    async function emptyAt(page: Page, p: { x: number; y: number }): Promise<boolean> {
+      return (await firstEmpty(page, await view(page), [p])) !== null;
+    }
+    /**
+     * Pans the map with one finger so the world point `w` lands on screen at
+     * `to`, in swipes slow enough that no fling follows, each starting on an
+     * empty cell so it drags no token. Returns where the point landed, since
+     * the camera's bounds may stop it short.
+     */
+    async function panTo(page: Page, cdp: CDPSession, w: { x: number; y: number }, to: { x: number; y: number }): Promise<{ x: number; y: number }> {
+      const size = page.viewportSize()!;
+      for (let tries = 0; tries < 8; tries++) {
+        const v = await view(page);
+        const now = onPage(v, w);
+        if (Math.abs(to.x - now.x) < 2 && Math.abs(to.y - now.y) < 2) return now;
+        // Each swipe at most 300 px, and on a short screen at most what leaves the finger room to start on the map.
+        const reach = { x: Math.min(300, size.width / 2 - 20), y: Math.min(300, size.height / 2 - 40) };
+        const d = { x: Math.max(-reach.x, Math.min(reach.x, to.x - now.x)), y: Math.max(-reach.y, Math.min(reach.y, to.y - now.y)) };
+        // The finger starts where the move keeps it on the screen, on an empty cell, nearest the middle first.
+        const grid: { x: number; y: number }[] = [];
+        for (let y = 60; y <= size.height - 60; y += 24) for (let x = 12; x <= size.width - 12; x += 24) if (y + d.y >= 8 && y + d.y <= size.height - 8 && x + d.x >= 8 && x + d.x <= size.width - 8) grid.push({ x, y });
+        const mid = { x: size.width / 2 - d.x / 2, y: size.height * 0.45 - d.y / 2 };
+        grid.sort((a, b) => Math.hypot(a.x - mid.x, a.y - mid.y) - Math.hypot(b.x - mid.x, b.y - mid.y));
+        const start = await firstEmpty(page, v, grid);
+        assert.ok(start, `no empty cell to start a pan on toward ${JSON.stringify(to)}`);
+        const steps = Math.max(12, Math.ceil(Math.hypot(d.x, d.y) / 12));
+        await touchSwipe(cdp, start, { x: start.x + d.x, y: start.y + d.y }, { steps, everyMs: 24 });
+        const after = await view(page);
+        // The camera's bounds stopped it: it lands as near as a pan can.
+        if (Math.abs(v.cam.x - after.cam.x) < 1 && Math.abs(v.cam.y - after.cam.y) < 1) return onPage(after, w);
+      }
+      return onPage(await view(page), w);
+    }
+    const bar = (page: Page, name: string) => page.getByRole("dialog", { name: `${name} actions` });
+    /** Puts every token back on its own cell, as a step that dragged one may have left it. */
+    async function homeTokens(): Promise<void> {
+      for (const t of [run.thorn, ...EDGE_TOKENS, run.goblin1, run.goblin2, run.barrel, run.lantern]) {
+        const now = dmSocket.state?.tokens[t.id];
+        if (now && (now.x !== t.x || now.y !== t.y)) await ops.send({ t: "token.update", tokenId: t.id, patch: { x: t.x, y: t.y } });
+      }
+      await waitFor("every token home", () => [run.thorn, ...EDGE_TOKENS].every((t) => patSocket.state?.tokens[t.id]?.x === t.x && patSocket.state?.tokens[t.id]?.y === t.y) || null);
+    }
+    /** Taps a token where the map takes the tap, its middle first, and waits for its bar, then gives the bar's box once it holds still. */
+    async function openOn(page: Page, t: Placed): Promise<Rect> {
+      const r = await tokenRect(page, t);
+      const inset = Math.min(6, (r.bottom - r.top) / 4);
+      const mid = { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 };
+      const points = [mid, { x: mid.x, y: r.top + inset }, { x: mid.x, y: r.bottom - inset }, { x: r.left + inset, y: mid.y }, { x: r.right - inset, y: mid.y }];
+      let at = mid;
+      for (const p of points) {
+        if ((await hitAt(page, p)) === "CANVAS") {
+          at = p;
+          break;
+        }
+      }
+      await page.touchscreen.tap(at.x, at.y);
+      try {
+        await bar(page, t.name).waitFor({ timeout: 8_000 });
+      } catch (err) {
+        await shots.take(page, `br-f-open-failed-${t.name.replaceAll(" ", "-")}`);
+        throw err;
+      }
+      return steady(page);
+    }
+    /** Opens the first of these tokens whose middle the map takes, so a tap meant for the map never dismisses a toast over a token. */
+    async function openClear(page: Page, tokens: readonly Placed[]): Promise<Rect> {
+      for (const t of tokens) if ((await hitAt(page, await middle(page, t))) === "CANVAS") return openOn(page, t);
+      throw new Error(`none of ${tokens.map((t) => t.name).join(", ")} takes a tap`);
+    }
+    /** The bar's box once it has held still for 300 ms. */
+    async function steady(page: Page): Promise<Rect> {
+      let last = await rectOf(frame(page));
+      for (let i = 0; i < 40; i++) {
+        await sleep(100);
+        const now = await rectOf(frame(page));
+        if (Math.abs(now.top - last.top) < 0.5 && Math.abs(now.bottom - last.bottom) < 0.5 && i >= 2) return now;
+        last = now;
+      }
+      return last;
+    }
+    type Cam = { x: number; y: number; scale: number };
+    type CamWin = { rvttCams?: { cams: Cam[]; stop: boolean }; Konva?: { stages: { x(): number; y(): number; scaleX(): number }[] }; requestAnimationFrame(fn: () => void): number };
+    /** Starts reading the camera on every animation frame, each new one once. */
+    async function startCams(page: Page): Promise<void> {
+      await page.evaluate(() => {
+        const w = globalThis as unknown as CamWin;
+        const probe = { cams: [] as Cam[], stop: false };
+        w.rvttCams = probe;
+        const read = () => {
+          if (probe.stop) return;
+          const s = w.Konva?.stages[0];
+          if (s) {
+            const cam = { x: Math.round(s.x() * 10) / 10, y: Math.round(s.y() * 10) / 10, scale: Math.round(s.scaleX() * 1000) / 1000 };
+            const last = probe.cams[probe.cams.length - 1];
+            if (!last || last.x !== cam.x || last.y !== cam.y || last.scale !== cam.scale) probe.cams.push(cam);
+          }
+          w.requestAnimationFrame(read);
+        };
+        read();
+      });
+    }
+    /** The cameras seen, first the one as it started, after `ms` more. */
+    async function stopCams(page: Page, ms = 1_500): Promise<Cam[]> {
+      await sleep(ms);
+      return page.evaluate(() => {
+        const w = globalThis as unknown as CamWin;
+        w.rvttCams!.stop = true;
+        return w.rvttCams!.cams;
+      });
+    }
+    /** Whether the map moved one way only, along y, and then held: one clearing move. */
+    function oneMoveUp(cams: Cam[]): boolean {
+      if (cams.length < 2) return false;
+      for (let i = 1; i < cams.length; i++) if (cams[i]!.y > cams[i - 1]!.y + 0.05 || Math.abs(cams[i]!.x - cams[0]!.x) > 0.5 || cams[i]!.scale !== cams[0]!.scale) return false;
+      return true;
+    }
+    /** The points of a box, every `step` px, where something other than the map's canvas takes a tap. */
+    function coveredIn(page: Page, box: Rect, step = 6): Promise<{ x: number; y: number; tag: string }[]> {
+      return page.evaluate(
+        ([b, s]) => {
+          const d = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document;
+          const out: { x: number; y: number; tag: string }[] = [];
+          for (let y = b.top + 1; y <= b.bottom - 1; y += s)
+            for (let x = b.left + 1; x <= b.right - 1; x += s) {
+              const tag = d.elementFromPoint(x, y)?.tagName ?? "none";
+              if (tag !== "CANVAS") out.push({ x, y, tag });
+            }
+          return out;
+        },
+        [box, step] as const,
+      );
+    }
+    /**
+     * What the alerts column draws over a box, though it takes no tap
+     * there: each card's part the column's box leaves in view, and the
+     * "Scroll for more" fade, whose pointer events are off.
+     */
+    function columnOver(page: Page, box: Rect): Promise<{ what: string; top: number; bottom: number }[]> {
+      return page.evaluate((b) => {
+        type El = { tagName: string; textContent: string | null; parentElement: El | null; getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number; height: number }; getAttribute(n: string): string | null };
+        const d = (globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<El> } }).document;
+        const out: { what: string; top: number; bottom: number }[] = [];
+        const clipOf = (el: El) => {
+          let col: El = el;
+          while (col.parentElement && col.parentElement.tagName !== "HEADER") col = col.parentElement;
+          return col.getBoundingClientRect();
+        };
+        const meets = (r: { left: number; top: number; right: number; bottom: number }) => r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top;
+        for (const el of Array.from(d.querySelectorAll("header [data-alert]"))) {
+          const r = el.getBoundingClientRect();
+          const c = clipOf(el);
+          const seen = { left: Math.max(r.left, c.left), top: Math.max(r.top, c.top), right: Math.min(r.right, c.right), bottom: Math.min(r.bottom, c.bottom) };
+          if (r.width > 0 && seen.bottom - seen.top > 0.5 && meets(seen)) out.push({ what: `card ${el.getAttribute("data-alert")}`, top: seen.top, bottom: seen.bottom });
+        }
+        for (const el of Array.from(d.querySelectorAll("header div"))) {
+          if (el.textContent !== "Scroll for more") continue;
+          const r = el.getBoundingClientRect();
+          if (r.height > 0 && meets(r)) out.push({ what: "fade", top: r.top, bottom: r.bottom });
+        }
+        return out;
+      }, box);
+    }
+    /** A second socket, Pat's, for what Pat sends while the DM's page is watched. */
+    async function patOps(): Promise<OpSocket> {
+      const cookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+      return OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+    }
+    /** Brings up a concentration check for each of these goblins, which concentrate on Hex from the first call. */
+    const hexed = new Set<string>();
+    async function checks(goblins: Placed[]): Promise<void> {
+      for (const g of goblins) {
+        if (!hexed.has(g.id)) {
+          await ops.send({ t: "actor.effect.add", target: { tokenId: g.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+          hexed.add(g.id);
+        }
+        await ops.send({ t: "actor.hp", target: { tokenId: g.id }, change: { kind: "damage", amount: 1 } });
+        await ops.send({ t: "actor.hp", target: { tokenId: g.id }, change: { kind: "heal", amount: 1 } });
+      }
+    }
+    /** The free area's top on a page: 8 px under the top bar, in the page's px. */
+    async function freeTop(page: Page, scale: number): Promise<number> {
+      const top = await rectOf(page.locator("header").first());
+      return top.bottom + 8 * scale;
+    }
+
+    test("br-f-1. at 390 x 844 the strip opens at 662 to 776 on its first frame, and pans, a pinch and a tap on another token leave its box", async () => {
+      await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { defaultView: { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5, zoom: 44 } } });
+      await homeTokens();
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const strip = { top: 662, bottom: 776, left: 8, right: 382 };
+      // The swipes and the pinch start on the column right of every token in view, so none drags a token.
+      const free = 370;
+      const at = await middle(pat, run.thorn);
+      const before = await readCamera(pat);
+      await startProbe(pat);
+      await pat.touchscreen.tap(at.x, at.y);
+      await bar(pat, "Thorn").waitFor();
+      assert.deepEqual(await stopProbe(pat), [strip], "the strip opened at its place, on its first frame, and stayed");
+      assert.deepEqual(await readCamera(pat), before, "Thorn mid-screen: no map move");
+      assert.equal(await bar(pat, "Thorn").getAttribute("data-bar-state"), "rest");
+      await shots.take(pat, "br-f-1-rest-390");
+      // Pans of 120 and 240 px, up and down, and a pinch: the box on every frame is the strip's.
+      for (const dy of [-120, 240, -120]) {
+        await startProbe(pat);
+        await touchSwipe(patCdp, { x: free, y: 300 }, { x: free, y: 300 + dy }, { steps: 12 });
+        assert.deepEqual(await stopProbe(pat, 600), [strip], `a pan of ${dy} px moved the strip`);
+      }
+      await startProbe(pat);
+      const touches = new Touches(patCdp);
+      await touches.start([
+        { x: free, y: 260, id: 1 },
+        { x: free, y: 340, id: 2 },
+      ]);
+      for (let i = 1; i <= 8; i++)
+        await touches.move([
+          { x: free, y: 260 - i * 6, id: 1 },
+          { x: free, y: 340 + i * 6, id: 2 },
+        ]);
+      await touches.end();
+      assert.deepEqual(await stopProbe(pat, 600), [strip], "a pinch moved the strip");
+      // A tap on another token shows it in the same strip.
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const again = await middle(pat, run.thorn);
+      await pat.touchscreen.tap(again.x, again.y);
+      await bar(pat, "Thorn").waitFor();
+      const goblin = await middle(pat, run.goblin1);
+      await startProbe(pat);
+      await pat.touchscreen.tap(goblin.x, goblin.y);
+      await bar(pat, "Goblin 1").waitFor();
+      assert.deepEqual(await stopProbe(pat), [strip], "another token's strip stands where Thorn's did");
+    });
+
+    test("br-f-3. a whisper keeps above the strip, a stack placed low under the column's card takes its place anew above it as the strip opens, and the column stacks over the strip only where its cards leave the band whole, nothing drawn over the band", async () => {
+      await homeTokens();
+      // Pat's strip rests, and a whisper keeps above it, 60 px clear of its top.
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const strip = await openOn(pat, run.thorn);
+      await ops.send({ t: "log.whisper", to: [run.patId], text: "You hear chanting." });
+      const whisper = pat.locator("[data-toast]").filter({ hasText: "You hear chanting." }).first();
+      await whisper.waitFor();
+      const w = await rectOf(whisper);
+      assert.ok(w.bottom <= strip.top - 60 + 0.5, `the whisper reaches down to ${w.bottom}, under the strip's top less 60 (${strip.top - 60})`);
+      assert.deepEqual(await rectOf(frame(pat)), strip, "the whisper moved the strip");
+      await shots.take(pat, "br-f-3-whisper");
+
+      const pats = await patOps();
+      try {
+        // At 320 x 568 at 130% a toast under the DM's concentration card stands low, past the strip's top less 60, so it takes its place anew as the strip opens.
+        const z = 1.3;
+        await setUp(dm, { width: 320, height: 568, scale: z });
+        await checks([run.goblin1]);
+        await dm.locator('[data-alert="concentration"]').first().waitFor();
+        await pats.send({ t: "log.whisper", to: [dmSocket.you!.memberId], text: "Behind the altar." });
+        const low = dm.locator("[data-toast]").filter({ hasText: "Behind the altar." }).first();
+        await low.waitFor();
+        const before = await rectOf(low);
+        const small = await openClear(dm, [run.thorn, run.lantern, run.goblin2, run.barrel]);
+        const floor = small.top - 60 * z;
+        assert.ok(before.bottom > floor, `the toast stood at ${before.bottom}, not low: the step tests nothing (floor ${floor})`);
+        await sleep(300);
+        const after = await rectOf(low);
+        assert.ok(after.bottom <= floor + 0.5, `the low toast stays at ${after.bottom}, under the strip's top less 60 (${floor})`);
+        await shots.take(dm, "br-f-3-low-anew");
+      } finally {
+        pats.close();
+      }
+
+      // The DM's strip at 390 x 844, then a concentration check: the strip stays, the card stacks over it with the band left, or the summary row stands for it.
+      await setUp(dm, { ...PHONE, scale: 1 });
+      const dmStrip = await openOn(dm, run.thorn);
+      await checks([run.goblin1]);
+      await dm.locator('[data-alert="concentration"]').first().waitFor();
+      await sleep(300);
+      assert.deepEqual(await rectOf(frame(dm)), dmStrip, "a concentration card moved the strip");
+      for (const [view, cards] of [
+        [{ ...PHONE, scale: 1 }, [run.goblin1, run.goblin2]],
+        [{ width: 320, height: 568, scale: 1.3 }, [run.goblin1, run.goblin2]],
+      ] as const) {
+        const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(dm, view);
+        await checks([...cards]);
+        await dm.locator('[data-alert="concentration"]').nth(1).waitFor({ state: "attached" });
+        // With no bar the two cards may stand over Thorn: the first token clear of them opens the strip.
+        const s = await openClear(dm, [run.thorn, run.goblin2, run.lantern, run.goblin1, run.barrel]);
+        await sleep(300);
+        // The band: the 44 px above the strip's own 8 px gap, across the strip.
+        const bottom = s.top - 8 * view.scale;
+        const band = { left: s.left, right: s.right, top: bottom - 44 * view.scale, bottom };
+        assert.deepEqual(await coveredIn(dm, band), [], `${label}: something takes a tap in the band`);
+        assert.deepEqual(await columnOver(dm, band), [], `${label}: the column draws over the band`);
+        await shots.take(dm, `br-f-3-band-${view.width}`);
+      }
+    });
+
+    test("br-f-5. every edge and corner token pans in above the strip and takes a tap, at four phones, for Pat and the DM, and for the DM with a concentration card standing", async () => {
+      const missed: string[] = [];
+      for (const who of ["Pat", "DM", "DM with a card"] as const) {
+        const page = who === "Pat" ? pat : dm;
+        const cdp = who === "Pat" ? patCdp : dmCdp;
+        for (const view of PHONES) {
+          const label = `${who} at ${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+          await homeTokens();
+          await setUp(page, view);
+          if (who === "DM with a card") {
+            await checks([run.goblin1]);
+            await page.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+          }
+          const strip = await openOn(page, run.thorn);
+          // The middle of the band over the strip, where a token near the map's foot must come to be seen whole.
+          const target = { x: (strip.left + strip.right) / 2, y: strip.top - 8 * view.scale - 22 * view.scale };
+          for (const t of EDGE_TOKENS) {
+            await panTo(page, cdp, { x: t.x + t.cells / 2, y: t.y + t.cells / 2 }, target);
+            // A tap anywhere on the token's own cells that the map takes: its middle first.
+            const r = await tokenRect(page, t);
+            const inset = Math.min(8, (r.bottom - r.top) / 4);
+            const points = [
+              { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 },
+              { x: (r.left + r.right) / 2, y: r.top + inset },
+              { x: (r.left + r.right) / 2, y: r.bottom - inset },
+              { x: r.left + inset, y: (r.top + r.bottom) / 2 },
+              { x: r.right - inset, y: (r.top + r.bottom) / 2 },
+            ];
+            let at: { x: number; y: number } | null = null;
+            for (const p of points) if (p.y < strip.top && (await hitAt(page, p)) === "CANVAS") at = at ?? p;
+            if (!at) {
+              missed.push(`${label}: ${t.name} at ${JSON.stringify(r)}, nothing of it takes a tap above the strip`);
+              continue;
+            }
+            await page.touchscreen.tap(at.x, at.y);
+            try {
+              await bar(page, t.name).waitFor({ timeout: 3_000 });
+            } catch {
+              missed.push(`${label}: a tap at ${JSON.stringify(at)} did not open ${t.name}'s bar`);
+              continue;
+            }
+            const now = await steady(page);
+            if (Math.abs(now.top - strip.top) > 0.5 || Math.abs(now.bottom - strip.bottom) > 0.5) missed.push(`${label}: ${t.name}'s strip stands at ${JSON.stringify(now)}, not ${JSON.stringify(strip)}`);
+          }
+          await shots.take(page, `br-f-5-${who === "Pat" ? "pat" : who === "DM" ? "dm" : "dm-card"}-${view.width}`);
+        }
+      }
+      assert.deepEqual(missed, []);
+    });
+
+    test("br-f-6. Fit, Find my token, a tracker row, the party panel and the outliner after Ruler each land their token above the strip, with one clearing move at most", async () => {
+      await homeTokens();
+      // Pat's Find my token, with Thorn panned under his own strip.
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const strip = await openOn(pat, run.thorn);
+      await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 }, { x: 195, y: strip.top + 40 });
+      await pat.getByRole("button", { name: "Find my token" }).click();
+      await sleep(600);
+      const found = await tokenRect(pat, run.thorn);
+      assert.ok(found.bottom <= strip.top, `Find my token left Thorn under the strip: ${JSON.stringify({ found, strip })}`);
+
+      // The DM's Fit, with Goblin 2's strip open: no token under the strip.
+      await setUp(dm, { ...PHONE, scale: 1 });
+      const dmStrip = await openOn(dm, run.goblin2);
+      await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+      await sleep(600);
+      for (const t of [run.thorn, run.goblin1, run.goblin2, ...EDGE_TOKENS]) {
+        const r = await tokenRect(dm, t);
+        assert.ok(r.bottom <= dmStrip.top + 0.5, `Fit left ${t.name} under the strip: ${JSON.stringify({ r, dmStrip })}`);
+      }
+      await shots.take(dm, "br-f-6-fit");
+
+      // A tracker row, the party panel and the outliner, each with its token first panned under the strip.
+      await ops.send({
+        t: "encounter.start",
+        entries: [
+          { id: randomUUID(), tokenId: run.goblin1.id, value: 15 },
+          { id: randomUUID(), tokenId: run.goblin2.id, value: 12 },
+          { id: randomUUID(), tokenId: run.thorn.id, value: 5 },
+        ],
+      });
+      try {
+        const opens: { name: string; t: Placed; open(): Promise<void> }[] = [
+          {
+            name: "a tracker row",
+            t: run.goblin2,
+            open: async () => {
+              const sheet = await openPanel(dm, "Initiative");
+              await sheet.getByRole("button", { name: /^Goblin 2/ }).first().click();
+            },
+          },
+          {
+            name: "the party panel",
+            t: run.thorn,
+            open: async () => {
+              const sheet = await openPanel(dm, "Party");
+              await sheet.getByRole("button", { name: /^Thorn/ }).first().click();
+            },
+          },
+          {
+            name: "the outliner after Ruler",
+            t: run.goblin1,
+            open: async () => {
+              await pickTool(dm, "Ruler");
+              const sheet = await openPanel(dm, "Outliner");
+              await sheet.getByLabel("Search the scene").fill("Goblin 1");
+              await sheet.getByRole("button", { name: /^Goblin 1/ }).first().click();
+            },
+          },
+        ];
+        for (const o of opens) {
+          await setUp(dm, { ...PHONE, scale: 1 });
+          const s = await openOn(dm, run.barrel);
+          await panTo(dm, dmCdp, { x: o.t.x + 0.5, y: o.t.y + 0.5 }, { x: 195, y: s.top + 40 });
+          await o.open();
+          await bar(dm, o.t.name).waitFor();
+          await sleep(800);
+          await startCams(dm);
+          const cams = await stopCams(dm, 1_000);
+          assert.equal(cams.length, 1, `${o.name}: the map still moves after it landed: ${JSON.stringify(cams)}`);
+          const r = await tokenRect(dm, o.t);
+          const now = await rectOf(frame(dm));
+          assert.ok(r.bottom <= now.top, `${o.name} left ${o.t.name} under the strip: ${JSON.stringify({ r, now })}`);
+          await shots.take(dm, `br-f-6-${o.name.replaceAll(" ", "-")}`);
+        }
+      } finally {
+        await ops.send({ t: "encounter.end" });
+      }
+    });
+
+    test("br-f-7. Expand grows the bar up from the strip's foot and Collapse brings the strip back with focus on Expand, it lasts through another token and a drag, Close ends it, a turn of the phone and back rests, Expand shows only from F = 294, and a stored Larger is removed", async () => {
+      await homeTokens();
+      await dm.evaluate(() => localStorage.setItem("rvtt.tokenBarLarger", "1"));
+      await setUp(dm, { ...PHONE, scale: 1 });
+      assert.equal(await dm.evaluate(() => localStorage.getItem("rvtt.tokenBarLarger")), null, "the stored Larger was kept");
+      const strip = await openOn(dm, run.thorn);
+      const thorn = bar(dm, "Thorn");
+      assert.equal(await thorn.getAttribute("data-bar-state"), "rest", "a stored Larger opened the bar expanded");
+      await startCams(dm);
+      await thorn.getByRole("button", { name: "Expand", exact: true }).click();
+      await waitFor("the bar to expand", async () => ((await thorn.getAttribute("data-bar-state")) === "expanded" ? true : null));
+      const big = await steady(dm);
+      const cams = await stopCams(dm, 600);
+      assert.ok(cams.length <= 2, `Expand moved the map more than once: ${JSON.stringify(cams)}`);
+      assert.equal(big.bottom, strip.bottom, "the expanded bar left the strip's foot");
+      const h = big.bottom - big.top;
+      // Two thirds of 843, the layout's height, caps it: 562 (docs/design-v1-bar-compact.md 5.1).
+      assert.ok(h > 114 && h <= 563, `expanded ${h} px`);
+      const t = await tokenRect(dm, run.thorn);
+      assert.ok(t.bottom <= big.top, `the expanded bar covers Thorn: ${JSON.stringify({ t, big })}`);
+      await shots.take(dm, "br-f-7-expanded");
+
+      // A pinch leaves the height.
+      const touches = new Touches(dmCdp);
+      await touches.start([
+        { x: 30, y: 120, id: 1 },
+        { x: 30, y: 180, id: 2 },
+      ]);
+      for (let i = 1; i <= 6; i++)
+        await touches.move([
+          { x: 30, y: 120 - i * 5, id: 1 },
+          { x: 30, y: 180 + i * 5, id: 2 },
+        ]);
+      await touches.end();
+      await sleep(400);
+      assert.deepEqual(await rectOf(frame(dm)), big, "a pinch changed the expanded bar");
+
+      // Another token keeps it expanded.
+      const goblin = await middle(dm, run.goblin1);
+      if (goblin.y < big.top) {
+        await dm.touchscreen.tap(goblin.x, goblin.y);
+        await bar(dm, "Goblin 1").waitFor();
+        assert.equal(await bar(dm, "Goblin 1").getAttribute("data-bar-state"), "expanded", "another token rested the bar");
+        await dm.touchscreen.tap((await middle(dm, run.thorn)).x, (await middle(dm, run.thorn)).y);
+        await thorn.waitFor();
+      }
+
+      // Collapse: the strip, the map unmoved, focus on Expand.
+      const before = await readCamera(dm);
+      await thorn.getByRole("button", { name: "Collapse", exact: true }).click();
+      await waitFor("the bar to rest", async () => ((await thorn.getAttribute("data-bar-state")) === "rest" ? true : null));
+      assert.deepEqual(await steady(dm), strip, "Collapse left another box than the strip");
+      assert.deepEqual(await readCamera(dm), before, "Collapse moved the map");
+      assert.equal(await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") ?? null), "Expand", "focus after Collapse");
+
+      // Close ends it: the next bar rests.
+      await thorn.getByRole("button", { name: "Expand", exact: true }).click();
+      await waitFor("the bar to expand", async () => ((await thorn.getAttribute("data-bar-state")) === "expanded" ? true : null));
+      await thorn.getByRole("button", { name: /^Close/ }).first().click();
+      await thorn.waitFor({ state: "detached" });
+      await openOn(dm, run.thorn);
+      assert.equal(await thorn.getAttribute("data-bar-state"), "rest", "the bar opened expanded after Close");
+
+      // A turn of the phone with the strip held docks the bar, and back upright it rests again.
+      await dm.setViewportSize({ width: 844, height: 390 });
+      await sleep(600);
+      assert.notEqual(await thorn.getAttribute("data-bar-mode"), "span", "on its side the bar still spans");
+      await dm.setViewportSize({ width: 390, height: 844 });
+      await waitFor("the strip again", async () => ((await thorn.getAttribute("data-bar-mode")) === "span" && (await thorn.getAttribute("data-bar-state")) === "rest" ? true : null), 5_000);
+      assert.equal(await dm.evaluate(() => localStorage.getItem("rvtt.tokenBarLarger")), null, "Expand wrote the stored Larger");
+
+      // Expand is drawn from F = 294, the free area's height, and not at 293. F 210, a 320 x 440 window at 130%, scrolls instead.
+      const offered: string[] = [];
+      for (const view of [...[418, 419, 420, 421, 422, 423, 424, 425].map((height) => ({ width: 390, height, scale: 1 })), { width: 320, height: 440, scale: 1.3 }]) {
+        await setUp(dm, view);
+        const s = await openOn(dm, run.thorn);
+        const f = Math.round((s.bottom - (await freeTop(dm, view.scale))) / view.scale);
+        const expand = await thorn.getByRole("button", { name: "Expand", exact: true }).count();
+        const more = await thorn.getByRole("button", { name: "Scroll for more", exact: true }).count();
+        offered.push(`F ${f}: ${expand ? "Expand" : more ? "Scroll for more" : "neither"}`);
+        assert.equal(expand > 0, f >= 294, `at F ${f} Expand is ${expand ? "" : "not "}drawn`);
+        if (view.scale !== 1) assert.ok(more > 0, `at F ${f} the strip offers no Scroll for more`);
+        if (f < 294) assert.equal(await thorn.getAttribute("data-bar-state"), more ? "scrolls" : "rest", `at F ${f} the bar is ${await thorn.getAttribute("data-bar-mode")}, ${await thorn.getAttribute("data-bar-state")}`);
+      }
+      console.log(offered.join(", "));
+    });
+
+    test("br-f-8. the clearing move: a token whose label meets the strip moves up once, a Gargantuan as far as its top allows, a drop in the band once, and Ruler then Select, a gathering tap and a Multi-select removal never; a plain tap from a group counts", async () => {
+      await homeTokens();
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const strip = await openOn(pat, run.thorn);
+      const free = await freeTop(pat, 1);
+
+      // Goblin 2's foot 10 px above the strip: its label meets it, so the tap moves the map up once.
+      await panTo(pat, patCdp, { x: run.goblin2.x + 0.5, y: run.goblin2.y + 1 }, { x: 195, y: strip.top - 10 });
+      await startCams(pat);
+      const g = await middle(pat, run.goblin2);
+      await pat.touchscreen.tap(g.x, g.y);
+      await bar(pat, "Goblin 2").waitFor();
+      const moved = await stopCams(pat);
+      assert.ok(oneMoveUp(moved), `not one move up: ${JSON.stringify(moved)}`);
+      const cleared = await tokenRect(pat, run.goblin2);
+      assert.ok(cleared.bottom + 30 <= strip.top + 0.5, `Goblin 2's label still meets the strip: ${JSON.stringify({ cleared, strip })}`);
+      assert.deepEqual(await rectOf(frame(pat)), strip, "the clearing move moved the strip");
+
+      // The Gargantuan low on the screen clears as far as its top stays in the free area.
+      await panTo(pat, patCdp, { x: run.ancient.x + 2, y: run.ancient.y + 2 }, { x: 195, y: strip.top - 20 });
+      const a = await middle(pat, run.ancient);
+      await pat.touchscreen.tap(a.x, Math.min(a.y, strip.top - 10));
+      await bar(pat, "Ancient Black Dragon").waitFor();
+      await sleep(800);
+      const ancient = await tokenRect(pat, run.ancient);
+      assert.ok(ancient.top >= free - 1, `the clearing move took the Gargantuan's top out of the free area: ${JSON.stringify({ ancient, free })}`);
+      assert.ok(ancient.bottom + 30 <= strip.top + 0.5 || ancient.top <= free + 1, `the Gargantuan neither clears nor stops at its top: ${JSON.stringify(ancient)}`);
+
+      // Ruler, then Select, with the bar open: it comes back with no map move.
+      await homeTokens();
+      await setUp(pat, { ...PHONE, scale: 1 });
+      await openOn(pat, run.thorn);
+      await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 1 }, { x: 195, y: strip.top - 10 });
+      const still = await readCamera(pat);
+      await pickTool(pat, "Ruler");
+      await pickTool(pat, "Select");
+      await bar(pat, "Thorn").waitFor();
+      await sleep(600);
+      assert.deepEqual(await readCamera(pat), still, "Ruler then Select moved the map");
+      // A blackout's end with the selection kept: the map comes back at the scene's view, as always, and the bar with it, with no clearing move, though Thorn stands under the strip there.
+      await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { x: run.thorn.x, y: run.thorn.y + 5 } });
+      await waitFor("Thorn five cells down", () => (patSocket.state?.tokens[run.thorn.id]?.y === run.thorn.y + 5 ? true : null));
+      await ops.send({ t: "view.blackout", blackout: true });
+      await pat.getByText("The DM has paused the game.").waitFor();
+      await ops.send({ t: "view.blackout", blackout: false });
+      await bar(pat, "Thorn").waitFor();
+      const back = (await view(pat)).cam;
+      await sleep(1_000);
+      assert.deepEqual((await view(pat)).cam, back, "the map moved after the blackout's end");
+      const under = await tokenRect(pat, { ...run.thorn, y: run.thorn.y + 5 });
+      assert.ok(under.bottom + 30 > strip.top, `Thorn stood clear of the strip at the scene's view, so the step tests nothing: ${JSON.stringify({ under, strip })}`);
+      await homeTokens();
+
+      // A drop in the band: the bar hides for the drag, comes back, and the map moves once to clear it.
+      const from = await middle(pat, run.thorn);
+      await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 }, { x: 195, y: 300 });
+      const start = await middle(pat, run.thorn);
+      await startCams(pat);
+      await touchSwipe(patCdp, start, { x: start.x, y: strip.top - 14 }, { steps: 20, everyMs: 24 });
+      await bar(pat, "Thorn").waitFor();
+      const dropped = await stopCams(pat, 1_500);
+      assert.ok(oneMoveUp(dropped), `the drop did not move the map once: ${JSON.stringify(dropped)}`);
+      const landed = await tokenRect(pat, run.thorn);
+      assert.ok(landed.bottom + 30 <= strip.top + 0.5, `the dropped token's label meets the strip: ${JSON.stringify({ landed, strip, from })}`);
+      await homeTokens();
+
+      // The DM's Multi-select: a gathering tap and a removal never move the map, and a plain tap from the group does (review BC-OPUS-37).
+      await setUp(dm, { ...PHONE, scale: 1 });
+      const dmStrip = await openOn(dm, run.thorn);
+      await (await barControl(bar(dm, "Thorn"), "Multi-select")).click();
+      await panTo(dm, dmCdp, { x: run.goblin2.x + 0.5, y: run.goblin2.y + 1 }, { x: 195, y: dmStrip.top - 10 });
+      const gathered = await readCamera(dm);
+      const g2 = await middle(dm, run.goblin2);
+      await dm.touchscreen.tap(g2.x, g2.y);
+      const group = dm.getByRole("dialog", { name: "2 selected tokens" });
+      await group.waitFor();
+      await sleep(800);
+      assert.deepEqual(await readCamera(dm), gathered, "a gathering tap moved the map");
+      await dm.touchscreen.tap(g2.x, g2.y);
+      await bar(dm, "Thorn").waitFor();
+      await sleep(800);
+      assert.deepEqual(await readCamera(dm), gathered, "a removal moved the map");
+      await dm.touchscreen.tap(g2.x, g2.y);
+      await group.waitFor();
+      await (await barControl(group, "Multi-select")).click();
+      // Its label meeting the bar again, which an Expand for Multi-select may have moved.
+      const over = await steady(dm);
+      await panTo(dm, dmCdp, { x: run.goblin2.x + 0.5, y: run.goblin2.y + 1 }, { x: 195, y: over.top - 10 });
+      const g3 = await middle(dm, run.goblin2);
+      await startCams(dm);
+      await dm.touchscreen.tap(g3.x, g3.y);
+      await bar(dm, "Goblin 2").waitFor();
+      const plain = await stopCams(dm);
+      assert.ok(oneMoveUp(plain), `a plain tap from the group did not move the map once: ${JSON.stringify(plain)}`);
+
+      // A duplicate with the bar open opens its copy's bar, one request: the map moves once at most.
+      const known = new Set(Object.keys(dmSocket.state?.tokens ?? {}));
+      await startCams(dm);
+      await (await barControl(bar(dm, "Goblin 2"), "Duplicate")).click();
+      const copy = await waitFor("the copy", () => Object.keys(dmSocket.state?.tokens ?? {}).find((id) => !known.has(id)) ?? null);
+      try {
+        await waitFor("the copy's bar", async () => ((await frame(dm).getAttribute("aria-label")) !== "Goblin 2 actions" ? true : null));
+        const copied = await stopCams(dm);
+        assert.ok(copied.length === 1 || oneMoveUp(copied), `the duplicate moved the map more than once: ${JSON.stringify(copied)}`);
+      } finally {
+        await ops.send({ t: "token.delete", tokenId: copy });
+      }
+      await shots.take(dm, "br-f-8-group-to-token");
+    });
+
+    test("br-f-9. a roll card at the foot lifts the strip by its height and back; in a fight with Multi-select at 320 x 568 at 130% it folds into Roll asked under the strip; Roll asked hides the bar and Actions brings it back; a card while expanded scrolls the strip and it expands again after", async () => {
+      await homeTokens();
+      const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+      const rollAsked = pat.getByRole("button", { name: /^Roll asked/ });
+      const asked: string[] = [];
+      const ask = async (): Promise<string> => {
+        const id = randomUUID();
+        asked.push(id);
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        return id;
+      };
+      const close = (id: string) => ops.send({ t: "roll.close", rollIds: [id] });
+      try {
+        // 390 x 844: the strip rises by the card's height, stays 114 tall, and comes back down as it goes.
+        await setUp(pat, { ...PHONE, scale: 1 });
+        const strip = await openOn(pat, run.thorn);
+        let id = await ask();
+        await card.waitFor();
+        const lifted = await steady(pat);
+        const c = await rectOf(card);
+        assert.equal(Math.round(lifted.bottom - lifted.top), 114, "the strip's height over the card");
+        assert.ok(lifted.bottom <= c.top + 0.5, `the strip meets the card: ${JSON.stringify({ lifted, c })}`);
+        assert.ok(Math.abs(strip.bottom - lifted.bottom - (c.bottom - c.top)) <= 2, `the strip rose ${strip.bottom - lifted.bottom}, the card is ${c.bottom - c.top} tall`);
+        await shots.take(pat, "br-f-9-card-390");
+        await close(id);
+        await card.waitFor({ state: "detached" });
+        assert.deepEqual(await steady(pat), strip, "the strip did not come back down");
+
+        // 320 x 568 at 130%, in a fight with Multi-select on: the card folds into Roll asked, the strip stays and never turns compact, and both come back.
+        await ops.send({
+          t: "encounter.start",
+          entries: [
+            { id: randomUUID(), tokenId: run.goblin1.id, value: 15 },
+            { id: randomUUID(), tokenId: run.thorn.id, value: 5 },
+          ],
+        });
+        // The first Next starts the fight, and its turn band shows.
+        await ops.send({ t: "encounter.next" });
+        try {
+          await setUp(pat, { width: 320, height: 568, scale: 1.3 });
+          const small = await openOn(pat, run.thorn);
+          await (await barControl(bar(pat, "Thorn"), "Multi-select")).click();
+          const several = await steady(pat);
+          id = await ask();
+          await rollAsked.waitFor();
+          assert.equal(await card.isVisible(), false, "the card stands under the held strip");
+          assert.equal(await frame(pat).getAttribute("data-bar-mode"), "span", "the bar turned compact for the card");
+          assert.deepEqual(await steady(pat), several, "the card moved the strip");
+          await shots.take(pat, "br-f-9-roll-asked-320");
+          await close(id);
+          await rollAsked.waitFor({ state: "detached" });
+          assert.deepEqual(await steady(pat), several, "the strip moved as the card went");
+          assert.ok(small.bottom >= several.bottom, "Multi-select's row lowered the strip");
+        } finally {
+          await ops.send({ t: "encounter.end" });
+        }
+
+        // With no bar the card stands. Thorn's tap then gives the strip, the card folding into Roll asked. The card stands over all but the map's top few px here, so Thorn goes there first, his middle just under the top bar.
+        await setUp(pat, { width: 320, height: 568, scale: 1.3 });
+        await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 }, { x: 160, y: (await freeTop(pat, 1.3)) + 4 });
+        id = await ask();
+        await card.waitFor();
+        await pat.getByRole("dialog", { name: "The DM asks for a roll" }).getByRole("button", { name: "Later" }).waitFor();
+        const m = await middle(pat, run.thorn);
+        if (m.y < (await rectOf(card)).top) {
+          await pat.touchscreen.tap(m.x, m.y);
+          await bar(pat, "Thorn").waitFor();
+          assert.equal(await frame(pat).getAttribute("data-bar-mode"), "span", "a card standing opened the bar compact");
+          await rollAsked.waitFor();
+          // Roll asked hides the bar and keeps Thorn: the card is answered, and Actions brings the strip back.
+          await rollAsked.click();
+          await card.waitFor();
+          await frame(pat).waitFor({ state: "detached" });
+          await card.getByLabel("Total Thorn rolled").fill("14");
+          await card.getByRole("button", { name: "Send", exact: true }).click();
+          await card.waitFor({ state: "detached" });
+          // Thorn again, out from under the answer's chip at the top, brings the strip back, the held strip's mode kept.
+          await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 }, { x: 160, y: 300 });
+          await openOn(pat, run.thorn);
+          assert.equal(await frame(pat).getAttribute("data-bar-mode"), "span");
+        } else {
+          assert.fail(`the card covers Thorn at 320 x 568 at 130%: ${JSON.stringify(m)}`);
+        }
+        await close(id);
+
+        // 375 x 667, expanded: a card scrolls the strip and keeps expanded, then it expands again, the map unmoved.
+        await setUp(pat, { width: 375, height: 667, scale: 1 });
+        await openOn(pat, run.thorn);
+        const thorn = bar(pat, "Thorn");
+        await thorn.getByRole("button", { name: "Expand", exact: true }).click();
+        await waitFor("the bar to expand", async () => ((await thorn.getAttribute("data-bar-state")) === "expanded" ? true : null));
+        const big = await steady(pat);
+        const cam = await readCamera(pat);
+        id = await ask();
+        await card.waitFor();
+        await waitFor("the strip to scroll", async () => ((await thorn.getAttribute("data-bar-state")) === "scrolls" ? true : null));
+        await shots.take(pat, "br-f-9-expanded-card-375");
+        await close(id);
+        await card.waitFor({ state: "detached" });
+        await waitFor("the bar to expand again", async () => ((await thorn.getAttribute("data-bar-state")) === "expanded" ? true : null));
+        assert.deepEqual(await steady(pat), big, "the bar came back at another height");
+        assert.deepEqual(await readCamera(pat), cam, "the map moved");
+      } finally {
+        if (asked.length > 0) await ops.send({ t: "roll.close", rollIds: asked });
+      }
+    });
+
+    test("br-f-10. a compact bar turns into the strip as F reaches 148 and never back, the strip 96 px with its header and quick row whole over a 44 px band, and edge tokens with the summary row showing are panned into the band and tapped", async () => {
+      await homeTokens();
+      const z = 1.3;
+      // 349 px at 130% opens compact, F about 140, and F reaches 148 just past 360 (docs/design-v1-bar-compact.md 3.1, a 320 x 360 window).
+      await setUp(pat, { width: 320, height: 349, scale: z });
+      await openOn(pat, run.thorn);
+      const thorn = bar(pat, "Thorn");
+      assert.equal(await thorn.getAttribute("data-bar-mode"), "compact", "F 140 opens compact");
+      const cam = await readCamera(pat);
+      // The window grows a pixel at a time until F reaches 148, a pixel or two past 360 here, where the top bar's and the toolbar's borders count.
+      let grown = 360;
+      for (; grown <= 368; grown++) {
+        await pat.setViewportSize({ width: 320, height: grown });
+        await sleep(300);
+        if ((await thorn.getAttribute("data-bar-mode")) === "span") break;
+      }
+      console.log(`br-f-10: the compact bar turned into the strip at 320 x ${grown} at 130%`);
+      await waitFor("the strip", async () => ((await thorn.getAttribute("data-bar-mode")) === "span" ? true : null), 3_000);
+      const strip = await steady(pat);
+      // The map keeps its middle as the window grows, as it always has, and moves no further: no clearing move.
+      const now = await readCamera(pat);
+      assert.ok(cam && now && now.x === cam.x && Math.abs(now.y - (cam.y + (grown - 349) / 2)) <= 0.5 && now.scale === cam.scale, `turning into the strip moved the map: ${JSON.stringify({ cam, now })}`);
+      const free = await freeTop(pat, z);
+      const f = (strip.bottom - free) / z;
+      assert.ok(f >= 148 && f < 149, `F is ${f}`);
+      assert.ok(Math.abs((strip.bottom - strip.top) / z - (f - 52)) <= 1, `the strip is ${(strip.bottom - strip.top) / z} tall at F ${f}`);
+      assert.ok(Math.abs((strip.top - 8 * z - free) / z - 44) <= 1.5, `the band is ${(strip.top - 8 * z - free) / z}`);
+      // The quick row is the strip's content, checked wherever the strip draws one.
+      if ((await thorn.locator("[data-rest-row]").count()) > 0) {
+        const row = await rectOf(thorn.locator("[data-rest-row]"));
+        assert.ok(row.top >= strip.top && row.bottom <= strip.bottom + 0.5, `the quick row is cut: ${JSON.stringify({ row, strip })}`);
+      }
+      assert.ok(await wholeInReach(thorn.getByRole("button", { name: /^Close/ }).first()), "the header's Close is cut");
+      await shots.take(pat, "br-f-10-strip-148");
+      await pat.setViewportSize({ width: 320, height: 349 });
+      await sleep(600);
+      assert.equal(await thorn.getAttribute("data-bar-mode"), "span", "the strip turned back compact");
+
+      // The DM, a check standing, the summary row in its place: the edge tokens pan into the band and take a tap.
+      await setUp(dm, { width: 320, height: grown, scale: z });
+      await checks([run.goblin1]);
+      await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+      // With no bar the card may stand over Thorn: the first token clear of it opens the strip.
+      await openClear(dm, [run.thorn, run.goblin2, run.lantern, run.goblin1, run.barrel]);
+      for (let h = grown; h <= grown + 8 && (await frame(dm).getAttribute("data-bar-mode")) !== "span"; h++) {
+        await dm.setViewportSize({ width: 320, height: h });
+        await sleep(300);
+      }
+      assert.equal(await frame(dm).getAttribute("data-bar-mode"), "span", "the DM's bar never rests as the strip near F 148");
+      const s = await steady(dm);
+      const target = { x: (s.left + s.right) / 2, y: s.top - 8 * z - 22 * z };
+      const missed: string[] = [];
+      for (const t of EDGE_TOKENS) {
+        await panTo(dm, dmCdp, { x: t.x + t.cells / 2, y: t.y + t.cells / 2 }, target);
+        const r = await tokenRect(dm, t);
+        const p = { x: Math.max(r.left + 4, Math.min(r.right - 4, target.x)), y: Math.max(r.top + 4, Math.min(r.bottom - 4, target.y)) };
+        if ((await hitAt(dm, p)) !== "CANVAS") {
+          missed.push(`${t.name}: ${JSON.stringify(p)} is covered`);
+          continue;
+        }
+        await dm.touchscreen.tap(p.x, p.y);
+        try {
+          await bar(dm, t.name).waitFor({ timeout: 3_000 });
+        } catch {
+          missed.push(`${t.name}: the tap at ${JSON.stringify(p)} opened nothing`);
+        }
+      }
+      await shots.take(dm, "br-f-10-summary-row-148");
+      assert.deepEqual(missed, []);
+    });
+
+    test("br-f-11. where the band is under 96, a toast is one 44 px row over the top bar's row clear of End turn and the band; a tap shows it whole with its time held, Close or Escape shrinks it with what it had left, and one waiting meanwhile gets its whole time once drawn", async () => {
+      await homeTokens();
+      const z = 1.3;
+      await ops.send({
+        t: "encounter.start",
+        entries: [
+          { id: randomUUID(), tokenId: run.thorn.id, value: 20 },
+          { id: randomUUID(), tokenId: run.goblin1.id, value: 5 },
+        ],
+      });
+      // The first Next starts the fight on Thorn's turn, so End turn stands in the band.
+      await ops.send({ t: "encounter.next" });
+      try {
+        await setUp(pat, { width: 320, height: 440, scale: z });
+        const strip = await openOn(pat, run.thorn);
+        const rowOf = (text: string) => pat.locator('[data-toast-form="row"]').filter({ hasText: text });
+        const wholeOf = (text: string) => pat.locator('[data-toast-form="whole"]').filter({ hasText: text });
+        await ops.send({ t: "log.whisper", to: [run.patId], text: "First whisper." });
+        const first = rowOf("First whisper.");
+        try {
+          await first.waitFor({ timeout: 8_000 });
+        } catch (err) {
+          await shots.take(pat, "br-f-11-no-row");
+          throw err;
+        }
+        const r = await rectOf(first);
+        assert.ok(Math.abs(r.bottom - r.top - 44 * z) <= 1, `the row is ${r.bottom - r.top} tall`);
+        const end = await rectOf(pat.getByRole("button", { name: "End turn" }));
+        assert.ok(r.bottom <= end.top || r.top >= end.bottom || r.right <= end.left || r.left >= end.right, `the row covers End turn: ${JSON.stringify({ r, end })}`);
+        const bottom = strip.top - 8 * z;
+        assert.deepEqual(await coveredIn(pat, { left: strip.left, right: strip.right, top: bottom - 44 * z, bottom }), [], "something stands in the band");
+        await shots.take(pat, "br-f-11-row");
+
+        // Shown whole, its time stops: it outlasts its 5 s, and a whisper that comes meanwhile waits undrawn.
+        await first.getByRole("button").first().click();
+        await wholeOf("First whisper.").waitFor();
+        await ops.send({ t: "log.whisper", to: [run.patId], text: "Second whisper." });
+        await sleep(6_000);
+        assert.equal(await wholeOf("First whisper.").count(), 1, "the whole toast ran out while shown whole");
+        const second = rowOf("Second whisper.");
+        assert.equal(await pat.locator("[data-toast]").filter({ hasText: "Second whisper." }).count(), 0, "the whisper that came meanwhile was drawn");
+        await shots.take(pat, "br-f-11-whole");
+        // Escape shrinks it, and the one that waited takes the row, its time starting as it draws (docs/design-v1-bar-compact.md 3.5).
+        await pat.keyboard.press("Escape");
+        await second.waitFor({ timeout: 2_000 });
+        await sleep(3_500);
+        assert.equal(await second.count(), 1, "the waiting whisper ran out before its time");
+        // Close shrinks it as Escape does, its time held while whole and running on after.
+        await second.getByRole("button").first().click();
+        await wholeOf("Second whisper.").getByRole("button", { name: "Close", exact: true }).click();
+        await second.waitFor();
+        await second.waitFor({ state: "detached", timeout: 6_000 });
+      } finally {
+        await ops.send({ t: "encounter.end" });
+      }
+    });
+    test("br-f-12. the quick row clips no control's focus ring, the 4 px past each control that its 2 px outline and 2 px offset take, and it lines up within 1 px, at 390 x 844 and 320 x 568 at 130%", async (t) => {
+      await homeTokens();
+      for (const view of [
+        { ...PHONE, scale: 1 },
+        { width: 320, height: 568, scale: 1.3 },
+      ]) {
+        const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(pat, view);
+        await openOn(pat, run.thorn);
+        const row = frame(pat).locator("[data-rest-row]");
+        if ((await row.count()) === 0) {
+          // The quick row is the strip's content (the content lane's), drawn once it stands on this frame.
+          t.skip("no quick row in the strip");
+          return;
+        }
+        const cut = await row.evaluate((el, ring) => {
+          type R = { left: number; top: number; right: number; bottom: number };
+          type E = { getBoundingClientRect(): R & { width: number; height: number }; offsetWidth: number; querySelectorAll(s: string): ArrayLike<E>; getAttribute(n: string): string | null; textContent: string | null };
+          const box = el as unknown as E;
+          const r = box.getBoundingClientRect();
+          const zoom = box.offsetWidth > 0 ? r.width / box.offsetWidth : 1;
+          const reach = ring * zoom;
+          const out: string[] = [];
+          for (const c of Array.from(box.querySelectorAll("[data-rest-shown] :is(button, input, a[href], [tabindex]:not([tabindex='-1']))"))) {
+            const b = c.getBoundingClientRect();
+            if (b.width === 0 || b.height === 0) continue;
+            if (b.left - reach < r.left - 0.5 || b.right + reach > r.right + 0.5 || b.top - reach < r.top - 0.5 || b.bottom + reach > r.bottom + 0.5)
+              out.push(`${c.getAttribute("aria-label") ?? c.textContent ?? "?"}: ${JSON.stringify(b)} in ${JSON.stringify(r)}`);
+          }
+          return out;
+        }, 4);
+        assert.deepEqual(cut, [], `${label}: the row clips these controls' focus rings`);
+        assert.deepEqual(alignmentLines(await measureAlignment(row), `${label} the quick row`), []);
+        await shots.take(pat, `br-f-12-row-${view.width}`);
+      }
+    });
+  });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)
 
