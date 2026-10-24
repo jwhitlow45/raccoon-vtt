@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 22;
-export const OP_VERSION = 20;
+export const OP_VERSION = 21;
 
 export type MigrationStep = {
   from: number;
@@ -593,6 +593,35 @@ export const opMigrations: MigrationStep[] = [
     to: 20,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 26 (design 9.4, Previous): no op changes shape, so
+    // the step is the identity. From this version a Next names in its saved
+    // step the row flags it changed (`EncounterSnapshot.turnFlags`), and a
+    // Previous takes back only what Next did: the round, the active row and
+    // its turn start, and those flags (`takesBackTurnOnly`). Rows the DM
+    // added, removed or changed during the turn stay as the DM left them.
+    // Older ops replay by the rule they were written under, where Previous
+    // put back the step's whole encounter, so a stored restore's hash
+    // guards still match.
+    //
+    // `turnFlags` is a new optional field of a saved step, and the snapshot
+    // number stays at 22. An older build loads such a snapshot, whose
+    // reducer ignores the field and puts back the whole encounter as it
+    // always did, so nothing reads under a rule it was not written for.
+    // Only its strict import schema refuses the field, as an older build's
+    // import refuses any newer export.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 21. Rollback: an older build refuses to migrate a
+    // version 21 op down (runMigrations), so a room whose log holds one
+    // after its last snapshot would not load there. A clean shutdown writes
+    // a snapshot after the last op, and an older build loads it. So only a
+    // room with version 21 ops after its last snapshot needs the backup from
+    // before the deploy.
+    from: 20,
+    to: 21,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -990,6 +1019,19 @@ export function logsByAudience(opVersion: number | undefined): boolean {
  */
 export function combatUses(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 20);
+}
+
+/**
+ * Whether Previous takes back only what Next did (design 9.4): the round,
+ * the active row and its turn start, and the row flags its saved step names
+ * (`EncounterSnapshot.turnFlags`), leaving the rows the DM added, removed
+ * or changed during the turn. Ops stored before version 21 put back the
+ * step's whole encounter and replay by that rule, and so does a Previous of
+ * a step saved before it, which names no flags. Live ops carry no stored
+ * version and take today's rule.
+ */
+export function takesBackTurnOnly(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 21);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

@@ -1664,8 +1664,33 @@ export type EncounterSnapshot = {
   companionReactions?: TokenId[];
   /** What the turn start replaced for each participant (docs/design-v1-combat-controls.md 3.3). Absent when nothing. */
   turnUses?: TurnUses[];
+  /**
+   * The flags of TURN_FLAGS this `next` changed on each row (design 9.4),
+   * whose values before it are `encounter`'s copy of the row. From op
+   * version 21 `prev` puts back only these, with the round, the active row,
+   * its turn start and the rows' TURN_MARKS, so the rows the DM added,
+   * removed or changed during the turn stay as the DM left them. Empty when
+   * it changed none. Absent in steps saved before op version 21, whose
+   * `prev` puts back `encounter` whole.
+   */
+  turnFlags?: { entryId: EntryId; flags: TurnFlag[] }[];
   at: string;
 };
+
+/**
+ * The fields of a row a turn's start changes that the DM and players change
+ * too, during any turn: a step names those its `next` changed
+ * (EncounterSnapshot.turnFlags), so Previous puts back only its own.
+ */
+export const TURN_FLAGS = ["reactionUsed", "hidden"] as const;
+export type TurnFlag = (typeof TURN_FLAGS)[number];
+/**
+ * The marks of whose turn has come, which only the turns themselves set: a
+ * turn's start by Next or by a removal, and a controlled ride taken during
+ * one. Previous takes back every turn since its step, so it puts these back
+ * as the step held them on every row the step holds.
+ */
+export const TURN_MARKS = ["hadTurn", "markRound"] as const;
 
 /**
  * The SRD 5.2.1's 18 skills (page 9), each under its usual ability in

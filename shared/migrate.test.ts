@@ -24,6 +24,7 @@ import {
   hiddenRowsShareNoMount,
   logsByAudience,
   combatUses,
+  takesBackTurnOnly,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -1131,8 +1132,7 @@ describe("follow-up batch 23: op version 19, snapshot version 21 (design 7.3, Lo
 });
 
 describe("combat uses: op version 20, snapshot version 22 (docs/design-v1-combat-controls.md 3.6)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 20);
+  test("is the snapshot version now", () => {
     assert.equal(SNAPSHOT_VERSION, 22);
   });
 
@@ -1169,5 +1169,27 @@ describe("combat uses: op version 20, snapshot version 22 (docs/design-v1-combat
 
   test("a version 20 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 20, 19, opMigrations), /down/);
+  });
+});
+
+describe("Previous takes back only the turn: op version 21 (design 9.4)", () => {
+  test("is the version now, and the snapshot version stays", () => {
+    assert.equal(OP_VERSION, 21);
+    assert.equal(SNAPSHOT_VERSION, 22);
+  });
+
+  test("the op step is the identity", () => {
+    const ops: unknown[] = [{ t: "encounter.next" }, { t: "encounter.prev", from: { entry: "e1", round: 2 } }, { t: "encounter.add", entries: [{ id: "e9", value: 12 }] }];
+    for (const op of ops) assert.equal(runMigrations(op, 20, 21, opMigrations), op);
+  });
+
+  test("only ops stored before version 21 put back the whole encounter", () => {
+    assert.equal(takesBackTurnOnly(20), false);
+    assert.equal(takesBackTurnOnly(21), true);
+    assert.equal(takesBackTurnOnly(undefined), true);
+  });
+
+  test("a version 21 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 21, 20, opMigrations), /down/);
   });
 });

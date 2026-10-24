@@ -436,6 +436,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       return [{ ...kept, holderId, ...(keptMarks ? { marks: keptMarks } : {}), ...(mappedLink !== undefined ? { link: mappedLink } : {}) }];
     });
     if (turnUses.length > 0) next.turnUses = turnUses;
+    // Kept even when empty: a step without them is one from before op version 21, whose Previous puts back the whole encounter.
+    if (snap.turnFlags) next.turnFlags = snap.turnFlags.filter((f) => entries.has(f.entryId)).map((f) => ({ ...f, entryId: entries.of(f.entryId) }));
     return next;
   });
   for (const h of Object.values(state.handouts)) {

@@ -3,6 +3,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import type { ActorTarget, Op } from "./protocol.ts";
 import type { ProjectedState } from "./project.ts";
 import { moveGroups } from "./rules/attach.ts";
+import { stepsTakenBack } from "./reducer/encounter.ts";
 import { nextTurn } from "./rules/initiative.ts";
 
 /**
@@ -288,7 +289,9 @@ export function reads(op: Op, state: RoomState): Reads {
     case "encounter.next":
       return of([], ["encounter", ...companionScene(state)]);
     case "encounter.prev": {
-      const saved = state.encounterHistory?.[state.encounterHistory.length - 1]?.companionReactions ?? [];
+      // Every step it takes back, which is more than one when the turn it would resume has left the fight.
+      const steps = state.encounter ? stepsTakenBack(state.encounter, state.encounterHistory ?? [], true) : [];
+      const saved = steps.flatMap((s) => s.companionReactions ?? []);
       return of([{ key: keys.encounterHistory }, ...saved.map((id) => ({ key: keys.token(id) }))], ["encounter"]);
     }
 

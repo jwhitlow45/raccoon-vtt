@@ -109,6 +109,29 @@ describe("combat uses through an import (docs/design-v1-combat-controls.md 3.6)"
   });
 });
 
+describe("a saved step's row flags through an import (design 9.4, op version 21)", () => {
+  test("they come through under the rows' new ids, a row that did not come through is left out, and an empty list stays", () => {
+    const before = played();
+    assert.equal(before.encounterHistory.length, 3);
+    before.encounterHistory[0]!.turnFlags = [
+      { entryId: "et", flags: ["reactionUsed", "hidden"] },
+      { entryId: "gone", flags: ["hidden"] },
+    ];
+    assert.deepEqual(before.encounterHistory[1]!.turnFlags, [], "a Next saves its flags, none here");
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(before)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    let n = 0;
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => `n${n++}` });
+    const thorn = Object.values(out.tokens).find((t) => t.name === "Thorn")!.id;
+    const row = out.encounter!.entries.find((e) => e.tokenId === thorn)!.id;
+    assert.deepEqual(out.encounterHistory[0]!.turnFlags, [{ entryId: row, flags: ["reactionUsed", "hidden"] }]);
+    assert.deepEqual(out.encounterHistory[1]!.turnFlags, [], "so Previous still takes back only the turn");
+    const bad = JSON.parse(JSON.stringify(before));
+    bad.encounterHistory[0].turnFlags[0].flags = ["value"];
+    assert.equal(parseRoomState(bad).ok, false, "a row's value is never a flag Previous puts back");
+  });
+});
+
 describe("marks through an import that changes a link (docs/design-v1-combat-controls.md 2.4 and 3.6)", () => {
   /** The fight with the lurker's own turn begun, Lunge saved by its start, and Acid Spit spent since. */
   function file(): RoomState {

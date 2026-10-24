@@ -12,8 +12,8 @@ import { DM, P1, P2, chance, character, env, int, pick, rng, room, token } from 
  * setting changes, the DM's initiative rolls, open and secret, and fights
  * ended and started again. The test keeps its
  * own record of which rows have had their turn, from the acting row after
- * each op, with Previous taking back what its step showed, and checks after
- * every op:
+ * each op, with Previous taking back what its step showed on the rows the
+ * step held, and checks after every op:
  *
  * - each player's and a table display's order is exactly the rows the older
  *   rules give them (the same state under "Everyone") that the setting
@@ -46,8 +46,13 @@ const CREATURES: ActorTarget[] = [
   { characterId: "npc" },
 ];
 
-/** What the test itself knows: the rows whose turn came, and what each Next found, for Previous. */
-type Record_ = { turned: Set<string>; steps: Set<string>[] };
+/**
+ * What the test itself knows: the rows whose turn came, and what each Next
+ * found, for Previous: the rows whose turn had come, the rows in the fight,
+ * and the row acting then, whose turn Previous resumes.
+ */
+type Step = { turned: Set<string>; rows: Set<string>; resumes: string | null };
+type Record_ = { turned: Set<string>; steps: Step[] };
 
 function shownByRecord(state: RoomState, record: Record_, id: string, viewer: Viewer): boolean {
   const reveal: OrderReveal = state.meta.settings.playersSeeOrder ?? "all";
@@ -97,16 +102,26 @@ function randomOp(r: () => number, state: RoomState, n: number): Op {
 }
 
 /** The record after an op that applied. */
-function follow(record: Record_, after: RoomState, op: Op): Record_ {
+function follow(record: Record_, before: RoomState, after: RoomState, op: Op): Record_ {
   if (op.t === "encounter.end") return { turned: new Set(), steps: [] };
   if (op.t === "encounter.start") return { turned: new Set(), steps: [] };
   let next = record;
   // Each Next the DM makes saves a step, the last 20 kept (MAX_HISTORY).
   if (op.t === "encounter.next") {
-    next = { turned: new Set(record.turned), steps: [...record.steps, new Set(record.turned)].slice(-20) };
+    const step: Step = { turned: new Set(record.turned), rows: new Set(before.encounter!.entries.map((e) => e.id)), resumes: before.encounter!.activeEntryId };
+    next = { turned: new Set(record.turned), steps: [...record.steps, step].slice(-20) };
   } else if (op.t === "encounter.prev") {
+    // Previous takes back each step's marks on the rows it holds, a row added since keeping its own, and goes on down
+    // while the turn a step would resume is a row's that has left the fight (design 9.4).
     const steps = [...record.steps];
-    next = { turned: steps.pop() ?? new Set(), steps };
+    const inFight = new Set(after.encounter!.entries.map((e) => e.id));
+    let turned = record.turned;
+    for (let step = steps.pop(); step; step = steps.pop()) {
+      const holds = step.rows;
+      turned = new Set([...step.turned, ...[...turned].filter((id) => !holds.has(id))]);
+      if (step.resumes === null || inFight.has(step.resumes) || steps.length === 0) break;
+    }
+    next = { turned, steps };
   }
   const active = after.encounter?.activeEntryId;
   if (active && !next.turned.has(active)) next = { ...next, turned: new Set([...next.turned, active]) };
@@ -182,7 +197,7 @@ describe("the order setting over random fights (docs/design-v1-combat-flow.md 11
           secretLines.set(result.state.log.at(-1)!.id, "tokenId" in creature && creature.tokenId === "lent" ? ["p2"] : []);
           secretRolls++;
         }
-        record = follow(record, result.state, op);
+        record = follow(record, state, result.state, op);
         state = result.state;
         check(state, record, `seed ${s}, op ${n} (${op.t})`);
       }

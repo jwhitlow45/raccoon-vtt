@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
@@ -425,6 +425,11 @@ const encounterSnapshot = z.strictObject({
         link: z.string().min(1).max(100).optional(),
       }),
     )
+    .max(600)
+    .optional(),
+  // The row flags a Next changed (design 9.4), none in backups from before op version 21.
+  turnFlags: z
+    .array(z.strictObject({ entryId: id, flags: z.array(z.enum(TURN_FLAGS)).min(1).max(TURN_FLAGS.length) }))
     .max(600)
     .optional(),
   at: iso,

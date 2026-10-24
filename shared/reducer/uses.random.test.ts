@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { resolveDiceOp, type DiceOp } from "../dice/resolve.ts";
 import { LIMITS } from "../limits.ts";
+import { OP_VERSION } from "../migrate.ts";
 import type { Actor, PromptKey, RoomState, Settled, Viewer } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import { stableStringify } from "../project.ts";
@@ -14,14 +15,17 @@ import { hpUndoRestore } from "./hpUndo.ts";
  * Random sequences of what combat uses juggle (docs/design-v1-combat-controls.md
  * 11): spends and give backs of every kind, prompts settled from every
  * surface, Skip and Reopen, rolls, take backs, turn starts by Next and by
- * removal with a mount and a companion, Previous, rests, In lair and block
- * changes. After every op the invariants hold:
+ * removal with a mount and a companion, Previous, rests, In lair, rows
+ * added and values set, and block changes. After every op the invariants
+ * hold:
  *
  * - every count is within its bounds: a mark's `used` 1 to its `max`, a
  *   resource's 0 to its `max`, pips and Resistance at most their counts;
  * - a creature holds at most `LIMITS.usesPerActor` marks;
  * - no occurrence is settled twice, and none after its turn;
  * - Next then Previous puts back every record, mark, damage type and pip;
+ * - Previous leaves the rows as the DM left them: the same rows in the same
+ *   order, each with its value and In lair (design 9.4);
  * - nothing a Long Rest brings back survives it;
  * - replaying the stored ops from the room's first state, its maps in
  *   another key order, rebuilds the same room.
@@ -170,7 +174,9 @@ function step(r: () => number, state: RoomState, n: number): { op: Op; who: View
     }
     case 13: {
       const missing = Object.entries(ROWS).filter(([id, row]) => state.tokens[id] && !state.encounter?.entries.some((e) => e.id === row || e.tokenId === id));
-      if (missing.length === 0) return null;
+      // With every creature in the fight, the DM sets a value instead, which Previous must leave as set.
+      const rows = state.encounter?.entries ?? [];
+      if (missing.length === 0) return rows.length > 0 ? { op: { t: "encounter.setValue", entryId: pick(r, rows).id, value: int(r, 1, 20) }, who: DM } : null;
       const [id] = pick(r, missing);
       return { op: { t: "encounter.add", entries: [{ id: `${ROWS[id]}-${n}`, tokenId: id, value: int(r, 1, 20) }] }, who: DM };
     }
@@ -182,6 +188,7 @@ function step(r: () => number, state: RoomState, n: number): { op: Op; who: View
     }
     case 16:
       return { op: { t: "token.update", tokenId: pick(r, ["dragon", "horse"]), patch: { actor: { srdId: pick(r, ["adult-red-dragon", "young-red-dragon", null]) } } }, who: DM };
+
     default:
       return { op: { t: "actor.hp", target: { characterId: "thorn" }, change: { kind: "set", cur: 0 } }, who: DM };
   }
@@ -198,6 +205,11 @@ function checkBounds(state: RoomState, at: string): void {
     }
   }
   for (const c of Object.values(state.characters)) for (const res of c.resources ?? []) assert.ok(res.used >= 0 && res.used <= res.max, `${at} ${c.id}: ${res.name}`);
+}
+
+/** What Previous must leave as the DM left it: the rows in order, each with its value and In lair. */
+function dmRows(state: RoomState): string {
+  return stableStringify((state.encounter?.entries ?? []).map((e) => [e.id, e.value, e.inLair]));
 }
 
 /** What Next then Previous must put back: every record, mark, damage type and pip. */
@@ -256,6 +268,7 @@ function run(seed: number, steps: number): { applied: number; settled: number; r
       }
     }
     checkBounds(result.state, at);
+    if (op.t === "encounter.prev") assert.equal(dmRows(result.state), dmRows(state), `${at}: Previous leaves the rows as the DM left them`);
     if (op.t === "encounter.next") {
       const back = applyOp(result.state, { t: "encounter.prev" }, DM, env(seq));
       assert.ok(back.ok, `${at}: Previous after Next`);
@@ -277,7 +290,7 @@ function run(seed: number, steps: number): { applied: number; settled: number; r
   // Replay from the first state as a reload hands it back, its maps in another order.
   let replayed = reordered(JSON.parse(JSON.stringify(first))) as RoomState;
   for (const { op, who, seq } of stored) {
-    const again = applyOp(replayed, op, who, { ...env(seq), opVersion: 20 });
+    const again = applyOp(replayed, op, who, { ...env(seq), opVersion: OP_VERSION });
     assert.ok(again.ok, `seed ${seed}: replay refused ${op.t} at ${seq}: ${again.ok ? "" : again.message}`);
     replayed = again.state;
   }
@@ -287,8 +300,9 @@ function run(seed: number, steps: number): { applied: number; settled: number; r
 
 describe("combat uses over random sequences (docs/design-v1-combat-controls.md 11)", () => {
   for (const seed of [1, 2, 3]) {
-    test(`seed ${seed}: 900 steps keep every invariant`, () => {
-      const { applied, settled, refused } = run(seed, 900);
+    // 1000 steps, since a Previous that keeps the rows added spreads the turns over more of them and settles fewer prompts in 900.
+    test(`seed ${seed}: 1000 steps keep every invariant`, () => {
+      const { applied, settled, refused } = run(seed, 1000);
       assert.ok(applied > 400, `seed ${seed}: only ${applied} applied`);
       assert.ok(settled > 20, `seed ${seed}: only ${settled} prompts settled`);
       assert.ok(refused > 20, `seed ${seed}: only ${refused} refused, so the refusals go untested`);

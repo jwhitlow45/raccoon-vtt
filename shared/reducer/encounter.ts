@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import type { Effect, Encounter, EncounterSnapshot, InitEntry, RoomState, Token, TurnStart, TurnUses, Viewer } from "../model.ts";
+import { TURN_FLAGS, TURN_MARKS, type Effect, type Encounter, type EncounterSnapshot, type InitEntry, type RoomState, type Token, type TurnFlag, type TurnStart, type TurnUses, type Viewer } from "../model.ts";
 import type { EntryInput, OpOf } from "../protocol.ts";
 import {
   anchorsForEntry,
@@ -10,7 +10,7 @@ import {
   tickEffects,
   unbindFromEntry,
 } from "../rules/durations.ts";
-import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew } from "../migrate.ts";
+import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
@@ -460,8 +460,19 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   writeEncounter(tx, turned);
   // After the mounts join, which are the turn's creatures too (docs/design-v1-combat-controls.md 2.3).
   if (combat) startTurn(tx, turned, landing, snapshot);
+  if (takesBackTurnOnly(tx.env.opVersion)) snapshot.turnFlags = flagsChanged(encounter.entries, turned.entries);
   tx.write(keys.encounterHistory, [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
   tx.addEvent({ type: "turn", entryId: step.landing, round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
+}
+
+/** The flags of each row a turn's start changed (EncounterSnapshot.turnFlags), so Previous takes back those alone. */
+function flagsChanged(before: readonly InitEntry[], after: readonly InitEntry[]): NonNullable<EncounterSnapshot["turnFlags"]> {
+  const was = new Map(before.map((e) => [e.id, e]));
+  return after.flatMap((e) => {
+    const old = was.get(e.id);
+    const flags = old ? TURN_FLAGS.filter((flag) => old[flag] !== e[flag]) : [];
+    return flags.length > 0 ? [{ entryId: e.id, flags }] : [];
+  });
 }
 
 /**
@@ -523,25 +534,114 @@ function sharedCompanions(tx: Tx, landing: InitEntry): Token[] {
 }
 
 /**
- * Walks one `next` back from the history: the encounter, the effects it
- * ticked, the legendary actions it reset, the tokens it revealed and the
- * companion Reactions it cleared.
+ * Walks one `next` back from the history (design 9.4): the effects it
+ * ticked, the legendary actions it reset, the tokens it revealed, the
+ * companion Reactions it cleared, the records its turn start replaced, and
+ * the encounter. From op version 21 only what the step changed in the
+ * encounter goes back (takenBack), so the rows the DM added, removed or
+ * changed during the turn stay as the DM left them, and a turn that would
+ * resume on a row that has left the fight is taken back too
+ * (stepsTakenBack). Older ops, and a step saved before then, put back the
+ * step's whole encounter.
  */
 export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
   if (pressChangesNothing(tx.state, tx.actor, op, tx.env)) return;
   const encounter = encounterOf(tx);
   const history = tx.state.encounterHistory;
-  const snapshot = history[history.length - 1];
-  if (!snapshot) throw invalid("nothing to go back to");
+  const steps = stepsTakenBack(encounter, history, takesBackTurnOnly(tx.env.opVersion));
+  const deepest = steps[steps.length - 1];
+  if (!deepest) throw invalid("nothing to go back to");
+  const turnOnly = takesBackTurnOnly(tx.env.opVersion) && steps[0]!.turnFlags !== undefined;
   // The line names the turn taken back, marked from the state before the
   // undo, as its own turn line was: a row this step re-hides keeps both out
   // of the players' log alike. It also names the row whose turn resumes,
   // marked from the state after, which is when that turn begins again.
   const taken = encounter.entries.find((e) => e.id === encounter.activeEntryId);
   const takenSeen = taken !== undefined && rowSeenByNonOwners(tx.state, taken, tx.env);
-  writeEncounter(tx, snapshot.encounter);
+  const back = turnOnly ? takenBack(encounter, steps) : deepest.encounter;
+  writeEncounter(tx, back);
   // The turn put back reminds anew, as the turn line it got did before op version 19: no record of it is kept to restore.
   tx.startTurn();
+  for (const step of steps) undoStep(tx, step);
+  if (turnOnly) followRows(tx, steps);
+  tx.write(keys.encounterHistory, history.slice(0, history.length - steps.length));
+  if (taken) {
+    // Older ops name the step's copy of the row, which is the row as it now stands.
+    const resumed = (turnOnly ? (tx.state.encounter?.entries ?? []) : back.entries).find((e) => e.id === back.activeEntryId);
+    tx.addEvent({
+      type: "turn",
+      entryId: taken.id,
+      round: encounter.round,
+      back: true,
+      ...(takenSeen ? { seen: true as const } : {}),
+      ...(resumed ? { to: resumed.id, ...(rowSeenByNonOwners(tx.state, resumed, tx.env) ? { toSeen: true as const } : {}) } : {}),
+    });
+  }
+}
+
+/**
+ * The saved steps one Previous takes back, newest first: the last one, and
+ * from op version 21, while the turn the deepest would resume is a row's
+ * that has left the fight, the step before it too, so the turn that
+ * resumes is a creature's still in the fight. A step saved before op
+ * version 21 names no flags and ends the walk, and so does the history's
+ * end. Read by the client's replay check too (shared/reads.ts).
+ */
+export function stepsTakenBack(encounter: Encounter, history: readonly EncounterSnapshot[], turnOnly: boolean): EncounterSnapshot[] {
+  const top = history[history.length - 1];
+  if (!top) return [];
+  if (!turnOnly || !top.turnFlags) return [top];
+  const inFight = new Set(encounter.entries.map((e) => e.id));
+  const steps = [top];
+  for (let i = history.length - 2; i >= 0; i--) {
+    const resumes = steps[steps.length - 1]!.encounter.activeEntryId;
+    const below = history[i]!;
+    if (resumes === null || inFight.has(resumes) || !below.turnFlags) break;
+    steps.push(below);
+  }
+  return steps;
+}
+
+/**
+ * The encounter with the steps' turns taken back (op version 21): the
+ * deepest step's round, active row and turn start, and on each row still in
+ * the fight that a step holds its TURN_MARKS and the flags its Next
+ * changed, as that step held them, the deepest last. The marks go back
+ * whole, since a turn a removal passed on since is taken back too. Every
+ * other field of a row, its value, In lair and place among them, stays as
+ * it is now, a row added since keeps its own, and a row removed since stays
+ * out. When the deepest step's active row has left the fight, which only
+ * the history's end or a step saved before op version 21 leaves, no row
+ * acts.
+ */
+function takenBack(encounter: Encounter, steps: readonly EncounterSnapshot[]): Encounter {
+  let entries = encounter.entries;
+  for (const step of steps) {
+    const before = new Map(step.encounter.entries.map((e) => [e.id, e]));
+    const changed = new Map((step.turnFlags ?? []).map((f) => [f.entryId, f.flags]));
+    entries = entries.map((e) => {
+      const was = before.get(e.id);
+      return was ? withFields(e, was, [...TURN_MARKS, ...(changed.get(e.id) ?? [])]) : e;
+    });
+  }
+  const deepest = steps[steps.length - 1]!.encounter;
+  const active = deepest.activeEntryId !== null && entries.some((e) => e.id === deepest.activeEntryId) ? deepest.activeEntryId : null;
+  const { turnStart: _now, ...rest } = encounter;
+  return { ...rest, round: deepest.round, activeEntryId: active, entries, ...(active !== null && deepest.turnStart ? { turnStart: deepest.turnStart } : {}) };
+}
+
+/** The row with each named field as `was` held it, absent where it was absent. */
+function withFields(row: InitEntry, was: InitEntry, fields: readonly (TurnFlag | (typeof TURN_MARKS)[number])[]): InitEntry {
+  const next: Record<string, unknown> = { ...row };
+  for (const field of fields) {
+    if (was[field] === undefined) delete next[field];
+    else next[field] = was[field];
+  }
+  return next as InitEntry;
+}
+
+/** What one step changed outside the encounter: the effects it ticked, the pips it refilled, the records, the reveals and the companion Reactions. */
+function undoStep(tx: Tx, snapshot: EncounterSnapshot): void {
   for (const [id, effects] of Object.entries(snapshot.effects).sort(([a], [b]) => (a < b ? -1 : 1))) {
     restoreEffects(tx, id, effects);
   }
@@ -558,18 +658,34 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
     if (token?.companion?.turn !== "shared" || token.companion.reactionUsed) continue;
     tx.write(keys.token(token.id), { ...token, companion: { ...token.companion, reactionUsed: true } });
   }
-  tx.write(keys.encounterHistory, history.slice(0, -1));
-  if (taken) {
-    const resumed = snapshot.encounter.entries.find((e) => e.id === snapshot.encounter.activeEntryId);
-    tx.addEvent({
-      type: "turn",
-      entryId: taken.id,
-      round: encounter.round,
-      back: true,
-      ...(takenSeen ? { seen: true as const } : {}),
-      ...(resumed ? { to: resumed.id, ...(rowSeenByNonOwners(tx.state, resumed, tx.env) ? { toSeen: true as const } : {}) } : {}),
-    });
+}
+
+/**
+ * Durations follow the rows that stay (design 9.5) once the effects the
+ * steps saved are back, since those lists predate the rows the DM added or
+ * removed during the turn: what is anchored to a row removed since pauses
+ * again, with no line, as its removal already said so, and what names the
+ * creature of a row added since binds to that row again.
+ */
+function followRows(tx: Tx, steps: readonly EncounterSnapshot[]): void {
+  if (steps.every((s) => Object.keys(s.effects).length === 0)) return;
+  const rows = tx.state.encounter?.entries ?? [];
+  const now = new Set(rows.map((e) => e.id));
+  const removed = new Map<string, InitEntry>();
+  const added = new Set<string>();
+  for (const step of steps) {
+    const then = new Set(step.encounter.entries.map((e) => e.id));
+    for (const e of step.encounter.entries) if (!now.has(e.id) && !removed.has(e.id)) removed.set(e.id, e);
+    for (const e of rows) if (!then.has(e.id)) added.add(e.id);
   }
+  for (const entry of removed.values()) {
+    const to = pausedAnchorForEntry(entry);
+    for (const resolved of tx.actors()) {
+      const r = unbindFromEntry(resolved.actor.effects, entry.id, to);
+      if (r.changed) tx.putActor(resolved, { ...resolved.actor, effects: r.effects });
+    }
+  }
+  for (const entry of rows) if (added.has(entry.id)) bindDurations(tx, entry);
 }
 
 /**

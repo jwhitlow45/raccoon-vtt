@@ -127,10 +127,13 @@ describe("damage types taken (docs/design-v1-combat-controls.md 3.4)", () => {
     assert.equal(f.state.encounter!.activeEntryId, "er2");
     f.run({ t: "encounter.remove", entryIds: ["er2"] });
     assert.equal(f.state.encounter!.activeEntryId, "eg");
-    f.run({ t: "encounter.prev" }).run({ t: "encounter.next" });
-    assert.equal(f.state.encounter!.activeEntryId, "er2");
+    // Previous leaves the removed row out of the fight (design 9.4), so the troll joins again for a turn of its own.
+    f.run({ t: "encounter.prev" });
+    assert.equal(f.state.encounter!.activeEntryId, null);
+    f.run({ t: "encounter.add", entries: [{ id: "er3", tokenId: "troll", value: 20 }] }).run({ t: "encounter.next" });
+    assert.equal(f.state.encounter!.activeEntryId, "er3");
     const record = f.of("troll").turnRecord!;
-    assert.equal(record.entryId, "er2");
+    assert.equal(record.entryId, "er3");
     const regen = applyOp(f.state, { t: "actor.use", target: { tokenId: "troll" }, use: { kind: "regenerate", key: "traits:regeneration", amount: 10, record: record.id } }, DM, env(f.seq + 1));
     assert.ok(regen.ok, "Apply is offered");
     const skip = applyOp(f.state, { t: "actor.prompt", target: { tokenId: "troll" }, record: record.id, what: "regeneration", state: "skipped" }, DM, env(f.seq + 1));
