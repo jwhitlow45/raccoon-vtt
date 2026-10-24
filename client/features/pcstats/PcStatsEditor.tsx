@@ -517,7 +517,7 @@ export function DdbStep(props: {
   const id = ddbCharacterId(props.link);
   return (
     <div style={{ display: "grid", gap: theme.space(3), fontSize: theme.font.body14 }}>
-      <Help>{`The character must be Public in D&D Beyond. The import reads numbers, proficiencies, weapons and spells, never their text, and you check what it read before anything is saved. It is best effort: D&D Beyond can change its format.`}</Help>
+      <Help>{`The character must be Public in D&D Beyond. The import reads numbers, proficiencies, weapons, spells and class resources, never their text, and you check what it read before anything is saved. It is best effort: D&D Beyond can change its format.`}</Help>
       <Field
         label="Share link or character number"
         type="text"

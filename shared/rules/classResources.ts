@@ -140,7 +140,7 @@ export function presetReset(preset: ClassPreset, classLevel: number): ClassResou
   return preset.shortFrom !== undefined && classLevel >= preset.shortFrom ? "short" : preset.reset;
 }
 
-/** A class resource as character.update sends it: no `used`, which the reducer keeps by id. */
+/** A class resource as the resource sheets send it in character.update: no `used`, which the reducer keeps by id. */
 export type ResourceInput = Omit<ClassResource, "used">;
 
 /** As a sync, its Undo or the editor's Save sends one: `used` only where it sets the count spent (docs/design-v1-ddb-resources.md 5). */
