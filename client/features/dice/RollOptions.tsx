@@ -1,10 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
 import { critRuleOf } from "#shared/dice/crit.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type RoomState, type SkillKey } from "#shared/model.ts";
+import { limitedUses, type LimitedUse } from "#shared/dice/uses.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type RoomState, type SkillKey } from "#shared/model.ts";
 import { playersTypeTotals } from "#shared/permissions.ts";
 import { playersToken } from "#shared/project.ts";
-import type { ActorTarget } from "#shared/protocol.ts";
+import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { pcSlots } from "#shared/rules/pcStats.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
@@ -19,7 +20,11 @@ import { tabKeyIndex } from "../../lib/a11y.ts";
 import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { abilityOp, openRecord } from "../combat/logic.ts";
+import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
+import { useAnyPending } from "../encounter/hooks.ts";
+import { reasonText } from "../resources/logic.ts";
 import type { PanelProps } from "../panels.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
@@ -27,7 +32,7 @@ import { useOpenPcStats } from "../pcstats/open.ts";
 import { d20Text, parseBonus } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
-import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
+import { creatureBlock, creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
 import { CreatureCard, DICE_CARD } from "./CreatureCard.tsx";
 import { creatureLook } from "./creatureLook.ts";
 import { foldKey, foldKind, useDiceFolds, type CreatureGroup } from "./diceFolds.ts";
@@ -39,18 +44,23 @@ import {
   commonTags,
   cutLabel,
   damageRolls,
+  dayCount,
+  dayUseOf,
   foldSummary,
   groupAsks,
   groupNote,
   initiativeRow,
   initiativeTag,
+  markOf,
+  markOnRoll,
   namedRoll,
+  NO_USES_LEFT,
   noNumbersNote,
   openForAsks,
   playerCreatures,
   presetLine,
   presetTag,
-  readUsed,
+  rechargeUseOf,
   riderToggleName,
   riderText,
   routedTest,
@@ -60,11 +70,11 @@ import {
   signedText,
   spellLevels,
   spendOnStart,
+  spendsFor,
   testLabel,
   typedTap,
   typedText,
-  withUsed,
-  writeUsed,
+  type Marks,
   type Pickable,
   type TypedBonus,
 } from "./options.ts";
@@ -73,6 +83,8 @@ import { presetFor } from "./presets.ts";
 import { useDiceView } from "./useDiceView.ts";
 import { GroupOptions } from "./groupSave/GroupOptions.tsx";
 import { useStartGroupSave } from "./groupSave/start.ts";
+import { useGroupSaveStore } from "./groupSave/store.ts";
+import { damageTo } from "./groupSave/plan.ts";
 import { ReplaceConfirm } from "./groupSave/ReplaceConfirm.tsx";
 import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, useCloseSettledBlock, WaitingAsks } from "./cast/CastBlock.tsx";
@@ -363,6 +375,14 @@ type Ctx = {
   blocked: string | null;
   /** The row a player's open ask for saves goes under, or null for the top of the options (docs/design-v1-player-save-spell.md 3.1). */
   castRow: string | null;
+  /** The actor its uses and turn record are on: a token's own, or its character's. */
+  actor: Actor | undefined;
+  /** Its spent abilities, as room state (docs/design-v1-combat-controls.md 2.2). */
+  marks: Marks;
+  /** Its block's limited uses, null where this viewer reads no block of it. */
+  uses: readonly LimitedUse[] | null;
+  /** This viewer may spend its uses: the DM, or one who owns it (6). */
+  spends: boolean;
 };
 
 /** What the card and the groups both read of a creature's options. */
@@ -381,7 +401,23 @@ function useCtx(props: Shown) {
   const actor = token && "inline" in token.actor ? token.actor.inline : character?.actor;
   // Every named roll draws a row. A block opens under its roll's row, else under the spell's found by name. A roll with no row, as for an area whose spell has none or a row gone since, opens the block at the top (3.1), so an open block always draws for its creature while its group is open (WaitingAsks leaves its send to it then).
   const castRow = cast ? (castRowOf(rolls.named, cast)?.key ?? null) : null;
-  const ctx: Ctx = { dice, rolls, creature, tokenId: props.tokenId, key, name: props.name, played, ask: played && !askOff, blocked, castRow };
+  const block = creatureBlock(dice, creature);
+  const ctx: Ctx = {
+    dice,
+    rolls,
+    creature,
+    tokenId: props.tokenId,
+    key,
+    name: props.name,
+    played,
+    ask: played && !askOff,
+    blocked,
+    castRow,
+    actor,
+    marks: actor?.uses,
+    uses: block ? limitedUses(block) : null,
+    spends: spendsFor(state, dice.you, creature),
+  };
   return { ctx, actor, character, askOff, cast };
 }
 
@@ -432,7 +468,6 @@ function CardBody(props: Shown) {
 function OptionGroups(props: Shown) {
   const { ctx, cast } = useCtx(props);
   const { fold, store: folds } = useDiceFolds();
-  const roomId = useRoomView((s) => s.roomId);
   const { dice, rolls, creature } = ctx;
   const state = dice.view;
   const kind = foldKind(state, creature);
@@ -446,7 +481,6 @@ function OptionGroups(props: Shown) {
   const typed = parseBonus(useOption((s) => s.bonus[ctx.key] ?? ""));
   const named = rolls.named.filter((r) => r.section !== "spells");
   const spells = rolls.named.filter((r) => r.section === "spells");
-  const used = readUsed(roomId)[ctx.key] ?? [];
 
   // The effects that bear on a group's rolls, named once in its label rather than under each of its buttons.
   const presetOf = (test: D20Test) => presetFor(dice, creature, test, { rolls });
@@ -513,7 +547,7 @@ function OptionGroups(props: Shown) {
         if (these.length === 0 && multiattack === null) return null;
         const note = [these.some((r) => r.attack !== undefined) && attackNote ? `Attacks ${attackNote}` : "", multiattack !== null ? `Multiattack. ${multiattack}` : ""].filter(Boolean).join(". ");
         return (
-          <Group key={section} label={title} {...groupFold(section)} summary={foldSummary({ group: "rows", rows: these.map((r) => ({ name: r.name, used: used.includes(r.key) })) }, asks[section])}>
+          <Group key={section} label={title} {...groupFold(section)} summary={foldSummary({ group: "rows", rows: these.map((r) => ({ name: r.name, used: markOf(ctx.marks, r.key, "recharge") !== undefined })) }, asks[section])}>
             <div role="group" aria-label={title} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
               {note ? <Help style={{ paddingBottom: theme.space(2) }}>{note}</Help> : null}
               {these.map((r) => (
@@ -824,10 +858,15 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   );
 }
 
-/** The death save, rolled by the server with the creature's own numbers. Where this viewer holds none of them its bonus goes unsaid. */
+/**
+ * The death save, rolled by the server with the creature's own numbers. Where this viewer holds none of them its bonus goes unsaid.
+ * While its turn's death save is open it settles it, as every death save Roll does, and it waits while this device shows the
+ * creature's Regeneration open (docs/design-v1-combat-controls.md 2.3).
+ */
 function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
   const { ctx } = props;
   const option = useRollOption("dice");
+  const waits = useDeathSaveWaits(ctx.creature);
   const test: D20Test = { kind: "deathSave" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
   const row = `deathSave:${"tokenId" in ctx.creature ? ctx.creature.tokenId : ctx.creature.characterId}`;
@@ -838,10 +877,39 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
       tag={presetTag(preset) || undefined}
       name={["Death Save", presetLine(preset)].filter(Boolean).join(", ")}
       row={row}
-      disabled={ctx.blocked}
-      onTap={() => option.deathSave(ctx.creature, preset, row)}
+      disabled={ctx.blocked ?? (waits ? WAITS_FOR_REGENERATION : null)}
+      onTap={() => option.deathSave(ctx.creature, preset, row, openRecord(ctx.dice.view.encounter, ctx.actor, "deathSave"))}
     />
   );
+}
+
+/**
+ * A row's own use ops (docs/design-v1-combat-controls.md 6): Used and an
+ * X/Day ability's Use, each busy while its op is out and deaf to a second
+ * tap, and a refusal said on the row, where it was tapped.
+ */
+function useRowUse() {
+  const actions = useRoomActions();
+  const [sent, setSent] = useState<{ what: string; n: number } | null>(null);
+  const pending = useAnyPending(sent === null ? [] : [sent.n]);
+  const [status, setStatus] = useState<string | null>(null);
+  return {
+    busy: pending ? (sent?.what ?? null) : null,
+    status,
+    send(what: string, op: ClientOp) {
+      if (pending) return;
+      const n = actions.dispatch(op, { quiet: true, onAnswer: (answer, refusal) => setStatus(answer === "refused" ? reasonText(refusal) : null) });
+      if (n === null) setStatus("That could not be sent.");
+      else {
+        setSent({ what, n });
+        setStatus(null);
+      }
+    },
+    /** A roll's mark of a recharge it went with (markOnRoll): never a refusal to show, so nothing waits on it. */
+    mark(op: ClientOp) {
+      actions.dispatch(op, { quiet: true });
+    },
+  };
 }
 
 /**
@@ -851,29 +919,36 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
  * Radiant"), then one line of controls that wraps only where the panel is
  * too narrow: Attack, Damage, Critical, each rider, Heal, a plain roll, a
  * group save, Recharge and a spell's slot level.
+ *
+ * Used and an X/Day ability's count are room state (docs/design-v1-combat-controls.md
+ * 6): Used marks a recharge used or ready, Use spends one X/Day use, and a
+ * roll that spends a recharge marks it only where this row shows it ready.
+ * A roll never spends an X/Day use, since a reroll is not a second use.
  */
 function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const { ctx } = props;
   const option = useRollOption("dice");
   const store = useOptionStore();
-  const roomId = useRoomView((s) => s.roomId);
   const rowKey = `${ctx.key}|${props.named.key}`;
   const crit = useOption((s) => s.critical[rowKey] === true);
   const critRule = useRoomView((s) => critRuleOf(s.view?.meta.settings ?? {}));
   const riders = useOption((s) => s.riders[rowKey]);
   const slotPicked = useOption((s) => s.slots[rowKey]);
-  const holder = ctx.key;
-  // Read on every render, since a recharge card may clear it while this row shows (6.4). The tick redraws after this row's own change.
-  const [, setTick] = useState(0);
-  const used = readUsed(roomId)[holder]?.includes(props.named.key) ?? false;
+  const rowUse = useRowUse();
+  const noneId = useId();
   const character = "characterId" in ctx.creature ? ctx.dice.view.characters[ctx.creature.characterId] : undefined;
   const slots = character && props.named.section === "spells" ? pcSlots(character, props.named.key) : null;
   const slot = slots ? Math.max(slots.from, Math.min(9, slotPicked ?? slots.from)) : null;
   const named = slots && slot !== null ? slots.at(slot) : props.named;
   const on = useMemo(() => new Set(riders ?? []), [riders]);
-  const markUsed = (value: boolean) => {
-    writeUsed(roomId, withUsed(readUsed(roomId), holder, props.named.key, value));
-    setTick((n) => n + 1);
+  const rechargeUse = ctx.spends ? rechargeUseOf(props.named, ctx.uses) : null;
+  const used = rechargeUse !== null && markOf(ctx.marks, rechargeUse.key, "recharge") !== undefined;
+  const dayUse = ctx.spends ? dayUseOf(props.named, ctx.uses) : null;
+  const day = dayUse && props.named.uses !== undefined ? dayCount(props.named.uses, dayUse, markOf(ctx.marks, dayUse.key, "day")) : null;
+  /** Marks the row's recharge used after a roll that spends it, hidden from players after a secret roll (8). */
+  const markRecharge = (quiet: boolean) => {
+    const use = markOnRoll(rechargeUse, ctx.marks);
+    if (use) rowUse.mark(abilityOp(ctx.creature, use, { ifReady: true, quiet }));
   };
   const toggleRider = (i: number) =>
     store.setState((s) => {
@@ -883,16 +958,13 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const setCrit = (value: boolean) => store.setState((s) => ({ critical: { ...s.critical, [rowKey]: value } }));
 
   const recharge = named.recharge === undefined ? null : named.recharge === 6 ? "Recharge 6" : `Recharge ${named.recharge}–6`;
-  const meta = [named.uses ?? null, recharge].filter(Boolean).join(", ");
+  const meta = [day?.text ?? named.uses ?? null, recharge].filter(Boolean).join(", ");
   const summary = rowSummary(named);
   const damageRow = `${rowKey}|damage`;
   const healRow = `${rowKey}|heal`;
   const diceRow = `${rowKey}|dice`;
+  // The combat uses' Roll recharge rolls on this row too, so each shows the other's roll (combat/CombatUses.tsx).
   const rechargeRow = `${rowKey}|recharge`;
-  const { tag: rechargeTag, rolls: rechargeLanded } = useRowResult(rechargeRow);
-  useActOnce(rechargeTag, rechargeLanded, (landed) => {
-    if ((landed[0]?.total ?? 0) >= (named.recharge ?? 7)) markUsed(false);
-  });
   // Only an attack roll scores a Critical Hit (SRD 5.2.1), so a save action's damage, such as Fire Breath's, never doubles (W7B-P-13).
   const canCrit = named.attack !== undefined;
   const hasDamage = named.damage.length > 0;
@@ -906,10 +978,31 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, marginRight: theme.space(2) }}>{named.name}</span>
           {meta || summary ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{[meta, summary].filter(Boolean).join(" · ")}</span> : null}
         </div>
-        {named.recharge !== undefined ? (
-          <Chip pressed={used} onClick={() => markUsed(!used)} aria-label={used ? `${named.name} is used. Tap when it recharges` : `Mark ${named.name} used`}>
-            Used
+        {rechargeUse ? (
+          // Mark ready gives the mark back, and settles the turn's open prompt for it in the same op on the server (3.1).
+          <Chip
+            pressed={used}
+            onClick={() => rowUse.send("used", abilityOp(ctx.creature, rechargeUse, { back: used }))}
+            aria-label={used ? `${named.name} is used. Tap when it recharges` : `Mark ${named.name} used`}
+          >
+            {rowUse.busy === "used" ? "Used…" : "Used"}
           </Chip>
+        ) : null}
+        {dayUse && day ? (
+          <>
+            <Chip
+              unavailable={day.left === 0}
+              describedBy={day.left === 0 ? noneId : undefined}
+              title={day.left === 0 ? NO_USES_LEFT : undefined}
+              onClick={() => rowUse.send("day", abilityOp(ctx.creature, dayUse))}
+              aria-label={`Use ${dayUse.name}, ${day.left} of ${dayUse.max} left`}
+            >
+              {rowUse.busy === "day" ? "Use…" : "Use"}
+            </Chip>
+            <span id={noneId} hidden>
+              {NO_USES_LEFT}
+            </span>
+          </>
         ) : null}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
@@ -928,7 +1021,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
             }}
           />
         ) : null}
-        {named.save && ctx.dice.you.role === "dm" ? <GroupSaveButton ctx={ctx} named={named} /> : null}
+        {named.save && ctx.dice.you.role === "dm" ? <GroupSaveButton ctx={ctx} named={named} spend={rechargeUse ? markRecharge : null} /> : null}
         {named.save && player ? (
           <Fill>
             <AskForSavesButton ref={askRef} spec={{ key: ctx.key, creature: ctx.creature, spell: props.named.name, roll: props.named.key }} />
@@ -943,9 +1036,10 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
             fill
             onTap={() => {
               const rolls = damageRolls(named, { on, critical: canCrit && crit, creature: ctx.creature });
-              if (option.rolls(rolls, damageRow) !== null) {
+              const tag = option.rolls(rolls, damageRow);
+              if (tag !== null) {
                 if (crit) setCrit(false);
-                if (named.recharge !== undefined) markUsed(true);
+                markRecharge(option.wentSecret(tag));
               }
             }}
           />
@@ -979,8 +1073,16 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         {named.dice ? (
           <OptionCell text="Roll" name={`${named.name}, ${named.dice}`} row={diceRow} disabled={ctx.blocked} fill onTap={() => option.rolls([namedRoll(named.dice!, named.name, ctx.creature)], diceRow)} />
         ) : null}
-        {named.recharge !== undefined ? (
-          <OptionCell text="Recharge" name={`${named.name} recharge, 1d6`} row={rechargeRow} disabled={ctx.blocked} fill onTap={() => option.rolls([namedRoll("1d6", `${named.name} recharge`, ctx.creature)], rechargeRow)} />
+        {rechargeUse ? (
+          <OptionCell
+            text="Recharge"
+            name={`${named.name} recharge, 1d6`}
+            row={rechargeRow}
+            disabled={ctx.blocked}
+            fill
+            // Rolled on the server, where a success gives the mark back, and settling the turn's open prompt for it (2.3).
+            onTap={() => option.recharge(ctx.creature, rechargeUse, rechargeRow, openRecord(ctx.dice.view.encounter, ctx.actor, `recharge:${rechargeUse.key}`))}
+          />
         ) : null}
         {slots && slot !== null ? (
           <Fill>
@@ -988,6 +1090,11 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           </Fill>
         ) : null}
       </div>
+      {rowUse.status ? (
+        <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText, overflowWrap: "anywhere" }}>
+          {rowUse.status}
+        </p>
+      ) : null}
       {player ? (
         <RowCast
           dice={ctx.dice}
@@ -1000,8 +1107,8 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           riders={on}
           opener={askRef}
           blockHere={ctx.castRow === props.named.key}
-          // A recharge action is marked Used once its ask goes, as its Damage tap marks it (3.1).
-          onSent={() => named.recharge !== undefined && markUsed(true)}
+          // A recharge action is marked used once its ask goes, as its Damage tap marks it (3.1). A player's roll is never secret.
+          onSent={() => markRecharge(false)}
         />
       ) : null}
     </div>
@@ -1032,21 +1139,28 @@ function SlotStepper(props: { name: string; value: number; min: number; onChange
  * filled from the action, its rows the selection less the acting creature
  * as it changes until the roll (5.1). The button shows with one creature
  * selected, so the page opens saying to select the creatures it hits, and
- * the DM's next selection fills it.
+ * the DM's next selection fills it. `spend` marks its recharge used.
  */
-function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll }) {
-  const { ctx, named } = props;
+function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll; spend: ((quiet: boolean) => void) | null }) {
+  const { ctx, named, spend } = props;
   const save = named.save!;
   const start = useStartGroupSave();
+  const groupSaves = useGroupSaveStore();
   const selected = useRoomView((s) => s.local.selectedIds);
-  const roomId = useRoomView((s) => s.roomId);
   const [pending, setPending] = useState(false);
   const others = selected.filter((id) => id !== ctx.tokenId);
   const filled = actionFill(ctx.dice, named, { key: ctx.key, ...(ctx.tokenId ? { tokenId: ctx.tokenId } : {}) })!;
   const source = { kind: "selection" as const, tokenIds: others, live: true as const, ...(ctx.tokenId ? { except: ctx.tokenId } : {}) };
   const input = { source, ...filled, panel: "dice" as const };
   // A recharge action is spent once its group save starts, as its Damage tap is once its roll goes, and not when the DM keeps the open one instead.
-  const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), named.recharge !== undefined ? () => writeUsed(roomId, withUsed(readUsed(roomId), ctx.key, named.key, true)) : null);
+  // Its mark is hidden from players where the page hides the damage it will roll (plan.ts damageTo), read from the page the start made.
+  const spendStarted = spend
+    ? () => {
+        const page = groupSaves.getState().page;
+        spend(page !== null && damageTo(page, ctx.dice.view) === "dm");
+      }
+    : null;
+  const go = (replace: boolean) => spendOnStart(() => start(input, { replace }), spendStarted);
   return (
     <>
       <Fill>

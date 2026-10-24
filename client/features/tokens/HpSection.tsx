@@ -18,7 +18,9 @@ import { resultWords, type HpChip } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
-import { deadLines, entryOperation, entryRefusal, sendHpEntry, type HpTarget } from "./groupHp.ts";
+import { actorOf, openRecord } from "../combat/logic.ts";
+import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
+import { deadLines, entryOperation, entryRefusal, sendHpEntry, untouchedTypes, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -82,7 +84,7 @@ export function HpEntry(props: {
   // The newest rolled damage or healing, offered under Damage and Heal (docs/design-v1-roll-options.md 4.3).
   const chips = useHpChips(mode === "damage" || mode === "heal" ? mode : null);
   const markApplied = useMarkChipApplied();
-  // The chip whose amount the field holds, so Apply takes that chip away. Once the viewer types or picks another mode, the amount is their own.
+  // The chip whose amount the field holds, so Apply takes that chip away and sends its rolled damage types. Once the viewer types or picks another mode, the amount is their own, and carries no types.
   const [filled, setFilled] = useState<HpChip | null>(null);
 
   const fillFrom = (chip: HpChip) => {
@@ -106,7 +108,7 @@ export function HpEntry(props: {
       setError(refused);
       return;
     }
-    sendHpEntry(actions, props.targets, parsed.change, crit && showCrit);
+    sendHpEntry(actions, props.targets, parsed.change, crit && showCrit, untouchedTypes(filled, text));
     if (filled) markApplied(filled.lineIds);
     setFilled(null);
     setMode(modeAfterApply(mode));
@@ -434,20 +436,22 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
  * `actor.deathRoll`, which the server rolls and counts from the state
  * then, so nothing follows once the line lands and a heal meanwhile is
  * never overwritten. The row key is the Dice panel's own, so both show
- * the same newest result.
+ * the same newest result. It waits, saying why, while this device shows
+ * the creature's Regeneration open (docs/design-v1-combat-controls.md 2.3).
  */
 function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
   const { target } = props;
   const option = useRollOption();
-  const blocked = useRollBlocked();
+  const waits = useDeathSaveWaits(target);
+  const blocked = useRollBlocked() ?? (waits ? WAITS_FOR_REGENERATION : null);
   const { dice } = useDiceView([target]);
   const row = `deathSave:${"tokenId" in target ? target.tokenId : target.characterId}`;
   const { receipt, rolls, waiting } = useRowResult(row);
   const blockedId = useId();
   const roll = () => {
     if (waiting || blocked || !dice) return;
-    // The preset is read at the tap, from the creature's effects then (presets.ts).
-    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row);
+    // The preset is read at the tap, from the creature's effects then (presets.ts). While its turn's death save is open, the roll settles it (docs/design-v1-combat-controls.md 2.3).
+    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row, openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"));
   };
   const said = blocked
     ? null

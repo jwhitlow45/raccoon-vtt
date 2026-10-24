@@ -15,7 +15,8 @@ import { asInitiative, asSave, d20Roll, initiativeOp, routedTest, routeOf, targe
 import { logSeq, remembered, rowTag, useOption, useOptionStore, type OptionState } from "./optionState.ts";
 import { useReceipt, useReceipts, type ReceiptState, type ReceiptTracker } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
-import { useDicePanel, type PanelRoll } from "./useDicePanel.ts";
+import { diceChoicesSlot, useDicePanel, type PanelRoll } from "./useDicePanel.ts";
+import { rechargeRollOp } from "../combat/logic.ts";
 import { throwHooksSlot } from "./throw/hooks.ts";
 
 /** The words on every option while a roll cannot go: no connection, or a preview, whose actions are refused. */
@@ -53,6 +54,7 @@ export function useRollOption(surface?: "dice") {
   const room = useRoomStore();
   const actions = useRoomActions();
   const dm = useRoomView((s) => s.you?.role === "dm");
+  const choices = useScoped(diceChoicesSlot);
   return useMemo(() => {
     const origin = () => (surface === "dice" ? throws.current?.origin() : undefined);
     const remember = (row: string, tag: string | null) => {
@@ -124,14 +126,25 @@ export function useRollOption(surface?: "dice") {
         }
         return remember(input.row, panel.roll([asInitiative(asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test), input.test)], { origin: origin() }));
       },
-      /** A death save, counted by the server from the state then (4.3). */
-      deathSave(creature: ActorTarget, preset: RollPreset, row: string): string | null {
+      /**
+       * A death save, counted by the server from the state then (4.3).
+       * `record` names the turn record whose open death save it settles
+       * (docs/design-v1-combat-controls.md 2.3, combat/logic.ts openRecord).
+       */
+      deathSave(creature: ActorTarget, preset: RollPreset, row: string, record?: number): string | null {
         const taken = panel.take();
         const tag = uuidv7();
         const extra = preset.extra.join("").replace(/^\+/, "");
         const n = sendRoll(
           sender,
-          { t: "actor.deathRoll", tag, target: creature, ...advantageFields([...preset.sources, ...taken.sources]), ...(extra ? { extra } : {}) },
+          {
+            t: "actor.deathRoll",
+            tag,
+            target: creature,
+            ...advantageFields([...preset.sources, ...taken.sources]),
+            ...(extra ? { extra } : {}),
+            ...(record !== undefined ? { record } : {}),
+          },
           { onAnswer: (answer) => answer === "refused" && taken.restore() },
         );
         if (n === null) {
@@ -140,6 +153,24 @@ export function useRollOption(surface?: "dice") {
         }
         panel.noted(tag, "Death Save", origin());
         return remember(row, tag);
+      },
+      /**
+       * An ability's Recharge 1d6, rolled on the server (docs/design-v1-combat-controls.md
+       * 3.1): `min` or more there makes it ready, and with `record` it
+       * settles the turn's open prompt for it. Who reads it is the server's
+       * rule for the creature, so the panel's choices are neither applied
+       * nor taken, as no d20 is rolled.
+       */
+      recharge(creature: ActorTarget, use: { key: string; name: string; min: number }, row: string, record?: number): string | null {
+        const tag = uuidv7();
+        if (sendRoll(sender, rechargeRollOp(tag, creature, use, record)) === null) return null;
+        panel.noted(tag, `${use.name} recharge`, origin());
+        return remember(row, tag);
+      },
+      /** Whether the panel roll with this tag went to the DM alone, as its Secret decided at the tap (useDicePanel.ts). */
+      wentSecret(tag: string): boolean {
+        const last = choices.getState().last;
+        return last !== null && "rolls" in last && last.tag === tag && last.to === "dm";
       },
       /** A monster's initiative score set on its row without a roll (4.2), as a typed value goes. */
       setInitiative(entryId: string, value: number, asDm: boolean): void {
@@ -151,7 +182,7 @@ export function useRollOption(surface?: "dice") {
         return remember(row, panel.roll(rolls, { origin: origin() }));
       },
     };
-  }, [panel, sender, scope, store, room, actions, dm, surface, throws]);
+  }, [panel, sender, scope, store, room, actions, dm, surface, throws, choices]);
 }
 
 /**

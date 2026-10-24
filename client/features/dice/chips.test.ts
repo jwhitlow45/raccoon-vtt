@@ -114,3 +114,32 @@ describe("HP chips", () => {
     assert.deepEqual(hpChips(log, "me", "damage", opts(["9:0"])), [], "an applied batch goes whole, and no older roll takes its place");
   });
 });
+
+/** The types a damage chip carries to the HP entry (docs/design-v1-combat-controls.md 3.4). */
+describe("HP chips' damage types", () => {
+  const typed = (label: string, total: number, type: DiceRoll["type"]): DiceRoll => ({ ...roll(label, total), ...(type ? { type } : {}) });
+
+  test("each type the chip's rolls dealt above 0, once, in the rules' order, from the line's own types and never its labels", () => {
+    const log = [
+      line("me", [typed("Flame Strike damage, radiant", 9, "radiant"), typed("Flame Strike damage, fire", 0, "fire"), typed("Flame Strike damage, cold", 4, "cold"), typed("Flame Strike damage, radiant", 3, "radiant")]),
+    ];
+    assert.deepEqual(hpChips(log, "me", "damage", opts())[0]!.types, ["cold", "radiant"], "fire came to 0, so it adds nothing");
+    const cut = line("me", [typed("Vorpal Longsword of the Seventh Sundered Kingdom damage and…", 7, "slashing")]);
+    assert.deepEqual(hpChips([cut], "me", "damage", opts())[0]!.types, ["slashing"]);
+  });
+
+  test("an untyped line, a line rolled before types, and a healing chip carry none", () => {
+    const old = line("me", [roll("Longsword damage, slashing", 9)]);
+    assert.equal("types" in hpChips([old], "me", "damage", opts())[0]!, false, "no type on the line: the label is no contract");
+    const zero = line("me", [typed("Longsword damage, slashing", 0, "slashing")]);
+    assert.equal(hpChips([zero], "me", "damage", opts())[0]!.types, undefined);
+    const heal = line("p1", [typed("Cure Wounds healing", 8, "radiant")]);
+    assert.equal(hpChips([heal], "me", "heal", opts())[0]!.types, undefined);
+  });
+
+  test("a roll sent as several lines takes the types of every line", () => {
+    const batched = (id: string, rolls: DiceRoll[]): LogEntry => ({ id, at: "", kind: "event", data: { type: "dice", by: "me", to: "all", batch: "b2", rolls } });
+    const log = [batched("20:0", [typed("Shared damage for 2 hits, slashing", 6, "slashing")]), batched("21:0", [typed("Shared damage for 2 hits, poison", 5, "poison")])];
+    assert.deepEqual(hpChips(log, "me", "damage", opts())[0]!.types, ["poison", "slashing"]);
+  });
+});

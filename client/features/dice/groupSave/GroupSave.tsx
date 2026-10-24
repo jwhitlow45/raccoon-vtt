@@ -22,8 +22,10 @@ import { usePanelHeader } from "../../panels.ts";
 import { EffectPicker } from "../../tokens/EffectsSection.tsx";
 import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
 import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
-import { creatureRolls } from "../creature.ts";
-import { creatureKey, readUsed, signedText, spendOnStart, withUsed, writeUsed } from "../options.ts";
+import { limitedUses } from "#shared/dice/uses.ts";
+import { abilityOp, actorOf } from "../../combat/logic.ts";
+import { creatureBlock, creatureRolls } from "../creature.ts";
+import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, spendOnStart, spendsFor } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { useRollSender } from "../send.ts";
 import { useDicePanel } from "../useDicePanel.ts";
@@ -180,6 +182,13 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const ids = page.phase === "setup" ? fromSource : page.rows.map((r) => r.tokenId);
   const creatures = useMemo<ActorTarget[]>(() => ids.map((tokenId) => ({ tokenId })), [ids.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const { dice, loading, failed } = useDiceView(creatures);
+  // Apply reads the recharge a fill came from in its creature's block, which loads with the page too, as after a reload (rechargeSpend). The SRD's blocks are one store, so `dice` reads them once loaded.
+  const rechargeHolder = page.fill?.recharge?.holder;
+  const casters = useMemo(() => {
+    const caster = rechargeHolder ? holderTarget(rechargeHolder) : null;
+    return caster ? [caster] : [];
+  }, [rechargeHolder]);
+  useDiceView(casters);
   const live = dice && page.phase === "setup" ? groupRows(dice, fromSource, page.test, page.spell) : page.rows;
   const rows = live;
   const tooMany = rows.length > 100;
@@ -320,7 +329,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     const to = damageTo(page, view);
     // A damage roll in the open names what players may know (Fill.publicName).
     const named = page.fill ? (to === "dm" ? page.fill.name : publicName(page.fill)) : "Group save";
-    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${named} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60) }] : []));
+    // Each roll keeps its type on its line, which a label cut to fit cannot promise (docs/design-v1-combat-controls.md 3.4).
+    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${named} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60), ...(p.type ? { type: p.type } : {}) }] : []));
     if (rollsToSend.length === 0) return;
     const tag = uuidv7();
     if (panel.roll(rollsToSend, { to, tag }) !== null) update(damageSent(pageRef.current, tag));
@@ -339,9 +349,23 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       return;
     }
     const base = page.phase === "setup" ? { ...page, rows, phase: "rolled" as const } : page;
-    // An action filled from a recharge is spent (6.4), once its outcome goes.
-    const recharge = page.fill?.recharge;
-    spendOnStart(() => run(apply(base, plan)), recharge ? () => writeUsed(roomId, withUsed(readUsed(roomId), recharge.holder, recharge.key, true)) : null);
+    // An action filled from a recharge is spent once its outcome goes, where this device shows it ready (docs/design-v1-combat-controls.md 6), and hidden from players with its damage (8).
+    const spend = rechargeSpend(page.fill?.recharge);
+    spendOnStart(() => run(apply(base, plan)), spend ? () => actions.dispatch(abilityOp(spend.target, spend.use, { ifReady: true, quiet: damageTo(page, view) === "dm" }), { quiet: true }) : null);
+  };
+
+  /**
+   * The recharge a fill came from, as its holder's use where this device
+   * shows it ready: its name and range from that creature's block, else its
+   * roll. None once the creature no longer has the roll.
+   */
+  const rechargeSpend = (from: { holder: string; key: string } | undefined) => {
+    const target = from ? holderTarget(from.holder) : null;
+    if (!from || !target || !spendsFor(view, dice.you, target)) return null;
+    const named = creatureRolls(dice, target)?.named.find((r) => r.key === from.key);
+    const block = creatureBlock(dice, target);
+    const use = markOnRoll(named ? rechargeUseOf(named, block ? limitedUses(block) : null) : null, actorOf(view, target)?.uses);
+    return use ? { target, use } : null;
   };
 
   // Close the ask (3.3): where Apply would change nothing, the ask closes as done, with the page's open requests first.

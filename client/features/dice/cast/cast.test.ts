@@ -143,9 +143,9 @@ describe("the block", () => {
     assert.equal(rollWords([fire, radiant]), "9d6 Fire + 2d8 Radiant");
     assert.deepEqual(sendWords({ rolls: [], save: true }), { first: "Ask the DM", dmRolls: null }, "Hold Person");
     assert.deepEqual(sendWords({ rolls: [], save: false }), { first: "Ask the DM to apply", dmRolls: null }, "a preset with no save");
-    assert.deepEqual(fillRolls("Ice Storm", "2d10 Bludgeoning + 4d6 Cold + 3", { tokenId: "g1" }).map((r) => [r.formula, r.label]), [
-      ["2d10", "Ice Storm damage, Bludgeoning"],
-      ["4d6", "Ice Storm damage, Cold"],
+    assert.deepEqual(fillRolls("Ice Storm", "2d10 Bludgeoning + 4d6 Cold + 3", { tokenId: "g1" }).map((r) => [r.formula, r.label, r.type]), [
+      ["2d10", "Ice Storm damage, Bludgeoning", "bludgeoning"],
+      ["4d6", "Ice Storm damage, Cold", "cold"],
     ]);
   });
 
@@ -193,7 +193,8 @@ describe("the block", () => {
     assert.equal(name.length, 60);
     const monster = customMonster("storm", { actions: [{ name, text: "Dexterity Saving Throw: DC 13, each creature in a 30-foot cone. Failure: 21 (6d6) Lightning damage. Success: Half damage." }] });
     const named = blockActions(monsterView(statBlockOf(monster))).find((r) => r.save)!;
-    assert.ok(named.key.length > 64, `${named.key} is past an id's 64`);
+    // A slug that long is cut to a hash of the whole name (shared/dice/named.ts entryKeys), which the ask keeps whole as it kept the long key.
+    assert.match(named.key, /^actions:[a-z0-9-]{37}-[0-9a-f]{6}$/);
     const input = askInput({ caster: "thorn", sceneId: "s1", spell: named.name, targets: ["g1"], roll: named.key });
     assert.equal(input.roll, named.key, "never dropped, since the DM's name fallback reads the cut name");
     const op = { t: "cast.ask", cast: { ...input, id: "0192f0a8-6c1e-7a4b-9c3d-000000000001" } };

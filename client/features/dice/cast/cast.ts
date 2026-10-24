@@ -136,7 +136,8 @@ export function areaPresetOf(spell: string): AreaSpell | undefined {
 export function fillRolls(spell: string, damage: string, creature: ActorTarget): PanelRoll[] {
   const parsed = parseParts(damage);
   if (!parsed.ok) return [];
-  return parsed.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: cutLabel(`${spell} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`), creature }] : []));
+  // Each roll names its type, as a row's Damage does, for the HP entry's types (docs/design-v1-combat-controls.md 3.4).
+  return parsed.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: cutLabel(`${spell} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`), creature, ...(p.type ? { type: p.type } : {}) }] : []));
 }
 
 /** The block's first line, from the player's own fill: "Dexterity save, DC 15, against Fireball at level 4". */

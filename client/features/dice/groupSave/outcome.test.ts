@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Defense } from "#shared/dice/defenses.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
-import { attackResults, conditionSkip, damageWords, parseParts, partAmounts, planTargets, rowDamage, worstCase, type PartAmount } from "./outcome.ts";
+import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
+import { attackResults, conditionSkip, damageWords, dealtTypes, parseParts, partAmounts, planTargets, rowDamage, worstCase, type PartAmount } from "./outcome.ts";
 
 /** A group save's outcome (docs/design-v1-roll-options.md 5.4 and 5.5). */
 
@@ -93,6 +94,54 @@ describe("conditions and the plan", () => {
     assert.equal(worstCase(hundred, two, "Hypnotic Pattern"), null);
     assert.equal(worstCase(hundred, [...two, { ...two[0]!, key: "prone" }], "Hypnotic Pattern"), OUTCOME_TOO_BIG);
     assert.match(worstCase([...hundred, { tokenId: "x" }], []) ?? "", /At most 100/);
+  });
+});
+
+/** The types each row takes, for the Regeneration note (docs/design-v1-combat-controls.md 3.4). */
+describe("the damage types a row takes", () => {
+  const dealt = (parts: PartAmount[], result: "pass" | "fail", defenses: Defense[] = []) => dealtTypes(parts, rowDamage(parts, result, { onPass: "half", dexSave: false, row: row(defenses) }).byPart);
+
+  test("each type of a part still above 0 after the save, the defenses and rounding, once, in the rules' order", () => {
+    assert.deepEqual(dealt(FLAME, "fail"), ["fire", "radiant"]);
+    assert.deepEqual(dealt([{ amount: 16, type: "radiant" }, { amount: 18, type: "fire" }], "fail"), ["fire", "radiant"], "in the rules' order, not the field's");
+    assert.deepEqual(dealt([...FLAME, { amount: 4, type: "fire" }], "fail"), ["fire", "radiant"], "a type twice counts once");
+    assert.deepEqual(dealt(FLAME, "fail", [stat("immune", "fire")]), ["radiant"], "immunity takes the part to 0");
+    assert.deepEqual(dealt(FLAME, "fail", [stat("resist", "fire")]), ["fire", "radiant"], "resisted, it still deals 9");
+    assert.deepEqual(dealt([{ amount: 1, type: "fire" }, { amount: 6, type: "cold" }], "pass"), ["cold"], "half of 1 rounds down to 0");
+    assert.deepEqual(dealt([{ amount: 1, type: "fire" }, { amount: 6, type: "cold" }], "pass", [stat("vulnerable", "fire")]), ["cold"], "doubled after the halving, 0 stays 0");
+    assert.deepEqual(dealt([{ amount: 12 }], "fail"), [], "an untyped part names no type");
+    assert.deepEqual(dealt(FLAME, "pass"), ["fire", "radiant"], "halved on a pass, both still deal");
+    assert.deepEqual(dealtTypes(FLAME, [0, 0]), []);
+    assert.deepEqual(dealtTypes(FLAME, [5]), ["fire"], "a part with no amount counts nothing");
+  });
+
+  test("a plan's target carries its types with its damage, never without it", () => {
+    const targets = planTargets(
+      [
+        { target: { tokenId: "a" }, amount: 9, conditions: [], resist: false, types: ["fire"] },
+        { target: { tokenId: "b" }, amount: 0, conditions: [], resist: true, types: ["fire"] },
+        { target: { tokenId: "c" }, amount: 4, conditions: [], resist: false, types: [] },
+        { target: { tokenId: "d" }, amount: 4, conditions: [], resist: false },
+      ],
+      () => "id",
+    );
+    assert.deepEqual(targets, [
+      { target: { tokenId: "a" }, amount: 9, types: ["fire"] },
+      { target: { tokenId: "b" }, resist: true },
+      { target: { tokenId: "c" }, amount: 4 },
+      { target: { tokenId: "d" }, amount: 4 },
+    ]);
+  });
+
+  test("the bound counts the types each row may carry, so a plan that passes it never meets the op's bound", () => {
+    const hundred = Array.from({ length: 100 }, (_, i) => ({ tokenId: `0192f0a8-6c1e-7a4b-9c3d-${String(i).padStart(12, "0")}` }));
+    const two = [
+      { key: "charmed" as const, duration: { mode: "turnEnd" as const, of: { tokenId: "0192f0a8-6c1e-7a4b-9c3d-000000000001" } }, save: { ability: "wis" as const, dc: 15 } },
+      { key: "incapacitated" as const, duration: { mode: "turnEnd" as const, of: { tokenId: "0192f0a8-6c1e-7a4b-9c3d-000000000001" } }, save: { ability: "wis" as const, dc: 15 } },
+    ];
+    assert.equal(worstCase(hundred, two, "Prismatic Storm"), null);
+    assert.equal(worstCase(hundred, two, "Prismatic Storm", { types: DAMAGE_TYPES }), OUTCOME_TOO_BIG, "every type on every row does not fit");
+    assert.equal(worstCase(hundred, two, "Prismatic Storm", { types: ["fire", "cold"], quiet: true }), null);
   });
 });
 

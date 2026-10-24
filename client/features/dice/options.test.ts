@@ -11,7 +11,49 @@ import { ReceiptTracker } from "./useReceipt.ts";
 import { watchInitiative, type InitiativeEnv } from "./useRollOption.ts";
 import { TYPE_BONUS, BONUS_WORDS, parseBonus } from "../rolls/card.ts";
 import { creatureRolls } from "./creature.ts";
-import { asInitiative, asSave, commonTags, creatureKey, CRIT_WORDS, critical, cutLabel, d20Roll, damageRolls, foldSummary, groupAsks, groupNote, initiativeOp, initiativeRow, initiativeTag, noNumbersNote, openForAsks, playerCreatures, presetLine, resultWords, routedTest, routeOf, sameSpell, scoreOf, spellLevels, spendOnStart, testLabel, typedTap, typedText, withExtra, withUsed } from "./options.ts";
+import {
+  asInitiative,
+  asSave,
+  commonTags,
+  creatureKey,
+  CRIT_WORDS,
+  critical,
+  cutLabel,
+  d20Roll,
+  damageRolls,
+  dayCount,
+  dayUseOf,
+  dropOldRechargeMarks,
+  foldSummary,
+  groupAsks,
+  groupNote,
+  holderTarget,
+  initiativeOp,
+  initiativeRow,
+  initiativeTag,
+  markOf,
+  markOnRoll,
+  noNumbersNote,
+  openForAsks,
+  playerCreatures,
+  presetLine,
+  rechargeUseOf,
+  resultWords,
+  routedTest,
+  routeOf,
+  sameSpell,
+  scoreOf,
+  spellLevels,
+  spendOnStart,
+  spendsFor,
+  testLabel,
+  typedTap,
+  typedText,
+  withExtra,
+} from "./options.ts";
+import type { DayUse, LimitedUse, RechargeUse } from "#shared/dice/uses.ts";
+import type { UseMark } from "#shared/model.ts";
+import { abilityOp } from "../combat/logic.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 
 /** The roll options' rules (docs/design-v1-roll-options.md 4.2 and 4.3). */
@@ -153,11 +195,25 @@ describe("damage, critical hits and results", () => {
   };
 
   test("riders toggled on join the one line, one roll per type, a critical sent as asked for the server's rule", () => {
-    assert.deepEqual(damageRolls(rapier, { on: new Set(), critical: false }), [{ formula: "1d8+4", label: "Rapier damage, Piercing" }]);
+    assert.deepEqual(damageRolls(rapier, { on: new Set(), critical: false }), [{ formula: "1d8+4", label: "Rapier damage, Piercing", type: "piercing" }]);
     assert.deepEqual(damageRolls(rapier, { on: new Set([1, 2]), critical: true, creature: { characterId: "bree" } }), [
-      { formula: "1d8+4+3d6", label: "Rapier critical damage and Sneak Attack, Piercing", creature: { characterId: "bree" }, critical: true },
-      { formula: "1d6", label: "Rapier critical damage and Sneak Attack, Fire", creature: { characterId: "bree" }, critical: true },
+      { formula: "1d8+4+3d6", label: "Rapier critical damage and Sneak Attack, Piercing", creature: { characterId: "bree" }, critical: true, type: "piercing" },
+      { formula: "1d6", label: "Rapier critical damage and Sneak Attack, Fire", creature: { characterId: "bree" }, critical: true, type: "fire" },
     ]);
+  });
+
+  test("each roll carries its damage type on its line, whatever its label is cut to, and an untyped part carries none (docs/design-v1-combat-controls.md 3.4)", () => {
+    const long: NamedRoll = { ...rapier, name: "A blade whose name runs on far past what a dice label can hold whole", damage: [rapier.damage[0]!, { formula: "2d6" }] };
+    const rolls = damageRolls(long, { on: new Set(), critical: false });
+    assert.deepEqual(
+      rolls.map((r) => [r.formula, r.type]),
+      [
+        ["1d8+4", "piercing"],
+        ["2d6", undefined],
+      ],
+    );
+    assert.ok(!rolls[0]!.label!.includes("Piercing"), "the label lost its type to the cut, and the line still has it");
+    assert.ok(!("type" in rolls[1]!), "no type key at all on an untyped roll");
   });
 
   test("the critical range: a kept 19 crits under critOn 19, a 1 misses, and a result reads its total and natural", () => {
@@ -195,13 +251,6 @@ describe("damage, critical hits and results", () => {
     }
   });
 
-  test("Used is kept per creature and action", () => {
-    let used = withUsed({}, "t:gob", "actions:fire-breath", true);
-    assert.deepEqual(used, { "t:gob": ["actions:fire-breath"] });
-    used = withUsed(used, "t:gob", "actions:fire-breath", false);
-    assert.deepEqual(used, {});
-  });
-
   test("a recharge action is spent only once what spends it started: Keep it on the open group save spends nothing", () => {
     let spent = 0;
     const spend = () => spent++;
@@ -211,6 +260,128 @@ describe("damage, critical hits and results", () => {
     assert.equal(spent, 1);
     assert.equal(spendOnStart(() => true, null), true, "an action with no recharge spends nothing");
     assert.equal(spent, 1);
+  });
+});
+
+describe("recharge and X/Day as room state (docs/design-v1-combat-controls.md 6)", () => {
+  const breath: NamedRoll = { key: "actions:fire-breath", name: "Fire Breath", section: "actions", save: { ability: "dex", dc: 21, onPass: "half" }, damage: [{ formula: "18d6", type: "fire" }], recharge: 5 };
+  const dominate: NamedRoll = { key: "actions:dominate-mind", name: "Dominate Mind", section: "actions", save: { ability: "wis", dc: 15, onPass: "none" }, damage: [], uses: "2/Day" };
+  const BLOCK_BREATH: RechargeUse = { kind: "recharge", key: "actions:fire-breath", name: "Fire Breath", min: 5, section: "actions" };
+  const BLOCK_DOMINATE: DayUse = { kind: "day", key: "actions:dominate-mind", name: "Dominate Mind", max: 2, short: true, section: "actions" };
+  const used = (kind: UseMark["kind"], n = 1, max = 1): UseMark => ({ kind, name: "x", used: n, max });
+
+  test("the old per-tab Used marks are deleted as a room loads, only that room's, and blocked storage never throws (3.6)", () => {
+    const before = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    const kept = new Map([
+      ["rvtt.rechargeUsed.r1", "{}"],
+      ["rvtt.rechargeUsed.r2", "{}"],
+      ["rvtt.other", "1"],
+    ]);
+    try {
+      Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: { removeItem: (k: string) => kept.delete(k) } });
+      dropOldRechargeMarks("r1");
+      assert.deepEqual([...kept.keys()], ["rvtt.rechargeUsed.r2", "rvtt.other"]);
+      Object.defineProperty(globalThis, "sessionStorage", {
+        configurable: true,
+        value: {
+          removeItem() {
+            throw new Error("blocked");
+          },
+        },
+      });
+      assert.doesNotThrow(() => dropOldRechargeMarks("r2"));
+      Object.defineProperty(globalThis, "sessionStorage", {
+        configurable: true,
+        get() {
+          throw new Error("denied");
+        },
+      });
+      assert.doesNotThrow(() => dropOldRechargeMarks("r2"), "even reading the storage may throw, in a sandboxed frame");
+    } finally {
+      if (before) Object.defineProperty(globalThis, "sessionStorage", before);
+      else delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
+    }
+  });
+
+  test("a mark counts only under its own key and kind, never one inherited from Object", () => {
+    const marks = { "actions:fire-breath": used("recharge"), "actions:dominate-mind": used("day", 1, 2) };
+    assert.equal(markOf(marks, "actions:fire-breath", "recharge"), marks["actions:fire-breath"]);
+    assert.equal(markOf(marks, "actions:fire-breath", "day"), undefined, "another kind under the key is not this ability's");
+    assert.equal(markOf(marks, "actions:bite", "recharge"), undefined);
+    assert.equal(markOf({}, "constructor", "recharge"), undefined);
+    assert.equal(markOf(Object.create({ "actions:fire-breath": used("recharge") }) as Record<string, UseMark>, "actions:fire-breath", "recharge"), undefined, "only a mark of the actor's own");
+    assert.equal(markOf(undefined, "actions:fire-breath", "recharge"), undefined, "a viewer whose copy holds no marks");
+  });
+
+  test("a recharge row's ability: the block's own entry by its key, else the roll's own facts, and never a spell's", () => {
+    const blockName: LimitedUse = { ...BLOCK_BREATH, name: "Fire Breath of the Block" };
+    assert.equal(rechargeUseOf(breath, [blockName]), blockName, "the block's entry wins, with its name and range");
+    assert.deepEqual(rechargeUseOf(breath, []), BLOCK_BREATH, "a block that leaves it out: the roll's key, name and range");
+    assert.deepEqual(rechargeUseOf(breath, null), BLOCK_BREATH, "no block read: the same");
+    assert.deepEqual(rechargeUseOf({ ...breath, recharge: 6 }, [{ ...BLOCK_DOMINATE, key: breath.key }]), { ...BLOCK_BREATH, min: 6 }, "an X/Day entry under the key is not its recharge");
+    assert.equal(rechargeUseOf(dominate, [BLOCK_BREATH]), null, "no recharge on the roll");
+    assert.equal(rechargeUseOf({ ...breath, section: "spells" }, null), null, "a spell has no ability key");
+  });
+
+  test("an X/Day row's ability comes from the block, which leaves out spells and legendary actions, and from the roll only where no block is read", () => {
+    assert.equal(dayUseOf(dominate, [BLOCK_DOMINATE]), BLOCK_DOMINATE, "the block knows a Short Rest brings it back");
+    assert.equal(dayUseOf(dominate, [BLOCK_BREATH]), null, "a block that does not list it as X/Day, as a Spellcasting entry's spell");
+    assert.deepEqual(dayUseOf(dominate, null), { ...BLOCK_DOMINATE, short: false });
+    assert.equal(dayUseOf({ ...dominate, uses: "1/Day; Requires Soul Bag" }, null)?.max, 1);
+    assert.equal(dayUseOf({ ...dominate, uses: "0/Day" }, null), null);
+    assert.equal(dayUseOf({ ...dominate, uses: "10/Day" }, null), null, "past the 9 a mark holds");
+    assert.equal(dayUseOf({ ...dominate, section: "spells" }, null), null);
+    assert.equal(dayUseOf(breath, [BLOCK_DOMINATE]), null, "no uses on the roll");
+  });
+
+  test("a roll marks its recharge used only where this device shows it ready, and its op can never be refused for being used", () => {
+    assert.equal(markOnRoll(BLOCK_BREATH, {}), BLOCK_BREATH);
+    assert.equal(markOnRoll(BLOCK_BREATH, undefined), BLOCK_BREATH);
+    assert.equal(markOnRoll(BLOCK_BREATH, { "actions:fire-breath": used("recharge") }), null, "shown used: nothing goes");
+    assert.equal(markOnRoll(BLOCK_BREATH, { "actions:fire-breath": used("day") }), BLOCK_BREATH, "a mark of another kind leaves it ready");
+    assert.equal(markOnRoll(null, {}), null, "a roll with no recharge marks nothing");
+    const target = { tokenId: "drag" };
+    assert.deepEqual(abilityOp(target, markOnRoll(BLOCK_BREATH, {})!, { ifReady: true, quiet: true }), {
+      t: "actor.use",
+      target,
+      use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true },
+      quiet: true,
+    });
+    // Used's own tap: Mark used is public by name, Mark ready gives it back.
+    assert.deepEqual(abilityOp(target, BLOCK_BREATH, { back: true }), { t: "actor.use", target, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5 }, back: true });
+    assert.deepEqual(abilityOp(target, BLOCK_DOMINATE), { t: "actor.use", target, use: { kind: "ability", key: "actions:dominate-mind", name: "Dominate Mind", limit: "day", max: 2, short: true } });
+  });
+
+  test("an X/Day row counts what is left after its printed words, and never below 0", () => {
+    assert.deepEqual(dayCount("2/Day", BLOCK_DOMINATE, undefined), { left: 2, text: "2/Day, 2 left" });
+    assert.deepEqual(dayCount("2/Day", BLOCK_DOMINATE, used("day", 1, 2)), { left: 1, text: "2/Day, 1 left" });
+    assert.deepEqual(dayCount("2/Day", BLOCK_DOMINATE, used("day", 2, 2)), { left: 0, text: "2/Day, 0 left" });
+    assert.equal(dayCount("1/Day; Requires Soul Bag", { ...BLOCK_DOMINATE, max: 1 }, used("day", 3, 3)).left, 0, "a mark from before the block was edited down");
+    assert.equal(dayCount("1/Day; Requires Soul Bag", { ...BLOCK_DOMINATE, max: 1 }, undefined).text, "1/Day; Requires Soul Bag, 1 left");
+  });
+
+  test("a group save's recharge names its holder as the Dice panel keys it, a token or a character", () => {
+    assert.deepEqual(holderTarget("t:drag"), { tokenId: "drag" });
+    assert.deepEqual(holderTarget("c:bree"), { characterId: "bree" });
+    assert.equal(holderTarget("t:"), null);
+    assert.equal(holderTarget("x:drag"), null);
+    assert.equal(holderTarget(""), null);
+  });
+
+  test("who may spend a creature's uses: the DM, or one who owns it, directly or through its character", () => {
+    const state = table();
+    state.tokens.lent = token("lent", { kind: "monster", name: "Mule", ownerIds: ["p2"] });
+    state.tokens.breeTok!.ownerIds = [];
+    const dm = { role: "dm" as const, memberId: "dm1" };
+    const bree = { role: "player" as const, memberId: "p1" };
+    const other = { role: "player" as const, memberId: "p2" };
+    assert.equal(spendsFor(state, dm, { tokenId: "gob" }), true);
+    assert.equal(spendsFor(state, bree, { tokenId: "gob" }), false);
+    assert.equal(spendsFor(state, bree, { characterId: "bree" }), true);
+    assert.equal(spendsFor(state, bree, { tokenId: "breeTok" }), true, "through the token's character");
+    assert.equal(spendsFor(state, other, { tokenId: "breeTok" }), false);
+    assert.equal(spendsFor(state, other, { tokenId: "lent" }), true, "a token lent to them");
+    assert.equal(spendsFor(state, bree, { tokenId: "gone" }), false);
   });
 });
 

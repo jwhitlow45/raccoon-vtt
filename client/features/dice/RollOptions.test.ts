@@ -2,9 +2,9 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { LogEntry, PcStats, RollRequest, RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, PcStats, RollRequest, RoomState, UseMark, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
+import { DM, P1, actor, character, customMonster, entry, room, token } from "#shared/testutil.ts";
 import { creatureRolls, type DiceView } from "./creature.ts";
 import { DICE_FOLD_KEYS, diceFoldsSlot } from "./diceFolds.ts";
 import { optionSlot } from "./optionState.ts";
@@ -320,5 +320,111 @@ describe("whether the options end on a group, which Recent rolls joins (docs/des
       s.characters.thorn!.ownerIds = [];
       s.tokens.tt!.ownerIds = [];
     }), false);
+  });
+});
+
+/*
+ * Used and X/Day are room state (docs/design-v1-combat-controls.md 6): a
+ * row reads them from the creature's actor, so every device and a reload
+ * show the same, and an X/Day row counts what is left with its Use.
+ */
+describe("a row's recharge and X/Day uses, read from the room", () => {
+  const LURKER = customMonster("lurker", {
+    actions: [
+      { name: "Fire Breath (Recharge 5–6)", text: "Dexterity Saving Throw: DC 13, each creature in a 15-foot Cone. Failure: 24 (7d6) Fire damage. Success: Half damage." },
+      { name: "Dominate Mind (2/Day)", text: "Wisdom Saving Throw: DC 15, one creature it can see within 30 feet. Failure: The target has the Charmed condition." },
+    ],
+  });
+
+  function draw(viewer: Viewer, uses?: Record<string, UseMark>): string {
+    const state = room({
+      monsters: { lurker: LURKER },
+      tokens: { lurk: token("lurk", { kind: "monster", name: "Lurker", actor: { inline: actor({ monsterId: "lurker", ...(uses ? { uses } : {}) }) } }) },
+    });
+    const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
+    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds: ["lurk"], multi: false }, ephemeral: { drags: {} } }));
+    const dice: DiceView = { you: viewer, view, srd: { monsters: null, rolls: null } };
+    const creature = { tokenId: "lurk" } as const;
+    return renderToStaticMarkup(
+      createElement(RoomProvider, {
+        store: store as never,
+        actions: { dispatch: () => 1, newId: () => "x" } as never,
+        ui: { notify() {} } as never,
+        assets: { url: () => "" } as never,
+        children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(OptionsList, { dice, rolls: creatureRolls(dice, creature)!, creature, tokenId: "lurk", name: "Lurker" }) }),
+      }),
+    );
+  }
+  const chip = (markup: string, label: string) => new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`).exec(markup)?.[0] ?? null;
+
+  test("Used is pressed only while the room holds the breath's mark", () => {
+    assert.match(chip(draw(DM), "Mark Fire Breath used") ?? "", /aria-pressed="false"/);
+    const used = draw(DM, { "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } });
+    assert.match(chip(used, "Fire Breath is used. Tap when it recharges") ?? "", /aria-pressed="true"/);
+  });
+
+  test("an X/Day row counts what is left with its Use, which is off with its reason at 0", () => {
+    const fresh = draw(DM);
+    assert.match(fresh, /2\/Day, 2 left/);
+    assert.ok(chip(fresh, "Use Dominate Mind, 2 of 2 left"));
+    const one = draw(DM, { "actions:dominate-mind": { kind: "day", name: "Dominate Mind", used: 1, max: 2 } });
+    assert.match(one, /2\/Day, 1 left/);
+    assert.doesNotMatch(chip(one, "Use Dominate Mind, 1 of 2 left") ?? "missing", /aria-disabled/);
+    const none = draw(DM, { "actions:dominate-mind": { kind: "day", name: "Dominate Mind", used: 2, max: 2 } });
+    assert.match(none, /2\/Day, 0 left/);
+    const off = chip(none, "Use Dominate Mind, 0 of 2 left") ?? "";
+    assert.match(off, /aria-disabled="true"/);
+    const reason = /aria-describedby="([^"]+)"/.exec(off)?.[1];
+    assert.ok(reason && new RegExp(`id="${reason}"[^>]*>No uses left<`).test(none), "the off Use says why");
+  });
+
+  test("the breath's mark is not the X/Day ability's, and a mark of another kind under a key counts for neither", () => {
+    const markup = draw(DM, { "actions:fire-breath": { kind: "day", name: "Fire Breath", used: 1, max: 1 } });
+    assert.match(chip(markup, "Mark Fire Breath used") ?? "", /aria-pressed="false"/);
+    assert.match(markup, /2\/Day, 2 left/);
+  });
+});
+
+/*
+ * The Dice panel's death save row waits while this device shows the
+ * creature's Regeneration open, as every death save Roll does
+ * (docs/design-v1-combat-controls.md 2.3 and 4.4).
+ */
+describe("the death save row while Regeneration is open", () => {
+  const TROLL = customMonster("troll", {
+    name: "Troll",
+    traits: [{ name: "Regeneration", text: "The troll regains 15 Hit Points at the start of each of its turns. If the troll takes Acid or Fire damage, this trait doesn't function at the start of the troll's next turn." }],
+  });
+
+  function draw(settled: boolean): string {
+    const record = { id: 7, entryId: "e1", round: 2, hp: 0, life: "dying" as const, ...(settled ? { settled: { regeneration: { state: "done" as const, total: 15 } } } : {}) };
+    const state = room({
+      monsters: { troll: TROLL },
+      tokens: { tr: token("tr", { kind: "monster", name: "Troll", actor: { inline: actor({ monsterId: "troll", hp: { cur: 0, max: 84, temp: 0 }, life: "dying", turnRecord: record }) } }) },
+      encounter: { rev: 0, round: 2, activeEntryId: "e1", entries: [entry("e1", { tokenId: "tr" })] },
+    });
+    const view = projectState(state, DM, { sceneId: "s1" }) as unknown as RoomState;
+    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["tr"], multi: false }, ephemeral: { drags: {} } }));
+    const dice: DiceView = { you: DM, view, srd: { monsters: null, rolls: null } };
+    const creature = { tokenId: "tr" } as const;
+    return renderToStaticMarkup(
+      createElement(RoomProvider, {
+        store: store as never,
+        actions: { dispatch: () => 1, newId: () => "x" } as never,
+        ui: { notify() {} } as never,
+        assets: { url: () => "" } as never,
+        children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(OptionsList, { dice, rolls: creatureRolls(dice, creature)!, creature, tokenId: "tr", name: "Troll" }) }),
+      }),
+    );
+  }
+  const deathSave = (markup: string) => /<button[^>]*aria-label="Death Save[^"]*"[^>]*>/.exec(markup)?.[0] ?? "";
+
+  test("off with its reason while Regeneration is open, and on once it is settled", () => {
+    const waiting = deathSave(draw(false));
+    assert.match(waiting, /disabled=""/);
+    assert.match(waiting, /title="Waiting for Regeneration"/);
+    const settled = deathSave(draw(true));
+    assert.ok(settled, "the row draws while the troll is dying");
+    assert.doesNotMatch(settled, /disabled=""/);
   });
 });

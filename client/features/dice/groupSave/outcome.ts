@@ -144,6 +144,18 @@ function note(notes: string[], text: string): void {
   if (!notes.includes(text)) notes.push(text);
 }
 
+/**
+ * The damage types a row actually takes (docs/design-v1-combat-controls.md
+ * 3.4), for the Regeneration note: each type of a part still above 0 once
+ * its save, immunity, resistance, vulnerability and rounding are applied,
+ * once, in the rules' order. A part that comes to 0 adds nothing, and an
+ * untyped part adds no type.
+ */
+export function dealtTypes(parts: readonly PartAmount[], byPart: readonly number[]): DamageType[] {
+  const dealt = new Set(parts.flatMap((p, i) => (p.type !== undefined && (byPart[i] ?? 0) > 0 ? [p.type] : [])));
+  return DAMAGE_TYPES.filter((t) => dealt.has(t));
+}
+
 /** A row's damage in words: "Immune to Fire: 9 Radiant", "17". */
 export function damageWords(parts: readonly PartAmount[], dealt: { amount: number; notes: string[]; byPart: number[] }): string {
   if (dealt.notes.length === 0 || parts.length < 2) return dealt.notes.length > 0 ? `${dealt.notes.join(". ")}: ${dealt.amount}` : `${dealt.amount}`;
@@ -161,8 +173,8 @@ export function conditionSkip(key: ConditionKey, row: { defenses: readonly Defen
 
 export type OutcomeCondition = { key: ConditionKey; duration?: DurationInput; save?: NonNullable<Effect["save"]> };
 
-/** One creature's part of the plan, before it is frozen. */
-export type PlanRow = { target: ActorTarget; amount: number; conditions: readonly OutcomeCondition[]; remove?: readonly string[]; resist: boolean };
+/** One creature's part of the plan, before it is frozen. `types` go with its damage (dealtTypes), never without it. */
+export type PlanRow = { target: ActorTarget; amount: number; conditions: readonly OutcomeCondition[]; remove?: readonly string[]; resist: boolean; types?: readonly DamageType[] };
 
 /**
  * The plan's targets: each creature once, with its amount, its conditions
@@ -174,6 +186,7 @@ export function planTargets(rows: readonly PlanRow[], newId: () => string): OpOf
   for (const row of rows) {
     const item: OpOf<"actor.outcome">["targets"][number] = { target: row.target };
     if (row.amount > 0) item.amount = Math.min(100_000, row.amount);
+    if (item.amount !== undefined && row.types && row.types.length > 0) item.types = [...row.types];
     if (row.conditions.length > 0) {
       item.effects = row.conditions.map((c): EffectInput => ({ id: newId(), key: c.key, ...(c.duration ? { duration: c.duration } : {}), ...(c.save ? { save: c.save } : {}) }));
     }
@@ -187,11 +200,16 @@ export function planTargets(rows: readonly PlanRow[], newId: () => string): OpOf
 /**
  * Whether the page's whole contract fits one `actor.outcome` (5.5):
  * every row failing, every condition chosen, the most damage, a
- * resistance each. Checked whenever the rows or the outcome change, before
- * any roll, so Apply never meets a plan its op refuses. Null when it fits,
- * else the words.
+ * resistance each, and every type the damage can carry. Checked whenever
+ * the rows or the outcome change, before any roll, so Apply never meets a
+ * plan its op refuses. Null when it fits, else the words.
  */
-export function worstCase(rows: readonly ActorTarget[], conditions: readonly OutcomeCondition[] | ((target: ActorTarget) => readonly OutcomeCondition[]), label?: string): string | null {
+export function worstCase(
+  rows: readonly ActorTarget[],
+  conditions: readonly OutcomeCondition[] | ((target: ActorTarget) => readonly OutcomeCondition[]),
+  label?: string,
+  more: { types?: readonly DamageType[]; quiet?: boolean } = {},
+): string | null {
   if (rows.length > LIMITS.outcomeTargets) return "At most 100 creatures in one group save.";
   const of = typeof conditions === "function" ? conditions : () => conditions;
   if (rows.some((target) => of(target).length > LIMITS.outcomeEffectsEach)) return OUTCOME_TOO_BIG;
@@ -202,9 +220,10 @@ export function worstCase(rows: readonly ActorTarget[], conditions: readonly Out
     plan: id(),
     ...(label ? { label } : {}),
     targets: planTargets(
-      rows.map((target) => ({ target, amount: 100_000, conditions: of(target), resist: true })),
+      rows.map((target) => ({ target, amount: 100_000, conditions: of(target), resist: true, ...(more.types ? { types: more.types } : {}) })),
       id,
     ),
+    ...(more.quiet ? { quiet: true as const } : {}),
   };
   return serializedBytes(op) <= LIMITS.outcomeOpBytes ? null : OUTCOME_TOO_BIG;
 }

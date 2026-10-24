@@ -16,7 +16,8 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { HpEntry, HpSection, oneTarget } = await import("./HpSection.tsx");
+const { DeathSaves, HpEntry, HpSection, oneTarget } = await import("./HpSection.tsx");
+const { actor, customMonster, DM, entry, room, token } = await import("#shared/testutil.ts");
 
 function render(access: "all" | "relative", vitals = { name: "Thorn", dead: false, max: 20 as number | undefined }, settings: { healRevives?: boolean } = {}, role: "dm" | "player" = "dm"): string {
   const target = oneTarget({ tokenId: "t1" }, access, false, vitals);
@@ -112,3 +113,39 @@ describe("the Hit points section of a creature with no HP to show (docs/design-v
   });
 });
 
+
+/*
+ * The token panel's and the token bar's death save Roll (DeathSaves) waits
+ * while this device shows the creature's Regeneration open, with the reason
+ * under it (docs/design-v1-combat-controls.md 2.3 and 4.4).
+ */
+describe("the death save Roll while Regeneration is open", () => {
+  const TROLL = customMonster("troll", {
+    name: "Troll",
+    traits: [{ name: "Regeneration", text: "The troll regains 15 Hit Points at the start of each of its turns. If the troll takes Acid or Fire damage, this trait doesn't function at the start of the troll's next turn." }],
+  });
+
+  function draw(settled: boolean): string {
+    const record = { id: 7, entryId: "e1", round: 2, hp: 0, life: "dying" as const, ...(settled ? { settled: { regeneration: { state: "done" as const, total: 15 } } } : {}) };
+    const view = room({
+      monsters: { troll: TROLL },
+      tokens: { tr: token("tr", { kind: "monster", name: "Troll", actor: { inline: actor({ monsterId: "troll", hp: { cur: 0, max: 84, temp: 0 }, life: "dying", turnRecord: record }) } }) },
+      encounter: { rev: 0, round: 2, activeEntryId: "e1", entries: [entry("e1", { tokenId: "tr" })] },
+    });
+    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: [], multi: false } }));
+    const saves = createElement(DeathSaves, { saves: { ok: 0, fail: 1 }, canEdit: true, target: { tokenId: "tr" }, onChange() {} });
+    return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: saves }) }));
+  }
+  const roll = (markup: string) => /<button[^>]*aria-label="Roll a Death Save"[^>]*>/.exec(markup)?.[0] ?? "";
+
+  test("off, and saying why, while Regeneration is open, and on once it is settled", () => {
+    const waiting = draw(false);
+    assert.match(roll(waiting), /disabled=""/);
+    const reason = /aria-describedby="([^"]+)"/.exec(roll(waiting))?.[1];
+    assert.ok(reason && new RegExp(`id="${reason}"[^>]*>Waiting for Regeneration<`).test(waiting));
+    const open = draw(true);
+    assert.ok(roll(open), "the Roll draws");
+    assert.doesNotMatch(roll(open), /disabled=""/);
+    assert.doesNotMatch(open, /Waiting for Regeneration/);
+  });
+});

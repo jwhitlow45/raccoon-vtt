@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { actor, castAsk, character, member, room, token } from "#shared/testutil.ts";
+import { actor, castAsk, character, customMonster, effect, member, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
 import { apply, mark, markGone, newPage, setAmount, setDc, stateOf, typeTotal, type Page } from "./chain.ts";
@@ -96,6 +96,84 @@ describe("the DM's own amount and the outcome's size", () => {
     assert.equal(worstCase(rows.map((r) => r.target), page.outcome.conditions.map((key) => ({ key: key as "charmed" })), "Hypnotic Pattern"), null, "the keys alone fit, which is what let it through");
     assert.equal(pageBound(page, rows), OUTCOME_TOO_BIG);
     assert.equal(pageBound({ ...page, outcome: { ...page.outcome, conditions: ["charmed", "incapacitated"] } }, rows), null, "two fit, as Hypnotic Pattern needs");
+  });
+});
+
+/** The types each creature's damage carries, and a secret page's quiet (docs/design-v1-combat-controls.md 3.4 and 8). */
+describe("the plan's damage types and its quiet", () => {
+  const hp = { cur: 30, max: 30, temp: 0 };
+  const tokens = {
+    g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp }) } }),
+    imp: token("imp", { kind: "monster", name: "Lurker", actor: { inline: actor({ hp, monsterId: "lurker" }) } }),
+    tough: token("tough", { kind: "monster", name: "Ogre", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 20 } }) } }),
+    stone: token("stone", { kind: "monster", name: "Statue", actor: { inline: actor({ hp, effects: [effect("e1", { key: "petrified" })] }) } }),
+  };
+  const dice: DiceView = { ...DICE, view: room({ tokens, monsters: { lurker: customMonster("lurker", { immunities: "Fire" }) } }) };
+  const ids = Object.keys(tokens);
+  const rows = groupRows(dice, ids, { kind: "save", ability: "dex" }, false);
+  function page(damage: string, result: "fail" | "pass", secret = true): Page {
+    const base: Page = {
+      ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: ids }, test: { kind: "save", ability: "dex" }, dc: 15, secret, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, onPass: "half" } }),
+      phase: "rolled",
+      rows,
+    };
+    return rows.reduce((p, r) => mark(p, r.holder, result), base);
+  }
+  const typesOf = (p: Page, amounts: { amount: number; type?: "fire" | "radiant" }[]) => {
+    const plan = buildPlan(p, dice, amounts, { plan: "plan", newId: () => "e" })!;
+    return Object.fromEntries(plan.targets.map((t) => ["tokenId" in t.target ? t.target.tokenId : "", t.types ?? null]));
+  };
+
+  test("mixed damage sends each type taken, immunity drops one, and temporary HP still counts, since the types go with the hit", () => {
+    const flame = [
+      { amount: 10, type: "fire" as const },
+      { amount: 6, type: "radiant" as const },
+    ];
+    assert.deepEqual(typesOf(page("10 fire + 6 radiant", "fail"), flame), { g1: ["fire", "radiant"], imp: ["radiant"], tough: ["fire", "radiant"], stone: ["fire", "radiant"] });
+    assert.deepEqual(rowOutcome(page("10 fire + 6 radiant", "fail"), rows[1]!, dice, flame).types, ["radiant"], "the row says what its plan target sends");
+  });
+
+  test("a part rounded to 0 adds nothing, and a creature that takes nothing sends no types at all", () => {
+    const thin = [
+      { amount: 1, type: "fire" as const },
+      { amount: 3, type: "radiant" as const },
+    ];
+    // Halved on a pass: fire 1 becomes 0, radiant 3 becomes 1. Petrified halves again: radiant 1 becomes 0.
+    assert.deepEqual(typesOf(page("1 fire + 3 radiant", "pass"), thin), { g1: ["radiant"], imp: ["radiant"], tough: ["radiant"] }, "the statue takes 0 and is left out");
+    const fire = [{ amount: 8, type: "fire" as const }];
+    const only = buildPlan(page("8 fire", "fail"), dice, fire, { plan: "plan", newId: () => "e" })!;
+    assert.equal(only.targets.some((t) => "tokenId" in t.target && t.target.tokenId === "imp"), false, "immune to all of it: no amount, no types");
+    const lurker = rowOutcome(page("8 fire", "fail"), rows[1]!, dice, fire);
+    assert.deepEqual([lurker.amount, lurker.types], [0, []]);
+    assert.deepEqual(rowOutcome(page("12", "fail"), rows[0]!, dice, [{ amount: 12 }]).types, [], "untyped damage names none");
+  });
+
+  test("an amount the DM typed keeps the worked-out types, and a typed 0 sends none", () => {
+    const fire = [{ amount: 8, type: "fire" as const }];
+    const holder = rows[0]!.holder;
+    assert.deepEqual(rowOutcome(setAmount(page("8 fire", "fail"), holder, 5), rows[0]!, dice, fire).types, ["fire"]);
+    assert.deepEqual(rowOutcome(setAmount(page("8 fire", "fail"), holder, 0), rows[0]!, dice, fire).types, []);
+    assert.equal(typesOf(setAmount(page("8 fire", "fail"), holder, 0), fire).g1, undefined, "no amount, so no target for it either");
+  });
+
+  test("secret saves make the outcome quiet, so a Legendary Resistance's line reaches only the DM and owners, and open saves do not", () => {
+    const fire = [{ amount: 8, type: "fire" as const }];
+    assert.equal(buildPlan(page("8 fire", "fail", true), dice, fire, { plan: "plan", newId: () => "e" })!.quiet, true);
+    assert.equal("quiet" in buildPlan(page("8 fire", "fail", false), dice, fire, { plan: "plan", newId: () => "e" })!, false);
+  });
+
+  test("the page's bound counts every type its damage field names, on every row", () => {
+    const hundred = Array.from({ length: 100 }, (_, i) => `0192f0a8-6c1e-7a4b-9c3d-${String(i).padStart(12, "0")}`);
+    const many: DiceView = { ...DICE, view: room({ tokens: Object.fromEntries(hundred.map((id) => [id, token(id, { kind: "monster", name: "Cultist", actor: { inline: actor() } })])) }) };
+    const cultists = groupRows(many, hundred, { kind: "save", ability: "wis" }, false);
+    const at = (damage: string): Page => ({
+      ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
+      fill: { name: "Prismatic Storm", from: "" },
+      outcome: { damage, onPass: "none", conditions: ["charmed", "incapacitated"], lasts: { mode: "turnEnd", rounds: 10, anchor: "own" }, saveEnds: { ability: "wis", dc: null } },
+    });
+    assert.equal(pageBound(at("1d6 fire"), cultists), null);
+    const every = "1 acid + 1 bludgeoning + 1 cold + 1 fire + 1 force + 1 lightning + 1 necrotic + 1 piercing + 1 poison + 1 psychic + 1 radiant + 1 slashing + 1 thunder";
+    assert.equal(pageBound(at(every), cultists), OUTCOME_TOO_BIG);
   });
 });
 

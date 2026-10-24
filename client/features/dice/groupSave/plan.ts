@@ -1,13 +1,13 @@
 import type { ConditionKey, Effect, RoomState } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import type { ActorTarget, DurationInput, OpOf } from "#shared/protocol.ts";
-import type { DamageType } from "#shared/rules/damage.ts";
+import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { effectName } from "#shared/logText.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import type { Page } from "./chain.ts";
 import { stateOf } from "./chain.ts";
-import { conditionSkip, damageWords, parseParts, partAmounts, planTargets, rowDamage, worstCase, type OutcomeCondition, type PartAmount, type PlanRow } from "./outcome.ts";
+import { conditionSkip, damageWords, dealtTypes, parseParts, partAmounts, planTargets, rowDamage, worstCase, type OutcomeCondition, type PartAmount, type PlanRow } from "./outcome.ts";
 import { rowResult, type Mark, type RowBase } from "./rows.ts";
 
 /**
@@ -37,6 +37,12 @@ export type RowOutcome = {
   evasionApplies: boolean;
   /** Whether the row counts Evasion: the DM's switch, else what the creature's block or stat block says. */
   evasion: boolean;
+  /**
+   * The damage types its amount carries (outcome.ts dealtTypes), for the
+   * Regeneration note (docs/design-v1-combat-controls.md 3.4): none when it
+   * takes nothing. An amount the DM typed keeps the worked-out parts' types.
+   */
+  types: DamageType[];
 };
 
 function hpOf(dice: DiceView, target: ActorTarget): { cur: number; temp: number } | null {
@@ -94,12 +100,14 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     .map((d) => ({ key: `${d.kind}:${d.of}:${d.qualifier ?? ""}:${d.source}`, words: `${d.kind === "immune" ? "Immune to" : d.kind === "resist" ? "Resists" : "Vulnerable to"} ${d.of} ${d.qualifier}` }));
   const evasionApplies = page.test.kind === "save" && page.test.ability === "dex" && page.outcome.onPass === "half";
   const evasion = state.evasion ?? rolls?.evasion ?? false;
-  const out: RowOutcome = { result, resisted, amount: 0, computed: 0, words: "", conditions: [], skips: [], legendaryLeft, qualified, evasionApplies, evasion };
+  const out: RowOutcome = { result, resisted, amount: 0, computed: 0, words: "", conditions: [], skips: [], legendaryLeft, qualified, evasionApplies, evasion, types: [] };
   if (result === null || result === "skip" || state.gone) return out;
+  let types: DamageType[] = [];
   if (amounts) {
     const dealt = rowDamage(amounts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
     out.amount = dealt.amount;
     out.computed = dealt.amount;
+    types = dealtTypes(amounts, dealt.byPart);
     // The amount shows on the row's first line, so words come only when a defense or Evasion changed it.
     out.words = amounts.length > 0 && dealt.notes.length > 0 ? damageWords(amounts, dealt) : "";
   }
@@ -107,6 +115,8 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     out.amount = state.amount;
     out.words = amounts ? `Typed ${state.amount}, worked out ${out.computed}` : `Typed ${state.amount}`;
   }
+  // Damage of 0 writes nothing (actors.ts), so it carries no type either.
+  out.types = out.amount > 0 ? types : [];
   if (result === "fail" && state.conditions !== "off") {
     for (const key of page.outcome.conditions as ConditionKey[]) {
       const skip = state.conditions === "on" ? null : conditionSkip(key, { defenses, qualifiedOn, effects, hp: hpOf(dice, row.target) }, out.amount);
@@ -132,6 +142,10 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
   const ends = page.outcome.saveEnds;
   const save = ends ? { ability: ends.ability, dc: 50, ...(page.spell ? { spell: true as const } : {}) } : undefined;
   const conditions = page.outcome.conditions as ConditionKey[];
+  // Every type the damage field names, which each row's damage may carry.
+  const parsed = page.outcome.damage.trim() ? parseParts(page.outcome.damage, page.fill?.damageType) : null;
+  const named = new Set(parsed?.ok ? parsed.parts.flatMap((p) => (p.type ? [p.type] : [])) : []);
+  const types = DAMAGE_TYPES.filter((t) => named.has(t));
   return worstCase(
     rows.map((r) => r.target),
     (target) => {
@@ -139,6 +153,7 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
       return conditions.map((key) => ({ key, ...(duration ? { duration } : {}), ...(save ? { save } : {}) }));
     },
     page.fill?.name,
+    { ...(types.length > 0 ? { types } : {}), quiet: page.secret },
   );
 }
 
@@ -207,14 +222,15 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     if (state.gone || state.mark === "skip") continue;
     const outcome = rowOutcome(page, row, dice, amounts);
     if (outcome.result === null || outcome.result === "skip") continue;
-    rows.push({ target: row.target, amount: outcome.amount, conditions: outcome.conditions, resist: outcome.resisted });
+    rows.push({ target: row.target, amount: outcome.amount, conditions: outcome.conditions, resist: outcome.resisted, types: outcome.types });
   }
   const targets = planTargets(rows, ids.newId);
   // The outcome closes the player's ask it answers in the same op (docs/design-v1-player-save-spell.md 3.3).
   // A trap's springing is settled by the outcome that applies it, in the same op (docs/design-v1-traps.md 4.4).
   const trap = page.source.kind === "trap" && !page.cast ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
   if (targets.length === 0 && !("trap" in trap)) return null;
-  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), ...trap, targets };
+  // Saves rolled in secret keep a Legendary Resistance's use line from players (docs/design-v1-combat-controls.md 8).
+  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), ...trap, targets, ...(page.secret ? { quiet: true as const } : {}) };
 }
 
 // ------------------------------------------------------------ a row in words (5.8)

@@ -1,10 +1,11 @@
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
-import { damageTypeName } from "#shared/rules/damage.ts";
+import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
+import type { DayUse, LimitedUse, RechargeUse } from "#shared/dice/uses.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId } from "#shared/model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId, type UseMark } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -14,6 +15,7 @@ import type { CastBlock } from "./optionState.ts";
 import type { CastPhase } from "./cast/cast.ts";
 import { foldKey, type CreatureGroup, type DiceFoldsStore, type FoldKind } from "./diceFolds.ts";
 import { d20Text, parseBonus, TYPE_BONUS } from "../rolls/card.ts";
+import { ownsCharacter, ownsToken } from "../tokens/access.ts";
 
 /**
  * The rules of the Dice panel's roll options (docs/design-v1-roll-options.md
@@ -303,7 +305,7 @@ export function damageRolls(named: NamedRoll, opts: { on: ReadonlySet<number>; c
   const riders = parts.flatMap((p) => (p.optional ? [riderName(p)] : [])).filter((n): n is string => n !== null);
   // "critical" in the label tells an HP entry the line was a critical hit, for a creature at 0 HP.
   const head = `${named.name} ${opts.critical ? "critical damage" : "damage"}${riders.length > 0 ? ` and ${riders.join(" and ")}` : ""}`;
-  const byType = new Map<string, string[]>();
+  const byType = new Map<DamageType | "", string[]>();
   for (const part of parts) {
     const parsed = parseFormula(part.formula);
     if (!parsed.ok) continue;
@@ -318,6 +320,8 @@ export function damageRolls(named: NamedRoll, opts: { on: ReadonlySet<number>; c
     const roll: PanelRoll = { formula: formatFormula(parsed.formula), label: cutLabel(type ? `${head}, ${damageTypeName(type)}` : head) };
     if (opts.creature) roll.creature = opts.creature;
     if (opts.critical) roll.critical = true;
+    // The line keeps the type itself, since a label is cut to fit or typed by hand (docs/design-v1-combat-controls.md 3.4).
+    if (type) roll.type = type;
     out.push(roll);
   }
   return out;
@@ -370,13 +374,21 @@ export function critical(roll: DiceRoll | undefined): boolean {
   return face !== undefined && face >= (roll?.critOn ?? 20);
 }
 
-// ------------------------------------------------------------ recharge
+// ------------------------------------------------------------ recharge and X/Day (docs/design-v1-combat-controls.md 6)
 
 /**
- * Actions marked Used on this device, per token, in session storage
- * (6.4): a tap on a recharge action's Damage or Group save marks it, its
- * row's Used toggles it, and a recharge that succeeds clears it.
+ * The per-tab Used marks of builds before recharge became room state
+ * (3.6), deleted as a room loads and never read, since they were one
+ * tab's guesses.
  */
+export function dropOldRechargeMarks(roomId: string): void {
+  try {
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`rvtt.rechargeUsed.${roomId}`);
+  } catch {
+    // Storage blocked: it could have kept nothing to drop.
+  }
+}
+
 function usedKey(roomId: string): string {
   return `rvtt.rechargeUsed.${roomId}`;
 }
@@ -411,6 +423,87 @@ export function writeUsed(roomId: string, used: Record<string, string[]>): void 
   }
 }
 
+/** A creature's spent abilities as this viewer's copy holds them, absent for a viewer who reads none (2.2). */
+export type Marks = Readonly<Record<string, UseMark>> | undefined;
+
+/** The mark under an ability's key, when it is of that ability's kind. */
+export function markOf(marks: Marks, key: string, kind: UseMark["kind"]): UseMark | undefined {
+  const mark = marks && Object.hasOwn(marks, key) ? marks[key] : undefined;
+  return mark?.kind === kind ? mark : undefined;
+}
+
+type RowFacts = Pick<NamedRoll, "key" | "name" | "section" | "recharge" | "uses">;
+
+/**
+ * The recharge ability a named roll belongs to, under its roll's key, which
+ * is the ability's (shared/dice/named.ts entryKeys): the block's own entry
+ * where this device reads the block, else the roll's own facts, whose name
+ * already drops the recharge bracket. Null for a roll with no recharge, and
+ * for a character's spell, which no ability key names.
+ */
+export function rechargeUseOf(named: RowFacts, uses: readonly LimitedUse[] | null): RechargeUse | null {
+  if (named.recharge === undefined || named.section === "spells") return null;
+  const listed = uses?.find((u): u is RechargeUse => u.kind === "recharge" && u.key === named.key);
+  return listed ?? { kind: "recharge", key: named.key, name: named.name, min: named.recharge, section: named.section };
+}
+
+const PER_DAY = /^(\d+)\/day\b/i;
+
+/**
+ * The X/Day ability a named roll belongs to: the block's own entry, which
+ * knows whether a Short Rest brings it back, and nothing where the block
+ * leaves it out, as a Spellcasting entry's spells and a legendary action
+ * are. Only a roll whose block this device does not read falls back on
+ * the roll's own "2/Day".
+ */
+export function dayUseOf(named: RowFacts, uses: readonly LimitedUse[] | null): DayUse | null {
+  if (named.uses === undefined || named.section === "spells") return null;
+  if (uses !== null) return uses.find((u): u is DayUse => u.kind === "day" && u.key === named.key) ?? null;
+  const n = Number(PER_DAY.exec(named.uses)?.[1] ?? 0);
+  return n >= 1 && n <= LIMITS.usesPerDay ? { kind: "day", key: named.key, name: named.name, max: n, short: false, section: named.section } : null;
+}
+
+/**
+ * The recharge a roll marks used (6): a Damage tap, a group save's start
+ * or Apply, a player's ask for saves. Only one this device shows ready,
+ * and its op goes with `ifReady`, so a mark another device made meanwhile
+ * changes nothing and draws no refusal. Null when there is nothing to mark.
+ */
+export function markOnRoll(use: RechargeUse | null, marks: Marks): RechargeUse | null {
+  return use !== null && markOf(marks, use.key, "recharge") === undefined ? use : null;
+}
+
+/** An X/Day ability's uses left, and its row's meta: the printed "2/Day" with the count after it, "2/Day, 1 left". */
+export function dayCount(printed: string, use: DayUse, mark: UseMark | undefined): { left: number; text: string } {
+  const left = Math.max(0, use.max - (mark?.used ?? 0));
+  return { left, text: `${printed}, ${left} left` };
+}
+
+/** The reason an X/Day ability's Use gives while none is left. */
+export const NO_USES_LEFT = "No uses left";
+
+/** A holder as the Dice panel keys it (creatureKey), back to the creature an op names: `t:` a token, `c:` a character. */
+export function holderTarget(holder: string): ActorTarget | null {
+  if (holder.startsWith("t:") && holder.length > 2) return { tokenId: holder.slice(2) };
+  if (holder.startsWith("c:") && holder.length > 2) return { characterId: holder.slice(2) };
+  return null;
+}
+
+/**
+ * Whether this viewer may spend a creature's uses, as `actor.use` allows
+ * (shared/permissions.ts): the DM, or one who owns it, directly or through
+ * its character. Anyone else's copy holds no marks to show.
+ */
+export function spendsFor(view: Pick<RoomState, "tokens" | "characters">, you: { role: "dm" | "player"; memberId: string }, creature: ActorTarget): boolean {
+  if (you.role === "dm") return true;
+  if ("characterId" in creature) {
+    const character = view.characters[creature.characterId];
+    return character !== undefined && ownsCharacter(you.memberId, character);
+  }
+  const token = view.tokens[creature.tokenId];
+  return token !== undefined && ownsToken(view, you.memberId, token);
+}
+
 /**
  * Starts what spends a recharge action and marks it Used only once that
  * went (6.4, ASTRA-15): a group save the DM kept open in its place, or an
@@ -429,10 +522,24 @@ export function spendOnStart(start: () => boolean, spend: (() => void) | null): 
  * (Bree's Longsword damage)". A roll the splitter sent as several lines is
  * one chip: `lineIds` are all of them, `lineId` the newest.
  */
-export type HpChip = { lineId: string; lineIds: string[]; amount: number; text: string; critical: boolean };
+export type HpChip = {
+  lineId: string;
+  lineIds: string[];
+  amount: number;
+  text: string;
+  critical: boolean;
+  /** A damage chip's types as rolled (rolledTypes), absent with none: the HP entry applies no defenses, so they go with an untouched chip's damage (docs/design-v1-combat-controls.md 3.4). */
+  types?: DamageType[];
+};
 
 const DAMAGE_LABEL = /\bdamage\b/i;
 const HEAL_LABEL = /\bhealing\b/i;
+
+/** The damage types rolls dealt as rolled: each roll's type where its total is above 0, once, in the rules' order. */
+export function rolledTypes(rolls: readonly Pick<DiceRoll, "type" | "total">[]): DamageType[] {
+  const dealt = new Set(rolls.flatMap((r) => (r.type !== undefined && r.total > 0 ? [r.type] : [])));
+  return DAMAGE_TYPES.filter((t) => dealt.has(t));
+}
 
 /** The words of a line's first label without its damage type: "Rapier damage and Sneak Attack". */
 function chipWhat(roll: DiceRoll): string {
@@ -477,8 +584,9 @@ export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "
       const amount = rolls.reduce((n, r) => n + r.total, 0);
       const what = chipWhat(data.rolls[0]!);
       const text = own ? `Use ${amount} (${what})` : `Use ${amount} (${opts.nameOf(data.by)}'s ${what})`;
+      const types = kind === "damage" ? rolledTypes(rolls) : [];
       // A line rolled before the server marked a crit says so only in its label.
-      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")) };
+      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(types.length > 0 ? { types } : {}) };
     }
     if (own) mine = chip;
     else theirs = chip;
