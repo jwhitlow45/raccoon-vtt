@@ -586,7 +586,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       await add.getByRole("checkbox", { name: "Natural Recovery (spell slots)", exact: true }).waitFor();
       assert.deepEqual(await Promise.all((await recovery.all()).map((box) => box.isChecked())), [false, false], "both unticked");
       assert.equal(await add.getByText("Circle of the Land. 1 use. Back on a Long Rest.", { exact: true }).count(), 2, "each says what it counts");
-      await measure(page, add, `the Add sheet from a class at ${at}`);
+      await measure(page, add, `the Add sheet with a subclass's two rows at ${at}`);
       await add.getByRole("combobox", { name: "Class" }).selectOption("bard");
       await add.getByRole("textbox", { name: "Charisma modifier" }).waitFor();
       await measure(page, add, `the Add sheet asking a modifier at ${at}`);
@@ -606,6 +606,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     assert.deepEqual([...measured].sort(), [
       "the Add sheet asking a modifier",
       "the Add sheet from a class",
+      "the Add sheet with a subclass's two rows",
       "the Add sheet's own",
       "the Class resources section",
       "the Edit sheet",
