@@ -33,7 +33,9 @@ export function deathSaveRow(target: { tokenId: string } | { characterId: string
  * the server, and names the turn's record, so the first roll from any
  * surface settles it and a second is refused before its die. While the
  * creature's Regeneration waits on this device, Roll waits too. Once
- * settled the card says how, from the stored outcome, with Done.
+ * settled the card says how, from the stored outcome, with Done, and
+ * alone: the dying line and the pips would read the counts after it, as a
+ * natural 20 that brought it back, a third success or a third failure.
  */
 export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits: boolean; onDismiss(): void }) {
   const { card } = props;
@@ -77,9 +79,9 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
     >
       <div>
         <div style={{ fontWeight: theme.weight.bold }}>Death save</div>
-        <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{deathSaveWords(participant.name, saves)}</div>
+        {settled ? null : <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{deathSaveWords(participant.name, saves)}</div>}
       </div>
-      {saves ? <Pips ok={saves.ok} fail={saves.fail} /> : null}
+      {saves && !settled ? <Pips ok={saves.ok} fail={saves.fail} /> : null}
       {status || trouble ? (
         <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
           {status ? <span>{status}</span> : null}
