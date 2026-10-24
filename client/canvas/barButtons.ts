@@ -114,7 +114,9 @@ export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
  * room changes with where the tapped token stands. Its capacity is the
  * least room any token's bar gets on that screen instead (barDock.ts
  * spanRoomAtWorst), the screen's alone, so a phone keeps one layout, and
- * Apply one place in view, whichever token is tapped.
+ * Apply one place in view, whichever token is tapped. A tall or zoomed
+ * token is the exception: the bar over it clears its drawn height, so it
+ * may get less room than that, and it scrolls (review FU24-OPUS-2).
  */
 export function barCapacity(room: BarRoom): number | null {
   const free = freeArea(room.viewport, room.chrome, room.foot);

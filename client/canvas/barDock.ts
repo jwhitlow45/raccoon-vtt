@@ -820,7 +820,11 @@ function spanHang(anchor: Point, free: Box, height: number, top: number, tokenHe
  * tapped: a token where the room below it and above it are equal, a little
  * under the free area's middle since a bar above its token also clears the
  * token itself. Each side there is about half the free area. Anywhere else
- * one side is larger, and the bar takes that one.
+ * one side is larger, and the bar takes that one. It counts a token of the
+ * 40 px FLIP_CLEARANCE. A bar over a taller or zoomed token clears that
+ * token's drawn height (review BS-F1), so its room can fall below this by
+ * up to half the height over 40 px, and that bar scrolls (review
+ * FU24-OPUS-2).
  */
 export function spanRoomAtWorst(free: Box): number {
   return spanHang({ x: free.left + free.width / 2, y: free.top + (free.height + FLIP_CLEARANCE) / 2 }, free, Number.POSITIVE_INFINITY, free.top, FLIP_CLEARANCE).room;
