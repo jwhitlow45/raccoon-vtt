@@ -277,13 +277,6 @@ export function nextRestMode(mode: HpMode): HpMode {
 // ------------------------------------------------------------ the strip's status line
 
 /**
- * A line on the dead in the strip's wording (3.3): the header names the
- * creature, so a line names it once, and a group's drops the words it
- * can spare, so each fits the note's two lines. The cases follow the
- * entry's own lines (groupHp.ts deadLines), whose sentences stay the
- * field's description.
- */
-/**
  * Whether Apply sends a Critical Hit (design section 9.6): the kept tick,
  * on a creature at 0 HP, for what will be sent as damage, the typed text
  * once it parses and the chosen mode otherwise. So a tick kept into Heal,
@@ -411,6 +404,13 @@ function sentenceOf(input: RestStatusInput): Sentence | null {
   return null;
 }
 
+/**
+ * A line on the dead in the strip's wording (3.3): the header names the
+ * creature, so a line names it once, and a group's drops the words it
+ * can spare, so each fits the note's two lines. The cases are groupHp.ts
+ * deadCase's, whose full sentences (deadLines) stay the field's
+ * description (review BB-OPUS-12).
+ */
 function deadWords(dead: DeadCase, name: string): string {
   switch (dead.kind) {
     case "heal":
