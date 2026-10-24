@@ -1328,7 +1328,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("bs-2. at 390 x 844 with the bar expanded, a drag of Thorn one cell down hides his bar and shows it again expanded where it stood, and the map moves once at most to clear him (review BS-O2, docs/design-v1-bar-compact.md 3.6)", async () => {
+  test("bs-2. at 390 x 844 with the bar expanded, a drag of Thorn one cell down hides his bar and shows it again expanded where it stood, at the height it had, and the map does not move (review BS-O2, docs/design-v1-bar-compact.md 5.3)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
     const effects = MANY.map((key) => ({ id: randomUUID(), key }));
@@ -1339,6 +1339,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       bar = await openThornAtMiddle(view);
       await expand(bar);
       const before = await barFacts(bar);
+      const cam = await readCamera(player);
 
       await touch(along(await cellPoint({ x: 8, y: 6 }), await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 7.5 }), 10));
       await waitFor("Thorn one cell down", () => playerSocket.state?.tokens[run.thorn.id]?.y === 7 || null);
@@ -1347,10 +1348,9 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const settled = await readCamera(player);
       const dropped = await barFacts(bar);
       assert.equal(await bar.getAttribute("data-bar-state"), "expanded", "the drop rested the bar");
+      // The height worked out at Expand holds, what the drop adds to the content scrolling, and an expanded bar's drop moves no map.
       assert.ok(Math.abs(dropped.top - before.top) <= 0.5 && Math.abs(dropped.height - before.height) <= 0.5, `the bar moved from ${before.top} + ${before.height} to ${dropped.top} + ${dropped.height}`);
-      // Thorn's label clears the bar, and nothing moves after.
-      const foot = await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 8 });
-      assert.ok(foot.y + 30 <= dropped.top + 0.5, `Thorn's label meets the bar after the drop: ${foot.y} against ${dropped.top}`);
+      assert.ok(cam && settled && settled.x === cam.x && settled.y === cam.y && settled.scale === cam.scale, `the drop moved the map: ${JSON.stringify({ cam, settled })}`);
       await player.waitForTimeout(500);
       const later = await readCamera(player);
       assert.ok(settled && later && later.y === settled.y && Math.abs((await barFacts(bar)).top - dropped.top) <= 0.5, "the map or the bar moved after the drop settled");
@@ -1406,7 +1406,12 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await bar.waitFor();
       await player.waitForTimeout(500);
       await expand(bar);
+      // Multi-select's options row lifts the bar by its height and leaves the map where it stands (docs/design-v1-bar-compact.md 3.2), and a drag on the map selects in Multi-select, so the map is panned up first, as a player would, Echo clear of the lifted bar.
+      const echoAt = await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 9.5, y: 6.5 });
+      const top = (await barFacts(bar)).top;
+      if (echoAt.y > top - 120) await panBy(Math.min(echoAt.y, top - 8), top - 120 - echoAt.y);
       await (await barControl(bar, "Multi-select")).tap();
+      await player.waitForTimeout(400);
       await touch([await cellPoint({ x: 9, y: 6 })]);
       await groupBar.waitFor();
       await player.waitForTimeout(500);

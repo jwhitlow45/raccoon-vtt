@@ -10,7 +10,7 @@ import type { Actor, LogEvent, RoomState } from "#shared/model.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "#shared/srd/monsters.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment, toastsUnderCards } from "./helpers/alignment.ts";
-import { ConsoleWatch, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Combat uses (docs/design-v1-combat-controls.md 4 to 6 and 11), on the
@@ -179,7 +179,8 @@ async function barUses(page: Page): Promise<Locator> {
   await tapCell(page, run.bounds, DRAGON_AT);
   const bar = page.getByRole("dialog", { name: `${DRAGON} actions` });
   await bar.waitFor();
-  const uses = bar.getByRole("button", { name: "Uses", exact: true });
+  // An upright phone's strip draws Uses only where it fits, else Expand shows it (docs/design-v1-bar-compact.md 6).
+  const uses = await barControl(bar, "Uses");
   await waitFor("the Uses button ready", async () => ((await uses.isEnabled()) ? true : null));
   if ((await uses.getAttribute("aria-pressed")) !== "true") await uses.click();
   const drawer = bar.locator("[data-uses-drawer]");

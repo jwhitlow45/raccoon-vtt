@@ -97,6 +97,9 @@ function bar(page: Page, name: string): Locator {
 
 /** Selects a token by a tap or a click on it: on its cell's center, or for a Tiny one at its own middle. */
 async function select(page: Page, name: string, cell: { x: number; y: number }, tiny = false): Promise<Locator> {
+  // An expanded bar lasts through a drag and covers the map under it, which a drop never moves (docs/design-v1-bar-compact.md 5.3): it rests first, as a player would.
+  const expanded = page.locator('[role="dialog"][data-bar-state="expanded"]');
+  if ((await expanded.count()) > 0) await expanded.getByRole("button", { name: "Collapse", exact: true }).first().click();
   if (tiny) {
     const p = await pagePoint(page, BOUNDS, { x: cell.x + 0.25, y: cell.y + 0.25 });
     await page.mouse.click(p.x, p.y);
@@ -396,7 +399,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("at-3b. Pat taps Undo move on Thorn's bar: Thorn is back in the saddle, and the horse shares the turn again", async () => {
     const rider = token(patSocket, run.thorn)!;
     const thorn = await select(pat, "Thorn", { x: rider.x, y: rider.y });
-    await thorn.getByRole("button", { name: "Undo move", exact: true }).tap();
+    await (await barControl(thorn, "Undo move")).tap();
     const back = await waitFor("Thorn on the warhorse again", () => (token(patSocket, run.thorn)?.attached?.to === run.horse ? token(patSocket, run.thorn) : null));
     assert.deepEqual(back.attached, { to: run.horse, kind: "ride", steer: true });
     await waitFor("the horse on the turn's list", () => (patSocket.state!.encounter!.turnStart?.mounts?.includes(run.horse) ? true : null));

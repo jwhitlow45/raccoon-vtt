@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, OpSocket, pagePoint, pickTool, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, multiSelect, OpSocket, pagePoint, pickTool, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token action bar at rest on a phone held upright
@@ -885,11 +885,29 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
 
       // The DM's Multi-select: a gathering tap and a removal never move the map, and a plain tap from the group does (review BC-OPUS-37).
       await setUp(dm, { ...PHONE, scale: 1 });
-      const dmStrip = await openOn(dm, run.thorn);
-      await (await barControl(bar(dm, "Thorn"), "Multi-select")).click();
-      await panTo(dm, dmCdp, { x: run.goblin2.x + 0.5, y: run.goblin2.y + 1 }, { x: 195, y: dmStrip.top - 10 });
+      await openOn(dm, run.thorn);
+      // Multi-select is behind Expand on the DM's strip at 390 x 844, and the strip rests again after, lifted by Multi-select's options row.
+      await multiSelect(bar(dm, "Thorn"));
+      const lifted = await steady(dm);
+      // In Multi-select one finger on the map draws a box that gathers, so two pan it, Goblin 2 just above the strip, its label meeting it.
+      const before = await middle(dm, run.goblin2);
+      const dy = lifted.top - 12 - before.y;
+      const fingers = new Touches(dmCdp);
+      const y0 = Math.min(lifted.top - 40, lifted.top - 40 - dy);
+      await fingers.start([
+        { x: 12, y: y0, id: 1 },
+        { x: 378, y: y0, id: 2 },
+      ]);
+      for (let i = 1; i <= 12; i++)
+        await fingers.move([
+          { x: 12, y: y0 + (dy * i) / 12, id: 1 },
+          { x: 378, y: y0 + (dy * i) / 12, id: 2 },
+        ]);
+      await fingers.end();
+      await sleep(600);
       const gathered = await readCamera(dm);
       const g2 = await middle(dm, run.goblin2);
+      assert.ok(g2.y < lifted.top - 4 && g2.y + 30 > lifted.top, `Goblin 2 does not stand just above the lifted strip, so the taps test nothing: ${JSON.stringify({ g2, lifted })}`);
       await dm.touchscreen.tap(g2.x, g2.y);
       const group = dm.getByRole("dialog", { name: "2 selected tokens" });
       await group.waitFor();
@@ -1043,7 +1061,7 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       const thorn = bar(pat, "Thorn");
       assert.equal(await thorn.getAttribute("data-bar-mode"), "compact", "F 140 opens compact");
       const cam = await readCamera(pat);
-      // The window grows a pixel at a time until F reaches 148, a pixel or two past 360 here, where the top bar's and the toolbar's borders count.
+      // The window grows a pixel at a time until F reaches 148, at 360 here, the bars measured as drawn.
       let grown = 360;
       for (; grown <= 368; grown++) {
         await pat.setViewportSize({ width: 320, height: grown });
@@ -1161,7 +1179,7 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await ops.send({ t: "encounter.end" });
       }
     });
-    test("br-f-12. the quick row clips no control's focus ring, the 4 px past each control that its 2 px outline and 2 px offset take, and it lines up within 1 px, at 390 x 844 and 320 x 568 at 130%", async (t) => {
+    test("br-f-12. nothing clips a quick row control's focus ring, the 4 px past it that its 2 px outline and 2 px offset take, the row runs out of nothing sideways, and it lines up within 1 px, at 390 x 844 and 320 x 568 at 130%", async (t) => {
       await homeTokens();
       for (const view of [
         { ...PHONE, scale: 1 },
@@ -1178,23 +1196,82 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         }
         const cut = await row.evaluate((el, ring) => {
           type R = { left: number; top: number; right: number; bottom: number };
-          type E = { getBoundingClientRect(): R & { width: number; height: number }; offsetWidth: number; querySelectorAll(s: string): ArrayLike<E>; getAttribute(n: string): string | null; textContent: string | null };
+          type S = { overflowX: string; overflowY: string; clipPath: string };
+          type E = {
+            getBoundingClientRect(): R & { width: number };
+            offsetWidth: number;
+            scrollWidth: number;
+            clientWidth: number;
+            parentElement: E | null;
+            matches(s: string): boolean;
+            querySelectorAll(s: string): ArrayLike<E>;
+            getAttribute(n: string): string | null;
+            textContent: string | null;
+          };
+          const view = globalThis as unknown as { getComputedStyle(e: E): S };
           const box = el as unknown as E;
-          const r = box.getBoundingClientRect();
-          const zoom = box.offsetWidth > 0 ? r.width / box.offsetWidth : 1;
+          const zoom = box.offsetWidth > 0 ? box.getBoundingClientRect().width / box.offsetWidth : 1;
           const reach = ring * zoom;
+          // What clips the row's controls, from the row up to the bar's frame: a box that clips what overflows it, and a clip path, grown by its inset.
+          const clips: { by: string; r: R }[] = [];
+          for (let a: E | null = box; a && !a.matches('[role="dialog"]'); a = a.parentElement) {
+            const cs = view.getComputedStyle(a);
+            const r = a.getBoundingClientRect();
+            if (cs.overflowX !== "visible" || cs.overflowY !== "visible") clips.push({ by: "overflow", r });
+            const inset = /^inset\((-?[\d.]+)px\)$/.exec(cs.clipPath);
+            const grow = inset ? -Number(inset[1]) * zoom : 0;
+            if (cs.clipPath !== "none") clips.push({ by: `clip path ${cs.clipPath}`, r: { left: r.left - grow, top: r.top - grow, right: r.right + grow, bottom: r.bottom + grow } });
+          }
           const out: string[] = [];
           for (const c of Array.from(box.querySelectorAll("[data-rest-shown] :is(button, input, a[href], [tabindex]:not([tabindex='-1']))"))) {
             const b = c.getBoundingClientRect();
-            if (b.width === 0 || b.height === 0) continue;
-            if (b.left - reach < r.left - 0.5 || b.right + reach > r.right + 0.5 || b.top - reach < r.top - 0.5 || b.bottom + reach > r.bottom + 0.5)
-              out.push(`${c.getAttribute("aria-label") ?? c.textContent ?? "?"}: ${JSON.stringify(b)} in ${JSON.stringify(r)}`);
+            if (b.width === 0) continue;
+            for (const { by, r } of clips) {
+              if (b.left - reach < r.left - 0.5 || b.right + reach > r.right + 0.5 || b.top - reach < r.top - 0.5 || b.bottom + reach > r.bottom + 0.5)
+                out.push(`${c.getAttribute("aria-label") ?? c.textContent ?? "?"}: ${JSON.stringify(b)} cut by the ${by} of ${JSON.stringify(r)}`);
+            }
           }
+          // Nor does the row run out of its parent sideways, which a box that scrolls would show.
+          const parent = box.parentElement;
+          if (parent && parent.scrollWidth > parent.clientWidth + 1) out.push(`the row's parent runs over: ${parent.scrollWidth} > ${parent.clientWidth}`);
           return out;
         }, 4);
         assert.deepEqual(cut, [], `${label}: the row clips these controls' focus rings`);
         assert.deepEqual(alignmentLines(await measureAlignment(row), `${label} the quick row`), []);
         await shots.take(pat, `br-f-12-row-${view.width}`);
+      }
+    });
+
+    test("br-f-13. a toast showing as a turn starts goes under the card the turn brings, a death save card here, so none of the card is under it (review LP20-CC-2)", async () => {
+      await homeTokens();
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const thorn = { characterId: run.thorn.characterId };
+      await ops.send({ t: "actor.hp", target: thorn, change: { kind: "damage", amount: 30 } });
+      await ops.send({
+        t: "encounter.start",
+        entries: [
+          { id: randomUUID(), tokenId: run.goblin1.id, value: 15 },
+          { id: randomUUID(), tokenId: run.thorn.id, value: 5 },
+        ],
+      });
+      // The first Next starts the fight on the goblin's turn, where Pat's column shows no card.
+      await ops.send({ t: "encounter.next" });
+      try {
+        await ops.send({ t: "log.whisper", to: [run.patId], text: "A cold draft." });
+        const toast = pat.locator("[data-toast]").filter({ hasText: "A cold draft." }).first();
+        await toast.waitFor();
+        await ops.send({ t: "encounter.next" });
+        const card = pat.getByRole("group", { name: "Death save for Thorn", exact: true }).first();
+        await card.waitFor();
+        await sleep(800);
+        assert.ok(await toast.isVisible(), "the toast went before the card came");
+        const t = await rectOf(toast);
+        const c = await rectOf(card);
+        assert.ok(t.top >= c.bottom - 0.5, `the toast lies over the death save card: ${JSON.stringify({ toast: t, card: c })}`);
+        await shots.take(pat, "br-f-13-toast-under-card");
+      } finally {
+        await ops.send({ t: "encounter.end" });
+        await ops.send({ t: "actor.hp", target: thorn, change: { kind: "heal", amount: 30 } });
       }
     });
   });
@@ -1715,21 +1792,36 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       await setUp(dm, { width: 320, height: 360, scale: 1.3 });
       await ops.send({ t: "actor.hp", target: { tokenId: caster }, change: { kind: "damage", amount: 1 } });
       await dm.locator('[data-alert="concentration"]').first().waitFor({ state: "attached" });
+      {
+        // The check's card stands over the map's top at this size, Thorn under it, so he is panned below it first, as the DM would.
+        const { pagePoint, touchSwipe } = await harness();
+        const card = (await dm.locator('[data-alert="concentration"]').first().boundingBox())!;
+        const t = dmSocket.state!.tokens[run.thorn.id]!;
+        const at = await pagePoint(dm, BOUNDS, { x: t.x + 0.5, y: t.y + 0.5 });
+        const below = card.y + card.height + 16;
+        if (at.y < below) await touchSwipe(dmCdp, { x: 12, y: below }, { x: 12, y: below + (below - at.y) }, { steps: 12, everyMs: 20 });
+      }
       const bar = await openBar(dm, run.thorn);
-      await bar.evaluate((el) => {
-        type Node = { scrollHeight: number; clientHeight: number; scrollTop: number; querySelectorAll(s: string): Iterable<Node> };
-        const { getComputedStyle } = globalThis as unknown as { getComputedStyle(n: Node): { overflowY: string } };
-        const frame = el as unknown as Node;
-        const scroller = [frame, ...frame.querySelectorAll("*")].find((n) => /auto|scroll/.test(getComputedStyle(n).overflowY));
-        if (scroller) scroller.scrollTop = scroller.scrollHeight;
-      });
       const summary = bar.getByRole("button", { name: /^Concentration save/ });
-      assert.equal(await summary.isVisible() && (await (await harness()).wholeInReach(summary)), false, "the header's summary scrolled away at the strip's foot");
-      await bar.evaluate((el) => {
-        type Node = { scrollTop: number; querySelectorAll(s: string): Iterable<Node> };
-        for (const n of [el as unknown as Node, ...(el as unknown as Node).querySelectorAll("*")]) n.scrollTop = 0;
-      });
-      assert.ok(await (await harness()).wholeInReach(summary), "a scroll back up brings the summary's button in the header");
+      if ((await summary.count()) === 0) {
+        // The DM's top bar leaves a gap left of Undo here, which takes the summary row (3.5), so the header holds none to scroll away: the row stays in reach.
+        const row = dm.getByRole("button", { name: /^Concentration save/ }).first();
+        assert.ok(await (await harness()).wholeInReach(row), "the summary row risen over the top bar is out of reach");
+      } else {
+        await bar.evaluate((el) => {
+          type Node = { scrollHeight: number; clientHeight: number; scrollTop: number; querySelectorAll(s: string): Iterable<Node> };
+          const { getComputedStyle } = globalThis as unknown as { getComputedStyle(n: Node): { overflowY: string } };
+          const frame = el as unknown as Node;
+          const scroller = [frame, ...frame.querySelectorAll("*")].find((n) => /auto|scroll/.test(getComputedStyle(n).overflowY));
+          if (scroller) scroller.scrollTop = scroller.scrollHeight;
+        });
+        assert.equal(await summary.isVisible() && (await (await harness()).wholeInReach(summary)), false, "the header's summary scrolled away at the strip's foot");
+        await bar.evaluate((el) => {
+          type Node = { scrollTop: number; querySelectorAll(s: string): Iterable<Node> };
+          for (const n of [el as unknown as Node, ...(el as unknown as Node).querySelectorAll("*")]) n.scrollTop = 0;
+        });
+        assert.ok(await (await harness()).wholeInReach(summary), "a scroll back up brings the summary's button in the header");
+      }
       await shots.take(dm, "br-c-3-alerts-back-up");
       await closeBars(dm);
     });

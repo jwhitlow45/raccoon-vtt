@@ -208,6 +208,18 @@ async function tapToken(page: Page, at: { x: number; y: number }, size = 1): Pro
   await page.mouse.click(p.x, p.y);
 }
 
+/**
+ * Fits the map to the screen, so a token stands where the scene puts it
+ * again after an expanded bar's clearing move panned the map
+ * (docs/design-v1-bar-compact.md 5.3).
+ */
+async function fitMap(page: Page): Promise<void> {
+  const fit = page.getByRole("button", { name: "Fit the map to the screen" });
+  if ((await fit.count()) === 0 || !(await wholeInReach(fit))) return;
+  await fit.click();
+  await page.waitForTimeout(300);
+}
+
 function bar(page: Page, name: string): Locator {
   return page.getByRole("dialog", { name: `${name} actions` });
 }
@@ -1053,8 +1065,9 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       [run.herald, run.herald.name],
       [run.thorn, "Thorn"],
     ] as const) {
-      // A spanning bar covers the map under it: put it away before the next tap.
+      // A spanning bar covers the map under it: put it away, and the map its clearing move panned back, before the next tap.
       await dm.keyboard.press("Escape");
+      await fitMap(dm);
       await tapToken(dm, t.at);
       const other = bar(dm, name);
       await other.waitFor();
@@ -1065,6 +1078,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       assert.ok(modes.bottom <= (await rectOf(other.getByRole("textbox", { name: "HP change" }))).top + 1, `${name}: the mode buttons moved under the field`);
     }
     await dm.keyboard.press("Escape");
+    await fitMap(dm);
     await tapToken(dm, run.goblin.at);
     await goblin.waitFor();
     await (await barControl(goblin, "Details")).click();
@@ -1222,6 +1236,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
           [run.herald, run.herald.name],
         ] as const) {
           await dm.keyboard.press("Escape");
+          await fitMap(dm);
           await tapToken(dm, t.at);
           const other = bar(dm, name);
           await other.waitFor();
@@ -1230,6 +1245,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
           await applyInView(other, `${size.label}, ${name}`);
         }
         await dm.keyboard.press("Escape");
+        await fitMap(dm);
         await tapToken(dm, run.goblin.at);
         await expandBar(goblin);
       }

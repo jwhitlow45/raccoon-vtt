@@ -495,12 +495,13 @@ async function selectToken(page: Page, name: string, cell: { x: number; y: numbe
 /**
  * A bar's header: its sticky header, or on a strip that scrolls, whose
  * header scrolls with it (docs/design-v1-bar-compact.md 5.4), the row that
- * holds its Close, marked for the measure.
+ * holds its Close (a group's Deselect all), marked for the measure.
  */
 async function barHeader(bar: Locator): Promise<Locator> {
   const sticky = bar.locator("[data-sticky-header]");
   if ((await sticky.count()) > 0) return sticky;
-  const close = bar.getByRole("button", { name: "Close", exact: true }).first();
+  // A group's bar names its Close "Deselect all".
+  const close = bar.getByRole("button", { name: /^(Close|Deselect all)$/ }).first();
   if ((await close.count()) === 0) return sticky;
   await close.evaluate((el) => {
     type El = { parentElement: El | null; getBoundingClientRect(): { width: number }; setAttribute(n: string, v: string): void; closest(s: string): El | null };
@@ -855,7 +856,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     if (await visible(done)) await done.click();
     const bar = await selectToken(page, "Adult Black Dragon", { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
     if (!bar) return sweep.missing(page, "dp-card-dragon", "a tap on the dragon opened no window");
-    await bar.getByRole("button", { name: "Roll", exact: true }).click();
+    await (await barControl(bar, "Roll")).click();
     const host = await openDice(page);
     await host.getByRole("region", { name: "Rolls for Adult Black Dragon" }).waitFor();
     await host.getByRole("button", { name: /^Rend/ }).first().waitFor();
@@ -886,7 +887,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     }
     const group = page.locator('[role="dialog"][data-bar-mode]').filter({ hasText: /\d+ selected/ }).first();
     if (!(await showsWithin(group, 3_000))) return sweep.missing(page, "dp-several", `Multi-select and ${added} taps opened no group window`);
-    await group.getByRole("button", { name: "Roll", exact: true }).click();
+    await (await barControl(group, "Roll")).click();
     const several = await openDice(page);
     const rolls = several.locator('section[aria-label="Group rolls"]');
     if (!(await showsWithin(rolls.getByRole("heading", { name: /^\d+ selected$/ }), 5_000))) return sweep.missing(page, "dp-several", "the group window's Roll showed no several-selected card");
@@ -1031,7 +1032,7 @@ async function barUses(page: Page, name: string, cell: { x: number; y: number })
   if (!(await canvasAt(page, cell))) return null;
   const bar = await selectToken(page, name, cell);
   if (!bar) return null;
-  const uses = bar.getByRole("button", { name: "Uses", exact: true });
+  const uses = await barControl(bar, "Uses");
   await waitFor("the Uses button ready", async () => ((await uses.isEnabled()) ? true : null));
   if ((await uses.getAttribute("aria-pressed")) !== "true") await uses.click();
   const drawer = bar.locator("[data-uses-drawer]");
@@ -1203,7 +1204,7 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
-    await thorn.getByRole("button", { name: "Details", exact: true }).click();
+    await (await barControl(thorn, "Details")).click();
     const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
     await panel.getByRole("heading", { name: "Thorn" }).first().waitFor();
     const combat = panel.getByRole("button", { name: "Combat", exact: true });
@@ -2295,7 +2296,20 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
           await pat.getByRole("dialog", { name: "The DM asks for a roll" }).waitFor();
         }
         try {
-          const strip = await selectToken(pat, "Thorn", { x: 5, y: 5 });
+          // The card stands over the map's middle on this phone, so Thorn stands a few rows up first, where the map takes his tap. The strip's clearing move then clears his label.
+          let thornAt = { x: 5, y: 5 };
+          if (card) {
+            for (const y of [5, 4, 3, 2, 1, 0]) {
+              const cell = { x: 5, y };
+              if (!(await canvasAt(pat, cell))) continue;
+              thornAt = cell;
+              break;
+            }
+            await ops.send({ t: "token.update", tokenId: run.ids.thorn, patch: { x: thornAt.x, y: thornAt.y, elevation: 0 } });
+            await waitFor("Thorn clear of the card", () => (dmSocket.state?.tokens[run.ids.thorn]?.y === thornAt.y ? true : null));
+            await pat.waitForTimeout(300);
+          }
+          const strip = await selectToken(pat, "Thorn", thornAt);
           if (!strip) {
             await sweep.missing(pat, `rest-scrolls ${at}`, "a tap on Thorn opened no window");
             continue;
@@ -2311,7 +2325,10 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
           await shots.take(pat, `alignment-rest-scrolls-${at}`);
         } finally {
           await escapeAll(pat);
-          if (card) await ops.send({ t: "roll.close", rollIds: [id] });
+          if (card) {
+            await ops.send({ t: "roll.close", rollIds: [id] });
+            await resetThorn();
+          }
         }
       }
     } finally {

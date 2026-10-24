@@ -585,7 +585,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await closeSheet(phone);
         await page.keyboard.press("Escape");
         await boxSelect({ x: run.orc.x - 1, y: run.orc.y - 1 }, { x: run.goblin.x + 2, y: run.goblin.y + 2 });
-        await page.getByRole("button", { name: "More", exact: true }).click();
+        await (await barControl(page.locator('[role="dialog"][data-bar-mode]'), "More")).click();
         const more = page.getByRole("dialog", { name: "2 tokens" });
         await checkDialog(more, `${label}, 2 tokens`, null);
         await shoot("group-more");
