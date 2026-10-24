@@ -672,9 +672,9 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         });
         assert.ok(box && turn && barBox, `${lead}: no box for the line, the turn card or the bar`);
         assert.ok(barBox.x < box.x + box.width && barBox.x + barBox.width > box.x, `${lead}: the bar at ${JSON.stringify(barBox)} is not docked across the column`);
-        assert.ok(box.y < turn.y, `${lead}: the line at ${box.y} is not drawn above the turn card at ${turn.y}`);
         assert.ok(cut <= 1, `${lead}: the column cuts ${cut} px off the line`);
         assert.ok(box.y + box.height <= barBox.y, `${lead}: the line's foot at ${box.y + box.height} is under the bar's top at ${barBox.y}`);
+        assert.ok(box.y < turn.y, `${lead}: the line at ${box.y} is not drawn above the turn card at ${turn.y}`);
         await measure(phone, line, `${lead} above the turn card at 844x390`);
         await shots.take(phone, `cu-b-${lead}-above-turn-sideways`);
         await closeBar(phone);
