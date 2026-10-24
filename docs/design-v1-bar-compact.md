@@ -443,6 +443,22 @@ Each settles something the owner's words leave open, with the alternative reject
 
 (The builder fills this in the lane's docs commit with every place the build went its own way.)
 
+### 9.4, the content lane
+
+- **Where the rules live.** `restFit`, `restStatus`, `nextRestMode` and `restButtons` are in barButtons.ts, not barDock.ts, which is the frame's: the content lane owns them and their tests. `restOrder` stays in barDock.ts. barButtons.ts also gives `groupRestButtons` (the group's candidates), `restDead` (the dead lines' cases, by the rule of groupHp.ts `deadLines`), `critSent` (whether Apply sends a Critical Hit, which the entry's Apply and the status line now share) and `REST_FIELD_MIN` (56).
+- **`restFit(widths, room, gap, fieldMin)`** reads the lead's width without its field, and counts the field at `fieldMin`. The lead always shows, its field giving up room first. A candidate drawn 0 px wide is left out, so a door's button with no door in reach, or Doesn't count on a resize's leg, never takes Roll's place. Only the first passing action is offered Roll's place.
+- **The group's strip** offers Undo move in Roll's place after a group's drag, as one token's strip does (D-261024-12). 9.4 lists Conditions, Roll, Multi-select and Hidden only.
+- **`restStatus`** takes three measures, the line's one line, the title's two lines and the note's two lines, and returns the line under the name, the sentence that needs more room with its place ("title" or "note"), and the whole sentence. A sentence (items 1 to 3) that fits one line stands under the name, which stays. Items 4 and 5 always take the line, cut with an ellipsis where they must, the whole sentence being the field's description. The frame draws the sentence over the title or in the note through `BarHeader`'s `sentence` prop, a contract addition agreed with the frame lane. The status span carries it as `data-rest-sentence` and `data-rest-place` too, which br-c reads.
+- **Cutting in the note** goes: the dead creature's name, or the one creature a group leaves out, to its most letters that fit (at least one), then the names left out as their count, cutting the dead name again there if it must. Several creatures left out go to their count at once, since there is no one name to cut. Left-out names are joined with commas: "7 damage, not Goblin 1, Goblin 2".
+- **The group's line with nothing else to say** names who is selected, as the line under the expanded group bar's header does. 3.3 leaves it open.
+- **`HpEntry` takes `rest: HpRest`** in place of `layout: "rest"`: `resting`, `scrolls`, the bar's own candidates, the ids the quick row drew and `onStatus`. It also takes `standing`, a group's note, and `describedBy`. On an upright phone its field row is a `RestRow` in both states, the lead alone while expanded, so the same input carries over.
+- **"Use 9"** is the newer of the entry's chips (this viewer's own roll and the newest of anyone else's), by its place in the log.
+- **The field's description** while the strip rests is a visually hidden copy of the entry's own sentences, and its error or refusal is said once by a polite status region in the entry, not the frame's.
+- **The scrolling strip** hides the vitals line, as the quick row and the status line hold them, and so draws Revive and the dead creature's note under the quick row. The rest follows in today's order, less what the strip holds.
+- **Conditions or Uses from the strip** that expanded the bar close their drawer as Collapse rests it, so the next Expand shows the bar plain.
+- **`GroupActionBar`** draws its content in a new `GroupBarBody`, so the content reads the frame's controls as `TokenBarBody` does.
+- **Waiting on the frame's build**, in the content lane's files, once the lanes are stacked: `RestRow`'s `onFit` feeds `HpRest.shown`, the bars' `inStrip` and `critInRow` (until then every candidate counts as drawn, as the contract's `RestRow` draws them), `NOTE_INSET` comes from barDock.ts in place of the local 12, `BarHeader` gets `sentence`, and `barCapacity` passes the layout to `spanRoomAtWorst`.
+
 ## Appendix A. Measurements
 
 ### A.1 Openings
