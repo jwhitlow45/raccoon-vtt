@@ -74,27 +74,27 @@ describe("a token's kind, from the viewer's copy", () => {
 
 describe("the folded Stat block names its source (3.3)", () => {
   test("a character with a block: its level and Proficiency Bonus, or that its level is not set", () => {
-    assert.equal(pcBlockSummary(thorn(5, undefined, true), 0), "Level 5, PB +3");
-    assert.equal(pcBlockSummary(thorn(1, undefined, true), 0), "Level 1, PB +2");
-    assert.equal(pcBlockSummary(thorn(17, undefined, true), 0), "Level 17, PB +6");
-    assert.equal(pcBlockSummary(thorn(undefined, undefined, true), 0), "Level not set");
+    assert.equal(pcBlockSummary(thorn(5, undefined, true)), "Level 5, PB +3");
+    assert.equal(pcBlockSummary(thorn(1, undefined, true)), "Level 1, PB +2");
+    assert.equal(pcBlockSummary(thorn(17, undefined, true)), "Level 17, PB +6");
+    assert.equal(pcBlockSummary(thorn(undefined, undefined, true)), "Level not set");
   });
 
   test("a character with no block, as today", () => {
-    assert.equal(pcBlockSummary(thorn(5), 0), "None yet");
-    assert.equal(pcBlockSummary(thorn(5), 4), "4 known forms", "known forms stand in for None yet");
-    assert.equal(pcBlockSummary(thorn(5), 1), "1 known form");
+    assert.equal(pcBlockSummary(thorn(5)), "None yet");
+    assert.equal(pcBlockSummary({ ...thorn(5), knownForms: ["wolf", "brown-bear", "cat", "ape"] } as never), "None yet", "known forms are never counted (D-261024-26)");
   });
 
-  test("known forms follow the block's words", () => {
-    assert.equal(pcBlockSummary(thorn(5, undefined, true), 4), "Level 5, PB +3 · 4 known forms");
-    assert.equal(pcBlockSummary(thorn(undefined, undefined, true), 2), "Level not set · 2 known forms");
+  test("known forms do not follow the block's words", () => {
+    const forms = ["wolf", "brown-bear", "cat", "ape"];
+    assert.equal(pcBlockSummary({ ...thorn(5, undefined, true), knownForms: forms } as never), "Level 5, PB +3");
+    assert.equal(pcBlockSummary({ ...thorn(undefined, undefined, true), knownForms: forms } as never), "Level not set");
   });
 
   test("a character in a shape names it, with or without a block", () => {
-    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: true }, true), 0), "Wild Shape: Brown Bear");
-    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: true }), 3), "Wild Shape: Brown Bear · 3 known forms");
-    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: false }, true), 0), "Shape: Brown Bear");
+    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: true }, true)), "Wild Shape: Brown Bear");
+    assert.equal(pcBlockSummary({ ...thorn(5, { srdId: "brown-bear", wild: true }), knownForms: ["wolf", "cat", "ape"] } as never), "Wild Shape: Brown Bear");
+    assert.equal(pcBlockSummary(thorn(5, { srdId: "brown-bear", wild: false }, true)), "Shape: Brown Bear");
   });
 
   const wolf = { srdId: "wolf", name: "Wolf", cr: "1/4" };

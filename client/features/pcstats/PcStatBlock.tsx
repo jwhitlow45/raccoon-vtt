@@ -52,9 +52,12 @@ export function PcStatBlock(props: {
   // The known forms step the section's Change opens, kept here so removing the last form, which can drop the section, leaves it open in the user's hands.
   const [choosingForms, setChoosingForms] = useState(false);
   const shaped = pcShape(character) !== "none";
+  // In another shape, such as Polymorph, the forms are not drawn: End the shape first.
+  const formCount = edits && pcShape(character) !== "other" ? (character.knownForms?.length ?? 0) : 0;
+  // The count lives on the button, not in the folded summary, which would crowd the row (D-261024-26, D-261024-27). The name stays an action.
   const take = shaped || !edits ? null : (
-    <SmallButton wrap onClick={() => setPicking(true)}>
-      Take a shape
+    <SmallButton wrap label={formCount > 0 ? `Take a shape, ${formCount} known ${formCount === 1 ? "form" : "forms"}` : undefined} onClick={() => setPicking(true)}>
+      {formCount > 0 ? `${formCount} ${formCount === 1 ? "shape" : "shapes"}` : "Take a shape"}
     </SmallButton>
   );
   const add = () =>
@@ -69,13 +72,11 @@ export function PcStatBlock(props: {
       {choosingForms ? <ShapePicker character={character} start="forms" onClose={() => setChoosingForms(false)} /> : null}
     </>
   );
-  // In another shape, such as Polymorph, the forms are not drawn: End the shape first.
-  const formCount = edits && pcShape(character) !== "other" ? (character.knownForms?.length ?? 0) : 0;
   // In Wild Shape, Take a shape is hidden, so the section shows even with no forms, as the one way to choose them without ending the shape.
   const showsForms = formCount > 0 || (edits && pcShape(character) === "wild");
   const forms = showsForms ? <KnownFormsSection character={character} onChange={() => setChoosingForms(true)} /> : null;
   // Folded, the row says what the block holds, so it reads without opening (docs/design-v1-look-pass.md 3.3).
-  const summary = pcBlockSummary(character, formCount);
+  const summary = pcBlockSummary(character);
   if (!character.stats && !shaped) {
     return (
       <>

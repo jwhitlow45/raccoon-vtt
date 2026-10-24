@@ -109,18 +109,15 @@ export function tokenKind(input: {
 /**
  * A character's folded Stat block (3.3): the shape it is in, else its level
  * and Proficiency Bonus as the open block starts, else "None yet". Known
- * forms the section draws follow either, as `forms`, or stand alone where
- * there is no block.
+ * forms are never counted here: the count lives on Take a shape, so the row
+ * stays on one line at large sizes (D-261024-26).
  */
-export function pcBlockSummary(character: Pick<Character, "level" | "stats" | "actor">, forms: number): string {
-  const known = forms > 0 ? `${forms} known ${forms === 1 ? "form" : "forms"}` : null;
+export function pcBlockSummary(character: Pick<Character, "level" | "stats" | "actor">): string {
   const shape = pcShape(character);
   const srdId = character.actor.srdId;
-  let lead: string;
-  if (shape !== "none" && srdId !== undefined) lead = `${shape === "wild" ? "Wild Shape" : "Shape"}: ${srdTitle(srdId)}`;
-  else if (character.stats) lead = character.level !== undefined ? `Level ${character.level}, PB ${signed(pcProficiency(character.level))}` : "Level not set";
-  else return known ?? "None yet";
-  return known ? `${lead} · ${known}` : lead;
+  if (shape !== "none" && srdId !== undefined) return `${shape === "wild" ? "Wild Shape" : "Shape"}: ${srdTitle(srdId)}`;
+  if (character.stats) return character.level !== undefined ? `Level ${character.level}, PB ${signed(pcProficiency(character.level))}` : "Level not set";
+  return "None yet";
 }
 
 /**
