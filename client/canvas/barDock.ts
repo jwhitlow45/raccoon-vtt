@@ -1045,14 +1045,17 @@ export function restHang(free: Box, state: RestState, expandedHeight: number | n
 
 /**
  * The alerts column beside a resting strip (3.5): its cards stack above
- * the strip where at least 44 px of map are left between the first card,
+ * the strip where at least 44 px of map are left between the last card,
  * with its 8 px gap, and the strip's top, less its own 8 px gap, so a
- * token can still be panned in under the card. Otherwise the column shows
- * its summary row. "none" with no card.
+ * token can still be panned in under the cards. Otherwise the column shows
+ * its summary row. All the cards count, not only the first: a stacked
+ * column reaches down to the strip (columnRoom), so cards after the first,
+ * and the fade of a column cut short, would lie over the band. "none"
+ * with no card.
  */
 export function restLane(column: ColumnFacts | null, restTop: number): Lane {
   if (!column || column.first <= 0) return "none";
-  return restTop - EDGE - (column.top + column.first + EDGE) >= BAND_MIN ? "stacked" : "summary";
+  return restTop - EDGE - (column.top + Math.max(column.first, column.content) + EDGE) >= BAND_MIN ? "stacked" : "summary";
 }
 
 /**

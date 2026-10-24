@@ -1755,6 +1755,14 @@ describe("the strip's lane, its expanded bar, the clearing move and a card it fo
     assert.equal(restLane({ top: 60, content: 44, first: 0, cover: 44 }, 662), "none", "a lone turn card is no card for the bar");
   });
 
+  test("the column stacks over the strip only where all its cards leave the band whole, so no card and no fade lies over its 44 px (3.5)", () => {
+    // Two cards, 300 and 242 with the gap between: the column ends where one card of 542 would.
+    assert.equal(restLane({ top: 60, content: 542, first: 300 }, 662), "stacked", "44 px left under both");
+    assert.equal(restLane({ top: 60, content: 543, first: 300 }, 662), "summary", "the second card would reach into the band, and its fade with it");
+    assert.equal(restLane({ top: 60, content: 600, first: 120 }, 662), "summary", "however short the first card");
+    assert.equal(restLane({ top: 60, content: 0, first: 543 }, 662), "summary", "facts with no content measured count the first card");
+  });
+
   test("Expand is offered where it adds a header's height: a reach of 166 at F = 294, not 165 at F = 293 (5.1, BC-OPUS-22)", () => {
     for (const [free, reach, offered] of [
       [293, 165, false],
