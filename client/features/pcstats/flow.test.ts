@@ -429,6 +429,53 @@ describe("the editor's class resources", () => {
       assert.equal(use.record, null, "as saved");
       assert.equal(use.resources, null);
     });
+
+    describe("the joint 40 is cut once, after the splice (DDBBUILD-ASTRA-07)", () => {
+      const luck = `r:${hash12("luck points")}`;
+      const others = Array.from({ length: 39 }, (_, i) => `o:${(i + 1).toString(16).padStart(12, "0")}`);
+      /** Bree with a Sling and Rage synced, Luck Points removed here the longest ago, then 39 other rolls; D&D Beyond still has Luck Points and sends no other rolls. */
+      function boundary(rageMax: number) {
+        const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ sheetUrl: SHEET }) };
+        const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: withSling([rageRead()]) });
+        const synced = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
+        const saved: SyncCharacter = { ...synced, resources: synced.resources!.map((r) => ({ ...r, used: 1 })), ddbSync: { ...synced.ddbSync!, gone: [luck, ...others] } };
+        const f: PcFill = { ...withSling([rageRead(0, rageMax), { name: "Luck Points", max: 3, reset: "long", used: 0 }]), read: { weapon: true, spell: true, other: false, resource: true } };
+        return { saved, f };
+      }
+      /** Use it with these ticks, the Sling then deleted, and a Save refused for the class resources, reviewed again against `live`. */
+      function stale(saved: SyncCharacter, f: PcFill, extra: (plan: ReturnType<typeof editorSyncPlan>) => string[] = () => [], live: SyncCharacter = saved) {
+        const opened = openDraft(saved);
+        const start = run(openFlow(opened.draft), { t: "open", step: "ddb" }).state;
+        const plan = editorSyncPlan(f, start, opened, saved);
+        const ticks = new Set([...defaultTicks(plan), ...extra(plan)]);
+        const use = editorSyncUse(syncResult(plan, ticks), saved, { fill: f, ticks });
+        const state = run(start, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: use }, { t: "edit", update: (d) => ({ ...d, stats: { ...d.stats, rolls: [] } }) }, { t: "save" }, { t: "saved", answer: "refused", stale: true }).state;
+        assert.equal(state.review?.only, "resources");
+        const again = editorSyncPlan(f, state, opened, live);
+        const result = syncResult(again, state.review!.ticks!);
+        assert.ok(!result.record.gone!.includes(luck), "the full review's cap took Luck Points for the deleted Sling");
+        return run(state, { t: "use", sync: editorSyncUse(result, live, { fill: f, ticks: state.review!.ticks! }, { pending: state.record }) }).state;
+      }
+
+      test("a pending record: Luck Points keeps its place among the 40, and the Sling's new marker stays out", () => {
+        const { saved, f } = boundary(4);
+        const after = stale(saved, f);
+        assert.deepEqual(after.record!.gone, [luck, ...others]);
+      });
+
+      test("past 40 after the splice, the oldest goes: Rage removed on another device meanwhile takes Luck Points' place", () => {
+        const { saved, f } = boundary(4);
+        const after = stale(saved, f, undefined, { ...saved, resources: [] });
+        assert.deepEqual(after.record!.gone, [...others, `r:${hash12("barbarian:rage")}`]);
+      });
+
+      test("nothing pending: the saved record's markers are the base, so the record stays as saved", () => {
+        const { saved, f } = boundary(3);
+        const after = stale(saved, f, (plan) => plan.spent.map((x) => x.id));
+        assert.equal(after.record, null);
+        assert.ok(after.resources?.list, "the spent line still holds the list");
+      });
+    });
   });
 
   test("a read with no class resources still marks a removed linked one: held with no list, so Save expects the resources (DDBBUILD-ASTRA-04)", () => {

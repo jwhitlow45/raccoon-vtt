@@ -216,6 +216,8 @@ export type SyncResult = {
   spent: { id: string; name: string; max: number; theirs: number; now: number }[];
   /** The removed markers the 40 cap drops (2.1), each `k`, with the name this read gives it if any. */
   goneDropped: { k: string; name?: string }[];
+  /** Both kinds' markers, oldest first, before the 40 cap, for a splice that keeps only some of them and caps once (DDBBUILD-ASTRA-07). */
+  markers: string[];
   /** A proficiency coming in beside a kept bonus on the same save or skill (3.3). */
   besideBonus: { on: { save: AbilityKey } | { skill: SkillKey }; bonus: number; total: number }[];
 };
@@ -950,6 +952,7 @@ export function syncResult(plan: SyncPlan, ticks: ReadonlySet<string>): SyncResu
       const name = names.get(k);
       return name !== undefined ? { k, name } : { k };
     }),
+    markers: marked,
     besideBonus: [],
   };
   result.besideBonus = besideBonus(plan, result, ticks);

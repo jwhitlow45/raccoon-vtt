@@ -124,7 +124,9 @@ export function editorHelpCharacter(plan: SyncPlan, saved: Pick<Character, "acto
  * pending one with only this review's resource part in it (6.2 c).
  */
 export function editorSyncUse(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }, only?: { pending: DdbSyncPatch | null }): SyncUse {
-  const made = only ? spliceResources(only.pending, result.record) : result.record;
+  // With nothing pending, the record Save keeps is the saved one, so that is the one the review's part goes into.
+  const base = only ? (only.pending ?? withoutAt(saved?.ddbSync)) : null;
+  const made = base ? spliceResources(base, result) : result.record;
   const record = saved && sameRecord(made, saved.ddbSync) ? null : made;
   return { stats: result.stats, level: result.level, also: result.also, record, resources: heldResources(result, made, saved, read) };
 }
@@ -142,26 +144,32 @@ function heldResources(result: SyncResult, record: DdbSyncPatch, saved: ExpectSu
   return { fill: read.fill, ticks: read.ticks, ...(list ? { list: sent } : levels ? { levels: sent } : {}), ...(part ? { part: true as const } : {}), expect: expectHash(saved, "resources") };
 }
 
+function withoutAt(record: DdbSyncPatch | undefined): DdbSyncPatch | null {
+  if (!record) return null;
+  const { at: _at, ...rest } = record;
+  return rest;
+}
+
 /**
  * The pending record with a resources-only review's part in place of its
  * own (6.2 c): its entries and `r:` markers from the review, every other
- * marker from the pending record, whose draft the review leaves as it is,
- * oldest first in the review's order with a pending marker the review
- * dropped kept after the one before it, and 40 of either kind together.
+ * marker from the pending record, whose draft the review leaves as it is.
+ * Oldest first in the review's order, before its cap, with a pending marker
+ * the review dropped kept after the one before it, then 40 of either kind
+ * together, cut once here (DDBBUILD-ASTRA-07).
  */
-function spliceResources(pending: DdbSyncPatch | null, from: DdbSyncPatch): DdbSyncPatch {
-  if (!pending) return from;
+function spliceResources(pending: DdbSyncPatch, from: SyncResult): DdbSyncPatch {
   const { res: _res, gone: _gone, ...rest } = pending;
   const rolls = (pending.gone ?? []).filter((k) => !k.startsWith("r:"));
   const keep = new Set(rolls);
-  const merged = (from.gone ?? []).filter((k) => k.startsWith("r:") || keep.has(k));
+  const merged = from.markers.filter((k) => k.startsWith("r:") || keep.has(k));
   for (const [i, k] of rolls.entries()) {
     if (merged.includes(k)) continue;
     const before = rolls.slice(0, i).findLast((b) => merged.includes(b));
     merged.splice(before === undefined ? 0 : merged.indexOf(before) + 1, 0, k);
   }
   const gone = merged.slice(Math.max(0, merged.length - MAX_PC_ROLLS));
-  return { ...rest, ...(from.res ? { res: from.res } : {}), ...(gone.length > 0 ? { gone } : {}) };
+  return { ...rest, ...(from.record.res ? { res: from.record.res } : {}), ...(gone.length > 0 ? { gone } : {}) };
 }
 
 /** Whether held class resources leave the editor unsaved: a list or a record part that changes, never levels alone (6.2 e). */
