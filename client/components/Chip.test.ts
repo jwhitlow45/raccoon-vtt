@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 const { Chip } = await import("./Chip.tsx");
 
 /*
- * An unavailable chip keeps its focus and says why to a reader; a caller
+ * An unavailable chip keeps its focus and says why to a reader. A caller
  * that also says why on a tap hears that tap through `onUnavailable`, and
  * nothing is sent (review CCB-OPUS-9, the Dice panel's X/Day Use at 0 left).
  * The button Chip draws is read as an element, so its click runs as a tap
