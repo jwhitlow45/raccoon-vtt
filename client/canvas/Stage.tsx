@@ -552,7 +552,7 @@ export function MapStage(props: {
     const d = dock.getState();
     if (d.barOpen !== barOpen) dock.setState({ barOpen });
     if (barOpen) return;
-    if (d.expanded || d.expandedHeight !== null || d.clearRequest !== null) dock.setState({ expanded: false, expandedHeight: null, clearRequest: null });
+    if (d.expanded || d.expandedHeight !== null || d.expandedFor !== null || d.clearRequest !== null) dock.setState({ expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null });
   }, [barOpen, scope]);
   useLayoutEffect(() => () => scope.get(barDockSlot).setState({ barOpen: false }), [scope]);
   const shapeRef = useRef<string | null>(null);

@@ -1284,29 +1284,26 @@ function BarFrame(props: {
    * Expand, for each new token (each token's bar is a frame of its own)
    * and on a change of the map's frame, from its content then, and frozen
    * otherwise (5.1, review BC-OPUS-8): a stat block that loads late or a
-   * drawer opened inside scrolls under Scroll for more. Collapse moves
+   * drawer opened inside scrolls under Scroll for more. The dock store
+   * keeps what it was worked out for, since a drag unmounts the frame
+   * and the bar it shows again is the same token's (3.6). Collapse moves
    * nothing (R3). Expand moves the map once, as a clear request does, for
    * the expanded bar's top (5.2).
    */
   const expand = () => {
     shiftOnExpand.current = true;
-    dockStore.setState({ expanded: true, expandedHeight: null });
+    dockStore.setState({ expanded: true, expandedHeight: null, expandedFor: null });
   };
-  const collapse = () => dockStore.setState({ expanded: false, expandedHeight: null });
+  const collapse = () => dockStore.setState({ expanded: false, expandedHeight: null, expandedFor: null });
   const shiftOnExpand = useRef(false);
   // The column's content counts, since a card that comes after the first changes the room it leaves (barDock.ts firstFoot).
-  const frameKey = JSON.stringify([layout.width, layout.height, props.viewport.width, props.viewport.height, chrome, restFoot, column ? [column.top, column.first, column.content] : null]);
-  const frozenFor = useRef<string | null>(null);
+  const frozenKey = JSON.stringify([props.opening, layout.width, layout.height, props.viewport.width, props.viewport.height, chrome, restFoot, column ? [column.top, column.first, column.content] : null]);
   useLayoutEffect(() => {
-    if (restState !== "expanded") {
-      frozenFor.current = null;
-      return;
-    }
+    if (restState !== "expanded") return;
     const content = contentRef.current;
-    if (frozenFor.current === frameKey || !content || content.offsetHeight === 0) return;
-    frozenFor.current = frameKey;
+    if (dockStore.getState().expandedFor === frozenKey || !content || content.offsetHeight === 0) return;
     const height = expandedRoom({ layout, free: stripFree, column, content: content.offsetHeight + 2 * theme.line.border });
-    if (dockStore.getState().expandedHeight !== height) dockStore.setState({ expandedHeight: height });
+    dockStore.setState({ expandedHeight: height, expandedFor: frozenKey });
   });
 
   /*

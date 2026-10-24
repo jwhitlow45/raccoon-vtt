@@ -1787,6 +1787,13 @@ type BarDockState = {
   /** The expanded bar's height (expandedRoom), frozen at Expand, for each new token and on a change of the map's frame. Null until worked out. */
   expandedHeight: number | null;
   /**
+   * The token and the map's frame `expandedHeight` was worked out for, so
+   * the bar a drag hid comes back at that height for the same token in the
+   * same frame, the content a drop adds, such as Undo move, scrolling
+   * (docs/design-v1-bar-compact.md 3.6, 5.1).
+   */
+  expandedFor: string | null;
+  /**
    * A request that the bar clear its token once, by moving the map
    * (clearShift, 3.6): set by Stage for an opening that counts
    * (keepsOpening) and for a drop (`drop`), a new object each time, and
@@ -1832,7 +1839,7 @@ type BarDockState = {
 export const barDockSlot = scopeSlot(() =>
   createStore<BarDockState>(() => {
     forgetLarger();
-    return { chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false };
+    return { chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false };
   }),
 );
 
