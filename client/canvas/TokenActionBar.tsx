@@ -116,6 +116,11 @@ import {
   type Spot,
 } from "./barDock.ts";
 import { barButtons, barShort, isCompanion, type BarButtonId } from "./barButtons.ts";
+import { groupRestButtons, restButtons, restStatus, type EntryStatus, type RestFit, type RestStatus } from "./barButtons.ts";
+import { RestRow, type RestItem } from "./RestRow.tsx";
+import { unitText, type VitalItem } from "../features/tokens/statSummary.ts";
+import { useGroupHp } from "../features/tokens/GroupHpEntry.tsx";
+import type { HpRest } from "../features/tokens/HpSection.tsx";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 const NO_CHARACTERS = {};
@@ -219,6 +224,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const scope = useRoomScope();
   const openRolls = useOpenRollOptions();
   const undoOffer = useStore(useScoped(lastMoveSlot), offered);
+  const rest = frame.rest;
+  const resting = rest?.resting === true;
+  const scrolls = resting && rest.scrolls;
+  const [entry, setEntry] = useState<EntryStatus>(QUIET_ENTRY);
+  const drawers = useRestDrawers(rest, drawer, setDrawer);
   const attachSlots = useAttachSlots(token);
   const detach = useDetach(token, attachSlots.includes("detach"));
   const detachNoteId = useId();
@@ -271,7 +281,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     const chunks = store.getState().view?.buildChunks ?? {};
     const copy = duplicateToken(token, { id, at: at ?? { x: token.x + fp.w, y: token.y }, chunks, blocks: blocks ?? {} });
     if (actions.dispatch({ t: "token.create", token: copy }) !== null) {
-      ui.select(id);
+      // The viewer's own opening of the copy's bar, which an upright phone's strip clears once (docs/design-v1-bar-compact.md 3.6).
+      ui.select(id, { opens: true });
     }
   };
 
@@ -279,7 +290,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const undoIds = barTokenIds(tokens, token);
   // Its combat uses (docs/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
   const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);
-  const rows = barButtons({
+  const buttonInput = {
     dm: access.dm,
     owner: access.owner,
     undoMove: offersUndo(undoOffer, undoIds),
@@ -290,7 +301,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     companion: isCompanion(token),
     attach: attachSlots,
     uses: usesPresence,
-  });
+  };
+  const rows = barButtons(buttonInput);
+  const lead = access.hp !== "none" && !noHp;
+  // The strip's quick row: the HP entry's lead and its own candidates, then these (docs/design-v1-bar-compact.md 3.3).
+  const restIds = rest ? restButtons({ ...buttonInput, lead }).filter((id) => id !== "mode") : [];
   const button = (id: BarButtonId): ReactNode => {
     switch (id) {
       case "undoMove":
@@ -301,7 +316,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         return <DoorButton key={id} token={token} />;
       case "conditions":
         return (
-          <BarButton key={id} pressed={drawer === "conditions"} onClick={() => setDrawer((d) => (d === "conditions" ? null : "conditions"))}>
+          <BarButton key={id} ref={drawers.ref("play", id)} pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
             Conditions
           </BarButton>
         );
@@ -314,7 +329,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       // Held while its block loads, then dropped if the block lists no use, so the buttons after it do not jump.
       case "uses":
         return (
-          <BarButton key={id} disabled={usesPresence === "loading"} pressed={drawer === "uses"} onClick={() => setDrawer((d) => (d === "uses" ? null : "uses"))}>
+          <BarButton key={id} ref={drawers.ref("play", id)} disabled={usesPresence === "loading"} pressed={drawer === "uses"} onClick={() => drawers.toggle("uses")}>
             Uses
           </BarButton>
         );
@@ -376,6 +391,29 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     }
   };
 
+  // The strip's own buttons. Conditions and Uses expand the bar with their drawer open, and Undo move draws as the undo arrow (3.3, 5.3, R13).
+  const restButton = (id: string): ReactNode => {
+    switch (id) {
+      case "undoMove":
+        return <UndoMoveButton tokenIds={undoIds} arrow />;
+      case "conditions":
+      case "uses":
+        return (
+          <BarButton ref={drawers.ref("rest", id)} disabled={id === "uses" && usesPresence === "loading"} pressed={drawer === id} onClick={() => drawers.fromRest(id)}>
+            {id === "uses" ? "Uses" : "Conditions"}
+          </BarButton>
+        );
+      case "details":
+        return <BarButton onClick={props.onDetails}>Details</BarButton>;
+      default:
+        return button(id as BarButtonId);
+    }
+  };
+  const restItems: RestItem[] = restIds.map((id) => ({ id, node: restButton(id) }));
+  // RestRow draws every item it is given, so each candidate, Crit among them while the entry offers it, is in the strip and out of the scrolling strip's rows below it.
+  const inStrip = (id: string) => scrolls && restIds.includes(id);
+  const status = useRestStatus({ entry: lead ? entry : QUIET_ENTRY, idle: vitalsWords(split.line), critInRow: true, active: resting });
+
   const savesAndDefenses = short ? (
     <MoreStats more={split.more} block={block} />
   ) : (
@@ -388,25 +426,25 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const badgeText = badge ? <span style={{ flex: "none", color: theme.color.accentSoft, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{badge} ft</span> : null;
   // A window too narrow for the badge in its header's one row shows it under the name instead (docs/design-v1-token-window.md 7.1).
   const badgeInHeader = frame.header.badgeInHeader;
+  const reviveButton = revive ? <ReviveButton target={target} describedBy={deadLineId} focusTo={REVIVE_FOCUS_IN_BAR} /> : undefined;
+  const deadNote = deadLine ? (
+    <div id={deadLineId} style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
+      {deadLine}
+    </div>
+  ) : null;
 
   return (
     <>
       <BarHeader
         // Two lines of the name at most: the frame's name holds all of it, and the token's plate shows it on the map.
         title={displayName(token)}
+        status={resting ? status.node : undefined}
         actions={badgeInHeader ? badgeText : null}
         onClose={props.onClose}
       />
-      <VitalsLine
-        items={short ? split.line : items}
-        afterTag={revive ? <ReviveButton target={target} describedBy={deadLineId} focusTo={REVIVE_FOCUS_IN_BAR} /> : undefined}
-        end={badgeInHeader ? undefined : badgeText}
-      />
-      {deadLine ? (
-        <div id={deadLineId} style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
-          {deadLine}
-        </div>
-      ) : null}
+      {/* The strip's status line holds the vitals while it rests. The entry after them keeps its place either way, so its field carries over (5.3). */}
+      {resting ? null : <VitalsLine items={short ? split.line : items} afterTag={reviveButton} end={badgeInHeader ? undefined : badgeText} />}
+      {resting ? null : deadNote}
 
       {access.hp !== "none" && !noHp ? (
         <HpEntry
@@ -414,87 +452,101 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           access={access.hp}
           place="bar"
           fieldFirst={short}
+          rest={rest ? { resting, scrolls, items: restItems, shown: null, onStatus: setEntry } : undefined}
         />
+      ) : resting ? (
+        <RestRow items={restItems} />
       ) : null}
 
-      {life === "dying" && access.deathSaves && actor?.deathSaves ? (
-        <DeathSaves
-          saves={actor.deathSaves}
-          canEdit
-          target={target}
-          onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })}
-        />
-      ) : null}
-      {effects.length > 0 ? (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-          {effects.map((effect) => (
-            <li
-              key={effect.id}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: theme.space(1.5),
-                padding: `${theme.space(0.5)}px ${theme.space(2)}px ${theme.space(0.5)}px ${theme.space(0.5)}px`,
-                borderRadius: theme.radius.pill,
-                background: theme.color.surfaceRaised,
-                fontSize: theme.font.small,
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              <EffectIcon effect={effect} size={20} />
-              {effectChip(effect).label}
-              {effect.hiddenFromPlayers ? <span style={{ color: theme.color.textMuted }}>(hidden)</span> : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      {/* The scrolling strip holds the rest of the bar under its quick row, in the expanded bar's order (5.4). */}
+      {resting && !scrolls ? null : (
+        <>
+          {scrolls && (reviveButton || deadNote) ? (
+            <div style={{ display: "grid", gap: theme.space(1) }}>
+              {reviveButton}
+              {deadNote}
+            </div>
+          ) : null}
+          {life === "dying" && access.deathSaves && actor?.deathSaves ? (
+            <DeathSaves
+              saves={actor.deathSaves}
+              canEdit
+              target={target}
+              onChange={(ok, fail) => actions.dispatch({ t: "actor.deathSave", target, ok, fail })}
+            />
+          ) : null}
+          {effects.length > 0 ? (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+              {effects.map((effect) => (
+                <li
+                  key={effect.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: theme.space(1.5),
+                    padding: `${theme.space(0.5)}px ${theme.space(2)}px ${theme.space(0.5)}px ${theme.space(0.5)}px`,
+                    borderRadius: theme.radius.pill,
+                    background: theme.color.surfaceRaised,
+                    fontSize: theme.font.small,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  <EffectIcon effect={effect} size={20} />
+                  {effectChip(effect).label}
+                  {effect.hiddenFromPlayers ? <span style={{ color: theme.color.textMuted }}>(hidden)</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
-      {savesAndDefenses}
+          {savesAndDefenses}
 
-      {/* What it rides or carries, each a tap away, so a phone reaches a rider that hides its mount (docs/design-v1-attach.md 4.4). */}
-      <GroupLine token={token} />
+          {/* What it rides or carries, each a tap away, so a phone reaches a rider that hides its mount (docs/design-v1-attach.md 4.4). */}
+          <GroupLine token={token} />
 
-      {/* Stat block and Details both open the panel, so they sit with the summary they expand. */}
-      <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-        {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
-        <BarButton onClick={props.onDetails}>Details</BarButton>
-      </div>
+          {/* Stat block and Details both open the panel, so they sit with the summary they expand. */}
+          <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+            {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
+            {inStrip("details") ? null : <BarButton onClick={props.onDetails}>Details</BarButton>}
+          </div>
 
-      {access.canEditToken("elevation") ? (
-        <StepperRow label="Elevation">
-          <BarButton label="Down 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) - 5 } })}>
-            −5
-          </BarButton>
-          <span style={{ minWidth: 56, textAlign: "center", fontWeight: theme.weight.bold }}>{token.elevation ?? 0} ft</span>
-          <BarButton label="Up 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) + 5 } })}>
-            +5
-          </BarButton>
-        </StepperRow>
-      ) : null}
+          {access.canEditToken("elevation") ? (
+            <StepperRow label="Elevation">
+              <BarButton label="Down 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) - 5 } })}>
+                −5
+              </BarButton>
+              <span style={{ minWidth: 56, textAlign: "center", fontWeight: theme.weight.bold }}>{token.elevation ?? 0} ft</span>
+              <BarButton label="Up 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) + 5 } })}>
+                +5
+              </BarButton>
+            </StepperRow>
+          ) : null}
 
-      <GroundNotice token={token} />
+          <GroundNotice token={token} />
 
-      {access.canEditToken("altImages") ? (
-        <AltImagesRow
-          token={token}
-          aspect={footprint(token).w / footprint(token).h}
-          onPatch={(patch) => actions.dispatch({ t: "token.update", tokenId: token.id, patch })}
-        />
-      ) : null}
+          {access.canEditToken("altImages") ? (
+            <AltImagesRow
+              token={token}
+              aspect={footprint(token).w / footprint(token).h}
+              onPatch={(patch) => actions.dispatch({ t: "token.update", tokenId: token.id, patch })}
+            />
+          ) : null}
 
-      {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
-      {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token)} onClose={() => setDrawer(null)} /> : null}
+          {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
+          {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token)} onClose={drawers.close} /> : null}
 
-      {rows.passing.length > 0 ? (
-        <ButtonRow row="passing">{rows.passing.map(button)}</ButtonRow>
-      ) : null}
-      <ButtonRow row="play">{rows.play.map(button)}</ButtonRow>
-      {rows.play.includes("detach") ? <DetachNote detach={detach} id={detachNoteId} /> : null}
-      {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design-v1-token-window.md 8.9). */}
-      {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
-      {rows.less.length > 0 ? (
-        <ButtonRow row="less">{rows.less.map(button)}</ButtonRow>
-      ) : null}
+          {rows.passing.some((id) => !inStrip(id)) ? (
+            <ButtonRow row="passing">{rows.passing.filter((id) => !inStrip(id)).map(button)}</ButtonRow>
+          ) : null}
+          <ButtonRow row="play">{rows.play.filter((id) => !inStrip(id)).map(button)}</ButtonRow>
+          {rows.play.includes("detach") ? <DetachNote detach={detach} id={detachNoteId} /> : null}
+          {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design-v1-token-window.md 8.9). */}
+          {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}
+          {rows.less.length > 0 ? (
+            <ButtonRow row="less">{rows.less.map(button)}</ButtonRow>
+          ) : null}
+        </>
+      )}
     </>
   );
 }
@@ -519,6 +571,26 @@ export function GroupActionBar(props: {
   onShift?(dy: number): void;
 }) {
   const { tokens } = props;
+  return (
+    <BarFrame
+      anchor={props.anchor}
+      viewport={props.viewport}
+      tokenHeight={props.tokenHeight}
+      // One opening while the group grows and shrinks, which keeps this bar mounted.
+      opening="group"
+      onShift={props.onShift}
+      label={`${tokens.length} selected tokens`}
+      dock={{ text: `${tokens.length} selected`, show: `Show actions for ${tokens.length} selected tokens`, closeLabel: "Deselect all", close: props.onClose }}
+    >
+      <GroupBarBody tokens={tokens} movable={props.movable} onClose={props.onClose} />
+    </BarFrame>
+  );
+}
+
+/** The group's bar inside its frame, which tells it whether it rests as an upright phone's strip. */
+function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; onClose(): void }) {
+  const { tokens } = props;
+  const frame = useContext(FrameContext);
   const ui = useRoomUi();
   const actions = useRoomActions();
   const multi = useRoomView((s) => s.local.multi);
@@ -549,100 +621,139 @@ export function GroupActionBar(props: {
   const scope = useRoomScope();
   const anyPlayed = useRoomView((s) => (s.view ? offersRequest(s.view, tokens) : false));
   const openRolls = useOpenRollOptions();
+  const undoOffer = useStore(useScoped(lastMoveSlot), offered);
+  const rest = frame.rest;
+  const resting = rest?.resting === true;
+  const scrolls = resting && rest.scrolls;
+  const drawers = useRestDrawers(rest, drawer, setDrawer);
+  const [entry, setEntry] = useState<EntryStatus>(QUIET_ENTRY);
+  const lead = useGroupHp(tokens).access !== "none";
+  // The group's strip (docs/design-v1-bar-compact.md 9.4): its entry as the lead, then these.
+  const restIds = rest ? groupRestButtons({ dm: offers.dm, lead, conditions: offers.conditions, undoMove: offersUndo(undoOffer, ids) }).filter((id) => id !== "mode") : [];
+  const inStrip = (id: string) => scrolls && restIds.includes(id);
+  const names = tokens.map((t) => displayName(t)).join(", ");
+  // With nothing else to say, the status line names who is selected, as the line under the expanded bar's header does.
+  const status = useRestStatus({ entry, idle: [names], critInRow: true, active: resting });
+
+  const hiddenButton = (
+    <BarButton
+      pressed={hidden === "all"}
+      half={hidden === "some"}
+      icon="hidden"
+      iconOnly
+      onClick={() => {
+        const patch = flagPatch(tokens, "hidden");
+        send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(encounter, ids) : [])]);
+      }}
+    >
+      Hidden
+    </BarButton>
+  );
+  const multiButton = (
+    <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
+      Multi-select
+    </BarButton>
+  );
+  const rollButton = <BarButton onClick={openRolls}>Roll</BarButton>;
+  const restItems: RestItem[] = restIds.map((id) => ({
+    id,
+    node:
+      id === "conditions" ? (
+        <BarButton ref={drawers.ref("rest", id)} pressed={drawer === "conditions"} onClick={() => drawers.fromRest("conditions")}>
+          Conditions
+        </BarButton>
+      ) : id === "undoMove" ? (
+        <UndoMoveButton tokenIds={ids} arrow />
+      ) : id === "roll" ? (
+        rollButton
+      ) : id === "hidden" ? (
+        hiddenButton
+      ) : (
+        multiButton
+      ),
+  }));
 
   return (
-    <BarFrame
-      anchor={props.anchor}
-      viewport={props.viewport}
-      tokenHeight={props.tokenHeight}
-      // One opening while the group grows and shrinks, which keeps this bar mounted.
-      opening="group"
-      onShift={props.onShift}
-      label={`${tokens.length} selected tokens`}
-      dock={{ text: `${tokens.length} selected`, show: `Show actions for ${tokens.length} selected tokens`, closeLabel: "Deselect all", close: props.onClose }}
-    >
-      <BarHeader title={`${tokens.length} selected`} onClose={props.onClose} closeLabel="Deselect all" />
-      <div style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>{tokens.map((t) => displayName(t)).join(", ")}</div>
-      <GroupBarHp tokens={tokens} />
-      {props.movable >= 2 ? (
-        <div style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
-          {props.movable === tokens.length ? "Drag any of them to move them all." : `A drag moves the ${props.movable} of them you may move.`}
-        </div>
-      ) : null}
-      {offers.elevation ? (
-        <StepperRow label="Elevation">
-          <BarButton label="All down 5 feet" onClick={() => send(elevationOps(tokens, -5))}>
-            −5
-          </BarButton>
-          <span style={{ minWidth: 56, textAlign: "center", fontWeight: theme.weight.bold }}>{elevation === null ? "Mixed" : `${elevation} ft`}</span>
-          <BarButton label="All up 5 feet" onClick={() => send(elevationOps(tokens, 5))}>
-            +5
-          </BarButton>
-        </StepperRow>
-      ) : null}
-      {drawer === "conditions" && offers.conditions ? (
-        <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} />
-      ) : null}
-      {/* Undo move on a line of its own while it shows, so the steady line below never moves (docs/design-v1-token-window.md 3.2). */}
-      <ButtonRow row="passing">
-        <UndoMoveButton tokenIds={ids} />
-      </ButtonRow>
-      <ButtonRow row="play">
-        {offers.conditions ? (
-          <BarButton pressed={drawer === "conditions"} onClick={() => setDrawer((d) => (d === "conditions" ? null : "conditions"))}>
-            Conditions
-          </BarButton>
-        ) : null}
-        {offers.dm ? (
-          <BarButton
-            pressed={hidden === "all"}
-            half={hidden === "some"}
-            icon="hidden"
-            iconOnly
-            onClick={() => {
-              const patch = flagPatch(tokens, "hidden");
-              send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(encounter, ids) : [])]);
-            }}
-          >
-            Hidden
-          </BarButton>
-        ) : null}
-        <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
-          Multi-select
-        </BarButton>
-        {offers.dm ? <BarButton onClick={openRolls}>Roll</BarButton> : null}
-        {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
-        {offers.dm ? (
-          <BarButton pressed={locked === "all"} half={locked === "some"} icon="locked" iconOnly onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
-            Locked
-          </BarButton>
-        ) : null}
-        {offers.dm && outOfFight > 0 ? (
-          <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, encounter, actions.newId, join.mark))}>
-            {encounter ? "Add to the fight" : "Start a fight"}
-          </BarButton>
-        ) : null}
-        {offers.dm ? (
-          <BarButton ref={moreButton} icon="more" iconOnly always onClick={() => setMore(true)}>
-            More
-          </BarButton>
-        ) : null}
-        {offers.dm ? (
-          <DeleteButton
-            armedText={`Delete ${tokens.length} tokens?`}
-            onDelete={() => {
-              send(deleteManyOps(ids));
-              props.onClose();
-            }}
-          />
-        ) : null}
-        <BarButton icon="close" iconOnly always onClick={props.onClose}>
-          Clear
-        </BarButton>
-      </ButtonRow>
-      {offers.dm && outOfFight > 0 && joinState === "failed" ? <SrdLoadFailed what="The stat blocks" inline /> : null}
+    <>
+      <BarHeader title={`${tokens.length} selected`} status={resting ? status.node : undefined} onClose={props.onClose} closeLabel="Deselect all" />
+      {/* The names stand in the strip's status line while it rests, so they are hidden there, and the entry after them keeps its place. */}
+      <div hidden={resting} style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>
+        {names}
+      </div>
+      {lead ? <GroupBarHp tokens={tokens} rest={rest ? { resting, scrolls, items: restItems, shown: null, onStatus: setEntry } : undefined} /> : resting ? (
+        <>
+          <GroupBarHp tokens={tokens} rest={{ resting, scrolls, items: restItems, shown: null, onStatus: setEntry }} />
+          <RestRow items={restItems} />
+        </>
+      ) : (
+        <GroupBarHp tokens={tokens} />
+      )}
+      {resting && !scrolls ? null : (
+        <>
+          {props.movable >= 2 ? (
+            <div style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>
+              {props.movable === tokens.length ? "Drag any of them to move them all." : `A drag moves the ${props.movable} of them you may move.`}
+            </div>
+          ) : null}
+          {offers.elevation ? (
+            <StepperRow label="Elevation">
+              <BarButton label="All down 5 feet" onClick={() => send(elevationOps(tokens, -5))}>
+                −5
+              </BarButton>
+              <span style={{ minWidth: 56, textAlign: "center", fontWeight: theme.weight.bold }}>{elevation === null ? "Mixed" : `${elevation} ft`}</span>
+              <BarButton label="All up 5 feet" onClick={() => send(elevationOps(tokens, 5))}>
+                +5
+              </BarButton>
+            </StepperRow>
+          ) : null}
+          {drawer === "conditions" && offers.conditions ? (
+            <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} />
+          ) : null}
+          {/* Undo move on a line of its own while it shows, so the steady line below never moves (docs/design-v1-token-window.md 3.2). */}
+          <ButtonRow row="passing">{inStrip("undoMove") ? null : <UndoMoveButton tokenIds={ids} />}</ButtonRow>
+          <ButtonRow row="play">
+            {offers.conditions && !inStrip("conditions") ? (
+              <BarButton ref={drawers.ref("play", "conditions")} pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
+                Conditions
+              </BarButton>
+            ) : null}
+            {offers.dm && !inStrip("hidden") ? hiddenButton : null}
+            {inStrip("multiSelect") ? null : multiButton}
+            {offers.dm && !inStrip("roll") ? rollButton : null}
+            {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
+            {offers.dm ? (
+              <BarButton pressed={locked === "all"} half={locked === "some"} icon="locked" iconOnly onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
+                Locked
+              </BarButton>
+            ) : null}
+            {offers.dm && outOfFight > 0 ? (
+              <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, encounter, actions.newId, join.mark))}>
+                {encounter ? "Add to the fight" : "Start a fight"}
+              </BarButton>
+            ) : null}
+            {offers.dm ? (
+              <BarButton ref={moreButton} icon="more" iconOnly always onClick={() => setMore(true)}>
+                More
+              </BarButton>
+            ) : null}
+            {offers.dm ? (
+              <DeleteButton
+                armedText={`Delete ${tokens.length} tokens?`}
+                onDelete={() => {
+                  send(deleteManyOps(ids));
+                  props.onClose();
+                }}
+              />
+            ) : null}
+            <BarButton icon="close" iconOnly always onClick={props.onClose}>
+              Clear
+            </BarButton>
+          </ButtonRow>
+          {offers.dm && outOfFight > 0 && joinState === "failed" ? <SrdLoadFailed what="The stat blocks" inline /> : null}
+        </>
+      )}
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
-    </BarFrame>
+    </>
   );
 }
 
@@ -668,10 +779,10 @@ function useOpenRollOptions(): () => void {
   };
 }
 
-/** The group's HP entry, field and Apply first while the window is short, as the frame decides (5.8). */
-function GroupBarHp(props: { tokens: readonly ViewToken[] }) {
+/** The group's HP entry, field and Apply first while the window is short, as the frame decides (5.8), and the strip's lead on an upright phone. */
+function GroupBarHp(props: { tokens: readonly ViewToken[]; rest?: HpRest }) {
   const frame = useContext(FrameContext);
-  return <GroupHpEntry tokens={props.tokens} place="bar" fieldFirst={frame.short} />;
+  return <GroupHpEntry tokens={props.tokens} place="bar" fieldFirst={frame.short} rest={props.rest} />;
 }
 
 /**
@@ -681,11 +792,16 @@ function GroupBarHp(props: { tokens: readonly ViewToken[] }) {
  * it undid, or that the move is no longer the newest step when another
  * device changed the stack meanwhile.
  */
-function UndoMoveButton(props: { tokenIds: readonly string[] }) {
+function UndoMoveButton(props: { tokenIds: readonly string[]; arrow?: boolean }) {
   const actions = useRoomActions();
   const offer = useStore(useScoped(lastMoveSlot), offered);
   if (!offer || !offersUndo(offer, props.tokenIds)) return null;
-  return (
+  // The strip's is the undo arrow alone, named and tipped "Undo move" as the top bar's Undo is, so it fits Roll's place (docs/design-v1-bar-compact.md R13).
+  return props.arrow ? (
+    <BarButton icon="undo" iconOnly always onClick={() => actions.dispatch(undoOf(offer))}>
+      Undo move
+    </BarButton>
+  ) : (
     <BarButton onClick={() => actions.dispatch(undoOf(offer))}>Undo move</BarButton>
   );
 }
@@ -1734,4 +1850,167 @@ function BarButton(props: {
       {props.children}
     </Button>
   );
+}
+
+// ------------------------------------------------------------ an upright phone's resting strip (docs/design-v1-bar-compact.md 3.3)
+
+/** The entry with nothing to say: the status line shows the vitals. */
+const QUIET_ENTRY: EntryStatus = { error: null, dead: null, preview: null, typed: false, crit: false, reach: 1, left: [], standing: null };
+
+/**
+ * The note's inset from each side of the strip (B.4). Lane F's frame
+ * exports it as barDock.ts NOTE_INSET, which takes this one's place once
+ * the frame's build is under this code.
+ */
+const NOTE_INSET = 12;
+
+/** The vitals the short layout keeps, as the status line's parts: "AC 14", then "HP 24/24" or a player's "Healthy". */
+function vitalsWords(items: readonly VitalItem[]): string[] {
+  return items.flatMap((item) => {
+    if (item.key === "ac") return item.units.flatMap((u) => (u.kind === "ac" ? [`AC ${u.ac}`] : []));
+    if (item.key === "hp") return [item.units.map(unitText).join(" ")];
+    return [];
+  });
+}
+
+/**
+ * The strip's status line (barButtons.ts restStatus), measured where it
+ * draws: the line under the name, the title's two lines and the note's
+ * two lines, each by the drawn width of its text in the line's own font,
+ * inside the chrome's zoom. `node` is what the header draws under the
+ * name. `status.sentence` is what needs more room than that line.
+ */
+function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; critInRow: boolean; active: boolean }): { status: RestStatus; node: ReactNode } {
+  const lineRef = useRef<HTMLSpanElement>(null);
+  const probeRef = useRef<HTMLSpanElement>(null);
+  const [noteWidth, setNoteWidth] = useState<number | null>(null);
+  const [titleWidth, setTitleWidth] = useState<number | null>(null);
+  const key = JSON.stringify([input.entry, input.idle, input.critInRow]);
+  const [status, setStatus] = useState<RestStatus>(() => restStatus({ ...input.entry, idle: input.idle, critInRow: input.critInRow, fit: FITS_ALL }));
+  // The widths it measures against, read again as the frame or the title changes width (a turn, a new interface size, a header button).
+  useLayoutEffect(() => {
+    const line = lineRef.current;
+    const frameEl = line?.closest<HTMLElement>('[role="dialog"]');
+    if (!input.active || !line) return;
+    const read = () => {
+      setTitleWidth(line.getBoundingClientRect().width);
+      setNoteWidth(frameEl ? frameEl.offsetWidth - 2 * NOTE_INSET : null);
+    };
+    read();
+    const watch = new ResizeObserver(read);
+    watch.observe(line);
+    if (frameEl) watch.observe(frameEl);
+    return () => watch.disconnect();
+  }, [input.active]);
+  useLayoutEffect(() => {
+    const [entry, idle, critInRow] = JSON.parse(key) as [EntryStatus, string[], boolean];
+    const line = lineRef.current;
+    const probe = probeRef.current;
+    const fit = input.active && line && probe && titleWidth !== null ? measuredFit(line, probe, noteWidth) : FITS_ALL;
+    const next = restStatus({ ...entry, idle, critInRow, fit });
+    setStatus((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
+  }, [key, input.active, titleWidth, noteWidth]);
+  const node = (
+    <span
+      ref={lineRef}
+      // What needs more room than the line, for the frame to draw over the title or in the note (9.2), and for tests to read.
+      data-rest-status=""
+      data-rest-sentence={status.sentence?.text}
+      data-rest-place={status.sentence?.place}
+      style={{ display: "block", position: "relative", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}
+    >
+      {status.line.text}
+      {/* Measures a text in the line's own font and zoom, never seen or read. */}
+      <span ref={probeRef} aria-hidden style={{ position: "absolute", left: 0, top: 0, visibility: "hidden", pointerEvents: "none" }} />
+    </span>
+  );
+  return { status, node };
+}
+
+/** Before the first measure: every text fits, so nothing is cut that may not need it. */
+const FITS_ALL: RestFit = { line: () => true, title: () => true, note: () => true };
+
+/**
+ * Fits by the probe inside the status line: one line against the line's
+ * drawn width, the title's two lines at the line's width, and the note's
+ * two lines at `noteWidth` (the frame's width less the note's insets), in
+ * the line's own px. Lines are counted by height against the line's own.
+ */
+function measuredFit(line: HTMLElement, probe: HTMLElement, noteWidth: number | null): RestFit {
+  const lineBox = line.getBoundingClientRect();
+  const measure = (text: string, width: number | "line" | null) => {
+    probe.textContent = text;
+    probe.style.whiteSpace = width === null ? "nowrap" : "normal";
+    probe.style.right = width === "line" ? "0" : "auto";
+    probe.style.width = typeof width === "number" ? `${width}px` : "auto";
+    const box = probe.getBoundingClientRect();
+    probe.textContent = "";
+    return box;
+  };
+  const lines = (box: DOMRect) => Math.round(box.height / Math.max(1, lineBox.height));
+  return {
+    line: (text) => measure(text, null).width <= lineBox.width + 0.01,
+    title: (text) => lines(measure(text, "line")) <= 2,
+    note: (text) => lines(measure(text, noteWidth ?? "line")) <= 2,
+  };
+}
+
+/**
+ * Conditions and Uses from the strip (5.3): the bar expands with that
+ * drawer open and focus on its button there, and closing the drawer by
+ * its button rests the bar again, focus back on the strip's button.
+ * Where Expand is not offered, the drawer opens inside the scrolling
+ * strip instead. A Collapse with such a drawer open closes it too.
+ */
+function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: (d: Drawer) => void) {
+  const [opened, setOpened] = useState<Drawer>(null);
+  const [focus, setFocus] = useState<{ place: "rest" | "play"; id: string } | null>(null);
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const resting = rest?.resting === true;
+  const wasResting = useRef(resting);
+  useLayoutEffect(() => {
+    const collapsed = resting && !wasResting.current;
+    wasResting.current = resting;
+    if (collapsed && opened !== null) {
+      setDrawer(null);
+      setOpened(null);
+    }
+  }, [resting, opened, setDrawer]);
+  useLayoutEffect(() => {
+    if (!focus || (focus.place === "rest") !== resting) return;
+    buttons.current.get(`${focus.place}:${focus.id}`)?.focus();
+    setFocus(null);
+  });
+  const close = () => {
+    setDrawer(null);
+    if (opened !== null && rest && !rest.resting) {
+      setFocus({ place: "rest", id: opened });
+      setOpened(null);
+      rest.collapse();
+    }
+  };
+  return {
+    ref: (place: "rest" | "play", id: string) => (el: HTMLButtonElement | null) => {
+      if (el) buttons.current.set(`${place}:${id}`, el);
+      else buttons.current.delete(`${place}:${id}`);
+    },
+    fromRest(id: "conditions" | "uses") {
+      if (!rest || rest.scrolls) {
+        setDrawer(drawer === id ? null : id);
+        return;
+      }
+      setDrawer(id);
+      setOpened(id);
+      setFocus({ place: "play", id });
+      rest.expand();
+    },
+    toggle(id: "conditions" | "uses") {
+      if (drawer === id) close();
+      else {
+        setDrawer(id);
+        setOpened(null);
+      }
+    },
+    close,
+  };
 }
