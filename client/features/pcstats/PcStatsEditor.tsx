@@ -113,7 +113,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   const [resourcesStale, setResourcesStale] = useState(false);
   const problems = useMemo(() => draftProblems(draft), [draft]);
   const size = useMemo(() => sizeOf(draft.stats), [draft.stats]);
-  // Class resources a D&D Beyond read set are unsaved too, even with the block and its record as saved (docs/design-v1-ddb-resources.md 6.2 e).
+  // Class resources a D&D Beyond read set are unsaved too, even with the block and its record as saved, but a preset's level alone is not (docs/design-v1-ddb-resources.md 6.2 e).
   const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || flow.record !== null || resourcesUnsaved(flow.resources) || pasted.trim() !== "" || ddbJson.trim() !== "";
   const held = flow.saving;
   // An answer that comes after the editor closed may only say what became of the save.

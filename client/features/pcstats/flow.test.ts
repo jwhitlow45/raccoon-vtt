@@ -8,6 +8,7 @@ import { actor } from "#shared/testutil.ts";
 import { openDraft } from "./draft.ts";
 import { alsoPatch } from "./fill.ts";
 import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { levelUps, resourcesAfter } from "#shared/rules/classResources.ts";
 import { expectHash } from "#shared/permissions.ts";
 import { hash12 } from "#shared/rules/pcSync.ts";
 import { goneDroppedLine } from "./resync.ts";
@@ -439,6 +440,28 @@ describe("the editor's class resources", () => {
     assert.equal(use.resources.list, undefined);
     assert.ok(resourcesUnsaved(use.resources));
     assert.deepEqual(resourcesSave(use.resources, { ddbSync: use.record! }), { expect: { resources: expectHash(saved as never, "resources") } });
+  });
+
+  test("a Barbarian 4 read at 5: Rage's level rides with the Save's other writes, never alone, and the Update question never comes (DDBBUILD-OPUS-1, D-261024-41)", () => {
+    const rage4 = { ...rageRead(), level: 4 };
+    const bare: SyncCharacter = { name: "Bree", level: 4, stats: structuredClone(EMPTY_PC_STATS) as PcStats, actor: actor({ sheetUrl: SHEET }) };
+    const p0 = planSync({ mode: "resync", stats: bare.stats, level: 4, character: bare, fill: { ...read([rage4]), level: 4 } });
+    const saved = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
+    assert.deepEqual([saved.resources![0]!.level, saved.resources![0]!.atLevel], [4, 4]);
+    const f = read([{ ...rageRead(), level: 5 }]);
+    const start = run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state;
+    const { use, ticks } = review(saved, f, start);
+    const held = use.resources!;
+    assert.ok(held, "held");
+    assert.equal(held.list, undefined, "the list itself is as it was");
+    assert.equal(resourcesUnsaved(held), false, "levels alone are not unsaved");
+    const state = run(start, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: use }).state;
+    assert.equal(state.draft.level, 5);
+    const sent = resourcesSave(state.resources, { level: 5 });
+    assert.deepEqual(sent.resources?.map((r) => [r.level, r.atLevel]), [[5, 5]]);
+    assert.equal(sent.expect?.resources, expectHash(saved as never, "resources"));
+    assert.deepEqual(levelUps(resourcesAfter(saved.resources, sent.resources!), 5), []);
+    assert.deepEqual(resourcesSave(state.resources, {}), {}, "alone, nothing is sent");
   });
 
   test("an editor splice past 40 markers drops the oldest, and the line names what dropped (OP-21)", () => {

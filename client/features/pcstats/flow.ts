@@ -1,5 +1,6 @@
 import type { Character, PcStats } from "#shared/model.ts";
 import { expectHash, type ExpectSubject } from "#shared/permissions.ts";
+import { stableStringify } from "#shared/project.ts";
 import { MAX_PC_ROLLS, type CharacterPatch, type DdbSyncPatch } from "#shared/protocol.ts";
 import { resourcesAfter, type ResourceSent } from "#shared/rules/classResources.ts";
 import type { FillMerge, PcFill } from "#shared/rules/pcFill.ts";
@@ -63,12 +64,14 @@ export type Review = {
  * A D&D Beyond read's class resources as its Use it left them (6.2 a): the
  * read and its ticks, for a review again after a refusal, and the hash of
  * the live list it was planned from, which Save expects. `list` is the
- * list Save sends when it changes the live one, and `part` marks a change
- * to the record's resource part. Held only when one of these holds (6.2
- * d), and until Save lands, a read's Use it replaces it, or the editor
- * closes.
+ * list Save sends when it changes the live one, and `levels` one that
+ * changes only presets' `level` and `atLevel`, which rides with any other
+ * write Save makes and is never unsaved alone (4.4, OP-19, D-261024-41).
+ * `part` marks a change to the record's resource part. Held only when one
+ * of these holds (6.2 d), and until Save lands, a read's Use it replaces
+ * it, or the editor closes.
  */
-export type HeldResources = { fill: PcFill; ticks: ReadonlySet<string>; list?: ResourceSent[]; part?: true; expect: string };
+export type HeldResources = { fill: PcFill; ticks: ReadonlySet<string>; list?: ResourceSent[]; levels?: ResourceSent[]; part?: true; expect: string };
 
 /**
  * What a D&D Beyond review's Use it sets: the merged block and level, the
@@ -131,10 +134,12 @@ function heldResources(result: SyncResult, record: DdbSyncPatch, saved: ExpectSu
   const after = result.resources !== undefined ? resourcesAfter(saved.resources, result.resources) : undefined;
   // A preset's level alone is not a change, so a spend meanwhile never refuses a Save over it alone (OP-19).
   const list = after !== undefined && !sameButLevels(after, saved.resources);
+  const levels = after !== undefined && !list && stableStringify(after) !== stableStringify(saved.resources ?? []);
   // The record's resource part can change with no list read, as when a removed resource's entry becomes its marker (DDBBUILD-ASTRA-04).
   const part = resourcePart(record) !== resourcePart(saved.ddbSync);
-  if (!list && !part) return null;
-  return { fill: read.fill, ticks: read.ticks, ...(list ? { list: result.resources! } : {}), ...(part ? { part: true as const } : {}), expect: expectHash(saved, "resources") };
+  if (!list && !levels && !part) return null;
+  const sent = result.resources!;
+  return { fill: read.fill, ticks: read.ticks, ...(list ? { list: sent } : levels ? { levels: sent } : {}), ...(part ? { part: true as const } : {}), expect: expectHash(saved, "resources") };
 }
 
 /**
@@ -159,19 +164,20 @@ function spliceResources(pending: DdbSyncPatch | null, from: DdbSyncPatch): DdbS
   return { ...rest, ...(from.res ? { res: from.res } : {}), ...(gone.length > 0 ? { gone } : {}) };
 }
 
-/** Whether held class resources leave the editor unsaved: a list or a record part that changes (6.2 e). */
+/** Whether held class resources leave the editor unsaved: a list or a record part that changes, never levels alone (6.2 e). */
 export function resourcesUnsaved(held: HeldResources | null): boolean {
   return held !== null && (held.list !== undefined || held.part === true);
 }
 
 /**
  * What Save adds for held class resources (6.2 d): the list when it
- * changes the live one, and `expect` whenever it writes the list or the
- * record's resource part.
+ * changes the live one, a levels-only list when the rest of the patch
+ * writes anything (4.4, as syncPatch lets it ride), and `expect` whenever
+ * it writes the list or the record's resource part.
  */
 export function resourcesSave(held: HeldResources | null, rest: CharacterPatch): { resources?: ResourceSent[]; expect?: { resources: string } } {
   if (!held) return {};
-  const resources = held.list;
+  const resources = held.list ?? (held.levels && Object.keys(rest).length > 0 ? held.levels : undefined);
   const writesPart = held.part === true && rest.ddbSync !== undefined;
   if (resources === undefined && !writesPart) return {};
   return { ...(resources ? { resources } : {}), expect: { resources: held.expect } };
