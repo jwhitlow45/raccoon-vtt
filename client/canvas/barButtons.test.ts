@@ -162,7 +162,8 @@ describe("a short bar", () => {
 
   test("a docked bar on a desktop is short while tall alert cards push it down, and not once they go", () => {
     const column = { top: 60, content: 640, first: 400 };
-    assert.equal(barCapacity(desk(800, column)), 264);
+    // Less the room kept for the column's fade under its first card (barDock.ts COLUMN_FADE).
+    assert.equal(barCapacity(desk(800, column)), 264 - 48);
     assert.equal(barShort(desk(800, column)), true);
     assert.equal(barShort(desk(800, null)), false);
   });

@@ -1,7 +1,8 @@
+import "../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { barCapacity } from "./barButtons.ts";
-import { DEFAULT_CHROME, DEFAULT_SPOT, EDGE, columnFacts, laneChoice, paneLaneBox, placeBar, restingBar, toastTop, type Chrome, type ColumnFacts } from "./barDock.ts";
+import { COLUMN_FADE, DEFAULT_CHROME, DEFAULT_SPOT, EDGE, columnFacts, laneChoice, paneLaneBox, placeBar, restingBar, toastTop, type Chrome, type ColumnFacts } from "./barDock.ts";
 
 /*
  * A turn card in the alerts column (docs/design-v1-combat-controls.md 4.2
@@ -47,14 +48,19 @@ describe("a turn card in the column: toasts keep under it, the bar and panes ski
     assert.equal(toastTop({ ...phone, column: { top: TOP, content: 44, first: 44 } }), TOP + 44 + EDGE);
   });
 
-  test("the bar docked under the column keeps a notice or the time-up line above a turn card whole (CCB-OPUS-11)", () => {
+  test("the bar docked under the column keeps a notice or the time-up line above a turn card whole, with the column's fade past it (CCB-OPUS-11, CCB-ASTRA-08)", () => {
     // A phone held sideways: the lane from under the top bar to the screen's foot, with room for the bar under the first card.
     for (const [what, height] of LEADS) {
       const column = columnFacts(null, { top: TOP, measured: { content: height + 8 + TURN, first: height, cover: height } });
       const { lane, floor } = laneChoice({ laneTop: 60, laneHeight: 322, column, besideRoom: 0 });
       assert.equal(lane, "stacked", what);
-      assert.equal(floor, TOP + height + EDGE, `${what}: the bar's floor is 8 px under its foot at ${TOP + height}`);
+      assert.equal(floor, TOP + height + EDGE + COLUMN_FADE, `${what}: the bar's floor keeps the fade's room under the card's foot at ${TOP + height}`);
     }
+  });
+
+  test("the fade's room is the fade's own height (TokenActionBar.tsx SCROLL_FOR_MORE_PX)", async () => {
+    const { SCROLL_FOR_MORE_PX } = await import("./TokenActionBar.tsx");
+    assert.equal(COLUMN_FADE, SCROLL_FOR_MORE_PX);
   });
 
   test("the bar, its resting place, its capacity and a pane read a lone turn card as no card", () => {

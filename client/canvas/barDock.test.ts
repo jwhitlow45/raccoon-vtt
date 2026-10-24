@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { RoomScope } from "../state/scope.ts";
 import {
   BAR_WIDTH,
+  COLUMN_FADE,
   laneChoice,
   paneLane,
   paneLaneBox,
@@ -491,7 +492,7 @@ describe("the window's size on a computer (docs/design-v1-token-window.md 5 and 
 
   test("the cap applies after the lane, stacked, beside and summarized, and a window the lane moves down keeps min(content, cap)", () => {
     // Stacked under a 150 px first card: 12 px below it for a resizable window whose top is free, 8 for a touch one.
-    const column = { top: 60, content: 300, first: 150 };
+    const column = { top: 60, content: 150, first: 150 };
     const stacked = placeBar({ ...base, column, height: 548, resizable: true, size: { h: 400 } });
     assert.equal(stacked!.lane, "stacked");
     assert.deepEqual(boxOf(stacked, 548), { left: 912 - 316, top: 732 - 400, width: 316, height: 400 });
@@ -611,7 +612,7 @@ describe("the right lane", () => {
   });
 
   test("stacked: the column keeps its first card and the bar sits 8 px under it, down to its floor", () => {
-    const column = { top: laneTop, content: 900, first: 140 };
+    const column = { top: laneTop, content: 140, first: 140 };
     const shared = shareLane({ ...lane, hang: home, column });
     assert.equal(shared.lane, "stacked");
     assert.equal(shared.hang.room, 672 - 148);
@@ -628,7 +629,7 @@ describe("the right lane", () => {
 
   test("a bar dropped on the column is pushed under its first card", () => {
     const dropped = spotHang({ corner: "tr", x: 0, y: 10 }, free, { width: 304, height: 200 });
-    const shared = shareLane({ ...lane, hang: dropped, column: { top: laneTop, content: 300, first: 150 } });
+    const shared = shareLane({ ...lane, hang: dropped, column: { top: laneTop, content: 150, first: 150 } });
     assert.equal(shared.lane, "stacked");
     assert.equal(shared.hang.at, laneTop + 158);
     assert.equal(shared.hang.room, 672 - 158);
@@ -636,7 +637,7 @@ describe("the right lane", () => {
 
   test("a bar hung by its bottom moves down under a tall first card instead of shrinking, as far as the lane's bottom", () => {
     const short: Box = { left: 8, top: 60, width: 904, height: 400 };
-    const column = { top: 60, content: 300, first: 272 };
+    const column = { top: 60, content: 272, first: 272 };
     const at = { laneTop: 60, laneHeight: 400, column, laneLeft: laneLeft(short), besideRoom: short.width - 312 };
     // A bottom right spot 80 px up: the first card ends at 340, and the lane at 460.
     const raised = spotHang({ corner: "br", x: 0, y: 80 }, short, { width: 304, height: 300 });
@@ -906,6 +907,32 @@ describe("a summary row risen over the bars (follow-up to docs/design-v1-bar-doc
     assert.deepEqual(laneChoice({ ...lane, column: { top: 122, content: 110, first: 110, row: 8 } }), { lane: "summary", floor: 122 }, "the row in the top bar's row");
     assert.deepEqual(laneChoice({ ...lane, column: { top: 100, content: 44, first: 44 } }), { lane: "summary", floor: 152 }, "a row at its place above the lane keeps the bar under it");
     assert.deepEqual(laneChoice({ ...lane, column: { top: 8, content: 44, first: 44 } }), { lane: "stacked", floor: 122 }, "a row standing for the cards, risen above the lane");
+  });
+
+  test("a bar stacked under the first card leaves room for the column's fade while more cards follow (lane B, 844 x 390)", () => {
+    const lane = { laneTop: 60, laneHeight: 300, besideRoom: 0 };
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 60, content: 90, first: 90 } }), { lane: "stacked", floor: 60 + 90 + EDGE }, "one card: no fade");
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 60, content: 250, first: 90 } }), { lane: "stacked", floor: 60 + 90 + EDGE + COLUMN_FADE }, "more cards: the fade lies past the first");
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 60, content: 120, first: 90 } }), { lane: "stacked", floor: 60 + 120 + EDGE }, "what follows is shorter than the fade: it shows whole, with no fade");
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 60, content: 250, first: 90 }, floorGap: 10 }), { lane: "stacked", floor: 60 + 90 + EDGE + COLUMN_FADE + 10 }, "the handle's reach on top");
+    // The fade's room counts toward the bar's floor: 120 px left stacks, 119 gives way.
+    const at = (first: number) => laneChoice({ ...lane, besideRoom: BESIDE_MIN, column: { top: 60, content: 400, first } }).lane;
+    assert.equal(at(300 - 120 - EDGE - COLUMN_FADE), "stacked");
+    assert.equal(at(300 - 120 - EDGE - COLUMN_FADE + 1), "beside");
+  });
+
+  test("the fade's room changes nothing for a lone first card or a lone turn card, and a lane too tight for it never stacks with the first card cut (CCB-ASTRA-08)", () => {
+    const lane = { laneTop: 60, laneHeight: 300, besideRoom: 0 };
+    // A lone first card: the floor the rule gave before the fade's room, 8 px under the card.
+    for (const first of [44, 90, 172]) assert.deepEqual(laneChoice({ ...lane, column: { top: 60, content: first, first } }), { lane: "stacked", floor: 60 + first + EDGE }, `a lone ${first} px card`);
+    // A lone turn card publishes no first card (CCB-OPUS-2), so it has no fade's room either.
+    assert.deepEqual(laneChoice({ ...lane, column: { top: 60, content: 44, first: 0, cover: 44 } }), { lane: "none", floor: 60 });
+    // Where the first card and the fade's room leave the bar less than its floor: beside where it fits, else the summary row, never stacked over the fade.
+    const tight = { top: 60, content: 300, first: 300 - 120 - EDGE - COLUMN_FADE + 1 };
+    assert.equal(laneChoice({ ...lane, besideRoom: BESIDE_MIN, column: tight }).lane, "beside");
+    assert.deepEqual(laneChoice({ ...lane, column: tight }), { lane: "summary", floor: 60 + SUMMARY_ROW + EDGE });
+    // The same card alone still stacks: the room is only kept while more cards follow.
+    assert.equal(laneChoice({ ...lane, column: { ...tight, content: tight.first } }).lane, "stacked");
   });
 
   test("the column's facts keep the row's place, and the same object when nothing changed", () => {

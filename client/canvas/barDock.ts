@@ -63,6 +63,13 @@ export const BESIDE_MIN = 230;
 export const BAR_FLOOR = 120;
 /** The column's alerts summary row, which stands in for its cards when nothing else fits. */
 export const SUMMARY_ROW = 44;
+/**
+ * How tall the column's "Scroll for more" fade stands over its foot
+ * (TokenActionBar.tsx SCROLL_FOR_MORE_PX). A bar stacked under the first
+ * card keeps up to this much more room under it while more cards follow,
+ * so the fade lies past the card and never over its last line (firstFoot).
+ */
+export const COLUMN_FADE = 48;
 /** A dropped bar whose edge lands this close to the free area's edge snaps to it. */
 export const SNAP_PX = 24;
 /** The least room left of the lane for the notices to center there instead of spanning. */
@@ -660,10 +667,21 @@ export function laneChoice(input: { laneTop: number; laneHeight: number; column:
   const height = Math.max(0, input.laneHeight);
   if (!column || column.first <= 0) return { lane: "none", floor: laneTop };
   // Never above the lane: a column that has risen over the bars leaves the bar the lane's whole height, no more.
-  const firstBottom = Math.max(laneTop, column.top + column.first + EDGE + (input.floorGap ?? 0));
+  const firstBottom = Math.max(laneTop, firstFoot(column) + (input.floorGap ?? 0));
   if (laneTop + height - firstBottom >= Math.min(BAR_FLOOR, height) && height > 0) return { lane: "stacked", floor: firstBottom };
   if (input.besideRoom >= BESIDE_MIN) return { lane: "beside", floor: laneTop };
   return { lane: "summary", floor: Math.max(laneTop, (column.row ?? column.top) + SUMMARY_ROW + EDGE) };
+}
+
+/**
+ * The top a bar stacked under the column's first card keeps to: the
+ * card's bottom and the 8 px gap, and while more cards follow, room for
+ * the column's fade over its foot, or for all that follows where that is
+ * shorter (COLUMN_FADE). Under the card alone the fade lay over its last
+ * line, a time-up line's second one at 844 x 390.
+ */
+function firstFoot(column: ColumnFacts): number {
+  return column.top + column.first + EDGE + Math.min(COLUMN_FADE, Math.max(0, column.content - column.first));
 }
 
 /** Where a map pane drawn as a card stands against a column with a card (paneLane). */
