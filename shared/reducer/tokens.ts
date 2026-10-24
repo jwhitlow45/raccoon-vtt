@@ -28,7 +28,7 @@ import {
   syncOwners,
 } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
-import { linkOf } from "./uses.ts";
+import { linkOf, relinked } from "./uses.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers, withUnshaped } from "../rules/pcStats.ts";
 import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
@@ -179,7 +179,7 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   setOrDelete(actor, "legendary", patch.legendary);
   if (resolved.holder === "character" && shapeKeepsOwnNumbers(tx.env.opVersion)) actor = withUnshaped(resolved.actor, actor, patch);
   // Marks are keyed by the block's entries, so a new block, or a shape taken or ended, takes them (docs/design-v1-combat-controls.md 2.4).
-  if (actor.uses !== undefined && linkOf(actor) !== linkOf(resolved.actor)) delete actor.uses;
+  actor = relinked(actor, linkOf(resolved.actor));
   return { actor, events };
 }
 
@@ -271,7 +271,7 @@ function updateCompanion(tx: Tx, token: Token, next: Token, p: TokenPatch): void
   // (docs/design-v1-companion-stat-blocks.md 3.2, rule 3). An SRD link holds nothing of the character's and stays.
   if (next.companion?.of !== token.companion?.of && "inline" in next.actor && next.actor.inline.blockId !== undefined) {
     const { blockId: _theirs, ...actor } = next.actor.inline;
-    next.actor = { inline: actor };
+    next.actor = { inline: relinked(actor, linkOf(next.actor.inline)) };
   }
   if (p.companionReaction !== undefined) {
     if (next.companion?.turn !== "shared") throw invalid(NOT_SHARED);

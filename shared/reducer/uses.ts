@@ -284,6 +284,19 @@ export function linkOf(actor: Pick<Actor, "srdId" | "wildShape" | "monsterId" | 
   return undefined;
 }
 
+/**
+ * The actor as a change of its links leaves it (2.4): its marks go when its
+ * block is not the one `was` names, since their keys named that block's
+ * entries. Every path that sets, drops or renames a link comes through here,
+ * so a creature's marks always belong to its block as linkOf reads it.
+ */
+export function relinked<A extends Pick<Actor, "srdId" | "wildShape" | "monsterId" | "blockId" | "uses">>(actor: A, was: string | undefined): A {
+  if (actor.uses === undefined || linkOf(actor) === was) return actor;
+  const next = { ...actor };
+  delete next.uses;
+  return next;
+}
+
 /** Damage types together, each once, in the rules' order, so every device and a replay hold the same list. */
 export function typeUnion(...lists: (readonly DamageType[] | undefined)[]): DamageType[] {
   const held = new Set(lists.flatMap((list) => list ?? []));

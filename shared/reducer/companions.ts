@@ -4,6 +4,7 @@ import { pausedAnchorForEntry } from "../rules/durations.ts";
 import { renumber, rowCharacter, sortEntries } from "../rules/initiative.ts";
 import { bindDurations, removeEntries } from "./encounter.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
+import { linkOf, relinked } from "./uses.ts";
 
 /**
  * The companion rules (docs/design-v1-combat-flow.md 3.6) the token,
@@ -241,7 +242,7 @@ export function normalizeCompanionState(state: RoomState): RoomState {
     if (character.actor.blockId === undefined) characters[id] = character;
     else {
       const { blockId: _gone, ...actor } = character.actor;
-      characters[id] = { ...character, actor };
+      characters[id] = { ...character, actor: relinked(actor, linkOf(character.actor)) };
     }
   }
   let out: RoomState = { ...state, tokens, characters };
@@ -258,9 +259,10 @@ function withLinkRules(state: RoomState, token: Token): Token {
   const { srdId: _srd, monsterId: _monster, ...one } = token.actor.inline;
   const block = state.companionBlocks[one.blockId!];
   const belongs = token.companion !== undefined && (block === undefined || block.characterId === token.companion.of);
-  if (belongs) return linksSet(token.actor.inline) > 1 ? { ...token, actor: { inline: one } } : token;
+  // Marks keyed by a link that goes go with it (docs/design-v1-combat-controls.md 2.4).
+  if (belongs) return linksSet(token.actor.inline) > 1 ? { ...token, actor: { inline: relinked(one, linkOf(token.actor.inline)) } } : token;
   const { blockId: _gone, ...unlinked } = token.actor.inline;
-  return { ...token, actor: { inline: unlinked } };
+  return { ...token, actor: { inline: relinked(unlinked, linkOf(token.actor.inline)) } };
 }
 
 /** One companion's rows out of a state's encounter and history, pure, as dropRows takes them with `rebind`. */

@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import type { Actor, RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { DM, actor, character, customMonster, env, room, token } from "#shared/testutil.ts";
+import { normalizeCompanionState } from "#shared/reducer/companions.ts";
+import { DM, actor, character, companionBlock, customMonster, env, room, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -105,5 +106,64 @@ describe("combat uses through an import (docs/design-v1-combat-controls.md 3.6)"
     assert.ok(prev.ok);
     const back = applyOp(prev.state, { t: "encounter.prev" }, DM, env(seq + 2));
     assert.ok(back.ok, "an imported saved turn goes back with no record to put back");
+  });
+});
+
+describe("marks through an import that changes a link (docs/design-v1-combat-controls.md 2.4 and 3.6)", () => {
+  /** The fight with the lurker's own turn begun, Lunge saved by its start, and Acid Spit spent since. */
+  function file(): RoomState {
+    let state = played();
+    const r = applyOp(state, { t: "actor.use", target: { tokenId: "lurker" }, use: { kind: "ability", key: "actions:acid-spit", name: "Acid Spit", limit: "recharge", max: 1, min: 5 } }, DM, env(50));
+    assert.ok(r.ok);
+    state = r.state;
+    const active = state.encounter!.entries.find((e) => e.id === state.encounter!.activeEntryId);
+    assert.equal(active?.tokenId, "lurker");
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok);
+    return parsed.state;
+  }
+  const imported = (state: RoomState) => {
+    let n = 0;
+    const out = remapState(state, { assets: new Map(), newId: () => `n${n++}` });
+    const lurker = Object.values(out.tokens).find((t) => t.name === "Cave Lurker")!.id;
+    const prev = applyOp(out, { t: "encounter.prev" }, DM, env(1));
+    assert.ok(prev.ok);
+    return { out, lurker, back: prev.state };
+  };
+
+  test("a room monster that did not come through takes the marks keyed by it, and Previous brings none back", () => {
+    const state = file();
+    delete state.monsters.lurker;
+    const { out, lurker, back } = imported(state);
+    assert.equal(inline(out, lurker).monsterId, undefined);
+    assert.equal(inline(out, lurker).uses, undefined);
+    assert.ok(!out.encounterHistory.some((s) => s.turnUses?.some((u) => u.holderId === lurker && u.marks)), "no saved mark keyed by the old block");
+    assert.equal(inline(back, lurker).uses, undefined);
+  });
+
+  test("a room monster under its new id keeps its marks, and Previous brings back the ones its start took", () => {
+    const { out, lurker, back } = imported(file());
+    assert.deepEqual(Object.keys(inline(out, lurker).uses ?? {}), ["actions:acid-spit"]);
+    assert.deepEqual(Object.keys(inline(back, lurker).uses ?? {}).sort(), ["actions:acid-spit", "legendaryActions:lunge"]);
+  });
+
+  test("the companion rules dropping a block link take its marks, and an SRD link keeps them", () => {
+    const gust = { kind: "day", name: "Gust", used: 1, max: 1 } as const;
+    const state = room({
+      characters: { c1: character("c1", { name: "Bree", ownerIds: ["p1"], actor: actor({ blockId: "cb0", uses: { "actions:gust": gust } }) }) },
+      tokens: {
+        stray: token("stray", { kind: "npc", name: "Stray", actor: { inline: actor({ blockId: "cb0", uses: { "actions:gust": gust } }) } }),
+        owl: token("owl", { kind: "npc", name: "Owl", actor: { inline: actor({ srdId: "owl", uses: { "actions:talons": gust } }) } }),
+        moth: token("moth", { kind: "npc", name: "Moth", ownerIds: ["p1"], companion: { of: "c1", turn: "shared" }, actor: { inline: actor({ srdId: "owl", blockId: "cb0", uses: { "actions:talons": gust } }) } }),
+      },
+    });
+    state.companionBlocks.cb0 = companionBlock("cb0", "c1");
+    const out = normalizeCompanionState(state);
+    assert.equal(inline(out, "stray").blockId, undefined);
+    assert.equal(inline(out, "stray").uses, undefined);
+    assert.equal(out.characters.c1!.actor.uses, undefined);
+    assert.deepEqual(inline(out, "owl").uses, { "actions:talons": gust });
+    assert.deepEqual([inline(out, "moth").srdId, inline(out, "moth").blockId], [undefined, "cb0"], "a companion's own block wins over its other links");
+    assert.equal(inline(out, "moth").uses, undefined, "and the marks keyed by the SRD creature go");
   });
 });

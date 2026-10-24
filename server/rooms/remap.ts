@@ -3,6 +3,7 @@ import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type {
+  Actor,
   AreaTemplate,
   Character,
   CompanionBlock,
@@ -38,6 +39,7 @@ import type {
   TurnUses,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
+import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import type { AssetKind } from "../assets/kinds.ts";
@@ -168,7 +170,20 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   // A turn record is named by the seq of the op that started its turn, a seq of the old room, and the new room counts from
   // its snapshot again (gateway.ts), so a later turn could take the same number. The record goes, and the damage types
   // taken with it, which only a record's start reads (docs/design-v1-combat-controls.md 3.6).
-  const actor = <A extends { effects: Effect[]; monsterId?: string; blockId?: string; turnRecord?: unknown; hurt?: unknown }>(a: A): A => {
+  //
+  // A block link (linkOf) as the remapped actor's own reads: a room monster or companion block by its new id, or none
+  // when it did not come through, as the actor's link goes then. A link renamed keeps the marks keyed by its block, and
+  // one dropped takes them (relinked), so they never come back under no block at all.
+  const savedLink = (link: string | undefined): string | undefined => {
+    if (link === undefined) return undefined;
+    const colon = link.indexOf(":");
+    const kind = link.slice(0, colon);
+    const id = link.slice(colon + 1);
+    if (kind === "monster") return monsters.has(id) ? `monster:${monsters.of(id)}` : undefined;
+    if (kind === "block") return blocks.has(id) ? `block:${blocks.of(id)}` : undefined;
+    return link;
+  };
+  const actor = <A extends Pick<Actor, "effects" | "srdId" | "wildShape" | "monsterId" | "blockId" | "uses" | "turnRecord" | "hurt">>(a: A): A => {
     const next: A = { ...a, effects: a.effects.map(effect) };
     delete next.turnRecord;
     delete next.hurt;
@@ -180,7 +195,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (blocks.has(a.blockId)) next.blockId = blocks.of(a.blockId);
       else delete next.blockId;
     }
-    return next;
+    const was = linkOf(a);
+    return relinked(next, savedLink(was) ?? was);
   };
   // An upload follows its new id where its place takes a token image, and goes when it did not come through. A shipped
   // icon's key means the same in every room (docs/design-v1-dm-tools.md 2.5).
@@ -391,17 +407,6 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   };
   if (state.encounter) out.encounter = encounter(state.encounter);
   const holder = (id: string): string | null => (tokens.has(id) ? tokens.of(id) : characters.has(id) ? characters.of(id) : null);
-  // A saved turn's block link (TurnUses.link) as the remapped actor's own reads: a room monster or companion block by its
-  // new id, or none when it did not come through, as the actor's link goes then.
-  const savedLink = (link: string | undefined): string | undefined => {
-    if (link === undefined) return undefined;
-    const colon = link.indexOf(":");
-    const kind = link.slice(0, colon);
-    const id = link.slice(colon + 1);
-    if (kind === "monster") return monsters.has(id) ? `monster:${monsters.of(id)}` : undefined;
-    if (kind === "block") return blocks.has(id) ? `block:${blocks.of(id)}` : undefined;
-    return link;
-  };
   out.encounterHistory = state.encounterHistory.map((snap): EncounterSnapshot => {
     const effects: Record<string, Effect[]> = {};
     for (const [holderId, list] of Object.entries(snap.effects)) {
@@ -421,10 +426,12 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const turnUses = (snap.turnUses ?? []).flatMap((saved): TurnUses[] => {
       const holderId = holder(saved.holderId);
       // The record each start replaced goes as the actors' records do, so Previous leaves a record as it is (3.6).
-      const { record: _record, link, ...kept } = saved;
-      if (holderId === null || (kept.marks === undefined && kept.actionsUsed === undefined)) return [];
+      const { record: _record, link, marks, ...kept } = saved;
       const mappedLink = savedLink(link);
-      return [{ ...kept, holderId, ...(mappedLink !== undefined ? { link: mappedLink } : {}) }];
+      // Marks keyed by a block that did not come through stay off, as the actor's own go.
+      const keptMarks = link !== undefined && mappedLink === undefined ? undefined : marks;
+      if (holderId === null || (keptMarks === undefined && kept.actionsUsed === undefined)) return [];
+      return [{ ...kept, holderId, ...(keptMarks ? { marks: keptMarks } : {}), ...(mappedLink !== undefined ? { link: mappedLink } : {}) }];
     });
     if (turnUses.length > 0) next.turnUses = turnUses;
     return next;

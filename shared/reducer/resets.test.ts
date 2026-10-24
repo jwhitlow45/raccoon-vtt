@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { Actor, RoomState, UseMark } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import { clientOpSchema } from "../protocol.ts";
-import { DM, P1, actor, apply, character, room, token } from "../testutil.ts";
+import { DM, P1, actor, apply, character, companionBlock, room, token } from "../testutil.ts";
 
 /** In lair's counts and a stat block's link (docs/design-v1-combat-controls.md 2.4). */
 
@@ -53,6 +53,10 @@ describe("a stat block's link (docs/design-v1-combat-controls.md 2.4)", () => {
     assert.deepEqual(dragon(kept).uses, { "actions:fire-breath": breath });
     const detached = apply(table(), { t: "token.update", tokenId: "dragon", patch: { actor: { srdId: null } } });
     assert.equal(dragon(detached).uses, undefined);
+    const unlinked = table();
+    unlinked.tokens.lent = token("lent", { name: "Owlbear", ownerIds: ["p1"], actor: { inline: actor({ uses: { "actions:fire-breath": breath } }) } });
+    const first = apply(unlinked, { t: "token.update", tokenId: "lent", patch: { actor: { srdId: "owlbear" } } });
+    assert.equal((first.tokens.lent!.actor as { inline: Actor }).inline.uses, undefined, "a first link takes marks kept under none");
   });
 
   test("a shape's end takes the shape's marks, and the character's resources stay", () => {
@@ -61,5 +65,26 @@ describe("a stat block's link (docs/design-v1-combat-controls.md 2.4)", () => {
     const ended = apply(state, { t: "character.update", characterId: "bree", patch: { actor: { srdId: null } } });
     assert.equal(ended.characters.bree!.actor.uses, undefined);
     assert.equal(ended.characters.bree!.resources![0]!.used, 1);
+  });
+
+  test("a companion detached or given to another character lets its block go and takes the marks keyed by it, and an SRD link keeps them", () => {
+    const moth: UseMark = { kind: "day", name: "Gust", used: 1, max: 1 };
+    const state = room({
+      characters: { c1: character("c1", { name: "Bree", ownerIds: ["p1"] }), c2: character("c2", { name: "Ash", ownerIds: ["p2"] }) },
+      tokens: {
+        spirit: token("spirit", { kind: "npc", name: "Moth Spirit", ownerIds: ["p1"], companion: { of: "c1", turn: "shared" }, actor: { inline: actor({ blockId: "cb0", uses: { "actions:gust": moth } }) } }),
+        owl: token("owl", { kind: "npc", name: "Owl", ownerIds: ["p1"], companion: { of: "c1", turn: "shared" }, actor: { inline: actor({ srdId: "owl", uses: { "actions:talons": moth } }) } }),
+      },
+    });
+    state.companionBlocks.cb0 = companionBlock("cb0", "c1");
+    const inline = (s: RoomState, id: string): Actor => (s.tokens[id]!.actor as { inline: Actor }).inline;
+    const detached = apply(state, { t: "token.update", tokenId: "spirit", patch: { companion: null } });
+    assert.equal(inline(detached, "spirit").blockId, undefined);
+    assert.equal(inline(detached, "spirit").uses, undefined);
+    const given = apply(state, { t: "token.update", tokenId: "spirit", patch: { companion: { of: "c2", turn: "shared" } } });
+    assert.equal(inline(given, "spirit").blockId, undefined);
+    assert.equal(inline(given, "spirit").uses, undefined);
+    const owl = apply(state, { t: "token.update", tokenId: "owl", patch: { companion: { of: "c2", turn: "shared" } } });
+    assert.deepEqual(inline(owl, "owl").uses, { "actions:talons": moth });
   });
 });
