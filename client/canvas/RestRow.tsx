@@ -12,13 +12,19 @@ const FIELD_MIN = 56;
 /**
  * How far the focus ring reaches past a control: its 2 px outline and its
  * 2 px offset (globals.css :focus-visible). The row clips what does not
- * fit, so it reaches this far past its own edges, padded and pulled back
- * by as much, and a control's ring shows whole.
+ * fit this far past its own edges, by a clip path, which leaves the
+ * layout alone: a control's ring shows whole, and the row never runs out
+ * of its parent, as a padding pulled back by a negative margin would.
  */
 const RING_ROOM = 4;
 
-/** A candidate that does not fit: out of the row's flow and unseen, but mounted and measured where it stands. */
-const SKIPPED: CSSProperties = { position: "absolute", left: 0, top: 0, visibility: "hidden", pointerEvents: "none" };
+/**
+ * A candidate that does not fit: out of the row's flow and unseen, but
+ * mounted and measured where it stands. It stands at the row's right
+ * corner, so one wider than the row runs out on the left, which no box
+ * scrolls to, rather than widening what holds the row.
+ */
+const SKIPPED: CSSProperties = { position: "absolute", right: 0, top: 0, visibility: "hidden", pointerEvents: "none" };
 
 /**
  * The resting strip's quick row (docs/design-v1-bar-compact.md 3.3): one
@@ -53,10 +59,9 @@ export function RestRow(props: { items: readonly RestItem[]; onFit?(shown: reado
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!row) return;
-    // Every width as drawn, in screen px, so the chrome's zoom scales the room, the gap and the field's least alike. The room is the row's less the ring's on each side.
-    const drawn = row.getBoundingClientRect().width;
-    const scale = row.offsetWidth > 0 ? drawn / row.offsetWidth : 1;
-    const rowWidth = Math.max(0, drawn - 2 * RING_ROOM * scale);
+    // Every width as drawn, in screen px, so the chrome's zoom scales the room, the gap and the field's least alike.
+    const rowWidth = row.getBoundingClientRect().width;
+    const scale = row.offsetWidth > 0 ? rowWidth / row.offsetWidth : 1;
     const widths: Record<string, number> = {};
     for (const el of row.querySelectorAll<HTMLElement>(":scope > [data-rest-item]")) {
       const id = el.dataset.restItem;
@@ -98,7 +103,7 @@ export function RestRow(props: { items: readonly RestItem[]; onFit?(shown: reado
     <div
       data-rest-row=""
       ref={rowRef}
-      style={{ position: "relative", display: "flex", flexWrap: "nowrap", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: theme.touch + 2 * RING_ROOM, padding: RING_ROOM, margin: -RING_ROOM, overflow: "hidden" }}
+      style={{ position: "relative", display: "flex", flexWrap: "nowrap", alignItems: "center", gap: theme.space(1), minWidth: 0, minHeight: theme.touch, clipPath: `inset(-${RING_ROOM}px)` }}
     >
       {order.map((id) => {
         const on = showing.has(id);
