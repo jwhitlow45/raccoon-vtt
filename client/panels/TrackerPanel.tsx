@@ -38,6 +38,10 @@ import { timerChoices } from "../features/encounter/timer.ts";
 import { EntryRow, type RowDrag } from "../features/encounter/Row.tsx";
 import { ValueEntry } from "../features/encounter/ValueEntry.tsx";
 import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
+import { creatureBlock } from "../features/dice/creature.ts";
+import { useDiceView } from "../features/dice/useDiceView.ts";
+import { placedInLair } from "../features/encounters/drop.ts";
+import type { EntryInput } from "#shared/protocol.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
@@ -517,11 +521,33 @@ function useCandidates(selectedTokenId: string | null): Record<AddMode, Token[]>
   );
 }
 
+/**
+ * The rows tokens join a fight with: a creature placed in its lair joins
+ * with In lair on, from its counts against its block
+ * (docs/design-v1-combat-controls.md 13.4). The candidates' blocks start
+ * loading as the panel shows them, so the tap that adds them reads them at
+ * once. A block still loading then reads as no lair.
+ */
+function useJoinBatches(candidates: readonly Token[]): (tokens: Token[]) => EntryInput[][] {
+  const actions = useRoomActions();
+  const targets = useMemo(() => candidates.filter((t) => "inline" in t.actor && t.actor.inline.legendary).map((t) => ({ tokenId: t.id })), [candidates]);
+  const { dice } = useDiceView(targets);
+  return (tokens) =>
+    entryBatches(tokens, actions.newId).map((batch) =>
+      batch.map((input) => {
+        const token = input.tokenId !== undefined ? tokens.find((t) => t.id === input.tokenId) : undefined;
+        if (!dice || !token || !("inline" in token.actor) || !token.actor.inline.legendary) return input;
+        return placedInLair(token.actor.inline, creatureBlock(dice, { tokenId: token.id })) ? { ...input, inLair: true } : input;
+      }),
+    );
+}
+
 function StartFight(props: { selectedTokenId: string | null }) {
   const actions = useRoomActions();
   const candidates = useCandidates(props.selectedTokenId);
+  const batches = useJoinBatches(candidates.scene);
   const start = (tokens: Token[]) => {
-    const [first = [], ...rest] = entryBatches(tokens, actions.newId);
+    const [first = [], ...rest] = batches(tokens);
     actions.dispatch({ t: "encounter.start", entries: first });
     for (const batch of rest) actions.dispatch({ t: "encounter.add", entries: batch });
   };
@@ -569,8 +595,9 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
   const scores = useRoomView((s) => s.view?.meta.settings.monsterInitScore ?? false);
   const fills = useMemo(() => (scores ? scoreFills(facts.view, entries) : []), [scores, facts.view, entries]);
 
+  const batches = useJoinBatches(candidates.scene);
   const add = (tokens: Token[]) => {
-    for (const batch of entryBatches(tokens, actions.newId)) actions.dispatch({ t: "encounter.add", entries: batch });
+    for (const batch of batches(tokens)) actions.dispatch({ t: "encounter.add", entries: batch });
   };
 
   return (

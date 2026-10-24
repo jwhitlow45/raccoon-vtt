@@ -1,4 +1,6 @@
-import type { ImageRef, RoomState, SavedEncounterMonster, Scene } from "#shared/model.ts";
+import { lairCounts } from "#shared/dice/uses.ts";
+import type { Actor, ImageRef, RoomState, SavedEncounterMonster, Scene } from "#shared/model.ts";
+import type { StatBlockMonster } from "#shared/srd/monsters.ts";
 import { MAX_ENTRIES_PER_OP, type ClientOp, type EntryInput, type TokenInput } from "#shared/protocol.ts";
 import { monsterImage, refOf } from "../monsters/images.ts";
 import { placeOnGround } from "../movement/ground.ts";
@@ -39,6 +41,8 @@ export function dropPlan(input: {
 }): DropPlan {
   const occupied = occupiedBoxes(Object.values(input.state.tokens), input.scene.id);
   const tokens: TokenInput[] = [];
+  // A creature placed in its lair joins the fight with In lair on, so the switch says what its counts say (docs/design-v1-combat-controls.md 13.4).
+  const lair = new Set<string>();
   let skipped = 0;
   // The biggest creatures take the spots nearest the middle first, so a dragon is not pushed to the edge by its kobolds.
   const lines = input.monsters
@@ -61,15 +65,33 @@ export function dropPlan(input: {
       const drop = { hp: null, hidden: input.options.hidden, inLair: line.inLair === true };
       const token = monsterToken(m, drop, { id: input.newId(), sceneId: input.scene.id, at, ...(image ? { image } : {}), ...link });
       tokens.push(placeOnGround(input.state.buildChunks ?? {}, token));
+      if (drop.inLair) lair.add(token.id);
     }
   }
   const ops: ClientOp[] = tokens.map((token) => ({ t: "token.create", token }));
   if (input.options.addToFight && input.state.encounter && tokens.length > 0) {
     // The reducer fills each row's group, hidden flag and score, as it does for tokens added from the tracker.
-    const entries: EntryInput[] = tokens.map((t) => ({ id: input.newId(), tokenId: t.id }));
+    const entries: EntryInput[] = tokens.map((t) => ({ id: input.newId(), tokenId: t.id, ...(lair.has(t.id) ? { inLair: true } : {}) }));
     for (let i = 0; i < entries.length; i += MAX_ENTRIES_PER_OP) ops.push({ t: "encounter.add", entries: entries.slice(i, i + MAX_ENTRIES_PER_OP) });
   }
   return { ops, skipped };
+}
+
+/**
+ * Whether a creature stands placed in its lair (13.4): its legendary counts
+ * are its block's lair counts and not its base ones, or, where the counts
+ * do not tell them apart, its XP is the lair's. A block whose counts never
+ * change in a lair says no.
+ */
+export function placedInLair(actor: Pick<Actor, "legendary" | "xp">, block: StatBlockMonster | null): boolean {
+  if (!block) return false;
+  const lair = lairCounts(block, true);
+  const base = lairCounts(block, false);
+  const held = { actionsMax: actor.legendary?.actionsMax ?? 0, resistMax: actor.legendary?.resistMax ?? 0 };
+  const same = (c: { actionsMax: number; resistMax: number }) => c.actionsMax === held.actionsMax && c.resistMax === held.resistMax;
+  if (!same(lair)) return false;
+  if (!same(base)) return true;
+  return lair.xp !== base.xp && actor.xp === lair.xp;
 }
 
 function side(resolved: Resolved): number {

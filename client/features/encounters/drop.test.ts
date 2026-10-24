@@ -7,7 +7,7 @@ import { loadMonsters } from "#shared/srd/monsters.ts";
 import { DM, actor, comparable, customMonster, env, imageRef, room, srdImage, token } from "#shared/testutil.ts";
 import { footprint } from "../../lib/scene.ts";
 import { resolveLine, srdIndex } from "./draft.ts";
-import { dropPlan, sendDrop, type DropOptions } from "./drop.ts";
+import { dropPlan, placedInLair, sendDrop, type DropOptions } from "./drop.ts";
 
 const LINES: SavedEncounterMonster[] = [
   { srdId: "goblin-warrior", count: 3 },
@@ -116,6 +116,11 @@ describe("placing a saved encounter", () => {
     }
     assert.deepEqual(rows.filter((r) => r.groupKey === "goblin-warrior").length, 3);
     assert.equal(rows.find((r) => after.tokens[r.tokenId!]!.name === "Cave Lurker")?.groupKey, "Cave Lurker");
+    // The dragon placed in its lair joins with In lair on, so the switch says what its counts say (docs/design-v1-combat-controls.md 13.4).
+    assert.deepEqual(
+      rows.filter((r) => r.inLair).map((r) => after.tokens[r.tokenId!]!.name),
+      ["Adult Red Dragon"],
+    );
 
     // Without a fight there is nothing to add to, whatever the switch says.
     const quiet = await plan(setup(), { addToFight: true });
@@ -164,5 +169,24 @@ describe("placing a saved encounter", () => {
     let calls = 0;
     assert.equal(sendDrop(empty, { dispatch: () => ++calls, newId: () => "g" }), null);
     assert.equal(calls, 0);
+  });
+});
+
+describe("a creature placed in its lair (docs/design-v1-combat-controls.md 13.4)", () => {
+  test("its counts against its block: the lair's and not the base's, or the lair's XP where the counts say nothing", async () => {
+    const monsters = await loadMonsters();
+    const dragon = monsters.find((m) => m.srdId === "adult-red-dragon")!;
+    const goblin = monsters.find((m) => m.srdId === "goblin-warrior")!;
+    const counts = (actionsMax: number, resistMax: number) => ({ actionsMax, actionsUsed: 0, resistMax, resistUsed: 0 });
+    assert.equal(placedInLair({ legendary: counts(4, 4) }, dragon), true);
+    assert.equal(placedInLair({ legendary: counts(3, 3) }, dragon), false);
+    assert.equal(placedInLair({ legendary: counts(4, 4) }, null), false, "no block, no lair");
+    assert.equal(placedInLair({ legendary: counts(5, 5) }, dragon), false, "counts set by hand to neither");
+    assert.equal(placedInLair({}, goblin), false, "a block with no lair");
+    assert.equal(placedInLair({ xp: goblin.xp }, goblin), false, "nor its own XP");
+    // A block whose lair changes only its XP.
+    const xpOnly = { ...goblin, xpInLair: goblin.xp * 2 };
+    assert.equal(placedInLair({ xp: goblin.xp * 2 }, xpOnly), true);
+    assert.equal(placedInLair({ xp: goblin.xp }, xpOnly), false);
   });
 });
