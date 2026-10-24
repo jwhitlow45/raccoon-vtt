@@ -14,8 +14,9 @@ import {
   endConcentration,
   type ActorEvent,
 } from "../rules/hp.ts";
-import { applyRest } from "../rules/rest.ts";
+import { applyRest, restedResources } from "../rules/rest.ts";
 import { hpRevertOf } from "./hpUndo.ts";
+import { keys } from "../keys.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 import { typeUnion } from "./uses.ts";
 
@@ -50,6 +51,12 @@ export function actorRest(tx: Tx, op: OpOf<"actor.rest">): void {
   const r = applyRest(resolved.actor, op.kind, op.heal ?? 0);
   if ("refused" in r) throw invalid(r.refused);
   tx.putActor(resolved, r.actor);
+  // A character's class resources come back with it (docs/design-v1-combat-controls.md 2.4), on the character beside its actor.
+  if (resolved.character) {
+    const character = tx.character(resolved.character.id);
+    const resources = restedResources(character.resources, op.kind);
+    if (resources !== character.resources) tx.write(keys.character(character.id), { ...character, resources });
+  }
   tx.addActorEvents(resolved, r.events);
 }
 

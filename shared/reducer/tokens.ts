@@ -1,8 +1,8 @@
 import { keys } from "../keys.ts";
 import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
-import type { Actor, AreaTemplate, Character, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
+import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
 import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
-import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
+import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
@@ -737,6 +737,7 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
     if (!pcStatsFits(next.stats)) throw new Refuse("quota", pcStatsTooBig(next.name));
   }
   if (syncsFromDdb(tx.env.opVersion)) syncRecord(next, p.ddbSync, p.stats === null, tx.env.at);
+  if (p.resources !== undefined) setOrDelete(next, "resources", p.resources.length > 0 ? keptResources(character.resources, p.resources) : null);
   // Written before the actor patch, which reads whether the character ends the op with a block.
   tx.write(keys.character(character.id), next);
   // Whoever plays the character plays its companions, on every scene (docs/design-v1-combat-flow.md 3.6.4).
@@ -751,6 +752,23 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
   const after = tx.character(character.id);
   const derived = withPcActorNumbers(after);
   if (derived !== after) tx.write(keys.character(character.id), derived);
+}
+
+/**
+ * A character's class resources as an update sends them, whole and in order
+ * (docs/design-v1-combat-controls.md 3.1): the update carries no counts
+ * spent, so each keeps its own by id, at most its new count, and a new one
+ * starts with none spent.
+ */
+function keptResources(before: readonly ClassResource[] | undefined, sent: NonNullable<CharacterPatch["resources"]>): ClassResource[] {
+  const spent = new Map((before ?? []).map((r) => [r.id, r.used]));
+  return sent.map((r) => ({ ...stripUndefined(r), used: Math.min(spent.get(r.id) ?? 0, r.max) }));
+}
+
+function stripUndefined<T extends object>(value: T): T {
+  const out = {} as T;
+  for (const [k, v] of Object.entries(value)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  return out;
 }
 
 /**

@@ -36,4 +36,8 @@ describe("combat uses' undo step labels (docs/design-v1-combat-controls.md 3.5)"
     assert.equal(describeOp({ t: "actor.prompt", target: { tokenId: "thorn" }, record: 3, what: "deathSave", state: "open" }, s), "reopening Thorn's death save");
     assert.equal(describeOp({ t: "actor.rechargeRoll", tag: "r1", target: { tokenId: "dragon" }, key: "actions:fire-breath", name: "Fire Breath", min: 5 }, s), "rolling the recharge of Fire Breath for Adult Red Dragon");
   });
+
+  test("an update of a character's class resources names them", () => {
+    assert.equal(describeOp({ t: "character.update", characterId: "thorn", patch: { resources: [] } }, state()), "changing Thorn's class resources");
+  });
 });
