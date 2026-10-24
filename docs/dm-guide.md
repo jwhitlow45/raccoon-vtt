@@ -672,7 +672,7 @@ Under the card, the rolls fold into groups, as they do for one creature:
 - **Skills**, folded to start with.
 - **Shared attacks**: an attack every selected monster has ("Scimitar for 4"), each rolled with that monster's own bonus against a **Target's AC**, followed by **Roll damage for 2 hits** for the ones that hit.
 
-A shared attack keeps its result while you work. You can fold the group between the attack and its damage, or select another creature or let one go, and as long as two or more stay selected, the hits and **Roll damage** are waiting when you come back. While the group is folded, its row reminds you of them ("Scimitar: 2 hits"). Selecting fewer than two clears them.
+A shared attack keeps its result while you work. You can fold the group between the attack and its damage, or select another creature or let one go, and as long as two or more stay selected and they all still have that attack, the hits and **Roll damage** are waiting when you come back. While the group is folded, its row reminds you of them ("Scimitar: 2 hits"). Selecting fewer than two clears them, and so does selecting creatures that don't share the attack, even if you go back to ones that do.
 
 A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll. If you step back from that page before it is finished, the panel shows a notice above the card, such as "Fire Breath's save: set up.", with **Open** to return to it.
 
