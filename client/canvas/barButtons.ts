@@ -1,4 +1,5 @@
 import { compactHang, freeArea, heldOrOpenMode, placeBar, restOrder, spanRoomAtWorst, type BarMode, type Box } from "./barDock.ts";
+import type { HpMode } from "../features/tokens/hpInput.ts";
 
 /*
  * The single-token bar's buttons and its short layout
@@ -221,3 +222,49 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
 
 /** Drawn widths are fractions of a pixel, so a sum may land a hair over the room it fills exactly. */
 const FIT_SLACK = 0.01;
+
+/** The play row's buttons the strip offers (3.3). Light, Attach, Get off, Locked, Duplicate and Delete are rarer, one tap away behind Expand (3.4). */
+const REST_PLAY: readonly BarButtonId[] = ["conditions", "roll", "multiSelect", "uses", "hidden"];
+
+/**
+ * The quick row's candidates on one token's strip, by who the viewer is
+ * and what applies (3.3), in the order they show. "mode" is the HP
+ * entry's lead, for a viewer who may change the token's HP (`lead`), and
+ * the entry offers its own Crit and "Use 9" beside it. The passing
+ * actions vie for Roll's place (restFit). Details shows only with no
+ * lead, since the lead's viewer reaches it behind Expand.
+ */
+export function restButtons(input: BarButtonInput & { lead: boolean }): string[] {
+  const rows = barButtons(input);
+  const ids: string[] = [...rows.passing, ...rows.play.filter((id) => REST_PLAY.includes(id))];
+  if (input.lead) ids.push("mode");
+  else ids.push("details");
+  return restOrder(ids);
+}
+
+/**
+ * The group's strip (9.4): its HP entry as the lead, then Conditions,
+ * Roll (the DM), Multi-select and Hidden (the DM). Undo move after a
+ * group's drag takes Roll's place as it does on one token's strip
+ * (D-261024-12). Request a roll, Locked, Start a fight, More and Delete
+ * stay behind Expand.
+ */
+export function groupRestButtons(input: { dm: boolean; lead: boolean; conditions: boolean; undoMove: boolean }): string[] {
+  const ids: string[] = [];
+  if (input.lead) ids.push("mode");
+  if (input.conditions) ids.push("conditions");
+  if (input.undoMove) ids.push("undoMove");
+  if (input.dm) ids.push("roll");
+  ids.push("multiSelect");
+  if (input.dm) ids.push("hidden");
+  return restOrder(ids);
+}
+
+/**
+ * The strip's mode toggle (3.3, D-261024-10): Damage and Heal switch, and
+ * Set or Temp, chosen in the expanded bar or by typed math, go back to
+ * Damage.
+ */
+export function nextRestMode(mode: HpMode): HpMode {
+  return mode === "damage" ? "heal" : "damage";
+}

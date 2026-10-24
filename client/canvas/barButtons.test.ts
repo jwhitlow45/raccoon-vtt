@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { barButtons, barCapacity, barShort, isCompanion, restFit, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
+import { barButtons, barCapacity, barShort, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
 import { DEFAULT_SPOT, freeArea, placeBar, spanRoomAtWorst, type Chrome } from "./barDock.ts";
 
 const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, companion: false, attach: [] };
@@ -340,5 +340,57 @@ describe("an upright phone's capacity follows the mode its frame draws in (docs/
     assert.equal(barCapacity(held), spanRoomAtWorst(free));
     const side: BarRoom = { ...held, layout: { width: 437, height: 246 }, viewport: { width: 437, height: 246 }, foot: 0 };
     assert.equal(barCapacity(side), barCapacity({ ...side, heldMode: null }));
+  });
+});
+
+describe("the strip's candidates by role and token (docs/design-v1-bar-compact.md 3.3 and 9.4)", () => {
+  test("the DM on a creature with HP: the lead, Conditions, Roll, Multi-select and Hidden, with the passing actions by Roll's place", () => {
+    assert.deepEqual(restButtons({ ...DM, lead: true }), ["mode", "conditions", "roll", "multiSelect", "hidden"]);
+    assert.deepEqual(restButtons({ ...DM, lead: true, undoMove: true, movedThisTurn: true }), ["mode", "conditions", "undoMove", "countLeg", "roll", "multiSelect", "hidden"]);
+  });
+
+  test("an owner: the lead, Conditions, Roll and Multi-select, the door and Undo move by Roll's place, and Uses after Multi-select (D-261024-11)", () => {
+    assert.deepEqual(restButtons({ ...OWNER, lead: true }), ["mode", "conditions", "roll", "multiSelect"]);
+    assert.deepEqual(restButtons({ ...OWNER, lead: true, undoMove: true, door: true }), ["mode", "conditions", "undoMove", "door", "roll", "multiSelect"]);
+    assert.deepEqual(restButtons({ ...OWNER, lead: true, uses: "yes" }), ["mode", "conditions", "roll", "multiSelect", "uses"]);
+    // Held while its block loads, as lane B's rule says, so the fit counts it.
+    assert.deepEqual(restButtons({ ...OWNER, lead: true, uses: "loading" }), ["mode", "conditions", "roll", "multiSelect", "uses"]);
+    assert.deepEqual(restButtons({ ...DM, lead: true, uses: "yes" }), ["mode", "conditions", "roll", "multiSelect", "uses", "hidden"]);
+  });
+
+  test("a player on another's creature: Multi-select and Details, or the lead and Multi-select where players apply damage", () => {
+    assert.deepEqual(restButtons({ ...NOTHING, lead: false }), ["multiSelect", "details"]);
+    assert.deepEqual(restButtons({ ...NOTHING, lead: false, undoMove: true }), ["undoMove", "multiSelect", "details"]);
+    assert.deepEqual(restButtons({ ...NOTHING, lead: true }), ["mode", "multiSelect"]);
+  });
+
+  test("a token with no HP: no lead, and Details last", () => {
+    assert.deepEqual(restButtons({ ...DM, lead: false }), ["conditions", "roll", "multiSelect", "hidden", "details"]);
+    assert.deepEqual(restButtons({ ...OWNER, lead: false }), ["conditions", "roll", "multiSelect", "details"]);
+  });
+
+  test("Light, Attach, Get off, Locked, Duplicate, Delete and Dismiss stay behind Expand", () => {
+    const rare = ["light", "attach", "detach", "locked", "duplicate", "delete", "dismiss"];
+    for (const who of [DM, OWNER, NOTHING]) {
+      for (const lead of [true, false]) {
+        const ids = restButtons({ ...who, lead, light: true, companion: true, attach: ["detach", "attach"] });
+        assert.deepEqual(ids.filter((id) => rare.includes(id)), [], `${JSON.stringify(who)} ${lead}`);
+      }
+    }
+  });
+
+  test("a group: its lead, Conditions, Roll (the DM), Multi-select and Hidden (the DM), and Undo move by Roll's place", () => {
+    assert.deepEqual(groupRestButtons({ dm: true, lead: true, conditions: true, undoMove: false }), ["mode", "conditions", "roll", "multiSelect", "hidden"]);
+    assert.deepEqual(groupRestButtons({ dm: false, lead: true, conditions: true, undoMove: false }), ["mode", "conditions", "multiSelect"]);
+    assert.deepEqual(groupRestButtons({ dm: false, lead: false, conditions: false, undoMove: false }), ["multiSelect"]);
+    assert.deepEqual(groupRestButtons({ dm: true, lead: true, conditions: true, undoMove: true }), ["mode", "conditions", "undoMove", "roll", "multiSelect", "hidden"]);
+    assert.deepEqual(groupRestButtons({ dm: false, lead: true, conditions: true, undoMove: true }), ["mode", "conditions", "undoMove", "multiSelect"]);
+  });
+
+  test("the mode toggle switches Damage and Heal, and takes Set or Temp back to Damage", () => {
+    assert.equal(nextRestMode("damage"), "heal");
+    assert.equal(nextRestMode("heal"), "damage");
+    assert.equal(nextRestMode("set"), "damage");
+    assert.equal(nextRestMode("temp"), "damage");
   });
 });
