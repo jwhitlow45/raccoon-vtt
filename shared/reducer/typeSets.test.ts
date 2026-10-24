@@ -63,12 +63,14 @@ describe("damage types taken (docs/design-v1-combat-controls.md 3.4)", () => {
     assert.equal(f.of("troll").hurt, undefined, "the start empties hurt");
   });
 
-  test("damage of 0, damage with no types and healing add nothing", () => {
+  test("damage of 0, damage with no types and healing add nothing, and a hit of 1 does", () => {
     const f = fight().start();
     f.hit("troll", 0, ["fire"]);
     f.run({ t: "actor.hp", target: { tokenId: "troll" }, change: { kind: "damage", amount: 4 } });
     f.run({ t: "actor.hp", target: { tokenId: "troll" }, change: { kind: "heal", amount: 2 } });
     assert.equal(f.of("troll").hurt, undefined);
+    f.hit("troll", 1, ["cold"]);
+    assert.deepEqual(f.of("troll").hurt, ["cold"]);
   });
 
   test("temporary HP that took the whole hit still count its types", () => {

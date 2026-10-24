@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Actor, RoomState, UseMark } from "../model.ts";
 import { canApply } from "../permissions.ts";
+import { clientOpSchema } from "../protocol.ts";
 import { DM, P1, actor, apply, character, room, token } from "../testutil.ts";
 
 /** In lair's counts and a stat block's link (docs/design-v1-combat-controls.md 2.4). */
@@ -38,6 +39,8 @@ describe("In lair's counts (docs/design-v1-combat-controls.md 2.4)", () => {
 
   test("only the DM sends them, with the switch", () => {
     const op = { t: "encounter.update", entryId: "el", patch: { inLair: true }, counts: { actionsMax: 3, resistMax: 3 } } as const;
+    assert.ok(clientOpSchema.safeParse(op).success, "the DM sends them with the switch");
+    assert.equal(clientOpSchema.safeParse({ ...op, patch: { hidden: true } }).success, false, "never without it");
     assert.equal(canApply(op, P1, table(), { canUseAsset: () => true }).ok, false, "even for a creature the player owns");
   });
 });

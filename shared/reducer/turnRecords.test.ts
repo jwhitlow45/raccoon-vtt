@@ -238,12 +238,15 @@ describe("turn records (docs/design-v1-combat-controls.md 2.3)", () => {
     assert.equal(f.of("dragon").uses, undefined, "a relinked dragon gets no marks back");
     const g = fight().next().next();
     g.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1, key: "legendaryActions:fiery-rays", name: "Fiery Rays", once: true } });
+    g.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1, key: "legendaryActions:tail-swipe", name: "Tail Swipe", once: true } });
     g.next().next().next().next();
+    assert.equal(g.active(), "dragon");
     const full: Record<string, UseMark> = {};
-    for (let i = 0; i < 16; i++) full[`actions:a${i}`] = { kind: "day", name: `A${i}`, used: 1, max: 2 };
+    for (let i = 0; i < 15; i++) full[`actions:a${i}`] = { kind: "day", name: `A${i}`, used: 1, max: 2 };
     g.put("dragon", { uses: full }).prev();
-    assert.equal(Object.keys(g.of("dragon").uses!).length, 16);
-    assert.equal(g.of("dragon").uses!["legendaryActions:fiery-rays"], undefined, "a mark that would not fit is left off");
+    const back = Object.keys(g.of("dragon").uses!);
+    assert.equal(back.length, 16, "one of the two marks fits under the bound and comes back");
+    assert.equal(back.filter((key) => key.startsWith("legendaryActions:")).length, 1, "the other is left off");
   });
 
   test("Previous skips a creature deleted since", () => {

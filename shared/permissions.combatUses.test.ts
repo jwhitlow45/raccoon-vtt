@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "./model.ts";
-import { canApply, type PermissionDeps } from "./permissions.ts";
+import { TURN_OVER, canApply, type PermissionDeps } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { DM, P1, P2, actor, character, room, scene, token } from "./testutil.ts";
 
@@ -30,9 +30,11 @@ function setup(): RoomState {
 const spend = (target: { tokenId: string } | { characterId: string }, use: Extract<Op, { t: "actor.use" }>["use"] = { kind: "resist" }): Op => ({ t: "actor.use", target, use });
 
 describe("actor.use permissions (docs/design-v1-combat-controls.md 3.1)", () => {
-  test("the DM spends any creature's uses", () => {
+  test("the DM spends any creature's uses, and even the DM's Regeneration waits for its creature's turn", () => {
     for (const id of ["dragon", "lent", "hidden"]) assert.deepEqual(canApply(spend({ tokenId: id }), DM, setup(), deps), { ok: true });
     assert.deepEqual(canApply(spend({ characterId: "thorn" }, { kind: "resource", id: "rage" }), DM, setup(), deps), { ok: true }, "the DM may spend a resource for a player who is away");
+    const regen = canApply(spend({ tokenId: "dragon" }, { kind: "regenerate", key: "traits:regeneration", amount: 10, record: 1 }), DM, setup(), deps);
+    assert.ok(!regen.ok && regen.message === TURN_OVER, "refused before anything is drawn or healed");
   });
 
   test("an owner spends their own creature's, a lent monster's included", () => {
