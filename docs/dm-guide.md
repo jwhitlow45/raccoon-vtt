@@ -448,7 +448,7 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 ## Tokens
 
-Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar opens under the token. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
+Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar rests at the foot of the map, and Expand shows all of it. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
 ![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll and Attach, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
