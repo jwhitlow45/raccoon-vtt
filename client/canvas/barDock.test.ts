@@ -1756,7 +1756,7 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     const back = smallerShift({ layout: view, viewport: view, chrome, foot: 0, column: null, anchor: { x: 200, y: 200 }, moved: 90, tokenHeight: 64 });
     assert.equal(back, -(200 - 64 - free.top));
     assert.ok(200 + back - 64 >= free.top, `the token's top went to ${200 + back - 64}`);
-    // A token taller than the free area leaves room for leaves the bar as it is.
+    // A token too tall to leave the bar any more room leaves it as it is.
     assert.equal(largerRoom(view, free, free.top, 640), 0);
     assert.equal(largerShift(room(391, 586, null, 640)), 0);
   });
