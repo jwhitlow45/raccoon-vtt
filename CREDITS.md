@@ -48,7 +48,7 @@ Changes to every icon: the black background square was removed and the fill set 
 
 The interface icons marked Lucide in `client/components/Icon.tsx` are path data copied from [Lucide](https://github.com/lucide-icons/lucide) ([lucide.dev](https://lucide.dev)), version 0.525.0, used under the ISC License. The app does not ship the Lucide package. The other icons in that file were drawn for this project. The icons copied, by Lucide's names:
 
-`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `chevrons-down`, `circle-user-round`, `clipboard-list`, `compass`, `contact-round`, `copy-plus`, `crop`, `crown`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `file-text`, `focus`, `footprints`, `hash`, `image`, `info`, `library`, `list-tree`, `lock`, `log-out`, `map`, `maximize-2`, `menu`, `minimize-2`, `notebook-text`, `paw-print`, `pencil`, `radar`, `radius`, `redo-2`, `refresh-cw`, `repeat`, `scroll-text`, `settings`, `share`, `skull`, `smartphone`, `sticky-note`, `swords`, `timer`, `trash-2`, `undo-2`, `user-minus`, `users`, `zoom-in`, `zoom-out`.
+`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `chevrons-down`, `circle-user-round`, `clipboard-list`, `compass`, `contact-round`, `copy-plus`, `crop`, `crown`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `file-text`, `focus`, `footprints`, `hash`, `image`, `info`, `library`, `list-tree`, `lock`, `log-out`, `map`, `maximize-2`, `menu`, `minimize-2`, `notebook-text`, `paw-print`, `pencil`, `radar`, `radius`, `redo-2`, `refresh-cw`, `repeat`, `scroll-text`, `settings`, `share`, `skull`, `smartphone`, `sticky-note`, `swords`, `timer`, `trash-2`, `undo-2`, `user-minus`, `users`, `zap`, `zoom-in`, `zoom-out`.
 
 ```
 ISC License

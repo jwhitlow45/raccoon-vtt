@@ -111,7 +111,8 @@ export type IconName =
   | "position"
   | "image"
   | "stats"
-  | "companion";
+  | "companion"
+  | "uses";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -173,6 +174,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   image: "image",
   stats: "hash",
   companion: "paw-print",
+  uses: "zap",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -547,6 +549,8 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z" />
     </g>
   ),
+  // Lucide zap: the token bar's Uses, what a creature can spend (docs/design-v1-icons-2.md 8). Never a lightning damage type, which stays words.
+  uses: <path {...STROKE} d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

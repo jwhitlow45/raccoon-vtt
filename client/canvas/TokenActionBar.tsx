@@ -339,7 +339,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       // Held while its block loads, then dropped if the block lists no use, so the buttons after it do not jump.
       case "uses":
         return (
-          <BarButton key={id} ref={drawers.ref("play", id)} disabled={usesPresence === "loading"} pressed={drawer === "uses"} onClick={() => drawers.toggle("uses")}>
+          // Found among the play row's words by its icon (docs/design-v1-icons-2.md 8). The strip's own Uses keeps its words alone, since an icon there would push a control off it, and Conditions keeps its words in both, since its icon took the row a line on a 320 px phone at 130%.
+          <BarButton key={id} ref={drawers.ref("play", id)} icon="uses" disabled={usesPresence === "loading"} pressed={drawer === "uses"} onClick={() => drawers.toggle("uses")}>
             Uses
           </BarButton>
         );

@@ -479,6 +479,64 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await closeSheets(phone);
   });
 
+  test("ic2-bar-2. the bar's play row leads Uses with its icon and Conditions keeps its words alone, on no more lines than without the icon, and the strip's Uses keeps its words alone, at 1280 x 800 at 85% to 115%, on phones at 100% and 130% and on a phone held sideways (docs/design-v1-icons-2.md 8)", async () => {
+    const views = [
+      [desk, deskCdp, { width: 1280, height: 800, scale: 1 }],
+      [desk, deskCdp, { width: 1280, height: 800, scale: 0.85 }],
+      [desk, deskCdp, { width: 1280, height: 800, scale: 1.15 }],
+      [phone, phoneCdp, { ...SMALL, scale: 1.3 }],
+      [phone, phoneCdp, { ...PHONE, scale: 1.3 }],
+      [phone, phoneCdp, PHONE],
+      [phone, phoneCdp, SIDEWAYS],
+    ] as const;
+    try {
+      for (const [page, cdp, view] of views) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(page, cdp, view);
+        await closeSheets(page);
+        await tapCell(page, run.bounds, DRAGON_AT);
+        const bar = page.getByRole("dialog", { name: `${DRAGON} actions` });
+        await bar.waitFor();
+        // An upright phone's strip offers Uses where it fits, in words alone, since an icon there would push a control off it.
+        assert.equal(await bar.locator('[data-rest-row] [data-rest-item="uses"] svg').count(), 0, `${at}: the strip's Uses draws an icon`);
+        await expandBar(bar);
+        const play = bar.locator('[data-bar-row="play"]');
+        const uses = play.getByRole("button", { name: "Uses", exact: true });
+        await waitFor("the Uses button ready", async () => ((await uses.isEnabled()) ? true : null));
+        assert.equal(await uses.locator("svg").count(), 1, `${at}: the play row's Uses draws no icon`);
+        assert.equal(await play.getByRole("button", { name: "Conditions", exact: true }).locator("svg").count(), 0, `${at}: the play row's Conditions draws an icon`);
+        // The row's lines and height as drawn, and again with Uses' icon taken out, which the row wraps as it did before the icon.
+        const lines = await play.evaluate((el) => {
+          type Box = { top: number; height: number };
+          type El = { textContent: string | null; parentElement: El | null; nextSibling: El | null; getBoundingClientRect(): Box; querySelector(s: string): El | null; querySelectorAll(s: string): Iterable<El>; remove(): void; insertBefore(a: El, b: El | null): void };
+          const row = el as unknown as El;
+          const read = () => {
+            const tops = [...row.querySelectorAll("button")].map((b) => b.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => Math.round(r.top));
+            return { lines: new Set(tops).size, height: Math.round(row.getBoundingClientRect().height * 10) / 10 };
+          };
+          const icon = [...row.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Uses")?.querySelector("svg") ?? null;
+          if (!icon?.parentElement) return null;
+          const drawn = read();
+          const parent = icon.parentElement;
+          const next = icon.nextSibling;
+          icon.remove();
+          const without = read();
+          parent.insertBefore(icon, next);
+          return { drawn, without };
+        });
+        assert.ok(lines, `${at}: no icon to take out`);
+        assert.deepEqual(lines.drawn, lines.without, `${at}: the play row with Uses' icon, and without it`);
+        assert.deepEqual(alignmentLines(await measureAlignment(play), `the bar's play row at ${at}`), []);
+        await shots.take(page, `ic2-bar-2-${view.width}-${Math.round(view.scale * 100)}`);
+        await bar.getByRole("button", { name: "Close", exact: true }).first().click();
+        await bar.waitFor({ state: "detached" });
+      }
+    } finally {
+      await setUp(desk, deskCdp, DESK);
+      await setUp(phone, phoneCdp, PHONE);
+    }
+  });
+
   test("cu-b-5. the dragon's turn: the recharge card on both DM devices, the turn card open on the desk and folded on the phone, one roll and its result after a reload", async () => {
     await turnTo("e-dragon");
     const deskCard = desk.getByRole("group", { name: `Fire Breath can recharge (5–6). ${DRAGON}` });

@@ -106,7 +106,7 @@ export const LUCIDE_NOTICE =
  * (its LUCIDE table), and a test holds the two lists and CREDITS.md to
  * the same names, so a newly copied icon cannot ship uncredited.
  */
-export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "chevrons-down", "circle-user-round", "clipboard-list", "compass", "contact-round", "copy-plus", "crop", "crown", "download", "eraser", "external-link", "eye", "eye-off", "file-text", "focus", "footprints", "hash", "image", "info", "library", "list-tree", "lock", "log-out", "map", "maximize-2", "menu", "minimize-2", "notebook-text", "paw-print", "pencil", "radar", "radius", "redo-2", "refresh-cw", "repeat", "scroll-text", "settings", "share", "skull", "smartphone", "sticky-note", "swords", "timer", "trash-2", "undo-2", "user-minus", "users", "zoom-in", "zoom-out"] as const;
+export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "chevrons-down", "circle-user-round", "clipboard-list", "compass", "contact-round", "copy-plus", "crop", "crown", "download", "eraser", "external-link", "eye", "eye-off", "file-text", "focus", "footprints", "hash", "image", "info", "library", "list-tree", "lock", "log-out", "map", "maximize-2", "menu", "minimize-2", "notebook-text", "paw-print", "pencil", "radar", "radius", "redo-2", "refresh-cw", "repeat", "scroll-text", "settings", "share", "skull", "smartphone", "sticky-note", "swords", "timer", "trash-2", "undo-2", "user-minus", "users", "zap", "zoom-in", "zoom-out"] as const;
 
 export type LucideIcon = (typeof LUCIDE_ICONS)[number];
 
