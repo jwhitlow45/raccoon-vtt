@@ -1589,6 +1589,42 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         });
       }
     });
+
+    test("br-f-19. a strip opened before a turn band and Multi-select's row take F under 146 at 320 x 480 at 130% stays a strip, 94 px (3.1, review BB-OPUS-6)", async () => {
+      await homeTokens();
+      const z = 1.3;
+      const thorn = bar(pat, "Thorn");
+      await patCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 44, bottom: 34, left: 0, right: 0 } });
+      try {
+        await setUp(pat, { width: 320, height: 480, scale: z });
+        const opened = await openOn(pat, run.thorn);
+        assert.equal(await thorn.getAttribute("data-bar-mode"), "span", "no strip opened before the band");
+        await ops.send({
+          t: "encounter.start",
+          entries: [
+            { id: randomUUID(), tokenId: run.thorn.id, value: 20 },
+            { id: randomUUID(), tokenId: run.goblin1.id, value: 5 },
+          ],
+        });
+        // The first Next starts the fight on Thorn's turn, so End turn stands in the band.
+        await ops.send({ t: "encounter.next" });
+        try {
+          await pat.getByRole("button", { name: "End turn" }).waitFor();
+          await (await barControl(thorn, "Multi-select")).click();
+          await pat.getByRole("toolbar", { name: "Select options" }).waitFor();
+          const held = await steady(pat);
+          assert.equal(await thorn.getAttribute("data-bar-mode"), "span", "the strip turned compact");
+          const tall = (held.bottom - held.top) / z;
+          assert.ok(Math.abs(tall - 94) <= 0.5, `the held strip is ${tall} tall, opened at ${(opened.bottom - opened.top) / z}`);
+          await shots.take(pat, "br-f-19-held-94");
+          await pat.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Done", exact: true }).click();
+        } finally {
+          await ops.send({ t: "encounter.end" });
+        }
+      } finally {
+        await patCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+      }
+    });
   });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)
