@@ -2122,25 +2122,33 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
     setStatus((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
   }, [key, input.active, box]);
   const node = (
-    <span
-      ref={setLine}
-      // What needs more room than the line, which the header draws over the title or in the note (9.2), for tests to read.
-      data-rest-status=""
-      data-rest-sentence={status.sentence?.text}
-      data-rest-place={status.sentence?.place}
-      style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}
-    >
+    <span ref={setLine} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}>
       {status.line.text}
     </span>
   );
-  // A box of no size that clips what it holds, so a long text measured in it never widens what scrolls.
+  /*
+   * A box of no size that clips what it holds, so a long text measured in
+   * it never widens what scrolls. It is drawn whenever the strip rests,
+   * so it also carries what the status says, wherever the header draws
+   * it, for tests to read.
+   */
   const probe = (
-    <span aria-hidden style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none" }}>
+    <span
+      aria-hidden
+      data-rest-status=""
+      data-rest-line={status.line.text}
+      data-rest-sentence={status.sentence?.text}
+      data-rest-place={status.sentence?.place}
+      style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none" }}
+    >
       <span ref={probeRef} style={{ position: "absolute", left: 0, top: 0, fontSize: theme.font.small, fontWeight: theme.weight.regular, lineHeight: `${STATUS_LINE_PX}px` }} />
     </span>
   );
   return { status, node, probe };
 }
+
+/** How many renders a focus moved to a strip's or an expanded bar's button waits for it to show. */
+const FOCUS_TRIES = 3;
 
 /** Before the first measure: every text fits, so nothing is cut that may not need it. */
 const FITS_ALL: RestFit = { line: () => true, title: () => true, note: () => true };
@@ -2177,7 +2185,7 @@ function measuredFit(probe: HTMLElement, box: StatusBox): RestFit {
  */
 function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: (d: Drawer) => void) {
   const [opened, setOpened] = useState<Drawer>(null);
-  const [focus, setFocus] = useState<{ place: "rest" | "play"; id: string } | null>(null);
+  const [focus, setFocus] = useState<{ place: "rest" | "play"; id: string; tries: number } | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const resting = rest?.resting === true;
   const wasResting = useRef(resting);
@@ -2189,15 +2197,23 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
       setOpened(null);
     }
   }, [resting, opened, setDrawer]);
+  /*
+   * The strip's button may draw a render late: its row fits the candidates
+   * the bar just gave it before it shows them. So the focus waits a few
+   * renders for its button to take it, and then gives up, never to steal
+   * focus later.
+   */
   useLayoutEffect(() => {
     if (!focus || (focus.place === "rest") !== resting) return;
-    buttons.current.get(`${focus.place}:${focus.id}`)?.focus();
-    setFocus(null);
+    const button = buttons.current.get(`${focus.place}:${focus.id}`);
+    button?.focus();
+    if (button && button.ownerDocument.activeElement === button) setFocus(null);
+    else setFocus(focus.tries >= FOCUS_TRIES ? null : { ...focus, tries: focus.tries + 1 });
   });
   const close = () => {
     setDrawer(null);
     if (opened !== null && rest && !rest.resting) {
-      setFocus({ place: "rest", id: opened });
+      setFocus({ place: "rest", id: opened, tries: 0 });
       setOpened(null);
       rest.collapse();
     }
@@ -2214,7 +2230,7 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
       }
       setDrawer(id);
       setOpened(id);
-      setFocus({ place: "play", id });
+      setFocus({ place: "play", id, tries: 0 });
       rest.expand();
     },
     toggle(id: "conditions" | "uses") {
