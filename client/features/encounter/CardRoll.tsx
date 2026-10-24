@@ -141,12 +141,12 @@ export function useCardSend<A extends string>() {
   return { busy, send };
 }
 
-const PRIMARY = new Set(["ask", "roll", "resist"]);
+const PRIMARY = new Set(["ask", "roll", "resist", "apply"]);
 const DANGER = new Set(["fail", "accept"]);
 
 /**
  * A card's buttons in one wrapping row, 44 px each. The first is the
- * card's one primary when it asks, rolls or resists, and the fails are
+ * card's one primary when it asks, rolls, resists or applies, and the fails are
  * red. Roll is busy while its line is on the way and disabled while no
  * roll can go, with the reason as its title.
  */

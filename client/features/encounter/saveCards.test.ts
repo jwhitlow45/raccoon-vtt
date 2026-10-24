@@ -1,6 +1,5 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { keys } from "#shared/keys.ts";
 import type { Effect, LogEntry, LogEvent, RollRequest, RoomState, Viewer } from "#shared/model.ts";
 import { projectEntity } from "#shared/project.ts";
@@ -23,16 +22,12 @@ import {
   landedWords,
   passOp,
   pressChip,
-  rechargePrompts,
-  rechargeTurn,
-  recharged,
   resistOp,
   saveCard,
   saveEndsRollTo,
   saveEndsTest,
   saveFacts,
   settleOp,
-  turnStarted,
   waitingRollOp,
   type SaveCardInput,
 } from "./saveCards.ts";
@@ -328,50 +323,6 @@ describe("the concentration card", () => {
   test("a fail ends every concentrating effect", () => {
     const effects = [effect("a", { key: "concentrating", spell: "Bless" }), effect("b", { key: "blessed" })];
     assert.deepEqual(endConcentrationOps({ tokenId: "g1" }, effects), [{ t: "actor.effect.remove", target: { tokenId: "g1" }, effectId: "a" }]);
-  });
-});
-
-describe("recharge prompts", () => {
-  const breath: NamedRoll = { key: "actions:fire-breath", name: "Fire Breath", section: "actions", damage: [{ formula: "16d6", type: "fire" }], recharge: 5 };
-  const bite: NamedRoll = { key: "actions:bite", name: "Bite", section: "actions", attack: 10, damage: [{ formula: "2d10+6", type: "piercing" }] };
-  const roar: NamedRoll = { key: "actions:roar", name: "Roar", section: "actions", damage: [], recharge: 6 };
-  const view = room({
-    tokens: { d1: token("d1", { name: "Young Red Dragon" }), b1: token("b1", { kind: "pc", name: "Bree", ownerIds: ["p1"] }) },
-    encounter: { rev: 0, round: 2, activeEntryId: "x1", entries: [entry("x1", { tokenId: "d1" }), entry("x2", { tokenId: "b1" })] },
-  });
-  const line = (data: Extract<LogEntry["data"], { type: "turn" }>): LogEntry => ({ id: "9:0", at: AT, kind: "event", data }) as LogEntry;
-
-  test("a turn starts on next, and not on Previous", () => {
-    assert.equal(turnStarted(line({ type: "turn", entryId: "x1", round: 2 })), "x1");
-    assert.equal(turnStarted(line({ type: "turn", entryId: "x1", round: 2, back: true })), null);
-  });
-
-  test("only actions marked Used, at their monster's turn start", () => {
-    const used = { "t:d1": ["actions:fire-breath", "actions:bite"] };
-    const turn = rechargeTurn(view, "9:0", "x1", used);
-    assert.ok(turn);
-    assert.deepEqual(turn.creature, { tokenId: "d1" });
-    const prompts = rechargePrompts(turn, [breath, bite, roar]);
-    assert.deepEqual(
-      prompts.map((p) => p.text),
-      ["Fire Breath can recharge (5–6)."],
-    );
-    assert.equal(prompts[0]?.row, "t:d1|actions:fire-breath|recharge");
-    assert.equal(prompts[0]?.after, 9, "the card reads only rolls sent since its turn's line");
-    // Nothing marked Used: no prompt, and no block to load.
-    assert.equal(rechargeTurn(view, "9:0", "x1", {}), null);
-    // A creature a player plays is never prompted.
-    assert.equal(rechargeTurn(view, "9:0", "x2", { "t:b1": ["actions:fire-breath"] }), null);
-    assert.deepEqual(
-      rechargePrompts({ ...turn, used: ["actions:roar"] }, [breath, roar]).map((p) => p.text),
-      ["Roar can recharge (6)."],
-    );
-  });
-
-  test("a recharge succeeds at or above its number", () => {
-    assert.equal(recharged(5, 5), true);
-    assert.equal(recharged(6, 5), true);
-    assert.equal(recharged(4, 5), false);
   });
 });
 

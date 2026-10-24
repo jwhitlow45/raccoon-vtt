@@ -1,6 +1,6 @@
-import type { D20Test, NamedRoll } from "#shared/dice/bonus.ts";
+import type { D20Test } from "#shared/dice/bonus.ts";
 import { advantageFields, type AdvantageSource } from "#shared/dice/formula.ts";
-import type { Effect, LogEntry, RollChange, RollTarget, RoomState } from "#shared/model.ts";
+import type { Effect, RollChange, RollTarget, RoomState } from "#shared/model.ts";
 import { anyPlayer, playersToken } from "#shared/project.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { dcOnLine, startsSecret } from "#shared/dice/secret.ts";
@@ -10,11 +10,11 @@ import type { PendingSave } from "#shared/rules/saveEnds.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
 import { effectChip } from "../../lib/tokenView.ts";
-import { asSave, creatureKey, d20Roll, presetLine, signedText, testLabel } from "../dice/options.ts";
+import { asSave, d20Roll, presetLine, signedText, testLabel } from "../dice/options.ts";
 import type { PanelRoll } from "../dice/useDicePanel.ts";
 import { d20Text } from "../rolls/card.ts";
 import { askOp, targetRef, type AskCheck } from "../rolls/logic.ts";
-import { entryName, playerOwnedEntry } from "./logic.ts";
+import { entryName } from "./logic.ts";
 
 /**
  * The fight alerts' cards that roll a save after the fact
@@ -444,65 +444,4 @@ export function concentrationResistOp(target: ActorTarget, plan: string): Client
 /** "5–6", or "6" for Recharge 6. */
 export function rechargeRange(recharge: number): string {
   return recharge === 6 ? "6" : `${recharge}–6`;
-}
-
-/** "Fire Breath can recharge (5–6)." (6.4). */
-export function rechargeText(name: string, recharge: number): string {
-  return `${name} can recharge (${rechargeRange(recharge)}).`;
-}
-
-/** The turn a log line starts: the row `encounter.next` or a removal lands on. Previous takes a turn back and starts none. */
-export function turnStarted(entry: LogEntry): string | null {
-  const data = entry.data;
-  if (entry.kind !== "event" || data?.type !== "turn" || data.back) return null;
-  return data.entryId;
-}
-
-/** The turn of a creature with actions marked Used on this device, as it started: the Used keys are read then (6.4). */
-export type RechargeTurn = { logId: string; creature: ActorTarget; holder: string; used: string[] };
-
-/**
- * A turn start that may prompt a recharge: the row's creature, its token
- * or else its character, when no player plays it and this device marked
- * any of its actions Used. Null otherwise, so a creature with nothing
- * marked never loads a block for nothing.
- */
-export function rechargeTurn(view: Pick<RoomState, "tokens" | "characters" | "encounter">, logId: string, entryId: string, used: Readonly<Record<string, readonly string[] | undefined>>): RechargeTurn | null {
-  const entry = view.encounter?.entries.find((e) => e.id === entryId);
-  if (!entry || playerOwnedEntry(view, entry)) return null;
-  const creature: ActorTarget | null = entry.tokenId !== undefined ? { tokenId: entry.tokenId } : entry.characterId !== undefined ? { characterId: entry.characterId } : null;
-  if (!creature) return null;
-  const holder = creatureKey(view, creature);
-  const keys = used[holder] ?? [];
-  return keys.length > 0 ? { logId, creature, holder, used: [...keys] } : null;
-}
-
-export type RechargePrompt = {
-  id: string;
-  key: string;
-  name: string;
-  recharge: number;
-  text: string;
-  row: string;
-  /** The seq of the turn's line: the card reads only a roll of its row sent since, so an earlier turn's result is not this one's (ASTRA-06). */
-  after: number;
-};
-
-/**
- * The recharge prompts of one turn start: each named roll with a recharge
- * that was marked Used when the turn started. An action never marked Used
- * is never prompted. `row` is the Dice panel's own row for that recharge
- * (RollOptions.tsx), so the result shows there too and is acted on once,
- * and `after` keeps the card to this turn's rolls of it.
- */
-export function rechargePrompts(turn: RechargeTurn, named: readonly NamedRoll[]): RechargePrompt[] {
-  const used = new Set(turn.used);
-  return named
-    .filter((r): r is NamedRoll & { recharge: NonNullable<NamedRoll["recharge"]> } => r.recharge !== undefined && used.has(r.key))
-    .map((r) => ({ id: `${turn.logId}|${r.key}`, key: r.key, name: r.name, recharge: r.recharge, text: rechargeText(r.name, r.recharge), row: `${turn.holder}|${r.key}|recharge`, after: Number(turn.logId.split(":")[0]) }));
-}
-
-/** A recharge roll's success: its total at or above the action's recharge. */
-export function recharged(total: number, recharge: number): boolean {
-  return total >= recharge;
 }

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import type { LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
-import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, EDGE, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
+import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
@@ -48,13 +48,19 @@ import { knownOrTyped } from "../rolls/card.ts";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import { creatureRolls } from "../dice/creature.ts";
-import { readUsed } from "../dice/options.ts";
+import { dropOldRechargeMarks } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
 import { alertCard as card } from "./alertCard.ts";
 import { CardBonus, CardButtons, CardChips, rollTrouble, useCardRoll, useCardSend, useTypedRoll } from "./CardRoll.tsx";
-import { RechargeCard, RechargeWait, rechargeAlertId, useRechargePrompts } from "./RechargeCard.tsx";
+import { RechargeCard, rechargeAlertId } from "./RechargeCard.tsx";
+import { useCombatAlerts } from "../combat/alerts.ts";
+import { DeathSaveCard, deathSaveAlertId } from "../combat/DeathSaveCard.tsx";
+import { RegenerationCard, regenerationAlertId, regenerationText } from "../combat/RegenerationCard.tsx";
+import { useDismissed } from "../combat/state.ts";
+import { TurnCard, turnTitle } from "../combat/TurnCard.tsx";
+import { rechargeWords } from "../combat/logic.ts";
 import { SaveEndsCard, saveAlertId, usePendingSaves } from "./SaveEndsCard.tsx";
 import {
   cardRoll,
@@ -65,12 +71,9 @@ import {
   concentrationWords,
   endConcentrationOps,
   legendaryLeft,
-  rechargeTurn,
   saveEndsWords,
-  turnStarted,
   type CardChip,
   type ConcentrationAction,
-  type RechargeTurn,
 } from "./saveCards.ts";
 
 /** How long "Your turn" flares when a player's turn arrives. */
@@ -121,6 +124,11 @@ export function InitiativeStrip(props: { placement: TurnPlacement; notice: boole
  */
 export function FightWatch() {
   const dm = useYou().role === "dm";
+  const roomId = useRoomView((s) => s.roomId);
+  // Recharge marks were once one tab's guesses, kept per tab: the room holds them now, so the old ones go as the room loads (docs/design-v1-combat-controls.md 3.6).
+  useEffect(() => {
+    if (roomId) dropOldRechargeMarks(roomId);
+  }, [roomId]);
   return (
     <>
       <FightAlerts />
@@ -524,37 +532,49 @@ function FightAlerts() {
 
   useEffect(() => unlockAudioOnTap(), []);
 
-  const { prompts, dismissPrompt, notices, dismissNotice, notify, recharge, dismissRecharge } = useLogAlerts();
+  const { prompts, dismissPrompt, notices, dismissNotice, notify } = useLogAlerts();
   const timeUp = useTimeUp();
   const view = useRowFacts().view;
   const saves = usePendingSaves();
-  const recharges = useRechargePrompts(recharge.turn, recharge.dismissed);
-  const rechargeFor = recharge.turn;
+  const combat = useCombatAlerts();
+  const local = useDismissed();
   // Keyed on the names, not the view, which changes with every op: the dock and Room read what this publishes.
   const who = prompts.map((p) => entryName(view, p.target)).join("\n");
   /*
-   * The dock's summary has no kind of its own for a save-ends or recharge
-   * card (pages/fold.ts ColumnAlert), so they go as notices, whose words
-   * are the card's own, keyed on their ids and words.
+   * The dock's summary has no kind of its own for a save-ends, Regeneration
+   * or recharge card (pages/fold.ts ColumnAlert), so they go as notices,
+   * whose words are the card's own, keyed on their ids and words. A death
+   * save and the turn card have kinds of their own (docs/design-v1-combat-controls.md 4.6).
    */
   const cardLines = [
     ...saves.map((p) => `${saveAlertId(p)}\t${saveEndsWords(entryName(view, p.target), p.effect).head}`),
-    ...recharges.prompts.map((p) => `${rechargeAlertId(p)}\t${p.text}`),
+    ...combat.regenerations.map((c) => `${regenerationAlertId(c)}\t${regenerationText(c, combat.revives)}`),
+    ...combat.recharges.map((c) => `${rechargeAlertId(c)}\t${rechargeWords(c.prompt.name, c.prompt.min)}`),
   ].join("\n");
+  const deathLines = combat.deathSaves.map((c) => `${deathSaveAlertId(c)}\t${c.participant.name}`).join("\n");
+  const turnLine = combat.turn ? `${combat.turn.id}\t${combat.turn.name}` : "";
   const alerts = useMemo<ColumnAlert[]>(() => {
     const names = who.split("\n");
     const list: ColumnAlert[] = prompts.map((p, i) => {
       const name = names[i] ?? "";
       return { id: p.logId, kind: "concentration", who: name, says: `Concentration save for ${name}.` };
     });
+    for (const line of deathLines ? deathLines.split("\n") : []) {
+      const [id = "", name = ""] = line.split("\t");
+      list.push({ id, kind: "deathSave", who: name, says: `Death save for ${name}.` });
+    }
     if (timeUp.text) list.push({ id: timeUp.key, kind: "timeUp", says: timeUp.text });
     for (const line of cardLines ? cardLines.split("\n") : []) {
       const [id = "", text = ""] = line.split("\t");
       list.push({ id, kind: "notice", text, says: text });
     }
     for (const n of notices) list.push({ id: n.id, kind: "notice", text: n.text, says: n.text });
+    if (turnLine) {
+      const [id = "", name = ""] = turnLine.split("\t");
+      list.push({ id, kind: "turn", who: name, says: `${turnTitle({ name })}.` });
+    }
     return list;
-  }, [prompts, notices, timeUp.text, timeUp.key, who, cardLines]);
+  }, [prompts, notices, timeUp.text, timeUp.key, who, cardLines, deathLines, turnLine]);
   const publishColumn = usePublishAlerts(alerts);
   const top = useTopBars();
 
@@ -808,6 +828,41 @@ function FightAlerts() {
   }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom, overlay, rowPlace.lift]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
+  /*
+   * The turn card (docs/design-v1-combat-controls.md 4.2) folds to its 44 px
+   * row under 600 px wide, and wherever the card unfolded would not stack
+   * above a bar that shares the lane. It is never the column's first card
+   * to the bar (firstCard skips it), so a turn card alone never forces the
+   * summary row or moves the bar. Where even its row would meet the bar, a
+   * card alone is left out of the column, and the same uses stay in the
+   * row's options and the bar. Its unfolded height is the last one drawn,
+   * measured while it shows unfolded.
+   */
+  const turnRef = useRef<HTMLElement | null>(null);
+  const turnOpenHeight = useRef(0);
+  const [turnFit, setTurnFit] = useState<"open" | "folded" | "hidden">("open");
+  const narrow = width < DOCK_MIN_WIDTH;
+  const turnShown = combat.turn !== null && local.shown.has(combat.turn.id);
+  const turnFolded = !turnShown && (narrow || turnFit !== "open");
+  const turnHidden = !turnShown && turnFit === "hidden";
+  useLayoutEffect(() => {
+    const cards = cardsRef.current;
+    if (!combat.turn || !cards || summarized || folded || overlay) return;
+    const el = turnRef.current;
+    const at = el?.getBoundingClientRect();
+    const all = cards.getBoundingClientRect();
+    if (at && !turnFolded) turnOpenHeight.current = at.height / zoom;
+    const top = (at ? at.top : all.top) / zoom;
+    const alone = top - all.top / zoom < 1;
+    const box = bar?.box;
+    const across = box !== undefined && box.left < all.right / zoom && box.left + box.width > all.left / zoom;
+    const fits = (height: number) => !across || box.top >= top + height + EDGE || box.top + box.height + EDGE <= top;
+    const fitsRow = fits(SUMMARY_ROW);
+    const fitsOpen = turnOpenHeight.current === 0 || fits(turnOpenHeight.current);
+    const next = fitsOpen && fitsRow ? "open" : fitsRow || !alone ? "folded" : "hidden";
+    setTurnFit((prev) => (prev === next ? prev : next));
+  });
+
   const clip = () => {
     const el = boxRef.current;
     setClipped(!!el && el.scrollHeight - el.clientHeight - el.scrollTop > 4);
@@ -1024,12 +1079,29 @@ function FightAlerts() {
         {saves.map((p) => (
           <SaveEndsCard key={p.effect.due.id} pending={p} onResult={notify} />
         ))}
-        {rechargeFor ? recharges.prompts.map((p) => <RechargeCard key={p.id} prompt={p} creature={rechargeFor.creature} holder={rechargeFor.holder} onDone={() => dismissRecharge(p.id)} />) : null}
-        {recharges.loading || recharges.failed ? <RechargeWait failed={recharges.failed} /> : null}
+        {combat.regenerations.map((c) => (
+          <RegenerationCard key={c.id} card={c} revives={combat.revives} onDismiss={() => local.dismiss(c.id)} />
+        ))}
+        {combat.deathSaves.map((c) => (
+          <DeathSaveCard key={c.id} card={c} waits={c.waits} onDismiss={() => local.dismiss(c.id)} />
+        ))}
+        {combat.recharges.map((c) => (
+          <RechargeCard key={c.id} card={c} onDismiss={() => local.dismiss(c.id)} />
+        ))}
         {/* No box of its own, so the rolls' cards and chips stay items of the column. */}
         <div data-alert="rolls" style={{ display: "contents" }}>
           <RollAlerts />
         </div>
+        {combat.turn && !turnHidden ? (
+          <TurnCard
+            cardRef={turnRef}
+            model={combat.turn}
+            folded={turnFolded}
+            foldable={!turnHidden && (narrow || turnFit !== "open")}
+            onShow={(on) => combat.turn && local.show(combat.turn.id, on)}
+            onDismiss={() => combat.turn && local.dismiss(combat.turn.id)}
+          />
+        ) : null}
         {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger onDismiss={timeUp.dismiss} /> : null}
         {notices.map((n) => (
           <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
@@ -1041,10 +1113,15 @@ function FightAlerts() {
   );
 }
 
-/** The first card as drawn: the first child with a box, looking inside a wrapper with `display: contents`, as the rolls' is. */
+/**
+ * The first card as drawn: the first child with a box, looking inside a
+ * wrapper with `display: contents`, as the rolls' is. A turn card is never
+ * it: it lasts the whole turn, so it never moves the bar or forces the
+ * summary row (docs/design-v1-combat-controls.md 4.2).
+ */
 function firstCard(cards: HTMLElement): HTMLElement | null {
   for (const child of cards.children) {
-    if (!(child instanceof HTMLElement)) continue;
+    if (!(child instanceof HTMLElement) || child.dataset.alert === "turn") continue;
     if (getComputedStyle(child).display === "contents") {
       const inner = firstCard(child);
       if (inner) return inner;
@@ -1190,17 +1267,14 @@ function useTimeUp(): { text: string | null; key: string; dismiss(): void } {
 }
 
 /**
- * Concentration checks, expiry notices and, for the DM, the recharge
- * prompts of a turn that starts, from the log (design 9.5 and 9.6,
- * docs/design-v1-roll-options.md 6.4). Only entries that arrive while the
- * page is open count: the log a snapshot carries is history, and the Log
- * panel shows it. Each turn start replaces the last one's recharge
- * prompts, whose moment has passed.
+ * Concentration checks and expiry notices, from the log (design 9.5 and
+ * 9.6). Only entries that arrive while the page is open count: the log a
+ * snapshot carries is history, and the Log panel shows it. A turn's
+ * prompts come from its turn record instead (combat/alerts.ts), so a
+ * reload or a second device shows the same cards.
  */
 function useLogAlerts() {
   const log = useRoomView((s) => s.view?.log);
-  const roomId = useRoomView((s) => s.roomId);
-  const store = useRoomStore();
   const confirmedSeq = useConfirmedSeq();
   const you = useYou();
   const facts = useRowFacts();
@@ -1209,7 +1283,6 @@ function useLogAlerts() {
   const seen = useRef<Set<string> | null>(null);
   const [prompts, setPrompts] = useState<ConcentrationPrompt[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
-  const [recharge, setRecharge] = useState<{ turn: RechargeTurn | null; dismissed: ReadonlySet<string> }>(NO_RECHARGE);
   const told = useRef(0);
 
   useEffect(() => {
@@ -1226,14 +1299,7 @@ function useLogAlerts() {
     const view = factsRef.current.view;
     const newPrompts: ConcentrationPrompt[] = [];
     const newNotices: Notice[] = [];
-    let started: { turn: RechargeTurn | null } | null = null;
     for (const entry of fresh) {
-      const turnOf = you.role === "dm" ? turnStarted(entry) : null;
-      if (turnOf !== null) {
-        const state = store.getState().view;
-        // Used is read as the turn starts: an action marked Used later waits for its next turn (6.4).
-        started = { turn: state ? rechargeTurn(state, entry.id, turnOf, readUsed(roomId)) : null };
-      }
       const prompt = concentrationPrompt(entry);
       if (prompt && answersPrompt(view, you, prompt)) newPrompts.push(prompt);
       const expiry = expiryNotice(entry);
@@ -1245,8 +1311,7 @@ function useLogAlerts() {
     }
     if (newPrompts.length > 0) setPrompts((p) => [...p, ...newPrompts]);
     if (newNotices.length > 0) setNotices((n) => [...n, ...newNotices].slice(-MAX_NOTICES));
-    if (started) setRecharge(started.turn ? { turn: started.turn, dismissed: new Set() } : NO_RECHARGE);
-  }, [log, confirmedSeq, you, store, roomId]);
+  }, [log, confirmedSeq, you]);
 
   // A check is moot once the creature stops concentrating, whoever ended it.
   useEffect(() => {
@@ -1269,12 +1334,8 @@ function useLogAlerts() {
     dismissNotice: (id: string) => setNotices((n) => n.filter((x) => x.id !== id)),
     /** A card's roll that decided it, told as a notice since the card goes with it. */
     notify: (text: string) => setNotices((n) => [...n, { id: `told:${++told.current}`, text }].slice(-MAX_NOTICES)),
-    recharge,
-    dismissRecharge: (id: string) => setRecharge((r) => ({ ...r, dismissed: new Set([...r.dismissed, id]) })),
   };
 }
-
-const NO_RECHARGE: { turn: RechargeTurn | null; dismissed: ReadonlySet<string> } = { turn: null, dismissed: new Set() };
 
 function seqOf(entry: LogEntry): number {
   const n = Number(entry.id.split(":")[0]);

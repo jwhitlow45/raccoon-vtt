@@ -212,8 +212,12 @@ export function dockFits(space: Omit<SheetSpace, "reserveTop">, dockHeight = DOC
  */
 export type ColumnAlert =
   | { id: string; kind: "concentration"; who: string; says: string }
+  /** A dying creature's death save at its turn start (docs/design-v1-combat-controls.md 4.4). */
+  | { id: string; kind: "deathSave"; who: string; says: string }
   | { id: string; kind: "timeUp"; says: string }
-  | { id: string; kind: "notice"; text: string; says: string };
+  | { id: string; kind: "notice"; text: string; says: string }
+  /** A creature's turn card, its uses for the whole turn (docs/design-v1-combat-controls.md 4.2). */
+  | { id: string; kind: "turn"; who: string; says: string };
 
 /** The rolls' line, as features/rolls publishes it (components/sheetFocus.ts AlertsSummaryEntry). `unnamed`: how many of its requests its words leave out. */
 export type RollsLine = { text: string; name: string; waiting: boolean; requests: number; unnamed?: number };
@@ -260,8 +264,10 @@ function phrase(text: string): string {
 /**
  * The dock's one alerts summary (3.2.1): the most pressing alert in its
  * visible text, with "+2" when two more wait, in this order: a roll that
- * waits for this viewer ("Roll asked"), concentration checks, the time-up,
- * the other open rolls ("Rolls 1/3"), then the notices, newest first. An
+ * waits for this viewer ("Roll asked"), concentration checks, death saves,
+ * the time-up, the other open rolls ("Rolls 1/3"), the notices, newest
+ * first, then the turn cards, which last the whole turn
+ * (docs/design-v1-combat-controls.md 4.6). An
  * order by urgency, since the column mixes log entries, roll requests and
  * a timer that share no clock. Its name starts with that text and lists
  * the rest, then says what a tap does: "Concentration check +2: Thorn
@@ -293,11 +299,17 @@ export function alertsSummary(rolls: RollsLine | null, alerts: readonly ColumnAl
     if (a.kind === "concentration") items.push({ kind: a.kind, id: a.id, text: "Concentration save", phrase: `${a.who} makes a Concentration save` });
   }
   for (const a of alerts) {
+    if (a.kind === "deathSave") items.push({ kind: a.kind, id: a.id, text: "Death save", phrase: `${a.who} makes a death save` });
+  }
+  for (const a of alerts) {
     if (a.kind === "timeUp") items.push({ kind: a.kind, id: a.id, text: "Time is up", phrase: "time is up" });
   }
   if (rolls && !rolls.waiting) items.push({ kind: "rolls", id: "rolls", text: rolls.text, phrase: rolls.name });
   for (const a of [...alerts].reverse()) {
     if (a.kind === "notice") items.push({ kind: a.kind, id: a.id, text: phrase(a.text), phrase: phrase(a.text) });
+  }
+  for (const a of alerts) {
+    if (a.kind === "turn") items.push({ kind: a.kind, id: a.id, text: `${a.who}'s turn`, phrase: `${a.who}'s turn` });
   }
   const [first] = items;
   if (!first) return null;

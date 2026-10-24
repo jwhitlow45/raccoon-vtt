@@ -57,6 +57,24 @@ const timeUp: ColumnAlert = { id: "t", kind: "timeUp", says: "Time is up for you
 const notice = (id: string, text: string): ColumnAlert => ({ id, kind: "notice", text, says: text });
 
 describe("alertsSummary", () => {
+  test("a death save comes after concentration, and the turn card last, after the notices (docs/design-v1-combat-controls.md 4.6)", () => {
+    const s = alertsSummary(null, [
+      { id: "turn", kind: "turn", who: "Adult Red Dragon", says: "Adult Red Dragon's turn." },
+      notice("n1", "Fire Breath can recharge (5–6)."),
+      { id: "ds", kind: "deathSave", who: "Thorn", says: "Death save for Thorn." },
+      timeUp,
+      prompt("p1", "Bree"),
+    ]);
+    assert.deepEqual(s, {
+      text: "Concentration save",
+      more: "+4",
+      name: "Concentration save +4: Bree makes a Concentration save, Thorn makes a death save, time is up, Fire Breath can recharge (5–6), Adult Red Dragon's turn. Close the sheet to see them.",
+      first: { kind: "concentration", id: "p1" },
+    });
+    const alone = alertsSummary(null, [{ id: "turn", kind: "turn", who: "Adult Red Dragon", says: "Adult Red Dragon's turn." }]);
+    assert.deepEqual(alone, { text: "Adult Red Dragon's turn", more: "", name: "Adult Red Dragon's turn: Adult Red Dragon's turn. Close the sheet to see it.", first: { kind: "turn", id: "turn" } });
+  });
+
   test("nothing waits, no summary", () => {
     assert.equal(alertsSummary(null, []), null);
   });

@@ -389,40 +389,6 @@ export function dropOldRechargeMarks(roomId: string): void {
   }
 }
 
-function usedKey(roomId: string): string {
-  return `rvtt.rechargeUsed.${roomId}`;
-}
-
-export function readUsed(roomId: string): Record<string, string[]> {
-  try {
-    const raw = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(usedKey(roomId));
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, string[]> = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === "string");
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-export function withUsed(used: Record<string, string[]>, holder: string, key: string, on: boolean): Record<string, string[]> {
-  const list = used[holder] ?? [];
-  const next = on ? [...new Set([...list, key])] : list.filter((k) => k !== key);
-  const out = { ...used };
-  if (next.length > 0) out[holder] = next;
-  else delete out[holder];
-  return out;
-}
-
-export function writeUsed(roomId: string, used: Record<string, string[]>): void {
-  try {
-    sessionStorage.setItem(usedKey(roomId), JSON.stringify(used));
-  } catch {
-    // Storage blocked or full: Used lasts until the page closes.
-  }
-}
-
 /** A creature's spent abilities as this viewer's copy holds them, absent for a viewer who reads none (2.2). */
 export type Marks = Readonly<Record<string, UseMark>> | undefined;
 
