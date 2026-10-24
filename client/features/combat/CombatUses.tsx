@@ -203,11 +203,13 @@ function reachable(el: HTMLElement | null | undefined): HTMLElement | null {
 
 /**
  * Where focus goes once a press took its button away (D-261024-43): the
- * row's first button, else the list's, else the prompt card a Reopen
- * brought back, else the turn card, the drawer's first button, the
- * drawer itself or the bar's frame that held the list, else the tracker
- * row's own button.
- * Never the page.
+ * nearest control that stays. That is the row's first button, else the
+ * list's, else the prompt card a Reopen brought back, else the turn card,
+ * the drawer's first button, the drawer itself or the bar's frame that
+ * held the list, else the tracker row's own button. None stays after a
+ * Reopen that took its turn card away when this device had dismissed the
+ * card it reopens. Focus is then left on the page, as it is when the
+ * button goes only after handFocusTo stopped waiting (HAND_OFF_WAIT_MS).
  */
 function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "trackerRow", HTMLElement | null>, key: string, reopened: string | null): HTMLElement | null {
   const list = reachable(near.list);
