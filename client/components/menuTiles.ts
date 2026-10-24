@@ -11,13 +11,13 @@
  */
 export function tileRows(widths: readonly number[], gap: number, room: number): { rows: number[][]; width: number | null } {
   const all = flow(widths, gap, Infinity);
-  if (widths.length <= 1 || all.width <= room + SLACK) return { rows: all.rows, width: null };
+  if (widths.length <= 1 || all.width <= room + EPSILON) return { rows: all.rows, width: null };
   let best: Flow | null = null;
   for (let i = 0; i < widths.length; i++) {
     let run = -gap;
     for (let j = i; j < widths.length; j++) {
       run += gap + (widths[j] ?? 0);
-      if (run > room + SLACK) break;
+      if (run > room + EPSILON) break;
       const next = flow(widths, gap, run);
       if (!best || better(next, best)) best = next;
     }
@@ -27,8 +27,14 @@ export function tileRows(widths: readonly number[], gap: number, room: number): 
   return { rows: best.rows, width: best.width };
 }
 
-/** Half a pixel, so a row the browser rounds a hair past its room still counts as fitting it. */
-const SLACK = 0.5;
+/**
+ * A hundredth of a pixel, so a row whose measured widths add up a hair past
+ * its room by floating point still fits. The headroom for the browser's own
+ * rounding goes on the cap Menu.tsx writes, never here: a row counted as
+ * fitting while wider than the menu gets no cap, and the browser would wrap
+ * its last tile alone.
+ */
+const EPSILON = 0.01;
 
 type Flow = { rows: number[][]; width: number };
 
@@ -39,7 +45,7 @@ function flow(widths: readonly number[], gap: number, cap: number): Flow {
   let line = 0;
   let width = 0;
   widths.forEach((w, i) => {
-    if (row.length > 0 && line + gap + w > cap + SLACK) {
+    if (row.length > 0 && line + gap + w > cap + EPSILON) {
       rows.push(row);
       row = [];
     }
@@ -56,5 +62,5 @@ function better(a: Flow, b: Flow): boolean {
   if (a.rows.length !== b.rows.length) return a.rows.length < b.rows.length;
   const lone = (f: Flow) => f.rows.length > 1 && f.rows[f.rows.length - 1]!.length === 1;
   if (lone(a) !== lone(b)) return !lone(a);
-  return a.width < b.width - SLACK;
+  return a.width < b.width - EPSILON;
 }

@@ -33,9 +33,12 @@ describe("a menu's tile rows", () => {
     assert.deepEqual(sizes(tileRows(zoomed, GAP * 1.3, 265.4).rows), [3, 2]);
   });
 
-  test("a row a hair past its room by the browser's rounding still fits", () => {
-    assert.equal(tileRows(SETUP, GAP, 378.2).width, null);
-    assert.deepEqual(sizes(tileRows(SETUP, GAP, 377.9).rows), [3, 2]);
+  test("a row past its room by a hair of floating point still fits, and by a twentieth of a pixel does not, so the browser never wraps its last tile alone", () => {
+    // The five setup tools and their gaps take 378.5 px.
+    assert.equal(tileRows(SETUP, GAP, 378.5).width, null, "its room exactly");
+    assert.equal(tileRows(SETUP, GAP, 378.495).width, null, "a sum of measured widths a hair past");
+    assert.deepEqual(sizes(tileRows(SETUP, GAP, 378.45).rows), [3, 2], "0.05 px past");
+    assert.deepEqual(sizes(tileRows(SETUP, GAP, 378.2).rows), [3, 2], "0.3 px past");
   });
 
   test("six play tools that do not fit one row stand three and three, and in three rows two to a row", () => {

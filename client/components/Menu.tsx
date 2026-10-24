@@ -100,7 +100,9 @@ export function Menu(props: {
    * menu's own width, which the box caps), and take the width cap
    * tileRows picks. The box then measures the rows they settle into. The
    * cap is a custom property React never writes, so a render while the
-   * menu is open keeps it.
+   * menu is open keeps it. The caps refresh only when the popover places
+   * the box, so a tile whose width changes while the menu is open keeps
+   * the cap it had.
    */
   useLayoutEffect(() => {
     if (!tiles) return;
