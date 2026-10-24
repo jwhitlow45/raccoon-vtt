@@ -1395,7 +1395,9 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * from the last render's (`was`) and what stands now: the toasts showing
  * (`ids`, oldest first), toastTop's place (`low`), paneToastTop's
  * (`pane`), whether a map pane stands as a bottom sheet (`paneStands`),
- * the layer and the very short sheet's slot.
+ * the layer, the very short sheet's slot, and the toasts to place under
+ * a spanning token bar's header with barToastTop's place there
+ * (`overBar`).
  *
  * The layer keeps one stack. A new toast joins it, or starts one under
  * the column's first card or the pane's header. While a pane stands, the
@@ -1415,16 +1417,13 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * goes on taking it while the turn lasts (`turning`), since the first
  * place after a turn may come from the card as it stood before, until
  * the column measures it again. So does a toast that comes under the
- * card while the turn lasts (review FU22B-ASTRA-03). A card that arrives at another time moves
- * no toast, so nothing jumps under a finger. A toast that would start under
- * the card while toasts at the notices' top reach down past it (`mapFoot`,
- * their foot as last drawn) joins them there instead, so the two stacks
- * never overlap (review LP18-TO-4). A pane that stops standing as the
- * screen turns leaves its toasts to be placed anew (review LP18-TO-3). A
- * toast leaves the layer only when a pane stops standing as the screen
- * turns (review LP18-TO-3), never leaves the sheet, and leaves the notices
- * only for a pane's header, a turned screen's card or a card that came
- * with it.
+ * card while the turn lasts (review FU22B-ASTRA-03). A card that arrives
+ * at another time moves no toast itself, so nothing jumps under a finger.
+ * A toast that would start under the card while toasts at the notices'
+ * top reach down past it (`mapFoot`, their foot as last drawn) joins them
+ * there instead, so the two stacks never overlap (review LP18-TO-4). A
+ * pane that stops standing as the screen turns leaves its toasts to be
+ * placed anew (review LP18-TO-3).
  *
  * A trap's toast comes in the same render as its card, before the column
  * has measured the card, so it starts at the notices' top, over that card
@@ -1433,6 +1432,24 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * takes its place again, as if it came now, on the first render that has
  * a place under the card (`low`), as the turn's rule does. Once it is
  * placed anew, or no longer new, a card moves it no more.
+ *
+ * On an upright phone the toasts in `overBar` take their places again
+ * under the spanning token bar's header, in the layer, as toasts that
+ * came now would there, and the layer's one stack goes with them, since a
+ * new toast would join it over the header again (review LP19-BS-2). Those
+ * are the toasts that just showed over the header, those already showing
+ * there as the bar opens (review LP19-Q1), and the stack placed under the
+ * header once the header's bottom goes below its top, as an alert card
+ * that moves the bar down makes it (review LP19-OPUS-3), as Room.tsx reads
+ * them from the boxes drawn (toastsUnderHead). A pane's header, the very
+ * short sheet and a page with no layer keep their own rules. As the
+ * screen turns, a toast under the bar's header takes its place anew.
+ *
+ * A toast leaves the layer only when a pane stops standing as the screen
+ * turns (review LP18-TO-3), or as the screen turns under a bar's header,
+ * never leaves the sheet, and leaves the notices only for a pane's header,
+ * a spanning bar's header, a turned screen's card or a card that came
+ * with it.
  */
 export function nextToastPlaces(
   was: ToastPlaces,
@@ -1446,7 +1463,7 @@ export function nextToastPlaces(
     turned?: boolean;
     mapFoot?: number | null;
     recent?: ReadonlySet<number>;
-    /** The toasts that just showed over a spanning bar's header, and barToastTop's place under it (review LP19-BS-2). */
+    /** The toasts to place under a spanning bar's header (toastsUnderHead), and barToastTop's place under it (reviews LP19-BS-2, LP19-Q1 and LP19-OPUS-3). */
     overBar?: { ids: ReadonlySet<number>; at: number | null };
   },
 ): ToastPlaces {
@@ -1460,7 +1477,7 @@ export function nextToastPlaces(
   const cardRoom = now.layer && !now.slot && !now.paneStands;
   const recent = now.recent ?? new Set<number>();
   const awaitCard = new Set(now.ids.filter((id) => was.awaitCard.has(id) && recent.has(id)));
-  // A toast that just showed over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since the new toast would join it over the header again.
+  // A toast over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since a new toast would join it over the header again.
   const barAt = cardRoom ? (now.overBar?.at ?? null) : null;
   const overBar = barAt !== null ? (now.overBar?.ids ?? new Set<number>()) : new Set<number>();
   for (const id of now.ids) {
