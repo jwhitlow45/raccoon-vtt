@@ -443,7 +443,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const col = await column(dm);
       if (view.width > view.height) for (const c of col.cards) assert.ok(!intersects(c, r), `${label}: a card meets the bar: ${JSON.stringify({ c, r })}`);
       if (view.width === 390) {
-        // Upright with a check at the column's head, the bar keeps off the Hag, low on the screen (BB-6).
+        // Upright with a check at the column's head, the strip keeps off the Hag, low on the screen: it opens at the map's foot and moves the map once to clear her (BB-6, docs/design-v1-bar-compact.md 3.6).
         const a = await pagePoint(dm, bounds, { x: 1, y: 17 });
         const b = await pagePoint(dm, bounds, { x: 2, y: 18 });
         const hag = { left: a.x, top: a.y, right: b.x, bottom: b.y };
@@ -1293,9 +1293,16 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
   });
 
-  test("lp19-bs2. at 390 x 844 a toast that comes while the token bar hangs over its token to the top of its room starts under the bar's header, so Close and Larger or Smaller stay in reach, with no alert card and under a trap's card (review LP19-BS-2)", async () => {
+  /** Presses Expand on a resting strip and waits for the bar it grows into to hold still. */
+  async function expand(bar: Locator): Promise<void> {
+    await bar.getByRole("button", { name: "Expand", exact: true }).tap();
+    await waitFor("the bar to expand", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null));
+    await dm.waitForTimeout(400);
+  }
+
+  test("lp19-bs2. at 390 x 844 a toast that comes while a low token's strip rests, or its bar stands expanded, never covers its header, so Close and Expand or Collapse stay in reach, with no alert card and under a trap's card (review LP19-BS-2, docs/design-v1-bar-compact.md 3.5)", async () => {
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
-    // Low on the map, so the bar hangs over the brute and its tall content reaches the top of its room.
+    // Low on the map, where the strip opens over the brute and moves the map once to clear it.
     const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
     const brute = randomUUID();
     const trapId = randomUUID();
@@ -1303,7 +1310,6 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await ops.send({ t: "token.create", token: { id: brute, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
     await waitFor("the brute and the trap in the DM's view", () => (dmSocket.state?.tokens[brute] && dmSocket.state.traps[trapId] ? true : null));
-    await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
     const bar = dm.getByRole("dialog", { name: "Brute actions" });
     try {
       await setUp({ width: 390, height: 844, scale: 1 });
@@ -1313,29 +1319,26 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await bar.waitFor();
       await dm.waitForTimeout(400);
       const head = bar.locator("[data-sticky-header]");
-      const check = async (label: string, words: string, size: "Larger" | "Smaller") => {
+      const check = async (label: string, words: string, size: "Expand" | "Collapse") => {
         const h = await rectOf(head);
-        assert.ok(h.top < 140, `${label}: the bar's header stands at ${h.top}, not at the top of its room, so no toast could meet it`);
         await whisperFromPat(words);
         const toast = dm.locator("[data-toast]").filter({ hasText: words }).first();
         await toast.waitFor();
         await dm.waitForTimeout(300);
         const t = await rectOf(toast);
         for (const other of await dm.locator("[data-toast]").all()) assert.ok(!intersects(await rectOf(other), h), `${label}: a toast ${JSON.stringify(await rectOf(other))} covers the bar's header ${JSON.stringify(h)}`);
-        assert.ok(Math.abs(t.top - (h.bottom + 8)) < 1.5 || t.top > h.bottom, `${label}: the whisper starts at ${t.top}, over the header's foot at ${h.bottom}`);
+        assert.ok(t.bottom <= h.top + 0.5 || t.top >= h.bottom - 0.5, `${label}: the whisper ${JSON.stringify(t)} meets the header ${JSON.stringify(h)}`);
         for (const name of ["Close", size]) assert.ok(await wholeInReach(bar.getByRole("button", { name, exact: true })), `${label}: ${name} is out of reach`);
         await shots.take(dm, `dmphone-lp19-bs2-${label}`);
       };
-      await check("no-card", "Is the brute asleep?", "Larger");
-      // Larger, then a trap's card: the bar stands under the card, and the trap's toast and the next whisper under the bar's header.
-      await bar.getByRole("button", { name: "Larger", exact: true }).tap();
-      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await check("no-card", "Is the brute asleep?", "Expand");
+      // Expanded, then a trap's card: the bar keeps under the card or the column's summary row, and the trap's toast and the next whisper off its header.
+      await expand(bar);
       await ops.send({ t: "trap.spring", trapId, tokenIds: [run.hag] });
-      await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor();
+      await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor({ state: "attached" });
       await dm.waitForTimeout(900);
-      await check("card", "The plate clicked under the hag.", "Smaller");
+      await check("card", "The plate clicked under the hag.", "Collapse");
     } finally {
-      await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
       if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
       for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
       await ops.send({ t: "trap.delete", trapId });
@@ -1344,19 +1347,17 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
   });
 
-  test("lp19-bs3. at 390 x 844 with Larger on, a token bar that opens under its token while a trap's toast stands under the alerts' card moves the map up only so far that the token stays below the toast (review LP19-BS-3)", async () => {
+  test("lp19-bs3. at 390 x 844 a low token's strip that opens while a trap's toast stands under the alerts' card moves the map up once to clear it, never so far that the token's top passes the toast (review LP19-BS-3, docs/design-v1-bar-compact.md 3.6)", async () => {
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
-    // The middle of the map, where the bar hangs under the brute and Larger moves the map up.
-    const cell = { x: Math.floor(bounds.w / 2), y: Math.floor(bounds.h / 2) };
     const brute = randomUUID();
     const walker = randomUUID();
     const trapId = randomUUID();
     const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+    const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
     await ops.send({ t: "token.create", token: { id: brute, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: 1, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
     await waitFor("the brute, the scout and the trap in the DM's view", () => (dmSocket.state?.tokens[brute] && dmSocket.state.tokens[walker] && dmSocket.state.traps[trapId] ? true : null));
-    await dm.evaluate(() => localStorage.setItem("rvtt.tokenBarLarger", "1"));
     const bar = dm.getByRole("dialog", { name: "Brute actions" });
     try {
       await setUp({ width: 390, height: 844, scale: 1 });
@@ -1364,25 +1365,24 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await ops.send({ t: "token.move", tokenId: walker, x: 1, y: 1 });
       const toast = dm.locator("[data-toast]").filter({ hasText: "Needle Plate went off: Scout." }).first();
       await toast.waitFor();
-      await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor();
+      await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor({ state: "attached" });
       await dm.waitForTimeout(900);
       const t = await rectOf(toast);
       const before = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
       assert.equal(await hit(dm, before), "CANVAS", "the brute is under something");
       await dm.touchscreen.tap(before.x, before.y);
-      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
-      await dm.waitForTimeout(500);
-      // The map moved up for the larger bar under the brute, and the brute's top stays below the trap's toast, where a tap reaches it.
+      await bar.waitFor();
+      await dm.waitForTimeout(700);
       const top = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y });
       const middle = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      const foot = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 1 });
       const b = await rectOf(bar);
-      assert.ok(middle.y < before.y - 20, `the map did not move up for the larger bar: the brute went from ${before.y} to ${middle.y}`);
-      assert.ok(b.top > middle.y, `the bar does not hang under the brute: ${JSON.stringify(b)}`);
-      assert.ok(top.y >= t.bottom - 0.5, `the brute's top went to ${top.y}, under the trap's toast, whose foot is at ${t.bottom}`);
-      assert.equal(await hit(dm, top.y + 2 > middle.y ? middle : { x: top.x, y: top.y + 2 }), "CANVAS", "the brute's top does not take a tap");
-      await shots.take(dm, "dmphone-lp19-bs3-larger-under-the-toast");
+      assert.equal(await bar.getAttribute("data-bar-state"), "rest");
+      assert.ok(foot.y <= b.top + 0.5 || top.y >= t.bottom - 0.5, `the brute is under the strip ${JSON.stringify(b)} and the move stopped short of the toast for no reason: ${JSON.stringify({ top, foot, t })}`);
+      assert.ok(top.y >= t.bottom - 0.5 || middle.y >= before.y - 0.5, `the brute's top went to ${top.y}, under the trap's toast, whose foot is at ${t.bottom}`);
+      assert.equal(await hit(dm, middle), "CANVAS", "the brute does not take a tap");
+      await shots.take(dm, "dmphone-lp19-bs3-strip-under-the-toast");
     } finally {
-      await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
       if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
       for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
       await ops.send({ t: "trap.delete", trapId });
@@ -1392,14 +1392,13 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     }
   });
 
-  /** A brute low on the map, where its bar hangs over it up to the top of its room, made for one step and removed after it. */
+  /** A brute low on the map, where its strip opens over it and the map moves once to clear it, made for one step and removed after it. */
   async function lowBrute(): Promise<{ id: string; at: { x: number; y: number }; bar: Locator; head: Locator; remove(): Promise<void> }> {
     const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
     const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
     const id = randomUUID();
     await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
     await waitFor("the brute in the DM's view", () => dmSocket.state?.tokens[id] ?? null);
-    await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
     await setUp({ width: 390, height: 844, scale: 1 });
     const at = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
     assert.equal(await hit(dm, at), "CANVAS", "the brute is under something");
@@ -1417,34 +1416,36 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     };
   }
 
-  test("fu24-q1. at 390 x 844 a whisper already showing at the top of the notices moves under the token bar's header as the bar opens over its token to the top of its room, the same toast, never drawn anew (review LP19-Q1)", async () => {
+  test("fu24-q1. at 390 x 844 a whisper already showing at the top of the notices stays where it is, the same toast, never drawn anew, as a low token's strip opens and as it expands: an upright phone's bar never hangs over the toasts (review LP19-Q1, docs/design-v1-bar-compact.md 3.5)", async () => {
     const brute = await lowBrute();
     try {
       const words = "Did the brute hear that?";
       await whisperFromPat(words);
       const toast = dm.locator("[data-toast]").filter({ hasText: words }).first();
       await toast.waitFor();
-      // Long past new, so only the bar's opening can move it.
+      // Long past new, so only the bar can move it.
       await dm.waitForTimeout(900);
       const was = await rectOf(toast);
       await toast.evaluate((el) => (el as unknown as { setAttribute(name: string, value: string): void }).setAttribute("data-e2e-kept", "1"));
       await dm.touchscreen.tap(brute.at.x, brute.at.y);
       await brute.bar.waitFor();
       await dm.waitForTimeout(400);
-      const h = await rectOf(brute.head);
-      assert.ok(intersects(was, h), `the whisper ${JSON.stringify(was)} would not cover the header ${JSON.stringify(h)}, so the opening had nothing to move`);
-      for (const other of await dm.locator("[data-toast]").all()) assert.ok(!intersects(await rectOf(other), h), `a toast ${JSON.stringify(await rectOf(other))} covers the bar's header ${JSON.stringify(h)}`);
-      const t = await rectOf(toast);
-      assert.ok(Math.abs(t.top - (h.bottom + 8)) < 1.5, `the whisper starts at ${t.top}, not 8 px under the header's foot at ${h.bottom}`);
-      assert.equal(await toast.getAttribute("data-e2e-kept"), "1", "the whisper was drawn anew");
-      for (const name of ["Close", "Larger"]) assert.ok(await wholeInReach(brute.bar.getByRole("button", { name, exact: true })), `${name} is out of reach`);
-      await shots.take(dm, "dmphone-fu24-q1-bar-opens-over-a-whisper");
+      for (const size of ["Expand", "Collapse"] as const) {
+        if (size === "Collapse") await expand(brute.bar);
+        const h = await rectOf(brute.head);
+        for (const other of await dm.locator("[data-toast]").all()) assert.ok(!intersects(await rectOf(other), h), `${size}: a toast ${JSON.stringify(await rectOf(other))} covers the bar's header ${JSON.stringify(h)}`);
+        const t = await rectOf(toast);
+        assert.ok(Math.abs(t.top - was.top) < 0.5, `${size}: the whisper went from ${was.top} to ${t.top}`);
+        assert.equal(await toast.getAttribute("data-e2e-kept"), "1", `${size}: the whisper was drawn anew`);
+        for (const name of ["Close", size]) assert.ok(await wholeInReach(brute.bar.getByRole("button", { name, exact: true })), `${size}: ${name} is out of reach`);
+      }
+      await shots.take(dm, "dmphone-fu24-q1-bar-opens-under-a-whisper");
     } finally {
       await brute.remove();
     }
   });
 
-  test("fu24-o3. at 390 x 844 a whisper under the token bar's header goes under it again when a check's card moves the bar down, never over the header or the card (review LP19-OPUS-3)", async () => {
+  test("fu24-o3. at 390 x 844 a whisper over a low token's expanded bar stays clear of its header and of a check's card when the card comes and caps the bar or gives way to the summary row (review LP19-OPUS-3, docs/design-v1-bar-compact.md 5.1)", async () => {
     const brute = await lowBrute();
     const check = dm.locator('[data-alert="concentration"]').first();
     // A roll in step 13 may have ended the hag's Hex.
@@ -1452,34 +1453,27 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     try {
       await dm.touchscreen.tap(brute.at.x, brute.at.y);
       await brute.bar.waitFor();
-      // Past the bar's opening, so only the header going down can move the whisper.
+      await expand(brute.bar);
+      // Past the bar's opening, so only the card can move anything.
       await dm.waitForTimeout(900);
-      const h = await rectOf(brute.head);
-      assert.ok(h.top < 140, `the bar's header stands at ${h.top}, not at the top of its room, so no toast could meet it`);
       const words = "Watch the hag.";
       await whisperFromPat(words);
       const toast = dm.locator("[data-toast]").filter({ hasText: words }).first();
       await toast.waitFor();
       await dm.waitForTimeout(300);
-      const placed = await rectOf(toast);
-      assert.ok(Math.abs(placed.top - (h.bottom + 8)) < 1.5, `the whisper starts at ${placed.top}, not 8 px under the header's foot at ${h.bottom}`);
-      // Damage to the hag brings up her concentration check, with no toast of its own: the bar stacks under the card.
+      // Damage to the hag brings up her concentration check, with no toast of its own.
       await hurtHag();
-      await check.waitFor();
+      await check.waitFor({ state: "attached" });
       await dm.waitForTimeout(600);
-      const card = await rectOf(check);
       const down = await rectOf(brute.head);
-      assert.ok(down.bottom > placed.top + 0.5, `the header went only to ${JSON.stringify(down)}, never into the whisper at ${placed.top}`);
       const t = await rectOf(toast);
-      for (const [what, box] of [
-        ["the bar's header", down],
-        ["the check's card", card],
-      ] as const)
-        assert.ok(!intersects(t, box), `the whisper ${JSON.stringify(t)} covers ${what} ${JSON.stringify(box)}`);
-      assert.ok(Math.abs(t.top - (down.bottom + 8)) < 1.5, `the whisper stands at ${t.top}, not 8 px under the header's new foot at ${down.bottom}`);
-      for (const name of ["Close", "Larger"]) assert.ok(await wholeInReach(brute.bar.getByRole("button", { name, exact: true })), `${name} is out of reach`);
-      assert.ok(await wholeInReach(check.getByRole("button", { name: "Passed", exact: true })), "the check's Passed is out of reach");
-      await shots.take(dm, "dmphone-fu24-o3-card-moves-the-header-down");
+      const boxes: [string, { left: number; top: number; right: number; bottom: number }][] = [["the bar's header", down]];
+      if (await check.isVisible()) boxes.push(["the check's card", await rectOf(check)]);
+      for (const [what, box] of boxes) assert.ok(!intersects(t, box), `the whisper ${JSON.stringify(t)} covers ${what} ${JSON.stringify(box)}`);
+      for (const name of ["Close", "Collapse"]) assert.ok(await wholeInReach(brute.bar.getByRole("button", { name, exact: true })), `${name} is out of reach`);
+      if (await check.isVisible()) assert.ok(await wholeInReach(check.getByRole("button", { name: "Passed", exact: true })), "the check's Passed is out of reach");
+      else assert.ok(await dm.getByRole("button", { name: /^Concentration save/ }).isVisible(), "neither the check nor the summary row shows");
+      await shots.take(dm, "dmphone-fu24-o3-card-over-the-expanded-bar");
     } finally {
       await brute.remove();
       if (await check.isVisible()) await check.getByRole("button", { name: "Passed", exact: true }).tap();

@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 
 /**
@@ -962,7 +962,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await img.waitFor();
       const fits = (l: Locator) => l.evaluate((el) => (el as unknown as El).scrollWidth <= (el as unknown as El).clientWidth + 1 && (el.querySelector("span[aria-hidden]") as unknown as El).getBoundingClientRect().width <= (el as unknown as El).getBoundingClientRect().width);
       assert.ok(await fits(img), `${name}'s number runs out of its shield in the bar`);
-      await b.getByRole("button", { name: "Details", exact: true }).click();
+      await (await barControl(b, "Details")).click();
       const inPanel = tokenPanel(dm).getByRole("img", { name: `Armor Class ${ac}` });
       await inPanel.waitFor();
       assert.ok(await fits(inPanel), `${name}'s number runs out of its shield in the panel`);
@@ -986,6 +986,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await tapToken(dm, t.at, span);
         const b = bar(dm, name);
         await b.waitFor();
+        // An upright phone's strip shows the speeds once expanded (docs/design-v1-bar-compact.md 5).
+        await expandBar(b);
         await noSideScroll(b, `${size.label}, ${name}'s bar`);
         // A short bar keeps speed in More stats.
         const more = b.getByRole("button", { name: "More stats", exact: true });
@@ -993,7 +995,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await speedUnitsWhole(b, `${size.label}, ${name}'s bar`);
         await noSideScroll(b, `${size.label}, ${name}'s bar opened`);
         await shots.take(dm, `tokenpanel-${size.width}x${size.height}-${name.split(" ")[0]!.toLowerCase()}-bar`);
-        await b.getByRole("button", { name: "Details", exact: true }).click();
+        await (await barControl(b, "Details")).click();
         const panel = tokenPanel(dm);
         await panel.getByRole("heading", { name, exact: true }).first().waitFor();
         // At 480 x 320 at 130% the panel takes the very short mode, over the whole screen with 243 px inside (docs/design-v1-layout-hierarchy.md 4.2).
@@ -1023,7 +1025,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         return { client: e.clientHeight, scroll: e.scrollHeight, line: Number.parseFloat(cs.lineHeight) || Number.parseFloat(cs.fontSize) * 1.25 };
       });
       assert.ok(clamp.client <= clamp.line * 2 + 2, `the bar's header shows more than two lines: ${JSON.stringify(clamp)}`);
-      await herald.getByRole("button", { name: "Details", exact: true }).click();
+      await (await barControl(herald, "Details")).click();
       const heading = tokenPanel(dm).getByRole("heading", { name: run.herald.name });
       await heading.waitFor();
       assert.equal((await heading.innerText()).trim(), run.herald.name, "the panel shows the whole name");
@@ -1037,11 +1039,14 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await tapToken(dm, run.goblin.at);
     const goblin = bar(dm, "Goblin 4");
     await goblin.waitFor();
+    // The bar rests as the strip at the map's foot, and Expand shows all of it (docs/design-v1-bar-compact.md 3 and 5).
+    assert.equal(await goblin.getAttribute("data-bar-state"), "rest", "390 x 844: the bar does not rest");
+    await expandBar(goblin);
     const vitals = await rectOf(goblin.locator("[data-vitals]"));
     assert.ok(vitals.height < 30, `the vitals take more than one line spanning: ${vitals.height} px`);
     const saves = await rectOf(goblin.locator("[data-saves]"));
     assert.ok(saves.height < 30, `the saves take more than one line spanning: ${saves.height} px`);
-    // At 100% the full layout's Apply shows wherever the bar hangs (barButtons.ts SPAN_SHORT_BAR_PX).
+    // At 100% the expanded bar's full layout shows Apply wherever its token stands (barButtons.ts barCapacity).
     await applyInView(goblin, "390 x 844, Goblin 4 mid-screen");
     // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.
     for (const [t, name] of [
@@ -1053,6 +1058,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await tapToken(dm, t.at);
       const other = bar(dm, name);
       await other.waitFor();
+      await expandBar(other);
       assert.equal(await other.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${name}: the layout changed with the token's place`);
       await applyInView(other, `390 x 844, ${name}`);
       const modes = await rectOf(other.getByRole("radiogroup", { name: "What the number does" }));
@@ -1061,7 +1067,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await dm.keyboard.press("Escape");
     await tapToken(dm, run.goblin.at);
     await goblin.waitFor();
-    await goblin.getByRole("button", { name: "Details", exact: true }).click();
+    await (await barControl(goblin, "Details")).click();
     const panel = tokenPanel(dm);
     const fold = panel.getByRole("button", { name: "Stat block", exact: true });
     await fold.waitFor();
@@ -1081,7 +1087,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await panel.waitFor({ state: "detached" });
     await dm.keyboard.press("Escape");
     await tapToken(dm, run.dragon.at, 3);
-    await bar(dm, "Adult White Dragon").getByRole("button", { name: "Details", exact: true }).click();
+    await (await barControl(bar(dm, "Adult White Dragon"), "Details")).click();
     assert.equal(await tokenPanel(dm).getByRole("button", { name: "Stat block", exact: true }).getAttribute("aria-expanded"), "true", "the fold is remembered for the next monster");
     await tokenPanel(dm).getByRole("button", { name: "Stat block", exact: true }).click();
     await dm.getByRole("region", { name: "Token", exact: true }).getByRole("button", { name: "Close Token" }).click();
@@ -1089,7 +1095,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
 
     // From the bar, Stat block hides it, opens the Token sheet at the block and focuses its disclosure.
     await tapToken(dm, run.goblin.at);
-    await goblin.getByRole("button", { name: "Stat block", exact: true }).click();
+    await (await barControl(goblin, "Stat block")).click();
     await goblin.waitFor({ state: "hidden" });
     await waitFor("focus on the stat block's disclosure", async () => {
       const f = await focused(dm);
@@ -1188,7 +1194,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("7b. a phone upright at 130%, short with Apply in view wherever its token stands, and an upright tablet, full: Stat block hiding the bar for the sheet at the block, and the image and HP rows", async () => {
+  test("7b. a phone upright at 130%, its expanded bar full with Apply in view wherever its token stands, and an upright tablet, full: Stat block hiding the bar for the sheet at the block, and the image and HP rows", async () => {
     const sizes: (View & { label: string; hpLabels: "beside" | "above" })[] = [
       { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%", hpLabels: "above" },
       { width: 820, height: 1180, scale: 1, label: "820 x 1180", hpLabels: "beside" },
@@ -1197,17 +1203,19 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await setUp(dm, dmCdp, size, null);
       await tapToken(dm, run.goblin.at);
       const goblin = bar(dm, "Goblin 4");
-      await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
+      await goblin.waitFor();
       /*
-       * A spanning bar's layout is the screen's, wherever the token stands,
-       * from the least room any token leaves it (barButtons.ts barCapacity).
-       * An upright phone at 130% leaves its full layout's Apply out of view
-       * there, so its bar is short for every token, with Apply in view. The
-       * tablet docks, full.
+       * An upright phone's bar rests as the strip, and its expanded bar's
+       * layout is the screen's, wherever the token stands, from the room
+       * Expand may take (barDock.ts spanRoomAtWorst, F - 128): at 390 x 844
+       * at 130% that holds the full layout, Apply in view for every token
+       * (docs/design-v1-bar-compact.md 9.1). The tablet docks, full.
        */
-      const short = size.width < 600;
-      assert.equal(await goblin.getByRole("button", { name: "More stats", exact: true }).count(), short ? 1 : 0, `${size.label}: the bar is ${short ? "full" : "short"}`);
-      if (short) {
+      const phone = size.width < 600;
+      await expandBar(goblin);
+      await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
+      assert.equal(await goblin.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${size.label}: the bar is short`);
+      if (phone) {
         await applyInView(goblin, `${size.label}, Goblin 4 mid-screen`);
         for (const [t, name] of [
           [run.thorn, "Thorn"],
@@ -1217,17 +1225,18 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
           await tapToken(dm, t.at);
           const other = bar(dm, name);
           await other.waitFor();
-          assert.equal(await other.getByRole("button", { name: "More stats", exact: true }).count(), 1, `${size.label}, ${name}: the layout changed with the token's place`);
+          await expandBar(other);
+          assert.equal(await other.getByRole("button", { name: "More stats", exact: true }).count(), 0, `${size.label}, ${name}: the layout changed with the token's place`);
           await applyInView(other, `${size.label}, ${name}`);
         }
         await dm.keyboard.press("Escape");
         await tapToken(dm, run.goblin.at);
-        await goblin.getByRole("button", { name: "More stats", exact: true }).click();
+        await expandBar(goblin);
       }
       await goblin.locator("[data-saves]").waitFor();
       await noSideScroll(goblin, `${size.label}, the bar`);
       await steadyAboveSize(goblin, size.label);
-      await goblin.getByRole("button", { name: "Stat block", exact: true }).click();
+      await (await barControl(goblin, "Stat block")).click();
       const panel = tokenPanel(dm);
       await panel.getByRole("heading", { name: "Goblin Warrior" }).waitFor();
       await goblin.waitFor({ state: "hidden" });
@@ -1316,14 +1325,16 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await tapToken(player, run.bear.at);
     await bar(player, "Brown Bear").locator("[data-saves]").waitFor();
 
-    // The SRD chunk waits 600 ms, so Loading saves shows.
+    // The SRD chunk waits 1.5 s, so Loading saves shows once the strip has expanded.
     await player.route(/\/assets\/monsters-[^/]*\.js$/, async (route) => {
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 1_500));
       await route.continue();
     });
     await setUp(player, playerCdp, { width: 390, height: 844, scale: 1 }, null);
     await tapToken(player, run.thorn.at);
     const thorn = bar(player, "Thorn");
+    // The strip shows the whole bar once expanded (docs/design-v1-bar-compact.md 5).
+    await expandBar(thorn);
     await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
     const text = (await thorn.innerText()).replace(/\s+/g, " ");
     for (const words of ["HP 31/38", "+5"]) assert.ok(text.includes(words), `Thorn's bar lacks ${words}`);
@@ -1331,11 +1342,11 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await thorn.getByRole("link", { name: "Open the sheet" }).getAttribute("href"), SHEET);
     await thorn.getByRole("button", { name: "Details", exact: true }).waitFor();
     assert.equal(await thorn.locator("[data-saves]").count(), 0);
-    // Conditions and Multi-select in view as the bar opens, with Size under them (the project owner's answer to W5B-P-2).
+    // Conditions and Multi-select in view as the bar expands, with Size under them (the project owner's answer to W5B-P-2).
     const spanning = await rectOf(thorn.locator("[data-bar-scroll]"));
     for (const name of ["Conditions", "Multi-select"]) {
       const button = await rectOf(thorn.getByRole("button", { name, exact: true }));
-      assert.ok(button.top >= spanning.top && button.bottom <= spanning.bottom + 1, `an upright phone: Pat's ${name} needs a scroll: ${JSON.stringify({ spanning, button })}`);
+      assert.ok(button.top >= spanning.top && button.bottom <= spanning.bottom + 1, `an upright phone, expanded: Pat's ${name} needs a scroll: ${JSON.stringify({ spanning, button })}`);
       assert.equal(await labelUnderFade(thorn, name), null, `an upright phone: Pat's ${name} runs under "Scroll for more"`);
     }
     await steadyAboveSize(thorn, "390 x 844, spanning");
@@ -1345,6 +1356,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await tapToken(player, run.bree.at);
     const bree = bar(player, "Bree");
     await bree.waitFor();
+    await expandBar(bree);
     assert.equal(await bree.getByRole("img").count(), 0, "Bree's AC shows to Pat");
     assert.ok((await bree.locator("[data-vitals]").innerText()).includes("HP 12/24"), "Bree's HP as the party's rule sends it");
     assert.equal(await bree.getByRole("img", { name: /^Passive Perception/ }).count(), 0);
@@ -1353,6 +1365,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await tapToken(player, run.goblin.at);
     const goblin = bar(player, "Goblin 4");
     await goblin.waitFor();
+    await expandBar(goblin);
     assert.equal((await goblin.locator("[data-vitals]").innerText()).trim(), "Healthy");
     assert.equal(await goblin.getByRole("textbox", { name: "HP change" }).count(), 0);
     await goblin.getByRole("button", { name: "Details", exact: true }).waitFor();
@@ -1369,6 +1382,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
 
     await tapToken(player, run.bear.at);
     const bear = bar(player, "Brown Bear");
+    await expandBar(bear);
     await bear.getByText("Loading saves…").waitFor();
     await shots.take(player, "tokenpanel-pat-bear-loading-saves");
     await bear.locator("[data-saves]").waitFor();
@@ -1391,6 +1405,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await setUp(page, cdp, view, null);
         await tapToken(page, run.thorn.at);
         const thorn = bar(page, "Thorn");
+        await expandBar(thorn);
         await thorn.getByRole("img", { name: "Armor Class 16" }).waitFor();
         if (elevation) {
           await page.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
@@ -1527,7 +1542,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await tapToken(dm, run.goblin.at);
         const goblin = bar(dm, "Goblin 4");
         await goblin.waitFor();
-        // A short bar keeps Details with the rest behind More stats.
+        // An upright phone's strip shows the rest once expanded, and a short bar keeps Details with the rest behind More stats.
+        await expandBar(goblin);
         const more = goblin.getByRole("button", { name: "More stats", exact: true });
         if ((await more.count()) > 0) await more.click();
         await goblin.getByRole("button", { name: "Details", exact: true }).click();
@@ -1768,6 +1784,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await setUp(player, playerCdp, view, null);
       await tapAt(player, { x: 4, y: 4 });
       await thorn.waitFor();
+      // At 320 x 480 at 130% the strip scrolls in place of Expand, and the row is reached by its scroll (docs/design-v1-bar-compact.md 5.4).
+      await expandBar(thorn);
       const row = sizeRow(thorn);
       await steadyAboveSize(thorn, label);
       await row.scrollIntoViewIfNeeded();

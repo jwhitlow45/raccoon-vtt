@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The combat flow (docs/design-v1-combat-flow.md section 8) on the real
@@ -1274,7 +1274,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await setUp(dm, dmCdp, phone);
     await openTracker(dm);
     await (await rowButton(dm, goblinName(4))).click();
-    await bar(dm, goblinName(4)).getByRole("button", { name: "Details", exact: true }).click();
+    await (await barControl(bar(dm, goblinName(4)), "Details")).click();
     const panel = dm.locator('dialog[data-rvtt-sheet][aria-label="Token"]');
     await openFold(panel, "Token settings");
     await panel.getByRole("button", { name: "Make a companion", exact: true }).click();
@@ -1284,7 +1284,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await dm.keyboard.press("Escape");
     await openTracker(dm);
     await dm.getByRole("button", { name: /^Wildfire Spirit, acts on Bree's turn/ }).click();
-    await bar(dm, "Wildfire Spirit").getByRole("button", { name: "Details", exact: true }).click();
+    await (await barControl(bar(dm, "Wildfire Spirit"), "Details")).click();
     await openFold(panel, "Companion");
     await turnShowsWhole(panel.getByRole("combobox", { name: "Turn", exact: true }), "the spirit's Companion section at 390");
     await dm.keyboard.press("Escape");

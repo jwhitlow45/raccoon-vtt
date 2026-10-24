@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page } from "playwright-core";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -198,9 +198,9 @@ const SOME_SIZES: Record<string, number> = {
   // Setup on the phone layout (the upright phones, the tablet and 844 x 390 at 100%), Tools in the pair (844 x 390 at 130%).
   "setup-menu": 9,
   "tools-menu": 1,
-  // The token bar's Larger, on the upright phones, where the bar spans, and the group's.
-  "window-larger": 6,
-  "group-larger": 6,
+  // The token bar expanded from the strip, on the upright phones where Expand is drawn (docs/design-v1-bar-compact.md 5.1), and the group's.
+  "window-expanded": 5,
+  "group-expanded": 5,
   // The dice pass's roots (docs/design-v1-dice-pass.md 11.3), at the three dice sizes at 100% and 130%.
   "dp-modes": 6,
   "dp-card-dragon": 6,
@@ -217,7 +217,8 @@ const SOME_SIZES: Record<string, number> = {
   // With the dragon's bar across the column, the turn card folds to its row, or leaves the column where even its row would meet the bar (4.2).
   // At 844 x 390 the recharge card and the fade's room under it leave the bar too little room to stack, so it docks beside the column (barDock.ts COLUMN_FADE).
   "cu-turn-fold-bar": 5,
-  "cu-turn-hidden-bar": 8,
+  // Not on the upright phones, whose bar rests as the strip at the map's foot, clear of the card (docs/design-v1-bar-compact.md 3.1).
+  "cu-turn-hidden-bar": 4,
 };
 
 /**
@@ -491,9 +492,40 @@ async function selectToken(page: Page, name: string, cell: { x: number; y: numbe
   return (await showsWithin(bar, 3_000)) ? bar : null;
 }
 
-/** Measures a token window's header, play row and group line (where it has one), and keeps where its header stands. */
+/**
+ * A bar's header: its sticky header, or on a strip that scrolls, whose
+ * header scrolls with it (docs/design-v1-bar-compact.md 5.4), the row that
+ * holds its Close, marked for the measure.
+ */
+async function barHeader(bar: Locator): Promise<Locator> {
+  const sticky = bar.locator("[data-sticky-header]");
+  if ((await sticky.count()) > 0) return sticky;
+  const close = bar.getByRole("button", { name: "Close", exact: true }).first();
+  if ((await close.count()) === 0) return sticky;
+  await close.evaluate((el) => {
+    type El = { parentElement: El | null; getBoundingClientRect(): { width: number }; setAttribute(n: string, v: string): void; closest(s: string): El | null };
+    const button = el as unknown as El;
+    const width = button.closest("[data-bar-mode]")?.getBoundingClientRect().width ?? 0;
+    let row = button.parentElement;
+    while (row && row.getBoundingClientRect().width < width * 0.8) row = row.parentElement;
+    row?.setAttribute("data-e2e-header", "");
+  });
+  return bar.locator("[data-e2e-header]");
+}
+
+/**
+ * Measures a token window's header, play row and group line (where it has
+ * one), and keeps where its header stands. An upright phone's bar is
+ * measured resting as the strip for its header, and expanded for the
+ * rest (docs/design-v1-bar-compact.md 11), which it stays.
+ */
 async function measureWindow(sweep: Sweep, page: Page, screen: string, bar: Locator, headers: HeaderPlace[], groupLine: boolean): Promise<void> {
-  await sweep.measure(page, `${screen}-header`, bar.locator("[data-sticky-header]"));
+  if ((await bar.getAttribute("data-bar-state")) === "expanded") {
+    await bar.getByRole("button", { name: "Collapse", exact: true }).click();
+    await waitFor("the strip", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null), 3_000);
+  }
+  await sweep.measure(page, `${screen}-header`, await barHeader(bar));
+  await expandBar(bar);
   await sweep.measure(page, `${screen}-play-row`, bar.locator('[data-bar-row="play"]'));
   await sweep.measure(page, `${screen}-group-line`, bar.getByRole("group", { name: "Attached tokens" }), { optional: !groupLine });
   const places = await headerPlaces(bar);
@@ -691,16 +723,9 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
     await measureWindow(sweep, page, "window-thorn", thorn, headers, false);
-    // An upright phone's bar in its larger size, whole (docs/design-v1-bar-dock.md 1.5), then Smaller again, which moves the map back.
-    const larger = thorn.getByRole("button", { name: "Larger", exact: true });
-    if (await visible(larger)) {
-      await larger.click();
-      await thorn.getByRole("button", { name: "Smaller", exact: true }).waitFor();
-      await sweep.measure(page, "window-larger", thorn);
-      await thorn.getByRole("button", { name: "Smaller", exact: true }).click();
-      await thorn.getByRole("button", { name: "Larger", exact: true }).waitFor();
-    }
-    const attach = thorn.getByRole("button", { name: "Attach", exact: true });
+    // An upright phone's bar expanded from the strip, whole (docs/design-v1-bar-compact.md 5), as measureWindow leaves it.
+    if ((await thorn.getAttribute("data-bar-state")) === "expanded") await sweep.measure(page, "window-expanded", thorn);
+    const attach = await barControl(thorn, "Attach");
     await attach.click();
     const sheet = page.getByRole("dialog", { name: "Attach Thorn" });
     await sheet.waitFor();
@@ -716,7 +741,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   if (goblin) {
     await measureWindow(sweep, page, "window-goblin", goblin, headers, true);
     await sweep.add(page, "holder-line", await leadLines(goblin.getByRole("group", { name: "Attached tokens" }), ["Carrying", "Dragging"], `${sweep.at} holder-line`));
-    const multi = goblin.getByRole("button", { name: "Multi-select", exact: true });
+    const multi = await barControl(goblin, "Multi-select");
     await multi.click();
     await tapCell(page, BOUNDS, { x: 4, y: 4 });
     // The prisoner too where the window leaves its cell clear, as on a short screen it may not.
@@ -724,15 +749,8 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     const group = page.locator('[role="dialog"][data-bar-mode]');
     if (await showsWithin(group.first(), 3_000)) {
       await measureWindow(sweep, page, "window-group", group.first(), headers, false);
-      // The group's bar in its larger size on an upright phone, then Smaller again.
-      const larger = group.first().getByRole("button", { name: "Larger", exact: true });
-      if (await visible(larger)) {
-        await larger.click();
-        await group.first().getByRole("button", { name: "Smaller", exact: true }).waitFor();
-        await sweep.measure(page, "group-larger", group.first());
-        await group.first().getByRole("button", { name: "Smaller", exact: true }).click();
-        await group.first().getByRole("button", { name: "Larger", exact: true }).waitFor();
-      }
+      // The group's bar expanded from its strip on an upright phone.
+      if ((await group.first().getAttribute("data-bar-state")) === "expanded") await sweep.measure(page, "group-expanded", group.first());
       await page.getByRole("button", { name: "Deselect all" }).first().click();
     } else await sweep.missing(page, "window-group", "Multi-select and two taps opened no group window");
     await escapeAll(page);
@@ -745,6 +763,19 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   else await sweep.missing(page, "window-rider", "a tap on the mounted Thorn opened no window");
   await escapeAll(page);
   await resetThorn();
+
+  // A dying Thorn's strip, Crit in its quick row where it fits (docs/design-v1-bar-compact.md 3.3), on the upright phones the design measured. The row is the strip's content, measured wherever the strip draws one.
+  if (PHONE_ROOTS.has(size.name)) {
+    await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "damage", amount: 30 } });
+    await waitFor("Thorn at 0 HP", () => (dmSocket.state?.characters[run.ids.thornChar]?.actor.hp.cur === 0 ? true : null));
+    const dying = await selectToken(page, "Thorn", { x: 5, y: 5 });
+    if (dying) {
+      const row = dying.locator("[data-rest-row]");
+      await sweep.measure(page, "rest-crit", row, { optional: (await row.count()) === 0 });
+    } else await sweep.missing(page, "rest-crit", "a tap on the dying Thorn opened no window");
+    await escapeAll(page);
+    await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "heal", amount: 30 } });
+  }
 
   if (headers.length === 0) await sweep.missing(page, "headers", "no header place was read");
   await sweep.add(page, "headers", headerLines(headers, `${sweep.at} headers`));
@@ -844,7 +875,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     await closeDiceSheet(page);
     const again = page.getByRole("dialog", { name: "Adult Black Dragon actions" });
     if (!(await showsWithin(again, 3_000))) return sweep.missing(page, "dp-several", "the dragon's window closed with the Dice sheet");
-    await again.getByRole("button", { name: "Multi-select", exact: true }).click();
+    await (await barControl(again, "Multi-select")).click();
     // Two more creatures where the map shows them: the dragon's window covers some cells at some sizes.
     let added = 0;
     for (const cell of [{ x: 4, y: 4 }, { x: 9, y: 3 }, { x: 8, y: 8 }, { x: 15, y: 11 }, { x: 3, y: 7 }]) {
@@ -1533,6 +1564,25 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await escapeAll(page);
   await setWall(false);
   await resetThorn();
+
+  // Pat's strip after his own move, Undo move in Roll's place where it fits (docs/design-v1-bar-compact.md 3.3), on the upright phones the design measured. The row is the strip's content, measured wherever the strip draws one.
+  if (PHONE_ROOTS.has(size.name)) {
+    const start = await pagePoint(page, BOUNDS, { x: 5.5, y: 5.5 });
+    const end = await pagePoint(page, BOUNDS, { x: 6.5, y: 5.5 });
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(start.x + ((end.x - start.x) * i) / 8, start.y + ((end.y - start.y) * i) / 8);
+    await page.mouse.up();
+    await waitFor("Thorn a cell east", () => (dmSocket.state?.tokens[run.ids.thorn]?.x === 6 ? true : null), 5_000);
+    const moved = page.getByRole("dialog", { name: "Thorn actions" });
+    const strip = (await showsWithin(moved, 1_500)) ? moved : await selectToken(page, "Thorn", { x: 6, y: 5 });
+    if (strip) {
+      const row = strip.locator("[data-rest-row]");
+      await sweep.measure(page, "rest-row-pat", row, { optional: (await row.count()) === 0 });
+    } else await sweep.missing(page, "rest-row-pat", "a tap on the moved Thorn opened no window");
+    await escapeAll(page);
+    await resetThorn();
+  }
 
   // Pat's other toasts (live play 18): the DM's whisper, an undo the DM's move overtook, and the DM's roll with its die.
   await toastScreen(sweep, page, "pat-toast-whisper", /hear chanting/, () => ops.send({ t: "log.whisper", to: [run.patId], text: "You hear chanting." }));
@@ -2224,6 +2274,50 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       sweep.tally();
     }
     assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line at 480x320-130:\n${sweep.lines.join("\n")}`);
+  });
+
+  test(`pl3-b${index + 2}. the scrolling strip at its top and after Scroll for more, at 375 x 667 with a roll card and in 320 x 440 and 320 x 360 windows at 130%, within ${LIMIT_PX} px (docs/design-v1-bar-compact.md 5.4)`, async () => {
+    const sweep = new Sweep("rest-scrolls");
+    try {
+      // No fight, whose turn band would leave these windows too short for the strip.
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await resetThorn();
+      for (const [size, scale, card] of [
+        [{ name: "375x667", width: 375, height: 667, touch: true }, 1, true],
+        [{ name: "320x440", width: 320, height: 440, touch: true }, 1.3, false],
+        [{ name: "320x360", width: 320, height: 360, touch: true }, 1.3, false],
+      ] as const) {
+        const at = `${size.name}${scale === 1 ? "" : "-130"}`;
+        await openAt(pat, size, scale);
+        const id = randomUUID();
+        if (card) {
+          await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
+          await pat.getByRole("dialog", { name: "The DM asks for a roll" }).waitFor();
+        }
+        try {
+          const strip = await selectToken(pat, "Thorn", { x: 5, y: 5 });
+          if (!strip) {
+            await sweep.missing(pat, `rest-scrolls ${at}`, "a tap on Thorn opened no window");
+            continue;
+          }
+          if ((await strip.getAttribute("data-bar-state")) !== "scrolls") {
+            await sweep.missing(pat, `rest-scrolls ${at}`, `the bar is ${await strip.getAttribute("data-bar-mode")} and ${await strip.getAttribute("data-bar-state")}, not a strip that scrolls`);
+            continue;
+          }
+          await sweep.measure(pat, "rest-scrolls", strip);
+          await strip.getByRole("button", { name: "Scroll for more", exact: true }).click();
+          await pat.waitForTimeout(400);
+          await sweep.measure(pat, "rest-scrolls", strip);
+          await shots.take(pat, `alignment-rest-scrolls-${at}`);
+        } finally {
+          await escapeAll(pat);
+          if (card) await ops.send({ t: "roll.close", rollIds: [id] });
+        }
+      }
+    } finally {
+      sweep.tally();
+    }
+    assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line in the scrolling strip:\n${sweep.lines.join("\n")}`);
   });
 
   test("pl3-c. the screens that show only at some sizes showed at as many as the polish pass found, and each trap name's pointer was read", () => {

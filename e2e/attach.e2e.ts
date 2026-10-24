@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { RoomState, Token } from "../shared/model.ts";
-import { ConsoleWatch, dragCells, dragWorld, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
  * Attached tokens end to end (docs/design-v1-attach.md 13), on the real
@@ -278,7 +278,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       const device = await patDevice(view.viewport, view.scale);
       try {
         const thorn = await select(device.page, "Thorn", { x: 3, y: 5 });
-        await thorn.getByRole("button", { name: "Attach", exact: true }).tap();
+        await (await barControl(thorn, "Attach")).tap();
         const sheet = device.page.getByRole("dialog", { name: "Attach Thorn" });
         await sheet.waitFor();
         const row = sheet.getByRole("button", { name: "Ride Warhorse" });
@@ -320,7 +320,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     const device = await patDevice(PHONE);
     try {
       const thorn = await select(device.page, "Thorn", { x: 3, y: 5 });
-      await thorn.getByRole("button", { name: "Attach", exact: true }).tap();
+      await (await barControl(thorn, "Attach")).tap();
       const sheet = device.page.getByRole("dialog", { name: "Attach Thorn" });
       await sheet.waitFor();
       const row = sheet.getByRole("button", { name: "Ride Warhorse" });
@@ -344,7 +344,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
 
   test("at-1. on Thorn's turn Pat opens Attach on Thorn's bar, picks Ride Warhorse, Controlled, and pays half Thorn's Speed", async () => {
     const thorn = await select(pat, "Thorn", { x: 3, y: 5 });
-    await thorn.getByRole("button", { name: "Attach", exact: true }).tap();
+    await (await barControl(thorn, "Attach")).tap();
     const sheet = pat.getByRole("dialog", { name: "Attach Thorn" });
     await sheet.waitFor();
     await sheet.getByRole("button", { name: "Ride Warhorse" }).tap();
@@ -382,7 +382,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
   test("at-3. Pat taps Get off on Thorn's bar: Thorn stands beside the warhorse, paying half his Speed, and the horse shares the turn no more", async () => {
     const rider = token(patSocket, run.thorn)!;
     const thorn = await select(pat, "Thorn", { x: rider.x, y: rider.y });
-    await thorn.getByRole("button", { name: "Get off", exact: true }).tap();
+    await (await barControl(thorn, "Get off")).tap();
     const off = await waitFor("Thorn off the warhorse", () => (token(patSocket, run.thorn)?.attached === undefined ? token(patSocket, run.thorn) : null));
     const horse = token(patSocket, run.horse)!;
     const inside = off.x >= horse.x && off.x < horse.x + 2 && off.y >= horse.y && off.y < horse.y + 2;
@@ -413,7 +413,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       await waitFor("the crowd on Pat's phone", () => (crowd.every((id) => token(patSocket, id)) ? true : null));
       const rider = token(patSocket, run.thorn)!;
       const thorn = await select(pat, "Thorn", { x: rider.x, y: rider.y });
-      const getOff = thorn.getByRole("button", { name: "Get off", exact: true });
+      const getOff = await barControl(thorn, "Get off");
       await waitFor("Get off unavailable", async () => ((await getOff.getAttribute("aria-disabled")) === "true" ? true : null));
       await thorn.getByText("No room to get off.", { exact: true }).waitFor();
       // Unavailable, not disabled: it takes focus and keeps its place in the keys' order.
@@ -439,7 +439,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
 
   test("at-4. the DM perches the hidden imp on the cult fanatic from the Attach popover and moves the fanatic: the imp follows, and no frame to Pat or Sam names it", async () => {
     await select(dm, "Imp", { x: 14, y: 3 }, true);
-    await bar(dm, "Imp").getByRole("button", { name: "Attach", exact: true }).click();
+    await (await barControl(bar(dm, "Imp"), "Attach")).click();
     const popover = dm.getByRole("dialog", { name: "Attach" });
     await popover.waitFor();
     await popover.getByRole("button", { name: "Perch on Cult Fanatic" }).click();
@@ -462,7 +462,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       return g && "inline" in g.actor && g.actor.inline.effects.some((e) => e.key === "grappled");
     });
     await select(sam, "Bree", { x: 9, y: 8 });
-    await bar(sam, "Bree").getByRole("button", { name: "Attach", exact: true }).click();
+    await (await barControl(bar(sam, "Bree"), "Attach")).click();
     const popover = sam.getByRole("dialog", { name: "Attach" });
     await popover.waitFor();
     await popover.getByRole("button", { name: "Drag Goblin" }).click();
@@ -534,7 +534,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     await waitFor("the scout on the DM's map", () => token(dmSocket, scout));
     await dm.keyboard.press("Escape");
     const b = await select(dm, "Scout", { x: 1, y: 1 });
-    await b.getByRole("button", { name: "Attach", exact: true }).click();
+    await (await barControl(b, "Attach")).click();
     const popover = dm.getByRole("dialog", { name: "Attach" });
     await popover.waitFor();
     const more = popover.getByText("Scroll for more");
@@ -565,7 +565,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
 
   test("lp2-3c-keys. in the DM's pop-up for the scout, Down, Up, Home and End move through the near rows and Farther away as one list, wrapping at the ends (docs/design-v1-look-pass-2.md 3, lane 3)", async () => {
     const b = await select(dm, "Scout", { x: 1, y: 1 });
-    await b.getByRole("button", { name: "Attach", exact: true }).click();
+    await (await barControl(b, "Attach")).click();
     const popover = dm.getByRole("dialog", { name: "Attach Scout" });
     await popover.waitFor();
     const farther = popover.getByRole("group", { name: "Farther away" });
@@ -614,6 +614,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       try {
         // The hobgoblin's top-right quarter, clear of the lantern in its bottom-left one.
         const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
+        // An upright phone's strip shows the holder's line once expanded (docs/design-v1-bar-compact.md 5).
+        await expandBar(b);
         const line = b.getByRole("group", { name: "Attached tokens" });
         await line.scrollIntoViewIfNeeded();
         const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
@@ -664,6 +666,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       try {
         const b = await select(page, "Hobgoblin", { x: 9.25, y: 0.75 });
         const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;
+        // An upright phone's strip shows its rows of buttons once expanded (docs/design-v1-bar-compact.md 5).
+        await expandBar(b);
         await b.locator('[data-bar-row="less"]').scrollIntoViewIfNeeded();
         await shots.take(page, `attach-pl2-c-rows-${viewport.width}-${Math.round(scale * 100)}`);
         const rows = await b.locator("[data-bar-row]").evaluateAll((nodes) =>
@@ -718,6 +722,8 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       try {
         // The ogre's top-right square, clear of the chest in its bottom-left corner.
         const b = await select(page, "Ogre", { x: 13, y: 0 });
+        // An upright phone's strip shows the holder's line once expanded (docs/design-v1-bar-compact.md 5).
+        await expandBar(b);
         const line = b.getByRole("group", { name: "Attached tokens" });
         await line.scrollIntoViewIfNeeded();
         const where = `at ${viewport.width} px and ${Math.round(scale * 100)}%`;

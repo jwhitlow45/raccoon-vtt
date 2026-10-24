@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
 
@@ -542,7 +542,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         // Modal: Attach a stat block, from the goblin's panel.
         await closeSheet(phone);
         await clickToken(run.goblin);
-        if (phone) await page.getByRole("button", { name: "Details" }).click();
+        if (phone) await (await barControl(page.locator('[role="dialog"][data-bar-mode]'), "Details")).click();
         else await page.getByRole("tab", { name: "Token" }).click();
         await page.getByRole("button", { name: "Attach a stat block" }).click();
         const attach = page.getByRole("dialog", { name: "Attach a stat block" });
@@ -553,7 +553,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await closeSheet(phone);
         await page.keyboard.press("Escape");
         await clickToken(run.pip);
-        if (phone) await page.getByRole("button", { name: "Details" }).click();
+        if (phone) await (await barControl(page.locator('[role="dialog"][data-bar-mode]'), "Details")).click();
         else await page.getByRole("tab", { name: "Token" }).click();
         await page.getByRole("button", { name: "Attach a stat block" }).click();
         const lists = page.getByRole("dialog", { name: "Attach a stat block" });
@@ -806,7 +806,7 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
       await clickToken(run.goblin);
       const bar = page.getByRole("dialog", { name: "Goblin actions" });
       await bar.waitFor();
-      await bar.getByRole("button", { name: "Attach", exact: true }).click();
+      await (await barControl(bar, "Attach")).click();
       const sheet = page.getByRole("dialog", { name: "Attach Goblin" });
       await sheet.waitFor();
       const row = sheet.getByRole("button", { name: "Get on Treasure chest of the drowned king" });

@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { AreaTemplate, LogEntry, LogEvent } from "../shared/model.ts";
-import { ConsoleWatch, diceFoldsOpen, dragCells, LoadWatch, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, dragCells, LoadWatch, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player's save spell end to end (docs/design-v1-player-save-spell.md 8),
@@ -381,7 +381,7 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     await waitFor("Goblin 2 on Pat's map", () => patSocket.state?.tokens[run.goblins[1]!.id]);
     await pickTool(pat, "Select");
     await tapCell(pat, BOUNDS, run.thorn);
-    await pat.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    await (await barControl(pat.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
     for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
     await pat.getByRole("dialog", { name: "3 selected tokens" }).waitFor();
     const dice = await openDice(pat);
@@ -437,7 +437,7 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
   test("ss-7. the DM's phone reloads with an ask's group save open: the card stays away until Discard", async () => {
     await pickTool(pat, "Select");
     await tapCell(pat, BOUNDS, run.thorn);
-    await pat.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    await (await barControl(pat.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
     for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
     await pat.getByRole("dialog", { name: "3 selected tokens" }).waitFor();
     const dice = await openDice(pat);
@@ -474,7 +474,7 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
   test("ss-7b. Hold Person's block takes the focus for its opening only, and folded, its ask still closes it and the DM's Dismiss clears the folded line", async () => {
     await pickTool(pat, "Select");
     await tapCell(pat, BOUNDS, run.thorn);
-    await pat.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    await (await barControl(pat.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
     for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
     await pat.getByRole("dialog", { name: "3 selected tokens" }).waitFor();
     const dice = await openDice(pat);

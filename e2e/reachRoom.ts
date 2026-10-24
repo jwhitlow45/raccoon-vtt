@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The room, the browsers and the steps of the short-screen reach run,
@@ -233,7 +233,7 @@ export async function setTool(page: Page, tool: Tool, label: string, select: () 
     return tool === "none";
   }
   if (tool === "none") return true;
-  await barFrame(page).getByRole("button", { name: "Multi-select", exact: true }).tap();
+  await (await barControl(barFrame(page), "Multi-select")).tap();
   await page.getByRole("toolbar", { name: "Select options" }).waitFor();
   const off = await emptyPoint(page, []);
   if (off) await page.touchscreen.tap(off.x, off.y);

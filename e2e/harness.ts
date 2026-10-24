@@ -485,6 +485,30 @@ export async function pickTool(page: Page, label: string, within?: Locator): Pro
   await page.getByRole("menu", { name: "Tools" }).getByRole("menuitemradio", { name: label, exact: true }).click();
 }
 
+/**
+ * A control of the token bar, by its role and name. On a phone held
+ * upright the bar rests as a strip at the map's foot, whose quick row
+ * shows only what fits there (docs/design-v1-bar-compact.md 3): a control
+ * not in it is behind Expand, which this presses first, or further down a
+ * strip that scrolls, which the control's own tap scrolls to. Any other
+ * bar shows every control, and this only finds it.
+ */
+export async function barControl(bar: Locator, name: string | RegExp, role: "button" | "checkbox" | "textbox" | "spinbutton" | "combobox" = "button"): Promise<Locator> {
+  const control = bar.getByRole(role, { name, exact: typeof name === "string" }).first();
+  if ((await bar.getAttribute("data-bar-state")) !== "rest" || ((await control.count()) > 0 && (await control.isVisible()))) return control;
+  await expandBar(bar);
+  return control;
+}
+
+/** Presses Expand on a resting strip (barControl) and waits for the bar it grows into. Any other bar is left as it is. */
+export async function expandBar(bar: Locator): Promise<void> {
+  if ((await bar.getAttribute("data-bar-state")) !== "rest") return;
+  const expand = bar.getByRole("button", { name: "Expand", exact: true });
+  if ((await expand.count()) === 0) return;
+  await expand.click();
+  await waitFor("the bar to expand", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null), 5_000);
+}
+
 /** Numbered screenshots that never overwrite an earlier run's. */
 export class Shots {
   private next: number | null = null;

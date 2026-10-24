@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, readCamera, reopenRoom, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, OpSocket, pagePoint, readCamera, reopenRoom, Shots, SocketWatch, startServer, tapCell, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A player on a phone after the visual design pass, from the live play
@@ -573,7 +573,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     // The token bar's Details gives way to the token's sheet, which takes focus at its heading (LPD-DESK-7).
     const thorn = playerSocket.state!.tokens[run.thorn.id]!;
     await tapCell(player, dmSocket.state!.scenes[run.sceneId]!.bounds, { x: thorn.x, y: thorn.y });
-    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Details" }).tap();
+    await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Details")).tap();
     await waitFor("the Token sheet's heading focused", async () => {
       const f = await focused(player);
       return f.tag === "h2" && f.name === "Token";
@@ -587,6 +587,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await tapCell(player, bounds, { x: 8, y: 6 });
     const bar = player.getByRole("dialog", { name: "Thorn actions" });
     await bar.waitFor();
+    // The mode's radios are the expanded bar's (docs/design-v1-bar-compact.md 3.3).
+    await expandBar(bar);
     await bar.getByRole("radiogroup", { name: "What the number does" }).locator("label").filter({ hasText: "Heal" }).tap();
     await bar.getByRole("textbox", { name: "HP change" }).fill("5");
 
@@ -597,6 +599,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
 
     await bar.waitFor();
     assert.equal(await bar.getByRole("textbox", { name: "HP change" }).inputValue(), "5", "the typed HP came back");
+    await expandBar(bar);
     assert.ok(await bar.getByRole("radio", { name: "Heal" }).isChecked(), "the mode chosen came back");
     await shots.take(player, "playerphone-bar-after-blackout");
     await bar.getByRole("button", { name: "Apply" }).tap();
@@ -695,6 +698,9 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await card(player).waitFor();
     await player.waitForTimeout(200);
     assert.ok(!intersects(await rectOf(card(player)), await rectOf(bar)), "upright after Show, the roll card meets the bar");
+    // The resting strip, its 114 px over the card (docs/design-v1-bar-compact.md 3.2).
+    assert.equal(await bar.getAttribute("data-bar-state"), "rest", "upright after Show, the bar is not the resting strip");
+    assert.ok(Math.abs((await rectOf(bar)).bottom - (await rectOf(bar)).top - 114) <= 0.5, "upright after Show, the strip is not 114 px");
     await shots.take(player, "playerphone-card-and-bar-portrait");
     await card(player).getByRole("button", { name: "Later" }).tap();
     await ops.send({ t: "roll.close", rollIds: [id] });
@@ -755,7 +761,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await waitFor("Goblin 2 on the player's map", () => playerSocket.state?.tokens[extra]);
     await setUp({ ...LANDSCAPE, scale: 1 });
     await touch([await cellPoint({ x: 8, y: 6 })]);
-    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
     await touch([await cellPoint({ x: 12, y: 9 })]);
     await player.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
 
@@ -791,7 +797,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
       // Off the bar, where the map shows: on an upright phone, whose overlay spans the screen, only the strip under the top bar.
       await player.waitForTimeout(200);
       await touch([await emptyPoint(player)]);
@@ -827,7 +833,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await insets({ side: 47, bottom: 21 });
       await setUp({ width: 844, height: 390, scale: 1.3 });
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
       await player.getByRole("toolbar", { name: "Select options" }).waitFor();
       assert.equal(await player.getByRole("toolbar", { name: "Select options" }).getAttribute("data-rvtt-arrangement"), "pair");
       assert.equal(await barFrame(player).getAttribute("data-bar-mode"), "dock", "844 x 390 at 130%: the bar does not dock");
@@ -842,7 +848,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
       const bar = player.getByRole("dialog", { name: "Thorn actions" });
-      await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await (await barControl(bar, "Multi-select")).tap();
       const id = randomUUID();
       await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
       // The roll's card yields to the compact bar at the screen's foot, or waits in the column, and either way the summary row stands for it.
@@ -901,7 +907,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       await insets(view.insets);
       await setUp(view);
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
       const id = randomUUID();
       try {
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
@@ -1038,7 +1044,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       try {
         await setUp({ width: 480, height: 320, scale });
         await touch([await cellPoint({ x: 8, y: 6 })]);
-        await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+        await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
         await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
         await player.waitForTimeout(400);
         await cardInReach(label, `playerphone-several-card-before-later-480x320-${Math.round(scale * 100)}`);
@@ -1076,7 +1082,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     try {
       await setUp({ width: 480, height: 320, scale: 1.3 });
       await touch([await cellPoint({ x: 8, y: 6 })]);
-      await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
       // The tap off hides the bar and keeps the group, before the turn band takes the map's last room.
       await touch([await emptyPoint(player)]);
       await barFrame(player).waitFor({ state: "detached" });
@@ -1129,7 +1135,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
           await player.getByRole("toolbar", { name: "Ruler options" }).waitFor();
         } else {
           await touch([await cellPoint({ x: 8, y: 6 })]);
-          await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+          await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
           await touch([await emptyPoint(player)]);
           await barFrame(player).waitFor({ state: "detached" });
         }
@@ -1258,190 +1264,161 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     return bar;
   }
 
+  /** Presses Expand on a resting strip and waits for the bar it grows into to hold still. */
+  async function expand(bar: Locator): Promise<void> {
+    await bar.getByRole("button", { name: "Expand", exact: true }).tap();
+    await waitFor("the bar to expand", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null));
+    await player.waitForTimeout(400);
+  }
+
   for (const view of [
     { width: 390, height: 844 },
     { width: 440, height: 956 },
   ]) {
     const label = `${view.width} x ${view.height}`;
-    test(`bs-1. at ${label} Larger, just left of Close, grows the bar under Thorn to show more of it with Thorn still on the map, Smaller puts it back, and a reload keeps Larger (docs/design-v1-bar-dock.md 1.5)`, async () => {
+    test(`bs-1. at ${label} Expand, just left of Close, grows Thorn's bar up from the strip's foot to show more of it with Thorn still on the map, Collapse brings the strip back, and a reload opens it resting (docs/design-v1-bar-compact.md 5)`, async () => {
       const KEY = "rvtt.tokenBarLarger";
       const target = { characterId: run.thorn.characterId };
       const effects = MANY.map((key) => ({ id: randomUUID(), key }));
       for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
-      await player.evaluate((key) => localStorage.removeItem(key), KEY);
       await setUp({ ...view, scale: 1 });
       let bar = player.getByRole("dialog", { name: "Thorn actions" });
       try {
         bar = await openThornAtMiddle(view);
         const before = await barFacts(bar);
         assert.equal(before.mode, "span", `${label}: the bar does not span`);
-        assert.ok(before.clipped, `${label}: the bar shows all it holds already (${before.height} px), so Larger has nothing to show`);
+        assert.equal(await bar.getAttribute("data-bar-state"), "rest", `${label}: the bar opened expanded`);
+        assert.equal(Math.round(before.height), 114, `${label}: the strip is ${before.height} px tall`);
 
         // Its button keeps the 44 px target and stands just left of Close, in its row.
-        const larger = bar.getByRole("button", { name: "Larger", exact: true });
+        const grow = bar.getByRole("button", { name: "Expand", exact: true });
         const close = bar.getByRole("button", { name: "Close", exact: true });
-        const [l, c] = [await rectOf(larger), await rectOf(close)];
-        assert.ok(l.right - l.left >= 44 - 0.5 && l.bottom - l.top >= 44 - 0.5, `${label}: Larger is under 44 px: ${JSON.stringify(l)}`);
-        assert.ok(l.right <= c.left + 0.5 && c.left - l.right <= 8.5, `${label}: Larger is not just left of Close: ${JSON.stringify({ l, c })}`);
-        assert.ok(Math.abs(l.top - c.top) <= 1 && Math.abs(l.bottom - c.bottom) <= 1, `${label}: Larger is out of Close's row`);
+        const [l, c] = [await rectOf(grow), await rectOf(close)];
+        assert.ok(l.right - l.left >= 44 - 0.5 && l.bottom - l.top >= 44 - 0.5, `${label}: Expand is under 44 px: ${JSON.stringify(l)}`);
+        assert.ok(l.right <= c.left + 0.5 && c.left - l.right <= 8.5, `${label}: Expand is not just left of Close: ${JSON.stringify({ l, c })}`);
+        assert.ok(Math.abs(l.top - c.top) <= 1 && Math.abs(l.bottom - c.bottom) <= 1, `${label}: Expand is out of Close's row`);
 
-        await larger.tap();
-        await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
-        await player.waitForTimeout(300);
+        await expand(bar);
         const grown = await barFacts(bar);
-        assert.ok(grown.height >= before.height + 80, `${label}: Larger grew the bar from ${before.height} to only ${grown.height} px`);
-        assert.ok(grown.whole > before.whole, `${label}: Larger shows no more of the bar: ${before.whole} buttons whole, then ${grown.whole}`);
+        assert.ok(grown.height >= before.height + 80, `${label}: Expand grew the bar from ${before.height} to only ${grown.height} px`);
+        assert.ok(Math.abs(grown.top + grown.height - (before.top + before.height)) <= 1, `${label}: the expanded bar left the strip's foot`);
+        assert.ok(grown.whole > before.whole, `${label}: Expand shows no more of the bar: ${before.whole} buttons whole, then ${grown.whole}`);
         assert.ok(grown.height <= (view.height * 2) / 3 + 2, `${label}: the bar took more than two thirds of the screen: ${grown.height} px`);
         // Thorn stays on the map, clear of the bar, the top bars and the toolbar.
         assert.equal(await hit(await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 6.5 })), "CANVAS", `${label}: Thorn is out of view`);
-        await shots.take(player, `playerphone-bs1-larger-${view.width}`);
+        await shots.take(player, `playerphone-bs1-expanded-${view.width}`);
 
-        await bar.getByRole("button", { name: "Smaller", exact: true }).tap();
-        await bar.getByRole("button", { name: "Larger", exact: true }).waitFor();
+        await bar.getByRole("button", { name: "Collapse", exact: true }).tap();
+        await bar.getByRole("button", { name: "Expand", exact: true }).waitFor();
         await player.waitForTimeout(300);
         const back = await barFacts(bar);
-        assert.ok(Math.abs(back.top - before.top) <= 1 && Math.abs(back.height - before.height) <= 1, `${label}: Smaller left the bar at ${back.top} + ${back.height}, not ${before.top} + ${before.height}`);
+        assert.ok(Math.abs(back.top - before.top) <= 1 && Math.abs(back.height - before.height) <= 1, `${label}: Collapse left the bar at ${back.top} + ${back.height}, not ${before.top} + ${before.height}`);
 
-        // The device keeps Larger for the next bar, through a reload.
-        await bar.getByRole("button", { name: "Larger", exact: true }).tap();
-        await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
-        assert.equal(await player.evaluate((key) => localStorage.getItem(key), KEY), "1");
+        // Expanded lasts while the bar stays open, and the device never keeps it: a reload opens the strip.
+        await expand(bar);
+        assert.equal(await player.evaluate((key) => localStorage.getItem(key), KEY), null, `${label}: Expand stored ${KEY}`);
         await setUp({ ...view, scale: 1 });
         bar = await openThornAtMiddle(view);
-        assert.equal(await bar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, `${label}: after the reload the bar offers Larger again`);
-        const reloaded = await barFacts(bar);
-        assert.ok(Math.abs(reloaded.height - grown.height) <= 1, `${label}: after the reload the bar opened at ${reloaded.height} px, not its larger ${grown.height}`);
+        assert.equal(await bar.getAttribute("data-bar-state"), "rest", `${label}: after the reload the bar opened expanded`);
         await shots.take(player, `playerphone-bs1-reloaded-${view.width}`);
       } finally {
-        await player.evaluate((key) => localStorage.removeItem(key), KEY);
         if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
         for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
       }
     });
   }
 
-  test("bs-2. at 390 x 844 with Larger on, a drag of Thorn one cell down hides his bar and shows it again where the drop leaves it, a cell shorter, and the map does not move a second time (review BS-O2)", async () => {
+  test("bs-2. at 390 x 844 with the bar expanded, a drag of Thorn one cell down hides his bar and shows it again expanded where it stood, and the map moves once at most to clear him (review BS-O2, docs/design-v1-bar-compact.md 3.6)", async () => {
     const view = { width: 390, height: 844 };
-    const KEY = "rvtt.tokenBarLarger";
     const target = { characterId: run.thorn.characterId };
     const effects = MANY.map((key) => ({ id: randomUUID(), key }));
     for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
-    await player.evaluate((key) => localStorage.removeItem(key), KEY);
     await setUp({ ...view, scale: 1 });
     let bar = player.getByRole("dialog", { name: "Thorn actions" });
     try {
       bar = await openThornAtMiddle(view);
-      await bar.getByRole("button", { name: "Larger", exact: true }).tap();
-      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
-      await player.waitForTimeout(300);
-      const cam = await readCamera(player);
-      assert.ok(cam, "the map has no camera");
+      await expand(bar);
       const before = await barFacts(bar);
 
-      // Down, so the bar under him loses a cell of room, which a second move of the map would give back.
       await touch(along(await cellPoint({ x: 8, y: 6 }), await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 7.5 }), 10));
       await waitFor("Thorn one cell down", () => playerSocket.state?.tokens[run.thorn.id]?.y === 7 || null);
       await bar.waitFor();
-      await player.waitForTimeout(500);
-      // The map stays where the drop left it, and the bar hangs a cell lower under Thorn, still Larger.
-      const now = await readCamera(player);
-      assert.ok(now && Math.abs(now.x - cam.x) <= 0.5 && Math.abs(now.y - cam.y) <= 0.5 && now.scale === cam.scale, `the map moved after the drop: ${JSON.stringify({ cam, now })}`);
+      await player.waitForTimeout(700);
+      const settled = await readCamera(player);
       const dropped = await barFacts(bar);
-      assert.ok(Math.abs(dropped.top - (before.top + cam.scale)) <= 1.5, `the bar's top went from ${before.top} to ${dropped.top}, not a cell of ${cam.scale} px down`);
-      assert.ok(Math.abs(dropped.height - (before.height - cam.scale)) <= 1.5, `the bar went from ${before.height} to ${dropped.height} px tall, not a cell shorter`);
-      assert.equal(await bar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, "the bar came back Smaller-labelled no more");
+      assert.equal(await bar.getAttribute("data-bar-state"), "expanded", "the drop rested the bar");
+      assert.ok(Math.abs(dropped.top - before.top) <= 0.5 && Math.abs(dropped.height - before.height) <= 0.5, `the bar moved from ${before.top} + ${before.height} to ${dropped.top} + ${dropped.height}`);
+      // Thorn's label clears the bar, and nothing moves after.
+      const foot = await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 8 });
+      assert.ok(foot.y + 30 <= dropped.top + 0.5, `Thorn's label meets the bar after the drop: ${foot.y} against ${dropped.top}`);
       await player.waitForTimeout(500);
       const later = await readCamera(player);
-      assert.ok(later && later.y === now.y && Math.abs((await barFacts(bar)).top - dropped.top) <= 0.5, "the map or the bar moved after the drop settled");
+      assert.ok(settled && later && later.y === settled.y && Math.abs((await barFacts(bar)).top - dropped.top) <= 0.5, "the map or the bar moved after the drop settled");
     } finally {
-      await player.evaluate((key) => localStorage.removeItem(key), KEY);
       if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
       for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
       await ops.send({ t: "token.move", tokenId: run.thorn.id, x: 8, y: 6 });
     }
   });
 
-  test("bs-3. at 390 x 844 with Larger on, a tap on another token while Thorn's bar is open opens its bar larger, and its Smaller puts the bar and the map back as they were before Thorn's Larger, as does the group's bar as Multi-select gathers the other token and Thorn's as it lets go of it (reviews LP19-BS-1 and LP19-OPUS-4)", async () => {
+  test("bs-3. at 390 x 844 with Thorn's bar expanded, a tap on another token opens its bar expanded, Collapse rests it with the map where it stood, and the group's bar as Multi-select gathers the other token stays expanded, as does Thorn's as it lets go (reviews LP19-BS-1 and LP19-OPUS-4, docs/design-v1-bar-compact.md 5.3)", async () => {
     const view = { width: 390, height: 844 };
-    const KEY = "rvtt.tokenBarLarger";
     const target = { characterId: run.thorn.characterId };
     const effects = MANY.map((key) => ({ id: randomUUID(), key }));
     // A second token of Thorn's, a cell east of him, with his conditions and so his tall bar.
     const echo = randomUUID();
     for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
     await ops.send({ t: "token.create", token: { id: echo, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Echo", x: 9, y: 6, disposition: "ally", actor: { ref: run.thorn.characterId } } });
-    await player.evaluate((key) => localStorage.removeItem(key), KEY);
     await setUp({ ...view, scale: 1 });
     let bar = player.getByRole("dialog", { name: "Thorn actions" });
     const echoBar = player.getByRole("dialog", { name: "Echo actions" });
     const groupBar = player.getByRole("dialog", { name: "2 selected tokens" });
     const done = player.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Done", exact: true });
+    const state = (frame: Locator) => frame.getAttribute("data-bar-state");
     try {
       bar = await openThornAtMiddle(view);
-      const cam = await readCamera(player);
-      assert.ok(cam, "the map has no camera");
       const before = await barFacts(bar);
-      await bar.getByRole("button", { name: "Larger", exact: true }).tap();
-      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
-      await player.waitForTimeout(300);
+      await expand(bar);
       const grown = await barFacts(bar);
-      assert.ok(grown.height >= before.height + 80, `Larger grew Thorn's bar from ${before.height} to only ${grown.height} px`);
+      assert.ok(grown.height >= before.height + 80, `Expand grew Thorn's bar from ${before.height} to only ${grown.height} px`);
 
-      // Echo, beside him, opens on the map Thorn's Larger moved, as large as his bar was.
+      // Echo, beside him, opens expanded, as tall as Thorn's, since its content is his.
       await touch([await cellPoint({ x: 9, y: 6 })]);
       await echoBar.waitFor();
       await player.waitForTimeout(500);
-      assert.equal(await echoBar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, "Echo's bar did not open Larger");
+      assert.equal(await state(echoBar), "expanded", "Echo's bar opened resting");
       const opened = await barFacts(echoBar);
-      assert.ok(Math.abs(opened.height - grown.height) <= 1, `Echo's bar opened at ${opened.height} px, not Thorn's larger ${grown.height}`);
-      await shots.take(player, "playerphone-bs3-echo-larger");
+      assert.ok(Math.abs(opened.height - grown.height) <= 1, `Echo's bar opened at ${opened.height} px, not Thorn's expanded ${grown.height}`);
+      await shots.take(player, "playerphone-bs3-echo-expanded");
 
-      // Its Smaller undoes Thorn's move too: the bar and the map are back as they were before Larger.
-      await echoBar.getByRole("button", { name: "Smaller", exact: true }).tap();
-      await echoBar.getByRole("button", { name: "Larger", exact: true }).waitFor();
+      // Its Collapse rests it, the map left where it stands.
+      const cam = await readCamera(player);
+      await echoBar.getByRole("button", { name: "Collapse", exact: true }).tap();
+      await echoBar.getByRole("button", { name: "Expand", exact: true }).waitFor();
       await player.waitForTimeout(300);
       const now = await readCamera(player);
-      assert.ok(now && Math.abs(now.y - cam.y) <= 0.5, `Smaller on Echo's bar left the map at ${now?.y}, not ${cam.y} where it stood before Thorn's Larger`);
+      assert.ok(now && cam && Math.abs(now.y - cam.y) <= 0.5, `Collapse on Echo's bar moved the map from ${cam?.y} to ${now?.y}`);
       const back = await barFacts(echoBar);
-      assert.ok(Math.abs(back.height - before.height) <= 1, `Smaller left Echo's bar at ${back.height} px, not ${before.height}`);
-      await shots.take(player, "playerphone-bs3-echo-smaller");
+      assert.ok(Math.abs(back.height - before.height) <= 1, `Collapse left Echo's bar at ${back.height} px, not ${before.height}`);
 
-      // Thorn again, Larger, then Multi-select gathers Echo: the group's bar opens on the map Thorn's Larger moved, and its Smaller undoes that move too (review LP19-OPUS-4).
-      const sizeTo = async (frame: Locator, press: "Larger" | "Smaller") => {
-        await frame.getByRole("button", { name: press, exact: true }).tap();
-        await frame.getByRole("button", { name: press === "Larger" ? "Smaller" : "Larger", exact: true }).waitFor();
-        await player.waitForTimeout(300);
-      };
-      const mapBack = async (what: string) => {
-        const at = await readCamera(player);
-        assert.ok(at && Math.abs(at.y - cam.y) <= 0.5, `Smaller on ${what} left the map at ${at?.y}, not ${cam.y} where it stood before Larger`);
-      };
+      // Thorn again, expanded, then Multi-select gathers Echo: the group's bar stays expanded, and so does Thorn's as Multi-select lets go of Echo.
       await touch([await cellPoint({ x: 8, y: 6 })]);
       await bar.waitFor();
       await player.waitForTimeout(500);
-      await sizeTo(bar, "Larger");
-      const moved = await readCamera(player);
-      assert.ok(moved && Math.abs(moved.y - cam.y) > 20, `Larger on Thorn's bar moved the map from ${cam.y} only to ${moved?.y}`);
-      await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await expand(bar);
+      await (await barControl(bar, "Multi-select")).tap();
       await touch([await cellPoint({ x: 9, y: 6 })]);
       await groupBar.waitFor();
       await player.waitForTimeout(500);
-      assert.equal(await groupBar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, "the group's bar did not open Larger");
-      await shots.take(player, "playerphone-bs3-group-larger");
-      await sizeTo(groupBar, "Smaller");
-      await mapBack("the group's bar");
-
-      // Larger on the group, then Multi-select lets go of Echo: Thorn's bar takes over, and its Smaller undoes the group's move.
-      await sizeTo(groupBar, "Larger");
+      assert.equal(await state(groupBar), "expanded", "the group's bar opened resting");
+      await shots.take(player, "playerphone-bs3-group-expanded");
       await touch([await cellPoint({ x: 9, y: 6 })]);
       await groupBar.waitFor({ state: "detached" });
-      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await bar.waitFor();
       await player.waitForTimeout(500);
-      await shots.take(player, "playerphone-bs3-let-go-larger");
-      await sizeTo(bar, "Smaller");
-      await mapBack("Thorn's bar after the group");
+      assert.equal(await state(bar), "expanded", "Thorn's bar rested as Multi-select let go of Echo");
+      await shots.take(player, "playerphone-bs3-let-go-expanded");
     } finally {
-      await player.evaluate((key) => localStorage.removeItem(key), KEY);
       for (const b of [bar, echoBar, groupBar]) if (await b.isVisible()) await b.getByRole("button", { name: /^(Close|Deselect all)$/ }).tap();
       if (await done.isVisible()) await done.tap();
       await ops.send({ t: "token.delete", tokenId: echo });
@@ -1466,32 +1443,27 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     return toast;
   }
 
-  test("fu24r1-own. at 390 x 844 a whisper under Thorn's bar's header stays where it is when another token's bar opens lower, with Thorn's bar open or closed first: the toasts belong to the bar whose header placed them (review FU24-OPUS-1)", async () => {
+  test("fu24r1-own. at 390 x 844 a whisper keeps above Thorn's expanded bar and stays where it is when another token's bar opens, expanded or after Close as the strip: an upright phone's bar never hangs over the toasts (review FU24-OPUS-1, docs/design-v1-bar-compact.md 3.5)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
     const effects = MANY.map((key) => ({ id: randomUUID(), key }));
-    // A scout on Thorn's row, whose bar for Pat is short, so it hangs over the scout well below the top.
+    // A scout on Thorn's row, whose bar for Pat is short.
     const scout = randomUUID();
     for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
     await ops.send({ t: "token.create", token: { id: scout, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Scout", x: 11, y: 6, disposition: "hostile", actor: { inline: actor(7) } } });
     await waitFor("the scout on the player's map", () => playerSocket.state?.tokens[scout]);
-    await player.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
     await setUp({ ...view, scale: 1 });
     const bar = player.getByRole("dialog", { name: "Thorn actions" });
     const scoutBar = player.getByRole("dialog", { name: "Scout actions" });
     try {
-      // Thorn low on the screen, so his tall bar hangs over him up to the top of its room.
-      const thorn = await cellPoint({ x: 8, y: 6 });
-      await panBy(300, view.height - 220 - thorn.y);
       for (const way of ["tap", "close"] as const) {
         await touch([await cellPoint({ x: 8, y: 6 })]);
         await bar.waitFor();
-        await player.waitForTimeout(900);
+        await expand(bar);
         const head = await rectOf(bar.locator("[data-sticky-header]"));
-        assert.ok(head.top < 140, `${way}: Thorn's header stands at ${head.top}, not at the top of its room`);
-        const toast = await whisperToPat(`Under Thorn's header, then ${way}.`);
+        const toast = await whisperToPat(`Above Thorn's header, then ${way}.`);
         const placed = await rectOf(toast);
-        assert.ok(Math.abs(placed.top - (head.bottom + 8)) < 1.5, `${way}: the whisper starts at ${placed.top}, not 8 px under Thorn's header at ${head.bottom}`);
+        assert.ok(!intersects(placed, head) && placed.bottom <= head.top, `${way}: the whisper ${JSON.stringify(placed)} meets Thorn's header ${JSON.stringify(head)}`);
         if (way === "close") {
           await bar.getByRole("button", { name: "Close", exact: true }).tap();
           await bar.waitFor({ state: "detached" });
@@ -1499,8 +1471,9 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
         await touch([await cellPoint({ x: 11, y: 6 })]);
         await scoutBar.waitFor();
         await player.waitForTimeout(700);
-        const other = await rectOf(scoutBar.locator("[data-sticky-header]"));
-        assert.ok(other.bottom > placed.top + 8.5 && !intersects(placed, other), `${way}: the scout's header ${JSON.stringify(other)} is not below the whisper ${JSON.stringify(placed)}, so nothing could pull it down`);
+        assert.equal(await scoutBar.getAttribute("data-bar-state"), way === "tap" ? "expanded" : "rest", `${way}: the scout's bar`);
+        const other = await rectOf(scoutBar);
+        assert.ok(!intersects(placed, other), `${way}: the scout's bar ${JSON.stringify(other)} meets the whisper ${JSON.stringify(placed)}`);
         const now = await rectOf(toast);
         assert.ok(Math.abs(now.top - placed.top) < 0.5, `${way}: the whisper went from ${placed.top} to ${now.top} as the scout's bar opened`);
         await shots.take(player, `playerphone-fu24r1-own-${way}`);
@@ -1516,34 +1489,30 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  test("fu24r1-pan. at 390 x 844 a whisper under Thorn's bar's header goes down with it when a one-finger pan moves the header down past the whisper's top, long after the bar opened and the whisper came (review FU24-OPUS-3)", async () => {
+  test("fu24r1-pan. at 390 x 844 a one-finger pan long after the bar opened and a whisper came leaves the strip, the expanded bar's header and the whisper where they stand (review FU24-OPUS-3, docs/design-v1-bar-compact.md 3.1)", async () => {
     const view = { width: 390, height: 844 };
-    await player.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
     await setUp({ ...view, scale: 1 });
     const bar = player.getByRole("dialog", { name: "Thorn actions" });
     try {
-      // Thorn's bar under him, then the map up until its header stands where the notices' toasts start.
-      const thorn = await cellPoint({ x: 8, y: 6 });
-      await panBy(thorn.y - 40, view.height / 2 - thorn.y);
       await touch([await cellPoint({ x: 8, y: 6 })]);
       await bar.waitFor();
-      await player.waitForTimeout(400);
-      const opened = await rectOf(bar.locator("[data-sticky-header]"));
-      await panBy(700, 85 - opened.top);
-      const head = await rectOf(bar.locator("[data-sticky-header]"));
-      assert.ok(head.top > 70 && head.top < 100, `Thorn's header went to ${head.top}, not under the notices' top`);
-      const toast = await whisperToPat("Watch the stairs.");
-      const placed = await rectOf(toast);
-      assert.ok(Math.abs(placed.top - (head.bottom + 8)) < 1.5, `the whisper starts at ${placed.top}, not 8 px under the header at ${head.bottom}`);
-      // Past the bar's opening and the whisper's first moments, so only the header going down can move it.
-      await player.waitForTimeout(900);
-      await panBy(head.bottom + 120, 40);
-      const down = await rectOf(bar.locator("[data-sticky-header]"));
-      assert.ok(down.bottom > placed.top + 8.5, `the pan took the header only to ${JSON.stringify(down)}, never past the whisper's top at ${placed.top}`);
-      const now = await rectOf(toast);
-      assert.ok(!intersects(now, down), `the whisper ${JSON.stringify(now)} covers the header ${JSON.stringify(down)}`);
-      assert.ok(now.top - down.bottom >= -0.5 && now.top - down.bottom <= 8.5, `the whisper stands at ${now.top}, not just under the header's foot at ${down.bottom}`);
-      await shots.take(player, "playerphone-fu24r1-pan");
+      for (const resting of [true, false]) {
+        if (!resting) await expand(bar);
+        await player.waitForTimeout(400);
+        const before = await rectOf(bar);
+        const toast = await whisperToPat(resting ? "Watch the stairs." : "Mind the gap.");
+        const placed = await rectOf(toast);
+        assert.ok(placed.bottom <= before.top, `the whisper ${JSON.stringify(placed)} meets the bar ${JSON.stringify(before)}`);
+        // Past the bar's opening and the whisper's first moments.
+        await player.waitForTimeout(900);
+        await panBy(Math.min(before.top - 60, placed.bottom + 60), 40);
+        assert.deepEqual(await rectOf(bar), before, `${resting ? "the strip" : "the expanded bar"} moved with the pan`);
+        const now = await rectOf(toast);
+        assert.ok(Math.abs(now.top - placed.top) < 0.5, `the whisper went from ${placed.top} to ${now.top} with the pan`);
+        await shots.take(player, `playerphone-fu24r1-pan-${resting ? "rest" : "expanded"}`);
+        await toast.tap();
+        await toast.waitFor({ state: "detached" });
+      }
     } finally {
       if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
     }

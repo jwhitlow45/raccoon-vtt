@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, diceFoldsOpen, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll options and the group save (docs/design-v1-roll-options.md 11), on
@@ -138,7 +138,7 @@ async function selectGoblins(which: readonly number[]): Promise<void> {
   await tapCell(dm, run.bounds, first);
   const bar = dm.getByRole("dialog", { name: `${first.name} actions` });
   await bar.waitFor();
-  await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+  await (await barControl(bar, "Multi-select")).tap();
   for (const i of which.slice(1)) await tapCell(dm, run.bounds, run.goblins[i]!);
 }
 
@@ -362,7 +362,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await tapCell(dm, run.bounds, first);
     const bar = dm.getByRole("dialog", { name: `${first.name} actions` });
     await bar.waitFor();
-    await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+    await (await barControl(bar, "Multi-select")).tap();
     for (const t of [...run.goblins.slice(1), run.bree]) await tapCell(dm, run.bounds, t);
     const group = dm.locator('[role="dialog"][data-bar-mode]');
     await group.getByRole("button", { name: "Roll", exact: true }).tap();
@@ -495,7 +495,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await tapCell(dm, run.bounds, first);
     const goblinBar = dm.getByRole("dialog", { name: `${first.name} actions` });
     await goblinBar.waitFor();
-    await goblinBar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+    await (await barControl(goblinBar, "Multi-select")).tap();
     for (const g of run.goblins.slice(1)) await tapCell(dm, run.bounds, g);
     // The group's Roll opens the Dice panel's first page, where the open group save's row opens it again.
     await dm.locator('[role="dialog"][data-bar-mode]').getByRole("button", { name: "Roll", exact: true }).tap();
