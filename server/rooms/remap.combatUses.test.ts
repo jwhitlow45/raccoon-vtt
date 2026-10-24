@@ -219,6 +219,44 @@ describe("a saved step through an import keeps the turns that left the fight (de
     assert.deepEqual(strays(back), []);
   });
 
+  test("an effect B's turn ended comes back through an import counting B's row, paused on B once B left, and bound to B's row added again (review FU26-ASTRA, expired effects)", () => {
+    const shortened = (): RoomState => {
+      const state = abc();
+      // Until the start of B's next turn, which B's turn ends.
+      state.tokens.c = { ...state.tokens.c!, actor: { inline: actor({ effects: [effect("short", { key: "custom", label: "Until B's turn", duration: { remaining: 1, boundary: "turnStart", anchor: { entryId: "eb" } } })] }) } };
+      // A save at the end of A's turns, whose occurrence names a line of the old room's log.
+      state.tokens.a = { ...state.tokens.a!, actor: { inline: actor({ effects: [effect("ps", { key: "poisoned", save: { ability: "con", dc: 12 }, duration: { remaining: 5, boundary: "turnEnd", anchor: { entryId: "ea" } } })] }) } };
+      return state;
+    };
+    const cEffects = (s: RoomState) => {
+      const a = Object.values(s.tokens).find((t) => t.name === "C")!.actor;
+      return "inline" in a ? a.inline.effects : [];
+    };
+    const bRow = (s: RoomState) => s.encounter!.entries.find((e) => s.tokens[e.tokenId!]?.name === "B")?.id;
+    const bToken = (s: RoomState) => Object.values(s.tokens).find((t) => t.name === "B")!.id;
+    const onC = play(shortened(), [NEXT, NEXT, NEXT]);
+    assert.deepEqual(cEffects(onC), [], "B's turn ended it");
+    assert.ok(onC.encounterHistory.some((h) => h.effectChanges?.some((c) => c.asked)), "A's turn end opened an occurrence");
+    const through = imported(onC).encounterHistory;
+    assert.ok(through.some((h) => h.effectChanges?.some((c) => c.ended)), "the step that ended it comes through with its change");
+    assert.ok(through.every((h) => (h.effectChanges ?? []).every((c) => c.asked === undefined)), "and no occurrence of the old room's log");
+
+    const kept = play(imported(onC), [PREV, PREV]);
+    assert.equal(acting(kept), "A");
+    assert.deepEqual(cEffects(kept).map((e) => [e.id, e.duration?.anchor]), [["short", { entryId: bRow(kept) }]]);
+
+    const removed = play(onC, [{ t: "encounter.remove", entryIds: ["eb"] }]);
+    const paused = play(imported(removed), [PREV]);
+    assert.equal(acting(paused), "A");
+    assert.deepEqual(cEffects(paused).map((e) => [e.id, e.duration?.anchor]), [["short", { tokenId: bToken(paused) }]]);
+    assert.deepEqual(strays(paused), []);
+
+    const room2 = imported(removed);
+    const readded = play(room2, [{ t: "encounter.add", entries: [{ id: "eb2", tokenId: bToken(room2), value: 15 }] }, PREV]);
+    assert.deepEqual(cEffects(readded).map((e) => [e.id, e.duration?.anchor]), [["short", { entryId: "eb2" }]]);
+    assert.deepEqual(strays(readded), []);
+  });
+
   test("a duration a saved step counts on a row that did not come through pauses on its creature, so Previous puts back none counting a row outside the fight", () => {
     const removed = play(abc(), [NEXT, NEXT, NEXT, { t: "encounter.remove", entryIds: ["eb"] }], 20);
     const room1 = imported(removed, (file) => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Actor, Effect, InitEntry, RoomState } from "../model.ts";
-import type { Op } from "../protocol.ts";
+import { MAX_EFFECTS, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { DM, actor, character, effect, entry, env, room, token } from "../testutil.ts";
 import type { Env } from "./tx.ts";
@@ -332,6 +332,22 @@ describe("Previous takes back only the turn (design 9.4, op version 21)", () => 
     assert.deepEqual(inline(back, "thorn").effects.map((e) => e.id), inline(without, "thorn").effects.map((e) => e.id), "as the DM's changes leave it without Thorn's turn");
   });
 
+  test("an ended effect the list has no room for stays off, and the effect the DM added in its slot stays (review FU26-ASTRA, the effect bound)", () => {
+    const state = fight();
+    const many = Array.from({ length: MAX_EFFECTS - 1 }, (_, i) => effect(`c${i}`, { key: "custom", label: `Mark ${i}` }));
+    state.tokens.thorn = {
+      ...state.tokens.thorn!,
+      actor: { inline: actor({ effects: [effect("short", { key: "custom", label: "Until Thorn's turn", duration: { remaining: 1, boundary: "turnStart", anchor: { entryId: "et" } } }), ...many] }) },
+    };
+    const onThorn = play(state, [NEXT, NEXT, { t: "actor.effect.add", target: { tokenId: "thorn" }, effect: { id: "fr", key: "frightened" } }]);
+    assert.equal(inline(onThorn, "thorn").effects.length, MAX_EFFECTS, "the DM filled the slot the ended effect freed");
+    const back = play(onThorn, [PREV]);
+    const ids = inline(back, "thorn").effects.map((e) => e.id);
+    assert.equal(ids.length, MAX_EFFECTS);
+    assert.ok(ids.includes("fr"), "the DM's effect stays");
+    assert.ok(!ids.includes("short"), "the ended one stays off, which can only let it end early");
+  });
+
   test("an ended effect put back that counts a row removed since pauses on its creature, and binds to that creature's row added since", () => {
     const state = fight();
     state.tokens.gob = { ...state.tokens.gob!, actor: { inline: actor() } };
@@ -437,9 +453,17 @@ describe("op version 21: stored Previous ops replay by the rule they were writte
     assert.deepEqual(play(fight(), [NEXT, NEXT], 21).encounterHistory.at(-1)!.turnFlags, [], "a step from version 21 holds its flags, none here");
   });
 
-  test("a version 20 Previous of a step a version 21 Next saved still puts back the whole encounter", () => {
+  test("a version 20 Previous of a step a version 21 Next saved still puts back the whole encounter and the whole effect lists the step keeps beside its changes", () => {
     const back = play(play(fight(), [NEXT, NEXT, ...during], 21), [PREV], 20);
     assert.deepEqual(rows(back), ["ed:19", "et:15", "er:10"]);
+    const state = fight();
+    state.tokens.thorn = { ...state.tokens.thorn!, actor: { inline: actor({ effects: [effect("bless", { duration: { remaining: 5, boundary: "turnStart", anchor: { entryId: "et" } } })] }) } };
+    const onThorn = play(state, [NEXT, NEXT, { t: "actor.effect.add", target: { tokenId: "thorn" }, effect: { id: "fr", key: "frightened" } }], 21);
+    const step = onThorn.encounterHistory.at(-1)!;
+    assert.deepEqual(step.effects.thorn?.map((e) => e.id), ["bless"], "the whole list, for a build from before op version 21");
+    assert.deepEqual(step.effectChanges, [{ holderId: "thorn", counted: [{ id: "bless", from: 5, to: 4 }] }]);
+    assert.deepEqual(anchors(inline(play(onThorn, [PREV], 20), "thorn").effects), [["bless", 5, { entryId: "et" }]], "version 20 puts the whole list back");
+    assert.deepEqual(anchors(inline(play(onThorn, [PREV], 21), "thorn").effects), [["bless", 5, { entryId: "et" }], ["fr", undefined, undefined]]);
   });
 
   test("a version 21 Previous never walks into a step a version 20 Next saved: no row acts", () => {

@@ -152,6 +152,25 @@ describe("Previous of a turn end whose save was settled during the turn (design 
     assert.deepEqual(effectOf(g, "gob", "fx")!.due, { id: due, state: "resolved" }, "settled during the turn, it stays settled");
   });
 
+  test("the occurrence a turn end replaced comes back as it was, settled or pending", () => {
+    let s = ok(send(fight(), { t: "encounter.next" })).state;
+    const first = effectOf(s, "gob", "fx")!.due!.id;
+    s = ok(send(s, { t: "actor.saveDue", target: { tokenId: "gob" }, effectId: "fx", due: first, state: "resolved" })).state;
+    s = ok(send(s, { t: "encounter.next" })).state;
+    s = ok(send(s, { t: "encounter.next" })).state;
+    const second = effectOf(s, "gob", "fx")!.due!;
+    assert.notEqual(second.id, first);
+    assert.equal(second.state, "pending");
+    const back = ok(send(s, { t: "encounter.prev" })).state;
+    assert.deepEqual(effectOf(back, "gob", "fx")!.due, { id: first, state: "resolved" });
+    let p = ok(send(fight(), { t: "encounter.next" })).state;
+    const pending = effectOf(p, "gob", "fx")!.due!;
+    p = ok(send(p, { t: "encounter.next" })).state;
+    p = ok(send(p, { t: "encounter.next" })).state;
+    assert.notDeepEqual(effectOf(p, "gob", "fx")!.due, pending);
+    assert.deepEqual(effectOf(ok(send(p, { t: "encounter.prev" })).state, "gob", "fx")!.due, pending);
+  });
+
   test("at op version 20 Previous put the effects back whole, a passed save's effect included", () => {
     let s = ok(send(fight("e-bree"), { t: "encounter.next" }, DM, 20)).state;
     s = ok(send(s, askFor(s, effectOf(s, "bree", "bfx")!.due!.id), DM, 20)).state;
