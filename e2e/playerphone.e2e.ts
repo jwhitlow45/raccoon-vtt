@@ -1361,7 +1361,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  test("bs-3. at 390 x 844 with Larger on, a tap on another token while Thorn's bar is open opens its bar larger, and its Smaller puts the bar and the map back as they were before Thorn's Larger (review LP19-BS-1)", async () => {
+  test("bs-3. at 390 x 844 with Larger on, a tap on another token while Thorn's bar is open opens its bar larger, and its Smaller puts the bar and the map back as they were before Thorn's Larger, as does the group's bar as Multi-select gathers the other token and Thorn's as it lets go of it (reviews LP19-BS-1 and LP19-OPUS-4)", async () => {
     const view = { width: 390, height: 844 };
     const KEY = "rvtt.tokenBarLarger";
     const target = { characterId: run.thorn.characterId };
@@ -1374,6 +1374,8 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await setUp({ ...view, scale: 1 });
     let bar = player.getByRole("dialog", { name: "Thorn actions" });
     const echoBar = player.getByRole("dialog", { name: "Echo actions" });
+    const groupBar = player.getByRole("dialog", { name: "2 selected tokens" });
+    const done = player.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Done", exact: true });
     try {
       bar = await openThornAtMiddle(view);
       const cam = await readCamera(player);
@@ -1403,9 +1405,45 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const back = await barFacts(echoBar);
       assert.ok(Math.abs(back.height - before.height) <= 1, `Smaller left Echo's bar at ${back.height} px, not ${before.height}`);
       await shots.take(player, "playerphone-bs3-echo-smaller");
+
+      // Thorn again, Larger, then Multi-select gathers Echo: the group's bar opens on the map Thorn's Larger moved, and its Smaller undoes that move too (review LP19-OPUS-4).
+      const sizeTo = async (frame: Locator, press: "Larger" | "Smaller") => {
+        await frame.getByRole("button", { name: press, exact: true }).tap();
+        await frame.getByRole("button", { name: press === "Larger" ? "Smaller" : "Larger", exact: true }).waitFor();
+        await player.waitForTimeout(300);
+      };
+      const mapBack = async (what: string) => {
+        const at = await readCamera(player);
+        assert.ok(at && Math.abs(at.y - cam.y) <= 0.5, `Smaller on ${what} left the map at ${at?.y}, not ${cam.y} where it stood before Larger`);
+      };
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await bar.waitFor();
+      await player.waitForTimeout(500);
+      await sizeTo(bar, "Larger");
+      const moved = await readCamera(player);
+      assert.ok(moved && Math.abs(moved.y - cam.y) > 20, `Larger on Thorn's bar moved the map from ${cam.y} only to ${moved?.y}`);
+      await bar.getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await touch([await cellPoint({ x: 9, y: 6 })]);
+      await groupBar.waitFor();
+      await player.waitForTimeout(500);
+      assert.equal(await groupBar.getByRole("button", { name: "Smaller", exact: true }).count(), 1, "the group's bar did not open Larger");
+      await shots.take(player, "playerphone-bs3-group-larger");
+      await sizeTo(groupBar, "Smaller");
+      await mapBack("the group's bar");
+
+      // Larger on the group, then Multi-select lets go of Echo: Thorn's bar takes over, and its Smaller undoes the group's move.
+      await sizeTo(groupBar, "Larger");
+      await touch([await cellPoint({ x: 9, y: 6 })]);
+      await groupBar.waitFor({ state: "detached" });
+      await bar.getByRole("button", { name: "Smaller", exact: true }).waitFor();
+      await player.waitForTimeout(500);
+      await shots.take(player, "playerphone-bs3-let-go-larger");
+      await sizeTo(bar, "Smaller");
+      await mapBack("Thorn's bar after the group");
     } finally {
       await player.evaluate((key) => localStorage.removeItem(key), KEY);
-      for (const b of [bar, echoBar]) if (await b.isVisible()) await b.getByRole("button", { name: "Close", exact: true }).tap();
+      for (const b of [bar, echoBar, groupBar]) if (await b.isVisible()) await b.getByRole("button", { name: /^(Close|Deselect all)$/ }).tap();
+      if (await done.isVisible()) await done.tap();
       await ops.send({ t: "token.delete", tokenId: echo });
       for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
     }
