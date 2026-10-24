@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Actor, RoomState, UseMark, Viewer } from "../model.ts";
+import { TURN_OVER } from "../permissions.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
 import { DM, actor, character, env, room, token } from "../testutil.ts";
+import { derivedId } from "./duplicate.ts";
 
 /**
  * Turn records and their resets (docs/design-v1-combat-controls.md 2.3,
@@ -310,5 +312,30 @@ describe("pips of a turn's other creatures (docs/design-v1-combat-controls.md 2.
     f.run({ t: "encounter.update", entryId: "ed", patch: { inLair: false }, counts: { actionsMax: 2, resistMax: 3 } });
     f.prev();
     assert.equal(f.of("dragon").legendary!.actionsUsed, 2, "at most the new count");
+  });
+});
+
+describe("a scene's copy (docs/design-v1-combat-controls.md 2.4)", () => {
+  test("keeps counted uses and drops the turn's record, marks and damage types, so the copy's prompt is refused while the original's row acts", () => {
+    const f = fight((s) => {
+      const t = s.tokens.dragon!;
+      if ("inline" in t.actor) t.actor.inline.uses = { "actions:fire-breath": breath, "actions:dominate-mind": dominate };
+    });
+    f.next();
+    assert.equal(f.active(), "dragon");
+    const record = f.of("dragon").turnRecord!;
+    assert.deepEqual(record.due, ["actions:fire-breath"]);
+    f.put("dragon", { uses: { ...f.of("dragon").uses, "legendaryActions:fiery-rays": rays }, hurt: ["fire"] });
+    f.run({ t: "scene.duplicate", sceneId: "s1", newSceneId: "s9", name: "Copy", include: { creatures: true, characters: false, fog: false, drawings: false } });
+    const copyId = derivedId("s9", "dragon");
+    const copy = f.of(copyId);
+    assert.deepEqual(copy.uses, { "actions:fire-breath": breath, "actions:dominate-mind": dominate });
+    assert.equal(copy.hurt, undefined);
+    assert.equal(copy.turnRecord, undefined);
+    assert.equal(f.of("dragon").turnRecord, record, "the original keeps its turn");
+    const skip = (tokenId: string): Op => ({ t: "actor.prompt", target: { tokenId }, record: record.id, what: "recharge:actions:fire-breath", state: "skipped" });
+    const refused = applyOp(f.state, skip(copyId), DM, env(f.seq + 1));
+    assert.ok(!refused.ok && refused.message === TURN_OVER);
+    assert.ok(applyOp(f.state, skip("dragon"), DM, env(f.seq + 1)).ok);
   });
 });

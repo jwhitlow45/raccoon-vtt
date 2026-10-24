@@ -5,6 +5,7 @@ import type { OpOf } from "../protocol.ts";
 import { footprintRect } from "../rules/footprint.ts";
 import { sortedById } from "./tokens.ts";
 import { invalid, type Env, type Tx } from "./tx.ts";
+import { withoutTurnScoped } from "./uses.ts";
 
 /**
  * Duplicate a scene (docs/design-v1-maps-vision.md section 3.2), in one op.
@@ -80,7 +81,10 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
     const holder = attached ? copied.get(attached.to) : undefined;
     if (attached && holder !== undefined) next.attached = { ...attached, to: holder };
     if ("inline" in token.actor) {
-      const actor = token.actor.inline;
+      // The copy keeps its counted uses, as it keeps its HP and pips, and drops what lasts a turn or a fight
+      // (docs/design-v1-combat-controls.md 2.4): the original's turn record would count as the copy's while the
+      // original's row acts. The token bar's Duplicate makes a new creature instead, so its uses start empty.
+      const actor = withoutTurnScoped(token.actor.inline);
       next.actor = { inline: { ...actor, effects: actor.effects.map((e) => pausedOn(e, id)) } };
     }
     tx.write(keys.token(id), next);
