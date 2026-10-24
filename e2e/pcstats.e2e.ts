@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Stat blocks for player characters end to end (docs/design-v1-pc-stats.md
@@ -315,8 +315,8 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await ana.getByRole("status", { name: "Connected" }).first().waitFor();
     await ana.locator(".konvajs-content").first().waitFor();
     await tapCell(ana, BOUNDS, { x: 5, y: 5 });
-    // Stat block opens the Token sheet with the block open, which a phone starts folded.
-    await bar(ana).getByRole("button", { name: "Stat block", exact: true }).click();
+    // Stat block opens the Token sheet with the block open, which a phone starts folded. Bree's strip has no room for it, so it is behind Expand.
+    await (await barControl(bar(ana), "Stat block")).click();
     const sheetPanel = ana.getByRole("region", { name: "Token", exact: true });
     await sheetPanel.locator("[data-pc-stats]").waitFor();
     await sheetPanel.getByRole("button", { name: "Edit", exact: true }).click();
@@ -447,7 +447,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await ana.getByRole("status", { name: "Connected" }).first().waitFor();
     await ana.locator(".konvajs-content").first().waitFor();
     await tapCell(ana, BOUNDS, { x: 5, y: 5 });
-    await bar(ana).getByRole("button", { name: "Stat block", exact: true }).click();
+    await (await barControl(bar(ana), "Stat block")).click();
     const sheetPanel = ana.getByRole("region", { name: "Token", exact: true });
     await sheetPanel.locator("[data-pc-stats]").waitFor();
     await sheetPanel.getByRole("button", { name: "Take a shape" }).click();

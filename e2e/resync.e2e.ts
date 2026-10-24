@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { ddbCharacterId, ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import type { PcStats } from "../shared/model.ts";
-import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -236,7 +236,8 @@ async function reopen(page: Page, size: { width: number; height: number }, scale
 /**
  * Bree's Stat block group with its buttons: from 900 px the Token tab of
  * the side panel, below that the Token sheet, which the bar's Stat block
- * opens with the group open. A panel already showing it is used as it is.
+ * opens with the group open (behind Expand on an upright phone's strip).
+ * A panel already showing it is used as it is.
  */
 async function breeBlock(page: Page): Promise<Locator> {
   const wide = (page.viewportSize()?.width ?? 0) >= 900;
@@ -246,7 +247,7 @@ async function breeBlock(page: Page): Promise<Locator> {
   await tapCell(page, BOUNDS, { x: 5, y: 5 });
   await bar(page).waitFor();
   if (wide) await openSideTab(page, "Token");
-  else await bar(page).getByRole("button", { name: "Stat block", exact: true }).click();
+  else await (await barControl(bar(page), "Stat block")).click();
   await edit.waitFor();
   return panel;
 }

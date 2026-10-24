@@ -9,7 +9,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import type { ClassResource } from "#shared/model.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Class resources (docs/design-v1-combat-controls.md 7 and 11), on the
@@ -150,7 +150,8 @@ async function closeSheets(page: Page): Promise<void> {
 async function thornsPanel(page: Page): Promise<Locator> {
   await closeSheets(page);
   await tapCell(page, run.bounds, { x: 5, y: 5 });
-  await page.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Details", exact: true }).click();
+  // On a phone held upright the bar rests as a strip, and Details is behind Expand.
+  await (await barControl(page.getByRole("dialog", { name: "Thorn actions" }), "Details")).click();
   const panel = tokenPanel(page);
   await panel.getByRole("heading", { name: "Thorn" }).first().waitFor();
   return panel;

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Companion stat blocks end to end (docs/design-v1-companion-stat-blocks.md
@@ -1267,7 +1267,8 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       await ana.getByRole("button", { name: "Back to Bree" }).click();
       // Both picker steps, from Hoot's panel.
       await ana.getByRole("button", { name: /^Hoot\. Show it on the map/ }).click();
-      await bar(ana, "Hoot").getByRole("button", { name: "Details", exact: true }).click();
+      // On a phone held upright the bar rests as a strip, and Details is behind Expand.
+      await (await barControl(bar(ana, "Hoot"), "Details")).click();
       await tokenPanel(ana).getByRole("button", { name: "Attach a stat block" }).click();
       const dialog = ana.getByRole("dialog", { name: "Attach a stat block" });
       await dialog.getByText("SRD 5.2.1 (330)").waitFor();
@@ -1324,7 +1325,7 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       await discardForm(ana);
       // The companion's panel and its picker.
       await ana.getByRole("button", { name: new RegExp(`^${c.companion}\\. Show it on the map`) }).click();
-      await bar(ana, c.companion).getByRole("button", { name: "Details", exact: true }).click();
+      await (await barControl(bar(ana, c.companion), "Details")).click();
       const panel = tokenPanel(ana);
       await panel.getByRole("button", { name: "Attach a stat block" }).waitFor();
       await noSideScroll(panel, `${label}: the token panel`);
