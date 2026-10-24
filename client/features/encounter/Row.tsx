@@ -23,6 +23,7 @@ import { ownResultText } from "../dice/useRollToasts.ts";
 import { marksTime, moveAfterRider, rowLink } from "../attach/tags.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../tokens/Revive.tsx";
 import { ownsToken } from "../tokens/access.ts";
+import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { opensStatBlock, statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import { displayName } from "../../lib/scene.ts";
 import { openStatBlock } from "../tokens/statBlockOpen.ts";
@@ -844,12 +845,13 @@ function RowMenu(props: {
   const reaction = useSend();
   const moving = useSendAll();
   const dm = role === "dm";
-  const update = (patch: { hidden?: boolean; reactionUsed?: boolean; inLair?: boolean; advantage?: "adv" | "dis" | null }) =>
+  const update = (patch: { hidden?: boolean; reactionUsed?: boolean; advantage?: "adv" | "dis" | null }) =>
     actions.dispatch({ t: "encounter.update", entryId: entry.id, patch });
   // In lair applies the block's lair or base counts with the switch (docs/design-v1-combat-controls.md 3.1), so it waits for the block.
   const lair = useLairCounts(dm ? props.target : null);
   const lairSend = useSend();
   const setLair = (inLair: boolean) => {
+    if (lair.state !== "ready") return;
     const counts = lair.counts(inLair);
     lairSend.send({ t: "encounter.update", entryId: entry.id, patch: { inLair }, ...(counts ? { counts } : {}) });
   };
@@ -889,7 +891,15 @@ function RowMenu(props: {
         <>
           <Switch label="Hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />
           <Switch label="Reaction used" help="Clears at the start of its turn" checked={entry.reactionUsed} onChange={(reactionUsed) => update({ reactionUsed })} />
-          <Switch label="In lair" help={lair.counts(true) ? "Its lair's legendary counts and XP" : undefined} checked={entry.inLair} busy={lair.loading || lairSend.waiting} onChange={setLair} />
+          <Switch
+            label="In lair"
+            help={lair.counts(true) ? "Its lair's legendary counts and XP" : undefined}
+            checked={entry.inLair}
+            disabled={lair.state === "failed"}
+            busy={lair.state === "loading" || lairSend.waiting}
+            onChange={setLair}
+          />
+          {lair.state === "failed" ? <SrdLoadFailed what="Its stat block" inline /> : null}
           {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm playerOwned={props.playerOwned} /> : null}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative roll reminder. Auto follows its conditions.</span>

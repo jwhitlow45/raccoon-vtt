@@ -41,8 +41,7 @@ export function dropPlan(input: {
 }): DropPlan {
   const occupied = occupiedBoxes(Object.values(input.state.tokens), input.scene.id);
   const tokens: TokenInput[] = [];
-  // A creature placed in its lair joins the fight with In lair on, so the switch says what its counts say (docs/design-v1-combat-controls.md 13.4).
-  const lair = new Set<string>();
+  const blocks = new Map<string, StatBlockMonster>();
   let skipped = 0;
   // The biggest creatures take the spots nearest the middle first, so a dragon is not pushed to the edge by its kobolds.
   const lines = input.monsters
@@ -65,13 +64,13 @@ export function dropPlan(input: {
       const drop = { hp: null, hidden: input.options.hidden, inLair: line.inLair === true };
       const token = monsterToken(m, drop, { id: input.newId(), sceneId: input.scene.id, at, ...(image ? { image } : {}), ...link });
       tokens.push(placeOnGround(input.state.buildChunks ?? {}, token));
-      if (drop.inLair) lair.add(token.id);
+      blocks.set(token.id, m);
     }
   }
   const ops: ClientOp[] = tokens.map((token) => ({ t: "token.create", token }));
   if (input.options.addToFight && input.state.encounter && tokens.length > 0) {
     // The reducer fills each row's group, hidden flag and score, as it does for tokens added from the tracker.
-    const entries: EntryInput[] = tokens.map((t) => ({ id: input.newId(), tokenId: t.id, ...(lair.has(t.id) ? { inLair: true } : {}) }));
+    const entries: EntryInput[] = tokens.map((t) => joinEntry({ id: input.newId(), tokenId: t.id }, "inline" in t.actor ? t.actor.inline : undefined, blocks.get(t.id) ?? null));
     for (let i = 0; i < entries.length; i += MAX_ENTRIES_PER_OP) ops.push({ t: "encounter.add", entries: entries.slice(i, i + MAX_ENTRIES_PER_OP) });
   }
   return { ops, skipped };
@@ -92,6 +91,18 @@ export function placedInLair(actor: Pick<Actor, "legendary" | "xp">, block: Stat
   if (!same(lair)) return false;
   if (!same(base)) return true;
   return lair.xp !== base.xp && actor.xp === lair.xp;
+}
+
+/**
+ * A creature's row as it joins a fight: In lair on where it stands placed
+ * in its lair (`placedInLair`), so the switch says what its counts say
+ * (docs/design-v1-combat-controls.md 13.4). Every path into a fight builds
+ * its rows with this: a saved encounter's drop, whose lair line placed it
+ * with its lair's counts, and the tracker's and the group bar's Start and
+ * Add (combat/state.ts useFightJoin).
+ */
+export function joinEntry(entry: EntryInput, actor: Pick<Actor, "legendary" | "xp"> | undefined, block: StatBlockMonster | null): EntryInput {
+  return actor && placedInLair(actor, block) ? { ...entry, inLair: true } : entry;
 }
 
 function side(resolved: Resolved): number {

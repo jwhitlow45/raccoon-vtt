@@ -2,11 +2,13 @@ import { useMemo } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { hasLair, lairCounts, limitedUses, type LimitedUse, type RegenerationUse } from "#shared/dice/uses.ts";
-import type { ActorTarget } from "#shared/protocol.ts";
+import type { Token } from "#shared/model.ts";
+import type { ActorTarget, EntryInput } from "#shared/protocol.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
-import { creatureBlock, srdNeeds } from "../dice/creature.ts";
+import { creatureBlock, srdNeeds, type DiceView } from "../dice/creature.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
+import { joinEntry } from "../encounters/drop.ts";
 import { actorOf, actsNow, currentRecord, deathSaveWaits, holderKey, promptsOf } from "./logic.ts";
 
 /*
@@ -128,11 +130,65 @@ export const WAITS_FOR_REGENERATION = "Waiting for Regeneration";
  * In lair's counts for a creature (docs/design-v1-combat-controls.md 3.1):
  * from the block this viewer reads, its lair or base legendary counts and
  * XP, or none where it has no block or its block's counts never change in
- * a lair. `loading` while the block loads, when the switch waits busy.
+ * a lair, which the switch then sets alone. `state` is "loading" while its
+ * block loads, when the switch waits busy, and "failed" when the block did
+ * not load, when the switch stays off beside the failure's reload: an
+ * unread block never lets In lair go without the counts it would carry.
  */
-export function useLairCounts(target: ActorTarget | null): { loading: boolean; counts(inLair: boolean): { actionsMax: number; resistMax: number; xp: number } | undefined } {
+export function useLairCounts(target: ActorTarget | null): { state: JoinState; counts(inLair: boolean): { actionsMax: number; resistMax: number; xp: number } | undefined } {
   const creatures = useMemo(() => (target ? [target] : []), [target]);
-  const { dice, loading } = useDiceView(creatures);
+  const { dice, failed } = useDiceView(creatures);
   const block = dice && target ? creatureBlock(dice, target) : null;
-  return { loading: target !== null && (dice === null || loading), counts: (inLair) => (block && hasLair(block) ? lairCounts(block, inLair) : undefined) };
+  return { state: lairState(dice, failed, target), counts: (inLair) => (block && hasLair(block) ? lairCounts(block, inLair) : undefined) };
+}
+
+/** Whether a creature's block is read for In lair (useLairCounts): only an SRD block not loaded yet waits, or fails with its load. */
+export function lairState(dice: DiceView | null, failed: boolean, target: ActorTarget | null): JoinState {
+  if (target === null) return "ready";
+  if (dice === null) return "loading";
+  if (!srdNeeds(dice, target).monsters || dice.srd.monsters !== null) return "ready";
+  return failed ? "failed" : "loading";
+}
+
+/** Whether a join can read its creatures' lairs now (useFightJoin): read, its blocks loading, or a block that did not load. */
+export type JoinState = "ready" | "loading" | "failed";
+
+/** A creature that may stand placed in its lair: one with legendary counts, which its block's lair counts are told apart by. */
+function lairCandidate(token: Token): boolean {
+  return "inline" in token.actor && token.actor.inline.legendary !== undefined;
+}
+
+/**
+ * Whether these tokens can join a fight now (13.4): a creature with
+ * legendary counts needs its block read to say whether it stands placed in
+ * its lair, so the join waits while that block loads, and stops with the
+ * failure's reload where it did not load. A row is never marked off for a
+ * block not read.
+ */
+export function joinState(dice: DiceView | null, failed: boolean, tokens: readonly Token[]): JoinState {
+  const unread = tokens.some((t) => lairCandidate(t) && (dice === null || (srdNeeds(dice, { tokenId: t.id }).monsters && dice.srd.monsters === null)));
+  if (!unread) return "ready";
+  return failed ? "failed" : "loading";
+}
+
+/**
+ * The rows tokens join a fight with, by the rule every path into a fight
+ * shares (encounters/drop.ts joinEntry): the tracker's Start a fight and
+ * Add, and the group bar's Start a fight and Add to the fight. `candidates`
+ * are the tokens a surface offers, whose blocks start loading as it shows
+ * them, so a tap normally finds them read. The surface holds its button
+ * busy while `stateOf` its tokens says loading, and off with the
+ * failure's reload when it says failed.
+ */
+export function useFightJoin(candidates: readonly Token[]): { stateOf(tokens: readonly Token[]): JoinState; mark(entry: EntryInput): EntryInput } {
+  const targets = useMemo(() => candidates.filter(lairCandidate).map((t) => ({ tokenId: t.id })), [candidates]);
+  const { dice, failed } = useDiceView(targets);
+  return {
+    stateOf: (tokens) => joinState(dice, failed, tokens),
+    mark: (entry) => {
+      const token = entry.tokenId !== undefined ? candidates.find((t) => t.id === entry.tokenId) : undefined;
+      if (!dice || !token || !("inline" in token.actor)) return entry;
+      return joinEntry(entry, token.actor.inline, creatureBlock(dice, { tokenId: token.id }));
+    },
+  };
 }

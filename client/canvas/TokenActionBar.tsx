@@ -16,6 +16,8 @@ import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useOptionStore } from "../features/dice/optionState.ts";
 import { UsesDrawer, useUsesPresence } from "../features/combat/CombatUses.tsx";
+import { useFightJoin } from "../features/combat/state.ts";
+import { SrdLoadFailed } from "../features/monsters/SrdLoadFailed.tsx";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { useSend } from "../features/encounter/hooks.ts";
@@ -539,6 +541,10 @@ export function GroupActionBar(props: {
   };
   const hidden = flagLit(tokens, "hidden");
   const locked = flagLit(tokens, "locked");
+  // The rows join by the rule every path into a fight shares (combat/state.ts useFightJoin), reading their blocks for the DM only.
+  const joining = useMemo(() => (offers.dm ? fightCandidates(tokens, encounter) : []), [offers.dm, tokens, encounter]);
+  const join = useFightJoin(joining);
+  const joinState = join.stateOf(joining);
   const outOfFight = fightCandidates(tokens, encounter).length;
   const scope = useRoomScope();
   const anyPlayed = useRoomView((s) => (s.view ? offersRequest(s.view, tokens) : false));
@@ -612,7 +618,9 @@ export function GroupActionBar(props: {
           </BarButton>
         ) : null}
         {offers.dm && outOfFight > 0 ? (
-          <BarButton onClick={() => send(fightOps(tokens, encounter, actions.newId))}>{encounter ? "Add to the fight" : "Start a fight"}</BarButton>
+          <BarButton busy={joinState === "loading"} disabled={joinState === "failed"} onClick={() => send(fightOps(tokens, encounter, actions.newId, join.mark))}>
+            {encounter ? "Add to the fight" : "Start a fight"}
+          </BarButton>
         ) : null}
         {offers.dm ? (
           <BarButton ref={moreButton} icon="more" iconOnly always onClick={() => setMore(true)}>
@@ -632,6 +640,7 @@ export function GroupActionBar(props: {
           Clear
         </BarButton>
       </ButtonRow>
+      {offers.dm && outOfFight > 0 && joinState === "failed" ? <SrdLoadFailed what="The stat blocks" inline /> : null}
       {more ? <GroupMoreSheet tokens={tokens} opener={moreButton} onClose={() => setMore(false)} /> : null}
     </BarFrame>
   );
@@ -1657,6 +1666,8 @@ function BarButton(props: {
   armed?: boolean;
   grow?: boolean;
   disabled?: boolean;
+  /** Waiting: it shows so and ignores taps (components/Button.tsx). */
+  busy?: boolean;
   /** Drawn before the words (docs/design-v1-icons.md 4). */
   icon?: IconName;
   /** The icon alone, its words its name and tooltip, where a mouse can hover. A touch screen keeps the words. */
@@ -1671,6 +1682,7 @@ function BarButton(props: {
       size="sm"
       variant={props.danger ? "danger" : "secondary"}
       disabled={props.disabled}
+      busy={props.busy}
       armed={props.armed}
       pressed={props.half ? undefined : props.pressed}
       aria-pressed={props.half ? "mixed" : props.pressed}

@@ -2,7 +2,7 @@ import { sameImage } from "#shared/imageRef.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import type { Character, Effect, Encounter, ImageRef, MemberId, Token } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type TokenGroupPatch } from "#shared/protocol.ts";
+import { MAX_ENTRIES_PER_OP, type ActorTarget, type ClientOp, type EntryInput, type TokenGroupPatch } from "#shared/protocol.ts";
 import { tokenAccess, type Role } from "./access.ts";
 
 /**
@@ -224,10 +224,17 @@ export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { compani
 /**
  * "Add to the fight": rows for the creatures not in it yet (fightCandidates).
  * With no fight on, the same tap starts one with them, as the tracker's
- * "Start a fight with" does.
+ * "Start a fight with" does. `mark` is the rule every path into a fight
+ * builds its rows by (combat/state.ts useFightJoin), which puts In lair on
+ * a creature placed in its lair.
  */
-export function fightOps(tokens: readonly (Pick<Token, "id" | "kind"> & { companion?: Token["companion"] })[], encounter: Pick<Encounter, "entries"> | null | undefined, newId: () => string): ClientOp[] {
-  const entries = fightCandidates(tokens, encounter).map((t) => ({ id: newId(), tokenId: t.id }));
+export function fightOps(
+  tokens: readonly (Pick<Token, "id" | "kind"> & { companion?: Token["companion"] })[],
+  encounter: Pick<Encounter, "entries"> | null | undefined,
+  newId: () => string,
+  mark: (entry: EntryInput) => EntryInput = (entry) => entry,
+): ClientOp[] {
+  const entries = fightCandidates(tokens, encounter).map((t) => mark({ id: newId(), tokenId: t.id }));
   const parts = chunks(entries, MAX_ENTRIES_PER_OP);
   if (!encounter) {
     const [first = [], ...rest] = parts;

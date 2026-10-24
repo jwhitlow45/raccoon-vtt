@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import type { Token } from "#shared/model.ts";
-import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
+import { MAX_ENTRIES_PER_OP, type EntryInput } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { Empty } from "../components/Empty.tsx";
 import { QuickStartLink } from "../features/guide/GuideLink.tsx";
@@ -38,10 +38,8 @@ import { timerChoices } from "../features/encounter/timer.ts";
 import { EntryRow, type RowDrag } from "../features/encounter/Row.tsx";
 import { ValueEntry } from "../features/encounter/ValueEntry.tsx";
 import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
-import { creatureBlock } from "../features/dice/creature.ts";
-import { useDiceView } from "../features/dice/useDiceView.ts";
-import { placedInLair } from "../features/encounters/drop.ts";
-import type { EntryInput } from "#shared/protocol.ts";
+import { useFightJoin, type JoinState } from "../features/combat/state.ts";
+import { SrdLoadFailed } from "../features/monsters/SrdLoadFailed.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
@@ -522,63 +520,71 @@ function useCandidates(selectedTokenId: string | null): Record<AddMode, Token[]>
 }
 
 /**
- * The rows tokens join a fight with: a creature placed in its lair joins
- * with In lair on, from its counts against its block
- * (docs/design-v1-combat-controls.md 13.4). The candidates' blocks start
- * loading as the panel shows them, so the tap that adds them reads them at
- * once. A block still loading then reads as no lair.
+ * The rows tokens join a fight with, by the rule every path into a fight
+ * shares (combat/state.ts useFightJoin): a creature placed in its lair
+ * joins with In lair on. Every offered token's block starts loading as the
+ * panel shows them, the selected one's too, which may not be in the
+ * scene's list.
  */
-function useJoinBatches(candidates: readonly Token[]): (tokens: Token[]) => EntryInput[][] {
+function useJoinBatches(candidates: Record<AddMode, Token[]>): { batches(tokens: Token[]): EntryInput[][]; stateOf(tokens: readonly Token[]): JoinState } {
   const actions = useRoomActions();
-  const targets = useMemo(() => candidates.filter((t) => "inline" in t.actor && t.actor.inline.legendary).map((t) => ({ tokenId: t.id })), [candidates]);
-  const { dice } = useDiceView(targets);
-  return (tokens) =>
-    entryBatches(tokens, actions.newId).map((batch) =>
-      batch.map((input) => {
-        const token = input.tokenId !== undefined ? tokens.find((t) => t.id === input.tokenId) : undefined;
-        if (!dice || !token || !("inline" in token.actor) || !token.actor.inline.legendary) return input;
-        return placedInLair(token.actor.inline, creatureBlock(dice, { tokenId: token.id })) ? { ...input, inLair: true } : input;
-      }),
-    );
+  const offered = useMemo(() => [...candidates.scene, ...candidates.selected.filter((t) => !candidates.scene.includes(t))], [candidates]);
+  const join = useFightJoin(offered);
+  return { batches: (tokens) => entryBatches(tokens, actions.newId).map((batch) => batch.map(join.mark)), stateOf: join.stateOf };
 }
 
 function StartFight(props: { selectedTokenId: string | null }) {
   const actions = useRoomActions();
   const candidates = useCandidates(props.selectedTokenId);
-  const batches = useJoinBatches(candidates.scene);
+  const join = useJoinBatches(candidates);
   const start = (tokens: Token[]) => {
-    const [first = [], ...rest] = batches(tokens);
+    const [first = [], ...rest] = join.batches(tokens);
     actions.dispatch({ t: "encounter.start", entries: first });
     for (const batch of rest) actions.dispatch({ t: "encounter.add", entries: batch });
   };
   return (
     <Section label="Start a fight with" style={COLUMN}>
       <Wrap>
-        <AddButtons candidates={candidates} onAdd={start} />
+        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={start} />
         <Button size="sm" onClick={() => start([])}>
           Nobody yet
         </Button>
       </Wrap>
+      <JoinFailed candidates={candidates} stateOf={join.stateOf} />
     </Section>
   );
 }
 
-function AddButtons(props: { candidates: Record<AddMode, Token[]>; onAdd(tokens: Token[]): void }) {
+/**
+ * The tracker's ways to add tokens. Each waits busy while a block it needs
+ * to tell a creature placed in its lair loads, and stays off where one did
+ * not load (JoinFailed says so), so none adds a row marked off for a lair
+ * it could not read.
+ */
+function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[]): void }) {
   const { candidates } = props;
   const selected = candidates.selected[0];
+  const button = (tokens: Token[], words: ReactNode) => {
+    const state = props.stateOf(tokens);
+    return (
+      <Button size="sm" disabled={tokens.length === 0 || state === "failed"} busy={state === "loading"} onClick={() => props.onAdd(tokens)}>
+        {words}
+      </Button>
+    );
+  };
   return (
     <>
-      <Button size="sm" disabled={!selected} onClick={() => props.onAdd(candidates.selected)}>
-        {selected ? displayName(selected) : "Selected token"}
-      </Button>
-      <Button size="sm" disabled={candidates.scene.length === 0} onClick={() => props.onAdd(candidates.scene)}>
-        Everyone here ({candidates.scene.length})
-      </Button>
-      <Button size="sm" disabled={candidates.visible.length === 0} onClick={() => props.onAdd(candidates.visible)}>
-        Visible to players ({candidates.visible.length})
-      </Button>
+      {button(candidates.selected, selected ? displayName(selected) : "Selected token")}
+      {button(candidates.scene, `Everyone here (${candidates.scene.length})`)}
+      {button(candidates.visible, `Visible to players (${candidates.visible.length})`)}
     </>
   );
+}
+
+/** The load failure's line and reload, where a block the tracker's adds need did not load. */
+function JoinFailed(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState }) {
+  const { selected, scene } = props.candidates;
+  return props.stateOf([...selected, ...scene]) === "failed" ? <SrdLoadFailed what="The stat blocks" inline /> : null;
 }
 
 /**
@@ -595,9 +601,9 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
   const scores = useRoomView((s) => s.view?.meta.settings.monsterInitScore ?? false);
   const fills = useMemo(() => (scores ? scoreFills(facts.view, entries) : []), [scores, facts.view, entries]);
 
-  const batches = useJoinBatches(candidates.scene);
+  const join = useJoinBatches(candidates);
   const add = (tokens: Token[]) => {
-    for (const batch of batches(tokens)) actions.dispatch({ t: "encounter.add", entries: batch });
+    for (const batch of join.batches(tokens)) actions.dispatch({ t: "encounter.add", entries: batch });
   };
 
   return (
@@ -633,8 +639,9 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
       </Section>
       <Section label="Add to the fight" style={COLUMN}>
         <Wrap>
-          <AddButtons candidates={candidates} onAdd={add} />
+          <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={add} />
         </Wrap>
+        <JoinFailed candidates={candidates} stateOf={join.stateOf} />
       </Section>
     </>
   );
