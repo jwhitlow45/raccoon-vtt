@@ -831,9 +831,10 @@ function FightAlerts() {
   /*
    * The turn card (docs/design-v1-combat-controls.md 4.2) folds to its 44 px
    * row under 600 px wide, and wherever the card unfolded would not stack
-   * above a bar that shares the lane. It is never the column's first card
-   * to the bar (firstCard skips it), so a turn card alone never forces the
-   * summary row or moves the bar. Where even its row would meet the bar, a
+   * above a bar that shares the lane. It is drawn last and is never the
+   * column's first card to the bar (firstCard skips it), so a turn card
+   * alone never forces the summary row or moves the bar, and with other
+   * cards it folds or is cut below them. Where even its row would meet the bar, a
    * card alone is left out of the column, and the same uses stay in the
    * row's options and the bar. Its unfolded height is the last one drawn,
    * measured while it shows unfolded.
@@ -1092,6 +1093,11 @@ function FightAlerts() {
         <div data-alert="rolls" style={{ display: "contents" }}>
           <RollAlerts />
         </div>
+        {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger onDismiss={timeUp.dismiss} /> : null}
+        {notices.map((n) => (
+          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
+        ))}
+        {/* Last, since it lasts the whole turn and gives way: the card above it is the column's real first card, which the bar keeps whole (design 4.6). */}
         {combat.turn && !turnHidden ? (
           <TurnCard
             cardRef={turnRef}
@@ -1102,10 +1108,6 @@ function FightAlerts() {
             onDismiss={() => combat.turn && local.dismiss(combat.turn.id)}
           />
         ) : null}
-        {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger onDismiss={timeUp.dismiss} /> : null}
-        {notices.map((n) => (
-          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
-        ))}
       </div>
       {/* Wherever the column cuts its cards, such as at the toolbar on a phone held sideways. Its foot keeps the shadow's room unless it stands over a docked bar. */}
       {clipped ? <ScrollForMore inset={stacked !== null ? 0 : SHADOW_ROOM} /> : null}
@@ -1118,8 +1120,8 @@ function FightAlerts() {
  * wrapper with `display: contents`, as the rolls' is. A turn card is never
  * it: it lasts the whole turn, so it never moves the bar or forces the
  * summary row (docs/design-v1-combat-controls.md 4.2). With `turn` it may
- * be, for a toast, which keeps under whatever card leads (barDock.ts
- * toastTop).
+ * be, for a toast, which keeps under a turn card alone too (barDock.ts
+ * toastTop). Drawn last, it is never ahead of another card.
  */
 function firstCard(cards: HTMLElement, turn = false): HTMLElement | null {
   for (const child of cards.children) {

@@ -98,6 +98,7 @@ type View = { width: number; height: number; scale: number };
 const DESK: View = { width: 1440, height: 900, scale: 1 };
 const PHONE: View = { width: 390, height: 844, scale: 1 };
 const SMALL: View = { width: 320, height: 568, scale: 1 };
+const SIDEWAYS: View = { width: 844, height: 390, scale: 1 };
 
 function plainActor(hp: number, max = hp): Actor {
   return { hp: { cur: hp, max, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 1, passivePerception: 11, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -632,7 +633,60 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     }
   });
 
-  test("cu-b-11. dragons placed in their lair join with In lair on through the group bar's Start a fight and Add to the fight, and the tracker's", async () => {
+  test("cu-b-11. on the DM's phone held sideways, a notice or the time-up line stays whole above the dragon's docked bar, with its turn card under it", async () => {
+    await setUp(phone, phoneCdp, SIDEWAYS);
+    const bar = phone.getByRole("dialog", { name: `${DRAGON} actions` });
+    try {
+      for (const lead of ["notice", "timeUp"] as const) {
+        await turnTo("e-thorn");
+        // Fire Breath ready, so no recharge card comes: the line is the column's first card, and the turn card the only other.
+        if (dragon()?.uses?.[BREATH]) {
+          await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use: { kind: "ability", key: BREATH, name: "Fire Breath", limit: "recharge", max: 1, min: 5 }, back: true });
+          await waitFor("Fire Breath ready", () => (dragon()?.uses?.[BREATH] === undefined ? true : null));
+        }
+        // An effect that ends as the dragon's turn starts gives the DM a notice. A 4 s turn timer gives the time-up line 4 s into the turn.
+        if (lead === "notice") await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "turnStart", of: { entryId: "e-dragon" } } } });
+        else await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
+        // The bar opens before the turn, since a notice lasts only 6 s.
+        await closeSheets(phone);
+        await tapCell(phone, run.bounds, DRAGON_AT);
+        await bar.waitFor();
+        await turnTo("e-dragon");
+        const line = alerts(phone, lead).first();
+        await line.waitFor({ timeout: 15_000 });
+        await alerts(phone, "turn").waitFor({ state: "attached" });
+        // The column takes the bar's place once both are drawn.
+        await phone.waitForTimeout(400);
+        const box = await line.boundingBox();
+        const turn = await alerts(phone, "turn").boundingBox();
+        const barBox = await bar.boundingBox();
+        // How much of the line its column's scroll box cuts off.
+        const cut = await line.evaluate((node) => {
+          type El = { getBoundingClientRect(): { bottom: number }; parentElement: El | null };
+          const style = (n: El) => (globalThis as unknown as { getComputedStyle(n: El): { overflowY: string } }).getComputedStyle(n);
+          const el = node as unknown as El;
+          const full = el.getBoundingClientRect().bottom;
+          let bottom = full;
+          for (let n = el.parentElement; n; n = n.parentElement) if (style(n).overflowY !== "visible") bottom = Math.min(bottom, n.getBoundingClientRect().bottom);
+          return full - bottom;
+        });
+        assert.ok(box && turn && barBox, `${lead}: no box for the line, the turn card or the bar`);
+        assert.ok(barBox.x < box.x + box.width && barBox.x + barBox.width > box.x, `${lead}: the bar at ${JSON.stringify(barBox)} is not docked across the column`);
+        assert.ok(box.y < turn.y, `${lead}: the line at ${box.y} is not drawn above the turn card at ${turn.y}`);
+        assert.ok(cut <= 1, `${lead}: the column cuts ${cut} px off the line`);
+        assert.ok(box.y + box.height <= barBox.y, `${lead}: the line's foot at ${box.y + box.height} is under the bar's top at ${barBox.y}`);
+        await measure(phone, line, `${lead} above the turn card at 844x390`);
+        await shots.take(phone, `cu-b-${lead}-above-turn-sideways`);
+        await closeBar(phone);
+        if (lead === "timeUp") await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+      }
+    } finally {
+      await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+    }
+    assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
+  test("cu-b-12. dragons placed in their lair join with In lair on through the group bar's Start a fight and Add to the fight, and the tracker's", async () => {
     const m = srd.find((x) => x.srdId === "adult-red-dragon")!;
     const placed: Actor = { ...srdActor("adult-red-dragon"), legendary: { actionsMax: 4, actionsUsed: 0, resistMax: 4, resistUsed: 0 }, xp: m.xpInLair! };
     for (const [i, id] of run.lair.entries()) {
@@ -668,7 +722,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await deselect(desk);
   });
 
-  test("cu-b-12. the Dice panel's X/Day Use with none left says so on a tap, and sends nothing", async () => {
+  test("cu-b-13. the Dice panel's X/Day Use with none left says so on a tap, and sends nothing", async () => {
     const m = srd.find((x) => x.srdId === "dretch")!;
     const cloud = limitedUses(m).find((u) => u.kind === "day")!;
     assert.ok(cloud.kind === "day");
@@ -693,7 +747,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await deselect(desk);
   });
 
-  test("cu-b-13. where the SRD's stat blocks did not load, In lair and every join stay off beside the failure's reload", async () => {
+  test("cu-b-14. where the SRD's stat blocks did not load, In lair and every join stay off beside the failure's reload", async () => {
     // A third lair dragon out of the fight, for the joins.
     await ops.send({ t: "encounter.remove", entryIds: deskSocket.state!.encounter!.entries.filter((e) => e.tokenId === run.lair[2]).map((e) => e.id) });
     await waitFor("the third out of the fight", () => (lairRows()[2] === null ? true : null));
@@ -741,7 +795,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     }
   });
 
-  test("cu-b-14. no console errors on any page", () => {
+  test("cu-b-15. no console errors on any page", () => {
     assert.deepEqual(deskConsole.errors, [], "the desk");
     assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
