@@ -896,18 +896,22 @@ function useRowUse() {
   const actions = useRoomActions();
   const [sent, setSent] = useState<{ what: string; n: number } | null>(null);
   const pending = useAnyPending(sent === null ? [] : [sent.n]);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ text: string; refused: boolean } | null>(null);
   return {
     busy: pending ? (sent?.what ?? null) : null,
     status,
     send(what: string, op: ClientOp) {
       if (pending) return;
-      const n = actions.dispatch(op, { quiet: true, onAnswer: (answer, refusal) => setStatus(answer === "refused" ? reasonText(refusal) : null) });
-      if (n === null) setStatus("That could not be sent.");
+      const n = actions.dispatch(op, { quiet: true, onAnswer: (answer, refusal) => setStatus(answer === "refused" ? { text: reasonText(refusal), refused: true } : null) });
+      if (n === null) setStatus({ text: "That could not be sent.", refused: true });
       else {
         setSent({ what, n });
         setStatus(null);
       }
+    },
+    /** Why a control that is off cannot act now, for a touch that never hears its described reason, as the uses list says it (combat/CombatUses.tsx). */
+    why(text: string) {
+      setStatus({ text, refused: false });
     },
     /** A roll's mark of a recharge it went with (markOnRoll): never a refusal to show, so nothing waits on it. */
     mark(op: ClientOp) {
@@ -996,6 +1000,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           <>
             <Chip
               unavailable={day.left === 0}
+              onUnavailable={() => rowUse.why(NO_USES_LEFT)}
               describedBy={day.left === 0 ? noneId : undefined}
               title={day.left === 0 ? NO_USES_LEFT : undefined}
               onClick={() => rowUse.send("day", abilityOp(ctx.creature, dayUse))}
@@ -1095,8 +1100,8 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         ) : null}
       </div>
       {rowUse.status ? (
-        <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.dangerText, overflowWrap: "anywhere" }}>
-          {rowUse.status}
+        <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: rowUse.status.refused ? theme.color.dangerText : theme.color.textMuted, overflowWrap: "anywhere" }}>
+          {rowUse.status.text}
         </p>
       ) : null}
       {player ? (

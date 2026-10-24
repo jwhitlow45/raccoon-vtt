@@ -23,7 +23,8 @@ import { choiceLook } from "./looks.ts";
  * look, `aria-disabled` and a tap that does nothing, with `describedBy`
  * naming the line that says why, such as the range rings' limit. A truly
  * disabled chip would leave the keyboard and a screen reader no way to
- * find it or the reason.
+ * find it or the reason. `onUnavailable` hears that tap, for a caller that
+ * also says why where a touch sees it, and sends nothing.
  */
 export function Chip(props: {
   ref?: Ref<HTMLButtonElement>;
@@ -34,6 +35,8 @@ export function Chip(props: {
   circle?: boolean;
   disabled?: boolean;
   unavailable?: boolean;
+  /** A tap while `unavailable`, which `onClick` never hears. */
+  onUnavailable?(): void;
   describedBy?: string;
   title?: string;
   "aria-label"?: string;
@@ -61,6 +64,7 @@ export function Chip(props: {
       disabled={props.disabled}
       onClick={() => {
         if (!off) props.onClick();
+        else if (props.unavailable && !props.disabled) props.onUnavailable?.();
       }}
       style={{
         display: "inline-flex",
