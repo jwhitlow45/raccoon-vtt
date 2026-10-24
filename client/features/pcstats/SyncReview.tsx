@@ -9,7 +9,7 @@ import { SectionLabel } from "../../components/Panel.tsx";
 import { Row, RowChevron, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
-import { alsoLine, changeLine, checkLines, differentIntro, groupSummary, keptRow, lossesText, NOTHING_NEW, ownRollsLine, replacesLine, spentLine, syncReadLine, type ReadingBlocks } from "./resync.ts";
+import { alsoLine, changeLine, checkLines, differentIntro, goneDroppedLine, groupSummary, keptRow, lossesText, NOTHING_NEW, ownRollsLine, replacesLine, spentLine, syncReadLine, type ReadingBlocks } from "./resync.ts";
 
 /**
  * A D&D Beyond read's review (docs/design-v1-resync.md 3.3), for the
@@ -71,6 +71,8 @@ export function SyncReview(props: {
   onFocusSection?(section: ReviewSection): void;
   /** The class resources alone, after a Save refused for them. */
   only?: "resources";
+  /** With `only`, the markers Use it's splice cuts at 40, which the review names (the rest of Check these is left out). */
+  dropped?: SyncResult["goneDropped"];
 }) {
   const { plan, result, ticks, name } = props;
   const only = props.only === "resources";
@@ -84,7 +86,8 @@ export function SyncReview(props: {
   const kept = of("kept");
   const different = of("different");
   const replaces = of("replaces");
-  const checks = only ? [] : checkLines(plan, result, name);
+  const droppedLine = goneDroppedLine(props.dropped ?? []);
+  const checks = only ? (droppedLine ? [droppedLine] : []) : checkLines(plan, result, name);
   const losses = only ? null : lossesText(plan, name);
   // The name's line stays last, after the counts spent.
   const also = only ? [] : plan.also.filter((a) => a.key !== "name");

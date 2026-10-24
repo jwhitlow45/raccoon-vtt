@@ -41,7 +41,7 @@ import {
   type TotalKey,
 } from "./draft.ts";
 import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } from "./fill.ts";
-import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
+import { editorHelpCharacter, editorSyncPlan, editorSyncUse, onlyGoneDropped, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
 import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
 import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
@@ -408,7 +408,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
             plan={plan}
             result={result}
             ticks={ticks}
-            {...(review.only ? { only: review.only, firstRef: staleFirst } : {})}
+            {...(review.only ? { only: review.only, firstRef: staleFirst, dropped: onlyGoneDropped(result, saved, flow.record) } : {})}
             onTick={(id) => send({ t: "tick", id })}
             onBulk={(next) => send({ t: "ticks", ticks: next })}
             name={name.current}

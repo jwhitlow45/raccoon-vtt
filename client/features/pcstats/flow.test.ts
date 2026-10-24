@@ -7,7 +7,7 @@ import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor } from "#shared/testutil.ts";
 import { openDraft } from "./draft.ts";
 import { alsoPatch } from "./fill.ts";
-import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { editorHelpCharacter, editorSyncPlan, editorSyncUse, onlyGoneDropped, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
 import { levelUps, resourcesAfter } from "#shared/rules/classResources.ts";
 import { expectHash } from "#shared/permissions.ts";
 import { hash12 } from "#shared/rules/pcSync.ts";
@@ -523,5 +523,21 @@ describe("the editor's class resources", () => {
     assert.equal(result.record.gone!.at(-1), `r:${hash12("barbarian:rage")}`);
     assert.equal(goneDroppedLine(result.goneDropped), "A roll you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
     assert.ok(!Object.keys(result.record.res ?? {}).includes(hash12(rageId)));
+  });
+
+  test("a resources-only review names the markers its splice's joint cap drops, though its own record cuts none (DDBBUILD-OPUS-7)", () => {
+    const saved0 = savedBree();
+    const marker = (i: number) => `o:${i.toString(16).padStart(12, "0")}`;
+    const saved: SyncCharacter = { ...saved0, resources: [], ddbSync: { ...saved0.ddbSync!, gone: [marker(100), marker(101)] } };
+    // The draft deleted 40 rolls since the fill, so the pending record holds 40 markers the saved record lacks.
+    const pending = { ...saved.ddbSync!, gone: Array.from({ length: 40 }, (_, i) => marker(i)) };
+    const f: PcFill = { ...read([rageRead()]), read: { weapon: true, spell: true, other: false, resource: true } };
+    const { plan, ticks } = review(saved, f, run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state);
+    const result = syncResult(plan, ticks);
+    assert.deepEqual(result.goneDropped, [], "the review's own record, with the saved markers, drops none");
+    const dropped = onlyGoneDropped(result, saved, pending);
+    assert.deepEqual(dropped, [{ k: marker(0) }], "the splice drops the oldest pending marker");
+    assert.equal(goneDroppedLine(dropped), "A roll you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.deepEqual(onlyGoneDropped(result, saved, { ...pending, gone: [marker(0)] }), [], "within 40, nothing drops");
   });
 });

@@ -126,7 +126,7 @@ export function editorHelpCharacter(plan: SyncPlan, saved: Pick<Character, "acto
 export function editorSyncUse(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }, only?: { pending: DdbSyncPatch | null }): SyncUse {
   // With nothing pending, the record Save keeps is the saved one, so that is the one the review's part goes into.
   const base = only ? (only.pending ?? withoutAt(saved?.ddbSync)) : null;
-  const made = base ? spliceResources(base, result) : result.record;
+  const made = base ? spliceResources(base, result).record : result.record;
   const record = saved && sameRecord(made, saved.ddbSync) ? null : made;
   return { stats: result.stats, level: result.level, also: result.also, record, resources: heldResources(result, made, saved, read) };
 }
@@ -158,7 +158,7 @@ function withoutAt(record: DdbSyncPatch | undefined): DdbSyncPatch | null {
  * the review dropped kept after the one before it, then 40 of either kind
  * together, cut once here (DDBBUILD-ASTRA-07).
  */
-function spliceResources(pending: DdbSyncPatch, from: SyncResult): DdbSyncPatch {
+function spliceResources(pending: DdbSyncPatch, from: SyncResult): { record: DdbSyncPatch; dropped: SyncResult["goneDropped"] } {
   const { res: _res, gone: _gone, ...rest } = pending;
   const rolls = (pending.gone ?? []).filter((k) => !k.startsWith("r:"));
   const keep = new Set(rolls);
@@ -168,8 +168,24 @@ function spliceResources(pending: DdbSyncPatch, from: SyncResult): DdbSyncPatch 
     const before = rolls.slice(0, i).findLast((b) => merged.includes(b));
     merged.splice(before === undefined ? 0 : merged.indexOf(before) + 1, 0, k);
   }
-  const gone = merged.slice(Math.max(0, merged.length - MAX_PC_ROLLS));
-  return { ...rest, ...(from.record.res ? { res: from.record.res } : {}), ...(gone.length > 0 ? { gone } : {}) };
+  const cut = Math.max(0, merged.length - MAX_PC_ROLLS);
+  const gone = merged.slice(cut);
+  const dropped = merged.slice(0, cut).map((k) => {
+    const name = from.markerNames[k];
+    return name !== undefined ? { k, name } : { k };
+  });
+  return { record: { ...rest, ...(from.record.res ? { res: from.record.res } : {}), ...(gone.length > 0 ? { gone } : {}) }, dropped };
+}
+
+/**
+ * The markers a resources-only review's splice cuts at 40 (OP-21), for the
+ * review to name: the review's own cap counts the saved record's markers,
+ * while Use it cuts the pending record's, so the two can differ. Empty when
+ * there is no record to splice into, where the review's own cap is the cut.
+ */
+export function onlyGoneDropped(result: SyncResult, saved: ExpectSubject | undefined, pending: DdbSyncPatch | null): SyncResult["goneDropped"] {
+  const base = pending ?? withoutAt(saved?.ddbSync);
+  return base ? spliceResources(base, result).dropped : result.goneDropped;
 }
 
 /** Whether held class resources leave the editor unsaved: a list or a record part that changes, never levels alone (6.2 e). */
