@@ -135,7 +135,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "actor.use":
       return usePhrase(op, before, target(op.target));
     case "actor.prompt":
-      return `answering a prompt for ${target(op.target)}`;
+      return `${op.state === "skipped" ? "skipping" : "reopening"} ${possessive(target(op.target))} ${promptName(op.what)}`;
     case "character.create":
       return `adding ${the("character", op.character.name)}`;
     case "character.update": {
@@ -327,7 +327,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "actor.deathRoll":
       return `rolling a Death Save for ${target(op.target)}`;
     case "actor.rechargeRoll":
-      return `rolling a recharge for ${target(op.target)}`;
+      return `rolling the recharge of ${quoted(op.name, "an ability")} for ${target(op.target)}`;
     case "undo":
     case "redo":
       return op.t;
@@ -601,6 +601,15 @@ function usePhrase(op: OpOf<"actor.use">, before: RoomState, who: string): strin
           ? quoted(use.name, "an ability")
           : quoted(resourceOf(before, op.target, use.id)?.name, "a class resource");
   return op.back ? `giving back ${name} for ${who}` : `using ${name} for ${who}`;
+}
+
+function possessive(name: string): string {
+  return name.endsWith("s") ? `${name}'` : `${name}'s`;
+}
+
+/** A turn's prompt as a step names it: "Regeneration", "death save", "recharge". */
+function promptName(what: string): string {
+  return what === "regeneration" ? "Regeneration" : what === "deathSave" ? "death save" : "recharge";
 }
 
 /** A character's class resource by id, its target a character or a token that plays one. */

@@ -128,6 +128,21 @@ export function revertedActor(current: Actor, revert: HpRevert): Actor | null {
   return withPoolOf({ ...current, hp: { ...revert.before.hp }, life: revert.before.life, deathSaves: { ...revert.before.deathSaves }, effects }, revert.shapeTemp?.before);
 }
 
+/**
+ * A Regeneration heal taken back reopens its prompt while the record it
+ * settled is current and its turn runs (docs/design-v1-combat-controls.md
+ * 3.4), so the card comes back. Later, the turn is over and nothing opens.
+ */
+function reopenedRegeneration(state: RoomState, actor: Actor, record: number | undefined): Actor {
+  const current = actor.turnRecord;
+  const encounter = state.encounter;
+  if (record === undefined || current?.id !== record || current.settled?.regeneration === undefined) return actor;
+  if (!encounter || encounter.activeEntryId !== current.entryId || encounter.round !== current.round) return actor;
+  const { regeneration: _gone, ...settled } = current.settled;
+  const { settled: _old, ...rest } = current;
+  return { ...actor, turnRecord: Object.keys(settled).length > 0 ? { ...rest, settled } : rest };
+}
+
 /** Whether a later line already took this change back. */
 export function takenBack(log: readonly { data?: LogEvent }[], logId: string): boolean {
   return log.some((e) => e.data?.type === "hp" && e.data.back === true && e.data.of === logId);
@@ -169,7 +184,7 @@ export function hpUndoRestore(state: RoomState, logId: string): HpUndo {
   if (!reverted) return { ok: false, code: "invalid", message: CHANGED_SINCE, event: data };
   const removed = new Set((data.revert.removed ?? []).map((e) => e.id));
   const anchors = data.revert.anchors;
-  const actor = { ...reverted, effects: reverted.effects.map((e) => (removed.has(e.id) ? restoredEffect(state, e, anchors) : e)) };
+  const actor = reopenedRegeneration(state, { ...reverted, effects: reverted.effects.map((e) => (removed.has(e.id) ? restoredEffect(state, e, anchors) : e)) }, data.revert.record);
   // Conditions added since stay, so the ones coming back can pass the limit. The room could then not be exported and imported.
   if (actor.effects.length > MAX_EFFECTS) return { ok: false, code: "quota", message: `at most ${MAX_EFFECTS} effects per creature`, event: data };
   const value = holder.key.startsWith("token:") ? { ...holder.value, actor: { inline: actor } } : { ...holder.value, actor };

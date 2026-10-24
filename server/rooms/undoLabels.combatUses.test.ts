@@ -28,4 +28,12 @@ describe("combat uses' undo step labels (docs/design-v1-combat-controls.md 3.5)"
     assert.equal(describeOp({ t: "actor.use", target: { characterId: "thorn" }, use: { kind: "resource", id: "gone" } }, s), "using a class resource for Thorn");
     assert.equal(describeOp({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "regenerate", key: "traits:regeneration", amount: 15, record: 3 } }, s), "Regeneration for Adult Red Dragon");
   });
+
+  test("a prompt's Skip and Reopen name the creature's prompt, and a recharge roll its ability", () => {
+    const s = state();
+    s.tokens.troll = token("troll", { name: "Troll" });
+    assert.equal(describeOp({ t: "actor.prompt", target: { tokenId: "troll" }, record: 3, what: "regeneration", state: "skipped" }, s), "skipping Troll's Regeneration");
+    assert.equal(describeOp({ t: "actor.prompt", target: { tokenId: "thorn" }, record: 3, what: "deathSave", state: "open" }, s), "reopening Thorn's death save");
+    assert.equal(describeOp({ t: "actor.rechargeRoll", tag: "r1", target: { tokenId: "dragon" }, key: "actions:fire-breath", name: "Fire Breath", min: 5 }, s), "rolling the recharge of Fire Breath for Adult Red Dragon");
+  });
 });

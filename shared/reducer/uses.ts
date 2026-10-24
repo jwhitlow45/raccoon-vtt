@@ -1,9 +1,13 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import type { Actor, ClassResource, Encounter, EncounterSnapshot, InitEntry, LogEvent, TurnRecord, TurnUses, UseKey, UseMark } from "../model.ts";
+import { healRevivesDead } from "../migrate.ts";
+import type { Actor, ClassResource, Encounter, EncounterSnapshot, InitEntry, LogEvent, PromptKey, Settled, TurnRecord, TurnUses, UseKey, UseMark } from "../model.ts";
+import { promptRefusal } from "../permissions.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
+import { applyHeal } from "../rules/hp.ts";
+import { hpRevertOf } from "./hpUndo.ts";
 import { invalid, type ResolvedActor, type Tx } from "./tx.ts";
 
 /**
@@ -90,8 +94,73 @@ export function actorUse(tx: Tx, op: UseOp): void {
     case "resource":
       return resourceUse(tx, resolved, use, op);
     case "regenerate":
-      throw invalid("Regeneration is not available yet");
+      return regenerate(tx, resolved, use);
   }
+}
+
+/** The creature's name as a refusal gives it: its character's, for a token that plays one. */
+export function nameOf(resolved: ResolvedActor): string {
+  return resolved.character?.name ?? resolved.token?.name ?? "It";
+}
+
+/** Refuses a prompt that cannot be settled now (permissions.ts promptRefusal), as permissions did before any die. */
+export function checkPrompt(tx: Tx, resolved: ResolvedActor, record: number, what: PromptKey, reopen = false): void {
+  const refusal = promptRefusal(tx.state, resolved.actor, nameOf(resolved), record, what, reopen);
+  if (refusal !== null) throw invalid(refusal);
+}
+
+/** The actor with one prompt of its record settled, or reopened (`settled` null). */
+export function withSettled(actor: Actor, what: PromptKey, settled: Settled | null): Actor {
+  const record = actor.turnRecord;
+  if (!record) return actor;
+  const all: Partial<Record<PromptKey, Settled>> = { ...record.settled };
+  if (settled === null) delete all[what];
+  else all[what] = settled;
+  const { settled: _old, ...rest } = record;
+  return { ...actor, turnRecord: Object.keys(all).length > 0 ? { ...rest, settled: all } : rest };
+}
+
+/**
+ * A turn's Skip, or Reopen of a skipped prompt while its turn runs (3.1).
+ * Skip writes no line. A done prompt never reopens this way: its roll or
+ * its heal stands, and the heal's take back reopens Regeneration (3.4).
+ */
+export function actorPrompt(tx: Tx, op: OpOf<"actor.prompt">): void {
+  const resolved = tx.resolveActor(op.target);
+  const what = op.what as PromptKey;
+  const reopen = op.state === "open";
+  checkPrompt(tx, resolved, op.record, what, reopen);
+  if (reopen && resolved.actor.turnRecord?.settled?.[what]?.state !== "skipped") return;
+  tx.putActor(resolved, withSettled(resolved.actor, what, reopen ? null : { state: "skipped" }));
+}
+
+/**
+ * Regeneration's Apply (2.3, 4.3): its heal by applyHeal's rules, which
+ * brings back a dying creature, and a dead one where the room lets healing
+ * do so, settling the prompt with what it healed. Its HP line's take back
+ * names the record, so it reopens the prompt (3.4).
+ */
+function regenerate(tx: Tx, resolved: ResolvedActor, use: Extract<UseOp["use"], { kind: "regenerate" }>): void {
+  checkPrompt(tx, resolved, use.record, "regeneration");
+  const actor = resolved.actor;
+  const healed = applyHeal(actor, use.amount, healRevivesDead(tx.state.meta.settings, tx.env.opVersion));
+  tx.putActor(resolved, withSettled(healed.actor, "regeneration", { state: "done", total: healed.actor.hp.cur - actor.hp.cur }));
+  if (healed.actor === actor) return;
+  const left = { ...healed.actor.hp };
+  const revert = { ...hpRevertOf(actor, healed.actor, tx.state.encounter?.entries ?? []), record: use.record };
+  tx.addActorEvents(resolved, healed.events.map((e) => (e.type === "hp" ? { ...e, left, revert } : e)));
+}
+
+/** "Fire Breath recharge", cut to a roll's label, whole characters kept (protocol.ts diceRollInput). */
+export function rechargeLabel(name: string): string {
+  const suffix = " recharge";
+  if (name.length + suffix.length <= LIMITS.diceLabelChars) return `${name}${suffix}`;
+  let cut = "";
+  for (const char of name) {
+    if (cut.length + char.length + 1 + suffix.length > LIMITS.diceLabelChars) break;
+    cut += char;
+  }
+  return `${cut.trimEnd()}…${suffix}`;
 }
 
 function lineFlags(op: UseOp): Pick<UseLine, "back" | "hidden"> {
@@ -159,7 +228,12 @@ function abilityUse(tx: Tx, resolved: ResolvedActor, use: Extract<UseOp["use"], 
     }
     next = { kind: use.limit, name: use.name, used: 1, max: 1, ...(use.min !== undefined ? { min: use.min } : {}) };
   }
-  tx.putActor(resolved, withMark(actor, use.key, next));
+  let after = withMark(actor, use.key, next);
+  // Mark ready settles the recharge's open occurrence as done, in the same op (2.3).
+  const record = actor.turnRecord;
+  const due: PromptKey = `recharge:${use.key}`;
+  if (op.back && held?.kind === "recharge" && record && promptRefusal(tx.state, actor, nameOf(resolved), record.id, due) === null) after = withSettled(after, due, { state: "done", outcome: "ready" });
+  tx.putActor(resolved, after);
   const line: Omit<UseLine, "tokenId" | "characterId" | "seen"> = { type: "use", what: "ability", name: op.back ? held!.name : use.name, ...lineFlags(op) };
   const counted = op.back ? held! : next!;
   if (counted.kind === "day") {

@@ -2125,6 +2125,12 @@ export type HpRevert = {
   removed?: Effect[];
   anchors?: Record<EntryId, DurationAnchor>;
   shapeTemp?: { before?: string; after?: string };
+  /**
+   * A Regeneration's heal names the turn record it settled
+   * (docs/design-v1-combat-controls.md 3.4), so taking it back reopens the
+   * prompt while that record is current.
+   */
+  record?: number;
 };
 
 export type LogEvent =

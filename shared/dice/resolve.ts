@@ -15,13 +15,13 @@ import { CANNOT_REROLL, rerolled, rerollFace, rollFormula, withDie, withLucky, t
  * too. The server's entry, with its secure draw and the batch id, is
  * server/rooms/dice.ts.
  */
-export type DiceOp = OpOf<"dice.roll" | "roll.dice" | "actor.deathRoll">;
+export type DiceOp = OpOf<"dice.roll" | "roll.dice" | "actor.deathRoll" | "actor.rechargeRoll">;
 
 export type Resolved = { ok: true; op: OpOf<"sys.dice"> } | { ok: false; code: RefusalCode; message: string };
 
 /** Whether an op is one the resolve rolls, which the server stores as `sys.dice` in its place. */
 export function isDiceOp(op: { t: string }): op is DiceOp {
-  return op.t === "dice.roll" || op.t === "roll.dice" || op.t === "actor.deathRoll";
+  return op.t === "dice.roll" || op.t === "roll.dice" || op.t === "actor.deathRoll" || op.t === "actor.rechargeRoll";
 }
 
 export type ResolveDeps = {
@@ -47,6 +47,8 @@ export function resolveDiceOp(op: DiceOp, state: RoomState, deps: ResolveDeps): 
       return op.change !== undefined ? changedAnswer(op, op.change, state, deps) : rolledAnswer(op, state, deps);
     case "actor.deathRoll":
       return deathRoll(op, state, deps);
+    case "actor.rechargeRoll":
+      return rechargeRoll(op, deps);
   }
 }
 
@@ -171,4 +173,15 @@ function deathRoll(op: OpOf<"actor.deathRoll">, state: RoomState, deps: ResolveD
   const rolled = rollFormula(formula.formula, deps.draw, op.mode);
   if (!rolled.ok) return refuse(rolled.error);
   return { ok: true, op: { t: "sys.dice", asked: op, batch: deps.batch, results: [op.cancelled ? { ...rolled.result, cancelled: true } : rolled.result] } };
+}
+
+/**
+ * A recharge roll (docs/design-v1-combat-controls.md 3.1): "Each time the
+ * monster starts its turn, roll 1d6" (SRD 5.2.1). The reducer compares it
+ * with the op's `min`.
+ */
+function rechargeRoll(op: OpOf<"actor.rechargeRoll">, deps: ResolveDeps): Resolved {
+  const rolled = rollFormula([{ kind: "dice", sign: 1, count: 1, sides: 6 }], deps.draw);
+  if (!rolled.ok) return refuse(rolled.error);
+  return { ok: true, op: { t: "sys.dice", asked: op, batch: deps.batch, results: [rolled.result] } };
 }

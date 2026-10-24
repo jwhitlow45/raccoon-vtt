@@ -10,6 +10,7 @@ import { resultOf } from "../rules/rolls.ts";
 import { hpRevertOf } from "./hpUndo.ts";
 import { answerOf, creatureOf, creatureRef, sameCreature, writeTarget } from "./rolls.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
+import { checkPrompt, markOf, rechargeLabel, withSettled, withUses } from "./uses.ts";
 
 /**
  * Dice rolled on the server (docs/design-v1-dice.md 4.1 and 5.1). The room
@@ -32,7 +33,7 @@ export function sysDice(tx: Tx, op: Sys): void {
     case "actor.deathRoll":
       return deathRoll(tx, op, asked);
     case "actor.rechargeRoll":
-      throw invalid("a recharge roll is not available yet");
+      return rechargeRoll(tx, op, asked);
   }
 }
 
@@ -137,23 +138,55 @@ function deathRoll(tx: Tx, op: Sys, asked: Asked<"actor.deathRoll">): void {
   const result = op.results[0];
   if (!result || op.results.length !== 1) throw invalid("a death save rolls once");
   const resolved = tx.resolveActor(asked.target);
+  // A roll of an open death save settles it, from whichever surface (docs/design-v1-combat-controls.md 2.3).
+  if (asked.record !== undefined) checkPrompt(tx, resolved, asked.record, "deathSave");
   const roll: DiceRoll = { ...result, label: "Death save", ...rollCreature(tx, asked.target) };
   const to = startsSecret(tx.state, tx.actor.role === "dm", [asked.target]) ? "dm" : "all";
   tx.addEvent({ type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to, rolls: [roll] });
   const actor = resolved.actor;
   if (actor.life !== "dying") return;
   const natural = naturalOf(result);
+  const success = natural !== 1 && result.total >= 10;
+  const settled = (next: typeof actor) =>
+    asked.record === undefined ? next : withSettled(next, "deathSave", { state: "done", total: result.total, outcome: natural === 20 ? "regain" : natural === 1 ? "twoFailures" : success ? "success" : "failure" });
   if (natural === 20) {
     const healed = applyHeal(actor, 1, healRevivesDead(tx.state.meta.settings, tx.env.opVersion));
     if (healed.actor === actor) return;
-    tx.putActor(resolved, healed.actor);
+    tx.putActor(resolved, settled(healed.actor));
     const left = { ...healed.actor.hp };
     const revert = hpRevertOf(actor, healed.actor, tx.state.encounter?.entries ?? []);
     tx.addActorEvents(resolved, healed.events.map((e) => (e.type === "hp" ? { ...e, left, revert } : e)));
     return;
   }
-  const success = natural !== 1 && result.total >= 10;
   const counted = applyDeathSaves(actor, Math.min(3, actor.deathSaves.ok + (success ? 1 : 0)), Math.min(3, actor.deathSaves.fail + (success ? 0 : natural === 1 ? 2 : 1)));
-  tx.putActor(resolved, counted.actor);
+  tx.putActor(resolved, settled(counted.actor));
   tx.addActorEvents(resolved, counted.events);
+}
+
+/**
+ * A recharge roll on the server (docs/design-v1-combat-controls.md 3.1):
+ * one `dice` line, "Fire Breath recharge", secret for the DM's monster as a
+ * roll's Secret starts. `min` or more makes the ability ready, its mark
+ * gone. With `record` it settles that turn's prompt for the key with its
+ * total, so two devices rolling at once count one roll.
+ */
+function rechargeRoll(tx: Tx, op: Sys, asked: Asked<"actor.rechargeRoll">): void {
+  const result = op.results[0];
+  if (!result || op.results.length !== 1) throw invalid("a recharge rolls once");
+  const resolved = tx.resolveActor(asked.target);
+  const due = `recharge:${asked.key}` as const;
+  if (asked.record !== undefined) checkPrompt(tx, resolved, asked.record, due);
+  const roll: DiceRoll = { ...result, label: rechargeLabel(asked.name), ...rollCreature(tx, asked.target) };
+  const to = startsSecret(tx.state, tx.actor.role === "dm", [asked.target]) ? "dm" : "all";
+  tx.addEvent({ type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to, rolls: [roll] });
+  const actor = resolved.actor;
+  const ready = result.total >= asked.min;
+  let next = actor;
+  if (ready && markOf(actor, asked.key)?.kind === "recharge") {
+    const uses = { ...actor.uses };
+    delete uses[asked.key];
+    next = withUses(actor, uses);
+  }
+  if (asked.record !== undefined) next = withSettled(next, due, { state: "done", total: result.total, outcome: ready ? "ready" : "used" });
+  if (next !== actor) tx.putActor(resolved, next);
 }

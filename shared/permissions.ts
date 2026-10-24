@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
-import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
@@ -188,7 +188,81 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   const routed = routeFits(op, check);
   if (!routed.ok) return routed;
   const stamped = stampFits(op, check);
-  return stamped.ok ? expectFits(op, check) : stamped;
+  if (!stamped.ok) return stamped;
+  const prompted = promptFits(op, check);
+  return prompted.ok ? expectFits(op, check) : prompted;
+}
+
+/** The refusal of a prompt whose turn record is not the creature's current one, or whose row and round no longer act (docs/design-v1-combat-controls.md 2.3). */
+export const TURN_OVER = "That turn is over.";
+/** The refusal of a prompt its record never held: a death save not dying at the start, or a recharge not due then. */
+export const NOT_DUE = "That is not due this turn.";
+
+export function noLongerDying(name: string): string {
+  return `${name} is no longer dying.`;
+}
+
+/**
+ * Why a turn's prompt (docs/design-v1-combat-controls.md 2.3) cannot be
+ * settled now, or null: by its roll, its Apply or its Skip, or with
+ * `reopen` a skipped one opened again. It is the occurrence `(record, what)`
+ * on the creature's current record, while that record's row acts in its
+ * round, so every surface settles it once and no answer lands after its
+ * turn. A death save waits while the record began dying and the creature
+ * still is, and a recharge while its mark is there. Regeneration is
+ * accepted for any creature, since only the block says it has the trait.
+ * Reopening a prompt not settled changes nothing, so it is no refusal.
+ * Permissions ask it before any die is drawn, and the reducer again.
+ */
+export function promptRefusal(state: Pick<RoomState, "encounter">, actor: Pick<Actor, "turnRecord" | "life" | "uses">, name: string, record: number, what: string, reopen = false): string | null {
+  const current = actor.turnRecord;
+  const encounter = state.encounter;
+  if (!current || current.id !== record || !encounter || encounter.activeEntryId !== current.entryId || encounter.round !== current.round) return TURN_OVER;
+  const settled = current.settled !== undefined && Object.hasOwn(current.settled, what) ? current.settled[what as PromptKey] : undefined;
+  if (reopen) return settled?.state === "done" ? SETTLED_MEANWHILE : null;
+  if (settled) return SETTLED_MEANWHILE;
+  if (what === "deathSave") {
+    if (current.life !== "dying") return NOT_DUE;
+    return actor.life === "dying" ? null : noLongerDying(name);
+  }
+  if (what.startsWith("recharge:")) {
+    const key = what.slice("recharge:".length);
+    if (!current.due?.includes(key)) return NOT_DUE;
+    return actor.uses !== undefined && Object.hasOwn(actor.uses, key) ? null : SETTLED_MEANWHILE;
+  }
+  return what === "regeneration" ? null : NOT_DUE;
+}
+
+/** The creature an op names, with the name a refusal gives it: its character's, for a token that plays one. */
+function creatureOf(state: RoomState, target: ActorTarget): { actor: Actor; name: string } | undefined {
+  if ("characterId" in target) {
+    const character = state.characters[target.characterId];
+    return character && { actor: character.actor, name: character.name };
+  }
+  const token = state.tokens[target.tokenId];
+  if (!token) return undefined;
+  if ("inline" in token.actor) return { actor: token.actor.inline, name: token.name };
+  const character = state.characters[token.actor.ref];
+  return character && { actor: character.actor, name: character.name };
+}
+
+/**
+ * The prompt an op settles or reopens, checked here, where ops arrive,
+ * before the server draws any die for it (promptRefusal): a Skip or Reopen,
+ * a death save or recharge roll that names its record, and Regeneration's
+ * Apply. A creature that is not here is the op's own rules' to answer.
+ */
+function promptFits(op: Op, c: Check): Decision {
+  let asked: { target: ActorTarget; record: number; what: string; reopen: boolean } | undefined;
+  if (op.t === "actor.prompt") asked = { target: op.target, record: op.record, what: op.what, reopen: op.state === "open" };
+  else if ((op.t === "actor.deathRoll" || op.t === "actor.rechargeRoll") && op.record !== undefined) {
+    asked = { target: op.target, record: op.record, what: op.t === "actor.deathRoll" ? "deathSave" : `recharge:${op.key}`, reopen: false };
+  } else if (op.t === "actor.use" && op.use.kind === "regenerate") asked = { target: op.target, record: op.use.record, what: "regeneration", reopen: false };
+  if (!asked) return OK;
+  const creature = creatureOf(c.state, asked.target);
+  if (!creature) return OK;
+  const refusal = promptRefusal(c.state, creature.actor, creature.name, asked.record, asked.what, asked.reopen);
+  return refusal === null ? OK : refuse("invalid", refusal);
 }
 
 /**
@@ -470,8 +544,9 @@ function forDm(op: Op, c: Check): Decision {
     // The DM keeps or allows a player's ask and never makes one (docs/design-v1-roll-request.md 7.5).
     case "roll.change":
       return op.ask === undefined ? OK : refuse("forbidden", ONLY_PLAYERS_ASK);
-    // The DM's death roll needs a creature that exists, checked before anything is drawn.
+    // The DM's death roll and recharge roll need a creature that exists, checked before anything is drawn.
     case "actor.deathRoll":
+    case "actor.rechargeRoll":
       return ("tokenId" in op.target ? c.state.tokens[op.target.tokenId] : c.state.characters[op.target.characterId]) ? OK : GONE;
     // The rule of the op it carries (docs/design-v1-dice.md 4.2).
     case "sys.dice":

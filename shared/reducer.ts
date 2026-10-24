@@ -59,7 +59,7 @@ import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdat
 import { noticeStep } from "./reducer/trapNotice.ts";
 import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
 import { sysDice } from "./reducer/dice.ts";
-import { actorUse } from "./reducer/uses.ts";
+import { actorPrompt, actorUse } from "./reducer/uses.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
 import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from "./reducer/monsters.ts";
@@ -440,9 +440,8 @@ function dispatch(tx: Tx, op: Op): void {
       return sysDice(tx, op);
     case "actor.use":
       return actorUse(tx, op);
-    // A turn's prompts (docs/design-v1-combat-controls.md 2.3) apply once their rules land.
     case "actor.prompt":
-      throw invalid(`${op.t} is not available yet`);
+      return actorPrompt(tx, op);
     case "undo":
     case "redo":
     // The server rolls (docs/design-v1-dice.md 4.2): the actor stores the `sys.dice` it resolves in place of each.
