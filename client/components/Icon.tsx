@@ -26,6 +26,7 @@ export type IconName =
   | "chevronRight"
   | "chevronDown"
   | "chevronUp"
+  | "scrollMore"
   | "caret"
   | "plus"
   | "minus"
@@ -132,6 +133,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   external: "external-link",
   fullScreen: "maximize-2",
   leaveFullScreen: "minimize-2",
+  scrollMore: "chevrons-down",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -153,6 +155,13 @@ const SHAPES: Record<IconName, ReactNode> = {
   chevronRight: <path {...STROKE} d="M9 5l7 7-7 7" />,
   chevronDown: <path {...STROKE} d="M5 9l7 7 7-7" />,
   chevronUp: <path {...STROKE} d="M5 15l7-7 7 7" />,
+  // Lucide chevrons-down: the resting strip's Scroll for more, two chevrons so it never reads as Collapse's one in the same place (docs/design-v1-bar-compact.md 5.4).
+  scrollMore: (
+    <>
+      <path {...STROKE} d="m7 6 5 5 5-5" />
+      <path {...STROKE} d="m7 13 5 5 5-5" />
+    </>
+  ),
   // The small mark in a value chip, or in the corner of a toolbar button, that says a tap opens a pop-up (docs/design-v1-tool-options.md 5.1, 6.2).
   caret: <path {...STROKE} d="M8 10l4 4 4-4" />,
   plus: <path {...STROKE} d="M12 5v14M5 12h14" />,
