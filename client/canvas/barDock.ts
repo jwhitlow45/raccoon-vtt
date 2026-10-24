@@ -1563,11 +1563,18 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * short sheet and a page with no layer keep their own rules. As the
  * screen turns, a toast under the bar's header takes its place anew.
  *
+ * An upright phone's resting strip keeps the toasts above the band over
+ * it (docs/design-v1-bar-compact.md 3.5). As resting begins, and each time
+ * the strip's top rises, the layer's stack whose drawn foot is lower than
+ * the strip's top less 60 takes its place anew, as if it came then, a
+ * stack a pane left included (`anew`, which Room.tsx reads from the stack
+ * as drawn).
+ *
  * A toast leaves the layer only when a pane stops standing as the screen
- * turns (review LP18-TO-3), or as the screen turns under a bar's header,
- * never leaves the sheet, and leaves the notices only for a pane's header,
- * a spanning bar's header, a turned screen's card or a card that came
- * with it.
+ * turns (review LP18-TO-3), as the screen turns under a bar's header, or
+ * as a resting strip takes its stack anew, never leaves the sheet, and
+ * leaves the notices only for a pane's header, an expanded bar's header
+ * (`overBar`), a turned screen's card or a card that came with it.
  */
 export function nextToastPlaces(
   was: ToastPlaces,
@@ -1583,6 +1590,8 @@ export function nextToastPlaces(
     recent?: ReadonlySet<number>;
     /** The toasts to place under a spanning bar's header (toastsUnderHead), barToastTop's place under it, and the bar's opening, which then owns the stack (reviews LP19-BS-2, LP19-Q1, LP19-OPUS-3 and FU24-OPUS-1). */
     overBar?: { ids: ReadonlySet<number>; at: number | null; opening: number | null };
+    /** The toasts that take their place anew for a resting strip, as toasts that came now would (docs/design-v1-bar-compact.md 3.5). */
+    anew?: ReadonlySet<number>;
   },
 ): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
@@ -1602,6 +1611,7 @@ export function nextToastPlaces(
     const place = was.places.get(id);
     if (place === undefined) continue;
     if (overBar.has(id) && place !== "sheet" && place !== "pane") continue;
+    if (now.anew?.has(id) && typeof place === "object") continue;
     if (bar !== null && overBar.size > 0 && typeof place === "object") {
       places.set(id, bar);
       continue;
@@ -1704,9 +1714,8 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
  * last showed (`shownAt`, for barOpening) and which of the bar's openings
  * it is (`opening`, from a count, `openings`, that goes up each time a
  * header shows), the foot of the toasts over the map (`foot`), which the
- * clearing move leaves its token below (clearShift, review LP19-BS-3), the
- * top of the resting strip (`restTop`), whose band the toasts keep out
- * of, and the stack the toasts placed under that opening's header
+ * clearing move leaves its token below (clearShift, review LP19-BS-3),
+ * and the stack the toasts placed under that opening's header
  * (`stack`, its top and its opening, barStack). In the chrome's px from
  * the page's top, null while there is none. Each side reads the other as
  * it acts, not as it draws, so a toast that comes moves no bar. A pan that
@@ -1721,7 +1730,6 @@ export const spanToastSlot = scopeSlot(() => ({
   opening: null as number | null,
   openings: 0,
   foot: null as number | null,
-  restTop: null as number | null,
   stack: null as { top: number; opening: number } | null,
   recheck: null as (() => void) | null,
 }));
@@ -1734,8 +1742,13 @@ export const spanToastSlot = scopeSlot(() => ({
  */
 export type HeaderSummary = { count: number; name: string; press(): void };
 
-/** The bar as it shows, for the column, the notices and the camera. `freeRight` is the free area's right edge (barCover). */
-export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number };
+/**
+ * The bar as it shows, for the column, the notices and the camera.
+ * `freeRight` is the free area's right edge (barCover). `rests` marks an
+ * upright phone's resting strip, whose band the toasts keep out of
+ * (docs/design-v1-bar-compact.md 3.5).
+ */
+export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number; rests?: boolean };
 
 type BarDockState = {
   /** Room's chrome, measured. Null until it is. */

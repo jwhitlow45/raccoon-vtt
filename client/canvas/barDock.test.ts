@@ -1120,6 +1120,27 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.ok(390 - now!.edges!.left - now!.edges!.right >= 300, "as wide as a card");
   });
 
+  test("a resting strip takes anew a stack placed low before it, a stack a pane left included, and leaves the notices' stack and the sheet's where they are (docs/design-v1-bar-compact.md 3.5, BAR-ASTRA-04)", () => {
+    // An actionable toast placed under a column card at 600, before the strip opened with its top at 662: the floor is 602.
+    let s = step(NO_TOAST_PLACES, [1], { low: 600 });
+    s = step(s, [1, 2]);
+    assert.deepEqual(s.places.get(1), { low: 600, column: true });
+    // Taken anew with the card's place now under 44 px of room (toastTop gives none), it starts at the notices' top, and so does its stack.
+    s = step(s, [1, 2], { anew: new Set([1, 2]) });
+    assert.equal(s.places.get(1), "map");
+    assert.equal(s.places.get(2), "map");
+    // A stack a pane left at its header's last place goes the same way.
+    let p = step(NO_TOAST_PLACES, [3], { paneStands: true, pane: 640 });
+    p = step(p, [3]);
+    assert.deepEqual(p.places.get(3), { low: 640, column: false });
+    p = step(p, [3], { anew: new Set([3]), low: 300 });
+    assert.deepEqual(p.places.get(3), { low: 300, column: true }, "under the column's card, where it has room now");
+    // A toast in the very short sheet stays there.
+    let sheet = step(NO_TOAST_PLACES, [4], { slot: true });
+    sheet = step(sheet, [4], { slot: true, anew: new Set([4]) });
+    assert.equal(sheet.places.get(4), "sheet");
+  });
+
   test("a column toast live as a pane opens moves under the pane's header, and the trap's toast joins it there", () => {
     let s = step(NO_TOAST_PLACES, [1], { low: 250 });
     assert.equal(top(s, [1]), 250);

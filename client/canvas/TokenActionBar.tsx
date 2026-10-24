@@ -1243,7 +1243,7 @@ function BarFrame(props: {
    * drag, dropped, put back by Escape or cancelled, publishes the latest,
    * alerts that arrived meanwhile included.
    */
-  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, drawnHeight), mode, lane: placed.lane, laneLeft: laneLeft(free), freeRight: free.left + free.width };
+  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, drawnHeight), mode, lane: placed.lane, laneLeft: laneLeft(free), freeRight: free.left + free.width, ...(mode === "span" && restState === "rest" ? { rests: true } : null) };
   const factsKey = facts ? JSON.stringify(facts) : "";
   const dragging = dragBox !== null;
   useLayoutEffect(() => {
@@ -1332,10 +1332,9 @@ function BarFrame(props: {
    * Where the expanded bar's header stands, for the toasts (barDock.ts
    * spanToastSlot): a toast that shows over it moves under it, so Close
    * and Collapse stay in reach (review LP19-BS-2). The resting strip
-   * publishes no header, since the toasts keep above it, but its top,
-   * which their room ends 60 px above (3.5), and asks them to look again
-   * as resting begins and each time its top rises. Read after each
-   * render, without drawing anything again, except that while the header
+   * publishes no header, since the toasts keep above it (3.5, its box in
+   * the dock store's `bar`). Read after each render, without drawing
+   * anything again, except that while the header
    * opens, and once it goes down into the toasts placed under it, the
    * toasts look again (headAsksToasts, reviews LP19-Q1 and LP19-OPUS-3).
    * Each time the header shows it starts a new opening, the key that owns
@@ -1343,9 +1342,6 @@ function BarFrame(props: {
    * count, since two openings can fall in the same millisecond.
    */
   useLayoutEffect(() => {
-    const strip = mode === "span" && restState === "rest" && !folded ? hangBox(placed.hang, placed.hang.room).top : null;
-    const rose = strip !== null && (spanToast.restTop === null || strip < spanToast.restTop - 0.5);
-    spanToast.restTop = strip;
     const header = mode === "span" && restState === "expanded" && !folded ? barRef.current?.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`) : null;
     const box = header?.getBoundingClientRect();
     const head = box && box.height > 0 ? { top: box.top / zoom, bottom: box.bottom / zoom } : null;
@@ -1354,7 +1350,6 @@ function BarFrame(props: {
     if (head === null) {
       spanToast.shownAt = null;
       spanToast.opening = null;
-      if (rose) spanToast.recheck?.();
       return;
     }
     const now = Date.now();
@@ -1370,8 +1365,6 @@ function BarFrame(props: {
       spanToast.head = null;
       spanToast.shownAt = null;
       spanToast.opening = null;
-      spanToast.restTop = null;
-      spanToast.recheck?.();
     },
     [spanToast],
   );
