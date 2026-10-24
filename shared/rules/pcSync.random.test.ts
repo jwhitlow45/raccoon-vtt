@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LIMITS, serializedBytes } from "../limits.ts";
-import type { Character, PcRoll, PcStats, RoomState } from "../model.ts";
+import type { Character, ClassResource, PcRoll, PcStats, RoomState } from "../model.ts";
+import { resourceNameKey } from "../ddb/resources.ts";
+import { combatUseSchemas } from "../protocol.ts";
+import { presetById, type ClassId } from "./classResources.ts";
+import type { FillResource } from "./pcFill.ts";
+import { readResources, resourceHash } from "./resourceSync.ts";
 import { canApply, expectOf } from "../permissions.ts";
 import { ddbSyncForImport, ddbSyncPatchSchema, EXPECT_PARTS, MAX_PC_ROLLS, opSchema, pcStatsForImport, type Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
@@ -38,7 +43,10 @@ import { EMPTY_PC_STATS } from "./pcStats.ts";
  * read in part, parts left out, shapes, relinks, the editor's mode, the
  * 40-roll cap and the 40 markers, each sync applied and then undone
  * through the real reducer. Section 5's eight invariants are checked at
- * every step, each with its exceptions.
+ * every step, each with its exceptions, and the class resources' seven
+ * more (docs/design-v1-ddb-resources.md 9, 9 to 15), with resources spent,
+ * edited, removed and added on both sides, reads that are not whole or
+ * lose a class, and ticks at random.
  */
 
 function rng(seed: number): () => number {
@@ -94,8 +102,29 @@ function randomRoll(r: R, prefix: string, name = pick(r, NAMES)): PcRoll {
   return roll;
 }
 
-/** What D&D Beyond holds for the character: a whole block, the fields beside it, and its number. */
-type Truth = { stats: PcStats; level: number; ac: number; hpMax: number; speeds: { walk: number; fly?: number }; senses?: string; name: string; number: string };
+/** What D&D Beyond holds for the character: a whole block, the fields beside it, its class resources, and its number. */
+type Truth = { stats: PcStats; level: number; ac: number; hpMax: number; speeds: { walk: number; fly?: number }; senses?: string; name: string; number: string; resources: FillResource[] };
+
+/** The class resources a read may hold, presets of two classes of one name among them. */
+const RESOURCE_POOL: FillResource[] = [
+  { name: "Rage", max: 3, reset: "shortOne", preset: "barbarian-rage", level: 3, classId: "barbarian" },
+  { name: "Channel Divinity", max: 2, reset: "shortOne", preset: "cleric-channel-divinity", level: 2, classId: "cleric" },
+  { name: "Channel Divinity", max: 2, reset: "shortOne", preset: "paladin-channel-divinity", level: 3, classId: "paladin" },
+  { name: "Wild Shape", max: 3, reset: "shortOne", preset: "druid-wild-shape", level: 6, classId: "druid" },
+  { name: "Lay on Hands", max: 25, reset: "long", pool: true, preset: "paladin-lay-on-hands", level: 5, classId: "paladin" },
+  { name: "Superiority Dice", max: 4, reset: "short", classId: "fighter" },
+  { name: "Second Wind", max: 2, reset: "shortOne", preset: "fighter-second-wind", level: 3, classId: "fighter" },
+  { name: "Breath Weapon", max: 3, reset: "long" },
+  { name: "Luck Points", max: 3, reset: "long" },
+  { name: "Flash of Genius", max: 4, reset: "long" },
+  { name: "Grit Points", max: 8, reset: "short", pool: true },
+];
+
+function randomResources(r: R): FillResource[] {
+  const out: FillResource[] = [];
+  for (const res of RESOURCE_POOL) if (chance(r, 0.5)) out.push({ ...res, used: Math.floor(r() * (res.max + 1)) });
+  return out.slice(0, LIMITS.resourcesPerCharacter);
+}
 
 function randomTruth(r: R, filler: boolean): Truth {
   let stats = structuredClone(EMPTY_PC_STATS) as PcStats;
@@ -104,7 +133,7 @@ function randomTruth(r: R, filler: boolean): Truth {
   const rolls: PcRoll[] = [];
   for (let i = 0; i < count; i++) rolls.push(filler && i >= 6 ? { id: newId("t"), name: `Roll ${i}`, kind: pick(r, ["weapon", "spell", "other"] as const), level: 1, dice: [{ formula: "1d4" }] } : randomRoll(r, "t"));
   stats.rolls = rolls.map((roll) => (roll.kind === "spell" ? roll : (({ level: _level, ...rest }) => rest)(roll)));
-  return { stats, level: 1 + Math.floor(r() * 20), ac: 10 + Math.floor(r() * 8), hpMax: 10 + Math.floor(r() * 60), speeds: chance(r, 0.2) ? { walk: 30, fly: 30 } : { walk: pick(r, [25, 30, 35]) }, ...(chance(r, 0.5) ? { senses: `Darkvision ${pick(r, [60, 120])} ft.` } : {}), name: pick(r, ["Bree", "Bree Tallow"]), number: "12345678" };
+  return { stats, level: 1 + Math.floor(r() * 20), ac: 10 + Math.floor(r() * 8), hpMax: 10 + Math.floor(r() * 60), speeds: chance(r, 0.2) ? { walk: 30, fly: 30 } : { walk: pick(r, [25, 30, 35]) }, ...(chance(r, 0.5) ? { senses: `Darkvision ${pick(r, [60, 120])} ft.` } : {}), name: pick(r, ["Bree", "Bree Tallow"]), number: "12345678", resources: randomResources(r) };
 }
 
 /** D&D Beyond moves on: a few fields, a roll changed, one removed, one added. A full one may add a roll first, where the read keeps it. */
@@ -118,9 +147,18 @@ function changeTruth(r: R, t: Truth, full: boolean): Truth {
   }
   if (stats.rolls.length > 0 && chance(r, 0.25)) stats.rolls.splice(Math.floor(r() * stats.rolls.length), 1);
   if (chance(r, 0.3)) stats.rolls.push(randomRoll(r, "t"));
+  let resources = t.resources.map((res) => (chance(r, 0.25) ? { ...res, used: Math.floor(r() * (res.max + 1)) } : res));
+  if (resources.length > 0 && chance(r, 0.2)) {
+    const i = Math.floor(r() * resources.length);
+    const max = Math.max(1, resources[i]!.max + pick(r, [-1, 1, 2]));
+    resources[i] = { ...resources[i]!, max, used: Math.min(resources[i]!.used ?? 0, max) };
+  }
+  if (resources.length > 0 && chance(r, 0.15)) resources.splice(Math.floor(r() * resources.length), 1);
+  if (resources.length < LIMITS.resourcesPerCharacter && chance(r, 0.2)) resources = [...resources, { ...pick(r, RESOURCE_POOL), used: 0 }];
   return {
     ...t,
     stats,
+    resources,
     level: chance(r, 0.2) ? Math.min(20, t.level + 1) : t.level,
     ac: chance(r, 0.15) ? t.ac + 1 : t.ac,
     hpMax: chance(r, 0.2) ? t.hpMax + 7 : t.hpMax,
@@ -171,6 +209,21 @@ function readOf(r: R, t: Truth, unread = 0.12): PcFill {
     rolls = rolls.slice(0, MAX_PC_ROLLS);
   }
   fill.stats.rolls = rolls;
+  // The class resources: sometimes not read at all, sometimes read in part and marked so, sometimes one whose class did not resolve.
+  if (!chance(r, 0.1)) {
+    let resources = t.resources.map((res) => ({ ...res }));
+    fill.read!.resource = true;
+    if (chance(r, 0.15)) {
+      fill.read!.resource = false;
+      resources = resources.filter(() => chance(r, 0.6));
+    }
+    if (resources.length > 0 && chance(r, 0.15)) {
+      const i = Math.floor(r() * resources.length);
+      const { classId: _c, ...unresolved } = resources[i]!;
+      resources[i] = unresolved;
+    }
+    fill.resources = resources;
+  }
   return fill;
 }
 
@@ -198,6 +251,20 @@ function edit(r: R, c: Character, full: Truth | null): Character {
     }
     next.stats = stats;
   }
+  let resources = [...(next.resources ?? [])];
+  resources = resources.map((res) => (chance(r, 0.3) ? { ...res, used: Math.floor(r() * (res.max + 1)) } : res));
+  if (resources.length > 0 && chance(r, 0.15)) {
+    const i = Math.floor(r() * resources.length);
+    const max = Math.max(1, resources[i]!.max + pick(r, [1, 2]));
+    resources[i] = { ...resources[i]!, max, edited: true };
+  }
+  if (resources.length > 0 && chance(r, 0.15)) resources.splice(Math.floor(r() * resources.length), 1);
+  if (resources.length < LIMITS.resourcesPerCharacter && chance(r, 0.15)) {
+    const from = pick(r, RESOURCE_POOL);
+    resources.push({ id: newId("res"), name: from.name, max: from.max, used: 0, reset: from.reset, ...(from.pool ? { pool: true as const } : {}), ...(from.preset && chance(r, 0.5) ? { preset: from.preset, level: from.level, atLevel: 5 } : {}) });
+  }
+  if (resources.length > 0) next.resources = resources;
+  else delete next.resources;
   if (chance(r, 0.1)) next.level = 1 + Math.floor(r() * 20);
   if (chance(r, 0.1)) next.actor.ac = 10 + Math.floor(r() * 8);
   if (chance(r, 0.1)) next.actor.senses = "";
@@ -269,8 +336,17 @@ function throughReducer(state: RoomState, c: Character, sent: NonNullable<Return
   return { after: applied.state.characters[c.id]!, afterState: applied.state };
 }
 
+/** A resource's shape as the player sees it, the bookkeeping aside. */
+function shapeOf(res: Pick<ClassResource, "name" | "max" | "reset" | "pool">): string {
+  return JSON.stringify([res.name, res.max, res.reset, res.pool === true]);
+}
+
+function classOf(res: Pick<ClassResource, "preset">): ClassId | undefined {
+  return presetById(res.preset)?.classId;
+}
+
 function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "resync" | "editor", seq: number): Character {
-  const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill });
+  const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill, newId: () => newId("added") });
   const record = plan.source === "same" ? c.ddbSync : undefined;
   const shaped = c.actor.srdId !== undefined;
   const stats = c.stats ?? (EMPTY_PC_STATS as PcStats);
@@ -381,9 +457,56 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
     }
   }
 
+  for (const item of plan.items) if (item.type === "resource") reached.resourceCases.add(item.case);
+  if (plan.spent.length > 0) reached.spent++;
+  for (const slot of plan.resources.slots) if (slot.read && resEntriesOf(c)[hash12(slot.resource.id)] && resEntriesOf(c)[hash12(slot.resource.id)]!.k !== slot.read.k) reached.moved++;
+
+  // 1, for class resources: with a record and nothing ticked, every resource the player changed or made stays as it is, and none removed comes back.
+  const resEntries = record?.res ?? {};
+  const before = c.resources ?? [];
+  if (record && mode === "resync" && r0.resources) {
+    for (const res of before) {
+      const entry = resEntries[hash12(res.id)];
+      if (entry && resourceHash(res) === entry.h) continue;
+      const out = r0.resources.find((x) => x.id === res.id);
+      assert.ok(out && shapeOf(out) === shapeOf(res), `1: the player's ${res.name} kept`);
+    }
+    const removedKeys = new Set([...Object.entries(resEntries).filter(([id]) => !before.some((x) => hash12(x.id) === id)).map(([, e]) => e.k), ...(record.gone ?? []).filter((k) => k.startsWith("r:"))]);
+    for (const res of r0.resources) if (!before.some((x) => x.id === res.id)) assert.ok(!removedKeys.has(r0.record.res?.[hash12(res.id)]?.k ?? ""), "1: a removed resource stays removed");
+  }
+
+  // 10. During a read that is not whole, every linked resource the read did not meet is kept as it was, with its entry.
+  if (record && fill.resources && fill.read?.resource !== true) {
+    for (const slot of plan.resources.slots) {
+      const entry = resEntries[hash12(slot.resource.id)];
+      if (!entry || slot.read) continue;
+      for (const res of [r0, rd, ra]) {
+        const out = res.resources!.find((x) => x.id === slot.resource.id);
+        assert.ok(out && shapeOf(out) === shapeOf(slot.resource) && out.used === undefined, `10: ${slot.resource.name} kept as it was`);
+        assert.deepEqual(res.record.res?.[hash12(slot.resource.id)], entry, "10: and its entry");
+      }
+    }
+  }
+  if (!fill.resources) for (const res of [r0, rd, ra]) assert.equal(res.resources, undefined, "10: no resources read, none written");
+
   // The ticks of this step, at random.
-  const ticks = new Set<string>([...plan.items.map((i) => i.id), ...plan.also.map((a) => a.id)].filter(() => chance(r, 0.5)));
+  const ticks = new Set<string>([...plan.items.map((i) => i.id), ...plan.also.map((a) => a.id), ...plan.spent.map((s) => s.id)].filter(() => chance(r, 0.5)));
   const result = syncResult(plan, ticks);
+
+  // 14. Nothing comes in or back beside an unlinked one left of the same name and a matching class.
+  if (result.resources) {
+    const linkedIds = new Set(Object.keys(result.record.res ?? {}));
+    for (const added of result.resources.filter((x) => !before.some((b) => b.id === x.id))) {
+      const read = readResources(fill.resources ?? []).find((x) => x.k === result.record.res?.[hash12(added.id)]?.k);
+      for (const other of result.resources) {
+        if (other === added || linkedIds.has(hash12(other.id))) continue;
+        const sameName = resourceNameKey(other.name) === resourceNameKey(added.name);
+        const oc = classOf(other);
+        const rc = read?.resource.classId;
+        assert.ok(!(sameName && (oc === undefined || rc === undefined || oc === rc)), `14: no second ${added.name}`);
+      }
+    }
+  }
 
   // 6. Ids stay, are unique, at most 40, and the block and record pass their schemas and sizes.
   const blockIds = new Set(stats.rolls.map((roll) => roll.id));
@@ -402,7 +525,7 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
   const fieldKeys = lineIds.map((id) => id.replace(/^(field|also):/, ""));
   assert.equal(new Set(fieldKeys).size, fieldKeys.length, "8: a field never in two sections");
   const n = result.counts;
-  assert.equal(n.cameIn + n.removed + n.cameBack + n.stayed + result.notFit, plan.items.length + plan.also.length, "8: the counts add up");
+  assert.equal(n.cameIn + n.removed + n.cameBack + n.stayed + n.resourcesRemoved + n.resourcesBack + result.notFit + result.resourcesNotFit, plan.items.length + plan.also.length + plan.spent.length, "8: the counts add up");
   for (const item of plan.items) if (item.section === "changes") assert.equal(takesTheirs(item, ticks), true);
 
   const sent = syncPatch(c, result);
@@ -410,11 +533,37 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
     // Nothing to send means nothing would change: the block, the fields beside it and the record are as they are.
     assert.deepEqual(result.stats, stats);
     assert.ok(c.ddbSync && sameRecord(result.record, c.ddbSync));
+    if (result.resources) for (const res of result.resources) assert.equal(res.used, undefined, "nothing sent, no count set");
     return c;
   }
 
   // 7. The undo patch, applied after the sync's, gives back everything, exactly the current and maximum HP included.
   const { after, afterState } = throughReducer(state, c, sent, seq);
+
+  // 9. A resource that survives keeps its count spent, cut to its new count, unless its spent line was ticked.
+  for (const res of before) {
+    const out = after.resources?.find((x) => x.id === res.id);
+    const line = plan.resources.slots.find((s) => s.resource.id === res.id)?.spent;
+    if (!out || (line && ticks.has(line.id))) continue;
+    assert.equal(out.used, Math.min(res.used, out.max), `9: ${res.name}'s count spent`);
+  }
+  // 12. Ids unique, at most 12, each stored resource and the record within their schemas and 6 KiB.
+  const resIds = (after.resources ?? []).map((x) => x.id);
+  assert.equal(new Set(resIds).size, resIds.length, "12: unique ids");
+  assert.ok(resIds.length <= LIMITS.resourcesPerCharacter, "12: at most 12");
+  for (const res of after.resources ?? []) assert.ok(combatUseSchemas.resourceStored.safeParse(res).success, "12: a stored resource passes");
+  assert.ok(Object.keys(after.ddbSync!.res ?? {}).length <= LIMITS.resourcesPerCharacter);
+  for (const id of Object.keys(after.ddbSync!.res ?? {})) assert.ok(resIds.some((x) => hash12(x) === id), "12: entries never outnumber the resources");
+  // 15. At most 40 markers, every one of a kind not read whole kept but for those the cap drops, each kind in its old order.
+  const goneBefore = plan.source === "same" ? (c.ddbSync?.gone ?? []) : [];
+  const goneAfter = after.ddbSync!.gone ?? [];
+  assert.ok(goneAfter.length <= MAX_PC_ROLLS, "15: at most 40");
+  const droppedKs = new Set(result.goneDropped.map((d) => d.k));
+  if (!fill.resources) for (const k of goneBefore.filter((x) => x.startsWith("r:"))) assert.ok(goneAfter.includes(k) || droppedKs.has(k), "15: a resource marker kept while none were read");
+  for (const letter of ["w", "s", "o", "r"]) {
+    const kept = goneBefore.filter((k) => k.startsWith(`${letter}:`) && goneAfter.includes(k));
+    assert.deepEqual(goneAfter.filter((k) => kept.includes(k)), kept, `15: the ${letter} markers keep their order`);
+  }
   const simulated = afterSync(c, sent.patch, after.ddbSync!.at);
   assert.deepEqual(expectOf(simulated, EXPECT_PARTS), expectOf(after, EXPECT_PARTS), "7: the device works out what the server holds");
   assert.equal(ddbSyncForImport.safeParse(after.ddbSync).success, true, "6: the stored record passes");
@@ -440,15 +589,18 @@ function checkStep(r: R, state: RoomState, c: Character, fill: PcFill, mode: "re
   assert.equal(restored.actor.sheetUrl, c.actor.sheetUrl);
   assert.deepEqual([restored.actor.hp.cur, restored.actor.hp.max], [c.actor.hp.cur, c.actor.hp.max], "7: exactly the HP");
   assert.deepEqual(restored.ddbSync, c.ddbSync, "7: the record");
+  // 13. Undo gives back the list exactly, every count spent included.
+  assert.deepEqual(restored.resources, c.resources, "13: the class resources");
 
   // 5. The new base is D&D Beyond's for every read field, and a re-sync at once with the same data brings nothing in.
   for (const key of SYNC_FIELD_KEYS) if (readsField(fill, key)) assert.deepEqual(fieldOfBase(after, key), fieldOf(fillStats(fill), key), `5: ${key}'s base`);
-  if (result.notFit === 0 && result.goneDropped.length === 0) {
+  // 11. A re-sync at once with the same data brings nothing in, class resources included.
+  if (result.notFit === 0 && result.resourcesNotFit === 0 && result.goneDropped.length === 0) {
     const again = planSync({ mode, stats: after.stats, level: after.level, character: after, fill: { ...fill, stats: { ...fill.stats, rolls: fill.stats.rolls.map((roll) => ({ ...roll, id: newId("again") })) } } });
     assert.deepEqual(again.items.filter((i) => i.section === "changes").map((i) => i.id), [], "5: nothing comes in");
     const notTaken = (id: string) => !takesTheirs([...plan.items, ...plan.also].find((x) => x.id === id)!, ticks);
     const expected = new Set([
-      ...plan.items.filter((i) => i.section !== "changes" && notTaken(i.id) && !(i.type === "roll" && i.case === "goneThere")).map((i) => i.id),
+      ...plan.items.filter((i) => i.section !== "changes" && notTaken(i.id) && !((i.type === "roll" || i.type === "resource") && i.case === "goneThere")).map((i) => i.id),
       ...plan.also.filter((a) => !ticks.has(a.id) && a.key !== "name" && a.key !== "sheetUrl").map((a) => `field:${a.key}`),
     ]);
     assert.deepEqual(new Set(again.items.map((i) => i.id)), expected, "5: the kept list is the same, a roll removed there while edited listed once");
@@ -492,7 +644,11 @@ function fieldOfBase(c: Pick<Character, "ddbSync">, key: FieldKey): FieldValue {
 
 /** One random life of Bree: where she starts, then up to six syncs with edits on both sides between them. */
 /** How often a full life's steps reached the record's room, so the test knows the boundary was run. */
-const reached = { unlinked: 0 };
+const reached = { unlinked: 0, resourceCases: new Set<string>(), spent: 0, moved: 0 };
+
+function resEntriesOf(c: Character): Record<string, { k: string; h: string }> {
+  return c.ddbSync?.res ?? {};
+}
 
 /**
  * One character's life of syncs and edits. A full one keeps about 40
@@ -510,6 +666,8 @@ function life(seed: number, full = false): void {
     actor: testActor({ ac: 15, hp: { cur: 20, max: 38, temp: 0 }, speeds: { walk: 30 }, senses: "", sheetUrl: "https://www.dndbeyond.com/characters/12345678" }),
     level: 5,
   });
+  // Some start with class resources typed by hand, one of a name D&D Beyond may hold.
+  if (chance(r, 0.4)) c.resources = [{ id: newId("res"), name: pick(r, RESOURCE_POOL).name, max: 2, used: 1, reset: "long" }];
   if (start === "typed") c.stats = { ...(structuredClone(EMPTY_PC_STATS) as PcStats), spellAbility: "cha", rolls: [randomRoll(r, "own"), randomRoll(r, "own")] };
   if (start === "imported") c.stats = { ...(structuredClone(EMPTY_PC_STATS) as PcStats), rolls: truth.stats.rolls.slice(0, 5).map((roll) => ({ ...roll, id: newId("old"), ddb: true as const })) };
   let state: RoomState = room({ characters: { bree: c } });
@@ -534,6 +692,9 @@ test("a re-sync's eight invariants hold over many random lives (docs/design-v1-r
       throw new Error(`seed ${seed}: ${(err as Error).message}`, { cause: err });
     }
   }
+  // The lives reached every case of a class resource, a spent line, and a link that followed its class (docs/design-v1-ddb-resources.md 4.2).
+  assert.deepEqual([...reached.resourceCases].sort(), ["add", "conflict", "deleted", "edited", "goneThere", "remove", "sameName", "update"]);
+  assert.ok(reached.spent > 0 && reached.moved > 0, JSON.stringify(reached));
 });
 
 test("the invariants hold near 40 rolls, where the record runs out of room for the player's own rolls (RS-O-30)", () => {

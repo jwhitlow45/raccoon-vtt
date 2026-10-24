@@ -1,9 +1,11 @@
-import type { Character, PcRoll, PcStats } from "#shared/model.ts";
+import type { Character, ClassResource, PcRoll, PcStats } from "#shared/model.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { damageTypeName } from "#shared/rules/damage.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { sensesWords, type AlsoItem, type FieldItem, type FieldKey, type FieldValue, type RollItem, type SyncItem, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
+import type { FillResource } from "#shared/rules/pcFill.ts";
+import { sensesWords, type AlsoItem, type FieldItem, type FieldKey, type FieldValue, type ResourceItem, type RollItem, type SyncItem, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
+import { countWords, RESET_WORDS } from "../resources/logic.ts";
 import { signed } from "#shared/statBlock.ts";
 import { speedText, whose } from "../tokens/companionBlocks.ts";
 import { readLine } from "./fill.ts";
@@ -150,9 +152,60 @@ function reading(blocks: ReadingBlocks["now"], roll: PcRoll): string {
   return rollReading(blocks.stats, blocks.level, roll);
 }
 
+function lower(text: string): string {
+  return text === "" ? text : `${text[0]!.toLowerCase()}${text.slice(1)}`;
+}
+
+type ResourceShape = Pick<ClassResource, "max" | "reset"> & { pool?: true | undefined };
+
+/** A class resource's count and rest (docs/design-v1-ddb-resources.md 6.1): "3 uses, one back on a Short Rest, all on a Long Rest", "a pool of 25, back on a Long Rest". */
+export function resourceReading(r: ResourceShape): string {
+  return `${lower(countWords(r.max, r.pool === true))}, ${lower(RESET_WORDS[r.reset])}`;
+}
+
+/**
+ * Only what differs between two of a resource's shapes, new then "now"
+ * old: "4 uses, now 3", "back on a Short or Long Rest, now back on a Long
+ * Rest", "a pool of 6, now 6 uses", the name first when it differs.
+ */
+function resourceChange(theirs: FillResource, mine: ClassResource): string {
+  const pool = (theirs.pool === true) === (mine.pool === true);
+  const next: string[] = [];
+  const now: string[] = [];
+  if (theirs.name !== mine.name) {
+    next.push(theirs.name);
+    now.push(mine.name);
+  }
+  if (theirs.max !== mine.max || !pool) {
+    next.push(lower(countWords(theirs.max, theirs.pool === true)));
+    now.push(pool && next.length === 1 ? String(mine.max) : lower(countWords(mine.max, mine.pool === true)));
+  }
+  if (theirs.reset !== mine.reset) {
+    next.push(lower(RESET_WORDS[theirs.reset]));
+    now.push(lower(RESET_WORDS[mine.reset]));
+  }
+  return `${next.join(", ")}, now ${now.join(", ")}`;
+}
+
+/** A class resource's line under Changes (6.1): "Adds Rage: 3 uses, …, 2 of 3 left", "Updates Rage: 4 uses, now 3", "Removes Divine Intervention". */
+function resourceChangeLine(item: ResourceItem): string {
+  const theirs = item.theirs?.resource;
+  switch (item.case) {
+    case "add": {
+      const spent = Math.min(theirs!.used ?? 0, theirs!.max);
+      return `Adds ${theirs!.name}: ${resourceReading(theirs!)}${spent > 0 ? `, ${theirs!.max - spent} of ${theirs!.max} left` : ""}`;
+    }
+    case "remove":
+      return `Removes ${item.mine!.name}`;
+    default:
+      return `Updates ${item.mine!.name}: ${resourceChange(theirs!, item.mine!)}`;
+  }
+}
+
 /** A line under Changes from D&D Beyond: "Wisdom 18, now 16", "Adds Moonbeam (level 2): …", "Removes Shortbow". A first sync leaves out "now". */
 export function changeLine(item: SyncItem, blocks: ReadingBlocks, first: boolean): string {
   if (item.type === "field") return first ? sayValue(item.key, item.theirs) : `${sayValue(item.key, item.theirs)}, now ${bareValue(item.key, item.now)}`;
+  if (item.type === "resource") return resourceChangeLine(item);
   const theirs = item.theirs?.roll;
   switch (item.case) {
     case "add":
@@ -175,6 +228,7 @@ export function keptRow(item: SyncItem, blocks: ReadingBlocks): KeptRow {
     const theirs = item.conflict && item.base !== undefined ? `D&D Beyond now says ${bareValue(item.key, item.theirs)}. At the last sync it said ${bareValue(item.key, item.base)}.` : `D&D Beyond says ${bareValue(item.key, item.theirs)}.`;
     return { first: sayValue(item.key, item.now), ...(tag ? { tag } : {}), theirs, tick: overwriteWords(item) };
   }
+  if (item.type === "resource") return resourceKeptRow(item, tag);
   const mine = item.mine;
   const theirs = item.theirs?.roll;
   switch (item.case) {
@@ -192,14 +246,46 @@ export function keptRow(item: SyncItem, blocks: ReadingBlocks): KeptRow {
   }
 }
 
+/**
+ * A kept or different class resource's row (6.1). The record keeps no
+ * earlier value, so a conflict says D&D Beyond's now alone, as a roll's
+ * does (ASTRA-5).
+ */
+function resourceKeptRow(item: ResourceItem, tag: string | undefined): KeptRow {
+  const mine = item.mine;
+  const theirs = item.theirs?.resource;
+  switch (item.case) {
+    case "goneThere":
+      return { first: `${mine!.name}, as you changed it: ${resourceReading(mine!)}`, theirs: "D&D Beyond no longer has it.", tick: "Remove it" };
+    case "deleted":
+      return { first: `${theirs!.name}: you removed it.`, theirs: `D&D Beyond says ${resourceReading(theirs!)}.`, tick: "Add it back" };
+    case "sameName":
+      return { first: `${mine!.name}, your own: ${resourceReading(mine!)}`, theirs: `D&D Beyond says ${theirs!.name === mine!.name ? "" : `${theirs!.name}: `}${resourceReading(theirs!)}.`, tick: "Overwrite with D&D Beyond's" };
+    default: {
+      const named = theirs!.name === mine!.name ? "" : `${theirs!.name}: `;
+      return { first: `${mine!.name}, as you changed it: ${resourceReading(mine!)}`, ...(tag ? { tag } : {}), theirs: `D&D Beyond says ${named}${resourceReading(theirs!)}.`, tick: "Overwrite with D&D Beyond's" };
+    }
+  }
+}
+
 /** A line under Replaces your changes, the editor's: "Spellcasting ability: Charisma, becomes Wisdom". */
 export function replacesLine(item: SyncItem, blocks: ReadingBlocks): string {
   if (item.type === "field") return `${sayValue(item.key, item.now)}, becomes ${bareValue(item.key, item.theirs)}`;
+  if (item.type === "resource") {
+    const theirs = item.theirs!.resource;
+    return `${item.mine!.name}: ${resourceReading(item.mine!)}, becomes ${theirs.name === item.mine!.name ? "" : `${theirs.name}: `}${resourceReading(theirs)}`;
+  }
   return `${rollTitle(item.mine!)}: ${reading(blocks.now, item.mine!)}, becomes ${reading(blocks.after, item.theirs!.roll)}`;
 }
 
 /** An item's line cut short, for a group's summary. */
 function shortLine(item: SyncItem, blocks: ReadingBlocks, first: boolean): string {
+  if (item.type === "resource") {
+    const name = (item.mine ?? item.theirs!.resource).name;
+    if (item.section === "changes") return `${item.case === "add" ? "Adds" : item.case === "remove" ? "Removes" : "Updates"} ${item.case === "add" ? item.theirs!.resource.name : name}`;
+    if (item.section === "replaces") return `${name}: yours, becomes D&D Beyond's`;
+    return `${name}, your own, differs from D&D Beyond's`;
+  }
   if (item.section === "changes") {
     if (item.type === "field") return changeLine(item, blocks, first);
     const roll = (item.mine ?? item.theirs!.roll) as PcRoll;
@@ -273,13 +359,25 @@ export function ownRollsLine(n: number): string {
   return `Keeps your ${n} own ${n === 1 ? "roll" : "rolls"}.`;
 }
 
-/** The removed markers the 40 cap drops (2.1): names up to three, then a count (RS-UX-25). */
+/**
+ * The removed markers the 40 cap drops (2.1), which rolls and class
+ * resources share (docs/design-v1-ddb-resources.md 4.1): names up to three,
+ * then a count of each kind (RS-UX-25).
+ */
 export function goneDroppedLine(dropped: SyncResult["goneDropped"]): string | null {
   if (dropped.length === 0) return null;
-  const tail = "may come back on a later re-sync. Only 40 deleted rolls are remembered.";
+  const tail = "may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.";
   const names = dropped.map((d) => d.name);
   if (names.every((n): n is string => n !== undefined) && names.length <= 3) return `Your deleted ${listWords(names)} ${tail}`;
-  return dropped.length === 1 ? `A roll you deleted ${tail}` : `${dropped.length} rolls you deleted ${tail}`;
+  const resources = dropped.filter((d) => d.k.startsWith("r:")).length;
+  const rolls = dropped.length - resources;
+  const kinds = [rolls === 1 ? "a roll" : rolls > 1 ? `${rolls} rolls` : null, resources === 1 ? "a class resource" : resources > 1 ? `${resources} class resources` : null].filter((w): w is string => w !== null);
+  return `${capital(listWords(kinds))} you deleted ${tail}`;
+}
+
+/** An Also set line for a linked resource's count spent (4.3): "Rage 3 of 3 left, now 1 of 3", with its help. */
+export function spentLine(line: SyncResult["spent"][number]): { text: string; help: string } {
+  return { text: `${line.name} ${line.max - line.theirs} of ${line.max} left, now ${line.max - line.now} of ${line.max}`, help: "Unticked keeps what was spent here." };
 }
 
 /** The player's own rolls D&D Beyond has too that the record had no room to link (2.4): names up to three, then a count. */
@@ -299,6 +397,13 @@ export function checkLines(plan: SyncPlan, result: SyncResult, name: string): st
       result.notFit === 1
         ? `1 roll from D&D Beyond did not fit, since a block holds 40. It comes in once there is room.`
         : `${result.notFit} rolls from D&D Beyond did not fit, since a block holds 40. They come in once there is room.`,
+    );
+  }
+  if (result.resourcesNotFit > 0) {
+    out.push(
+      result.resourcesNotFit === 1
+        ? `1 class resource from D&D Beyond did not fit, since a character holds ${LIMITS.resourcesPerCharacter}. It comes in once there is room.`
+        : `${result.resourcesNotFit} class resources from D&D Beyond did not fit, since a character holds ${LIMITS.resourcesPerCharacter}. They come in once there is room.`,
     );
   }
   const gone = goneDroppedLine(result.goneDropped);
@@ -322,16 +427,40 @@ export function lossesText(plan: SyncPlan, name: string): string | null {
   if (l.proficiencies) takes.push(`${l.proficiencies} proficiencies`);
   if (l.defenses) takes.push(`${l.defenses} defenses`);
   if (l.rolls) takes.push(`${l.rolls} rolls`);
+  if (l.resources) takes.push(`${l.resources} class resources`);
   const parts = [l.level ? `lowers ${whose(name)} level from ${l.level.from} to ${l.level.to}` : null, takes.length > 0 ? `takes away ${listWords(takes)}` : null].filter((p): p is string => p !== null);
   return `This ${parts.join(" and ")}. If that is not what changed in D&D Beyond, its format may have changed. Cancel, and check the character there.`;
 }
 
-/** The done line (3.4): "6 changes came in, 1 roll was removed, 1 came back, and 2 of your changes stayed." A part that is 0 is left out. */
+function rollsWord(n: number): string {
+  return n === 1 ? "1 roll" : `${n} rolls`;
+}
+
+function resourcesWord(n: number): string {
+  return n === 1 ? "1 class resource" : `${n} class resources`;
+}
+
+/** "1 roll was", "2 class resources were", "1 roll and 2 class resources were". */
+function kindsWere(rolls: number, resources: number): string {
+  const words = [rolls > 0 ? rollsWord(rolls) : null, resources > 0 ? resourcesWord(resources) : null].filter((w): w is string => w !== null);
+  return `${listWords(words)} ${rolls + resources === 1 ? "was" : "were"}`;
+}
+
+/**
+ * The done line (3.4): "6 changes came in, 1 roll was removed, 1 came
+ * back, and 2 of your changes stayed." Class resources count beside the
+ * rolls (docs/design-v1-ddb-resources.md 6.1). A part that is 0 is left out.
+ */
 export function doneLine(counts: SyncResult["counts"]): string {
   const parts: string[] = [];
+  const removed = counts.removed + counts.resourcesRemoved;
+  const back = counts.cameBack + counts.resourcesBack;
   if (counts.cameIn > 0) parts.push(`${counts.cameIn} ${counts.cameIn === 1 ? "change" : "changes"} came in`);
-  if (counts.removed > 0) parts.push(`${counts.removed} ${counts.removed === 1 ? "roll was" : "rolls were"} removed`);
-  if (counts.cameBack > 0) parts.push(counts.removed > 0 ? `${counts.cameBack} came back` : `${counts.cameBack} ${counts.cameBack === 1 ? "roll came" : "rolls came"} back`);
+  if (removed > 0) parts.push(`${kindsWere(counts.removed, counts.resourcesRemoved)} removed`);
+  if (back > 0) {
+    const words = [counts.cameBack > 0 ? rollsWord(counts.cameBack) : null, counts.resourcesBack > 0 ? resourcesWord(counts.resourcesBack) : null].filter((w): w is string => w !== null);
+    parts.push(removed > 0 ? `${back} came back` : `${listWords(words)} came back`);
+  }
   if (counts.stayed > 0) parts.push(`${counts.stayed} of your changes stayed`);
   if (parts.length === 0) return "Nothing changed.";
   if (parts.length === 1) return `${parts[0]}.`;

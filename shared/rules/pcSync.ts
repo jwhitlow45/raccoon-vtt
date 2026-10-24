@@ -1,12 +1,15 @@
 import { ddbCharacterId } from "../ddb/link.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type DdbBase, type DdbSync, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type ClassResource, type DdbBase, type DdbSync, type PcRoll, type PcStats, type SkillKey } from "../model.ts";
+import { uuidv7 } from "../ids.ts";
 import { expectOf } from "../permissions.ts";
 import { hash128, stableStringify } from "../project.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { ddbSyncPatchSchema, MAX_PC_ROLLS, type ActorPatch, type CharacterExpect, type CharacterPatch, type DdbSyncPatch, type ExpectPart, type PcStatsPatch } from "../protocol.ts";
+import { resourcesAfter, type ResourceSent } from "./classResources.ts";
 import { DAMAGE_TYPES, type DamageType } from "./damage.ts";
 import type { PcFill } from "./pcFill.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcDerived } from "./pcStats.ts";
+import { planResources, resourceLosses, resourcePart, resourceResult, sameButLevels, type ResourceItem, type ResourcePlan, type SpentItem } from "./resourceSync.ts";
 
 /**
  * A D&D Beyond sync merged three ways (docs/design-v1-resync.md 2): the
@@ -19,11 +22,13 @@ import { applyPcStatsPatch, EMPTY_PC_STATS, pcDerived } from "./pcStats.ts";
  *
  * `planSync` lists every item with its default, ticks change only the
  * items they name (`syncResult`), and `syncPatch` and `undoSync` turn a
- * result into the one op Apply sends and the one Undo sends.
+ * result into the one op Apply sends and the one Undo sends. The class
+ * resources are one more group, merged by ./resourceSync.ts
+ * (docs/design-v1-ddb-resources.md 4).
  */
 
 /** The groups of Changes and Different, in their order (3.3). */
-export const SYNC_GROUPS = ["Ability scores", "Saves and skills", "Bonuses", "Spellcasting", "Features", "Defenses", "Rolls"] as const;
+export const SYNC_GROUPS = ["Ability scores", "Saves and skills", "Bonuses", "Spellcasting", "Features", "Defenses", "Rolls", "Class resources"] as const;
 export type SyncGroup = (typeof SYNC_GROUPS)[number];
 
 const ADJUST_FIELDS = ["allSaves", "allChecks", "init", "passive", "spellDc", "spellAttack"] as const;
@@ -62,7 +67,7 @@ export type FieldValue = number | boolean | string | null | Actor["speeds"] | un
 /** Where the merge stands with the record (1.3): no block yet, no record, a record of another number, or the same source. */
 export type SyncSource = "first" | "none" | "relinked" | "same";
 
-/** What a sync does with a roll (2.4), named by its row. */
+/** What a sync does with a roll (2.4) or a class resource, named by its row. */
 export type RollCase =
   /** D&D Beyond has a roll the block lacks: it comes in. */
   | "add"
@@ -113,7 +118,9 @@ export type RollItem = {
   conflict: boolean;
 };
 
-export type SyncItem = FieldItem | RollItem;
+export type SyncItem = FieldItem | RollItem | ResourceItem;
+
+export type { ResourceItem, SpentItem } from "./resourceSync.ts";
 
 export type AlsoItem = {
   type: "also";
@@ -133,8 +140,16 @@ export type SyncInput = {
   stats: PcStats | undefined;
   level: number | undefined;
   /** The character as the merge sees it. In the editor, a record from an earlier fill before Save has no `at` yet. */
-  character: Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch };
+  character: Pick<Character, "name" | "actor"> & { ddbSync?: DdbSyncPatch; resources?: ClassResource[] };
   fill: PcFill;
+  /**
+   * The record's resource part the class resources merge against, when it
+   * is not `character.ddbSync`'s: the editor's saved record, since its live
+   * list lacks the ids a pending record names (docs/design-v1-ddb-resources.md 6.2).
+   */
+  resourceRecord?: Pick<DdbSyncPatch, "res" | "gone"> | null;
+  /** The ids additions take, for a test to fix. */
+  newId?: () => string;
 };
 
 export type SyncPlan = {
@@ -153,9 +168,13 @@ export type SyncPlan = {
   losses: SyncLosses | null;
   /** How the rolls stand, for syncResult. */
   rolls: RollPlan;
+  /** How the class resources stand (docs/design-v1-ddb-resources.md 4). */
+  resources: ResourcePlan;
+  /** Also set's lines for counts spent, unticked, before the name (4.3). */
+  spent: SpentItem[];
 };
 
-export type SyncLosses = { level?: { from: number; to: number }; spellAbility?: true; proficiencies?: number; defenses?: number; rolls?: number };
+export type SyncLosses = { level?: { from: number; to: number }; spellAbility?: true; proficiencies?: number; defenses?: number; rolls?: number; resources?: number };
 
 type RollSlot = { roll: PcRoll; entry?: { k: string; h: string }; item?: RollItem };
 
@@ -178,10 +197,20 @@ export type SyncResult = {
   /** The fields beside the block the sync sets, as ticked. */
   also: { level?: number; name?: string; ac?: number; hpMax?: number; speeds?: Actor["speeds"]; senses?: string; sheetUrl?: string };
   record: DdbSyncPatch;
-  /** The done line's counts (3.4). */
-  counts: { cameIn: number; removed: number; cameBack: number; stayed: number };
+  /**
+   * The class resources as Apply sends them, whole, each `used` only where
+   * the sync sets it, or undefined when none were read
+   * (docs/design-v1-ddb-resources.md 4).
+   */
+  resources: ResourceSent[] | undefined;
+  /** The done line's counts (3.4): `removed` and `cameBack` count rolls, the `resources` ones class resources. */
+  counts: { cameIn: number; removed: number; cameBack: number; stayed: number; resourcesRemoved: number; resourcesBack: number };
   /** D&D Beyond's rolls left out for room (2.4). */
   notFit: number;
+  /** D&D Beyond's class resources left out for room. */
+  resourcesNotFit: number;
+  /** Each spent line's numbers as the ticks leave the resource (4.3). */
+  spent: { id: string; name: string; max: number; theirs: number; now: number }[];
   /** The removed markers the 40 cap drops (2.1), each `k`, with the name this read gives it if any. */
   goneDropped: { k: string; name?: string }[];
   /** A proficiency coming in beside a kept bonus on the same save or skill (3.3). */
@@ -520,12 +549,24 @@ export function planSync(input: SyncInput): SyncPlan {
   const rolls = planRolls(input, source, noBase);
   const rollItems = [...rolls.slots.flatMap((s) => (s.item ? [s.item] : [])), ...rolls.extra];
   const own = rolls.slots.filter((s) => !s.entry && !s.item).length;
+  const resources = planResources({
+    mode: input.mode,
+    source,
+    noBase,
+    resources: fill.resources,
+    // Absent while the resources are there reads as not whole, so such a fill never removes one (3.1).
+    whole: fill.read?.resource === true,
+    list: character.resources,
+    record: input.resourceRecord !== undefined ? (input.resourceRecord ?? undefined) : record,
+    newId: input.newId ?? (() => uuidv7()),
+  });
+  const resourceItems = [...resources.slots.flatMap((s) => (s.item ? [s.item] : [])), ...resources.extra];
 
   const ordered = [
-    ...sectionItems(items, rollItems, "changes"),
-    ...sectionItems(items, rollItems, "kept").sort((a, b) => Number(b.conflict) - Number(a.conflict)),
-    ...sectionItems(items, rollItems, "different"),
-    ...sectionItems(items, rollItems, "replaces"),
+    ...sectionItems(items, rollItems, resourceItems, "changes"),
+    ...sectionItems(items, rollItems, resourceItems, "kept").sort((a, b) => Number(b.conflict) - Number(a.conflict)),
+    ...sectionItems(items, rollItems, resourceItems, "different"),
+    ...sectionItems(items, rollItems, resourceItems, "replaces"),
   ];
   const shape = character.actor.srdId === undefined ? null : character.actor.wildShape ? "wild" : "other";
   return {
@@ -536,16 +577,19 @@ export function planSync(input: SyncInput): SyncPlan {
     also,
     ownRolls: own,
     shaped: shape,
-    losses: lossesOf(input, source, base, rolls),
+    losses: lossesOf(input, source, base, rolls, resources),
     rolls,
+    resources,
+    spent: resources.spent,
   };
 }
 
-function sectionItems(fields: readonly SyncItem[], rolls: readonly RollItem[], section: SyncSection): SyncItem[] {
+function sectionItems(fields: readonly SyncItem[], rolls: readonly RollItem[], resources: readonly ResourceItem[], section: SyncSection): SyncItem[] {
   const out: SyncItem[] = [];
   for (const group of SYNC_GROUPS) {
     for (const item of fields) if (item.section === section && item.group === group) out.push(item);
     if (group === "Rolls") for (const item of rolls) if (item.section === section) out.push(item);
+    if (group === "Class resources") for (const item of resources) if (item.section === section) out.push(item);
   }
   return out;
 }
@@ -675,7 +719,7 @@ function takenRoll(mine: PcRoll, theirs: PcRoll): PcRoll {
   return out;
 }
 
-function lossesOf(input: SyncInput, source: SyncSource, base: DdbBase | undefined, rolls: RollPlan): SyncLosses | null {
+function lossesOf(input: SyncInput, source: SyncSource, base: DdbBase | undefined, rolls: RollPlan, resources: ResourcePlan): SyncLosses | null {
   if (source === "first") return null;
   const stats = input.stats ?? (EMPTY_PC_STATS as PcStats);
   const fill = input.fill;
@@ -706,6 +750,8 @@ function lossesOf(input: SyncInput, source: SyncSource, base: DdbBase | undefine
   const synced = rolls.slots.filter((s) => s.entry || (s.item && s.item.case !== "sameName")).length;
   const removed = rolls.slots.filter((s) => s.item?.case === "remove" || s.item?.case === "goneThere").length;
   if (removed >= 6 && removed * 2 >= synced) out.rolls = removed;
+  const lostResources = resourceLosses(resources);
+  if (lostResources) out.resources = lostResources;
   return Object.keys(out).length > 0 ? out : null;
 }
 
@@ -734,7 +780,7 @@ export function bulkToggle(ids: readonly string[], ticks: ReadonlySet<string>): 
   return out;
 }
 
-/** The ticks a review opens with: every Also set line but the name. */
+/** The ticks a review opens with: every Also set line but the name and the counts spent (docs/design-v1-ddb-resources.md 4.3). */
 export function defaultTicks(plan: SyncPlan): Set<string> {
   return new Set(plan.also.filter((a) => a.on).map((a) => a.id));
 }
@@ -762,7 +808,7 @@ export function syncResult(plan: SyncPlan, ticks: ReadonlySet<string>): SyncResu
   const { input } = plan;
   const start = input.stats ?? (EMPTY_PC_STATS as PcStats);
   let stats: PcStats = { ...start };
-  const counts = { cameIn: 0, removed: 0, cameBack: 0, stayed: 0 };
+  const counts = { cameIn: 0, removed: 0, cameBack: 0, stayed: 0, resourcesRemoved: 0, resourcesBack: 0 };
   const also: SyncResult["also"] = {};
   let level = input.level;
 
@@ -848,14 +894,36 @@ export function syncResult(plan: SyncPlan, ticks: ReadonlySet<string>): SyncResu
   }
   stats = rolls.length === start.rolls.length && rolls.every((r, i) => r === start.rolls[i]) ? { ...stats, rolls: start.rolls } : { ...stats, rolls };
 
-  // A removed roll that came back leaves the markers, and a new removal joins their end. Past 40, the oldest go (2.1).
-  const marked = plan.rolls.gone.filter((k) => !back.has(k));
+  const res = resourceResult(plan.resources, ticks, (item) => takesTheirs(item, ticks), level);
+  counts.cameIn += res.counts.cameIn;
+  counts.stayed += res.counts.stayed;
+  counts.resourcesRemoved = res.counts.removed;
+  counts.resourcesBack = res.counts.cameBack;
+
+  /*
+   * The markers of both kinds share one list (docs/design-v1-ddb-resources.md
+   * 4.1): each held one keeps its age in the list the resources were planned
+   * from, the rolls' new ones join the end, then the resources'. A removed
+   * roll that came back leaves them. Past 40, the oldest of either kind go.
+   */
+  const ages = new Map<string, number>();
+  plan.resources.base.forEach((k, i) => {
+    if (!ages.has(k)) ages.set(k, i);
+  });
+  const end = plan.resources.base.length;
+  const order: { k: string; at: number; tier: number; seq: number }[] = [];
+  for (const k of plan.rolls.gone) if (!k.startsWith("r:") && !back.has(k)) order.push({ k, at: ages.get(k) ?? end, tier: 0, seq: order.length });
+  for (const m of res.old) order.push({ k: m.k, at: m.at, tier: 0, seq: order.length });
+  for (const k of res.added) order.push({ k, at: end, tier: 1, seq: order.length });
+  order.sort((a, b) => a.at - b.at || a.tier - b.tier || a.seq - b.seq);
+  const marked = [...new Set(order.map((m) => m.k))];
   const dropped = marked.length > MAX_PC_ROLLS ? marked.slice(0, marked.length - MAX_PC_ROLLS) : [];
   const gone = marked.slice(dropped.length);
-  const names = new Map(plan.rolls.extra.map((x) => [x.theirs!.k, x.theirs!.roll.name]));
+  const names = new Map([...plan.rolls.extra.map((x): [string, string] => [x.theirs!.k, x.theirs!.roll.name]), ...res.names]);
 
   const record: DdbSyncPatch = { base: nextBase(plan), rolls: Object.fromEntries([...entries, ...orphans]) };
   if (plan.from !== undefined) record.from = plan.from;
+  if (res.res) record.res = res.res;
   if (gone.length > 0) record.gone = gone;
 
   const result: SyncResult = {
@@ -863,8 +931,11 @@ export function syncResult(plan: SyncPlan, ticks: ReadonlySet<string>): SyncResu
     level,
     also,
     record,
+    resources: res.list,
     counts,
     notFit,
+    resourcesNotFit: res.notFit,
+    spent: res.spent,
     goneDropped: dropped.map((k) => {
       const name = names.get(k);
       return name !== undefined ? { k, name } : { k };
@@ -977,11 +1048,19 @@ export function sameRecord(a: Omit<DdbSync, "at"> & { at?: string }, b: (Omit<Dd
  */
 export function leavesAsIs(plan: SyncPlan, result: SyncResult): boolean {
   const { input } = plan;
-  return input.stats !== undefined && same(result.stats, input.stats) && result.level === input.level && Object.keys(result.also).length === 0 && sameRecord(result.record, input.character.ddbSync);
+  return (
+    input.stats !== undefined &&
+    same(result.stats, input.stats) &&
+    result.level === input.level &&
+    Object.keys(result.also).length === 0 &&
+    sameRecord(result.record, input.character.ddbSync) &&
+    // A preset's level and atLevel alone are not something new (OP-19).
+    (result.resources === undefined || sameButLevels(resourcesAfter(input.character.resources, result.resources), input.character.resources))
+  );
 }
 
 /** The character a sync starts from, as the dialog holds it. */
-export type SyncCharacter = Pick<Character, "name" | "level" | "actor" | "stats" | "ddbSync">;
+export type SyncCharacter = Pick<Character, "name" | "level" | "actor" | "stats" | "ddbSync" | "resources">;
 
 /**
  * The one `character.update` Apply sends (1.2, 4): every part and field the
@@ -1004,9 +1083,22 @@ export function syncPatch(character: SyncCharacter, result: SyncResult): { patch
   if (result.also.hpMax !== undefined && result.also.hpMax !== a.hp.max) actor.hp = hpForMax(a, result.also.hpMax);
   if (Object.keys(actor).length > 0) patch.actor = actor;
   const changes = Object.keys(patch).length > 0;
-  if (!changes && sameRecord(result.record, character.ddbSync)) return null;
+  const sameRec = sameRecord(result.record, character.ddbSync);
+  if (result.resources !== undefined) {
+    const after = resourcesAfter(character.resources, result.resources);
+    // A preset's level and atLevel ride with any other write, and alone are not one (docs/design-v1-ddb-resources.md 4.4, OP-19).
+    if (!sameButLevels(after, character.resources) || (!same(after, character.resources ?? []) && (changes || !sameRec))) patch.resources = result.resources;
+  }
+  if (!changes && patch.resources === undefined && sameRec) return null;
   patch.ddbSync = result.record;
-  return { patch, expect: expectOf(character, [...writtenParts(patch), "actor.shape"]) };
+  return { patch, expect: expectOf(character, syncExpectParts(patch, character.ddbSync)) };
+}
+
+/** What a sync's op expects: each part it writes, the shape, and the class resources whenever it changes the record's resource part (docs/design-v1-ddb-resources.md 5). */
+function syncExpectParts(patch: CharacterPatch, before: Pick<DdbSyncPatch, "res" | "gone"> | undefined): ExpectPart[] {
+  const parts = [...writtenParts(patch), "actor.shape" as const];
+  if (patch.resources === undefined && patch.ddbSync !== undefined && resourcePart(patch.ddbSync) !== resourcePart(before)) parts.push("resources");
+  return parts;
 }
 
 /** The parts of a character a patch writes, as `expect` names them. */
@@ -1022,6 +1114,7 @@ export function writtenParts(patch: CharacterPatch): ExpectPart[] {
   if (patch.actor?.sheetUrl !== undefined) out.push("actor.sheetUrl");
   if (patch.actor?.hp !== undefined) out.push("actor.hp");
   if (patch.ddbSync !== undefined) out.push("ddbSync");
+  if (patch.resources !== undefined) out.push("resources");
   return out;
 }
 
@@ -1051,6 +1144,11 @@ export function afterSync(before: SyncCharacter, patch: CharacterPatch, at: stri
   }
   if (patch.ddbSync === null || patch.stats === null) delete out.ddbSync;
   else if (patch.ddbSync !== undefined) out.ddbSync = { ...patch.ddbSync, at: patch.ddbSync.at ?? at };
+  // The reducer's own rule for the list (docs/design-v1-ddb-resources.md 5), so Undo expects exactly what Apply left.
+  if (patch.resources !== undefined) {
+    if (patch.resources.length > 0) out.resources = resourcesAfter(before.resources, patch.resources);
+    else delete out.resources;
+  }
   return out;
 }
 
@@ -1086,6 +1184,10 @@ export function undoSync(before: SyncCharacter, sent: CharacterPatch, stamped: s
   if (s?.sheetUrl !== undefined) actor.sheetUrl = before.actor.sheetUrl ?? null;
   if (s?.hp !== undefined) actor.hp = { cur: before.actor.hp.cur, max: before.actor.hp.max };
   if (Object.keys(actor).length > 0) patch.actor = actor;
+  // The list whole, each count spent as it was (docs/design-v1-ddb-resources.md 5).
+  if (sent.resources !== undefined) patch.resources = before.resources ?? [];
   patch.ddbSync = before.ddbSync ?? null;
-  return { patch, expect: expectOf(after, [...writtenParts(patch), "actor.shape"]) };
+  const parts = [...writtenParts(patch), "actor.shape" as const];
+  if (patch.resources === undefined && resourcePart(before.ddbSync) !== resourcePart(after.ddbSync)) parts.push("resources");
+  return { patch, expect: expectOf(after, parts) };
 }

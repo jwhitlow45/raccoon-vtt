@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, PcRoll, PcStats } from "#shared/model.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type ResourceItem, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { readResources } from "#shared/rules/resourceSync.ts";
+import type { ClassResource } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor, character } from "#shared/testutil.ts";
 import {
@@ -26,6 +28,8 @@ import {
   syncedOn,
   syncReadLine,
   groupSummary,
+  resourceReading,
+  spentLine,
   unlinkedLine,
   type ReadingBlocks,
 } from "./resync.ts";
@@ -215,12 +219,15 @@ describe("Check these and the warnings (3.3)", () => {
   });
 
   test("a deleted roll the 40 cap forgets: its names up to three, then a count", () => {
-    assert.equal(goneDroppedLine([{ k: "w:1", name: "Shortbow" }]), "Your deleted Shortbow may come back on a later re-sync. Only 40 deleted rolls are remembered.");
-    assert.equal(goneDroppedLine([{ k: "w:1", name: "Shortbow" }, { k: "w:2", name: "Sling" }]), "Your deleted Shortbow and Sling may come back on a later re-sync. Only 40 deleted rolls are remembered.");
-    assert.equal(goneDroppedLine(["Shortbow", "Sling", "Dagger"].map((name, i) => ({ k: `w:${i}`, name }))), "Your deleted Shortbow, Sling and Dagger may come back on a later re-sync. Only 40 deleted rolls are remembered.");
-    assert.equal(goneDroppedLine(["Shortbow", "Sling", "Dagger", "Club"].map((name, i) => ({ k: `w:${i}`, name }))), "4 rolls you deleted may come back on a later re-sync. Only 40 deleted rolls are remembered.");
-    assert.equal(goneDroppedLine([{ k: "w:1" }]), "A roll you deleted may come back on a later re-sync. Only 40 deleted rolls are remembered.");
-    assert.equal(goneDroppedLine([{ k: "w:1" }, { k: "w:2", name: "Sling" }]), "2 rolls you deleted may come back on a later re-sync. Only 40 deleted rolls are remembered.");
+    assert.equal(goneDroppedLine([{ k: "w:1", name: "Shortbow" }]), "Your deleted Shortbow may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine([{ k: "w:1", name: "Shortbow" }, { k: "w:2", name: "Sling" }]), "Your deleted Shortbow and Sling may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine(["Shortbow", "Sling", "Dagger"].map((name, i) => ({ k: `w:${i}`, name }))), "Your deleted Shortbow, Sling and Dagger may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine(["Shortbow", "Sling", "Dagger", "Club"].map((name, i) => ({ k: `w:${i}`, name }))), "4 rolls you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine([{ k: "w:1" }]), "A roll you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine([{ k: "w:1" }, { k: "w:2", name: "Sling" }]), "2 rolls you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine([{ k: "r:1", name: "Rage" }, { k: "w:2", name: "Shortbow" }]), "Your deleted Rage and Shortbow may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine([{ k: "r:1" }]), "A class resource you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.equal(goneDroppedLine([{ k: "w:1" }, { k: "o:2" }, { k: "r:3" }]), "2 rolls and a class resource you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
     assert.equal(goneDroppedLine([]), null);
   });
 
@@ -240,10 +247,17 @@ describe("Check these and the warnings (3.3)", () => {
 
 describe("the done line, the size refusals and the answers (3.4, 3.5)", () => {
   test("counts what came in, removals and restores apart, and what stayed, leaving out a 0", () => {
-    assert.equal(doneLine({ cameIn: 1, removed: 0, cameBack: 0, stayed: 0 }), "1 change came in.");
-    assert.equal(doneLine({ cameIn: 6, removed: 0, cameBack: 0, stayed: 2 }), "6 changes came in, and 2 of your changes stayed.");
-    assert.equal(doneLine({ cameIn: 6, removed: 1, cameBack: 1, stayed: 2 }), "6 changes came in, 1 roll was removed, 1 came back, and 2 of your changes stayed.");
-    assert.equal(doneLine({ cameIn: 0, removed: 0, cameBack: 2, stayed: 0 }), "2 rolls came back.");
+    const none = { resourcesRemoved: 0, resourcesBack: 0 };
+    assert.equal(doneLine({ cameIn: 1, removed: 0, cameBack: 0, stayed: 0, ...none }), "1 change came in.");
+    assert.equal(doneLine({ cameIn: 6, removed: 0, cameBack: 0, stayed: 2, ...none }), "6 changes came in, and 2 of your changes stayed.");
+    assert.equal(doneLine({ cameIn: 6, removed: 1, cameBack: 1, stayed: 2, ...none }), "6 changes came in, 1 roll was removed, 1 came back, and 2 of your changes stayed.");
+    assert.equal(doneLine({ cameIn: 0, removed: 0, cameBack: 2, stayed: 0, ...none }), "2 rolls came back.");
+  });
+
+  test("class resources count beside the rolls (docs/design-v1-ddb-resources.md 6.1)", () => {
+    assert.equal(doneLine({ cameIn: 2, removed: 1, cameBack: 0, stayed: 1, resourcesRemoved: 2, resourcesBack: 1 }), "2 changes came in, 1 roll and 2 class resources were removed, 1 came back, and 1 of your changes stayed.");
+    assert.equal(doneLine({ cameIn: 0, removed: 0, cameBack: 0, stayed: 0, resourcesRemoved: 1, resourcesBack: 0 }), "1 class resource was removed.");
+    assert.equal(doneLine({ cameIn: 0, removed: 0, cameBack: 1, stayed: 0, resourcesRemoved: 0, resourcesBack: 1 }), "1 roll and 1 class resource came back.");
   });
 
   test("too big, refused, and answered after closing", () => {
@@ -254,5 +268,65 @@ describe("the done line, the size refusals and the answers (3.4, 3.5)", () => {
     assert.equal(lateApplyText("Bree", "unknown"), "The connection dropped before the server answered, so Bree may not have been re-synced. Check the stat block.");
     assert.equal(lateApplyText("Bree", "taken"), null);
     assert.equal(lateUndoText("Bree", "refused", "no"), "Bree's re-sync was not undone. No.");
+  });
+});
+
+/** Every line of the Class resources group (docs/design-v1-ddb-resources.md 6.1). */
+describe("class resources' words", () => {
+  const blocks: ReadingBlocks = { now: { stats: empty(), level: 5 }, after: { stats: empty(), level: 5 } };
+  const mine: ClassResource = { id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne", preset: "barbarian-rage", level: 3 };
+  const theirs = (over: Partial<NonNullable<PcFill["resources"]>[number]> = {}) => readResources([{ name: "Rage", max: 3, reset: "shortOne", preset: "barbarian-rage", level: 3, classId: "barbarian", used: 0, ...over }])[0]!;
+  const item = (c: ResourceItem["case"], over: Partial<ResourceItem> = {}): ResourceItem => ({ type: "resource", id: "res:x", group: "Class resources", section: "changes", case: c, conflict: false, ...over });
+
+  test("a reading: the count's words with a lower first letter, then the rest's", () => {
+    assert.equal(resourceReading({ max: 3, reset: "shortOne" }), "3 uses, one back on a Short Rest, all on a Long Rest");
+    assert.equal(resourceReading({ max: 25, reset: "long", pool: true }), "a pool of 25, back on a Long Rest");
+    assert.equal(resourceReading({ max: 1, reset: "short" }), "1 use, back on a Short or Long Rest");
+  });
+
+  test("Changes: added with its spent count, updated with only what differs, removed", () => {
+    assert.equal(changeLine(item("add", { theirs: theirs({ used: 1 }) }), blocks, false), "Adds Rage: 3 uses, one back on a Short Rest, all on a Long Rest, 2 of 3 left");
+    assert.equal(changeLine(item("add", { theirs: theirs() }), blocks, true), "Adds Rage: 3 uses, one back on a Short Rest, all on a Long Rest");
+    assert.equal(changeLine(item("update", { mine, theirs: theirs({ max: 4 }) }), blocks, false), "Updates Rage: 4 uses, now 3");
+    const inspiration: ClassResource = { id: "bi", name: "Bardic Inspiration", max: 3, used: 0, reset: "long" };
+    assert.equal(changeLine(item("update", { mine: inspiration, theirs: readResources([{ name: "Bardic Inspiration", max: 3, reset: "short" }])[0]! }), blocks, false), "Updates Bardic Inspiration: back on a Short or Long Rest, now back on a Long Rest");
+    const dice: ClassResource = { id: "sd", name: "Superiority Dice", max: 6, used: 0, reset: "short" };
+    assert.equal(changeLine(item("update", { mine: dice, theirs: readResources([{ name: "Superiority Dice", max: 6, reset: "short", pool: true }])[0]! }), blocks, false), "Updates Superiority Dice: a pool of 6, now 6 uses");
+    assert.equal(changeLine(item("remove", { mine: { ...mine, name: "Divine Intervention" } }), blocks, false), "Removes Divine Intervention");
+  });
+
+  test("Kept: as you changed it, D&D Beyond's named when the names differ, the conflict's tag, and each tick", () => {
+    const edited = { ...mine, name: "Superiority Dice", max: 5, reset: "short" as const };
+    const read = readResources([{ name: "Superiority Dice", max: 4, reset: "short" }])[0]!;
+    assert.deepEqual(keptRow(item("edited", { section: "kept", mine: edited, theirs: read }), blocks), { first: "Superiority Dice, as you changed it: 5 uses, back on a Short or Long Rest", theirs: "D&D Beyond says 4 uses, back on a Short or Long Rest.", tick: "Overwrite with D&D Beyond's" });
+    assert.deepEqual(keptRow(item("conflict", { section: "kept", mine: { ...mine, name: "Fury", max: 5 }, theirs: theirs(), conflict: true }), blocks), {
+      first: "Fury, as you changed it: 5 uses, one back on a Short Rest, all on a Long Rest",
+      tag: "Also changed in D&D Beyond",
+      theirs: "D&D Beyond says Rage: 3 uses, one back on a Short Rest, all on a Long Rest.",
+      tick: "Overwrite with D&D Beyond's",
+    });
+    assert.deepEqual(keptRow(item("goneThere", { section: "kept", mine }), blocks), { first: "Rage, as you changed it: 3 uses, one back on a Short Rest, all on a Long Rest", theirs: "D&D Beyond no longer has it.", tick: "Remove it" });
+    assert.deepEqual(keptRow(item("deleted", { section: "kept", theirs: theirs() }), blocks), { first: "Rage: you removed it.", theirs: "D&D Beyond says 3 uses, one back on a Short Rest, all on a Long Rest.", tick: "Add it back" });
+  });
+
+  test("Different's summary and Replaces' line", () => {
+    const own = { ...mine, max: 4, reset: "long" as const };
+    const a = item("sameName", { section: "different", mine: own, theirs: theirs() });
+    assert.equal(groupSummary([a, { ...a, id: "res:y" }], blocks), "2: Rage, your own, differs from D&D Beyond's, and 1 more");
+    assert.equal(replacesLine({ ...a, section: "replaces" }, blocks), "Rage: 4 uses, back on a Long Rest, becomes 3 uses, one back on a Short Rest, all on a Long Rest");
+    assert.equal(groupSummary(Array.from({ length: 12 }, (_, i) => item("add", { id: `res:${i}`, theirs: theirs() })), blocks), "12: Adds Rage, and 11 more");
+  });
+
+  test("Also set's spent line and its help", () => {
+    assert.deepEqual(spentLine({ id: "spent:x", name: "Rage", max: 3, theirs: 0, now: 2 }), { text: "Rage 3 of 3 left, now 1 of 3", help: "Unticked keeps what was spent here." });
+  });
+
+  test("Check these: the no-room line, and the losses warning's class resources", () => {
+    const c = { name: "Bree", level: 5, stats: empty(), actor: actor({ sheetUrl: SHEET }), resources: Array.from({ length: 12 }, (_, i): ClassResource => ({ id: `o${i}`, name: `Own ${i}`, max: 1, used: 0, reset: "long" })) };
+    const f: PcFill = { source: "ddb", stats: { rolls: [] }, actor: { sheetUrl: SHEET }, warnings: [], read: { weapon: true, spell: true, other: true, resource: true }, resources: [{ name: "Rage", max: 3, reset: "long" }, { name: "Luck", max: 3, reset: "long" }] };
+    const p = planSync({ mode: "resync", stats: c.stats, level: 5, character: c, fill: f });
+    assert.ok(checkLines(p, syncResult(p, defaultTicks(p)), "Bree").includes("2 class resources from D&D Beyond did not fit, since a character holds 12. They come in once there is room."));
+    assert.ok(checkLines(p, { ...syncResult(p, defaultTicks(p)), resourcesNotFit: 1 }, "Bree").includes("1 class resource from D&D Beyond did not fit, since a character holds 12. It comes in once there is room."));
+    assert.equal(lossesText({ ...p, losses: { resources: 4 } }, "Bree"), "This takes away 4 class resources. If that is not what changed in D&D Beyond, its format may have changed. Cancel, and check the character there.");
   });
 });

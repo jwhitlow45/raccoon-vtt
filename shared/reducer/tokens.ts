@@ -29,6 +29,7 @@ import {
 } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
 import { linkOf, relinked } from "./uses.ts";
+import { resourcesAfter } from "../rules/classResources.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers, withUnshaped } from "../rules/pcStats.ts";
 import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
@@ -766,14 +767,7 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
  * which it takes. Older ops never send one, so they replay as before.
  */
 function keptResources(before: readonly ClassResource[] | undefined, sent: NonNullable<CharacterPatch["resources"]>): ClassResource[] {
-  const spent = new Map((before ?? []).map((r) => [r.id, r.used]));
-  return sent.map((r) => ({ ...stripUndefined(r), used: Math.min(r.used ?? spent.get(r.id) ?? 0, r.max) }));
-}
-
-function stripUndefined<T extends object>(value: T): T {
-  const out = {} as T;
-  for (const [k, v] of Object.entries(value)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
-  return out;
+  return resourcesAfter(before, sent);
 }
 
 /**

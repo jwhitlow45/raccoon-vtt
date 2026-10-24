@@ -5,10 +5,13 @@ import { createInitialState } from "#shared/initial.ts";
 import { keys } from "#shared/keys.ts";
 import { CHARACTER_CHANGED } from "#shared/limits.ts";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import type { Actor, Character, DdbSync, Member, PcStats, RoomState } from "#shared/model.ts";
+import type { Actor, Character, ClassResource, DdbSync, Member, PcStats, RoomState } from "#shared/model.ts";
 import { expectOf } from "#shared/permissions.ts";
 import { EXPECT_PARTS, SYNC_AT_AHEAD, type CharacterPatch, type ExpectPart, type Op, type PcStatsPatch, type ServerMessage } from "#shared/protocol.ts";
+import type { PcFill } from "#shared/rules/pcFill.ts";
+import { defaultTicks, hash12, planSync, syncPatch, syncResult, undoSync } from "#shared/rules/pcSync.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
+import { resourceHash } from "#shared/rules/resourceSync.ts";
 import { actor as testActor, character as testCharacter, effect as testEffect } from "#shared/testutil.ts";
 import { RoomActor, type ActorDeps } from "./actor.ts";
 import { SnapshotBudget } from "./budgets.ts";
@@ -494,6 +497,64 @@ describe("a re-sync's race at the room actor (docs/design-v1-resync.md 5)", () =
       const bree = actor.committed.state.characters[id]!;
       assert.deepEqual(bree.actor.hp, { cur: 35, max: 38, temp: 0 });
       assert.deepEqual(bree.ddbSync, EARLIER, "the record before, its at kept");
+    });
+  });
+});
+
+describe("class resources in the race (docs/design-v1-ddb-resources.md 5)", () => {
+  const rage: ClassResource = { id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne", preset: "barbarian-rage", level: 3, atLevel: 5 };
+  const linked = () => table({ resources: [rage], ddbSync: { ...EARLIER, res: { [hash12("rage")]: { k: `r:${hash12("barbarian:rage")}`, h: resourceHash(rage) } } } });
+  /** D&D Beyond raises Rage to 4, nothing spent there, and adds Luck Points. */
+  const fill: PcFill = {
+    source: "ddb",
+    stats: { rolls: [] },
+    actor: { sheetUrl: "https://www.dndbeyond.com/characters/123456789" },
+    warnings: [],
+    read: { weapon: true, spell: true, other: true, resource: true },
+    resources: [
+      { name: "Rage", max: 4, reset: "shortOne", preset: "barbarian-rage", level: 3, classId: "barbarian", used: 0 },
+      { name: "Luck Points", max: 3, reset: "long", used: 1 },
+    ],
+  };
+  const review = (seen: Character) => {
+    const plan = planSync({ mode: "resync", stats: seen.stats, level: seen.level, character: seen, fill });
+    const sent = syncPatch(seen, syncResult(plan, defaultTicks(plan)));
+    assert.ok(sent);
+    return { plan, sent, op: { t: "character.update", characterId: seen.id, patch: sent.patch, expect: sent.expect } as Op };
+  };
+  const useRage = (id: string): Op => ({ t: "actor.use", target: { characterId: id }, use: { kind: "resource", id: "rage" } });
+
+  test("Rage spent in a fight between the review and Apply refuses it, and the review rebuilt from the live character offers the new count", async () => {
+    await play(linked(), async ({ actor, dm, ana, id }) => {
+      const first = review(ana.sees(id));
+      assert.ok(first.sent.expect.resources, "Apply expects the resources");
+      assert.equal(await dm.send(useRage(id)), null);
+      const before = structuredClone(actor.committed.state.characters[id]);
+      assert.deepEqual(await ana.send(first.op), STALE);
+      assert.deepEqual(actor.committed.state.characters[id], before, "nothing changed");
+      const rebuilt = review(ana.sees(id));
+      assert.deepEqual(rebuilt.plan.spent.map((s) => [s.theirs, s.now]), [[0, 1]], "the spent line reads the DM's spend");
+      assert.equal(await ana.send(rebuilt.op), null);
+      const bree = actor.committed.state.characters[id]!;
+      assert.deepEqual(bree.resources?.map((r) => [r.name, r.max, r.used]), [
+        ["Rage", 4, 1],
+        ["Luck Points", 3, 1],
+      ]);
+    });
+  });
+
+  test("a use spent after Apply refuses its Undo, which changes nothing", async () => {
+    await play(linked(), async ({ actor, dm, ana, id }) => {
+      const seen = ana.sees(id);
+      const { sent, op } = review(seen);
+      assert.equal(await ana.send(op), null);
+      const at = ana.sees(id).ddbSync!.at;
+      const undo = undoSync(seen, sent.patch, at);
+      assert.ok(undo?.expect.resources);
+      assert.equal(await dm.send(useRage(id)), null);
+      const before = structuredClone(actor.committed.state.characters[id]);
+      assert.deepEqual(await ana.send({ t: "character.update", characterId: id, patch: undo.patch, expect: undo.expect }), STALE);
+      assert.deepEqual(actor.committed.state.characters[id], before);
     });
   });
 });

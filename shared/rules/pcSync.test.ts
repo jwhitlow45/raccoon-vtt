@@ -26,6 +26,7 @@ import {
   undoSync,
   withField,
   SYNC_FIELD_KEYS,
+  SYNC_GROUPS,
   type FieldKey,
   type FieldValue,
   type SyncCharacter,
@@ -777,5 +778,44 @@ describe("the review's checks (3.3)", () => {
     assert.equal(stampedAt(save, b.state), "2026-10-21T19:00:00.001Z", "its own stamp");
     const undo = undoSync(bree0, sent.patch, stampedA)!;
     assert.deepEqual(canApply({ t: "character.update", characterId: "bree", patch: undo.patch, expect: undo.expect }, P1, b.state, { canUseAsset: () => true }), { ok: false, code: "invalid", message: CHARACTER_CHANGED });
+  });
+});
+
+/** The class resources as one more group of the review (docs/design-v1-ddb-resources.md 6.1). */
+describe("class resources in the review", () => {
+  const rage = (over: Partial<NonNullable<PcFill["resources"]>[number]> = {}) => ({ name: "Rage", max: 3, reset: "shortOne" as const, preset: "barbarian-rage", level: 3, classId: "barbarian" as const, used: 0, ...over });
+  const withResources = (resources: NonNullable<PcFill["resources"]>, read = true): PcFill => fillOf(empty(), { resources, read: { weapon: true, spell: true, other: true, resource: read } });
+  let n = 0;
+  const planOf = (c: SyncCharacter, f: PcFill) => planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: f, newId: () => `n${++n}` });
+
+  test("Class resources is a group after Rolls", () => {
+    assert.deepEqual(SYNC_GROUPS.slice(-2), ["Rolls", "Class resources"]);
+  });
+
+  test("Overwrite all covers a resource's Overwrite, Remove it and Add it back, and never a spent line", () => {
+    const c0 = synced(withResources([rage(), { name: "Luck Points", max: 3, reset: "long" }, { name: "Grit", max: 2, reset: "short" }]));
+    const rageId = c0.resources!.find((r) => r.name === "Rage")!.id;
+    const c: SyncCharacter = {
+      ...c0,
+      resources: c0.resources!.filter((r) => r.name !== "Grit").map((r) => (r.id === rageId ? { ...r, max: 5, used: 2 } : r.name === "Luck Points" ? { ...r, max: 4 } : r)),
+    };
+    const p = planOf(c, withResources([rage(), { name: "Grit", max: 2, reset: "short" }]));
+    const kept = bulkIds(p, "kept");
+    assert.deepEqual(p.items.filter((i) => kept.includes(i.id)).map((i) => i.type === "resource" && i.case), ["edited", "goneThere", "deleted"]);
+    assert.equal(p.spent.length, 1);
+    assert.ok(!kept.includes(p.spent[0]!.id));
+    const result = syncResult(p, bulkToggle(kept, defaultTicks(p)));
+    assert.deepEqual(result.resources!.map((r) => [r.name, r.max]), [["Rage", 3], ["Grit", 2]]);
+    assert.deepEqual(result.counts, { cameIn: 1, removed: 0, cameBack: 0, stayed: 1, resourcesRemoved: 1, resourcesBack: 1 });
+  });
+
+  test("the losses warning counts 3 or more resources taken away that are at least half of those synced", () => {
+    const four = ["Rage", "Wild Shape", "Luck Points", "Grit"].map((name) => ({ name, max: 2, reset: "long" as const }));
+    const c = synced(withResources(four));
+    assert.equal(planOf(c, withResources(four.slice(0, 1))).losses?.resources, 3);
+    assert.equal(planOf(c, withResources(four.slice(0, 2))).losses?.resources, undefined, "2 is fewer than 3");
+    const seven = ["A", "B", "C", "D", "E", "F", "G"].map((name) => ({ name, max: 2, reset: "long" as const }));
+    assert.equal(planOf(synced(withResources(seven)), withResources(seven.slice(0, 4))).losses?.resources, undefined, "3 of 7 is under half");
+    assert.equal(planOf(c, withResources([], false)).losses, null, "a read not whole takes none away");
   });
 });

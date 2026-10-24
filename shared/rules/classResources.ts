@@ -143,6 +143,25 @@ export function presetReset(preset: ClassPreset, classLevel: number): ClassResou
 /** A class resource as character.update sends it: no `used`, which the reducer keeps by id. */
 export type ResourceInput = Omit<ClassResource, "used">;
 
+/** As a sync, its Undo or the editor's Save sends one: `used` only where it sets the count spent (docs/design-v1-ddb-resources.md 5). */
+export type ResourceSent = ResourceInput & { used?: number };
+
+/**
+ * The list an update leaves, by the reducer's rule: each resource sent, in
+ * order, with the count spent it was sent with, else its own by id, else
+ * none, and never past its count. The reducer and a sync's Undo both work
+ * it out here, so Undo expects exactly what Apply left.
+ */
+export function resourcesAfter(before: readonly ClassResource[] | undefined, sent: readonly ResourceSent[]): ClassResource[] {
+  const spent = new Map((before ?? []).map((r) => [r.id, r.used]));
+  return sent.map((r) => {
+    const out = {} as ClassResource;
+    for (const [k, v] of Object.entries(r)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+    out.used = Math.min(r.used ?? spent.get(r.id) ?? 0, r.max);
+    return out;
+  });
+}
+
 /** What the stored list sends back unchanged: every resource but its `used`. */
 export function asInputs(resources: readonly ClassResource[] | undefined): ResourceInput[] {
   return (resources ?? []).map(({ used: _used, ...rest }) => rest);

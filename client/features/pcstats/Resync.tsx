@@ -426,7 +426,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
       <div ref={root} style={{ display: "grid", gap: theme.space(3) }}>
         {/* A plain status line: the check mark means chosen in this app, never done (docs/design-v1-look-pass-2.md 2.3). */}
         <p ref={done} tabIndex={-1} role="status" style={{ margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body, outline: "none" }}>
-          {undone ? RESYNC_WORDS.undone(who) : doneLine(counts.current ?? { cameIn: 0, removed: 0, cameBack: 0, stayed: 0 })}
+          {undone ? RESYNC_WORDS.undone(who) : doneLine(counts.current ?? { cameIn: 0, removed: 0, cameBack: 0, stayed: 0, resourcesRemoved: 0, resourcesBack: 0 })}
         </p>
         {!undone && !flow.undoing && (!undo || flow.undoStale) ? <Help>{RESYNC_WORDS.undoStale(who)}</Help> : null}
         {!undone && notice ? (
