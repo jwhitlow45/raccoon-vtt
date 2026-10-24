@@ -3,7 +3,9 @@ import { actorHp, effectAdd, effectRemove } from "./actors.ts";
 import { ASK_CLOSED } from "../permissions.ts";
 import { closeCast } from "./casts.ts";
 import { settleTrap } from "./traps.ts";
+import { combatUses } from "../migrate.ts";
 import { Refuse, invalid, type Tx } from "./tx.ts";
+import { addUseLine } from "./uses.ts";
 
 /** The refusal of a Legendary Resistance a creature has no use of left. */
 export const NO_RESISTANCE_LEFT = "it has no Legendary Resistance left";
@@ -37,6 +39,10 @@ export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
       const legendary = resolved.actor.legendary;
       if (!legendary || legendary.resistUsed >= legendary.resistMax) throw invalid(NO_RESISTANCE_LEFT);
       tx.putActor(resolved, { ...resolved.actor, legendary: { ...legendary, resistUsed: legendary.resistUsed + 1 } });
+      // Its use line, which a stored op from before combat uses never wrote: one more line would move every later id of the op.
+      if (combatUses(tx.env.opVersion)) {
+        addUseLine(tx, resolved, { type: "use", what: "resist", left: legendary.resistMax - legendary.resistUsed - 1, max: legendary.resistMax, ...(op.quiet ? { hidden: true as const } : {}) });
+      }
     }
     for (const effectId of item.remove ?? []) effectRemove(tx, { t: "actor.effect.remove", target: item.target, effectId });
     if (item.amount !== undefined) actorHp(tx, { t: "actor.hp", target: item.target, change: { kind: "damage", amount: item.amount, ...(item.types ? { types: item.types } : {}) } });

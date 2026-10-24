@@ -69,7 +69,7 @@ function withMark(actor: Actor, key: UseKey, mark: UseMark | null): Actor {
 }
 
 /** Writes a use line about the creature, stamped as addActorEvents stamps its events. */
-function addUseLine(tx: Tx, resolved: ResolvedActor, line: Omit<UseLine, "tokenId" | "characterId" | "seen">): void {
+export function addUseLine(tx: Tx, resolved: ResolvedActor, line: Omit<UseLine, "tokenId" | "characterId" | "seen">): void {
   const token = resolved.holder === "token" ? tx.state.tokens[resolved.id] : undefined;
   const about = token ? { tokenId: resolved.id, ...(seenByNonOwners(tx.state, token, tx.env) ? { seen: true as const } : {}) } : { characterId: resolved.id };
   tx.addEvent({ ...line, ...about });
