@@ -135,7 +135,7 @@ export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
  */
 export function barCapacity(room: BarRoom): number | null {
   const free = freeArea(room.viewport, room.chrome, room.foot);
-  if (roomMode(room, free) === "span") return spanRoomAtWorst(free);
+  if (roomMode(room, free) === "span") return spanRoomAtWorst(free, room.layout);
   const placed = placeBar({ ...room, height: Number.POSITIVE_INFINITY });
   if (!placed) return null;
   if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome, room.width).room;

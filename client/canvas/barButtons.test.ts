@@ -326,10 +326,10 @@ describe("an upright phone's capacity follows the mode its frame draws in (docs/
     assert.equal(free.height, 139);
     const standing: BarRoom = { ...room, cardAt: "foot" };
     assert.equal(placeBar({ ...standing, height: 200 })?.mode, "span");
-    assert.equal(barCapacity(standing), spanRoomAtWorst(free));
+    assert.equal(barCapacity(standing), spanRoomAtWorst(free, layout));
     // Counted as today, the card's foot makes the bar compact, with the overlay's own capacity.
     assert.equal(placeBar({ ...room, height: 200 })?.mode, "compact");
-    assert.notEqual(barCapacity(room), spanRoomAtWorst(free));
+    assert.notEqual(barCapacity(room), spanRoomAtWorst(free, layout));
   });
 
   test("a card summoned onto the toolbar or the screen counts its foot, as the opening rule does", () => {
@@ -339,9 +339,19 @@ describe("an upright phone's capacity follows the mode its frame draws in (docs/
     }
   });
 
+  test("an upright phone's capacity is the expanded bar's reach: two thirds of the screen at most, and the free area less 128 (5.1, 9.1)", () => {
+    const phone = { width: 390, height: 844 };
+    const upright: BarRoom = { ...desk(844), layout: phone, viewport: phone, chrome: chrome({ side: 0, bottom: 0 }), foot: 0 };
+    const uprightFree = freeArea(phone, upright.chrome, 0);
+    // 716 tall, so 588 by the free area alone, and 563 by two thirds of the screen.
+    assert.equal(uprightFree.height, 716);
+    assert.equal(barCapacity(upright), Math.min(Math.round((844 * 2) / 3), 716 - 128));
+    assert.equal(barCapacity(upright), spanRoomAtWorst(uprightFree, phone));
+  });
+
   test("a held strip keeps the strip's layout as its free area falls under 148, and lets go of it on its side (review BC-OPUS-32)", () => {
     const held: BarRoom = { ...room, heldMode: "span" };
-    assert.equal(barCapacity(held), spanRoomAtWorst(free));
+    assert.equal(barCapacity(held), spanRoomAtWorst(free, layout));
     const side: BarRoom = { ...held, layout: { width: 437, height: 246 }, viewport: { width: 437, height: 246 }, foot: 0 };
     assert.equal(barCapacity(side), barCapacity({ ...side, heldMode: null }));
   });

@@ -58,8 +58,10 @@ export type HpRest = {
   scrolls: boolean;
   /** The bar's own candidates, after the entry's in the quick row. */
   items: readonly RestItem[];
-  /** The ids the quick row drew (RestRow's fit), or null while it draws every one. */
+  /** The ids the quick row drew (RestRow's fit), or null before its first fit. */
   shown: readonly string[] | null;
+  /** Hears the ids the quick row draws, whenever they change. */
+  onFit?(shown: readonly string[]): void;
   /** What the entry has to say, for the status line (canvas/barButtons.ts restStatus). */
   onStatus(status: EntryStatus): void;
 };
@@ -274,7 +276,7 @@ export function HpEntry(props: {
   // The same wrapper in both states of an upright bar, so the field under it is never mounted afresh.
   const fieldRow = rest ? (
     <div key="field" style={{ order: !resting && fieldFirst ? 0 : 1, minWidth: 0 }}>
-      <RestRow items={restItems} />
+      <RestRow items={restItems} onFit={rest.onFit} />
     </div>
   ) : (
     <div key="field" style={{ display: "flex", gap: theme.space(1), order: fieldFirst ? 0 : 1 }}>

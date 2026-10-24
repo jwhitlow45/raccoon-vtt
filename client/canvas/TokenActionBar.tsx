@@ -125,6 +125,7 @@ import {
 import { barButtons, barShort, isCompanion, type BarButtonId } from "./barButtons.ts";
 import { groupRestButtons, restButtons, restStatus, type EntryStatus, type RestFit, type RestStatus } from "./barButtons.ts";
 import { RestRow, type RestItem } from "./RestRow.tsx";
+import { NOTE_INSET } from "./barDock.ts";
 import { unitText, type VitalItem } from "../features/tokens/statSummary.ts";
 import { useGroupHp } from "../features/tokens/GroupHpEntry.tsx";
 import type { HpRest } from "../features/tokens/HpSection.tsx";
@@ -235,6 +236,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const resting = rest?.resting === true;
   const scrolls = resting && rest.scrolls;
   const [entry, setEntry] = useState<EntryStatus>(QUIET_ENTRY);
+  // The ids the quick row drew (RestRow's fit), null until it first fits.
+  const [drawn, setDrawn] = useState<readonly string[] | null>(null);
   const drawers = useRestDrawers(rest, drawer, setDrawer);
   const attachSlots = useAttachSlots(token);
   const detach = useDetach(token, attachSlots.includes("detach"));
@@ -417,9 +420,9 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     }
   };
   const restItems: RestItem[] = restIds.map((id) => ({ id, node: restButton(id) }));
-  // RestRow draws every item it is given, so each candidate, Crit among them while the entry offers it, is in the strip and out of the scrolling strip's rows below it.
-  const inStrip = (id: string) => scrolls && restIds.includes(id);
-  const status = useRestStatus({ entry: lead ? entry : QUIET_ENTRY, idle: vitalsWords(split.line), critInRow: true, active: resting });
+  // What the quick row drew is out of the scrolling strip's rows below it. Before its first fit, every candidate counts as drawn.
+  const inStrip = (id: string) => scrolls && (drawn ?? restIds).includes(id);
+  const status = useRestStatus({ entry: lead ? entry : QUIET_ENTRY, idle: vitalsWords(split.line), critInRow: drawn === null || drawn.includes("crit"), active: resting });
 
   const savesAndDefenses = short ? (
     <MoreStats more={split.more} block={block} />
@@ -446,9 +449,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         // Two lines of the name at most: the frame's name holds all of it, and the token's plate shows it on the map.
         title={displayName(token)}
         status={resting ? status.node : undefined}
+        sentence={resting ? status.status.sentence : null}
         actions={badgeInHeader ? badgeText : null}
         onClose={props.onClose}
       />
+      {resting ? status.probe : null}
       {/* The strip's status line holds the vitals while it rests. The entry after them keeps its place either way, so its field carries over (5.3). */}
       {resting ? null : <VitalsLine items={short ? split.line : items} afterTag={reviveButton} end={badgeInHeader ? undefined : badgeText} />}
       {resting ? null : deadNote}
@@ -459,10 +464,10 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           access={access.hp}
           place="bar"
           fieldFirst={short}
-          rest={rest ? { resting, scrolls, items: restItems, shown: null, onStatus: setEntry } : undefined}
+          rest={rest ? { resting, scrolls, items: restItems, shown: drawn, onFit: setDrawn, onStatus: setEntry } : undefined}
         />
       ) : resting ? (
-        <RestRow items={restItems} />
+        <RestRow items={restItems} onFit={setDrawn} />
       ) : null}
 
       {/* The scrolling strip holds the rest of the bar under its quick row, in the expanded bar's order (5.4). */}
@@ -634,13 +639,15 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const scrolls = resting && rest.scrolls;
   const drawers = useRestDrawers(rest, drawer, setDrawer);
   const [entry, setEntry] = useState<EntryStatus>(QUIET_ENTRY);
+  // The ids the quick row drew (RestRow's fit), null until it first fits.
+  const [drawn, setDrawn] = useState<readonly string[] | null>(null);
   const lead = useGroupHp(tokens).access !== "none";
   // The group's strip (docs/design-v1-bar-compact.md 9.4): its entry as the lead, then these.
   const restIds = rest ? groupRestButtons({ dm: offers.dm, lead, conditions: offers.conditions, undoMove: offersUndo(undoOffer, ids) }).filter((id) => id !== "mode") : [];
-  const inStrip = (id: string) => scrolls && restIds.includes(id);
+  const inStrip = (id: string) => scrolls && (drawn ?? restIds).includes(id);
   const names = tokens.map((t) => displayName(t)).join(", ");
   // With nothing else to say, the status line names who is selected, as the line under the expanded bar's header does.
-  const status = useRestStatus({ entry, idle: [names], critInRow: true, active: resting });
+  const status = useRestStatus({ entry, idle: [names], critInRow: drawn === null || drawn.includes("crit"), active: resting });
 
   const hiddenButton = (
     <BarButton
@@ -682,15 +689,16 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
 
   return (
     <>
-      <BarHeader title={`${tokens.length} selected`} status={resting ? status.node : undefined} onClose={props.onClose} closeLabel="Deselect all" />
+      <BarHeader title={`${tokens.length} selected`} status={resting ? status.node : undefined} sentence={resting ? status.status.sentence : null} onClose={props.onClose} closeLabel="Deselect all" />
+      {resting ? status.probe : null}
       {/* The names stand in the strip's status line while it rests, so they are hidden there, and the entry after them keeps its place. */}
       <div hidden={resting} style={{ color: theme.color.textMuted, overflowWrap: "anywhere" }}>
         {names}
       </div>
-      {lead ? <GroupBarHp tokens={tokens} rest={rest ? { resting, scrolls, items: restItems, shown: null, onStatus: setEntry } : undefined} /> : resting ? (
+      {lead ? <GroupBarHp tokens={tokens} rest={rest ? { resting, scrolls, items: restItems, shown: drawn, onFit: setDrawn, onStatus: setEntry } : undefined} /> : resting ? (
         <>
-          <GroupBarHp tokens={tokens} rest={{ resting, scrolls, items: restItems, shown: null, onStatus: setEntry }} />
-          <RestRow items={restItems} />
+          <GroupBarHp tokens={tokens} rest={{ resting, scrolls, items: restItems, shown: drawn, onFit: setDrawn, onStatus: setEntry }} />
+          <RestRow items={restItems} onFit={setDrawn} />
         </>
       ) : (
         <GroupBarHp tokens={tokens} />
@@ -2059,13 +2067,6 @@ function BarButton(props: {
 /** The entry with nothing to say: the status line shows the vitals. */
 const QUIET_ENTRY: EntryStatus = { error: null, dead: null, preview: null, typed: false, crit: false, reach: 1, left: [], standing: null };
 
-/**
- * The note's inset from each side of the strip (B.4). Lane F's frame
- * exports it as barDock.ts NOTE_INSET, which takes this one's place once
- * the frame's build is under this code.
- */
-const NOTE_INSET = 12;
-
 /** The vitals the short layout keeps, as the status line's parts: "AC 14", then "HP 24/24" or a player's "Healthy". */
 function vitalsWords(items: readonly VitalItem[]): string[] {
   return items.flatMap((item) => {
@@ -2075,28 +2076,37 @@ function vitalsWords(items: readonly VitalItem[]): string[] {
   });
 }
 
+/** The widths a status text is measured against: the line's, drawn and in the chrome's own px, and the note's text. */
+type StatusBox = { lineDrawn: number; line: number; note: number | null };
+
+/** The status line's and the header's sentences' lines (TokenActionBar.tsx BarHeader's SENTENCE_LINES). */
+const STATUS_LINE_PX = 18;
+
 /**
  * The strip's status line (barButtons.ts restStatus), measured where it
  * draws: the line under the name, the title's two lines and the note's
- * two lines, each by the drawn width of its text in the line's own font,
+ * two lines, each by the drawn width of its text in the status font,
  * inside the chrome's zoom. `node` is what the header draws under the
- * name. `status.sentence` is what needs more room than that line.
+ * name, `probe` the hidden measure the bar draws once in its content,
+ * and `status.sentence` what the header draws over its title or in its
+ * note. The line's width is kept while a sentence stands in the title in
+ * its place, so the choice never flips back and forth.
  */
-function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; critInRow: boolean; active: boolean }): { status: RestStatus; node: ReactNode } {
+function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; critInRow: boolean; active: boolean }): { status: RestStatus; node: ReactNode; probe: ReactNode } {
   // State, not a ref, so a line the header draws afresh is measured and watched again.
   const [line, setLine] = useState<HTMLSpanElement | null>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
-  const [noteWidth, setNoteWidth] = useState<number | null>(null);
-  const [titleWidth, setTitleWidth] = useState<number | null>(null);
+  const [box, setBox] = useState<StatusBox | null>(null);
   const key = JSON.stringify([input.entry, input.idle, input.critInRow]);
   const [status, setStatus] = useState<RestStatus>(() => restStatus({ ...input.entry, idle: input.idle, critInRow: input.critInRow, fit: FITS_ALL }));
-  // The widths it measures against, read again as the frame or the title changes width (a turn, a new interface size, a header button).
+  // Read again as the frame or the line changes width: a turn, a new interface size, a header button.
   useLayoutEffect(() => {
     const frameEl = line?.closest<HTMLElement>('[role="dialog"]');
     if (!input.active || !line) return;
     const read = () => {
-      setTitleWidth(line.getBoundingClientRect().width);
-      setNoteWidth(frameEl ? frameEl.offsetWidth - 2 * NOTE_INSET : null);
+      // The note's words stand NOTE_INSET in from its edges, and the note is as wide as the frame (BarHeader's NOTE_BOX).
+      const next = { lineDrawn: line.getBoundingClientRect().width, line: line.offsetWidth, note: frameEl ? frameEl.offsetWidth - 2 * theme.line.border - 2 * NOTE_INSET : null };
+      setBox((now) => (now && now.lineDrawn === next.lineDrawn && now.line === next.line && now.note === next.note ? now : next));
     };
     read();
     const watch = new ResizeObserver(read);
@@ -2107,52 +2117,54 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
   useLayoutEffect(() => {
     const [entry, idle, critInRow] = JSON.parse(key) as [EntryStatus, string[], boolean];
     const probe = probeRef.current;
-    const fit = input.active && line && probe && titleWidth !== null ? measuredFit(line, probe, noteWidth) : FITS_ALL;
+    const fit = input.active && probe && box ? measuredFit(probe, box) : FITS_ALL;
     const next = restStatus({ ...entry, idle, critInRow, fit });
     setStatus((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
-  }, [key, input.active, line, titleWidth, noteWidth]);
+  }, [key, input.active, box]);
   const node = (
     <span
       ref={setLine}
-      // What needs more room than the line, for the frame to draw over the title or in the note (9.2), and for tests to read.
+      // What needs more room than the line, which the header draws over the title or in the note (9.2), for tests to read.
       data-rest-status=""
       data-rest-sentence={status.sentence?.text}
       data-rest-place={status.sentence?.place}
-      style={{ display: "block", position: "relative", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}
+      style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}
     >
       {status.line.text}
-      {/* Measures a text in the line's own font and zoom, never seen or read. */}
-      <span ref={probeRef} aria-hidden style={{ position: "absolute", left: 0, top: 0, visibility: "hidden", pointerEvents: "none" }} />
     </span>
   );
-  return { status, node };
+  // A box of no size that clips what it holds, so a long text measured in it never widens what scrolls.
+  const probe = (
+    <span aria-hidden style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none" }}>
+      <span ref={probeRef} style={{ position: "absolute", left: 0, top: 0, fontSize: theme.font.small, fontWeight: theme.weight.regular, lineHeight: `${STATUS_LINE_PX}px` }} />
+    </span>
+  );
+  return { status, node, probe };
 }
 
 /** Before the first measure: every text fits, so nothing is cut that may not need it. */
 const FITS_ALL: RestFit = { line: () => true, title: () => true, note: () => true };
 
 /**
- * Fits by the probe inside the status line: one line against the line's
- * drawn width, the title's two lines at the line's width, and the note's
- * two lines at `noteWidth` (the frame's width less the note's insets), in
- * the line's own px. Lines are counted by height against the line's own.
+ * Fits by the probe: one line against the line's drawn width, so a text
+ * the browser would end in an ellipsis for under a pixel does not fit,
+ * and the title's and the note's two lines by the probe's height at
+ * their widths in the chrome's own px.
  */
-function measuredFit(line: HTMLElement, probe: HTMLElement, noteWidth: number | null): RestFit {
-  const lineBox = line.getBoundingClientRect();
-  const measure = (text: string, width: number | "line" | null) => {
+function measuredFit(probe: HTMLElement, box: StatusBox): RestFit {
+  const measure = (text: string, width: number | null) => {
     probe.textContent = text;
     probe.style.whiteSpace = width === null ? "nowrap" : "normal";
-    probe.style.right = width === "line" ? "0" : "auto";
-    probe.style.width = typeof width === "number" ? `${width}px` : "auto";
-    const box = probe.getBoundingClientRect();
+    probe.style.width = width === null ? "auto" : `${width}px`;
+    const drawn = probe.getBoundingClientRect().width;
+    const lines = Math.round(probe.offsetHeight / STATUS_LINE_PX);
     probe.textContent = "";
-    return box;
+    return { drawn, lines };
   };
-  const lines = (box: DOMRect) => Math.round(box.height / Math.max(1, lineBox.height));
   return {
-    line: (text) => measure(text, null).width <= lineBox.width + 0.01,
-    title: (text) => lines(measure(text, "line")) <= 2,
-    note: (text) => lines(measure(text, noteWidth ?? "line")) <= 2,
+    line: (text) => measure(text, null).drawn <= box.lineDrawn + 0.01,
+    title: (text) => measure(text, box.line).lines <= 2,
+    note: (text) => measure(text, box.note ?? box.line).lines <= 2,
   };
 }
 
