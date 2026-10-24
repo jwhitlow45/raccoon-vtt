@@ -42,6 +42,16 @@ function obj(v: unknown): Obj | null {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : null;
 }
 
+/**
+ * Whether a list was read to its end: null, absent, or a list within its
+ * bound. A list cut at its bound, or not a list, may hold a linked roll, so
+ * its kind is not read whole and a merge never removes one because of it
+ * (docs/design-v1-resync.md 2.5, DDBBUILD-ASTRA-01).
+ */
+function wholeList(v: unknown, max: number): boolean {
+  return v === null || v === undefined || (Array.isArray(v) && v.length <= max);
+}
+
 function arr(v: unknown, max: number): unknown[] {
   return Array.isArray(v) ? v.slice(0, max) : [];
 }
@@ -306,11 +316,19 @@ function spellPart(m: Obj, scale: string | null, level: number, spellLevel: numb
   return { part, dice };
 }
 
-function spellRolls(data: Obj, ctx: Ctx, characterLevel: number, casting: AbilityKey | null): { rolls: PcRoll[]; unhalved: string[] } {
+function spellRolls(data: Obj, ctx: Ctx, characterLevel: number, casting: AbilityKey | null): { rolls: PcRoll[]; unhalved: string[]; whole: boolean } {
   const entries: { entry: Obj; granted: boolean }[] = [];
-  for (const raw of arr(data.classSpells, MAX.classes)) for (const s of arr(obj(raw)?.spells, MAX.spells)) entries.push({ entry: obj(s) ?? {}, granted: false });
+  let whole = wholeList(data.classSpells, MAX.classes);
+  for (const raw of arr(data.classSpells, MAX.classes)) {
+    whole &&= wholeList(obj(raw)?.spells, MAX.spells);
+    for (const s of arr(obj(raw)?.spells, MAX.spells)) entries.push({ entry: obj(s) ?? {}, granted: false });
+  }
   const groups = obj(data.spells) ?? {};
-  for (const key of ["race", "class", "item", "feat"]) for (const s of arr(groups[key], MAX.spells)) entries.push({ entry: obj(s) ?? {}, granted: true });
+  for (const key of ["race", "class", "item", "feat"]) {
+    whole &&= wholeList(groups[key], MAX.spells);
+    for (const s of arr(groups[key], MAX.spells)) entries.push({ entry: obj(s) ?? {}, granted: true });
+  }
+  whole &&= entries.length <= MAX.spells;
   const seen = new Set<string>();
   const rolls: PcRoll[] = [];
   const unhalved: string[] = [];
@@ -364,7 +382,7 @@ function spellRolls(data: Obj, ctx: Ctx, characterLevel: number, casting: Abilit
     }
     rolls.push(roll);
   }
-  return { rolls, unhalved };
+  return { rolls, unhalved, whole };
 }
 
 function actionRolls(data: Obj, ctx: Ctx): PcRoll[] {
@@ -585,6 +603,14 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const actions = sent.actions ? actionRolls(data, ctx) : null;
   const cut = cutRolls(weapons, spells?.rolls ?? null, actions);
   stats.rolls = cut.rolls;
+  if (spells && !spells.whole) {
+    cut.read.spell = false;
+    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's spells were not read, since a list of them was too long or did not read. Spells here that they would change stay as they are.");
+  }
+  if (weapons && !wholeList(data.inventory, MAX.inventory)) {
+    cut.read.weapon = false;
+    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's equipment was not read, since the list was too long. Weapons here that it would change stay as they are.");
+  }
   if (sent.actions && !actionsWhole(data)) {
     cut.read.other = false;
     warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's actions were not read, since a list of them was too long or did not read. Rolls and class resources here that they would change stay as they are.");

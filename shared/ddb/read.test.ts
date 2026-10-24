@@ -270,6 +270,39 @@ describe("readDdbCharacter: what does not read", () => {
     assert.ok(checkedFill(fill));
   });
 
+  test("a spell or equipment list cut at its bound or not a list leaves its rolls read not whole, with its line (DDBBUILD-ASTRA-01)", () => {
+    const SPELLS_CUT = "Some of D&D Beyond's spells were not read, since a list of them was too long or did not read. Spells here that they would change stay as they are.";
+    const GEAR_CUT = "Some of D&D Beyond's equipment was not read, since the list was too long. Weapons here that it would change stay as they are.";
+    const bolt = spell("Fire Bolt", 0, { requiresAttackRoll: true, modifiers: [damage("fire", "1d10")] });
+    const sleeps = (count: number) => Array.from({ length: count }, (_, i) => spell(`Sleep ${i}`, 1, { modifiers: [] }));
+    const spellCuts = [
+      ione([...sleeps(400), bolt]),
+      ione([bolt], { classSpells: [{ spells: [bolt] }, { spells: {} }] }),
+      ione([bolt], { classSpells: Array.from({ length: 21 }, () => ({ spells: [] })) }),
+      ione([bolt], { spells: { race: "bolt", class: [], item: [], feat: [] } }),
+      ione(sleeps(200), { spells: { race: sleeps(201), class: [], item: [], feat: [] } }),
+    ];
+    for (const [i, json] of spellCuts.entries()) {
+      const fill = readDdbCharacter(json, ids)!;
+      assert.equal(fill.read?.spell, false, `spell cut ${i}`);
+      assert.ok(fill.warnings.includes(SPELLS_CUT), `spell cut ${i}`);
+      assert.ok(checkedFill(fill));
+    }
+    for (const json of [ione([bolt]), ione([bolt], { classSpells: [{ spells: [bolt] }, { spells: null }, {}] }), ione([bolt], { spells: { race: null, class: [] } })]) {
+      const fill = readDdbCharacter(json, ids)!;
+      assert.equal(fill.read?.spell, true);
+      assert.ok(!fill.warnings.includes(SPELLS_CUT));
+    }
+    const knives = (count: number) => Array.from({ length: count }, (_, i) => ({ equipped: false, definition: { id: 1000 + i, name: `Knife ${i}`, filterType: "Weapon" } }));
+    const rapier = { equipped: true, definition: { id: 903, name: "Rapier", filterType: "Weapon", damage: { diceString: "1d8" }, damageType: "Piercing", attackType: 1, properties: [{ name: "Finesse" }] } };
+    const gearCut = readDdbCharacter(wren({ inventory: [...knives(400), rapier] }), ids)!;
+    assert.equal(gearCut.read?.weapon, false);
+    assert.ok(gearCut.warnings.includes(GEAR_CUT));
+    const gearWhole = readDdbCharacter(wren({ inventory: [...knives(399), rapier] }), ids)!;
+    assert.equal(gearWhole.read?.weapon, true, "400 is read whole");
+    assert.ok(!gearWhole.warnings.includes(GEAR_CUT));
+  });
+
   test("a list past its bound is read only to it", () => {
     const flood = wren({ inventory: Array.from({ length: 100_000 }, (_, i) => ({ equipped: true, definition: { id: i, name: `Knife ${i}`, filterType: "Weapon", damage: { diceString: "1d4" }, damageType: "Piercing", attackType: 1, properties: [] } })) });
     const started = Date.now();
