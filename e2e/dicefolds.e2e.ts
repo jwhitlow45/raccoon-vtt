@@ -15,7 +15,10 @@ import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, So
  * creature, an ask that opens Saves and checks once, for Pat's Thorn and
  * for the NPC the DM lent him (a monster's fold), and never again after a
  * tab pick, Pat's creatures as tabs by tap and by arrow keys, and a
- * token's Roll landing the panel with Adv, Dis and Secret whole (8).
+ * token's Roll landing the panel with Adv, Dis and Secret whole (8), from
+ * the top, and from the panel's foot on a computer and on a phone, and
+ * Recent rolls joining the last group, or standing under a lone card, as
+ * the panel comes back from the group save page.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-eight, one file
  * after another as the others. The other environment variables are the
@@ -160,6 +163,50 @@ async function another(from: BrowserContext, viewport: { width: number; height: 
 /** What the in-page code reads, typed here since the e2e files are built without the DOM's types. */
 type Box = { parentElement: Box | null; scrollTop: number; scrollHeight: number; getBoundingClientRect(): { top: number; bottom: number } };
 type Doc = { document: { activeElement: unknown; querySelector(selector: string): Box | null }; getComputedStyle(el: Box): { overflowY: string } };
+
+/** Scrolls the Dice panel's own scroller, the one around `inside`, to its foot. */
+async function toFoot(inside: Locator): Promise<void> {
+  await inside.evaluate((el) => {
+    const g = globalThis as unknown as Doc;
+    let box = (el as unknown as Box).parentElement;
+    while (box && g.getComputedStyle(box).overflowY !== "auto") box = box.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+  });
+}
+
+/**
+ * Where a token's Roll landed the Dice panel in `within`, once any smooth
+ * scroll and restored place have settled (the same box twice running):
+ * the roll modes whole under the sticky line, and the card after them
+ * inside the scroller (docs/design-v1-dice-pass.md 8).
+ */
+async function landed(page: Page, within: Locator) {
+  const measure = () =>
+    within.locator("[data-dice-modes]").evaluate((el) => {
+      const g = globalThis as unknown as Doc;
+      const modes = el as unknown as Box;
+      let box = modes.parentElement;
+      while (box && g.getComputedStyle(box).overflowY !== "auto") box = box.parentElement;
+      const b = box!.getBoundingClientRect();
+      const last = g.document.querySelector("[data-dice-last]")!.getBoundingClientRect();
+      const m = modes.getBoundingClientRect();
+      const card = g.document.querySelector("[data-dice-card]")!.getBoundingClientRect();
+      return { top: Math.round(b.top), bottom: Math.round(b.bottom), sticky: Math.round(last.bottom), modesTop: Math.round(m.top), modesBottom: Math.round(m.bottom), cardBottom: Math.round(card.bottom), scroll: box!.scrollTop };
+    });
+  await page.waitForTimeout(400);
+  let seen = await measure();
+  await waitFor("the panel and its scroll to settle", async () => {
+    await page.waitForTimeout(150);
+    const now = await measure();
+    const still = JSON.stringify(now) === JSON.stringify(seen);
+    seen = now;
+    return still ? true : null;
+  });
+  assert.ok(seen.modesTop >= seen.sticky, `the roll modes start under the sticky line: ${JSON.stringify(seen)}`);
+  assert.ok(seen.modesBottom <= seen.bottom, `the roll modes end inside the panel: ${JSON.stringify(seen)}`);
+  assert.ok(seen.cardBottom <= seen.bottom, `the card follows them whole: ${JSON.stringify(seen)}`);
+  return seen;
+}
 
 const DM_GROUPS = ["Saves and checks", "Skills", "Actions"] as const;
 const PAT_GROUPS = ["Saves and checks", "Skills", "Actions", "Spells"] as const;
@@ -344,45 +391,111 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
     await fold(options, "Actions").waitFor();
     await options.getByRole("button", { name: /^Longsword/ }).first().tap();
     await dice.locator("[data-dice-last]").getByRole("button", { name: "Show this roll in Recent rolls" }).waitFor();
-    await dice.locator("[data-roll-options]").evaluate((el) => {
-      const g = globalThis as unknown as Doc;
-      let box = (el as unknown as Box).parentElement;
-      while (box && g.getComputedStyle(box).overflowY !== "auto") box = box.parentElement;
-      if (box) box.scrollTop = box.scrollHeight;
-    });
+    await toFoot(dice.locator("[data-roll-options]"));
     await closeDiceSheet(pat);
     await tapCell(pat, patSocket.state!.scenes[run.sceneId]!.bounds, run.thorn);
     const bar = pat.getByRole("dialog", { name: "Thorn actions" });
     await bar.waitFor();
     await bar.getByRole("button", { name: "Roll", exact: true }).tap();
     await dice.waitFor();
-    // Measured once the smooth scroll has settled: the same box twice running.
-    const measure = () =>
-      dice.locator("[data-dice-modes]").evaluate((el) => {
-        const g = globalThis as unknown as Doc;
-        const modes = el as unknown as Box;
-        let box = modes.parentElement;
-        while (box && g.getComputedStyle(box).overflowY !== "auto") box = box.parentElement;
-        const b = box!.getBoundingClientRect();
-        const last = g.document.querySelector("[data-dice-last]")!.getBoundingClientRect();
-        const m = modes.getBoundingClientRect();
-        const card = g.document.querySelector("[data-dice-card]")!.getBoundingClientRect();
-        return { top: Math.round(b.top), bottom: Math.round(b.bottom), sticky: Math.round(last.bottom), modesTop: Math.round(m.top), modesBottom: Math.round(m.bottom), cardBottom: Math.round(card.bottom), scroll: box!.scrollTop };
-      });
-    await pat.waitForTimeout(400);
-    let seen = await measure();
-    await waitFor("the sheet and its scroll to settle", async () => {
-      await pat.waitForTimeout(150);
-      const now = await measure();
-      const still = JSON.stringify(now) === JSON.stringify(seen);
-      seen = now;
-      return still ? true : null;
-    });
-    assert.ok(seen.modesTop >= seen.sticky, `the roll modes start under the sticky line: ${JSON.stringify(seen)}`);
-    assert.ok(seen.modesBottom <= seen.bottom, `the roll modes end inside the panel: ${JSON.stringify(seen)}`);
-    assert.ok(seen.cardBottom <= seen.bottom, `the card follows them whole: ${JSON.stringify(seen)}`);
+    await landed(pat, dice);
     await shots.take(pat, "df-6-pat-390-bar-roll");
     await closeDiceSheet(pat);
+  });
+
+  test("df-6b. at 1440 x 900, the goblin's bar's Roll lands the side panel, scrolled to its foot, on the roll modes under the sticky line", async () => {
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("Dice") });
+    const options = panel.locator("[data-roll-options]");
+    await options.getByRole("region", { name: "Rolls for Goblin" }).waitFor();
+    // A roll first, so the sticky line shows, then the panel scrolled to its foot, still open.
+    await options.getByRole("button", { name: /^Scimitar/ }).first().click();
+    await panel.locator("[data-dice-last]").getByRole("button", { name: "Show this roll in Recent rolls" }).waitFor();
+    await toFoot(options);
+    const bar = dm.getByRole("dialog", { name: "Goblin actions" });
+    if (!(await bar.isVisible())) await tapCell(dm, dmSocket.state!.scenes[run.sceneId]!.bounds, run.goblin);
+    await bar.getByRole("button", { name: "Roll", exact: true }).click();
+    const seen = await landed(dm, panel);
+    assert.ok(seen.scroll > 0, `the panel scrolled to the modes, not its top: ${JSON.stringify(seen)}`);
+    await shots.take(dm, "df-6b-dm-1440-bar-roll-from-foot");
+  });
+
+  test("df-6c. on a phone, Thorn's bar's Roll lands the sheet on the roll modes though it reopens at the foot it was left at", async () => {
+    const dice = diceSheet(pat);
+    const bar = pat.getByRole("dialog", { name: "Thorn actions" });
+    if (!(await bar.isVisible())) await tapCell(pat, patSocket.state!.scenes[run.sceneId]!.bounds, run.thorn);
+    await bar.getByRole("button", { name: "Roll", exact: true }).tap();
+    await landed(pat, dice);
+    // Left at its foot, which the sheet keeps for Thorn when it shows again.
+    await toFoot(dice.locator("[data-roll-options]"));
+    await pat.waitForTimeout(300);
+    await closeDiceSheet(pat);
+    if (!(await bar.isVisible())) await tapCell(pat, patSocket.state!.scenes[run.sceneId]!.bounds, run.thorn);
+    await bar.getByRole("button", { name: "Roll", exact: true }).tap();
+    await dice.waitFor();
+    await landed(pat, dice);
+    await shots.take(pat, "df-6c-pat-390-bar-roll-from-foot");
+    await closeDiceSheet(pat);
+  });
+
+  test("df-6d. Recent rolls joins the options' last group, and keeps its gap under a lone card, however the panel comes back from the group save page", async () => {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("Dice") });
+    const rolls = panel.locator('section[aria-label="Group rolls"]');
+    const notice = panel.locator("[data-open-group-save]");
+    /** Recent rolls' top less the foot of the options' last group, and less the card's foot, in the panel's own px. */
+    const gaps = () =>
+      panel.evaluate((root) => {
+        type El = { offsetHeight: number; getBoundingClientRect(): { top: number; bottom: number; height: number }; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
+        const r = root as unknown as El;
+        const zoom = r.getBoundingClientRect().height / r.offsetHeight;
+        const recent = r.querySelector("[data-dice-recent]")!.getBoundingClientRect().top;
+        const options = r.querySelector("[data-roll-options]")!;
+        const groups = options.querySelectorAll("[data-panel-group]");
+        const last = groups.length > 0 ? groups[groups.length - 1]!.getBoundingClientRect().bottom : null;
+        const card = options.querySelector("[data-dice-card]")!.getBoundingClientRect().bottom;
+        return { toGroup: last === null ? null : (recent - last) / zoom, toCard: (recent - card) / zoom };
+      });
+    const back = () => dm.getByRole("button", { name: "Back to Dice" }).filter({ visible: true }).first().click();
+    /** Another side tab and back to Dice, so the panel mounts afresh on whatever page it shows. */
+    const remount = async () => {
+      await openSideTab(dm, "Token");
+      await openSideTab(dm, "Dice");
+    };
+
+    // Two selected, the goblin and Sildar, and a group save set up from their card.
+    const bar = dm.getByRole("dialog", { name: "Goblin actions" });
+    if (!(await bar.isVisible())) await tapCell(dm, bounds, run.goblin);
+    await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
+    await tapCell(dm, bounds, run.sildar);
+    await openSideTab(dm, "Dice");
+    await rolls.getByRole("heading", { name: "2 selected" }).waitFor();
+    await rolls.getByRole("button", { name: "Set up a group save", exact: true }).click();
+
+    // The panel mounts on the group save page, then steps back to two selected: Recent rolls touches their last group.
+    await remount();
+    await dm.getByRole("button", { name: "Back to Dice" }).filter({ visible: true }).first().waitFor();
+    await back();
+    await rolls.getByRole("heading", { name: "2 selected" }).waitFor();
+    let seen = await gaps();
+    assert.ok(seen.toGroup !== null && Math.abs(seen.toGroup) <= 1, `mounted on the page, Recent rolls joins the last group: ${JSON.stringify(seen)}`);
+
+    // Mounted on the first page, then the group save page in place, nobody selected there, and back: the card's gap stays.
+    await remount();
+    await rolls.getByRole("heading", { name: "2 selected" }).waitFor();
+    await notice.getByRole("button", { name: "Open", exact: true }).click();
+    await dm.getByRole("button", { name: "Deselect all" }).first().click();
+    const done = dm.getByRole("button", { name: "Done", exact: true });
+    if (await done.isVisible()) await done.click();
+    await back();
+    await panel.getByText("Select a token to roll for it.").waitFor();
+    seen = await gaps();
+    assert.equal(seen.toGroup, null, "nobody selected draws no group");
+    assert.ok(Math.abs(seen.toCard - 8) <= 1, `back with nobody selected, Recent rolls stands 8 px under the card: ${JSON.stringify(seen)}`);
+    await shots.take(dm, "df-6d-dm-1440-recent-under-card");
+
+    await notice.getByRole("button", { name: "Open", exact: true }).click();
+    await panel.getByRole("button", { name: "Discard", exact: true }).first().click();
+    await notice.waitFor({ state: "detached" });
   });
 
   test("df-7. nothing went wrong in the browsers", () => {

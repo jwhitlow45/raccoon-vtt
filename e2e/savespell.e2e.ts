@@ -20,7 +20,10 @@ import { ConsoleWatch, diceFoldsOpen, dragCells, LoadWatch, OpSocket, pagePoint,
  * Then Hold Person at level 3 goes from its row with both goblins selected,
  * and the DM sets it aside. An asked area offers Pat no move, size or
  * Delete until Pat withdraws. A reload of the DM's phone keeps the group
- * save that holds an ask, so its card stays away until Discard.
+ * save that holds an ask, so its card stays away until Discard. Hold
+ * Person's block takes the focus for its opening only, not when its group
+ * reopens or Thorn's tab is picked back, and an ask sent as Spells folds
+ * closes the block and leaves the folded line once the DM sets it aside.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-three, one file
  * after another as the others. The other environment variables are the
@@ -466,6 +469,79 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     const back = await dmCard("Thorn asks for saves: Hold Person");
     await back.getByRole("button", { name: "Dismiss Thorn's Hold Person" }).tap();
     await waitFor("the ask set aside", () => (Object.keys(dmSocket.state?.casts ?? {}).length === 0 ? true : null));
+  });
+
+  test("ss-7b. Hold Person's block takes the focus for its opening only, and folded, its ask still closes it and the DM's Dismiss clears the folded line", async () => {
+    await pickTool(pat, "Select");
+    await tapCell(pat, BOUNDS, run.thorn);
+    await pat.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
+    await pat.getByRole("dialog", { name: "3 selected tokens" }).waitFor();
+    const dice = await openDice(pat);
+    const spells = dice.locator("[data-group-fold]").and(dice.getByRole("button", { name: "Spells", exact: true }));
+    const block = dice.getByRole("group", { name: "Ask for saves: Hold Person" });
+    const focused = (at: Locator) => at.evaluate((el) => el.ownerDocument.activeElement === el);
+    /** The Dice sheet's own scroll offset. */
+    const place = () =>
+      spells.evaluate((el) => {
+        type Box = { parentElement: Box | null; scrollTop: number };
+        const g = globalThis as unknown as { getComputedStyle(el: Box): { overflowY: string } };
+        let box = (el as unknown as Box).parentElement;
+        while (box && g.getComputedStyle(box).overflowY !== "auto") box = box.parentElement;
+        return box?.scrollTop ?? -1;
+      });
+    await dice.getByRole("button", { name: "Ask the DM for saves against Hold Person" }).tap();
+    await waitFor("the opening's focus in its block", () => block.evaluate((el) => el.contains(el.ownerDocument.activeElement) || null));
+
+    // Folded and opened again by keys: the block draws again, and the focus and the panel's place stay.
+    await spells.focus();
+    await pat.keyboard.press("Enter");
+    await waitFor("Spells folded", async () => ((await spells.getAttribute("aria-expanded")) === "false" ? true : null));
+    const top = await place();
+    await pat.keyboard.press("Enter");
+    await block.waitFor();
+    await pat.waitForTimeout(300);
+    assert.equal(await focused(spells), true, "the focus stays on the fold row");
+    assert.ok(Math.abs((await place()) - top) <= 1, "the panel keeps its place");
+
+    // Bree's tab and back by arrow keys: Thorn's block draws again, and the focus stays on his tab.
+    const thorn = dice.getByRole("tablist", { name: "Roll for" }).getByRole("tab", { name: "Thorn", exact: true });
+    await thorn.focus();
+    await pat.keyboard.press("ArrowRight");
+    await dice.getByRole("region", { name: "Rolls for Bree" }).waitFor();
+    await pat.keyboard.press("ArrowLeft");
+    await block.waitFor();
+    await pat.waitForTimeout(300);
+    assert.equal(await focused(thorn), true, "the focus stays on Thorn's tab");
+    await shots.take(pat, "savespell-block-focus-kept");
+
+    // Asked, then folded on the next task, before the server's answer can land: the send's id opens Spells once on the render that first sees it, so a fold in the same task would be undone.
+    await block.getByRole("button", { name: "Ask the DM", exact: true }).evaluate(async (button) => {
+      type El = { click(): void; textContent: string | null; closest(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
+      const root = (button as unknown as El).closest("[data-roll-options]")!;
+      (button as unknown as El).click();
+      await new Promise((done) => setTimeout(done, 0));
+      Array.from(root.querySelectorAll("[data-group-fold]"))
+        .find((f) => f.textContent?.startsWith("Spells"))!
+        .click();
+    });
+    assert.equal(await spells.getAttribute("aria-expanded"), "false", "folded before the answer");
+    await waitFor("Hold Person's ask", () => Object.values(dmSocket.state?.casts ?? {})[0] ?? null);
+    await dice.getByRole("group", { name: "Asks for saves" }).getByText("Asked the DM for saves. Waiting.").waitFor();
+    await spells.getByText("Ask for saves waiting: Hold Person", { exact: false }).waitFor();
+    await shots.take(pat, "savespell-folded-asked");
+
+    // The DM sets it aside while Pat's Spells stays folded: the folded line lets it go, and no block comes back.
+    const card = await dmCard("Thorn asks for saves: Hold Person");
+    await card.getByRole("button", { name: "Dismiss Thorn's Hold Person" }).tap();
+    await waitFor("the ask set aside", () => (Object.keys(patSocket.state?.casts ?? {}).length === 0 ? true : null));
+    await waitFor("the folded line without the ask", async () => (/Ask for saves waiting/.test((await spells.textContent()) ?? "") ? null : true));
+    await spells.tap();
+    await dice.getByRole("button", { name: "Ask the DM for saves against Hold Person" }).waitFor();
+    assert.equal(await block.count(), 0, "the settled ask's block came back");
+    await closeSheet(pat, "Dice");
+    const done = pat.getByRole("button", { name: "Done", exact: true });
+    if (await done.isVisible()) await done.tap();
   });
 
   test("ss-8. nothing went wrong in the browsers", () => {
