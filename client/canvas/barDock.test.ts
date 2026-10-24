@@ -1789,6 +1789,12 @@ describe("the strip's lane, its expanded bar, the clearing move and a card it fo
     assert.equal(at(900, { top: 60, content: 541, first: 541 }), 166);
   });
 
+  test("an expanded bar under a first card with more after it leaves room for the column's fade (lane B, 844 x 390)", () => {
+    assert.equal(expandedRoom({ layout: tall, free: tallFree, column: { top: 60, content: 500, first: 300 }, content: 900 }), 775 - (60 + 300 + EDGE + COLUMN_FADE));
+    assert.equal(expandedLane({ top: 60, content: 600, first: 541 - COLUMN_FADE }, tallFree), "stacked");
+    assert.equal(expandedLane({ top: 60, content: 600, first: 542 - COLUMN_FADE }, tallFree), "summary");
+  });
+
   test("the clearing move: just enough for the label to clear the strip, none above it, and no further than the token's top allows (3.6, 5.2)", () => {
     const move = (y: number, tokenHeight = 40, toastFoot: number | null = null) => clearShift({ anchor: { x: 200, y }, tokenHeight, free: tallFree, barTop: 662, toastFoot });
     assert.equal(move(600), 0, "the label already clears the strip");

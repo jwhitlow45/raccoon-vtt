@@ -1066,9 +1066,9 @@ export function expandedLane(column: ColumnFacts | null, free: Box): Lane {
   return underCard(column, free) >= REST_HEIGHT + EXPAND_GAIN ? "stacked" : "summary";
 }
 
-/** The free area left under the column's first card and its 8 px gap. */
+/** The free area left under the column's first card, its 8 px gap and the fade's room (firstFoot). */
 function underCard(column: ColumnFacts, free: Box): number {
-  return free.top + free.height - (column.top + column.first + EDGE);
+  return free.top + free.height - firstFoot(column);
 }
 
 /**
