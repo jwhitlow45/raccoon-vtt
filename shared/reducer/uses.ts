@@ -229,10 +229,13 @@ function abilityUse(tx: Tx, resolved: ResolvedActor, use: Extract<UseOp["use"], 
     next = { kind: use.limit, name: use.name, used: 1, max: 1, ...(use.min !== undefined ? { min: use.min } : {}) };
   }
   let after = withMark(actor, use.key, next);
-  // Mark ready settles the recharge's open occurrence as done, in the same op (2.3).
+  // Mark ready settles the recharge's open occurrence as done, in the same op (2.3). So does a spend while it is open:
+  // a rest, a roll without its record or a new block brings the ability back mid-turn without settling it, and the
+  // turn's roll must not open again for the ability spent anew. Each check reads the actor that holds the mark.
   const record = actor.turnRecord;
   const due: PromptKey = `recharge:${use.key}`;
-  if (op.back && held?.kind === "recharge" && record && promptRefusal(tx.state, actor, nameOf(resolved), record.id, due) === null) after = withSettled(after, due, { state: "done", outcome: "ready" });
+  const marked = op.back ? (held?.kind === "recharge" ? actor : undefined) : use.limit === "recharge" ? after : undefined;
+  if (marked && record && promptRefusal(tx.state, marked, nameOf(resolved), record.id, due) === null) after = withSettled(after, due, { state: "done", outcome: "ready" });
   tx.putActor(resolved, after);
   const line: Omit<UseLine, "tokenId" | "characterId" | "seen"> = { type: "use", what: "ability", name: op.back ? held!.name : use.name, ...lineFlags(op) };
   const counted = op.back ? held! : next!;

@@ -303,6 +303,44 @@ describe("prompts that end before their roll (docs/design-v1-combat-controls.md 
     assert.equal(f.before(recharge("dragon", f.record("dragon"))), SETTLED_MEANWHILE);
   });
 
+  test("a breath back mid-turn by a rest, a roll without its record or a new block, then spent again, settles its turn's roll as ready, and that roll is refused", () => {
+    const spend: Op = { t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5 } };
+    const backs: Record<string, (f: ReturnType<typeof fight>) => void> = {
+      rest: (f) => f.run({ t: "actor.rest", target: { tokenId: "dragon" }, kind: "short", heal: 0 }),
+      "manual roll": (f) => f.roll(recharge("dragon"), 6),
+      relink: (f) => f.run({ t: "token.update", tokenId: "dragon", patch: { actor: { srdId: "young-red-dragon" } } }),
+    };
+    for (const [how, back] of Object.entries(backs)) {
+      const f = fight().run({ t: "encounter.next" });
+      const record = f.record("dragon");
+      back(f);
+      assert.equal(f.of("dragon").uses, undefined, how);
+      f.run(spend);
+      assert.deepEqual(f.of("dragon").uses, { "actions:fire-breath": breath }, how);
+      assert.deepEqual(f.settled("dragon", "recharge:actions:fire-breath"), { state: "done", outcome: "ready" }, how);
+      assert.equal(f.before(recharge("dragon", record)), SETTLED_MEANWHILE, how);
+      const resolved = resolveDiceOp(recharge("dragon", record), f.state, { draw: () => 6, batch: "AbCdEfGhIjKlMnOp" });
+      assert.ok(resolved.ok);
+      assert.equal(f.refusal(resolved.op), SETTLED_MEANWHILE, how);
+    }
+  });
+
+  test("a spend after the turn's own roll, on another creature's turn, or of another kind, settles nothing more", () => {
+    const spend: Op = { t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5 } };
+    const f = fight().run({ t: "encounter.next" });
+    f.roll(recharge("dragon", f.record("dragon")), 6);
+    f.run(spend);
+    assert.deepEqual(f.settled("dragon", "recharge:actions:fire-breath"), { state: "done", total: 6, outcome: "ready" });
+    const g = fight().run({ t: "encounter.next" }).run({ t: "actor.rest", target: { tokenId: "dragon" }, kind: "short", heal: 0 }).run({ t: "encounter.next" });
+    const before = g.of("dragon").turnRecord;
+    g.run(spend);
+    assert.deepEqual(g.of("dragon").turnRecord, before);
+    // A block edited since makes the breath 1/Day: that spend brings back no recharge, so the turn's roll stays open.
+    const h = fight().run({ t: "encounter.next" });
+    h.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "day", max: 1 } });
+    assert.equal(h.settled("dragon", "recharge:actions:fire-breath"), undefined);
+  });
+
   test("a recharge roll never readies a mark of another kind under its key", () => {
     const f = fight();
     f.state.tokens.dragon = { ...f.state.tokens.dragon!, actor: { inline: actor({ uses: { "actions:fire-breath": { kind: "day", name: "Fire Breath", used: 1, max: 1 } } }) } };
