@@ -3,6 +3,7 @@ import type { Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help } from "../../components/Panel.tsx";
+import { handFocusOn } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { barSlots, DETACH_WORDS, detachChoice, detachOp, getOffPlace, holderAction, NO_ROOM_TO_GET_OFF, type DetachChoice } from "./detach.ts";
@@ -59,7 +60,10 @@ export function DetachButton(props: { token: Token; detach: DetachState | null; 
       aria-disabled={detach.stuck ? true : undefined}
       aria-describedby={detach.stuck ? props.noteId : undefined}
       onClick={() => {
-        if (!detach.stuck) actions.dispatch(detachOp(props.token.id, detach.place));
+        if (detach.stuck) return;
+        actions.dispatch(detachOp(props.token.id, detach.place));
+        // The button goes with the link it undid, so focus moves to the bar around it.
+        handFocusOn(document.body, [BAR_FRAME]);
       }}
       // It stands only in the bar's play row, whose buttons grow to share their line (canvas/TokenActionBar.tsx ButtonRow).
       style={{ flex: "1 1 auto", ...(detach.stuck ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
@@ -84,6 +88,9 @@ const IN_CELL = { flex: "0 1 auto", maxWidth: "100%", overflowWrap: "anywhere" }
 
 /** The words before a holder's tokens, what it carries and then what it drags. */
 const HOLDS: Record<"carrying" | "dragging", string> = { carrying: "Carrying", dragging: "Dragging" };
+
+/** The token bar's frame, which holds one token's or a group's bar at a time and takes focus from script. */
+const BAR_FRAME = '[role="dialog"][data-bar-mode]';
 
 /**
  * The group line in the bar's summary (4.4): "Riding Warhorse" or
@@ -112,11 +119,17 @@ export function GroupLine(props: { token: Token }) {
   if (!view) return null;
   const line = groupLine(view.tokens, token);
   if (!line.holder && line.carried.length === 0) return null;
+  // A name here opens that token's bar in place of this one, and Put down or Let go takes its row away, so the
+  // button pressed leaves the page with focus on it. Focus moves to the bar that stands then, as Revive's does.
+  const press = (run: () => void) => {
+    run();
+    handFocusOn(document.body, [BAR_FRAME]);
+  };
   const holds = (["carrying", "dragging"] as const).map((key) => ({ key, tokens: line.carried.filter((c) => c.dragged === (key === "dragging")) })).filter((h) => h.tokens.length > 0);
   return (
     <div role="group" aria-label="Attached tokens" style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "baseline", gap: theme.space(1) }}>
       {line.holder ? (
-        <Button size="sm" onClick={() => ui.select(line.holder!.id, { opens: true })} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
+        <Button size="sm" onClick={() => press(() => ui.select(line.holder!.id, { opens: true }))} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
           {line.holder.text}
         </Button>
       ) : null}
@@ -130,11 +143,11 @@ export function GroupLine(props: { token: Token }) {
               const action = holderAction(c.token);
               return (
                 <Fragment key={c.id}>
-                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => ui.select(c.id, { opens: true })} style={IN_CELL}>
+                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => press(() => ui.select(c.id, { opens: true }))} style={IN_CELL}>
                     {c.name}
                   </Button>
                   {action && detachAllowed(view, viewer, c.token) ? (
-                    <Button size="sm" aria-label={action.words} onClick={() => actions.dispatch(detachOp(c.id, null))} style={IN_CELL}>
+                    <Button size="sm" aria-label={action.words} onClick={() => press(() => actions.dispatch(detachOp(c.id, null)))} style={IN_CELL}>
                       {DETACH_WORDS[action.choice]}
                     </Button>
                   ) : null}

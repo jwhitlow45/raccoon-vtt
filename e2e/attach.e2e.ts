@@ -762,4 +762,64 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       }
     }
   });
+
+  test("lp21-at-keys. by keyboard on the DM's desktop, a carried crate's holder link hands focus to the porter's bar that replaces it, Put down to that bar as its row goes, and the crate's own Put down to the crate's bar (LP21-BAR-2)", async () => {
+    const porter = randomUUID();
+    const crate = randomUUID();
+    // Cells 7 and 10, which the earlier steps leave empty: at-6's mule ends where its drag left it, near the map's left.
+    await ops.send(tokenOp(porter, { kind: "npc", name: "Porter", x: 7, y: 10, disposition: "neutral", actor: { inline: actor() } }));
+    await ops.send(tokenOp(crate, { kind: "object", name: "Crate", size: "tiny", x: 7, y: 10.5, actor: { inline: actor({ hp: { cur: 1, max: 1, temp: 0 } }) } }));
+    await ops.send({ t: "token.attach", tokenId: crate, to: porter, kind: "carry", x: 7, y: 10.5, elevation: 0 });
+    await waitFor("the porter's crate", () => (token(dmSocket, crate)?.attached?.to === porter) || null);
+    const focused = () =>
+      dm.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        if (!a || a.tagName === "BODY") return "the page";
+        return `${a.tagName.toLowerCase()} ${a.getAttribute("aria-label") ?? (a.textContent ?? "").trim().slice(0, 60)}`;
+      });
+    const lands = async (where: RegExp, label: string) => {
+      try {
+        await waitFor(label, async () => where.test(await focused()), 3_000);
+      } catch {
+        assert.fail(`${label}: focus is on "${await focused()}", not ${where}`);
+      }
+    };
+    try {
+      await dm.keyboard.press("Escape");
+      // A token just placed may take a moment to take clicks, as the map draws its hit areas: click again until its bar shows.
+      const crateBar = bar(dm, "Crate");
+      for (let tries = 0; tries < 5 && !(await crateBar.isVisible()); tries++) {
+        const p = await pagePoint(dm, BOUNDS, { x: 7.25, y: 10.75 });
+        await dm.mouse.click(p.x, p.y);
+        await crateBar.waitFor({ timeout: 2_000 }).catch(() => undefined);
+      }
+      await crateBar.waitFor();
+      const link = crateBar.getByRole("group", { name: "Attached tokens" }).getByRole("button").first();
+      await link.focus();
+      await dm.keyboard.press("Enter");
+      const porterBar = bar(dm, "Porter");
+      await porterBar.waitFor();
+      // The crate's bar and its link are gone: focus is on the porter's bar, not the page.
+      await lands(/^div Porter actions$/, "the holder link handed focus on");
+      await porterBar.getByRole("button", { name: /^Put down/ }).focus();
+      await dm.keyboard.press("Enter");
+      await waitFor("the crate put down", () => (token(dmSocket, crate) && !token(dmSocket, crate)!.attached ? true : null));
+      await lands(/^div Porter actions$/, "Put down handed focus on");
+      await shots.take(dm, "attach-lp21-keys");
+      // The crate's own Put down, in its bar's play row, goes with the link too: focus moves to the crate's bar.
+      await ops.send({ t: "token.attach", tokenId: crate, to: porter, kind: "carry", x: 7, y: 10.5, elevation: 0 });
+      await waitFor("the crate carried again", () => (token(dmSocket, crate)?.attached?.to === porter) || null);
+      await porterBar.getByRole("button", { name: "Carrying Crate" }).click();
+      const own = bar(dm, "Crate");
+      await own.waitFor();
+      await (await barControl(own, "Put down")).focus();
+      await dm.keyboard.press("Enter");
+      await waitFor("the crate put down from its own bar", () => (token(dmSocket, crate) && !token(dmSocket, crate)!.attached ? true : null));
+      await lands(/^div Crate actions$/, "the crate's own Put down handed focus on");
+    } finally {
+      await dm.keyboard.press("Escape");
+      await ops.send({ t: "token.delete", tokenId: crate });
+      await ops.send({ t: "token.delete", tokenId: porter });
+    }
+  });
 });
