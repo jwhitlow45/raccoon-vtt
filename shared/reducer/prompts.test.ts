@@ -341,6 +341,37 @@ describe("prompts that end before their roll (docs/design-v1-combat-controls.md 
     assert.equal(h.settled("dragon", "recharge:actions:fire-breath"), undefined);
   });
 
+  test("a shared companion moved off the row's scene keeps its record through its turn, and in the next round only the round refuses it", () => {
+    let state = room({
+      tokens: {
+        thorn: token("thorn", { kind: "pc", name: "Thorn", actor: { ref: "thorn" } }),
+        wolf: token("wolf", { kind: "npc", name: "Wolf", ownerIds: ["p1"], companion: { of: "thorn", turn: "shared" }, actor: { inline: actor({ hp: { cur: 5, max: 11, temp: 0 } }) } }),
+      },
+      characters: { thorn: character("thorn", { name: "Thorn", ownerIds: ["p1"] }) },
+    });
+    let seq = 0;
+    const run = (op: Op) => {
+      const r = applyOp(state, op, DM, env(++seq));
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    };
+    const wolf = () => (state.tokens.wolf!.actor as { inline: Actor }).inline;
+    run({ t: "encounter.start", entries: [{ id: "et", tokenId: "thorn", value: 10 }] });
+    run({ t: "encounter.next" });
+    const record = wolf().turnRecord!;
+    assert.deepEqual([record.entryId, record.round], ["et", 1]);
+    run({ t: "token.update", tokenId: "wolf", patch: { sceneId: "s2" } });
+    const answer = skip("wolf", record.id, "regeneration");
+    assert.ok(canApply(answer, DM, state, { canUseAsset: () => true }).ok, "its turn still runs");
+    run({ t: "encounter.next" });
+    assert.deepEqual([state.encounter!.round, state.encounter!.activeEntryId], [2, "et"]);
+    assert.equal(wolf().turnRecord, record, "no start reached it on the other scene");
+    const later = canApply(answer, DM, state, { canUseAsset: () => true });
+    assert.ok(!later.ok && later.message === TURN_OVER);
+    const r = applyOp(state, answer, DM, env(++seq));
+    assert.ok(!r.ok && r.message === TURN_OVER);
+  });
+
   test("a recharge roll never readies a mark of another kind under its key", () => {
     const f = fight();
     f.state.tokens.dragon = { ...f.state.tokens.dragon!, actor: { inline: actor({ uses: { "actions:fire-breath": { kind: "day", name: "Fire Breath", used: 1, max: 1 } } }) } };
