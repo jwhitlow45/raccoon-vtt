@@ -1498,13 +1498,14 @@ export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boole
 /**
  * The toasts' places by id, the pane header's last place, whether a pane
  * stood on the render before, the toasts a turn of the screen is placing
- * under the column's card, and the toasts at the notices' top that came
+ * under the column's card, the toasts at the notices' top that came
  * with no card measured to start under (`awaitCard`), which a card the
- * column measures while they are new still takes under it.
+ * column measures while they are new still takes under it, and the place
+ * under the column's card on the render before (`low`).
  */
-export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean; turning: ReadonlySet<number>; awaitCard: ReadonlySet<number> };
+export type ToastPlaces = { places: ReadonlyMap<number, ToastPlace>; paneLast: number | null; paneStood: boolean; turning: ReadonlySet<number>; awaitCard: ReadonlySet<number>; low: number | null };
 
-export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false, turning: new Set(), awaitCard: new Set() };
+export const NO_TOAST_PLACES: ToastPlaces = { places: new Map(), paneLast: null, paneStood: false, turning: new Set(), awaitCard: new Set(), low: null };
 
 /** A place in the toasts' own layer, rather than in the notices' stack or the sheet. */
 export function inToastLayer(place: ToastPlace | undefined): boolean {
@@ -1538,8 +1539,14 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * goes on taking it while the turn lasts (`turning`), since the first
  * place after a turn may come from the card as it stood before, until
  * the column measures it again. So does a toast that comes under the
- * card while the turn lasts (review FU22B-ASTRA-03). A card that arrives
- * at another time moves no toast itself, so nothing jumps under a finger.
+ * card while the turn lasts (review FU22B-ASTRA-03). As a creature's turn
+ * starts (`turnStarted`), the toasts at the notices' top take their
+ * places again, as toasts that came then would, on the first render that
+ * has a place under a card where the render before had none: the turn's
+ * card, or a death save card, coming to a column that showed no card
+ * (review LP20-CC-2). So its Show and the death save card's words are
+ * never under a toast for the rest of its time. A card that arrives at
+ * another time moves no toast itself, so nothing jumps under a finger.
  * A toast that would start under the card while toasts at the notices'
  * top reach down past it (`mapFoot`, their foot as last drawn) joins them
  * there instead, so the two stacks never overlap (review LP18-TO-4). A
@@ -1577,7 +1584,8 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * turns (review LP18-TO-3), as the screen turns under a bar's header, or
  * as a resting strip takes its stack anew, never leaves the sheet, and
  * leaves the notices only for a pane's header, an expanded bar's header
- * (`overBar`), a turned screen's card or a card that came with it.
+ * (`overBar`), a turned screen's card, a card that came with it or the
+ * first card of a turn's start.
  */
 export function nextToastPlaces(
   was: ToastPlaces,
@@ -1595,6 +1603,8 @@ export function nextToastPlaces(
     overBar?: { ids: ReadonlySet<number>; at: number | null; opening: number | null };
     /** The toasts that take their place anew for a resting strip, as toasts that came now would (docs/design-v1-bar-compact.md 3.5). */
     anew?: ReadonlySet<number>;
+    /** A creature's turn started moments ago (Room.tsx), so a card that comes to a column with none is its turn's (review LP20-CC-2). */
+    turnStarted?: boolean;
   },
 ): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
@@ -1607,6 +1617,8 @@ export function nextToastPlaces(
   const cardRoom = now.layer && !now.slot && !now.paneStands;
   const recent = now.recent ?? new Set<number>();
   const awaitCard = new Set(now.ids.filter((id) => was.awaitCard.has(id) && recent.has(id)));
+  // The turn's first card: a place under a card where the render before had none, as the turn starts.
+  const turnCard = now.turnStarted === true && was.low === null && now.low !== null;
   // A toast over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since a new toast would join it over the header again, and that bar's opening owns the stack from then on.
   const bar = cardRoom && now.overBar && now.overBar.at !== null && now.overBar.opening !== null ? { low: now.overBar.at, column: false, bar: now.overBar.opening } : null;
   const overBar = bar !== null ? (now.overBar?.ids ?? new Set<number>()) : new Set<number>();
@@ -1626,7 +1638,7 @@ export function nextToastPlaces(
       turning.add(id);
       continue;
     }
-    if (cardRoom && now.low !== null && place === "map" && awaitCard.has(id)) continue;
+    if (cardRoom && now.low !== null && place === "map" && (awaitCard.has(id) || turnCard)) continue;
     // A pane that stops standing as the screen turns is a card now, or gone, and its header's last place was read on the screen before the turn, perhaps above this one: its toasts take their places anew (review LP18-TO-3).
     if (freeze && turned && place === "pane") continue;
     if (now.pane !== null && (inToastLayer(place) || (place === "map" && now.layer))) places.set(id, "pane");
@@ -1656,7 +1668,7 @@ export function nextToastPlaces(
     if (at === "map" && now.low === null && cardRoom && recent.has(id)) awaitCard.add(id);
   }
   for (const id of awaitCard) if (places.get(id) !== "map") awaitCard.delete(id);
-  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands, turning, awaitCard };
+  return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands, turning, awaitCard, low: now.low };
 }
 
 /**

@@ -1590,7 +1590,11 @@ function Banner() {
  * that card, and again as the column measures the card anew while the
  * turn lasts (review LP17-AW-1), so it never covers the card's buttons.
  * So is a toast that came with its card, as a trap's does, once the
- * column measures that card (review LP18-TO-5).
+ * column measures that card (review LP18-TO-5), and a toast already at the
+ * top of the notices as a turn starts, once the column measures the
+ * turn's card or a death save card in a column that showed none (review
+ * LP20-CC-2), so neither card's top nor the folded turn card's Show is
+ * under it.
  *
  * Each toast over the map renders through a portal into a host of its
  * own, an element with no box, which this moves into the notices' stack
@@ -1678,6 +1682,11 @@ function Toasts(props: {
   const cardMs = cardWaitMs();
   // A toast not drawn yet is new, however long it waited (store.ts toastsLeft).
   const recent = new Set(showing.filter((t) => t.shownAt === undefined || Date.now() - t.shownAt < cardMs).map((t) => t.id));
+  // A turn's start counts for as long, since the column measures the turn's card a render or two after it (review LP20-CC-2).
+  const activeEntry = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
+  const turnAt = useRef({ entry: activeEntry, at: -Infinity });
+  if (turnAt.current.entry !== activeEntry) turnAt.current = { entry: activeEntry, at: Date.now() };
+  const turnStarted = activeEntry !== null && Date.now() - turnAt.current.at < cardMs;
   // The toasts to place under a spanning token bar's header, read from the boxes as last drawn, the place under it, and the bar's opening then, which owns the stack once it is placed (barDock.ts toastsUnderHead and barStack).
   const spanToast = useScoped(spanToastSlot);
   const [overBar, setOverBar] = useState<OverBar>(NOT_OVER_BAR);
@@ -1699,7 +1708,7 @@ function Toasts(props: {
   const rose = props.restFloor !== null && (floorWas.current === null || props.restFloor < floorWas.current - 0.5);
   const anew = rose && layerFoot.current !== null && layerFoot.current > props.restFloor! ? new Set(ids) : undefined;
   floorWas.current = props.restFloor;
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar, anew });
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar, anew, turnStarted });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;

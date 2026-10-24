@@ -1304,6 +1304,39 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.equal(s.places.get(1), "map");
   });
 
+  test("as a turn starts, the toasts at the notices' top go under the turn's first card in a column that showed none, and a whisper after joins them (review LP20-CC-2)", () => {
+    // Pat's toast at the notices' top through Kira's turn, no card in Pat's column. Thorn's turn starts, and the column measures his card a render later.
+    let s = step(NO_TOAST_PLACES, [1, 2]);
+    s = step(s, [1, 2], { turnStarted: true });
+    assert.equal(s.places.get(1), "map");
+    s = step(s, [1, 2], { turnStarted: true, low: 162 });
+    assert.deepEqual(s.places.get(1), { low: 162, column: true });
+    assert.deepEqual(s.places.get(2), { low: 162, column: true });
+    s = step(s, [1, 2, 3], { turnStarted: true, low: 162 });
+    assert.deepEqual(s.places.get(3), { low: 162, column: true });
+    // Placed, the card that moves moves them no more.
+    s = step(s, [1, 2, 3], { low: 200 });
+    assert.deepEqual(s.places.get(1), { low: 162, column: true });
+  });
+
+  test("a turn's start moves no toast under a card that stood before it, nor once the start has passed, nor where no card can take it (review LP20-CC-2)", () => {
+    // A toast at the notices' top over a column that showed a card before the turn keeps its place.
+    let t = step(NO_TOAST_PLACES, [1]);
+    t = step(t, [1], { low: 140, mapFoot: 226 });
+    t = step(t, [1], { low: 140, turnStarted: true });
+    assert.equal(t.places.get(1), "map", "the card stood before the turn");
+    // The turn's start passed before the column measured its card.
+    let u = step(NO_TOAST_PLACES, [1], { turnStarted: true });
+    u = step(u, [1], { low: 162 });
+    assert.equal(u.places.get(1), "map");
+    // A pane standing, the very short sheet or no layer keep their own rules.
+    for (const at of [{ slot: true }, { layer: false }] as const) {
+      let v = step(NO_TOAST_PLACES, [1], at);
+      v = step(v, [1], { ...at, turnStarted: true, low: 162 });
+      assert.equal(inToastLayer(v.places.get(1)), false, JSON.stringify(at));
+    }
+  });
+
   test("a toast that came with the column's card, before the column measured it, takes its place under the card once the column does, and then keeps it (review LP18-TO-5)", () => {
     const fresh = new Set([1, 2]);
     // The trap's toast and its card in one render: no place under the card yet.
