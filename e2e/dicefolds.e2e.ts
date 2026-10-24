@@ -18,7 +18,10 @@ import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, So
  * token's Roll landing the panel with Adv, Dis and Secret whole (8), from
  * the top, and from the panel's foot on a computer and on a phone, and
  * Recent rolls joining the last group, or standing under a lone card, as
- * the panel comes back from the group save page.
+ * the panel comes back from the group save page. Last, a folded group's
+ * refused ask for saves, refused by the server through a routed socket:
+ * its Ask again and Close above the card, which the block follows, so
+ * opening the group shows no second send.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-eight, one file
  * after another as the others. The other environment variables are the
@@ -158,6 +161,39 @@ async function another(from: BrowserContext, viewport: { width: number; height: 
   await page.goto(`${server.origin}/r/${run.roomId}`);
   await page.locator(".konvajs-content").first().waitFor();
   return { context, page };
+}
+
+/**
+ * Another of Pat's phones, whose room socket goes through a route. While
+ * `route.spoil` is on, an ask for saves goes out naming its first target
+ * twice, so the server itself refuses it ("a target is named twice"). The
+ * client never sends such an ask, and it disables a fourth send before the
+ * server's quota could refuse one, so this is how a refusal is had on cue.
+ */
+async function routedPat() {
+  const context = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await context.addCookies(await patContext.cookies(server.origin));
+  const page = await context.newPage();
+  const watch = new ConsoleWatch("pat-2");
+  watch.attach(page);
+  const route = { spoil: false, spoiled: 0 };
+  await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+    const upstream = ws.connectToServer();
+    ws.onMessage((m) => {
+      const frame = route.spoil && typeof m === "string" ? (JSON.parse(m) as { t?: string; op?: { t?: string; cast?: { targets?: string[] } } }) : null;
+      const targets = frame?.t === "op" && frame.op?.t === "cast.ask" ? frame.op.cast?.targets : undefined;
+      if (frame?.op?.cast && targets && targets.length > 0) {
+        frame.op.cast.targets = [...targets, targets[0]!];
+        route.spoiled++;
+        upstream.send(JSON.stringify(frame));
+      } else upstream.send(m);
+    });
+    upstream.onMessage((m) => ws.send(m));
+  });
+  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  await page.locator(".konvajs-content").first().waitFor();
+  return { context, page, watch, route };
 }
 
 /** What the in-page code reads, typed here since the e2e files are built without the DOM's types. */
@@ -496,6 +532,113 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
     await notice.getByRole("button", { name: "Open", exact: true }).click();
     await panel.getByRole("button", { name: "Discard", exact: true }).first().click();
     await notice.waitFor({ state: "detached" });
+  });
+
+  test("fu27-1. a folded block's refused ask shows above the card: Ask again there, refused again, moves the block to the new ask, taken it closes the block, and Close lets it go, so Spells opens on no second send (DB-O9)", async () => {
+    const phone = await routedPat();
+    try {
+      const { page, route } = phone;
+      const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+      // Thorn, then the goblin he targets.
+      await tapCell(page, bounds, run.thorn);
+      await page.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+      await tapCell(page, bounds, run.goblin);
+      await page.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
+      const dice = await openDiceSheet(page);
+      const options = dice.locator("[data-roll-options]");
+      await options.getByRole("region", { name: "Rolls for Thorn" }).waitFor();
+      const spells = fold(options, "Spells");
+      const expanded = async (open: boolean) => waitFor(`Spells ${open ? "open" : "folded"}`, async () => ((await spells.getAttribute("aria-expanded")) === String(open) ? true : null));
+      await expanded(true);
+      const block = dice.getByRole("group", { name: "Ask for saves: Sacred Flame" });
+      const asks = dice.getByRole("group", { name: "Asks for saves" });
+      const notAsked = dice.getByText("Sacred Flame: not asked.", { exact: true });
+      const again = (within: Locator) => within.getByRole("button", { name: "Ask again for saves against Sacred Flame" });
+      const sends = dice.getByRole("button", { name: "Ask, the DM rolls" });
+      const openBlock = async () => {
+        await dice.getByRole("button", { name: "Ask the DM for saves against Sacred Flame" }).tap();
+        await block.getByText("Targets (1): Goblin").waitFor();
+      };
+      const folded = () => spells.textContent().then((t) => t ?? "");
+
+      // Asked from the block, refused by the server: the block shows its own refusal, and the list leaves it to the block.
+      await openBlock();
+      route.spoil = true;
+      await block.getByRole("button", { name: "Ask, the DM rolls" }).tap();
+      await again(block).waitFor();
+      assert.equal(route.spoiled, 1);
+      assert.equal(await notAsked.count(), 0, "the open block's refusal shows in the list too");
+
+      // Folded, the refusal shows above the card, and the folded line no longer names the block.
+      await spells.tap();
+      await expanded(false);
+      await again(asks).waitFor();
+      assert.equal(await notAsked.count(), 1);
+      assert.equal(await block.count(), 0, "the folded group hides the block");
+      assert.doesNotMatch(await folded(), /Ask for saves waiting/);
+      await asks.scrollIntoViewIfNeeded();
+      await shots.take(page, "fu27-1-pat-390-folded-refused");
+
+      // Ask again above the card, refused again: one line still, for the new ask.
+      await again(asks).tap();
+      await waitFor("the second spoiled ask", () => (route.spoiled === 2 ? true : null));
+      await again(asks).waitFor();
+      assert.equal(await notAsked.count(), 1, "one refusal line, the retry's");
+      assert.equal(await spells.getAttribute("aria-expanded"), "false", "the retry opened Spells");
+      await waitFor("the folded line without the block", async () => (/Ask for saves waiting/.test(await folded()) ? null : true));
+      // Opened, the block shows the retry's refusal in place, so it followed the new ask: no fresh send, and nothing left above the card.
+      await spells.tap();
+      await expanded(true);
+      await again(block).waitFor();
+      assert.equal(await sends.count(), 0, "the block offers a second send");
+      assert.equal(await notAsked.count(), 0, "the block's refusal shows in the list too");
+      await block.scrollIntoViewIfNeeded();
+      await shots.take(page, "fu27-1-pat-390-block-follows-retry");
+
+      // Folded again, Ask again above the card is taken: the ask waits in the view, and the block closes, so Spells opens on no block.
+      await spells.tap();
+      await expanded(false);
+      route.spoil = false;
+      await again(asks).tap();
+      const ask = await waitFor("Sacred Flame's ask on the DM's page", () => Object.values(dmSocket.state?.casts ?? {}).find((a) => a.spell === "Sacred Flame") ?? null);
+      assert.deepEqual(ask.targets, [run.goblin.id]);
+      await asks.getByText("Asked the DM for saves. Waiting.").waitFor();
+      await spells.getByText("Ask for saves waiting: Sacred Flame", { exact: false }).waitFor();
+      assert.equal(await notAsked.count(), 0);
+      assert.equal(await spells.getAttribute("aria-expanded"), "false", "the taken retry opened Spells");
+      await spells.tap();
+      await expanded(true);
+      await options.getByRole("button", { name: "Withdraw the ask for saves against Sacred Flame" }).first().waitFor();
+      assert.equal(await block.count(), 0, "the block stayed open on a taken ask");
+      assert.equal(await sends.count(), 0, "a second send is offered");
+      await asks.scrollIntoViewIfNeeded();
+      await shots.take(page, "fu27-1-pat-390-retry-taken");
+      await ops.send({ t: "cast.close", castId: ask.id, end: "dismissed" });
+      await waitFor("the ask set aside", () => (Object.keys(dmSocket.state?.casts ?? {}).length === 0 ? true : null));
+
+      // Refused again from a new block, then Close above the card: the block goes with it, and Spells opens on the row's own Ask for saves.
+      await openBlock();
+      route.spoil = true;
+      await block.getByRole("button", { name: "Ask, the DM rolls" }).tap();
+      await again(block).waitFor();
+      assert.equal(route.spoiled, 3);
+      await spells.tap();
+      await expanded(false);
+      await asks.getByRole("button", { name: "Close", exact: true }).tap();
+      await waitFor("the refusal closed", async () => ((await notAsked.count()) === 0 ? true : null));
+      await spells.tap();
+      await expanded(true);
+      await dice.getByRole("button", { name: "Ask the DM for saves against Sacred Flame" }).waitFor();
+      assert.equal(await block.count(), 0, "the closed refusal's block came back");
+      assert.equal(await sends.count(), 0, "a second send is offered");
+      assert.equal(route.spoiled, 3, "Close sent nothing");
+      assert.deepEqual(Object.keys(dmSocket.state?.casts ?? {}), [], "nothing was asked");
+      await dice.getByRole("button", { name: "Ask the DM for saves against Sacred Flame" }).scrollIntoViewIfNeeded();
+      await shots.take(page, "fu27-1-pat-390-closed");
+      assert.deepEqual(phone.watch.errors, [], "the routed phone logged errors");
+    } finally {
+      await phone.context.close();
+    }
   });
 
   test("df-7. nothing went wrong in the browsers", () => {
