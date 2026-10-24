@@ -420,6 +420,8 @@ export function resourceResult(plan: ResourcePlan, ticks: ReadonlySet<string>, t
       counts.stayed++;
       continue;
     }
+    // A ticked Add it back leaves its marker even with no room, as a roll's does, so it comes in once there is room (D-261024-41).
+    if (item.case === "deleted") back.add(item);
     if (list.length >= LIMITS.resourcesPerCharacter) {
       notFit++;
       continue;
@@ -438,10 +440,8 @@ export function resourceResult(plan: ResourcePlan, ticks: ReadonlySet<string>, t
       ...(r.used !== undefined ? { used: Math.min(r.used, r.max) } : {}),
     });
     entries.push([hash12(id), { k: read.k, h: read.h }]);
-    if (item.case === "deleted") {
-      counts.cameBack++;
-      back.add(item);
-    } else counts.cameIn++;
+    if (item.case === "deleted") counts.cameBack++;
+    else counts.cameIn++;
   }
 
   // A removed resource that came back leaves the markers, and one that stays removed takes the read's key (2.1's rule for rolls).

@@ -233,6 +233,24 @@ describe("the cases (4.2)", () => {
     assert.equal(result.record.res, undefined);
   });
 
+  test("a ticked Add it back with no room drops its marker, as a roll's does, so it comes in once there is room (D-261024-41)", () => {
+    const marked = applied(removed(synced([RAGE]), "Rage"), plan(removed(synced([RAGE]), "Rage"), fill([RAGE])));
+    assert.equal(marked.ddbSync!.gone!.length, 1);
+    const twelve: ClassResource[] = Array.from({ length: 12 }, (_, i) => ({ id: `o${i}`, name: `Own ${i}`, max: 1, used: 0, reset: "long" }));
+    const full = { ...marked, resources: twelve };
+    const p = plan(full, fill([RAGE]));
+    const back = res(p).find((i) => i.case === "deleted")!;
+    const ticks = new Set([...defaultTicks(p), back.id]);
+    const result = syncResult(p, ticks);
+    assert.equal(result.resourcesNotFit, 1);
+    assert.equal(result.record.gone, undefined, "the marker goes");
+    const after = applied(full, p, ticks);
+    const roomy = { ...after, resources: after.resources!.slice(1) };
+    assert.equal(caseOf(plan(roomy, fill([RAGE])), "Rage"), "add", "Rage comes in as an addition");
+    const unticked = syncResult(p, defaultTicks(p));
+    assert.deepEqual(unticked.record.gone, marked.ddbSync!.gone, "unticked, it stays removed");
+  });
+
   test("12 read into an empty list come in, and the record holds 12", () => {
     const reads = Array.from({ length: 12 }, (_, i): FillResource => ({ name: `Use ${i}`, max: 1, reset: "long" }));
     const c = synced(reads);
