@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { LogEvent } from "#shared/model.ts";
+import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
 import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -1515,6 +1516,99 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await waitFor("the ogre's turn over", () => (anaSocket.state?.encounter?.activeEntryId !== "e-ogre" ? true : null));
     assert.ok(anaSocket.state!.encounter!.entries.some((e) => e.id === "e-ogre"));
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
+  });
+
+  test("13j. by keyboard, a press that takes a uses list's last button away hands focus to what stays: the row's next button across a recharge's turn, the turn card after its sole Use, the bar's frame after the only other row's Restore, and the reopened card after Reopen (D-261024-43)", async () => {
+    const focused = () =>
+      dm.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        if (!a || a.tagName === "BODY") return "the page";
+        return `${a.tagName.toLowerCase()} ${a.getAttribute("aria-label") ?? (a.textContent ?? "").trim().slice(0, 60)}`;
+      });
+    const lands = async (where: RegExp, label: string) => {
+      try {
+        await waitFor(label, async () => where.test(await focused()), 3_000);
+      } catch {
+        assert.fail(`${label}: focus is on "${await focused()}", not ${where}`);
+      }
+    };
+    const press = async (control: Locator) => {
+      await control.focus();
+      await dm.keyboard.press("Enter");
+    };
+    const srd = await loadMonsters();
+    const block = (srdId: string) => monsterActor(srd.find((m) => m.srdId === srdId)!);
+    // A wolf whose one use is Cold Breath, a troll limb with Regeneration alone, and a goblin with a mark its block no longer lists.
+    const wolf = randomUUID();
+    const limb = randomUUID();
+    const old = randomUUID();
+    const token = (id: string, name: string, x: number, actorOf: ReturnType<typeof block>, size = "medium") => ({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name, size, x, y: 15, visibility: "all", disposition: "hostile", actor: { inline: actorOf } } });
+    await ops.send(token(wolf, "Winter Wolf", 5, block("winter-wolf"), "large"));
+    await ops.send(token(limb, "Troll Limb", 9, { ...block("troll-limb"), hp: { cur: 1, max: block("troll-limb").hp.max, temp: 0 } }, "small"));
+    await ops.send(token(old, "Old Goblin", 13, block("goblin-warrior"), "small"));
+    await ops.send({ t: "actor.use", target: { tokenId: old }, use: { kind: "ability", key: "actions:old-breath", name: "Old Breath", limit: "recharge", min: 5, max: 1 } });
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "encounter.start", entries: [{ id: "e-wolf", tokenId: wolf, value: 20 }, { id: "e-limb", tokenId: limb, value: 10 }, { id: "e-old", tokenId: old, value: 5 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the wolf's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-wolf" ? true : null));
+    try {
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+
+      // The wolf's turn card holds Cold Breath's Use alone: used, its row keeps its words with no button, and focus goes to the card.
+      const turn = dm.getByRole("group", { name: "Winter Wolf's turn" });
+      await press(turn.getByRole("button", { name: "Use Cold Breath" }));
+      await lands(/^section Winter Wolf's turn$/, "the sole Use handed focus to the turn card");
+      await dm.keyboard.press("Escape");
+      assert.equal(await turn.isVisible(), true, "Escape put the turn card away");
+
+      // In the wolf's drawer, Mark ready turns the row's buttons into Use: focus goes to the row's new first button, and back.
+      await openTracker(dm);
+      await (await rowButton(dm, "Winter Wolf")).click();
+      const wolfBar = bar(dm, "Winter Wolf");
+      await press(wolfBar.getByRole("button", { name: "Uses", exact: true }));
+      const drawer = wolfBar.locator("[data-uses-drawer]");
+      await drawer.waitFor();
+      const breathUsed = () => {
+        const a = dmSocket.state?.tokens[wolf]?.actor;
+        return a && "inline" in a ? Object.values(a.inline.uses ?? {}).some((m) => m.name === "Cold Breath") : false;
+      };
+      await press(drawer.getByRole("button", { name: "Mark Cold Breath ready" }));
+      await lands(/^button Use Cold Breath$/, "Mark ready handed focus to the row's Use");
+      // A button waits for the server's answer, deaf to a second press, so the next press waits for it too.
+      await waitFor("Cold Breath ready again", () => (breathUsed() ? null : true));
+      await dm.keyboard.press("Enter");
+      await lands(/^button Roll the recharge of Cold Breath, 1d6$/, "Use handed focus to the row's Roll recharge");
+      await dm.keyboard.press("Escape");
+      await drawer.waitFor({ state: "detached" });
+      assert.equal(await wolfBar.isVisible(), true, "Escape closed the bar, not the drawer");
+      await wolfBar.getByRole("button", { name: "Close", exact: true }).first().click();
+
+      // The goblin's drawer holds one row, Old Breath, which its block no longer lists: Restore takes the drawer away, and focus goes to the bar.
+      await (await rowButton(dm, "Old Goblin")).click();
+      const oldBar = bar(dm, "Old Goblin");
+      await press(oldBar.getByRole("button", { name: "Uses", exact: true }));
+      await press(oldBar.locator("[data-uses-drawer]").getByRole("button", { name: "Restore Old Breath" }));
+      await waitFor("the mark gone", () => (dmSocket.state?.tokens[old]?.actor && "inline" in dmSocket.state.tokens[old]!.actor && !dmSocket.state.tokens[old]!.actor.inline.uses?.["actions:old-breath"] ? true : null));
+      await lands(/^div Old Goblin actions$/, "the last Restore handed focus to the bar");
+      await oldBar.getByRole("button", { name: "Close", exact: true }).first().click();
+
+      // The limb's turn: its Regeneration skipped, then Reopen, the turn card's only button, takes the card away with it: focus goes to the card it reopened.
+      await ops.send({ t: "encounter.next" });
+      await waitFor("the limb's turn", () => (dmSocket.state?.encounter?.activeEntryId === "e-limb" ? true : null));
+      const regeneration = dm.getByRole("group", { name: "Regeneration for Troll Limb" });
+      await regeneration.getByRole("button", { name: "Skip", exact: true }).click();
+      await regeneration.waitFor({ state: "detached" });
+      const limbTurn = dm.getByRole("group", { name: "Troll Limb's turn" });
+      await press(limbTurn.getByRole("button", { name: "Reopen: Regeneration skipped" }));
+      await regeneration.waitFor();
+      await lands(/^button Apply$/, "Reopen handed focus to the card it reopened");
+      assert.equal(await regeneration.getByRole("button", { name: "Apply", exact: true }).evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus is on another card's Apply");
+      await shots.take(dm, "13j-reopened");
+    } finally {
+      await dm.keyboard.press("Escape");
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      for (const id of [wolf, limb, old]) await ops.send({ t: "token.delete", tokenId: id });
+    }
   });
 
   test("14. no page logged an error", () => {

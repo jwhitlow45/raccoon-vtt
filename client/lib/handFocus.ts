@@ -44,6 +44,30 @@ export function handFocusOn(scope: El | null | undefined, to: readonly string[],
   env.schedule(step);
 }
 
+/**
+ * The hand-off for a press that may take its whole surroundings with it,
+ * such as a list's last button with the list, so no scope is sure to
+ * stand: `find` reads the page once the control has gone and returns the
+ * nearest control that stayed, or null. It waits and gives up as
+ * handFocusOn does, and moves nothing when focus went somewhere else.
+ */
+export function handFocusTo(find: () => Focusable | null, env: HandOffEnv = browser()): void {
+  const { doc } = env;
+  const pressed = pressedControl(doc);
+  if (pressed === null) return;
+  const until = env.now() + HAND_OFF_WAIT_MS;
+  const step = () => {
+    if (pressed.isConnected) {
+      if (doc.activeElement === pressed && env.now() < until) env.schedule(step);
+      return;
+    }
+    const active = doc.activeElement;
+    if (active !== null && active !== doc.body) return;
+    find()?.focus();
+  };
+  env.schedule(step);
+}
+
 /** What has focus as a control is pressed, or null when nothing does and so nothing can be lost. */
 export function pressedControl(doc: Doc = document as unknown as Doc): Doc["activeElement"] {
   const active = doc.activeElement;

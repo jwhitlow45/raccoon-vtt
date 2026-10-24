@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HAND_OFF_WAIT_MS, handFocusNow, handFocusOn, pressedControl } from "./handFocus.ts";
+import { HAND_OFF_WAIT_MS, handFocusNow, handFocusOn, handFocusTo, pressedControl } from "./handFocus.ts";
 
 /**
  * A page of named elements, one of them focused, where removing the
@@ -131,5 +131,48 @@ describe("the hand-off's one step, for a caller that knows when the op behind th
     moved.remove("delete");
     assert.equal(handFocusNow(moved.scope, pressed, ["next"], moved.doc), null);
     assert.equal(moved.active(), "other");
+  });
+});
+
+describe("the hand-off whose target is found once the control has gone (LP21-COMBAT-2)", () => {
+  test("a list's last button gone with its list: focus goes to what find reads then, not before", () => {
+    const p = page(["restore", "card"], "restore");
+    let asked = 0;
+    handFocusTo(() => {
+      asked++;
+      return p.scope.querySelector("card");
+    }, p.env);
+    p.frame();
+    assert.equal(asked, 0, "read before the control went");
+    p.remove("restore");
+    p.frame();
+    assert.equal(asked, 1);
+    assert.equal(p.active(), "card");
+  });
+
+  test("nothing moves while the control stays past the wait, when it never had focus, when focus went elsewhere, or when nothing stayed", () => {
+    const kept = page(["restore", "card"], "restore");
+    handFocusTo(() => kept.scope.querySelector("card"), kept.env);
+    kept.frame(HAND_OFF_WAIT_MS + 1);
+    kept.remove("restore");
+    kept.frame();
+    assert.equal(kept.active(), "body");
+    const tapped = page(["restore", "card"], "none");
+    handFocusTo(() => tapped.scope.querySelector("card"), tapped.env);
+    tapped.remove("restore");
+    tapped.frame();
+    assert.equal(tapped.active(), "body");
+    const moved = page(["restore", "card", "other"], "restore");
+    handFocusTo(() => moved.scope.querySelector("card"), moved.env);
+    moved.doc.activeElement = { isConnected: true, name: "other" };
+    moved.frame();
+    moved.remove("restore");
+    moved.frame();
+    assert.equal(moved.active(), "other");
+    const gone = page(["restore"], "restore");
+    handFocusTo(() => null, gone.env);
+    gone.remove("restore");
+    gone.frame();
+    assert.equal(gone.active(), "body");
   });
 });

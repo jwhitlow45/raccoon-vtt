@@ -7,7 +7,7 @@ import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { handFocusOn } from "../../lib/handFocus.ts";
+import { handFocusTo } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { OnAnswer } from "../../state/types.ts";
@@ -20,7 +20,7 @@ import { reasonText } from "../resources/logic.ts";
 import { useOption } from "../dice/optionState.ts";
 import { useReceipts } from "../dice/useReceipt.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
-import { combatLocalSlot, rechargeRow, tellPassed, useActsNow, useCreatureUses, useListRolls } from "./state.ts";
+import { combatLocalSlot, promptId, rechargeRow, tellPassed, useActsNow, useCreatureUses, useListRolls } from "./state.ts";
 import {
   abilityHead,
   abilityOp,
@@ -183,6 +183,41 @@ function rowKey(row: UseRow): string {
   }
 }
 
+/**
+ * The prompt card a skipped row's Reopen brings back, by its id in the
+ * alerts column (RegenerationCard.tsx, DeathSaveCard.tsx and
+ * encounter/RechargeCard.tsx name theirs so).
+ */
+function reopenedCard(holder: string, record: number, what: PromptKey): string {
+  const kind = what === "regeneration" || what === "deathSave" ? what : "recharge";
+  return `[data-alert-id="${CSS.escape(`${kind}:${promptId(holder, record, what)}`)}"]`;
+}
+
+/** A control a reader and a keyboard can reach: on the page and drawn. */
+function reachable(el: HTMLElement | null | undefined): HTMLElement | null {
+  return el && el.isConnected && el.getClientRects().length > 0 ? el : null;
+}
+
+/**
+ * Where focus goes once a press took its button away (D-261024-43): the
+ * row's first button, else the list's, else the prompt card a Reopen
+ * brought back, else the turn card, the drawer's first button or the
+ * bar's frame that held the list, else the tracker row's own button.
+ * Never the page.
+ */
+function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "trackerRow", HTMLElement | null>, key: string, reopened: string | null): HTMLElement | null {
+  const list = reachable(near.list);
+  return (
+    reachable(list?.querySelector<HTMLElement>(`[data-use-key="${CSS.escape(key)}"] button`)) ??
+    reachable(list?.querySelector<HTMLElement>("button")) ??
+    (reopened ? reachable(document.querySelector<HTMLElement>(reopened)?.querySelector<HTMLElement>("button")) : null) ??
+    reachable(near.card) ??
+    reachable(reachable(near.drawer)?.querySelector<HTMLElement>("button")) ??
+    reachable(near.frame) ??
+    reachable(reachable(near.trackerRow)?.querySelector<HTMLElement>("[data-row-button]"))
+  );
+}
+
 type LineProps = {
   row: UseRow;
   target: ActorTarget;
@@ -206,9 +241,23 @@ function UseLine(props: LineProps) {
   /*
    * A press often takes its own button away: Restore once the use is back, a recharge's Use as it turns into Roll
    * recharge and Mark ready, a skipped prompt's row with its Reopen. Focus then falls to the page, and the next
-   * Escape closes the whole bar rather than the drawer, so it moves to the row's first button, or the list's.
+   * Escape closes the whole bar rather than the drawer, so it moves to the row's first button, or the list's. The
+   * last button can take the whole list with it, and the turn card or the drawer around it too, so the places it
+   * may move to are taken as the press finds them and read once the button has gone (D-261024-43).
    */
-  const keepFocus = () => handFocusOn(line.current?.closest<HTMLElement>("[data-combat-uses]"), [`[data-use-key="${CSS.escape(rowKey(row))}"] button`, "button"]);
+  const keepFocus = () => {
+    const li = line.current;
+    if (!li) return;
+    const near = {
+      list: li.closest<HTMLElement>("[data-combat-uses]"),
+      card: li.closest<HTMLElement>('[data-alert="turn"]'),
+      drawer: li.closest<HTMLElement>("[data-uses-drawer]"),
+      frame: li.closest<HTMLElement>('[role="dialog"][data-bar-mode]'),
+      trackerRow: li.closest<HTMLElement>("[data-companion-row], [data-entry-row]"),
+    };
+    const reopened = row.kind === "skipped" && props.record !== undefined ? reopenedCard(props.holder, props.record, row.what) : null;
+    handFocusTo(() => usesFocusTarget(near, rowKey(row), reopened));
+  };
   let head: ReactNode;
   let state: string | null = null;
   const buttons: ReactNode[] = [];
