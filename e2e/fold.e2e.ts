@@ -599,7 +599,8 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
   test("9. 320 x 480 at 130% with 44 and 34 px insets: the dock's buttons move into the sheet's header", async () => {
     await setUp(dm, dmCdp, { width: 320, height: 480, scale: 1.3, top: 44, bottom: 34 });
     for (const id of run.goblins) await ops.send({ t: "actor.hp", target: { tokenId: id }, change: { kind: "damage", amount: 1 } });
-    await dm.locator('[data-alert="concentration"]').nth(2).waitFor();
+    // Here the column has room for no whole card, so the three stand as its summary row.
+    await dm.locator('[data-alert="concentration"]').nth(2).waitFor({ state: "attached" });
     await selectThornAsDm();
     // This screen is too short to dock the bar, so it opens compact over the toolbar (docs/design-v1-bar-dock.md 1.4), and a pointer reaches Panels only once it closes. The keyboard still does.
     await panelsButton(dm).press("Enter");
