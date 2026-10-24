@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * A DM running a session from a phone, after the whole-app design pass
@@ -1368,7 +1368,26 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.getByRole("group", { name: "Needle Plate went off" }).first().waitFor({ state: "attached" });
       await dm.waitForTimeout(900);
       const t = await rectOf(toast);
+      // The map fits with the brute's label clear of where the strip opens (its top at 662 here), so two fingers first pan the brute's middle 30 px under that, as the DM would, and drag no token.
+      const fitted = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      const dy = 692 - fitted.y;
+      if (dy > 0) {
+        const fingers = new Touches(dmCdp);
+        await fingers.start([
+          { x: 12, y: 420, id: 1 },
+          { x: 378, y: 420, id: 2 },
+        ]);
+        for (let i = 1; i <= 12; i++)
+          await fingers.move([
+            { x: 12, y: 420 + (dy * i) / 12, id: 1 },
+            { x: 378, y: 420 + (dy * i) / 12, id: 2 },
+          ]);
+        await fingers.end();
+        await dm.waitForTimeout(600);
+      }
       const before = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      const below = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 1 });
+      assert.ok(below.y + 34 > 662, `the brute's label is clear of the strip before the tap: its foot at ${below.y}`);
       assert.equal(await hit(dm, before), "CANVAS", "the brute is under something");
       await dm.touchscreen.tap(before.x, before.y);
       await bar.waitFor();
@@ -1378,8 +1397,10 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const foot = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 1 });
       const b = await rectOf(bar);
       assert.equal(await bar.getAttribute("data-bar-state"), "rest");
-      assert.ok(foot.y <= b.top + 0.5 || top.y >= t.bottom - 0.5, `the brute is under the strip ${JSON.stringify(b)} and the move stopped short of the toast for no reason: ${JSON.stringify({ top, foot, t })}`);
-      assert.ok(top.y >= t.bottom - 0.5 || middle.y >= before.y - 0.5, `the brute's top went to ${top.y}, under the trap's toast, whose foot is at ${t.bottom}`);
+      // The map moved up, until the brute's label, its foot and the 34 px under it, clears the strip, or its top stops 8 px under the toast (barDock.ts clearShift).
+      assert.ok(middle.y < before.y - 0.5, `the map did not move: the brute's middle at ${middle.y}, from ${before.y}`);
+      assert.ok(foot.y + 34 <= b.top + 0.5 || Math.abs(top.y - (t.bottom + 8)) <= 1, `the move stopped short of the strip ${JSON.stringify(b)} and of the toast for no reason: ${JSON.stringify({ top, foot, t })}`);
+      assert.ok(top.y >= t.bottom + 8 - 1, `the brute's top went to ${top.y}, past 8 px under the trap's toast, whose foot is at ${t.bottom}`);
       assert.equal(await hit(dm, middle), "CANVAS", "the brute does not take a tap");
       await shots.take(dm, "dmphone-lp19-bs3-strip-under-the-toast");
     } finally {
