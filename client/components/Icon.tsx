@@ -91,7 +91,27 @@ export type IconName =
   | "guide"
   | "external"
   | "pass"
-  | "fail";
+  | "fail"
+  | "token"
+  | "combat"
+  | "dice"
+  | "log"
+  | "journal"
+  | "areas"
+  | "dm"
+  | "scenes"
+  | "monsters"
+  | "encounters"
+  | "characters"
+  | "outliner"
+  | "library"
+  | "timer"
+  | "statBlock"
+  | "notes"
+  | "position"
+  | "image"
+  | "stats"
+  | "companion";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -134,6 +154,25 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   fullScreen: "maximize-2",
   leaveFullScreen: "minimize-2",
   scrollMore: "chevrons-down",
+  token: "circle-user-round",
+  combat: "swords",
+  log: "scroll-text",
+  journal: "notebook-text",
+  areas: "radius",
+  dm: "crown",
+  scenes: "map",
+  monsters: "skull",
+  encounters: "clipboard-list",
+  characters: "contact-round",
+  outliner: "list-tree",
+  library: "library",
+  timer: "timer",
+  statBlock: "file-text",
+  notes: "sticky-note",
+  position: "compass",
+  image: "image",
+  stats: "hash",
+  companion: "paw-print",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -409,6 +448,105 @@ const SHAPES: Record<IconName, ReactNode> = {
   // The DM desk's Pass and Fail, beside their words: a check and a cross, the one place they mean a save's outcome.
   pass: CHECK,
   fail: CROSS,
+  // The panels' own icons (docs/design-v1-icons-2.md 2), one per panel, in its tab, More's list and a phone's Panels list.
+  // Lucide circle-user-round: the Token panel, the token picked on the map.
+  token: (
+    <g {...STROKE}>
+      <path d="M18 20a6 6 0 0 0-12 0" />
+      <circle cx="12" cy="10" r="4" />
+      <circle cx="12" cy="12" r="10" />
+    </g>
+  ),
+  // Lucide swords: the fight, the Initiative panel and the Token panel's Combat group. Never Remove from the fight.
+  combat: <path {...STROKE} d="M14.5 17.5 3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2M14.5 6.5 18 3h3v3l-3.5 3.5M5 14l4 4M7 17l-3 3M3 19l2 2" />,
+  // The app's own d20 (features/dice/throw/D20Icon.tsx) as a line drawing at half its 48 unit size: its hexagon and the face toward the viewer, without the spokes or the number. A die is a game concept, so not Lucide's dices (docs/design-v1-icons.md 1).
+  dice: <path {...STROKE} d="M12 1l9.525 5.5v11L12 23l-9.525-5.5v-11zM12 4.5l6.75 11.75H5.25z" />,
+  // Lucide scroll-text: the Log, what happened.
+  log: <path {...STROKE} d="M15 12h-5M15 8h-5M19 17V5a2 2 0 0 0-2-2H4M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />,
+  // Lucide notebook-text: the Journal's pages.
+  journal: (
+    <g {...STROKE}>
+      <path d="M2 6h4M2 10h4M2 14h4M2 18h4M9.5 8h5M9.5 12H16M9.5 16H14" />
+      <rect width="16" height="20" x="4" y="2" rx="2" />
+    </g>
+  ),
+  // Lucide radius: the Areas panel, areas of effect placed on the map. Never one area's shape, which areaCone and the rest draw.
+  areas: (
+    <g {...STROKE}>
+      <path d="M20.34 17.52a10 10 0 1 0-2.82 2.82M13.41 13.41l4.18 4.18" />
+      <circle cx="19" cy="19" r="2" />
+      <circle cx="12" cy="12" r="2" />
+    </g>
+  ),
+  // Lucide crown: the DM panel, the DM's own tools.
+  dm: <path {...STROKE} d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294zM5 21h14" />,
+  // Lucide map: the Scenes panel, the room's maps. Never the Pin tool's pin.
+  scenes: <path {...STROKE} d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0zM15 5.764v15M9 3.236v15" />,
+  // Lucide skull: the Monsters panel, the stat blocks to place. Never Dead or a death save, which keep their words.
+  monsters: (
+    <g {...STROKE}>
+      <path d="m12.5 17-.5-1-.5 1h1zM15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="9" cy="12" r="1" />
+    </g>
+  ),
+  // Lucide clipboard-list: the Encounters panel, fights planned ahead.
+  encounters: (
+    <g {...STROKE}>
+      <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M12 11h4M12 16h4M8 11h.01M8 16h.01" />
+    </g>
+  ),
+  // Lucide contact-round: the Characters panel, the room's characters and their pages.
+  characters: (
+    <g {...STROKE}>
+      <path d="M16 2v2M17.915 22a6 6 0 0 0-12 0M8 2v2" />
+      <circle cx="12" cy="12" r="4" />
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+    </g>
+  ),
+  // Lucide list-tree: the Outliner, everything on the scene as a list.
+  outliner: <path {...STROKE} d="M21 12h-8M21 6H8M21 18h-8M3 6v4c0 1.1.9 2 2 2h3M3 10v6c0 1.1.9 2 2 2h3" />,
+  // Lucide library: the Library panel, the room's pictures and files.
+  library: <path {...STROKE} d="m16 6 4 14M12 6v14M8 8v12M4 4v16" />,
+  // Lucide timer: the turn timer's clock, and the alert when its time is up.
+  timer: (
+    <g {...STROKE}>
+      <path d="M10 2h4M12 14l3-3" />
+      <circle cx="12" cy="14" r="8" />
+    </g>
+  ),
+  // The Token panel's and a character's page's groups (docs/design-v1-icons-2.md 5), one per group, before its name. Combat takes the fight's swords and Owners the members' two people.
+  // Lucide file-text: a creature's stat block.
+  statBlock: <path {...STROKE} d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8" />,
+  // Lucide sticky-note: a token's or a character's notes. Never the Journal's pages.
+  notes: <path {...STROKE} d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8ZM15 3v4a2 2 0 0 0 2 2h4" />,
+  // Lucide compass: a token's place, its elevation and its facing.
+  position: (
+    <g {...STROKE}>
+      <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" />
+      <circle cx="12" cy="12" r="10" />
+    </g>
+  ),
+  // Lucide image: a token's or a character's pictures, the group that holds them.
+  image: (
+    <g {...STROKE}>
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </g>
+  ),
+  // Lucide hash: a creature's numbers, the Stats group.
+  stats: <path {...STROKE} d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />,
+  // Lucide paw-print: a companion, and a character's companions.
+  companion: (
+    <g {...STROKE}>
+      <circle cx="11" cy="4" r="2" />
+      <circle cx="18" cy="8" r="2" />
+      <circle cx="20" cy="16" r="2" />
+      <path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z" />
+    </g>
+  ),
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

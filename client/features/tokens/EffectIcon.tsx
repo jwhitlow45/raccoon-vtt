@@ -84,3 +84,64 @@ export function EffectIcon(props: { effect: Pick<Effect, "key" | "label" | "glyp
     </span>
   );
 }
+
+/** The art's file for an effect, or null for a custom status or a key with none. */
+function artUrl(key: Effect["key"]): string | null {
+  return key === "custom" ? null : chipIconUrl(key);
+}
+
+/** Whether `EffectArt` draws anything for this key, so a chip or a line falls back to its glyph or its words where it does not. */
+export function effectHasArt(key: Effect["key"]): boolean {
+  return artUrl(key) !== null;
+}
+
+/**
+ * A small chip's face, the tracker's and the party bar's
+ * (docs/design-v1-icons-2.md 4): the effect's art where the chip holds no
+ * number, else its letters as before. The art and a number together are
+ * 27 px wide, past the chip's 20 px box, so exhaustion keeps "E2", whose
+ * letters hold its level, and a counted effect keeps its letters beside its
+ * number where the chip shows one (`counts`, the tracker's).
+ */
+export function ChipFace(props: { effect: Pick<Effect, "key" | "label" | "glyph" | "color" | "level" | "spell">; size: number; counts?: boolean }) {
+  const exhaustion = props.effect.key === "exhaustion";
+  const count = props.counts && !exhaustion ? effectCount(props.effect) : null;
+  const art = !exhaustion && count === null && effectHasArt(props.effect.key);
+  return (
+    <>
+      {art ? <EffectArt effectKey={props.effect.key} size={props.size} /> : effectChip(props.effect).glyph}
+      {count !== null ? <span style={{ marginLeft: theme.space(0.5), fontVariantNumeric: "tabular-nums" }}>{count}</span> : null}
+    </>
+  );
+}
+
+/**
+ * A condition's or status's art alone, in the text's color, for a small
+ * chip or a line of words that names the effect (docs/design-v1-icons-2.md
+ * 4). Null where the effect has no art (`effectHasArt`): a custom status,
+ * whose glyph is its own words, or a key the app does not know.
+ */
+export function EffectArt(props: { effectKey: Effect["key"]; size: number; color?: string }) {
+  const url = artUrl(props.effectKey);
+  if (url === null) return null;
+  return (
+    <span
+      aria-hidden
+      style={{
+        flex: "none",
+        display: "inline-block",
+        width: props.size,
+        height: props.size,
+        background: props.color ?? "currentColor",
+        WebkitMaskImage: `url(${url})`,
+        maskImage: `url(${url})`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+      }}
+    />
+  );
+}
