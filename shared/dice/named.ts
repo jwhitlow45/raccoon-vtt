@@ -212,27 +212,55 @@ function effectsOf(text: string, old: boolean, repeats = text): Pick<NamedRoll, 
 
 const HEAL = /\bregains?\s+\d+\s*\(\s*(\d+\s*d\s*\d+(?:\s*[+\-−–]\s*\d+)?)\s*\)\s*hit points\b/i;
 const RECHARGE = /^recharge\s+(\d)(?:\s*[–\-−]\s*6)?$/i;
-const USES = /^\d+\/day\b/i;
+const USES = /^(\d+)\/day\b/i;
 const RECHARGE_IN_NAME = /\(recharge\s+[2-6]\b/i;
+/** "(Recharge after a Short or Long Rest)", 2014's "(Recharges after a Short or Long Rest)" too. */
+const REST_RECHARGE = /^recharges? after a short or long rest$/i;
+/** An older block's "(Costs 2 Actions)" on a legendary action. */
+const COST = /^costs\s+([1-3])\s+actions?$/i;
 
-/** The name without a recharge or uses bracket, which the options show on their own. */
-function nameParts(printed: string): { name: string; recharge?: NamedRoll["recharge"]; uses?: string } {
-  const out: { name: string; recharge?: NamedRoll["recharge"]; uses?: string } = { name: printed };
+/**
+ * A printed name's parts (docs/design-v1-combat-controls.md 2.1): the name
+ * without its recharge, uses, rest recharge or cost bracket, which the
+ * options and the combat uses show on their own. `shown` keeps the rest
+ * recharge and the cost, as the Dice panel's rows have always named them.
+ * `perDay` is the N of "(N/Day", and `uses` the bracket's words.
+ */
+export type NameParts = { name: string; shown: string; recharge?: NamedRoll["recharge"]; uses?: string; perDay?: number; rest?: true; cost?: number };
+
+export function nameParts(printed: string): NameParts {
+  const out: NameParts = { name: printed, shown: printed };
+  let shown = printed;
   out.name = printed
     .replace(/\s*\(([^()]*)\)/g, (whole, inner: string) => {
-      const recharge = RECHARGE.exec(inner.trim());
+      const words = inner.trim();
+      const recharge = RECHARGE.exec(words);
       const n = recharge ? Number(recharge[1]) : 0;
       if (n >= 2 && n <= 6) {
         out.recharge = n as NamedRoll["recharge"];
+        shown = shown.replace(whole, "");
         return "";
       }
-      if (USES.test(inner.trim())) {
-        out.uses = inner.trim();
+      const perDay = USES.exec(words);
+      if (perDay) {
+        out.uses = words;
+        out.perDay = Number(perDay[1]);
+        shown = shown.replace(whole, "");
+        return "";
+      }
+      if (REST_RECHARGE.test(words)) {
+        out.rest = true;
+        return "";
+      }
+      const cost = COST.exec(words);
+      if (cost) {
+        out.cost = Number(cost[1]);
         return "";
       }
       return whole;
     })
     .trim();
+  out.shown = shown.trim();
   return out;
 }
 
@@ -244,6 +272,58 @@ function slug(name: string): string {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "") || "roll"
   );
+}
+
+/**
+ * The longest slug a key keeps whole, and how much of a longer one it keeps
+ * before its hash: the longest section, its colon, 44 and a repeat's "-99"
+ * make 64. The SRD's longest is 42, the wererat's "Hand Crossbow (Humanoid
+ * or Hybrid Form Only)", so no SRD key is cut.
+ */
+const SLUG_MAX = 44;
+const SLUG_CUT = 37;
+
+/** 6 hex digits of FNV-1a over the name's UTF-16 units: the same on every device, with no crypto to load. */
+function shortHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0").slice(0, 6);
+}
+
+/** A name's slug, cut to 37 characters and 6 hex digits of the whole name's hash where it runs past 44, so a key stays within 64. */
+function keySlug(name: string): string {
+  const whole = slug(name);
+  if (whole.length <= SLUG_MAX) return whole;
+  return `${whole.slice(0, SLUG_CUT).replace(/-+$/, "")}-${shortHash(name)}`;
+}
+
+const keysRead = new WeakMap<StatBlockMonster, readonly string[]>();
+
+/**
+ * Every entry's key, in blockEntries' order (docs/design-v1-combat-controls.md
+ * 2.1): its section, a colon and a slug of its name without its brackets,
+ * then `-2` and up for a name repeated in its section. Each entry has one
+ * before any is read into rolls, so a roll's key (its entry's, with `:hit`
+ * or `:later` for a follow-up) and a spent ability's key name the same
+ * entry on every device, whatever rolls an entry makes. At most 64
+ * characters, as the use key's contract bounds it (shared/protocol.ts).
+ */
+export function entryKeys(view: StatBlockMonster): readonly string[] {
+  const cached = keysRead.get(view);
+  if (cached) return cached;
+  const taken = new Set<string>();
+  const out = blockEntries(view).map((entry) => {
+    const base = `${entry.section}:${keySlug(nameParts(entry.name).name)}`;
+    let key = base;
+    for (let n = 2; taken.has(key); n++) key = `${base}-${n}`;
+    taken.add(key);
+    return key;
+  });
+  keysRead.set(view, out);
+  return out;
 }
 
 type Save = { ability: AbilityKey; dc: number; at: number; edition: 2014 | 2024 };
@@ -348,14 +428,11 @@ export function blockActions(view: StatBlockMonster): NamedRoll[] {
   const cached = read.get(view);
   if (cached) return cached;
   const out: NamedRoll[] = [];
-  const keys = new Set<string>();
-  for (const entry of blockEntries(view)) {
-    const { name, recharge, uses } = nameParts(entry.name);
+  const keys = entryKeys(view);
+  blockEntries(view).forEach((entry, i) => {
+    const { shown, recharge, uses } = nameParts(entry.name);
     for (const { suffix, label, roll } of entryRolls(entry)) {
-      let key = `${entry.section}:${slug(name)}${suffix}`;
-      for (let n = 2; keys.has(key); n++) key = `${entry.section}:${slug(name)}-${n}${suffix}`;
-      keys.add(key);
-      const named: NamedRoll = { key, name: `${name}${label}`, section: entry.section, ...roll };
+      const named: NamedRoll = { key: `${keys[i]!}${suffix}`, name: `${shown}${label}`, section: entry.section, ...roll };
       // A recharge or uses limit belongs to the action, so its later damage and follow-up save carry none of their own.
       if (suffix === "") {
         if (recharge !== undefined) named.recharge = recharge;
@@ -363,7 +440,7 @@ export function blockActions(view: StatBlockMonster): NamedRoll[] {
       }
       out.push(named);
     }
-  }
+  });
   read.set(view, out);
   return out;
 }
