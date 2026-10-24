@@ -9,6 +9,10 @@ import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { fieldStyle, NUMBER_FIELD_WIDTH } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { useTooltip } from "../../components/Tooltip.tsx";
+import { critSent, nextRestMode, REST_FIELD_MIN, restDead, type EntryStatus } from "../../canvas/barButtons.ts";
+import { RestRow, type RestItem } from "../../canvas/RestRow.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
@@ -41,6 +45,26 @@ export function oneTarget(target: ActorTarget, access: HpAccessLevel, atZero: bo
 }
 
 /**
+ * An upright phone's bar around the entry (docs/design-v1-bar-compact.md
+ * 3.3 and 5.3), while it rests as the strip or is expanded from it. The
+ * field row stands in the strip's quick row (canvas/RestRow.tsx) in both,
+ * so the same field, with its text, caret, focus and the phone's keyboard,
+ * carries over as the bar expands and rests.
+ */
+export type HpRest = {
+  /** The strip shows: the mode toggle in the modes' place, Crit and the newest rolled amount in the quick row, and the feedback in the status line. False while expanded. */
+  resting: boolean;
+  /** The strip scrolls (5.4), holding under its quick row whatever the row leaves out. */
+  scrolls: boolean;
+  /** The bar's own candidates, after the entry's in the quick row. */
+  items: readonly RestItem[];
+  /** The ids the quick row drew (RestRow's fit), or null while it draws every one. */
+  shown: readonly string[] | null;
+  /** What the entry has to say, for the status line (canvas/barButtons.ts restStatus). */
+  onStatus(status: EntryStatus): void;
+};
+
+/**
  * The quick entry: a mode, then a number, or math typed straight in
  * (`-7`, `+5`, `=20`, `t5`). `relative` access is the room's "players can
  * apply damage" setting, which allows damage and healing only. With several
@@ -59,6 +83,11 @@ export function HpEntry(props: {
    * (docs/design-v1-token-panel.md 3.3). Typed math works from the field alone.
    */
   fieldFirst?: boolean;
+  rest?: HpRest;
+  /** A group's standing note, which the status line shows while the field is empty. */
+  standing?: string | null;
+  /** More of the field's description, such as a group's notes while the strip rests. */
+  describedBy?: string;
 }) {
   const actions = useRoomActions();
   // What was typed before a blackout unmounted the entry comes back with it (hpDraft.ts).
@@ -74,18 +103,23 @@ export function HpEntry(props: {
   // At 0 HP and dying or stable, damage can be a critical hit: two failed death saves.
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
+  const sendsCrit = critSent({ crit, atZero, mode, preview });
   const reach = props.targets.filter((t) => t.access !== "none").length;
   // Typed math such as =12 may ask for what this viewer cannot send, which shows at once in the summary's place.
   const refusal = preview?.ok ? entryRefusal(props.access, preview.change, props.targets.length) : null;
   // What will be sent decides the lines on the dead: the typed text once it parses and may go, the chosen mode otherwise.
   const revives = useRoomView((s) => healRevivesDead(s.view?.meta.settings ?? {}));
   const dm = useRoomView((s) => s.you?.role === "dm");
-  const lines = deadLines(props.targets, entryOperation(props.access, mode, preview), { revives, dm });
+  const operation = entryOperation(props.access, mode, preview);
+  const lines = deadLines(props.targets, operation, { revives, dm });
   // The newest rolled damage or healing, offered under Damage and Heal (docs/design-v1-roll-options.md 4.3).
   const chips = useHpChips(mode === "damage" || mode === "heal" ? mode : null);
   const markApplied = useMarkChipApplied();
   // The chip whose amount the field holds, so Apply takes that chip away and sends its rolled damage types. Once the viewer types or picks another mode, the amount is their own, and carries no types.
   const [filled, setFilled] = useState<HpChip | null>(null);
+  const rest = props.rest;
+  const resting = rest?.resting === true;
+  const descriptionId = useId();
 
   const fillFrom = (chip: HpChip) => {
     setText(String(chip.amount));
@@ -95,6 +129,11 @@ export function HpEntry(props: {
     if (chip.critical && atZero && mode === "damage") setCrit(true);
     // The previous chip's tick goes with it, so picking another chip never carries its critical hit over.
     else if (filled?.critical) setCrit(false);
+  };
+
+  const pickMode = (next: HpMode) => {
+    setMode(next);
+    setFilled(null);
   };
 
   const apply = () => {
@@ -108,7 +147,7 @@ export function HpEntry(props: {
       setError(refused);
       return;
     }
-    sendHpEntry(actions, props.targets, parsed.change, crit && showCrit, untouchedTypes(filled, text));
+    sendHpEntry(actions, props.targets, parsed.change, sendsCrit, untouchedTypes(filled, text));
     if (filled) markApplied(filled.lineIds);
     setFilled(null);
     setMode(modeAfterApply(mode));
@@ -117,6 +156,29 @@ export function HpEntry(props: {
     setError(null);
     props.onApplied?.();
   };
+
+  /*
+   * The status line reads what the entry would say (canvas/barButtons.ts
+   * restStatus), handed up before paint, so the strip's header never
+   * draws a frame behind the field. The primitives key it, since a new
+   * object each render would hand it up on every render.
+   */
+  const left = props.targets.filter((t) => t.access === "none").map((t) => t.name);
+  const said = {
+    error: error ?? refusal,
+    dead: restDead(props.targets, operation, { revives, dm }),
+    preview: preview?.ok && refusal === null ? preview.summary : null,
+    typed: text.trim() !== "",
+    crit: sendsCrit,
+    reach,
+    left,
+    standing: props.standing ?? null,
+  };
+  const saidKey = JSON.stringify(said);
+  const onStatus = rest?.onStatus;
+  useLayoutEffect(() => {
+    if (onStatus) onStatus(JSON.parse(saidKey) as EntryStatus);
+  }, [onStatus, saidKey]);
 
   /*
    * Tab and a screen reader follow what shows: the field first in the
@@ -143,34 +205,91 @@ export function HpEntry(props: {
       even
       value={mode}
       options={modes.map((m) => ({ value: m.mode, label: m.label, chosenStyle: modeLook(m.mode) }))}
-      onChange={(next) => {
-        setMode(next);
-        setFilled(null);
-      }}
+      onChange={pickMode}
       style={{ order: fieldFirst ? 1 : 0 }}
     />
   );
-  const fieldRow = (
-    <div key="field" style={{ display: "flex", gap: theme.space(1), order: fieldFirst ? 0 : 1 }}>
+  // The strip's own sentences show in its header, so the field is described by the entry's whole ones (3.3).
+  const describedBy = [resting ? descriptionId : null, props.describedBy ?? null].filter((id) => id !== null).join(" ") || undefined;
+  const lead = (
+    <div style={{ display: "flex", gap: theme.space(1), flex: "1 1 auto", minWidth: 0 }}>
+      {resting ? <ModeToggle key="toggle" mode={mode} onPick={() => pickMode(nextRestMode(mode))} /> : null}
       <input
+        key="input"
         aria-label="HP change"
+        aria-describedby={describedBy}
+        data-rest-field=""
         value={text}
         inputMode="numeric"
         enterKeyHint="done"
         autoComplete="off"
-        placeholder={mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
+        // The toggle names the mode in the strip, so its sample alone is enough there.
+        placeholder={resting ? MODE_SAMPLE[mode] : mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
         onChange={(e) => {
           setText(e.target.value);
           setError(null);
           setFilled(null);
         }}
-        style={{ ...fieldStyle(), flex: 1, width: 0 }}
+        style={{ ...fieldStyle(), flex: 1, width: 0, minWidth: resting ? REST_FIELD_MIN : undefined }}
       />
-      <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
+      <SmallButton key="apply" type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
         Apply
       </SmallButton>
     </div>
   );
+  // The newest rolled amount for the mode, the one the strip offers (3.3).
+  const newest = useNewestChip(chips);
+  const shown = (id: string) => rest?.shown == null || rest.shown.includes(id);
+  const restItems: RestItem[] = resting
+    ? [
+        { id: "mode", node: lead },
+        ...(showCrit
+          ? [
+              {
+                id: "crit",
+                node: (
+                  <Button size="sm" pressed={crit} aria-label={CRIT_WORDS} title={CRIT_WORDS} onClick={() => setCrit(!crit)}>
+                    Crit
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        ...(newest
+          ? [
+              {
+                id: "useRoll",
+                node: (
+                  <Button size="sm" aria-label={newest.text} title={newest.text} onClick={() => fillFrom(newest)}>
+                    {`Use ${newest.amount}`}
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        ...rest!.items,
+      ]
+    : [{ id: "mode", node: lead }];
+  // The same wrapper in both states of an upright bar, so the field under it is never mounted afresh.
+  const fieldRow = rest ? (
+    <div key="field" style={{ order: !resting && fieldFirst ? 0 : 1, minWidth: 0 }}>
+      <RestRow items={restItems} />
+    </div>
+  ) : (
+    <div key="field" style={{ display: "flex", gap: theme.space(1), order: fieldFirst ? 0 : 1 }}>
+      {lead}
+    </div>
+  );
+  // The strip's quick row stands in the modes' place, and the scrolling strip holds what the row leaves out under it (5.4).
+  const rows = resting ? [fieldRow] : fieldFirstInPage ? [fieldRow, modeButtons] : [modeButtons, fieldRow];
+  const chipRow = resting && !rest!.scrolls ? [] : chips.filter((chip) => !(resting && chip === newest && shown("useRoll")));
+  const critBox = showCrit && (!resting || (rest!.scrolls && !shown("crit")));
+  const feedback =
+    error || refusal ? (
+      <Note tone="error">{error ?? refusal}</Note>
+    ) : preview?.ok ? (
+      <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}` : preview.summary}</Note>
+    ) : null;
 
   return (
     <form
@@ -184,10 +303,10 @@ export function HpEntry(props: {
       }}
       style={{ display: "grid", gap: theme.space(1) }}
     >
-      <div style={{ display: "grid", gap: theme.space(1) }}>{fieldFirstInPage ? [fieldRow, modeButtons] : [modeButtons, fieldRow]}</div>
-      {chips.length > 0 ? (
+      <div style={{ display: "grid", gap: theme.space(1) }}>{rows}</div>
+      {chipRow.length > 0 ? (
         <ChipRow label="Rolled amounts">
-          {chips.map((chip) => (
+          {chipRow.map((chip) => (
             // A long label wraps inside its chip rather than pushing the entry wider than a phone.
             <span key={chip.lineId} style={{ display: "grid", maxWidth: "100%" }}>
               <Chip onClick={() => fillFrom(chip)}>
@@ -197,19 +316,88 @@ export function HpEntry(props: {
           ))}
         </ChipRow>
       ) : null}
-      {showCrit ? (
-        <Checkbox checked={crit} onChange={setCrit} label="Critical Hit (two failed Death Saves)" />
-      ) : null}
-      {error || refusal ? (
-        <Note tone="error">{error ?? refusal}</Note>
-      ) : preview?.ok ? (
-        <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}` : preview.summary}</Note>
-      ) : null}
-      {lines.map((line) => (
-        <Note key={line}>{line}</Note>
-      ))}
+      {critBox ? <Checkbox checked={crit} onChange={setCrit} label={CRIT_WORDS} /> : null}
+      {resting ? (
+        <>
+          <div id={descriptionId} style={VISUALLY_HIDDEN}>
+            {feedback}
+            {lines.map((line) => (
+              <Note key={line}>{line}</Note>
+            ))}
+          </div>
+          {/* Said once as it comes, since the strip shows it in its header, away from the field (3.3). */}
+          <span role="status" style={VISUALLY_HIDDEN}>
+            {error ?? refusal ?? ""}
+          </span>
+        </>
+      ) : (
+        <>
+          {feedback}
+          {lines.map((line) => (
+            <Note key={line}>{line}</Note>
+          ))}
+        </>
+      )}
     </form>
   );
+}
+
+/** The Crit toggle's and box's words: what a critical hit at 0 HP does. */
+const CRIT_WORDS = "Critical Hit (two failed Death Saves)";
+
+/** Each mode's sample, the strip's placeholder, since its toggle names the mode. */
+const MODE_SAMPLE: Record<HpMode, string> = { damage: "7", heal: "5", set: "20", temp: "5" };
+
+/** Each mode as the strip's toggle draws it, a sign in the mode's color. */
+const MODE_SIGN: Record<HpMode, string> = { damage: "\u2212", heal: "+", set: "=", temp: "T" };
+
+/**
+ * The strip's mode toggle (3.3, D-261024-10 and 13): one 44 px button that
+ * draws the entry's mode as its sign, named and tipped by the mode, and a
+ * tap switches Damage and Heal, so an iPhone's number pad, which has no
+ * plus key, can heal.
+ */
+function ModeToggle(props: { mode: HpMode; onPick(): void }) {
+  const name = HP_MODES.find((m) => m.mode === props.mode)?.label ?? props.mode;
+  const tooltip = useTooltip(name);
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={name}
+        data-rest-mode={props.mode}
+        {...tooltip.anchor()}
+        onClick={props.onPick}
+        style={{
+          flex: "none",
+          width: theme.touch,
+          height: theme.touch,
+          display: "grid",
+          placeItems: "center",
+          padding: 0,
+          borderRadius: theme.radius.md,
+          ...modeLook(props.mode),
+          color: modeColor(props.mode),
+          fontFamily: theme.font.body,
+          fontSize: theme.font.heading,
+          fontWeight: theme.weight.bold,
+          lineHeight: 1,
+          cursor: "pointer",
+        }}
+      >
+        <span aria-hidden>{MODE_SIGN[props.mode]}</span>
+      </button>
+      {tooltip.tip}
+    </>
+  );
+}
+
+/** The newest of the entry's rolled amounts, by its place in the log: this viewer's own or another's. */
+function useNewestChip(chips: readonly HpChip[]): HpChip | null {
+  const log = useRoomView((s) => s.view?.log);
+  if (chips.length <= 1) return chips[0] ?? null;
+  const at = (chip: HpChip) => log?.findLastIndex((e) => e.id === chip.lineId) ?? -1;
+  return chips.reduce((a, b) => (at(b) > at(a) ? b : a));
 }
 
 function modeColor(mode: HpMode): string {

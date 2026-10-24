@@ -170,6 +170,9 @@ function roomMode(room: BarRoom, free: Box): BarMode {
 
 // ------------------------------------------------------------ an upright phone's resting strip
 
+/** The HP field's least width in the strip, where three digits and a sign still show (R14). The fit counts the lead's field at this. */
+export const REST_FIELD_MIN = 56;
+
 /** The passing actions, newest first, which take Roll's place in the strip while one applies (docs/design-v1-bar-compact.md 3.3). */
 const PASSING: readonly string[] = ["undoMove", "countLeg", "door"];
 
