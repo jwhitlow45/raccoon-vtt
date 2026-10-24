@@ -820,6 +820,44 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     }
   });
 
+  test("fu26-a. Previous takes back only the turn: the goblin the DM added on Thorn's turn, the troll's new value and the dragon's In lair stay", async () => {
+    await ops.send({ t: "encounter.end" });
+    await waitFor("no fight", () => (deskSocket.state?.encounter ? null : true));
+    await ops.send({ t: "actor.hp", target: { characterId: run.thorn }, change: { kind: "heal", amount: 30 } });
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: "fu26-dragon", tokenId: run.dragon, value: 19 },
+        { id: "fu26-thorn", tokenId: run.thornToken, value: 15 },
+        { id: "fu26-troll", tokenId: run.troll, value: 10 },
+      ],
+    });
+    await waitFor("the fight", () => (deskSocket.state?.encounter?.entries.length === 3 ? true : null));
+    await turnTo("fu26-thorn");
+    await ops.send({ t: "encounter.add", entries: [{ id: "fu26-goblin", tokenId: run.goblin, value: 12 }] });
+    await ops.send({ t: "encounter.setValue", entryId: "fu26-troll", value: 8 });
+    const tracker = await openTracker(desk);
+    const toggle = tracker.getByRole("button", { name: `${DRAGON} options` });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await tracker.getByRole("switch", { name: /^In lair/ }).click();
+    await waitFor("the lair's counts", () => (dragon()?.legendary?.actionsMax === 4 ? true : null));
+    const m = srd.find((x) => x.srdId === "adult-red-dragon")!;
+
+    await desk.locator("[data-round-header]").first().getByRole("button", { name: "Previous turn" }).click();
+    await waitFor("the dragon's turn again", () => (deskSocket.state?.encounter?.activeEntryId === "fu26-dragon" ? true : null));
+    const rows = (state: RoomState | null) => state?.encounter?.entries.map((e) => `${e.id}:${e.value}${e.inLair ? ":lair" : ""}`);
+    const want = ["fu26-dragon:19:lair", "fu26-thorn:15", "fu26-goblin:12", "fu26-troll:8"];
+    assert.deepEqual(rows(deskSocket.state), want);
+    assert.equal(deskSocket.state?.encounter?.round, 1);
+    assert.equal(dragon()?.legendary?.actionsMax, 4, "the lair's counts stay with the switch");
+    assert.equal(dragon()?.xp, m.xpInLair);
+    await waitFor("the phone sees the same", () => (phoneSocket.state?.encounter?.activeEntryId === "fu26-dragon" && JSON.stringify(rows(phoneSocket.state)) === JSON.stringify(want) ? true : null));
+    await tracker.getByRole("button", { name: "Goblin options" }).waitFor();
+    // The options closed, so the shot shows the four rows.
+    if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+    await shots.take(desk, "fu26-previous-keeps-the-rows");
+  });
+
   test("cu-b-15. no console errors on any page", () => {
     assert.deepEqual(deskConsole.errors, [], "the desk");
     assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
