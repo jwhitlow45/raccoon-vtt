@@ -51,6 +51,20 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * dragon's recharge card and its turn card folded and open, and the
  * troll's Regeneration card with its death save card waiting for it.
  *
+ * The second icon pass (docs/design-v1-icons-2.md 15) is measured at its
+ * own seven sizes: 320 x 568 and 390 x 844 at 130%, 390 x 844 at 115%
+ * and 85%, and 1280 x 800 at 100%, 115% and 85%, in a fight of its own:
+ * Thorn at level 7 with a stat block and a counted Hex, Wren a druid with
+ * known forms, Exhaustion 2 and Poisoned, and the goblin hidden, locked
+ * and its name hidden. The DM measures the side panel's tabs (one line, each 44 px, no
+ * name cut) or a phone's Panels list, Thorn's and Wren's panels with every
+ * group folded (each name on one line, a summary never under its 4em
+ * floor, and on a computer the Stat block's action on its name's line),
+ * the goblin's header tags, the round header with its clock as tall as
+ * without the timer, the tracker's and party bar's chips in their 20 x 18
+ * box, and the time-up and ended-effect lines as tall and on as many lines
+ * with their lead as without it.
+ *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
  * sweep must reach and did not, a root that matches nothing or only what
@@ -141,9 +155,11 @@ const run = {
     wolf: randomUUID(),
     redDragon: randomUUID(),
     troll: randomUUID(),
+    wrenChar: randomUUID(),
+    wren: randomUUID(),
   },
-  /** The combat screens' fight: its rows, Thorn's first. */
-  fight: { thorn: randomUUID(), dragon: randomUUID(), troll: randomUUID() },
+  /** The combat screens' fight: its rows, Thorn's first. The second icon pass's fight takes the goblin and Wren too. */
+  fight: { thorn: randomUUID(), dragon: randomUUID(), troll: randomUUID(), goblin: randomUUID(), wren: randomUUID() },
   traps: { pit: randomUUID(), needle: randomUUID(), door: randomUUID(), wire: randomUUID() },
 };
 
@@ -1609,6 +1625,365 @@ async function patScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
  * lays them out in standards mode, as the app is: in quirks mode a line
  * that holds only a lowered span does not grow, so its words never move.
  */
+// ------------------------------------------------------------ the second icon pass (docs/design-v1-icons-2.md 15)
+
+/**
+ * The second icon pass's sizes (docs/design-v1-icons-2.md 1): the 130%
+ * phones, an upright phone at 115% and 85%, and a computer at 100%, 115%
+ * and 85%. Touch ones first, so the DM's touch context closes before the
+ * mouse one opens.
+ */
+const IC2_PHONE: Size = { name: "390x844", width: 390, height: 844, touch: true };
+const IC2_DESK: Size = { name: "1280x800", width: 1280, height: 800, touch: false };
+const IC2_AT: { size: Size; scale: number }[] = [
+  { size: { name: "320x568", width: 320, height: 568, touch: true }, scale: 1.3 },
+  { size: IC2_PHONE, scale: 1.3 },
+  { size: IC2_PHONE, scale: 1.15 },
+  { size: IC2_PHONE, scale: 0.85 },
+  { size: IC2_DESK, scale: 1 },
+  { size: IC2_DESK, scale: 1.15 },
+  { size: IC2_DESK, scale: 0.85 },
+];
+/** Wren's cell, clear of the other tokens, the traps and the walls. */
+const WREN_AT = { x: 2, y: 2 };
+
+/**
+ * The pass's fight, on the sweep's room: Thorn at level 7 with a stat
+ * block, so his folded Stat block reads "Level 7, PB +3" beside Take a
+ * shape, and a counted Hex. Wren a druid with known forms, Exhaustion 2
+ * and Poisoned, whose Stat block holds "4 shapes". The goblin hidden from players,
+ * locked and its name hidden. Thorn, the goblin and Wren in a fight on
+ * Thorn's turn with the turn timer on, so the round header draws its clock.
+ */
+async function ic2Start(): Promise<void> {
+  await settleTraps();
+  if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+  await resetThorn();
+  const stats = (wis: number) => ({ abilities: { str: 16, dex: 12, con: 14, int: 10, wis, cha: 10 }, saves: ["str", "con"], skills: { athletics: "prof" }, spellAbility: "wis", rolls: [] });
+  await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 7, stats: stats(12) } });
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.thornChar }, effect: { id: randomUUID(), key: "hexed", level: 3 } });
+  await ops.send({ t: "character.create", character: { id: run.ids.wrenChar, name: "Wren", size: "medium", ownerIds: [run.patId], actor: actor({ hp: { cur: 22, max: 22, temp: 0 } }) } });
+  await ops.send({ t: "character.update", characterId: run.ids.wrenChar, patch: { level: 4, knownForms: ["wolf", "brown-bear", "giant-spider", "riding-horse"], stats: stats(16) } });
+  await ops.send({ t: "token.create", token: { id: run.ids.wren, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Wren", ...WREN_AT, disposition: "ally", actor: { ref: run.ids.wrenChar } } });
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.wrenChar }, effect: { id: randomUUID(), key: "exhaustion", level: 2 } });
+  // A chip with no number, which draws its art (docs/design-v1-icons-2.md 4).
+  await ops.send({ t: "actor.effect.add", target: { characterId: run.ids.wrenChar }, effect: { id: randomUUID(), key: "poisoned" } });
+  await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { visibility: "dm", locked: true, nameHidden: true } });
+  // The goblin's turn comes at every size for the alert lines, and must leave it hidden.
+  await ops.send({ t: "room.update", settings: { turnTimerSec: 0, revealHiddenOnTurn: false } });
+  await ops.send({
+    t: "encounter.start",
+    entries: [
+      { id: run.fight.thorn, tokenId: run.ids.thorn, value: 20 },
+      { id: run.fight.goblin, tokenId: run.ids.goblin, value: 14 },
+      { id: run.fight.wren, tokenId: run.ids.wren, value: 12 },
+    ],
+  });
+  await waitFor("the icon pass's fight", () => dmSocket.state?.encounter?.entries.some((e) => e.id === run.fight.wren) || null);
+  await turnTo(run.fight.thorn);
+  await ops.send({ t: "room.update", settings: { turnTimerSec: 300 } });
+}
+
+/** A token's panel, from Details on its bar: the side panel's Token tab, or a phone's sheet. */
+async function ic2TokenPanel(page: Page, name: string, heading: string, cell: { x: number; y: number }): Promise<Locator | null> {
+  await closeSheets(page);
+  await escapeAll(page);
+  const bar = await selectToken(page, name, cell);
+  if (!bar) return null;
+  await (await barControl(bar, "Details")).click();
+  const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
+  await panel.getByRole("heading", { name: heading }).first().waitFor();
+  return panel.first();
+}
+
+/** Folds every open group of a panel, so each header shows its summary. */
+async function foldGroups(panel: Locator): Promise<void> {
+  for (let i = 0; i < 12; i++) {
+    const open = panel.locator("button[data-group-fold][aria-expanded=true]");
+    if ((await open.count()) === 0) return;
+    await open.first().click();
+  }
+}
+
+/**
+ * Each group header's name on one line, a folded summary never under its
+ * 4em floor, and, where `actionInline`, every header's action on its
+ * name's line (docs/design-v1-icons-2.md 3.3 and 5): lines naming each
+ * header that breaks a rule.
+ */
+async function groupHeaderLines(panel: Locator, at: string, screen: string, actionInline: boolean): Promise<string[]> {
+  const found = await panel.evaluate((root) => {
+    type El = {
+      id: string;
+      textContent: string | null;
+      parentElement: El | null;
+      nextElementSibling: El | null;
+      getAttribute(n: string): string | null;
+      querySelector(s: string): El | null;
+      querySelectorAll(s: string): ArrayLike<El>;
+      getBoundingClientRect(): { top: number; bottom: number; width: number };
+    };
+    const g = globalThis as unknown as { document: { getElementById(id: string): El | null; createRange(): { selectNodeContents(n: El): void; getClientRects(): ArrayLike<{ top: number }> } }; getComputedStyle(e: El): { fontSize: string } };
+    const lines = (el: El) => {
+      const range = g.document.createRange();
+      range.selectNodeContents(el);
+      return new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size;
+    };
+    const zoom = (el: El) => (el as unknown as { currentCSSZoom?: number }).currentCSSZoom ?? 1;
+    const out: string[] = [];
+    for (const group of Array.from((root as unknown as El).querySelectorAll("[data-panel-group]"))) {
+      const fold = group.querySelector("[data-group-fold]");
+      const nameId = fold?.getAttribute("aria-labelledby");
+      const name = nameId ? g.document.getElementById(nameId) : null;
+      if (!name || name.getBoundingClientRect().width === 0) continue;
+      const label = name.textContent ?? "";
+      if (lines(name) !== 1) out.push(`${label}: its name takes ${lines(name)} lines`);
+      const summaryId = fold?.getAttribute("aria-describedby");
+      const summary = summaryId ? g.document.getElementById(summaryId) : null;
+      if (summary) {
+        const floor = 4 * parseFloat(g.getComputedStyle(summary).fontSize) * zoom(summary);
+        const width = summary.getBoundingClientRect().width;
+        if (width < floor - 0.5) out.push(`${label}: its summary is ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
+      }
+      const heading = fold?.parentElement;
+      const action = heading?.nextElementSibling ?? null;
+      if (action && heading) {
+        const nameBox = name.getBoundingClientRect();
+        const actionBox = action.getBoundingClientRect();
+        const inline = actionBox.top < nameBox.bottom && actionBox.bottom > nameBox.top;
+        out.push(`${inline ? "inline" : "wrapped"}:${label}`);
+      }
+    }
+    return out;
+  });
+  const lines: string[] = [];
+  for (const f of found) {
+    if (f.startsWith("inline:")) continue;
+    if (f.startsWith("wrapped:")) {
+      if (actionInline) lines.push(`${at} ${screen}: ${f.slice("wrapped:".length)}'s action wrapped under its name`);
+      continue;
+    }
+    lines.push(`${at} ${screen}: ${f}`);
+  }
+  return lines;
+}
+
+/**
+ * Measures a part drawn with and without its lead, the icon before its
+ * words: its height and its words' lines must match, so the icon grew
+ * nothing (docs/design-v1-icons-2.md 15). The lead goes and comes back in
+ * one task, so the page never paints without it.
+ */
+async function sameWithoutLead(part: Locator, lead: string, words: string): Promise<{ with: { h: number; lines: number }; without: { h: number; lines: number } } | null> {
+  return part.evaluate(
+    (el, sel) => {
+      type El = { remove(): void; getBoundingClientRect(): { height: number }; querySelector(s: string): El | null; parentElement: El | null; nextSibling: El | null; insertBefore(a: El, b: El | null): void };
+      const root = el as unknown as El;
+      const g = globalThis as unknown as { document: { createRange(): { selectNodeContents(n: El): void; getClientRects(): ArrayLike<{ top: number }> } } };
+      const read = () => {
+        const text = root.querySelector(sel.words);
+        const range = g.document.createRange();
+        if (text) range.selectNodeContents(text);
+        return { h: Math.round(root.getBoundingClientRect().height * 10) / 10, lines: text ? new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size : 0 };
+      };
+      const icon = root.querySelector(sel.lead);
+      if (!icon || !icon.parentElement) return null;
+      const before = read();
+      const parent = icon.parentElement;
+      const next = icon.nextSibling;
+      icon.remove();
+      const after = read();
+      parent.insertBefore(icon, next);
+      return { with: before, without: after };
+    },
+    { lead, words },
+  );
+}
+
+/** The sizes a chip's box keeps (docs/design-v1-icons-2.md 4): 20 x 18 at 100%, at most as wide where it holds letters. */
+async function chipLines(chips: Locator, at: string, screen: string): Promise<string[]> {
+  const boxes = await chips.evaluateAll((els) =>
+    els.map((el) => {
+      const e = el as unknown as { textContent: string | null; getBoundingClientRect(): { width: number; height: number }; currentCSSZoom?: number };
+      const z = e.currentCSSZoom ?? 1;
+      const r = e.getBoundingClientRect();
+      return { words: (e.textContent ?? "").trim(), w: r.width / z, h: r.height / z };
+    }),
+  );
+  const out: string[] = [];
+  for (const b of boxes) {
+    if (Math.abs(b.h - 18) > 0.5) out.push(`${at} ${screen}: the chip "${b.words || "art"}" is ${b.h.toFixed(1)} px tall, not 18`);
+    // Art, and exhaustion's letters, keep the 20 px box. A counted effect's letters and number are as wide as they were.
+    if (!/\d$/.test(b.words) || /^E\d$/.test(b.words)) {
+      if (Math.abs(b.w - 20) > 0.5) out.push(`${at} ${screen}: the chip "${b.words || "art"}" is ${b.w.toFixed(1)} px wide, not 20`);
+    }
+  }
+  return out;
+}
+
+/** The side panel's tab row at a computer's size: one line, each tab 44 px, no name cut (docs/design-v1-icons-2.md 15). */
+async function tabRowLines(page: Page, at: string): Promise<string[]> {
+  const row = await page.getByRole("tablist", { name: "Panels" }).evaluate((list) => {
+    type El = { scrollWidth: number; clientWidth: number; getAttribute(n: string): string | null; querySelectorAll(s: string): ArrayLike<El>; getBoundingClientRect(): { top: number; height: number }; textContent: string | null; currentCSSZoom?: number };
+    const tabs = Array.from((list as unknown as El).querySelectorAll('[role="tab"]'));
+    const z = tabs[0]?.currentCSSZoom ?? 1;
+    const cut = Array.from((list as unknown as El).querySelectorAll('[role="tab"] span')).filter((s) => s.getAttribute("aria-hidden") !== "true" && s.scrollWidth > s.clientWidth + 0.5 && s.clientWidth > 1);
+    return {
+      tops: new Set(tabs.map((t) => Math.round(t.getBoundingClientRect().top))).size,
+      heights: tabs.map((t) => Math.round((t.getBoundingClientRect().height / z) * 10) / 10),
+      icons: tabs.filter((t) => t.getAttribute("aria-haspopup") === null).length,
+      cut: cut.map((s) => s.textContent ?? ""),
+    };
+  });
+  const out: string[] = [];
+  if (row.tops !== 1) out.push(`${at} tabs: the row takes ${row.tops} lines`);
+  for (const h of row.heights) if (Math.abs(h - 44) > 0.5) out.push(`${at} tabs: a tab is ${h} px tall, not 44`);
+  if (row.icons < 4) out.push(`${at} tabs: the row holds ${row.icons} tabs, not 4`);
+  for (const words of row.cut) out.push(`${at} tabs: "${words}" is cut`);
+  return out;
+}
+
+/** The pass's screens at one size, the DM's (docs/design-v1-icons-2.md 15). */
+async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): Promise<void> {
+  const wide = size.width / scale >= 900;
+  const at = sweep.at;
+  if (wide) {
+    await openSideTab(page, "Initiative");
+    await sweep.add(page, "ic2-tabs", await tabRowLines(page, at));
+    await sweep.measure(page, "ic2-tabs", page.getByRole("tablist", { name: "Panels" }));
+  } else {
+    await closeSheets(page);
+    await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    const list = page.getByRole("region", { name: "Panels" }).getByRole("list", { name: "Panels" });
+    await list.waitFor();
+    // Each row of places, its icon leading (3.1), apart from the list's own labels.
+    await sweep.measure(page, "ic2-panel-list", list.locator("li:has(button)"));
+    await escapeAll(page);
+    await closeSheets(page);
+  }
+
+  // Thorn's and Wren's panels with every group folded: one line a name, a summary at least its floor, and on a computer the Stat block's action on its name's line.
+  for (const [name, cell] of [
+    ["Thorn", { x: 5, y: 5 }],
+    ["Wren", WREN_AT],
+  ] as const) {
+    const panel = await ic2TokenPanel(page, name, name, cell);
+    if (!panel) {
+      await sweep.missing(page, `ic2-groups-${name}`, `a tap on ${name} opened no window`);
+      continue;
+    }
+    await foldGroups(panel);
+    await sweep.add(page, `ic2-groups-${name}`, await groupHeaderLines(panel, at, `ic2-groups-${name}`, !size.touch));
+    await sweep.measure(page, `ic2-groups-${name}`, panel.locator("[data-panel-group] > div:first-child"));
+    await closeSheets(page);
+    await escapeAll(page);
+  }
+
+  // The goblin's header: Hidden and Locked with their icons, "Name hidden" in words, each tag whole.
+  const goblin = await ic2TokenPanel(page, "Goblin", "Goblin", { x: 9, y: 3 });
+  if (goblin) {
+    // The tags' row stands under the kind line (features/tokens/CreatureHeader.tsx).
+    const tags = goblin.locator("[data-kind-line] + div").first();
+    for (const words of ["Hidden", "Locked", "Name hidden"]) {
+      const tag = tags.getByText(words, { exact: true }).first();
+      if (!(await visible(tag))) await sweep.missing(page, "ic2-goblin-tags", `no "${words}" tag`);
+      else if (await tag.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 0.5)) sweep.lines.push(`${at} ic2-goblin-tags: "${words}" is cut`);
+    }
+    await sweep.measure(page, "ic2-goblin-tags", tags);
+    await closeSheets(page);
+    await escapeAll(page);
+  } else await sweep.missing(page, "ic2-goblin-tags", "a tap on the goblin opened no window");
+
+  // The tracker: the round header's clock with its timer as tall as without, and the chips' boxes.
+  // The header's own box stands its padding unevenly on purpose, its fill meeting the pane's top as it sticks, so its row and the clock are measured inside it.
+  const tracker = await openTracker(page);
+  const header = page.locator("[data-round-header]").first();
+  const clock = header.getByRole("timer");
+  if (await visible(clock)) {
+    const both = await sameWithoutLead(header, '[role="timer"] svg', '[role="timer"]');
+    if (!both) sweep.lines.push(`${at} ic2-round: the clock has no timer`);
+    else if (Math.abs(both.with.h - both.without.h) > 0.5) sweep.lines.push(`${at} ic2-round: the round header is ${both.with.h} px with the timer, ${both.without.h} without`);
+    await sweep.measure(page, "ic2-round", header.locator(":scope > div").first());
+    await sweep.measure(page, "ic2-clock", clock);
+  } else await sweep.missing(page, "ic2-round", "the round header shows no clock");
+  const rows = tracker.locator("li[data-entry-row]");
+  await rows.first().waitFor();
+  // The chips, not the row's AC shield or health bar.
+  const chips = rows.locator('span[role="img"][title]:not([title="Armor Class"])');
+  await sweep.add(page, "ic2-tracker-chips", await chipLines(chips.filter({ visible: true }), at, "ic2-tracker-chips"));
+  // Each row's chips, which the pass changed, in the box that holds them.
+  for (const who of ["Thorn", "Wren"]) await sweep.measure(page, `ic2-chips-${who}`, rows.filter({ has: page.getByRole("button", { name: `${who} options` }) }).locator('span[role="img"][title]:not([title="Armor Class"])').first().locator(".."));
+  await closeSheets(page);
+  // The party bar, where it docks atop the side panel: Wren's E2 in the 20 px box.
+  if (wide) {
+    const party = page.getByRole("region", { name: "Party" }).or(page.locator('section[aria-label="Party"]')).first();
+    if (await visible(party)) {
+      await sweep.add(page, "ic2-party-chips", await chipLines(party.locator("span[title][aria-hidden]"), at, "ic2-party-chips"));
+      await sweep.measure(page, "ic2-party", party);
+    } else await sweep.missing(page, "ic2-party", "no party bar");
+  }
+
+  // The alert lines' leads: time up on the goblin's turn, and an effect that ended as it did.
+  await ops.send({ t: "actor.effect.add", target: { tokenId: run.ids.goblin }, effect: { id: randomUUID(), key: "frightened", duration: { mode: "turnEnd", of: { entryId: run.fight.goblin } } } });
+  await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
+  await turnTo(run.fight.goblin);
+  await page.locator('[data-alert="timeUp"]').first().waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
+  const timeUp = await alertCard(page, "Time is up for Goblin's turn.");
+  if (timeUp) await ic2Line(sweep, page, timeUp, "ic2-time-up");
+  else await sweep.missing(page, "ic2-time-up", "the goblin's turn ran out and showed no line");
+  await escapeAll(page);
+  await turnTo(run.fight.wren);
+  const ended = await alertCard(page, "Frightened ended on Goblin.");
+  if (ended) await ic2Line(sweep, page, ended, "ic2-ended");
+  else await sweep.missing(page, "ic2-ended", "Frightened ending showed no line");
+  await escapeAll(page);
+  await ops.send({ t: "room.update", settings: { turnTimerSec: 300 } });
+  await turnTo(run.fight.thorn);
+}
+
+/**
+ * An alert line, measured, and no taller and on no more lines with its
+ * lead and its close than as it was drawn before the pass: no lead, and
+ * Dismiss in words, as wide as a small button with those words. The x
+ * leaves the words more room than Dismiss did, and the lead takes some of
+ * it back (docs/design-v1-icons-2.md 4).
+ */
+async function ic2Line(sweep: Sweep, page: Page, line: Locator, screen: string): Promise<void> {
+  const both = await line.evaluate((el) => {
+    type El = { remove(): void; getBoundingClientRect(): { height: number }; querySelector(s: string): El | null; parentElement: El | null; nextSibling: El | null; insertBefore(a: El, b: El | null): void; style: Record<string, string> };
+    const root = el as unknown as El;
+    const g = globalThis as unknown as { document: { createRange(): { selectNodeContents(n: El): void; getClientRects(): ArrayLike<{ top: number }> }; createElement(t: string): { getContext(k: string): { font: string; measureText(t: string): { width: number } } } }; getComputedStyle(e: El): { font: string; paddingLeft: string; borderLeftWidth: string } };
+    const read = () => {
+      const text = root.querySelector("p");
+      const range = g.document.createRange();
+      if (text) range.selectNodeContents(text);
+      return { h: Math.round(root.getBoundingClientRect().height * 10) / 10, lines: text ? new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size : 0 };
+    };
+    const lead = root.querySelector(":scope > span:first-child");
+    const close = root.querySelector(":scope > button");
+    if (!lead || !close) return null;
+    const now = read();
+    // Today's Dismiss: its words in the button's own font, with its side padding and border either side, in the chrome's own px as its style is.
+    const cs = g.getComputedStyle(close);
+    const context = g.document.createElement("canvas").getContext("2d");
+    context.font = cs.font;
+    const dismiss = context.measureText("Dismiss").width + 2 * (parseFloat(cs.paddingLeft) || 12) + 2 * (parseFloat(cs.borderLeftWidth) || 0);
+    const next = lead.nextSibling;
+    const was = close.style.width ?? "";
+    lead.remove();
+    close.style.width = `${dismiss}px`;
+    const before = read();
+    close.style.width = was;
+    root.insertBefore(lead, next);
+    return { now, before };
+  });
+  if (!both) sweep.lines.push(`${sweep.at} ${screen}: the line has no lead or no close`);
+  else if (both.now.h > both.before.h + 0.5 || both.now.lines > both.before.lines) {
+    sweep.lines.push(`${sweep.at} ${screen}: ${both.now.h} px on ${both.now.lines} lines with its lead and its x, ${both.before.h} px on ${both.before.lines} as before the pass`);
+  }
+  await sweep.measure(page, screen, line);
+}
+
 const CASES = `
 <!doctype html>
 <style>
@@ -2337,6 +2712,25 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     }
     assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line in the scrolling strip:\n${sweep.lines.join("\n")}`);
   });
+
+  test("ic2-a. the second icon pass's fight: Thorn at level 7 with a stat block and a counted Hex, Wren a druid with known forms, Exhaustion 2 and Poisoned, the goblin hidden, locked and its name hidden, and the turn timer on", async () => {
+    await ic2Start();
+    await waitFor("Wren on the DM's copy", () => (dmSocket.state?.tokens[run.ids.wren] ? true : null));
+  });
+
+  for (const [i, { size, scale }] of IC2_AT.entries()) {
+    const at = `ic2-${size.name}-${Math.round(scale * 100)}`;
+    test(`ic2-b${i + 1}. at ${size.width} x ${size.height} at ${Math.round(scale * 100)}%: the pass's icons draw no new line, row or cut, within ${LIMIT_PX} px (docs/design-v1-icons-2.md 15)`, async () => {
+      const sweep = new Sweep(at);
+      const page = await dmPageFor(size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, size, scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await ic2Screens(sweep, page, size, scale);
+      console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
+      assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line at ${at}:\n${sweep.lines.join("\n")}`);
+    });
+  }
 
   test("pl3-c. the screens that show only at some sizes showed at as many as the polish pass found, and each trap name's pointer was read", () => {
     const short = Object.entries(SOME_SIZES)

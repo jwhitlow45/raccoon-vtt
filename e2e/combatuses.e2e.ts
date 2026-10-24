@@ -517,6 +517,33 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.equal(await deskCard.count(), 1, "Done hides it on this device alone");
   });
 
+  test("ic2-cu. the turn card's fold leads with its chevron and its Dismiss is the close, their names keep their words: folded on the phone, Show and its count, open, Collapse and Dismiss, and on the desk Dismiss (docs/design-v1-icons-2.md 4)", async () => {
+    const lead = (button: Locator) => button.evaluate((el) => (el as unknown as { firstElementChild: { tagName: string } | null }).firstElementChild?.tagName.toLowerCase() ?? null);
+    const close = async (button: Locator, why: string) => {
+      assert.equal((await button.innerText()).trim(), "", `${why} draws no words`);
+      assert.equal(await button.locator("svg").count(), 1, `${why} draws the close`);
+    };
+    const show = alerts(phone, "turn").getByRole("button", { name: `Show ${DRAGON}'s turn`, exact: true });
+    await show.waitFor();
+    assert.equal(await lead(show), "svg", "the chevron leads the folded line");
+    assert.equal(await show.getAttribute("aria-expanded"), "false");
+    const count = await show.evaluate((el) => {
+      const e = el as unknown as { getAttribute(n: string): string | null; ownerDocument: { getElementById(id: string): { textContent: string | null } | null } };
+      return e.ownerDocument.getElementById(e.getAttribute("aria-describedby") ?? "")?.textContent ?? null;
+    });
+    assert.equal(count, "3 uses", "the count its name leaves out is its description");
+    await show.click();
+    const collapse = alerts(phone, "turn").getByRole("button", { name: `Collapse ${DRAGON}'s turn`, exact: true });
+    await collapse.waitFor();
+    assert.equal(await lead(collapse), "svg", "the chevron leads the open card's title");
+    assert.equal(await collapse.getAttribute("aria-expanded"), "true");
+    await close(alerts(phone, "turn").getByRole("button", { name: `Dismiss ${DRAGON}'s turn`, exact: true }), "the phone's Dismiss");
+    await shots.take(phone, "cu-ic2-turn-open-phone");
+    await collapse.click();
+    await show.waitFor();
+    await close(alerts(desk, "turn").getByRole("button", { name: `Dismiss ${DRAGON}'s turn`, exact: true }), "the desk's Dismiss");
+  });
+
   test("cu-b-6. In lair gives the dragon its lair's legendary counts and XP", async () => {
     const tracker = await openTracker(desk);
     const toggle = tracker.getByRole("button", { name: `${DRAGON} options` });

@@ -529,9 +529,39 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     assert.ok(words);
     await player.mouse.click(words.x + 4, words.y + words.height / 2);
     assert.equal(await card.count(), 1, "a tap on the words dismissed the time-up");
+    // Its kind leads its words, and its Dismiss is the close alone (docs/design-v1-icons-2.md 4).
+    assert.equal(await card.locator(":scope > span:first-child svg").count(), 1, "the timer leads the time-up");
+    assert.equal((await card.getByRole("button", { name: /^Dismiss Time is up/ }).innerText()).trim(), "", "Dismiss draws its close alone");
     await card.getByRole("button", { name: /^Dismiss Time is up/ }).click();
     await card.waitFor({ state: "detached" });
     await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+  });
+
+  test("ic2-fold. an effect that ends leads its line with its art, then its words and the close (docs/design-v1-icons-2.md 4)", async () => {
+    // Frightened on Thorn until the end of the next goblin's turn, which ends one turn on: an effect set to end with the turn of the creature acting runs to the end of its next one.
+    const active = () => dmSocket.state?.encounter?.activeEntryId;
+    assert.equal(active(), run.entries.thorn, "Thorn's turn, as test 5 left it");
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: randomUUID(), key: "frightened", duration: { mode: "turnEnd", of: { entryId: run.entries.goblins[1] } } } });
+    await waitFor("Thorn frightened", () => (dmSocket.state?.characters[run.thorn.characterId]?.actor.effects.some((e) => e.key === "frightened") ? true : null));
+    await ops.send({ t: "encounter.next" });
+    await ops.send({ t: "encounter.next" });
+    const line = player.getByRole("group", { name: "Frightened ended on Thorn.", exact: true });
+    await line.waitFor();
+    const art = await line.locator(":scope > span:first-child > span").evaluate((el) => (el as unknown as { style: { maskImage: string; webkitMaskImage: string } }).style.maskImage || (el as unknown as { style: { webkitMaskImage: string } }).style.webkitMaskImage);
+    assert.match(art, /conditions\/frightened\.svg/, "Frightened's art leads the line");
+    await line.getByRole("status").getByText("Frightened ended on Thorn.", { exact: true }).waitFor();
+    const dismiss = line.getByRole("button", { name: "Dismiss Frightened ended on Thorn", exact: true });
+    assert.equal((await dismiss.innerText()).trim(), "", "Dismiss draws its close alone");
+    await shots.take(player, "fold-ic2-ended-line");
+    await dismiss.click();
+    await line.waitFor({ state: "detached" });
+    // Round on to Thorn's turn again, as the later steps find it.
+    for (let i = 0; i < 4 && active() !== run.entries.thorn; i++) {
+      const was = active();
+      await ops.send({ t: "encounter.next" });
+      await waitFor("the turn moved", () => (active() !== was ? true : null));
+    }
+    assert.equal(active(), run.entries.thorn);
   });
 
   for (const size of [

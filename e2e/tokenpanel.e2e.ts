@@ -1549,6 +1549,34 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await shots.take(dm, "tokenpanel-dm-group-bar");
   });
 
+  test("ic2-tags. a hidden, locked token with its name hidden: Hidden and Locked wear their icons, Hidden keeps its whole words as its tooltip, and Name hidden stays words (docs/design-v1-icons-2.md 5)", async () => {
+    await setUp(dm, dmCdp, DESK, null);
+    await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { visibility: "dm", locked: true, nameHidden: true } });
+    try {
+      await waitFor("the goblin hidden and locked", () => (dmSocket.state?.tokens[run.goblin.id]?.locked && dmSocket.state.tokens[run.goblin.id]?.nameHidden ? true : null));
+      await tapToken(dm, run.goblin.at);
+      await bar(dm, "Goblin 4").getByRole("button", { name: "Details", exact: true }).click();
+      const panel = tokenPanel(dm);
+      await panel.locator("[data-kind-line]").first().waitFor();
+      // A tag's words stand in a span of their own inside it, where it cuts them (components/Tag.tsx).
+      const tag = (words: string) => panel.locator("[data-kind-line] ~ div").first().getByText(words, { exact: true }).locator("..");
+      const looks = [];
+      for (const words of ["Hidden", "Locked", "Name hidden"]) {
+        const t = tag(words);
+        await t.waitFor();
+        looks.push({ words, icon: await t.locator("svg").count(), title: await t.getAttribute("title") });
+      }
+      assert.deepEqual(looks, [
+        { words: "Hidden", icon: 1, title: "Hidden from players" },
+        { words: "Locked", icon: 1, title: "Locked" },
+        { words: "Name hidden", icon: 0, title: "Name hidden" },
+      ]);
+      await shots.take(dm, "tokenpanel-ic2-header-tags");
+    } finally {
+      await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { visibility: "all", locked: false, nameHidden: false } });
+    }
+  });
+
   test("pl1-e. the panel's rows that stretch their control share one left edge, whatever each control's own width: the goblin's Size and Senses in Stats and its Name, Kind, Ring, Layer and Players see HP as in Token settings, at 320 x 568, 390 x 844 and 1440 x 900, at 100% and 130% (docs/design-v1-polish.md R2)", async () => {
     for (const width of [320, 390, 1440]) {
       for (const scale of [1, 1.3]) {

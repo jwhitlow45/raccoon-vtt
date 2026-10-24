@@ -612,7 +612,8 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await belowName(dm, "Log").click();
     const list = belowMenu(dm);
     await list.waitFor();
-    const items = await list.getByRole("menuitemradio").evaluateAll((els) => els.map((el) => ((el as unknown as { firstChild: DomEl | null }).firstChild?.textContent ?? "").trim()));
+    // Each item's title, after its panel's icon, which a screen reader does not hear (docs/design-v1-icons-2.md 3.1).
+    const items = await list.getByRole("menuitemradio").evaluateAll((els) => els.map((el) => ((el as unknown as { querySelector(s: string): DomEl | null }).querySelector(":scope > :not([aria-hidden])")?.textContent ?? "").trim()));
     assert.deepEqual(items, ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
     assert.equal(await list.getByRole("menuitemradio", { name: sideTabName("Log") }).getAttribute("aria-checked"), "true");
     assert.equal(await described(list.getByRole("menuitemradio", { name: "Initiative" })), "Shown on top");
@@ -1238,6 +1239,35 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await ops.send({ t: "token.delete", tokenId: run.pip });
     await waitFor("Pip gone", () => (dmSocket.state?.tokens[run.pip] ? null : true));
     await oneOnly(dm);
+  });
+
+  test("ic2-split. on a touch tablet the top pane's icon tab is named above it, and the pane below, which the bar names, never is (docs/design-v1-icons-2.md 3.1)", async () => {
+    const context = await browser.newContext({ viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: true, storageState: await dmContext.storageState() });
+    try {
+      const page = await context.newPage();
+      const watch = new ConsoleWatch("dm, touch tablet");
+      watch.attach(page);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      await showSide(page);
+      await splitWith(page, "Initiative", "Token");
+      // The header stands before the pane's body (pages/Room.tsx SidePane).
+      const headerOf = (pane: Locator) =>
+        pane.evaluate((el) => {
+          type E = { matches(s: string): boolean; querySelector(s: string): E | null; previousElementSibling: E | null; textContent: string | null };
+          const e = el as unknown as E;
+          const body = e.matches("[data-pane-body]") ? e : e.querySelector("[data-pane-body]");
+          const header = body?.previousElementSibling ?? null;
+          return header ? (header.textContent ?? "").trim() : null;
+        });
+      assert.equal(await headerOf(topPane(page, "Initiative")), "Initiative", "the top pane's icon tab is named above it");
+      assert.equal(await headerOf(bottomPane(page, "Token")), null, "the pane below draws no header");
+      await shots.take(page, "splitpanel-ic2-tablet-two-panels");
+      assert.deepEqual(watch.errors, [], "the tablet's page logged errors");
+    } finally {
+      await context.close();
+    }
   });
 
   test("11. no page logged an error or a warning", () => {

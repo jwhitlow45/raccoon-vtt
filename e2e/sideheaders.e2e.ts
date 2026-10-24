@@ -519,6 +519,27 @@ describe("raccoon-vtt: the side panel's compact headers", { timeout: 900_000 }, 
     await phone.close();
   });
 
+  test("ic2-sheet. a phone's sheet names its panel in its own header, and nothing draws a second name over it (docs/design-v1-icons-2.md 3.1)", async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, storageState: await dmContext.storageState() });
+    try {
+      const page = await context.newPage();
+      const watch = new ConsoleWatch("dm, phone");
+      watch.attach(page);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
+      await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Log/ }).tap();
+      const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Log"]');
+      await sheet.waitFor();
+      assert.equal(await sheet.getByRole("heading", { name: "Log", exact: true }).count(), 1, "one header names the Log");
+      await shots.take(page, "sideheaders-ic2-phone-sheet");
+      assert.deepEqual(watch.errors, [], "the phone's page logged errors");
+    } finally {
+      await context.close();
+    }
+  });
+
   test("5. a phone held sideways at 85% holds two panels for the DM", async () => {
     await view(dm, dmCdp, { width: 844, height: 390 }, { side: 47, bottom: 21 });
     await reloadAt(dm, 0.85, true);

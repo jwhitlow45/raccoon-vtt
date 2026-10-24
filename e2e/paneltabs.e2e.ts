@@ -59,8 +59,11 @@ const run = {
 const DM_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
 const PLAYER_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
 // "Two panels" heads each menu, a checkbox this shape does not list, then the line under it (docs/design-v1-split-panel.md 6).
-const DM_MENU = ["---", "#In play", "Log", "Journal", "Areas", "DM", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
-const PLAYER_MENU = ["---", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
+// The Log is in the row since the tabs draw their icons alone (docs/design-v1-icons-2.md 6).
+const DM_MENU = ["---", "#In play", "Journal", "Areas", "DM", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
+const PLAYER_MENU = ["---", "Journal", "Areas", "Characters", "Library", "Menu"];
+/** The row's tabs in today's side panel, its icons alone (docs/design-v1-icons-2.md 6). */
+const ROW = ["Token", "Initiative", "Dice", "Log"];
 
 type Box = { x: number; y: number; width: number; height: number };
 type Insets = { side?: number; bottom?: number };
@@ -69,7 +72,11 @@ type Insets = { side?: number; bottom?: number };
 type DomEl = {
   tagName: string;
   textContent: string | null;
+  nodeType: number;
   firstChild: { textContent: string | null } | null;
+  childNodes: ArrayLike<DomEl>;
+  previousElementSibling: DomEl | null;
+  currentCSSZoom?: number;
   scrollWidth: number;
   clientWidth: number;
   children: ArrayLike<DomEl>;
@@ -128,12 +135,68 @@ function isFocused(target: Locator): Promise<boolean> {
   return target.evaluate((el) => el === (el as unknown as DomEl).ownerDocument.activeElement);
 }
 
-/** The titles of the tabs in the row, More left out: each tab's first text, before its corner badge. */
+/**
+ * The titles of the tabs in the row, More left out: each tab's first
+ * words after its icon, before its corner badge. A tab that draws its
+ * icon alone keeps its title in a hidden span (docs/design-v1-icons-2.md 3.1).
+ */
 function rowTitles(page: Page): Promise<string[]> {
   return tablist(page)
     .locator('[role="tab"]:not([aria-haspopup])')
-    .evaluateAll((els) => els.map((el) => ((el as unknown as DomEl).firstChild?.textContent ?? "").trim()));
+    .evaluateAll((els) =>
+      els.map((el) => {
+        for (const n of Array.from((el as unknown as DomEl).childNodes)) {
+          if (n.nodeType === 3 && (n.textContent ?? "").trim() !== "") return (n.textContent ?? "").trim();
+          if (n.tagName === "SPAN" && n.getAttribute("aria-hidden") !== "true") return (n.textContent ?? "").trim();
+        }
+        return "";
+      }),
+    );
 }
+
+/** The header the side panel draws above a tab's panel, its words and height in the chrome's px, or null with none (docs/design-v1-panel-tabs.md 3.8). */
+function headerOver(page: Page, tab: Locator): Promise<{ words: string; height: number } | null> {
+  return tab.evaluate((el) => {
+    const e = el as unknown as DomEl;
+    const body = e.ownerDocument.getElementById(e.getAttribute("aria-controls") ?? "") ?? (e as unknown as { closest(s: string): DomEl | null }).closest("aside")?.querySelector('[role="tabpanel"]') ?? null;
+    const header = body?.previousElementSibling ?? null;
+    if (!header) return null;
+    return { words: (header.textContent ?? "").trim(), height: header.getBoundingClientRect().height };
+  });
+}
+
+/**
+ * Picks a tab as a press does and reads the header over its panel in the
+ * next animation frame, before the browser paints it, so a header drawn a
+ * frame late is caught.
+ */
+function pickAndReadHeader(tab: Locator): Promise<string | null> {
+  return tab.evaluate(
+    (el) =>
+      new Promise<string | null>((resolve) => {
+        const e = el as unknown as DomEl & { click(): void; id: string };
+        e.click();
+        const g = globalThis as unknown as { requestAnimationFrame(f: () => void): void };
+        g.requestAnimationFrame(() => {
+          const body = e.ownerDocument.getElementById(e.getAttribute("aria-controls") ?? "");
+          const header = body?.previousElementSibling ?? null;
+          resolve(header ? (header.textContent ?? "").trim() : null);
+        });
+      }),
+  );
+}
+
+/** Whether More's title is drawn: its words, or its icon alone with the title kept hidden for a screen reader. */
+function moreTitleDrawn(page: Page): Promise<boolean> {
+  return more(page)
+    .locator("span:not([aria-hidden])")
+    .first()
+    // A title kept for a screen reader alone is a 1 px box, which the interface size draws up to 1.3 px.
+    .evaluate((el) => (el as unknown as DomEl).getBoundingClientRect().width > 2);
+}
+
+/** The tooltip on show with these words, in the browser's top layer (docs/design-v1-icons.md 3.2). */
+const tipOn = (page: Page, words: string) => page.locator('[role="tooltip"]:popover-open', { hasText: new RegExp(`^${words}$`) });
 
 /** More's menu as it reads: "#" and a group's label, "---" for the line, an item's title. */
 function menuShape(page: Page): Promise<string[]> {
@@ -141,7 +204,8 @@ function menuShape(page: Page): Promise<string[]> {
     const out: string[] = [];
     const walk = (el: DomEl) => {
       const role = el.getAttribute("role");
-      if (role === "menuitemradio") out.push((el.querySelector("span")?.textContent ?? "").trim());
+      // Its title's span, after the icon's, which is hidden from a screen reader.
+      if (role === "menuitemradio") out.push((el.querySelector("span:not([aria-hidden])")?.textContent ?? "").trim());
       else if (role === "separator") out.push("---");
       else {
         if (role === "group") out.push(`#${el.ownerDocument.getElementById(el.getAttribute("aria-labelledby") ?? "")?.textContent ?? ""}`);
@@ -280,7 +344,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
           const row = await rowTitles(page);
           const rowBox = await box(tablist(page).locator(".."));
           assert.ok(rowBox.height <= (44 + 16 + 1) * scale + 1, `${at}: the row is one tab tall with its padding, ${rowBox.height} px`);
-          if (size.width === 1280) assert.deepEqual(row, ["Token", "Initiative", "Dice"], `${at}: the row`);
+          if (size.width === 1280) assert.deepEqual(row, ROW, `${at}: the row`);
           await more(page).click();
           await menu(page).waitFor();
           const items = (await menuShape(page)).filter((s) => !s.startsWith("#") && s !== "---");
@@ -298,10 +362,10 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     }
   });
 
-  test("2. a panel opened from More names More and moves nothing, and the Log's badge in More moves no tab", async () => {
+  test("2. a panel opened from More names More and moves nothing, and the Log's badge on its icon tab names it and moves no tab", async () => {
     await openSideTab(dm, "Initiative");
     const before = await rowBoxes(dm);
-    for (const title of DM_PANELS.slice(3)) {
+    for (const title of DM_PANELS.slice(ROW.length)) {
       await more(dm).click();
       await menu(dm).getByRole("menuitemradio", { name: sideTabName(title) }).click();
       await dm.getByRole("tabpanel", { name: sideTabName(title) }).waitFor();
@@ -318,7 +382,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await tablist(dm).getByRole("tab", { name: "Initiative", exact: true }).click();
     assert.ok(await tablist(dm).getByRole("tab", { name: "More panels" }).isVisible(), "More is More panels again");
 
-    // The Log is in More since Dice joined the row (docs/design-v1-dice.md 8.1), so its badge goes there with it.
+    // The Log is in the row since the tabs draw their icons alone, so its badge sits on its tab's corner and its count stays in the tab's name (docs/design-v1-icons-2.md 3.1).
     const rowBefore = await rowBoxes(dm);
     const patCookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: patCookie });
@@ -327,10 +391,10 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     } finally {
       patOps.close();
     }
-    await waitFor("More's description says 1 unread", async () => ((await moreDescription(dm)) === "1 unread" ? true : null));
+    await tablist(dm).getByRole("tab", { name: "Log 1 unread", exact: true }).waitFor();
     assert.ok(
       (await rowBoxes(dm)).every((b, i) => sameBox(b, rowBefore[i]!)),
-      "the badge sits on More's corner and moves no tab",
+      "the badge sits on the Log's corner and moves no tab",
     );
     await shots.take(dm, "paneltabs-dm-log-badge");
     await openSideTab(dm, "Log");
@@ -352,14 +416,18 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await openSideTab(dm, "Dice");
     await dice.focus();
     await dm.keyboard.press("ArrowRight");
-    assert.ok(await isFocused(more(dm)), "Right from Dice goes to More");
-    assert.equal(await dice.getAttribute("aria-selected"), "true", "and Dice stays chosen");
+    const log = tablist(dm).getByRole("tab", { name: sideTabName("Log") });
+    assert.ok(await isFocused(log), "Right from Dice goes to the Log");
+    assert.equal(await log.getAttribute("aria-selected"), "true", "and chooses it, as a tab does");
+    await dm.keyboard.press("ArrowRight");
+    assert.ok(await isFocused(more(dm)), "Right from the Log goes to More");
+    assert.equal(await log.getAttribute("aria-selected"), "true", "and the Log stays chosen");
     await dm.keyboard.press("Enter");
-    await on("Log", "Enter opens the menu at its first item");
+    await on("Journal", "Enter opens the menu at its first item");
     await dm.keyboard.press("ArrowDown");
-    await on("Journal", "Down");
+    await on("Areas", "Down");
     await dm.keyboard.press("ArrowUp");
-    await on("Log", "Up");
+    await on("Journal", "Up");
     await dm.keyboard.press("End");
     await on("Menu", "End");
     await dm.keyboard.press("Home");
@@ -424,9 +492,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await tablist(dm).getByRole("tab", { name: "Token", exact: true }).click();
     await dm.keyboard.press("ArrowLeft");
     await dm.keyboard.press("Enter");
-    await on("Log", "Enter on More");
-    await dm.keyboard.press("ArrowDown");
-    await on("Journal", "Down to the Journal");
+    await on("Journal", "Enter on More, at the Journal");
     await dm.keyboard.press("Enter");
     await dm.getByRole("heading", { name: "Lore" }).waitFor();
     assert.ok(await isFocused(more(dm)), "focus stays on More");
@@ -490,7 +556,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await pat.keyboard.press("Escape");
   });
 
-  test("6. hidden and shown: focus on More, the menu closed, and a large phone held sideways cuts a name and names it above the panel", async () => {
+  test("6. hidden and shown: focus on More, the menu closed, and a short window draws a held name More would cut as its icon alone, named on hover, not above the panel", async () => {
     await openSideTab(dm, "Monsters");
     await hidePanels(dm).click();
     await sidePanel(dm).waitFor({ state: "hidden" });
@@ -513,22 +579,24 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     await panelsButton(dm).click();
     await sidePanel(dm).waitFor();
     assert.ok(await isFocused(tablist(dm).getByRole("tab", { name: "Initiative", exact: true })), "Panels gives focus to the Initiative tab");
-    assert.deepEqual(await rowTitles(dm), ["Token", "Initiative"]);
+    assert.deepEqual(await rowTitles(dm), ["Token", "Initiative", "Dice"]);
     await openSideTab(dm, "Encounters");
-    const span = more(dm).locator("span").first();
-    assert.ok(await span.evaluate((el) => (el as unknown as DomEl).scrollWidth > (el as unknown as DomEl).clientWidth), "More's title is cut");
+    // More would cut the name, so it draws the panel's icon alone, and a computer names it on hover and focus, not above the panel (docs/design-v1-icons-2.md 3.1, D-261024-36).
+    assert.equal(await moreTitleDrawn(dm), false, "More draws Encounters' icon alone");
     assert.ok(await tablist(dm).getByRole("tab", { name: "Encounters", exact: true, selected: true }).isVisible(), "More's name is the whole title");
-    await sidePanel(dm).getByRole("heading", { name: "Encounters", exact: true }).waitFor();
-    await shots.take(dm, "paneltabs-dm-932x430-encounters-cut");
+    assert.equal(await headerOver(dm, more(dm)), null, "a computer draws no header over the panel");
+    await more(dm).hover();
+    await tipOn(dm, "Encounters").waitFor();
+    await shots.take(dm, "paneltabs-dm-932x430-encounters-icon");
     await openSideTab(dm, "Initiative");
 
     await view(dm, dmCdp, { width: 1280, height: 800 });
     await reloadAt(dm, 1);
-    await openSideTab(dm, "Dice");
-    await tablist(dm).getByRole("tab", { name: sideTabName("Dice") }).focus();
+    await openSideTab(dm, "Log");
+    await tablist(dm).getByRole("tab", { name: sideTabName("Log") }).focus();
     await view(dm, dmCdp, { width: 932, height: 430 }, { side: 59, bottom: 21 });
-    await waitFor("Dice in More, and focus on More", async () => ((await isFocused(more(dm))) ? true : null), 3_000);
-    assert.ok(await tablist(dm).getByRole("tab", { name: sideTabName("Dice"), selected: true }).isVisible(), "More names the Dice");
+    await waitFor("the Log in More, and focus on More", async () => ((await isFocused(more(dm))) ? true : null), 3_000);
+    assert.ok(await tablist(dm).getByRole("tab", { name: sideTabName("Log"), selected: true }).isVisible(), "More names the Log");
     await view(dm, dmCdp, { width: 1280, height: 800 });
     await openSideTab(dm, "Initiative");
   });
@@ -614,7 +682,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     assert.deepEqual(misses, []);
   });
 
-  test("8. a font as wide as DejaVu Sans keeps Token, Initiative and Dice, cuts Encounters on More and names it above the panel", async () => {
+  test("8. a font as wide as DejaVu Sans keeps Token, Initiative, Dice and Log, draws Encounters on More as its icon alone and names it on hover", async () => {
     // Verdana, which macOS has, draws these titles within a few px of DejaVu Sans (3.2). The room's CSP refuses a page's own style element, so this DM's second window lets the test add one.
     const wide = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true, storageState: await dmContext.storageState() });
     try {
@@ -627,17 +695,19 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       await page.addStyleTag({ content: 'aside, aside * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }' });
       await page.waitForTimeout(300);
       await openSideTab(page, "Initiative");
-      assert.deepEqual(await rowTitles(page), ["Token", "Initiative", "Dice"]);
+      assert.deepEqual(await rowTitles(page), ROW);
       const before = await rowBoxes(page);
       await openSideTab(page, "Encounters");
-      const span = more(page).locator("span").first();
-      assert.ok(await span.evaluate((el) => (el as unknown as DomEl).scrollWidth > (el as unknown as DomEl).clientWidth), "More's title is cut");
+      assert.equal(await moreTitleDrawn(page), false, "More draws Encounters' icon alone");
       assert.ok(await tablist(page).getByRole("tab", { name: "Encounters", exact: true, selected: true }).isVisible(), "More's name is the whole title");
       await page.getByRole("tabpanel", { name: "Encounters", exact: true }).waitFor();
-      await sidePanel(page).getByRole("heading", { name: "Encounters", exact: true }).waitFor();
+      assert.equal(await headerOver(page, more(page)), null, "a computer draws no header over the panel");
+      await more(page).hover();
+      await tipOn(page, "Encounters").waitFor();
       await shots.take(page, "paneltabs-dm-wide-font-encounters");
       assert.ok((await rowBoxes(page)).every((b, i) => sameBox(b, before[i]!)), "Encounters moved a tab");
       await openSideTab(page, "Journal");
+      assert.equal(await moreTitleDrawn(page), true, "More draws the Journal's whole name");
       assert.equal(await sidePanel(page).getByRole("heading", { name: "Journal", exact: true }).count(), 0, "a whole name gets no header");
       assert.ok((await rowBoxes(page)).every((b, i) => sameBox(b, before[i]!)), "Journal moved a tab");
       await openSideTab(page, "Initiative");
@@ -716,6 +786,124 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       assert.deepEqual(watch.errors, [], "the touch page logged errors");
     } finally {
       await touch.close();
+    }
+  });
+
+  test("ic2-1. on a computer each tab draws its icon alone, named by its words and on hover and keyboard focus with no native title, More draws a held name it would cut as its icon alone with its tooltip and still opens its menu, and no header ever stands over the panel, at 85%, 100%, 115% and 130%", async () => {
+    await view(dm, dmCdp, { width: 1280, height: 800 });
+    let iconAlone = 0;
+    for (const scale of [0.85, 1, 1.15, 1.3]) {
+      const at = `1280 x 800 at ${scale * 100}%`;
+      await reloadAt(dm, scale);
+      await openSideTab(dm, "Initiative");
+      assert.deepEqual(await rowTitles(dm), ROW, `${at}: four tabs`);
+      for (const title of ROW) {
+        const tab = tablist(dm).getByRole("tab", { name: sideTabName(title) });
+        assert.equal(await tab.getAttribute("title"), null, `${at}: ${title} has no native title`);
+        assert.equal(await tab.getAttribute("aria-label"), null, `${at}: ${title} is named by its words, so its badge's words stay in its name`);
+      }
+      const initiative = tablist(dm).getByRole("tab", { name: "Initiative", exact: true });
+      assert.equal(await headerOver(dm, initiative), null, `${at}: no header over an icon tab's panel`);
+      const top = (await box(dm.getByRole("tabpanel", { name: "Initiative", exact: true }))).y;
+      await openSideTab(dm, "Encounters");
+      if (!(await moreTitleDrawn(dm))) iconAlone++;
+      assert.equal(await headerOver(dm, more(dm)), null, `${at}: no header over a panel More holds`);
+      assert.ok(Math.abs((await box(dm.getByRole("tabpanel", { name: "Encounters", exact: true }))).y - top) <= 0.5, `${at}: the panel keeps its top, so its height`);
+      await openSideTab(dm, "Journal");
+      assert.equal(await moreTitleDrawn(dm), true, `${at}: More draws the Journal's whole name beside its icon`);
+      if (scale === 1) {
+        await initiative.hover();
+        await tipOn(dm, "Initiative").waitFor();
+        await shots.take(dm, "paneltabs-ic2-1280x800-hover-initiative");
+        await dm.mouse.move(640, 700);
+        await tipOn(dm, "Initiative").waitFor({ state: "detached" }).catch(() => {});
+        // By the keys: Shift+Tab from Hide panels to More, which holds Encounters drawn as its icon, its menu, then Left to the Log's icon.
+        await openSideTab(dm, "Encounters");
+        assert.equal(await moreTitleDrawn(dm), false, "at 100% More draws Encounters' icon alone");
+        await more(dm).hover();
+        await tipOn(dm, "Encounters").waitFor();
+        await dm.mouse.move(640, 700);
+        await hidePanels(dm).focus();
+        await dm.keyboard.press("Shift+Tab");
+        assert.ok(await isFocused(more(dm)), "Shift+Tab reaches More");
+        await tipOn(dm, "Encounters").waitFor();
+        await shots.take(dm, "paneltabs-ic2-1280x800-focus-more");
+        await dm.keyboard.press("Enter");
+        await menu(dm).waitFor();
+        await dm.keyboard.press("Escape");
+        await menu(dm).waitFor({ state: "detached" });
+        await dm.keyboard.press("ArrowLeft");
+        await tipOn(dm, "Log").waitFor();
+        await more(dm).click();
+        await menu(dm).waitFor();
+        await dm.keyboard.press("Escape");
+        await menu(dm).waitFor({ state: "detached" });
+      }
+      await openSideTab(dm, "Initiative");
+    }
+    assert.ok(iconAlone > 0, "More drew Encounters as its icon at no size");
+    await reloadAt(dm, 1);
+  });
+
+  /** The DM's room in a touch context of its own, as a tablet or a phone opens it. */
+  async function touchDm(size: { width: number; height: number }): Promise<{ context: BrowserContext; page: Page; watch: ConsoleWatch }> {
+    const context = await browser.newContext({ viewport: size, hasTouch: true, isMobile: true, storageState: await dmContext.storageState() });
+    const page = await context.newPage();
+    const watch = new ConsoleWatch(`dm, touch ${size.width} x ${size.height}`);
+    watch.attach(page);
+    await page.goto(`${server.origin}/r/${run.roomId}`);
+    await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    await page.locator(".konvajs-content").first().waitFor();
+    return { context, page, watch };
+  }
+
+  test("ic2-2. on a touch tablet an icon tab's panel is named above it from the first frame, 45 px at 100%, More's whole name needs no header, and More's icon alone gets one, at 85%, 100%, 115% and 130%", async () => {
+    const { context, page, watch } = await touchDm({ width: 1180, height: 820 });
+    let iconAlone = 0;
+    try {
+      for (const scale of [0.85, 1, 1.15, 1.3]) {
+        const at = `1180 x 820 at ${scale * 100}%`;
+        await reloadAt(page, scale);
+        if (await sidePanel(page).isHidden()) await panelsButton(page).tap();
+        await openSideTab(page, "Token");
+        assert.deepEqual(await rowTitles(page), ROW, `${at}: four tabs on touch too`);
+        const initiative = tablist(page).getByRole("tab", { name: "Initiative", exact: true });
+        assert.equal(await pickAndReadHeader(initiative), "Initiative", `${at}: the header names Initiative in the frame after the pick`);
+        const header = await headerOver(page, initiative);
+        assert.ok(header && Math.abs(header.height - 45 * scale) <= 1, `${at}: the header is ${header?.height} px, not ${45 * scale}`);
+        await openSideTab(page, "Journal");
+        assert.equal(await headerOver(page, more(page)), null, `${at}: More shows the Journal's whole name, so no header`);
+        // More draws its name whole where it fits, else the icon alone, and the header names it then alone.
+        await openSideTab(page, "Encounters");
+        const whole = await moreTitleDrawn(page);
+        if (!whole) iconAlone++;
+        assert.equal((await headerOver(page, more(page)))?.words ?? null, whole ? null : "Encounters", `${at}: the header over Encounters, its name ${whole ? "whole" : "an icon"} on More`);
+        if (scale === 1) await shots.take(page, "paneltabs-ic2-1180x820-encounters-header");
+        await openSideTab(page, "Initiative");
+      }
+      assert.ok(iconAlone > 0, "More drew Encounters as its icon at no size");
+      assert.deepEqual(watch.errors, [], "the tablet's page logged errors");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("ic2-3. a phone held sideways at 844 x 390 at 85% docks the side panel, shown by Panels, and names an icon tab's panel above it, 38 px (ICONS2-R2-02)", async () => {
+    const { context, page, watch } = await touchDm({ width: 844, height: 390 });
+    try {
+      await reloadAt(page, 0.85, "clear");
+      assert.equal(await sidePanel(page).isHidden(), true, "a short layout with no stored choice starts hidden");
+      await panelsButton(page).tap();
+      await sidePanel(page).waitFor();
+      const initiative = tablist(page).getByRole("tab", { name: "Initiative", exact: true });
+      await openSideTab(page, "Token");
+      assert.equal(await pickAndReadHeader(initiative), "Initiative", "the header names Initiative in the frame after the pick");
+      const header = await headerOver(page, initiative);
+      assert.ok(header && Math.abs(header.height - 45 * 0.85) <= 1, `the header is ${header?.height} px, not 38`);
+      await shots.take(page, "paneltabs-ic2-844x390-85-header");
+      assert.deepEqual(watch.errors, [], "the phone's page logged errors");
+    } finally {
+      await context.close();
     }
   });
 
