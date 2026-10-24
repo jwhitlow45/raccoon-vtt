@@ -128,7 +128,9 @@ export function CreatureUses(props: { target: ActorTarget; name: string }) {
  * The token bar's Uses drawer (docs/design-v1-combat-controls.md 6): the
  * creature's off-turn list, as its tracker row's group holds it. It opens
  * on its first button, so a keyboard lands in it, and Escape closes it
- * alone, never the bar around it.
+ * alone, never the bar around it. It takes focus itself when a press
+ * leaves it with no button, as Restore beside Regeneration does, so that
+ * Escape still reaches it.
  */
 export function UsesDrawer(props: { target: ActorTarget; name: string; onClose(): void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -145,6 +147,7 @@ export function UsesDrawer(props: { target: ActorTarget; name: string; onClose()
       role="group"
       aria-label={`${props.name}'s uses`}
       data-uses-drawer=""
+      tabIndex={-1}
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
         e.stopPropagation();
@@ -201,8 +204,9 @@ function reachable(el: HTMLElement | null | undefined): HTMLElement | null {
 /**
  * Where focus goes once a press took its button away (D-261024-43): the
  * row's first button, else the list's, else the prompt card a Reopen
- * brought back, else the turn card, the drawer's first button or the
- * bar's frame that held the list, else the tracker row's own button.
+ * brought back, else the turn card, the drawer's first button, the
+ * drawer itself or the bar's frame that held the list, else the tracker
+ * row's own button.
  * Never the page.
  */
 function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "trackerRow", HTMLElement | null>, key: string, reopened: string | null): HTMLElement | null {
@@ -213,6 +217,7 @@ function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "tr
     (reopened ? reachable(document.querySelector<HTMLElement>(reopened)?.querySelector<HTMLElement>("button")) : null) ??
     reachable(near.card) ??
     reachable(reachable(near.drawer)?.querySelector<HTMLElement>("button")) ??
+    reachable(near.drawer) ??
     reachable(near.frame) ??
     reachable(reachable(near.trackerRow)?.querySelector<HTMLElement>("[data-row-button]"))
   );

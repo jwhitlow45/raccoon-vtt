@@ -1518,7 +1518,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
   });
 
-  test("13j. by keyboard, a press that takes a uses list's last button away hands focus to what stays: the row's next button across a recharge's turn, the turn card after its sole Use, the bar's frame after the only other row's Restore, and the reopened card after Reopen (D-261024-43)", async () => {
+  test("13j. by keyboard, a press that takes a uses list's last button away hands focus to what stays: the row's next button across a recharge's turn, the turn card after its sole Use, the bar's frame after the only other row's Restore, the drawer after a Restore beside Regeneration, and the reopened card after Reopen (D-261024-43)", async () => {
     const focused = () =>
       dm.evaluate(() => {
         const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
@@ -1535,6 +1535,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const press = async (control: Locator) => {
       await control.focus();
       await dm.keyboard.press("Enter");
+    };
+    const marked = (tokenId: string, key: string) => {
+      const a = dmSocket.state?.tokens[tokenId]?.actor;
+      return a !== undefined && "inline" in a && a.inline.uses?.[key] !== undefined;
     };
     const srd = await loadMonsters();
     const block = (srdId: string) => monsterActor(srd.find((m) => m.srdId === srdId)!);
@@ -1591,6 +1595,20 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await waitFor("the mark gone", () => (dmSocket.state?.tokens[old]?.actor && "inline" in dmSocket.state.tokens[old]!.actor && !dmSocket.state.tokens[old]!.actor.inline.uses?.["actions:old-breath"] ? true : null));
       await lands(/^div Old Goblin actions$/, "the last Restore handed focus to the bar");
       await oldBar.getByRole("button", { name: "Close", exact: true }).first().click();
+
+      // The limb's drawer holds Regeneration, which has no button, and a mark its block no longer lists: Restore leaves the drawer with no button, and focus goes to the drawer, so Escape closes it alone.
+      await ops.send({ t: "actor.use", target: { tokenId: limb }, use: { kind: "ability", key: "actions:old-bite", name: "Old Bite", limit: "recharge", min: 5, max: 1 } });
+      await (await rowButton(dm, "Troll Limb")).click();
+      const limbBar = bar(dm, "Troll Limb");
+      await press(limbBar.getByRole("button", { name: "Uses", exact: true }));
+      const limbDrawer = limbBar.locator("[data-uses-drawer]");
+      await press(limbDrawer.getByRole("button", { name: "Restore Old Bite" }));
+      await waitFor("the limb's mark gone", () => (marked(limb, "actions:old-bite") ? null : true));
+      await lands(/^div Troll Limb's uses$/, "the Restore beside Regeneration handed focus to the drawer");
+      await dm.keyboard.press("Escape");
+      await limbDrawer.waitFor({ state: "detached" });
+      assert.equal(await limbBar.isVisible(), true, "Escape closed the bar, not the drawer");
+      await limbBar.getByRole("button", { name: "Close", exact: true }).first().click();
 
       // The limb's turn: its Regeneration skipped, then Reopen, the turn card's only button, takes the card away with it: focus goes to the card it reopened.
       await ops.send({ t: "encounter.next" });
