@@ -410,9 +410,19 @@ export function readResources(data: Obj, src: Sources & { who: string }): Resour
   const out = resources.slice(0, MAX_FILL_RESOURCES);
   // Lines for resources the cut took say nothing true of the character's list.
   const shown = new Set(out.map((r) => r.resource.name));
-  const ability = skips.flatMap((s) => (s.why === "ability" ? [s.name] : []));
-  const prof = skips.flatMap((s) => (s.why === "proficiency" ? [s.name] : []));
-  const another = skips.flatMap((s) => (s.why === "another" ? [s.name] : []));
+  // Rules 2 and 3 of 2.1 merge only what was read, so a feature on several actions is skipped once per action: name it once, as first spelled.
+  const skipped = (why: "ability" | "proficiency" | "another"): string[] => {
+    const seen = new Map<string, string>();
+    for (const s of skips) {
+      if (s.why !== why || !("name" in s)) continue;
+      const key = resourceNameKey(s.name);
+      if (!seen.has(key)) seen.set(key, s.name);
+    }
+    return [...seen.values()];
+  };
+  const ability = skipped("ability");
+  const prof = skipped("proficiency");
+  const another = skipped("another");
   unread += skips.filter((s) => s.why === "unread").length;
 
   const lines: string[] = [];

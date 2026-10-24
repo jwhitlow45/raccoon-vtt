@@ -547,6 +547,18 @@ describe("the read's lines", () => {
     assert.ok(fill.warnings.includes("Fey Step comes back at dawn in D&D Beyond. Here a Long Rest brings it back."));
   });
 
+  test("a name on several actions is named once, in the singular, by its first spelling (DDBBUILD-OPUS-2)", () => {
+    const bard = [act("Bardic Inspiration", lu({ maxUses: 0, statModifierUsesId: 6, resetType: 2 }), { componentId: 91 }), act("bardic inspiration", lu({ maxUses: 0, statModifierUsesId: 6, resetType: 1 }), { componentId: 92 })];
+    const noScores = read(bree({ class: bard }, [cls("Bard", 5, [feature(91, "Bardic Inspiration", 1), feature(92, "Font of Inspiration", 5)])], { bonusStats: undefined }));
+    assert.ok(noScores.warnings.includes("Bardic Inspiration's count comes from an ability score, which was not read, so it stays as it is."), noScores.warnings.join(" | "));
+    const breath = (id: number) => act("Breath Weapon", lu({ maxUses: 0, useProficiencyBonus: true }), { componentTypeId: SPECIES_TRAIT, componentId: id });
+    const noClasses = read(bree({ race: [breath(1), breath(2)] }, []));
+    assert.ok(noClasses.warnings.includes("Breath Weapon's count comes from the proficiency bonus, which needs the classes, so it stays as it is."));
+    const cold = (id: number) => act("Cold Caster", lu({ resetType: 4 }), { componentTypeId: FEAT, componentId: id });
+    const twice = read(bree({ feat: [cold(1), cold(2), act("Action Hero", lu({ resetType: 4 }), { componentTypeId: FEAT })] }));
+    assert.ok(twice.warnings.includes("Cold Caster and Action Hero come back another way in D&D Beyond, so they were left out. Add one as your own if it counts."), twice.warnings.join(" | "));
+  });
+
   test("a long list of names stays within a warning's 400 characters", () => {
     const actions = Array.from({ length: 10 }, (_, i) => act(`${"A long feat name number".padEnd(36, "x")} ${i}`, lu({ resetType: 4 })));
     const fill = read(bree({ class: actions }));
