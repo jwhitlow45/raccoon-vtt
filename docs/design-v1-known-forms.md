@@ -166,3 +166,7 @@ Each has the recommended answer, which the coordinator takes unless the project 
 
 - **Decided**, for review to overrule: at most 8, the table's most. SRD ids only. No new op. No budget. `character.create` takes none.
 - **Later**: a known form that names one of the token's other images, so taking it swaps the picture too (design 6, Other images). A Druid level stored on the character, if enforcing is ever wanted. Room monsters as known forms, once a shape can link one.
+
+## As built
+
+- **Where the forms show** (5.3, D-261024-29): the Stat block group no longer draws the Known forms section. The forms show in the Take a shape picker, first in its list, and the row's Take a shape button reads the count ("4 shapes", D-261024-27) and stays in Wild Shape, so a druid changes form or opens Change from the picker without ending the shape. Polymorph or another shape still hides it. The folded summary never counts forms (D-261024-26).
