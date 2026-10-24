@@ -81,6 +81,7 @@ import {
   handleCorner,
   hangBox,
   hasSize,
+  headAsksToasts,
   headerLayout,
   heldPlace,
   isDefaultSpot,
@@ -1006,16 +1007,29 @@ function BarFrame(props: {
    * toasts (barDock.ts spanToastSlot): a toast that shows over it moves
    * under it, so Close and Larger or Smaller stay in reach (review
    * LP19-BS-2). Read after each render, as the bar moves with its token,
-   * without drawing anything again.
+   * without drawing anything again, except that while the bar opens, and
+   * once the header goes down into the toasts placed under it, the toasts
+   * look again (headAsksToasts, reviews LP19-Q1 and LP19-OPUS-3).
    */
   useLayoutEffect(() => {
     const header = mode === "span" && !folded ? barRef.current?.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`) : null;
     const box = header?.getBoundingClientRect();
-    spanToast.head = box && box.height > 0 ? { top: box.top / zoom, bottom: box.bottom / zoom } : null;
+    const head = box && box.height > 0 ? { top: box.top / zoom, bottom: box.bottom / zoom } : null;
+    const was = spanToast.head;
+    spanToast.head = head;
+    if (head === null) {
+      spanToast.shownAt = null;
+      return;
+    }
+    const now = Date.now();
+    if (was === null) spanToast.shownAt = now;
+    const moved = was === null || was.top !== head.top || was.bottom !== head.bottom;
+    if (moved && headAsksToasts(spanToast, head, now)) spanToast.recheck?.();
   });
   useLayoutEffect(
     () => () => {
       spanToast.head = null;
+      spanToast.shownAt = null;
     },
     [spanToast],
   );

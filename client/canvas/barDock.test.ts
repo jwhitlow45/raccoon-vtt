@@ -75,6 +75,11 @@ import {
   paneToastTop,
   barToastTop,
   toastsOverHead,
+  toastsUnderHead,
+  barStack,
+  barOpening,
+  headAsksToasts,
+  BAR_OPEN_MS,
   fitToasts,
   inToastLayer,
   nextToastPlaces,
@@ -1461,6 +1466,87 @@ describe("a toast over a spanning token bar's header (review LP19-BS-2)", () => 
     let c = step(step(NO_TOAST_PLACES, [1]), [1], { overBar: { ids: new Set([1]), at: 121 } });
     c = step(c, [1], { turned: true, low: 130 });
     assert.deepEqual(c.places.get(1), { low: 130, column: true });
+  });
+});
+
+describe("toasts already showing as the bar opens or its header goes down (reviews LP19-Q1 and LP19-OPUS-3)", () => {
+  type Now = Parameters<typeof nextToastPlaces>[1];
+  const phone: Omit<Now, "ids"> = { pane: null, paneStands: false, low: null, layer: true, slot: false };
+  const step = (was: ToastPlaces, ids: readonly number[], now: Partial<Now> = {}) => nextToastPlaces(was, { ...phone, ids, ...now });
+  // The DM's bar at 390 x 844 over its token to the free area's top: its header from 61 to 113.
+  const head = { top: 61, bottom: 113 };
+  /** The toasts' look at the header, as Room.tsx Toasts takes it: the places it gives on the next render. */
+  const look = (s: ToastPlaces, ids: readonly number[], boxes: readonly { id: number; top: number; bottom: number }[], at: { top: number; bottom: number }, now: Partial<Now> = {}) => {
+    const over = toastsUnderHead(boxes, at, barStack(s, ids));
+    return step(s, ids, { ...now, overBar: { ids: over, at: barToastTop({ head: at, optionsTop: 776 }) } });
+  };
+
+  test("the bar opens for a while from when its header shows, and asks the toasts to look while it does, and as its header goes down into the stack under it, but not on any other move", () => {
+    assert.equal(barOpening(null, 5000), false);
+    assert.equal(barOpening(5000, 5000), true);
+    assert.equal(barOpening(5000, 5000 + BAR_OPEN_MS - 1), true);
+    assert.equal(barOpening(5000, 5000 + BAR_OPEN_MS), false);
+    const now = 9000;
+    assert.equal(headAsksToasts({ shownAt: now - 100, stackTop: null }, head, now), true);
+    assert.equal(headAsksToasts({ shownAt: now - BAR_OPEN_MS, stackTop: null }, head, now), false, "a pan after the opening");
+    assert.equal(headAsksToasts({ shownAt: null, stackTop: null }, head, now), false);
+    // A stack under the header at 121: the header's bottom at 121 still meets nothing, a little lower it goes into it.
+    const shown = { shownAt: now - 2000, stackTop: 113 + EDGE };
+    assert.equal(headAsksToasts(shown, { top: 69, bottom: 121 }, now), false);
+    assert.equal(headAsksToasts(shown, { top: 69.4, bottom: 121.4 }, now), false, "half a pixel of rounding");
+    assert.equal(headAsksToasts(shown, { top: 69.6, bottom: 121.6 }, now), true);
+    assert.equal(headAsksToasts(shown, { top: 190, bottom: 242 }, now), true);
+    assert.equal(headAsksToasts(shown, { top: 40, bottom: 92 }, now), false, "the header going up");
+  });
+
+  test("a toast already showing over the header at the notices' top or under the column's card takes its place under it as the bar opens, with the layer's stack, and those clear of it stay (review LP19-Q1)", () => {
+    // A whisper at the notices' top, long past new, and the bar opens with its header over it.
+    let s = step(NO_TOAST_PLACES, [1]);
+    assert.equal(s.places.get(1), "map");
+    s = look(s, [1], [{ id: 1, top: 68, bottom: 112 }], head);
+    assert.deepEqual(s.places.get(1), { low: 113 + EDGE, column: false, bar: true });
+    // On the next look nothing meets the header, and it stays.
+    s = look(s, [1], [{ id: 1, top: 121, bottom: 165 }], head);
+    assert.deepEqual(s.places.get(1), { low: 113 + EDGE, column: false, bar: true });
+    // Under the column's card, where the bar's stacked top stands, with a toast at the notices' top clear of the header.
+    let c = step(NO_TOAST_PLACES, [3], { layer: false });
+    c = step(c, [3, 4], { low: 130 });
+    c = step(c, [3, 4, 5], { low: 130 });
+    assert.deepEqual(c.places.get(5), { low: 130, column: true });
+    const under = { top: 130, bottom: 182 };
+    c = look(c, [3, 4, 5], [{ id: 3, top: 20, bottom: 60 }, { id: 4, top: 130, bottom: 174 }, { id: 5, top: 182, bottom: 226 }], under, { low: 130 });
+    assert.equal(c.places.get(3), "map");
+    assert.deepEqual(c.places.get(4), { low: 182 + EDGE, column: false, bar: true });
+    assert.deepEqual(c.places.get(5), c.places.get(4));
+  });
+
+  test("a stack placed under the header goes under it again once its bottom goes below the stack's top, as an alert card moves the bar down, and stays as the header goes up (review LP19-OPUS-3)", () => {
+    let s = step(step(NO_TOAST_PLACES, [1]), [1, 2]);
+    s = step(s, [1, 2], { overBar: { ids: new Set([1, 2]), at: 113 + EDGE } });
+    assert.deepEqual(barStack(s, [1, 2]), { top: 113 + EDGE, ids: [1, 2] });
+    // A card comes, and the header goes down to 190: neither toast meets it any more, and the stack goes under it all the same.
+    const down = { top: 190, bottom: 242 };
+    assert.deepEqual([...toastsUnderHead([], down, barStack(s, [1, 2]))], [1, 2]);
+    s = look(s, [1, 2], [], down, { low: 182 });
+    assert.deepEqual(barStack(s, [1, 2]), { top: 242 + EDGE, ids: [1, 2] });
+    // The header going up leaves the stack where it is, and a header that goes only as far as the stack's top moves nothing.
+    s = look(s, [1, 2], [], head);
+    assert.deepEqual(barStack(s, [1, 2]), { top: 242 + EDGE, ids: [1, 2] });
+    assert.equal(toastsUnderHead([], { top: 198, bottom: 250 }, barStack(s, [1, 2])).size, 0);
+    assert.equal(toastsUnderHead([], { top: 198.4, bottom: 250.4 }, barStack(s, [1, 2])).size, 0, "half a pixel of rounding");
+  });
+
+  test("only a stack the bar's header placed counts: not one under the column's card, a pane's, or toasts at the notices' top", () => {
+    const card = step(NO_TOAST_PLACES, [1], { low: 130 });
+    assert.equal(barStack(card, [1]), null);
+    assert.equal(toastsUnderHead([], { top: 190, bottom: 242 }, barStack(card, [1])).size, 0);
+    const pane = step(NO_TOAST_PLACES, [1], { paneStands: true, pane: 300 });
+    assert.equal(barStack(pane, [1]), null);
+    const map = step(NO_TOAST_PLACES, [1]);
+    assert.equal(barStack(map, [1]), null);
+    // A toast that went is no part of it.
+    const bar = step(step(NO_TOAST_PLACES, [1, 2]), [1, 2], { overBar: { ids: new Set([1, 2]), at: 121 } });
+    assert.deepEqual(barStack(bar, [2]), { top: 121, ids: [2] });
   });
 });
 

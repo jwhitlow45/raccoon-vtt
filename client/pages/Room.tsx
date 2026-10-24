@@ -4,6 +4,8 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import {
   barDockSlot,
+  barOpening,
+  barStack,
   barToastTop,
   columnEdges,
   DEFAULT_CHROME,
@@ -18,7 +20,7 @@ import {
   spanToastSlot,
   TOAST_MIN,
   toastLayerPlace,
-  toastsOverHead,
+  toastsUnderHead,
   toastTop,
   type Chrome,
   type ToastEdges,
@@ -1544,8 +1546,12 @@ function Banner() {
  * token, is placed again as if it came now, under that header, so Close
  * and Larger or Smaller stay in reach (review LP19-BS-2). Its box is read
  * once it is drawn, since only then is its height known, and the move
- * happens before the browser paints. A toast already showing as the bar
- * opens or moves keeps its place, so no toast moves under a finger.
+ * happens before the browser paints. So is a toast already showing there
+ * as the bar opens (review LP19-Q1), and the stack under the header once
+ * the header goes down into it, as an alert card that moves the bar down
+ * makes it (review LP19-OPUS-3). The bar asks for that look through
+ * `recheck` (barDock.ts headAsksToasts). Any other move of the bar leaves
+ * the toasts where they are.
  *
  * When the screen turns, a toast at the top of the notices that now
  * meets the column's first card is placed again as if it came now, under
@@ -1594,9 +1600,17 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
   const cardMs = cardWaitMs();
   const recent = new Set(showing.filter((t) => Date.now() - t.shownAt < cardMs).map((t) => t.id));
-  // The toasts that just showed over a spanning token bar's header, as last drawn, and the place under it (review LP19-BS-2).
+  // The toasts to place under a spanning token bar's header, read from the boxes as last drawn, and the place under it (barDock.ts toastsUnderHead).
   const spanToast = useScoped(spanToastSlot);
   const [overBar, setOverBar] = useState<{ ids: ReadonlySet<number>; at: number | null }>(NOT_OVER_BAR);
+  // The bar asks for a look again as it opens, or as its header goes down into the stack under it, which draws nothing else here.
+  const [, setRecheck] = useState(0);
+  useLayoutEffect(() => {
+    spanToast.recheck = () => setRecheck((n) => n + 1);
+    return () => {
+      spanToast.recheck = null;
+    };
+  }, [spanToast]);
   placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar });
   const { places } = placed.current;
   useEffect(() => {
@@ -1658,12 +1672,16 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     const layerBox = lowAt !== null ? stacks.layer.box.current : null;
     const feet = [mapFoot.current, layerBox && low.length > 0 ? layerBox.getBoundingClientRect().bottom / zoom : null].filter((f): f is number => f !== null);
     spanToast.foot = feet.length > 0 ? Math.max(...feet) : null;
-    // A toast that just showed over the bar's header takes its place again under it, on a render before the browser paints.
+    // A toast that just showed over the bar's header takes its place again under it, on a render before the browser paints. While the bar opens, so does every toast already showing there (review LP19-Q1).
+    const opening = barOpening(spanToast.shownAt, Date.now());
     const boxes = drawn.flatMap((t) => {
-      const r = recent.has(t.id) ? hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect() : undefined;
+      const r = opening || recent.has(t.id) ? hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect() : undefined;
       return r && r.height > 0 ? [{ id: t.id, top: r.top / zoom, bottom: r.bottom / zoom }] : [];
     });
-    const over = toastsOverHead(boxes, spanToast.head);
+    // A stack already under the header goes again once the header goes down into it (review LP19-OPUS-3).
+    const stack = barStack(placed.current, ids);
+    spanToast.stackTop = stack?.top ?? null;
+    const over = toastsUnderHead(boxes, spanToast.head, stack);
     const at = over.size > 0 && props.optionsTop !== null ? barToastTop({ head: spanToast.head, optionsTop: props.optionsTop }) : null;
     const next = at === null ? NOT_OVER_BAR : { ids: over, at };
     if (next.at !== overBar.at || next.ids.size !== overBar.ids.size || [...next.ids].some((id) => !overBar.ids.has(id))) setOverBar(next);
@@ -1671,6 +1689,7 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   useEffect(
     () => () => {
       spanToast.foot = null;
+      spanToast.stackTop = null;
     },
     [spanToast],
   );

@@ -1307,6 +1307,64 @@ export function toastsOverHead(boxes: readonly ({ id: number } & Band)[], head: 
   return over;
 }
 
+/** The toasts' layer stack while it stands under a spanning bar's header (barToastTop): the top it was placed at, and its toasts. */
+export type BarStack = { top: number; ids: readonly number[] };
+
+/** The layer's stack, of the toasts showing (`ids`), if a spanning bar's header placed it. Null for a stack placed anywhere else, or none. */
+export function barStack(state: ToastPlaces, ids: readonly number[]): BarStack | null {
+  let top: number | null = null;
+  const under: number[] = [];
+  for (const id of ids) {
+    const place = state.places.get(id);
+    if (typeof place !== "object") continue;
+    if (!place.bar) return null;
+    top ??= place.low;
+    under.push(id);
+  }
+  return top === null ? null : { top, ids: under };
+}
+
+/**
+ * The toasts that take their place again under a spanning bar's header,
+ * as toasts that came now would (barToastTop, nextToastPlaces' `overBar`):
+ * of `boxes`, as drawn, those that meet the header, and the whole stack
+ * placed under the header before (`stack`) once the header's bottom has
+ * moved below that stack's top, as an alert card or a pan that moves the
+ * bar down makes it (review LP19-OPUS-3). So that stack goes down with the
+ * header, and stays where it is as the header goes up. Half a pixel of
+ * rounding never counts.
+ */
+export function toastsUnderHead(boxes: readonly ({ id: number } & Band)[], head: Band | null, stack: BarStack | null): Set<number> {
+  const over = toastsOverHead(boxes, head);
+  if (head !== null && stack !== null && head.bottom - 0.5 > stack.top) for (const id of stack.ids) over.add(id);
+  return over;
+}
+
+/**
+ * How long a spanning bar opens for, for the toasts, from when its header
+ * shows: in that time it measures its content and Larger moves the map,
+ * each of which can move its header. As long as a turn lasts for them
+ * (Room.tsx TURN_MS).
+ */
+export const BAR_OPEN_MS = 600;
+
+/** Whether a spanning bar whose header showed at `shownAt` is still opening (BAR_OPEN_MS). */
+export function barOpening(shownAt: number | null, now: number): boolean {
+  return shownAt !== null && now - shownAt < BAR_OPEN_MS;
+}
+
+/**
+ * Whether a spanning bar's header that moved to `head` has the toasts look
+ * again for those to place under it (spanToastSlot's `recheck`): while
+ * the bar opens, so toasts already showing that cover the header move
+ * under it, as new ones do (review LP19-Q1), and once the header's bottom
+ * goes below the top of the stack placed under it (toastsUnderHead, review
+ * LP19-OPUS-3). Any other move draws no toast.
+ */
+export function headAsksToasts(slot: { shownAt: number | null; stackTop: number | null }, head: Band, now: number): boolean {
+  return barOpening(slot.shownAt, now) || (slot.stackTop !== null && head.bottom - 0.5 > slot.stackTop);
+}
+
 /**
  * Where a toast stands: at the top of the map's notices, in the toasts' own
  * layer under the column's first card (`low`, in the chrome's px, and
@@ -1508,12 +1566,22 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
  * other as they act, never as they draw, so a pan that moves the bar draws
  * no toast and a toast that comes moves no bar: the box of the bar's
  * header while it spans (`head`), which a toast that shows over it moves
- * under (barToastTop, review LP19-BS-2), and the foot of the toasts over
- * the map (`foot`), which Larger leaves its token below (largerHang, review
- * LP19-BS-3). In the chrome's px from the page's top, null while there is
- * none. Per Room page, as the dock store is.
+ * under (barToastTop, review LP19-BS-2), when that header last showed
+ * (`shownAt`, for barOpening), the foot of the toasts over the map
+ * (`foot`), which Larger leaves its token below (largerHang, review
+ * LP19-BS-3), and the top of the stack placed under the header
+ * (`stackTop`, barStack). In the chrome's px from the page's top, null
+ * while there is none. The one way back is `recheck`, which the toasts
+ * set and the bar calls only as headAsksToasts says. Per Room page, as
+ * the dock store is.
  */
-export const spanToastSlot = scopeSlot(() => ({ head: null as Band | null, foot: null as number | null }));
+export const spanToastSlot = scopeSlot(() => ({
+  head: null as Band | null,
+  shownAt: null as number | null,
+  foot: null as number | null,
+  stackTop: null as number | null,
+  recheck: null as (() => void) | null,
+}));
 
 /** The bar as it shows, for the column, the notices and the camera. `freeRight` is the free area's right edge (barCover). */
 export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number };

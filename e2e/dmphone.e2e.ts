@@ -1387,6 +1387,101 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await waitFor("the brute, the scout and the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[brute] && !dmSocket.state.tokens[walker] ? true : null));
     }
   });
+
+  /** A brute low on the map, where its bar hangs over it up to the top of its room, made for one step and removed after it. */
+  async function lowBrute(): Promise<{ id: string; at: { x: number; y: number }; bar: Locator; head: Locator; remove(): Promise<void> }> {
+    const bounds = dmSocket.state!.scenes[run.sceneId]!.bounds;
+    const cell = { x: Math.floor(bounds.w / 2), y: bounds.h - 2 };
+    const id = randomUUID();
+    await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Brute", x: cell.x, y: cell.y, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+    await waitFor("the brute in the DM's view", () => dmSocket.state?.tokens[id] ?? null);
+    await dm.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
+    await setUp({ width: 390, height: 844, scale: 1 });
+    const at = await pagePoint(dm, bounds, { x: cell.x + 0.5, y: cell.y + 0.5 });
+    assert.equal(await hit(dm, at), "CANVAS", "the brute is under something");
+    const bar = dm.getByRole("dialog", { name: "Brute actions" });
+    return {
+      id,
+      at,
+      bar,
+      head: bar.locator("[data-sticky-header]"),
+      remove: async () => {
+        if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
+        await ops.send({ t: "token.delete", tokenId: id });
+        await waitFor("the brute gone", () => (dmSocket.state && !dmSocket.state.tokens[id] ? true : null));
+      },
+    };
+  }
+
+  test("fu24-q1. at 390 x 844 a whisper already showing at the top of the notices moves under the token bar's header as the bar opens over its token to the top of its room, the same toast, never drawn anew (review LP19-Q1)", async () => {
+    const brute = await lowBrute();
+    try {
+      const words = "Did the brute hear that?";
+      await whisperFromPat(words);
+      const toast = dm.locator("[data-toast]").filter({ hasText: words }).first();
+      await toast.waitFor();
+      // Long past new, so only the bar's opening can move it.
+      await dm.waitForTimeout(900);
+      const was = await rectOf(toast);
+      await toast.evaluate((el) => (el as unknown as { setAttribute(name: string, value: string): void }).setAttribute("data-e2e-kept", "1"));
+      await dm.touchscreen.tap(brute.at.x, brute.at.y);
+      await brute.bar.waitFor();
+      await dm.waitForTimeout(400);
+      const h = await rectOf(brute.head);
+      assert.ok(intersects(was, h), `the whisper ${JSON.stringify(was)} would not cover the header ${JSON.stringify(h)}, so the opening had nothing to move`);
+      for (const other of await dm.locator("[data-toast]").all()) assert.ok(!intersects(await rectOf(other), h), `a toast ${JSON.stringify(await rectOf(other))} covers the bar's header ${JSON.stringify(h)}`);
+      const t = await rectOf(toast);
+      assert.ok(Math.abs(t.top - (h.bottom + 8)) < 1.5, `the whisper starts at ${t.top}, not 8 px under the header's foot at ${h.bottom}`);
+      assert.equal(await toast.getAttribute("data-e2e-kept"), "1", "the whisper was drawn anew");
+      for (const name of ["Close", "Larger"]) assert.ok(await wholeInReach(brute.bar.getByRole("button", { name, exact: true })), `${name} is out of reach`);
+      await shots.take(dm, "dmphone-fu24-q1-bar-opens-over-a-whisper");
+    } finally {
+      await brute.remove();
+    }
+  });
+
+  test("fu24-o3. at 390 x 844 a whisper under the token bar's header goes under it again when a check's card moves the bar down, never over the header or the card (review LP19-OPUS-3)", async () => {
+    const brute = await lowBrute();
+    const check = dm.locator('[data-alert="concentration"]').first();
+    // A roll in step 13 may have ended the hag's Hex.
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.hag }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } }).catch(() => undefined);
+    try {
+      await dm.touchscreen.tap(brute.at.x, brute.at.y);
+      await brute.bar.waitFor();
+      // Past the bar's opening, so only the header going down can move the whisper.
+      await dm.waitForTimeout(900);
+      const h = await rectOf(brute.head);
+      assert.ok(h.top < 140, `the bar's header stands at ${h.top}, not at the top of its room, so no toast could meet it`);
+      const words = "Watch the hag.";
+      await whisperFromPat(words);
+      const toast = dm.locator("[data-toast]").filter({ hasText: words }).first();
+      await toast.waitFor();
+      await dm.waitForTimeout(300);
+      const placed = await rectOf(toast);
+      assert.ok(Math.abs(placed.top - (h.bottom + 8)) < 1.5, `the whisper starts at ${placed.top}, not 8 px under the header's foot at ${h.bottom}`);
+      // Damage to the hag brings up her concentration check, with no toast of its own: the bar stacks under the card.
+      await hurtHag();
+      await check.waitFor();
+      await dm.waitForTimeout(600);
+      const card = await rectOf(check);
+      const down = await rectOf(brute.head);
+      assert.ok(down.bottom > placed.top + 0.5, `the header went only to ${JSON.stringify(down)}, never into the whisper at ${placed.top}`);
+      const t = await rectOf(toast);
+      for (const [what, box] of [
+        ["the bar's header", down],
+        ["the check's card", card],
+      ] as const)
+        assert.ok(!intersects(t, box), `the whisper ${JSON.stringify(t)} covers ${what} ${JSON.stringify(box)}`);
+      assert.ok(Math.abs(t.top - (down.bottom + 8)) < 1.5, `the whisper stands at ${t.top}, not 8 px under the header's new foot at ${down.bottom}`);
+      for (const name of ["Close", "Larger"]) assert.ok(await wholeInReach(brute.bar.getByRole("button", { name, exact: true })), `${name} is out of reach`);
+      assert.ok(await wholeInReach(check.getByRole("button", { name: "Passed", exact: true })), "the check's Passed is out of reach");
+      await shots.take(dm, "dmphone-fu24-o3-card-moves-the-header-down");
+    } finally {
+      await brute.remove();
+      if (await check.isVisible()) await check.getByRole("button", { name: "Passed", exact: true }).tap();
+      await check.waitFor({ state: "detached" });
+    }
+  });
 });
 
 /**
