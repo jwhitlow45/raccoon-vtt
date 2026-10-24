@@ -183,7 +183,7 @@ type LineProps = {
   onStatus(status: { text: string; refused: boolean } | null): void;
 };
 
-/** One row's line: its words at the start, its buttons at the end, wrapping under them where the panel is narrow. */
+/** One row's line: its words, then its buttons on a line of their own under them. */
 function UseLine(props: LineProps) {
   const { row, target, form } = props;
   const send = useUseSend(props.onStatus);

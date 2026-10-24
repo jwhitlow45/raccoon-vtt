@@ -407,7 +407,7 @@ export function legendaryHead(row: Extract<UseRow, { kind: "legendary" }>, form:
   return `Legendary actions ${row.left} of ${row.max}${form === "card" ? ", after other creatures' turns" : ""}`;
 }
 
-/** "Use Legendary Resistance (2 left)" in the list, "Legendary Resistance 3 of 3" on the card (4.2, 5). */
+/** "Legendary Resistance 2 of 3", in the list and on the card alike (4.2, 5): its Use button's name says how many are left. */
 export function resistHead(row: Extract<UseRow, { kind: "resist" }>): string {
   return `Legendary Resistance ${row.left} of ${row.max}`;
 }

@@ -23,8 +23,10 @@ type RechargeAction = "roll" | "ready" | "dismiss" | "done";
  * first, on the Dice panel's own row for that recharge, so the result
  * shows in both. The record keeps the result, so it stays after a reload:
  * "Rolled 5: Fire Breath is ready." or "Rolled 2: Fire Breath stays used.",
- * with Done. The ability's name and range are its mark's, so the card
- * needs no stat block.
+ * with Done. The ability's name and range are its mark's while it is
+ * marked. A roll that made it ready takes the mark, so the settled card
+ * reads them from the block's recharge use, else its key (logic.ts
+ * promptsOf).
  */
 export function RechargeCard(props: { card: PromptCard<RechargePromptState>; onDismiss(): void }) {
   const { card } = props;
