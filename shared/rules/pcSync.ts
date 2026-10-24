@@ -494,17 +494,17 @@ function letterOf(k: string): string {
   return k.slice(0, 1);
 }
 
+/** Where a record stands with the number read: none, another D&D Beyond character's, or the same source's (1.3). */
+function sourceOf(record: Pick<DdbSyncPatch, "from"> | undefined, read: string | undefined): SyncSource {
+  return !record ? "none" : record.from !== undefined && read !== undefined && record.from !== read ? "relinked" : "same";
+}
+
 /**
  * Every item of a sync with its default (2.2 to 2.4): what comes in, what
  * is kept with its offer, and the Also set lines, against the block and
  * character as they are now. A live change makes a new plan, whose ids
  * match the old one's where its items remain, so ticks carry over.
  */
-/** Where a record stands with the number read: none, another D&D Beyond character's, or the same source's (1.3). */
-function sourceOf(record: Pick<DdbSyncPatch, "from"> | undefined, read: string | undefined): SyncSource {
-  return !record ? "none" : record.from !== undefined && read !== undefined && record.from !== read ? "relinked" : "same";
-}
-
 export function planSync(input: SyncInput): SyncPlan {
   const { fill, character } = input;
   const record = character.ddbSync;
