@@ -941,6 +941,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         assert.ok(copied.length === 1 || oneMoveUp(copied), `the duplicate moved the map more than once: ${JSON.stringify(copied)}`);
       } finally {
         await ops.send({ t: "token.delete", tokenId: copy });
+        // The copy numbered Goblin 2 as its sibling, a number deleting the copy leaves, so the steps after read its name as it was.
+        await ops.send({ t: "token.update", tokenId: run.goblin2.id, patch: { number: null } });
       }
       await shots.take(dm, "br-f-8-group-to-token");
     });
