@@ -165,8 +165,8 @@ export type DiceFoldsStore = {
    * its row (6.4). The ids are kept here, in the Room scope, so a tab pick
    * that remounts the options, or a phone's Dice sheet closing, never opens
    * a group again that the viewer folded since. Says whether any id was new.
-   * `quiet` ids are only marked seen, first, as a block's own sends are: the
-   * block's opening stands for them (options.ts groupAsks).
+   * `quiet` ids are only marked seen, first, as a block's own send is when
+   * its creature's groups render with the block (options.ts groupAsks).
    */
   openForNew(key: DiceFoldKey, ids: readonly string[], quiet?: readonly string[]): boolean;
   subscribe(listener: () => void): () => void;

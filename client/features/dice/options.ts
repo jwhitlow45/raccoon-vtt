@@ -750,15 +750,17 @@ export function castRowOf<R extends Pick<NamedRoll, "key" | "name">>(named: read
  * answer opens Saves and checks for a save or a plain check, and Skills
  * for a skill, by the request's id. A player's open ask for saves opens
  * the group that holds its row, by the opening's stamp, as does an ask
- * waiting in the view, by its id. The block's own sent ask counts as the
- * block and is only marked seen, so an ask sent from it opens nothing
- * again once it waits, nor does a retry the block follows from the list
- * above the card while its group is folded. One first seen after a reload
- * opens its group once. The block names its spell in the folded line only
- * while it waits for the player or for the server's answer (`castPhase`
- * null or sending): once refused or unknown, the list above the card says
- * so, and once it waits in the view, the view's ask names it, until the DM
- * settles it.
+ * waiting in the view, by its id. The block's own send is marked seen,
+ * opening nothing, only when its creature's groups render with the block.
+ * So an ask sent from it opens nothing again once it waits, nor does a
+ * retry the block follows from the list above the card while its group is
+ * folded. A send those groups never rendered is first seen in the view and
+ * opens its group once: one after a reload, or a retry taken while another
+ * tab is picked or the options load. The block names its spell in the
+ * folded line only while it waits for the player or for the server's
+ * answer (`castPhase` null or sending): once refused or unknown, the list
+ * above the card says so, and once it waits in the view, the view's ask
+ * names it, until the DM settles it.
  */
 export function groupAsks(input: {
   state: Pick<RoomState, "tokens" | "rolls" | "casts">;

@@ -28,7 +28,7 @@ export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterI
   const elsewhere = useRoomView((s) => (s.view ? onAnotherScene(s.view, entry) : false));
   const shown = token?.image ?? character?.defaultImage;
   const image = shown && isAssetImage(shown) ? shown : undefined;
-  const color = DISPOSITION_RING[portraitDisposition(token, elsewhere)] ?? theme.color.neutral;
+  const color = DISPOSITION_RING[portraitDisposition(token, elsewhere)];
   // The disposition ring sits just outside the disk, as an outline, which follows the round corners and takes no room in the row.
   const frame: CSSProperties = { outline: `${theme.line.strong}px solid ${props.ring ?? color}`, outlineOffset: 0, opacity: props.dim ? 0.45 : 1 };
   const box: CSSProperties = {

@@ -99,9 +99,9 @@ function setup(input: Input) {
   if (input.picked !== null) options.setState({ picked: input.picked });
   options.getInitialState = options.getState;
   if (input.folded && input.cast) {
-    // The opening and its send opened Spells once, then Pat folded it.
+    // The opening opened Spells once, its send marked seen, then Pat folded it.
     const folds = scope.get(diceFoldsSlot);
-    folds.openForNew("pc.spells", [`open:${input.cast.opened ?? 0}`, input.cast.sent]);
+    folds.openForNew("pc.spells", [`open:${input.cast.opened ?? 0}`], [input.cast.sent]);
     folds.tap("pc.spells", false, false);
   }
   return { input, view, scope, tracker };

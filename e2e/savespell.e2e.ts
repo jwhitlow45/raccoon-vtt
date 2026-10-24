@@ -515,7 +515,7 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     assert.equal(await focused(thorn), true, "the focus stays on Thorn's tab");
     await shots.take(pat, "savespell-block-focus-kept");
 
-    // Asked, then folded on the next task, before the server's answer can land: the send's id opens Spells once on the render that first sees it, so a fold in the same task would be undone.
+    // Asked, then folded on the next task, before the server's answer can land: the open block's send is marked seen as Thorn's groups render with it, so it opens nothing and the fold stays.
     await block.getByRole("button", { name: "Ask the DM", exact: true }).evaluate(async (button) => {
       type El = { click(): void; textContent: string | null; closest(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
       const root = (button as unknown as El).closest("[data-roll-options]")!;
