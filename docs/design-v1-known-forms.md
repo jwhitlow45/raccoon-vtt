@@ -169,4 +169,4 @@ Each has the recommended answer, which the coordinator takes unless the project 
 
 ## As built
 
-- **Where the forms show** (5.3, D-261024-29): the Stat block group no longer draws the Known forms section. The forms show in the Take a shape picker, first in its list, and the row's Take a shape button reads the count ("4 shapes", D-261024-27) and stays in Wild Shape, so a druid changes form or opens Change from the picker without ending the shape. Polymorph or another shape still hides it. The folded summary never counts forms (D-261024-26).
+- **Where the forms show** (5.3, D-261024-29): the Stat block group no longer draws the Known forms section. The forms show in the Take a shape picker, first in its list, and the row's Take a shape button reads the count ("4 shapes", D-261024-27) and stays in Wild Shape, so a druid changes form or opens Change from the picker without ending the shape. Polymorph or another shape still hides it. The folded summary never counts forms (D-261024-26). In Wild Shape the current form's row is pressed and unavailable, so a tap cannot refill the Temporary HP, and the picker offers only Wild Shape while shaped (D-261024-32).

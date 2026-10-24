@@ -1,7 +1,7 @@
-import { pcShape } from "#shared/rules/pcStats.ts";
 import { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Character } from "#shared/model.ts";
 import { MAX_KNOWN_FORMS } from "#shared/protocol.ts";
+import { pcShape } from "#shared/rules/pcStats.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
@@ -22,7 +22,7 @@ import { SmallButton } from "../tokens/ui.tsx";
 import { monsterMatcher } from "../tokens/monsterSearch.ts";
 import { formLabel, formMark, knownFormCountWords, isCurrentForm, knownFormPatch, knownFormsIn, missingFormText, rememberDruidLevel, rememberedDruidLevel, startDruidLevel, toggleKnownForm } from "./knownForms.ts";
 import { byCrThenName, DRUID_LEVELS, fitsShapeLimit, shapeLimit } from "./shapeLevel.ts";
-import { shapePatch, shapeTempHp, wildShapeDetail, type ShapeKind } from "./shape.ts";
+import { effectiveShapeKind, shapePatch, shapeTempHp, wildShapeDetail, type ShapeKind } from "./shape.ts";
 
 /** Whether an SRD creature is a Beast, which Wild Shape and Polymorph take. */
 function isBeast(m: SrdMonster): boolean {
@@ -135,10 +135,12 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   };
 
   if (picked) {
-    const temp = shapeTempHp(kind, props.character, picked, remembered ?? undefined);
+    // Read live: another device may put the character in Wild Shape while this step is open, and it must not send Polymorph then.
+    const shapeKind = effectiveShapeKind(props.character, kind);
+    const temp = shapeTempHp(shapeKind, props.character, picked, remembered ?? undefined);
     const holding = props.character.actor.hp.temp;
     const take = () => {
-      const patch = shapePatch(picked, kind, props.character, gainTemp ? temp : undefined);
+      const patch = shapePatch(picked, shapeKind, props.character, gainTemp ? temp : undefined);
       if (actions.dispatch({ t: "character.update", characterId, patch: { actor: patch } }) !== null) props.onClose();
     };
     const druidWords = typeof remembered === "number" ? `Druid level ${remembered}, as picked in Take a shape.` : `The Druid level, read as ${whose(name)} level.`;
@@ -159,7 +161,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
         }
       >
         {/* Its step rises from the bottom on a phone, so a shape other than Wild Shape, which only Take the shape sends, holds it against a swipe (docs/design-v1-sheet-swipe.md 4.6). */}
-        <UnsavedInput unsaved={kind !== "wild" || !gainTemp} />
+        <UnsavedInput unsaved={shapeKind !== "wild" || !gainTemp} />
         <div style={{ display: "grid", gap: theme.space(2), fontSize: theme.font.body14 }}>
           {refusalLine}
           {inWildShape ? (
@@ -171,8 +173,8 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
             <Help>{`${whose(name)} ${holding} Temporary HP stay, as they are no fewer than the ${temp} the shape gives.`}</Help>
           ) : (
             <Checkbox
-              label={`Gain ${temp} Temporary HP (${kind === "wild" ? "Wild Shape" : "Polymorph"})`}
-              help={kind === "wild" ? druidWords : `${whose(picked.name)} HP. What is left of them goes when the shape ends.`}
+              label={`Gain ${temp} Temporary HP (${shapeKind === "wild" ? "Wild Shape" : "Polymorph"})`}
+              help={shapeKind === "wild" ? druidWords : `${whose(picked.name)} HP. What is left of them goes when the shape ends.`}
               checked={gainTemp}
               onChange={setGainTemp}
             />

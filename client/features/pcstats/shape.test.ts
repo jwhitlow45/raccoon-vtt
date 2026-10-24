@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { actor } from "#shared/testutil.ts";
 import type { PcStats } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
-import { END_SHAPE, shapeNote, shapePatch, shapeTempHp, wildShapeDetail } from "./shape.ts";
+import { effectiveShapeKind, END_SHAPE, shapeNote, shapePatch, shapeTempHp, wildShapeDetail } from "./shape.ts";
 
 /** Take a shape and the section's words (docs/design-v1-pc-stats.md 7.3). The numbers a shape rolls with are doc 1's creatureNumbers (shared/rules/pcStats.shape.test.ts). */
 describe("shapes", () => {
@@ -40,5 +40,15 @@ describe("shapes", () => {
     assert.equal(shapeNote(sage, "Wolf", false), "In Wild Shape as Wolf. Sage has no stat block, so rolls use all of Wolf's numbers.");
     assert.equal(wildShapeDetail(sage, "Wolf", true), "Sage has no stat block, so rolls use all of Wolf's numbers. Add a stat block to keep Sage's Intelligence, Wisdom, Charisma and proficiencies.");
     assert.equal(wildShapeDetail({ ...sage, stats: EMPTY_PC_STATS as PcStats }, "Wolf", true), "Sage keeps Intelligence, Wisdom, Charisma and proficiencies, and each save and skill takes the higher of the two.");
+  });
+});
+
+describe("the kind a picked creature is taken as", () => {
+  test("Polymorph chosen before another device put the character in Wild Shape is sent as Wild Shape, and stays Polymorph otherwise", () => {
+    const wild = { actor: actor({ srdId: "wolf", wildShape: true }) };
+    assert.equal(effectiveShapeKind(wild, "other"), "wild");
+    assert.equal(effectiveShapeKind({ actor: actor({}) }, "other"), "other");
+    assert.equal(effectiveShapeKind({ actor: actor({ srdId: "wolf" }) }, "other"), "other", "Polymorph's own shape is not Wild Shape");
+    assert.equal(effectiveShapeKind({ actor: actor({}) }, "wild"), "wild");
   });
 });

@@ -13,6 +13,14 @@ import { whose } from "../tokens/companionBlocks.ts";
 export type ShapeKind = "wild" | "other";
 
 /**
+ * The kind a picked creature is taken as: always Wild Shape while the character is in it, whatever was chosen
+ * before another device put her there, since the choice is hidden then and Polymorph waits for End the shape.
+ */
+export function effectiveShapeKind(character: Pick<Character, "actor">, chosen: ShapeKind): ShapeKind {
+  return pcShape(character) === "wild" ? "wild" : chosen;
+}
+
+/**
  * The temporary HP a shape gives by the 2024 rules (W7B-P-9): the Druid
  * level for Wild Shape, and the creature's HP for Polymorph. The Druid level
  * is the one this device remembers picking in Take a shape when there is
