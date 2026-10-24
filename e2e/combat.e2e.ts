@@ -1381,6 +1381,47 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await lands(dm, /^button Wildfire Spirit, acts on Bree's turn/, "Revive in the sub-row's options");
   });
 
+  test("13g-2. by keyboard, a bar's Uses drawer keeps focus as Restore takes itself away, so Escape then closes the drawer alone (LP21-COMBAT-2)", async () => {
+    const focused = () =>
+      dm.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        if (!a || a.tagName === "BODY") return "the page";
+        return `${a.tagName.toLowerCase()} ${a.getAttribute("aria-label") ?? (a.textContent ?? "").trim().slice(0, 60)}`;
+      });
+    const lands = async (where: RegExp, label: string) => {
+      try {
+        await waitFor(label, async () => where.test(await focused()), 3_000);
+      } catch {
+        assert.fail(`${label}: focus is on "${await focused()}", not ${where}`);
+      }
+    };
+    const i = 9;
+    const goblin = goblinName(i);
+    await ops.send({ t: "token.update", tokenId: run.goblins[i]!, patch: { actor: { legendary: { resistMax: 2, resistUsed: 0, actionsMax: 0, actionsUsed: 0 } } } });
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    await openTracker(dm);
+    await (await rowButton(dm, goblin)).click();
+    const b = bar(dm, goblin);
+    await b.getByRole("button", { name: "Uses", exact: true }).focus();
+    await dm.keyboard.press("Enter");
+    const drawer = b.locator("[data-uses-drawer]");
+    await drawer.waitFor();
+    await lands(/^button Use Legendary Resistance, 2 left$/, "the drawer opened on its first button");
+    await dm.keyboard.press("Enter");
+    await waitFor("one Legendary Resistance spent", () => (goblinState(i)?.legendary?.resistUsed === 1 ? true : null));
+    await drawer.getByRole("button", { name: "Restore one Legendary Resistance" }).focus();
+    await dm.keyboard.press("Enter");
+    await waitFor("the Legendary Resistance back", () => (goblinState(i)?.legendary?.resistUsed === 0 ? true : null));
+    // Restore goes with the use it gave back: focus moves to the row's Use, not to the page.
+    await lands(/^button Use Legendary Resistance, 2 left$/, "Restore handed focus on");
+    await dm.keyboard.press("Escape");
+    await drawer.waitFor({ state: "detached" });
+    assert.equal(await b.isVisible(), true, "Escape closed the bar, not the drawer");
+    await shots.take(dm, "13g-2-uses-restore-escape");
+    await b.getByRole("button", { name: "Close", exact: true }).first().click();
+    await ops.send({ t: "token.update", tokenId: run.goblins[i]!, patch: { actor: { legendary: null } } });
+  });
+
   test("13h. turning a token's Hidden off shows its row to players, by its bar, the H key, the token panel and a group's bar, and the tracker still hides a row on its own", async () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     const pair = [run.goblins[2]!, run.goblins[3]!];

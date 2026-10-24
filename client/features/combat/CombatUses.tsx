@@ -7,6 +7,7 @@ import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
+import { handFocusOn } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { OnAnswer } from "../../state/types.ts";
@@ -201,12 +202,30 @@ function UseLine(props: LineProps) {
   const send = useUseSend(props.onStatus);
   const recharge = useRechargeRoll(props.holder, row.kind === "ability" ? row.use.key : "", props.turn, props.onStatus);
   const id = useId();
+  const line = useRef<HTMLLIElement>(null);
+  /*
+   * A press often takes its own button away: Restore once the use is back, a recharge's Use as it turns into Roll
+   * recharge and Mark ready, a skipped prompt's row with its Reopen. Focus then falls to the page, and the next
+   * Escape closes the whole bar rather than the drawer, so it moves to the row's first button, or the list's.
+   */
+  const keepFocus = () => handFocusOn(line.current?.closest<HTMLElement>("[data-combat-uses]"), [`[data-use-key="${CSS.escape(rowKey(row))}"] button`, "button"]);
   let head: ReactNode;
   let state: string | null = null;
   const buttons: ReactNode[] = [];
   const add = (key: string, b: Omit<UseButtonProps, "busy"> & { op?: ClientOp | null }) => {
     const { op, ...rest } = b;
-    buttons.push(<UseButton key={key} {...rest} busy={send.busy === key} onClick={rest.onClick ?? (() => op && send.send(key, op))} />);
+    const press = rest.onClick ?? (() => op && send.send(key, op));
+    buttons.push(
+      <UseButton
+        key={key}
+        {...rest}
+        busy={send.busy === key}
+        onClick={() => {
+          press();
+          keepFocus();
+        }}
+      />,
+    );
   };
   switch (row.kind) {
     case "resist":
@@ -248,7 +267,10 @@ function UseLine(props: LineProps) {
             off={recharge.blocked}
             offId={`${id}-roll`}
             onOff={props.onStatus}
-            onClick={() => recharge.roll(target, use, openRecord(props.encounter, props.actor, `recharge:${use.key}`))}
+            onClick={() => {
+              recharge.roll(target, use, openRecord(props.encounter, props.actor, `recharge:${use.key}`));
+              keepFocus();
+            }}
           />,
         );
       }
@@ -268,7 +290,7 @@ function UseLine(props: LineProps) {
       break;
   }
   return (
-    <li data-use-row={row.kind} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
+    <li ref={line} data-use-row={row.kind} data-use-key={rowKey(row)} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
       <div style={{ flex: "1 1 auto", minWidth: 0, fontSize: theme.font.body14, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
         <span style={{ fontWeight: theme.weight.strong }}>{head}</span>
         {state ? <span style={{ color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>{`, ${state}`}</span> : null}
