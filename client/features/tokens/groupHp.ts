@@ -135,16 +135,24 @@ export function entryOperation(access: "all" | "relative", mode: HpMode, preview
 }
 
 /**
- * The lines an HP entry adds about the dead among its targets
- * (docs/design-v1-combat-flow.md 3.5), for one creature or a group alike.
- * They follow what will be sent, so `+5` typed under Damage reads as a heal.
+ * What an HP entry has to say about the dead among its targets
+ * (docs/design-v1-combat-flow.md 3.5), for one creature or a group alike,
+ * worded in full by deadLines and briefly by the bar's resting strip. It
+ * follows what will be sent, so `+5` typed under Damage counts as a heal.
  * With healing bringing back the dead (`revives`), a heal, or a set of a
  * current HP above 0, counts the dead it will bring back: those whose
  * maximum is above 0, or unknown to this viewer, since a maximum of 0
  * leaves them at 0. Off, a heal or a set says the dead stay dead before
- * anything is sent. Damage and temporary HP add nothing.
+ * anything is sent. Damage and temporary HP add nothing (null).
  */
-export function deadLines(targets: readonly HpTarget[], operation: EntryOperation, ctx: { revives: boolean; dm: boolean }): string[] {
+export type DeadCase =
+  | { kind: "heal"; name: string; dm: boolean }
+  | { kind: "set"; name: string }
+  | { kind: "healMany"; count: number }
+  | { kind: "setMany"; count: number }
+  | { kind: "back"; count: number };
+
+export function deadCase(targets: readonly HpTarget[], operation: EntryOperation, ctx: { revives: boolean; dm: boolean }): DeadCase | null {
   const seen = new Set<string>();
   const reached: HpTarget[] = [];
   for (const t of targets) {
@@ -153,24 +161,35 @@ export function deadLines(targets: readonly HpTarget[], operation: EntryOperatio
     reached.push(t);
   }
   const dead = reached.filter((t) => t.dead);
-  if (dead.length === 0) return [];
+  if (dead.length === 0) return null;
   const one = reached.length === 1 ? dead[0] : undefined;
   if (ctx.revives) {
     const healing = operation.kind === "heal" || (operation.kind === "set" && operation.cur !== undefined && operation.cur > 0);
-    if (!healing) return [];
+    if (!healing) return null;
     const back = dead.filter((t) => t.max === undefined || t.max > 0).length;
-    if (back === 0) return [];
-    return [back === 1 ? "Brings back 1 dead creature." : `Brings back ${back} dead creatures.`];
+    return back === 0 ? null : { kind: "back", count: back };
   }
-  if (operation.kind === "heal") {
-    if (one) return [`Healing does nothing while ${one.name} is dead.${ctx.dm ? ` Revive ${one.name} first.` : ""}`];
-    return [`Healing does nothing to the ${dead.length} dead among them.`];
+  if (operation.kind === "heal") return one ? { kind: "heal", name: one.name, dm: ctx.dm } : { kind: "healMany", count: dead.length };
+  if (operation.kind === "set") return one ? { kind: "set", name: one.name } : { kind: "setMany", count: dead.length };
+  return null;
+}
+
+/** The lines an HP entry adds about the dead among its targets, worded in full from deadCase. */
+export function deadLines(targets: readonly HpTarget[], operation: EntryOperation, ctx: { revives: boolean; dm: boolean }): string[] {
+  const dead = deadCase(targets, operation, ctx);
+  if (!dead) return [];
+  switch (dead.kind) {
+    case "back":
+      return [dead.count === 1 ? "Brings back 1 dead creature." : `Brings back ${dead.count} dead creatures.`];
+    case "heal":
+      return [`Healing does nothing while ${dead.name} is dead.${dead.dm ? ` Revive ${dead.name} first.` : ""}`];
+    case "healMany":
+      return [`Healing does nothing to the ${dead.count} dead among them.`];
+    case "set":
+      return [`${dead.name} stays dead at the new HP. Only Revive brings ${dead.name} back.`];
+    case "setMany":
+      return [`The ${dead.count} dead among them stay dead at the new HP. Only Revive brings them back.`];
   }
-  if (operation.kind === "set") {
-    if (one) return [`${one.name} stays dead at the new HP. Only Revive brings ${one.name} back.`];
-    return [`The ${dead.length} dead among them stay dead at the new HP. Only Revive brings them back.`];
-  }
-  return [];
 }
 
 /**

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { barButtons, barCapacity, barShort, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restDead, restFit, restStatus, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
-import type { HpTarget } from "../features/tokens/groupHp.ts";
+import { barButtons, barCapacity, barShort, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, restStatus, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
+import { deadCase, type HpTarget } from "../features/tokens/groupHp.ts";
 import { parseHpInput } from "../features/tokens/hpInput.ts";
 import { DEFAULT_SPOT, freeArea, placeBar, spanRoomAtWorst, type Chrome } from "./barDock.ts";
 
@@ -536,28 +536,28 @@ describe("the strip's status line (docs/design-v1-bar-compact.md 3.3)", () => {
     const dm = { revives: false, dm: true };
     const player = { revives: false, dm: false };
     const thorn = [hpTarget("Thorn", { dead: true })];
-    assert.deepEqual(restDead(thorn, { kind: "heal" }, dm), { kind: "heal", name: "Thorn", dm: true });
-    assert.equal(said({ dead: restDead(thorn, { kind: "heal" }, dm) }), "Healing does nothing while Thorn is dead. Revive first.");
-    assert.equal(said({ dead: restDead(thorn, { kind: "heal" }, player) }), "Healing does nothing while Thorn is dead.");
-    assert.equal(said({ dead: restDead(thorn, { kind: "set", cur: 5 }, dm) }), "Thorn stays dead at the new HP. Only Revive brings them back.");
-    assert.equal(restDead(thorn, { kind: "damage" }, dm), null);
-    assert.equal(restDead(thorn, { kind: "temp" }, dm), null);
+    assert.deepEqual(deadCase(thorn, { kind: "heal" }, dm), { kind: "heal", name: "Thorn", dm: true });
+    assert.equal(said({ dead: deadCase(thorn, { kind: "heal" }, dm) }), "Healing does nothing while Thorn is dead. Revive first.");
+    assert.equal(said({ dead: deadCase(thorn, { kind: "heal" }, player) }), "Healing does nothing while Thorn is dead.");
+    assert.equal(said({ dead: deadCase(thorn, { kind: "set", cur: 5 }, dm) }), "Thorn stays dead at the new HP. Only Revive brings them back.");
+    assert.equal(deadCase(thorn, { kind: "damage" }, dm), null);
+    assert.equal(deadCase(thorn, { kind: "temp" }, dm), null);
     // A group heal with a dead creature and Goblin 2 left out.
     const group = [hpTarget("Goblin 1", { dead: true }), hpTarget("Goblin 3"), hpTarget("Goblin 2", { access: "none" })];
-    assert.equal(said({ dead: restDead(group, { kind: "heal" }, dm), left: ["Goblin 2"] }), "Healing does nothing to the 1 dead. Leaves out Goblin 2.");
-    assert.equal(said({ dead: restDead(group, { kind: "set" }, dm) }), "1 dead stays dead. Only Revive brings them back.");
+    assert.equal(said({ dead: deadCase(group, { kind: "heal" }, dm), left: ["Goblin 2"] }), "Healing does nothing to the 1 dead. Leaves out Goblin 2.");
+    assert.equal(said({ dead: deadCase(group, { kind: "set" }, dm) }), "1 dead stays dead. Only Revive brings them back.");
     const two = [hpTarget("Goblin 1", { dead: true }), hpTarget("Goblin 3", { dead: true })];
-    assert.equal(said({ dead: restDead(two, { kind: "set" }, dm) }), "2 dead stay dead. Only Revive brings them back.");
+    assert.equal(said({ dead: deadCase(two, { kind: "set" }, dm) }), "2 dead stay dead. Only Revive brings them back.");
     // With healing bringing back the dead, a heal or a set above 0 counts those it brings back, and a maximum of 0 brings none.
     const revives = { revives: true, dm: true };
-    assert.equal(said({ dead: restDead(two, { kind: "heal" }, revives) }), "Brings back 2 dead creatures.");
-    assert.equal(said({ dead: restDead(thorn, { kind: "set", cur: 5 }, revives) }), "Brings back 1 dead creature.");
-    assert.equal(restDead(thorn, { kind: "set", cur: 0 }, revives), null);
-    assert.equal(restDead([hpTarget("Thorn", { dead: true, max: 0 })], { kind: "heal" }, revives), null);
+    assert.equal(said({ dead: deadCase(two, { kind: "heal" }, revives) }), "Brings back 2 dead creatures.");
+    assert.equal(said({ dead: deadCase(thorn, { kind: "set", cur: 5 }, revives) }), "Brings back 1 dead creature.");
+    assert.equal(deadCase(thorn, { kind: "set", cur: 0 }, revives), null);
+    assert.equal(deadCase([hpTarget("Thorn", { dead: true, max: 0 })], { kind: "heal" }, revives), null);
     // Two tokens of one character count once, and a creature left out is not among the dead.
     const shared = [hpTarget("Thorn", { dead: true, holder: "character:t" }), hpTarget("Thorn copy", { dead: true, holder: "character:t" })];
-    assert.deepEqual(restDead(shared, { kind: "heal" }, dm), { kind: "heal", name: "Thorn", dm: true });
-    assert.equal(restDead([hpTarget("Goblin 2", { dead: true, access: "none" })], { kind: "heal" }, dm), null);
+    assert.deepEqual(deadCase(shared, { kind: "heal" }, dm), { kind: "heal", name: "Thorn", dm: true });
+    assert.equal(deadCase([hpTarget("Goblin 2", { dead: true, access: "none" })], { kind: "heal" }, dm), null);
   });
 
   test("an 80-letter name in the note at 320 x 568 at 130%: two lines at most, the name cut by width from its end, the warning and recovery whole", () => {

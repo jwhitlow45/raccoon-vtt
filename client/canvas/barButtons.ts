@@ -1,5 +1,5 @@
 import { compactHang, freeArea, heldOrOpenMode, placeBar, restOrder, spanRoomAtWorst, type BarMode, type Box } from "./barDock.ts";
-import type { EntryOperation, HpTarget } from "../features/tokens/groupHp.ts";
+import type { DeadCase } from "../features/tokens/groupHp.ts";
 import type { HpMode, HpParse } from "../features/tokens/hpInput.ts";
 
 /*
@@ -283,36 +283,6 @@ export function nextRestMode(mode: HpMode): HpMode {
  * entry's own lines (groupHp.ts deadLines), whose sentences stay the
  * field's description.
  */
-export type RestDead =
-  | { kind: "heal"; name: string; dm: boolean }
-  | { kind: "set"; name: string }
-  | { kind: "healMany"; count: number }
-  | { kind: "setMany"; count: number }
-  | { kind: "back"; count: number };
-
-/** The strip's line on the dead among an entry's targets, for what it will send, by the rule of groupHp.ts deadLines. Null for none. */
-export function restDead(targets: readonly HpTarget[], operation: EntryOperation, ctx: { revives: boolean; dm: boolean }): RestDead | null {
-  const seen = new Set<string>();
-  const reached: HpTarget[] = [];
-  for (const t of targets) {
-    if (t.access === "none" || seen.has(t.holder)) continue;
-    seen.add(t.holder);
-    reached.push(t);
-  }
-  const dead = reached.filter((t) => t.dead);
-  if (dead.length === 0) return null;
-  const one = reached.length === 1 ? dead[0] : undefined;
-  if (ctx.revives) {
-    const healing = operation.kind === "heal" || (operation.kind === "set" && operation.cur !== undefined && operation.cur > 0);
-    if (!healing) return null;
-    const back = dead.filter((t) => t.max === undefined || t.max > 0).length;
-    return back === 0 ? null : { kind: "back", count: back };
-  }
-  if (operation.kind === "heal") return one ? { kind: "heal", name: one.name, dm: ctx.dm } : { kind: "healMany", count: dead.length };
-  if (operation.kind === "set") return one ? { kind: "set", name: one.name } : { kind: "setMany", count: dead.length };
-  return null;
-}
-
 /**
  * Whether Apply sends a Critical Hit (design section 9.6): the kept tick,
  * on a creature at 0 HP, for what will be sent as damage, the typed text
@@ -327,7 +297,7 @@ export function critSent(input: { crit: boolean; atZero: boolean; mode: HpMode; 
 export type EntryStatus = {
   /** The entry's error, or the refusal of what was typed. */
   error: string | null;
-  dead: RestDead | null;
+  dead: DeadCase | null;
   /** The typed change's summary while the field's text parses, such as "7 damage". */
   preview: string | null;
   /** The field holds text. */
@@ -441,7 +411,7 @@ function sentenceOf(input: RestStatusInput): Sentence | null {
   return null;
 }
 
-function deadWords(dead: RestDead, name: string): string {
+function deadWords(dead: DeadCase, name: string): string {
   switch (dead.kind) {
     case "heal":
       return `Healing does nothing while ${name} is dead.${dead.dm ? " Revive first." : ""}`;

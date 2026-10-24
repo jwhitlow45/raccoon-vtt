@@ -10,7 +10,7 @@ import { fieldStyle, NUMBER_FIELD_WIDTH } from "../../components/Field.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { useTooltip } from "../../components/Tooltip.tsx";
-import { critSent, nextRestMode, REST_FIELD_MIN, restDead, type EntryStatus } from "../../canvas/barButtons.ts";
+import { critSent, nextRestMode, REST_FIELD_MIN, type EntryStatus } from "../../canvas/barButtons.ts";
 import { RestRow, type RestItem } from "../../canvas/RestRow.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
@@ -24,7 +24,7 @@ import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
 import { actorOf, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
-import { deadLines, entryOperation, entryRefusal, sendHpEntry, untouchedTypes, type HpTarget } from "./groupHp.ts";
+import { deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, untouchedTypes, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -168,7 +168,7 @@ export function HpEntry(props: {
   const left = props.targets.filter((t) => t.access === "none").map((t) => t.name);
   const said = {
     error: error ?? refusal,
-    dead: restDead(props.targets, operation, { revives, dm }),
+    dead: deadCase(props.targets, operation, { revives, dm }),
     preview: preview?.ok && refusal === null ? preview.summary : null,
     typed: text.trim() !== "",
     crit: sendsCrit,
