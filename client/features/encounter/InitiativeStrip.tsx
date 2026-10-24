@@ -662,7 +662,22 @@ function FightAlerts() {
     const row = rowRef.current;
     const box = boxRef.current;
     const header = box?.parentElement;
+    /*
+     * Beside an upright phone's strip or its expanded bar, the row keeps 8
+     * px above the band's last 44 px over the bar (barDock.ts restFloor,
+     * docs/design-v1-bar-compact.md 3.5), so a token can still be panned
+     * in under it. Where no spot is left, it stands in the strip's header
+     * instead, its own tap kept, and the row here is hidden meanwhile.
+     */
+    const strip = bar?.mode === "span" && !folded ? bar.box.top : null;
+    const handTo = (handed: boolean) => {
+      const was = dock.getState().headerSummary;
+      const next = handed && summary ? { count: 1 + (Number.parseInt(summary.more.replace("+", ""), 10) || 0), name: summary.name, press: () => rowRef.current?.click() } : null;
+      if (next === null ? was !== null : was === null || was.count !== next.count || was.name !== next.name) dock.setState({ headerSummary: next });
+      if (row) row.style.visibility = handed ? "hidden" : "";
+    };
     if (!row || !box || !header || !chrome) {
+      handTo(false);
       setRowPlace(NOT_RAISED);
       return;
     }
@@ -696,8 +711,11 @@ function FightAlerts() {
      * scrolled at 130%, the row lets that rule go too and stands as high
      * as the others allow, over as little of them as it can.
      */
+    const overBand = strip === null ? Infinity : (strip - EDGE - theme.touch - EDGE) * zoom;
+    const kept = { ...rules, floor: Math.min(rules.floor, overBand) };
     const place =
-      raisedRow({ ...rules, floor: (height - chrome.bottom - theme.space(1)) * zoom }) ?? raisedRow(rules) ?? raisedRow({ ...rules, floor: Infinity, highest: true });
+      raisedRow({ ...kept, floor: Math.min((height - chrome.bottom - theme.space(1)) * zoom, overBand) }) ?? raisedRow(kept) ?? (strip === null ? raisedRow({ ...rules, floor: Infinity, highest: true }) : null);
+    handTo(strip !== null && place === null);
     const shift = place ? Math.max(0, Math.round((usual.left - place.left) / zoom)) : 0;
     const next = place
       ? {
@@ -711,6 +729,8 @@ function FightAlerts() {
     const near = (a: RowPlace, b: RowPlace) => Math.abs(a.lift - b.lift) <= 1 && Math.abs(a.shift - b.shift) <= 1 && Math.abs(a.insetLeft - b.insetLeft) <= 1 && Math.abs(a.insetRight - b.insetRight) <= 1;
     setRowPlace((prev) => (near(prev, next) ? prev : next));
   });
+  // A column that goes takes its row out of the strip's header with it.
+  useLayoutEffect(() => () => dock.setState({ headerSummary: null }), [dock]);
   // Asked for where they are, the cards stand over the tool's options until a tap lands outside them.
   useEffect(() => {
     if (asked !== "column") return;
