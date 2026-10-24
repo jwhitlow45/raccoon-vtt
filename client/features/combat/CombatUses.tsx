@@ -174,16 +174,17 @@ export function UsesDrawer(props: { target: ActorTarget; name: string; onClose()
   );
 }
 
-/** Whether a creature has uses to show (logic.ts usesPresence), reading its block. */
+/** Whether a creature has uses to show (logic.ts usesPresence), reading its block and its current record. */
 export function useUsesPresence(target: ActorTarget | null): "yes" | "loading" | "no" {
   const actor = useRoomView((s) => (target && s.view ? actorOf(s.view, target) : undefined));
+  const encounter = useRoomView((s) => s.view?.encounter);
   const resources = useRoomView((s) => {
     const id = target && s.view ? characterIdOf(s.view, target) : undefined;
     return id !== undefined ? s.view?.characters[id]?.resources : undefined;
   });
   const read = useCreatureUses(target);
   if (!target) return "no";
-  return usesPresence({ actor, resources, uses: read.uses, loading: read.loading });
+  return usesPresence({ actor, resources, uses: read.uses, loading: read.loading, record: currentRecord(encounter, actor) });
 }
 
 function rowKey(row: UseRow): string {

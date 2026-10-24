@@ -362,15 +362,18 @@ export type UsesInput = {
   actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined;
   /** The creature acts now: its own turn, when legendary actions wait for another creature's. */
   ownTurn: boolean;
-  /** Its current record, for the card's results and skipped prompts. */
+  /** Its current record, for the card's results and the turn's skipped prompts. */
   record: TurnRecord | null;
 };
 
 /**
- * The rows of a creature's uses (4.2, 5, 6), one list in three places. The
+ * The rows of a creature's uses (4.2, 5, 6), one list in four places. The
  * card leaves out legendary action buttons, since they come only after
  * another creature's turn (13.1), and Regeneration's line, which its own
  * card covers. The list adds them, and the marks its block no longer lists.
+ * Both end with the turn's skipped prompts and their Reopen while the
+ * record is current, so a turn card put away on this device leaves Reopen
+ * in the list, until Next (D-261024-40).
  */
 export function usesRows(input: UsesInput): UseRow[] {
   const { form, actor } = input;
@@ -413,7 +416,7 @@ export function usesRows(input: UsesInput): UseRow[] {
       if (!listed.has(key) || (mark.kind !== "turn" && !uses.some((u) => u.key === key && u.kind === mark.kind))) rows.push({ kind: "other", key, mark });
     }
   }
-  if (form === "card" && input.record) {
+  if (input.record) {
     const names: Record<string, string> = {};
     for (const [key, mark] of Object.entries(marks)) names[key] = mark.name;
     for (const use of uses) names[use.key] = use.name;
@@ -595,15 +598,24 @@ export function markChips(marks: Readonly<Record<string, UseMark>> | undefined):
 }
 
 /**
- * Whether a creature shows a Uses button or group (6): only where its list
- * (`usesRows`, the `list` form) has a row or it has class resources, so
- * neither ever opens empty. Before its block is read, spent uses show at
- * once, with the list's loading line where their rows will stand, and a
- * creature with nothing yet is held while its block loads.
+ * Whether a creature shows a Uses button, group or section (6): only where
+ * its list (`usesRows`, the `list` form) has a row or it has class
+ * resources, so none ever opens empty. A skipped prompt of its current
+ * record (`record`, currentRecord's) is a row, so a goblin whose only row
+ * is its skipped death save shows Uses while its turn lasts. Before its
+ * block is read, spent uses show at once, with the list's loading line
+ * where their rows will stand, and a creature with nothing yet is held
+ * while its block loads.
  */
-export function usesPresence(input: { actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined; resources: readonly unknown[] | undefined; uses: readonly LimitedUse[] | null; loading: boolean }): "yes" | "loading" | "no" {
+export function usesPresence(input: {
+  actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined;
+  resources: readonly unknown[] | undefined;
+  uses: readonly LimitedUse[] | null;
+  loading: boolean;
+  record: TurnRecord | null;
+}): "yes" | "loading" | "no" {
   if ((input.resources?.length ?? 0) > 0) return "yes";
-  if (usesRows({ form: "list", uses: input.uses, actor: input.actor, ownTurn: false, record: null }).length > 0) return "yes";
+  if (usesRows({ form: "list", uses: input.uses, actor: input.actor, ownTurn: false, record: input.record }).length > 0) return "yes";
   if (input.uses !== null) return "no";
   if (Object.keys(input.actor?.uses ?? {}).length > 0) return "yes";
   return input.loading ? "loading" : "no";

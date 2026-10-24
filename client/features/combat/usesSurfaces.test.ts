@@ -96,6 +96,37 @@ describe("a row with no uses draws no Uses group (CCB-ASTRA-05, CCB-OPUS-1)", ()
   });
 });
 
+describe("a goblin whose only row is its skipped death save shows Uses in its row and its bar while its turn lasts (D-261024-40)", () => {
+  test("Reopen in both, gone after Next", () => {
+    let state = room();
+    state.meta.settings = { ...state.meta.settings, monstersDieAtZero: false };
+    state.tokens.g1 = token("g1", { name: "Goblin", x: 2, y: 2 });
+    state.tokens.o1 = token("o1", { name: "Orc", x: 4, y: 2 });
+    let seq = 0;
+    const run = (op: Op) => {
+      const r = applyOp(state, op, DM, env(++seq));
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    };
+    run({ t: "actor.hp", target: { tokenId: "g1" }, change: { kind: "set", cur: 0 } });
+    run({ t: "encounter.start", entries: [{ id: "eo", tokenId: "o1", value: 15 }, { id: "eg", tokenId: "g1", value: 10 }] });
+    while (state.encounter!.activeEntryId !== "eg") run({ t: "encounter.next" });
+    const goblinDrawer = () => provide(state, DM, createElement(UsesDrawer, { target: { tokenId: "g1" }, name: "Goblin", onClose() {} }));
+    assert.doesNotMatch(rowMenu(state, "eg"), /data-uses-group/, "its death save is a card, not a use");
+    const actorNow = state.tokens.g1!.actor;
+    assert.ok("inline" in actorNow && actorNow.inline.turnRecord);
+    run({ t: "actor.prompt", target: { tokenId: "g1" }, record: actorNow.inline.turnRecord.id, what: "deathSave", state: "skipped" });
+    for (const markup of [rowMenu(state, "eg"), goblinDrawer()]) {
+      assert.match(markup, />Death save skipped</);
+      assert.match(markup, /aria-label="Reopen: Death save skipped"/);
+    }
+    assert.match(rowMenu(state, "eg"), /data-uses-group/);
+    run({ t: "encounter.next" });
+    assert.doesNotMatch(rowMenu(state, "eg"), /data-uses-group/);
+    assert.doesNotMatch(goblinDrawer(), /Death save skipped/);
+  });
+});
+
 /**
  * Rows: Dragon 20, Bree 10, Warhorse 8, the warhorse a creature with
  * legendary counts that Bree rides and steers, so it acts on her turn.

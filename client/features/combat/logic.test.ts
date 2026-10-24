@@ -276,10 +276,14 @@ describe("the list", () => {
     assert.equal(otherHead({ kind: "day", name: "Dominate Mind", used: 1, max: 2 }), "Dominate Mind, 1 of 2 used");
   });
 
-  test("Regeneration is a line in the list, and skipped prompts are rows of the card with Reopen", () => {
+  test("Regeneration is a line in the list, and skipped prompts are rows of the card and the list with Reopen while their record is current (D-261024-40)", () => {
     assert.ok(usesRows({ form: "list", uses: [regen], actor: {}, ownTurn: false, record: null }).some((r) => r.kind === "regeneration"));
-    const card = usesRows({ form: "card", uses: [regen], actor: {}, ownTurn: true, record: record({ settled: { regeneration: { state: "skipped" }, deathSave: { state: "done", total: 3, outcome: "failure" } } }) });
+    const skipped = record({ settled: { regeneration: { state: "skipped" }, deathSave: { state: "done", total: 3, outcome: "failure" } } });
+    const card = usesRows({ form: "card", uses: [regen], actor: {}, ownTurn: true, record: skipped });
     assert.deepEqual(card, [{ kind: "skipped", what: "regeneration", text: "Regeneration skipped" }]);
+    const list = usesRows({ form: "list", uses: [regen], actor: {}, ownTurn: false, record: skipped });
+    assert.deepEqual(list, [{ kind: "regeneration", amount: 15 }, { kind: "skipped", what: "regeneration", text: "Regeneration skipped" }]);
+    assert.deepEqual(usesRows({ form: "list", uses: [regen], actor: {}, ownTurn: false, record: null }), [{ kind: "regeneration", amount: 15 }], "no current record, no skipped row");
   });
 
   test("the folded row counts what the viewer can act on, and class resources", () => {
@@ -319,27 +323,35 @@ describe("the list", () => {
   });
 
   test("a creature shows Uses at once with counts, marks or resources, holds it while its block loads, and drops it with none", () => {
-    assert.equal(usesPresence({ actor: { legendary }, resources: undefined, uses: null, loading: true }), "yes");
-    assert.equal(usesPresence({ actor: { uses: { a: breathMark } }, resources: undefined, uses: null, loading: true }), "yes");
-    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: [], loading: false }), "yes");
-    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: null, loading: true }), "loading");
-    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [], loading: false }), "no");
-    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [breath], loading: false }), "yes");
-    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: null, loading: false }), "no", "failed");
+    assert.equal(usesPresence({ actor: { legendary }, resources: undefined, uses: null, loading: true, record: null }), "yes");
+    assert.equal(usesPresence({ actor: { uses: { a: breathMark } }, resources: undefined, uses: null, loading: true, record: null }), "yes");
+    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: [], loading: false, record: null }), "yes");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: null, loading: true, record: null }), "loading");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [], loading: false, record: null }), "no");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [breath], loading: false, record: null }), "yes");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: null, loading: false, record: null }), "no", "failed");
+  });
+
+  test("a creature whose only row is a skipped prompt of its current record shows Uses, held or not by its block (D-261024-40)", () => {
+    const skipped = record({ settled: { deathSave: { state: "skipped" } } });
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [], loading: false, record: skipped }), "yes");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: null, loading: true, record: skipped }), "yes", "while its block loads");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [], loading: false, record: record({ settled: { deathSave: { state: "done", total: 12, outcome: "success" } } }) }), "no", "a settled prompt is no row");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [], loading: false, record: null }), "no");
   });
 
   test("a creature shows Uses only where its list has a row: legendary actions the block prints need counts to stand (CCB-OPUS-5)", () => {
     const drake: LimitedUse[] = [pounce, wing];
     const none = { actionsMax: 0, actionsUsed: 0, resistMax: 0, resistUsed: 0 };
     assert.equal(usesRows({ form: "list", uses: drake, actor: {}, ownTurn: false, record: null }).length, 0);
-    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: drake, loading: false }), "no");
-    assert.equal(usesPresence({ actor: { legendary: none }, resources: undefined, uses: drake, loading: false }), "no", "counts of 0 draw no pips");
-    assert.equal(usesPresence({ actor: { legendary: none }, resources: undefined, uses: null, loading: true }), "loading");
-    assert.equal(usesPresence({ actor: { legendary: { ...none, actionsMax: 2 } }, resources: undefined, uses: drake, loading: false }), "yes");
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: drake, loading: false, record: null }), "no");
+    assert.equal(usesPresence({ actor: { legendary: none }, resources: undefined, uses: drake, loading: false, record: null }), "no", "counts of 0 draw no pips");
+    assert.equal(usesPresence({ actor: { legendary: none }, resources: undefined, uses: null, loading: true, record: null }), "loading");
+    assert.equal(usesPresence({ actor: { legendary: { ...none, actionsMax: 2 } }, resources: undefined, uses: drake, loading: false, record: null }), "yes");
     // What stays: class resources, a mark the block no longer lists, and a mark waiting for its block in the loading line.
-    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: drake, loading: false }), "yes");
-    assert.equal(usesPresence({ actor: { uses: { "actions:frost-breath": breathMark } }, resources: undefined, uses: drake, loading: false }), "yes");
-    assert.equal(usesPresence({ actor: { uses: { "actions:frost-breath": breathMark } }, resources: undefined, uses: null, loading: false }), "yes", "a failed block keeps its marks' place for the failure line");
+    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: drake, loading: false, record: null }), "yes");
+    assert.equal(usesPresence({ actor: { uses: { "actions:frost-breath": breathMark } }, resources: undefined, uses: drake, loading: false, record: null }), "yes");
+    assert.equal(usesPresence({ actor: { uses: { "actions:frost-breath": breathMark } }, resources: undefined, uses: null, loading: false, record: null }), "yes", "a failed block keeps its marks' place for the failure line");
   });
 });
 
@@ -547,6 +559,24 @@ describe("the cards of a turn, from what the reducer wrote at its start", () => 
     assert.equal(f.of("troll").hp.cur, 15);
     const after = cards(f.state, dmYou, (h) => (h === "t:troll" ? [regen] : []));
     assert.equal(regeneratedWords(after.regenerations[0]!.prompt.settled!), "Regenerated 15 HP.");
+  });
+
+  test("a dying goblin's skipped death save: Uses with Reopen in the list while its turn lasts, none after Next (D-261024-40)", () => {
+    const f = fight();
+    f.run({ t: "actor.hp", target: { tokenId: "goblin" }, change: { kind: "set", cur: 0 } });
+    assert.equal(f.of("goblin").life, "dying");
+    while (f.active() !== "eg") f.run({ t: "encounter.next" });
+    const now = () => currentRecord(f.state.encounter, f.of("goblin"));
+    const list = () => usesRows({ form: "list", uses: [], actor: f.of("goblin"), ownTurn: false, record: now() });
+    const presence = () => usesPresence({ actor: f.of("goblin"), resources: undefined, uses: [], loading: false, record: now() });
+    assert.equal(presence(), "no", "its death save is a card, not a use");
+    f.run(promptOp({ tokenId: "goblin" }, now()!.id, "deathSave", "skipped") as Op);
+    assert.deepEqual(list(), [{ kind: "skipped", what: "deathSave", text: "Death save skipped" }]);
+    assert.equal(presence(), "yes");
+    f.run({ t: "encounter.next" });
+    assert.equal(now(), null, "its record is no longer current");
+    assert.deepEqual(list(), []);
+    assert.equal(presence(), "no");
   });
 
   test("a healthy goblin's turn brings no card", () => {
