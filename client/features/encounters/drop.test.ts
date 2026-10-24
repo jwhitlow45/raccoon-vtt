@@ -7,7 +7,7 @@ import { loadMonsters } from "#shared/srd/monsters.ts";
 import { DM, actor, comparable, customMonster, env, imageRef, room, srdImage, token } from "#shared/testutil.ts";
 import { footprint } from "../../lib/scene.ts";
 import { resolveLine, srdIndex } from "./draft.ts";
-import { dropPlan, placedInLair, sendDrop, type DropOptions } from "./drop.ts";
+import { dropPlan, joinEntry, placedInLair, sendDrop, type DropOptions } from "./drop.ts";
 
 const LINES: SavedEncounterMonster[] = [
   { srdId: "goblin-warrior", count: 3 },
@@ -188,5 +188,29 @@ describe("a creature placed in its lair (docs/design-v1-combat-controls.md 13.4)
     const xpOnly = { ...goblin, xpInLair: goblin.xp * 2 };
     assert.equal(placedInLair({ xp: goblin.xp * 2 }, xpOnly), true);
     assert.equal(placedInLair({ xp: goblin.xp }, xpOnly), false);
+  });
+
+  test("a saved line's In lair choice, true or false, stands over the counts, which decide only where the line holds none (CCB-ASTRA-07)", async () => {
+    // A block whose lair changes neither its counts nor its XP: its counts can never tell.
+    const state = setup();
+    state.monsters.mon1 = customMonster("mon1", { xp: 450, xpInLair: 450 });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [] };
+    const srd = srdIndex(await loadMonsters());
+    const rows = (lines: SavedEncounterMonster[]) => {
+      let n = 0;
+      const p = dropPlan({ monsters: lines, resolve: (m) => resolveLine(m, srd, state.monsters), state, scene: state.scenes.s1!, center: { x: 10.5, y: 10.5 }, options: { hidden: false, addToFight: true }, newId: () => `new-${n++}` });
+      return applyAll(state, p.ops).state.encounter!.entries.map((e) => e.inLair === true);
+    };
+    assert.deepEqual(rows([{ monsterId: "mon1", count: 2, inLair: true }]), [true, true], "the line's In lair");
+    assert.deepEqual(rows([{ monsterId: "mon1", count: 1, inLair: false }]), [false]);
+    assert.deepEqual(rows([{ monsterId: "mon1", count: 1 }]), [false], "no choice, and counts that cannot tell");
+    assert.deepEqual(rows([{ srdId: "adult-red-dragon", count: 1 }]), [false], "no choice, the base counts");
+
+    // An explicit no stands over counts that say lair, and inference speaks only where there is no choice.
+    const dragon = (await loadMonsters()).find((m) => m.srdId === "adult-red-dragon")!;
+    const lair = { legendary: { actionsMax: 4, actionsUsed: 0, resistMax: 4, resistUsed: 0 } };
+    assert.equal(joinEntry({ id: "r", tokenId: "t" }, lair, dragon, false).inLair, undefined);
+    assert.equal(joinEntry({ id: "r", tokenId: "t" }, lair, dragon).inLair, true);
+    assert.equal(joinEntry({ id: "r", tokenId: "t" }, {}, null, true).inLair, true, "a choice needs no block");
   });
 });
