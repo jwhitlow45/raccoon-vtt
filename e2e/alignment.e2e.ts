@@ -97,8 +97,14 @@ const PHONE_ROOTS = new Set(["390x844", "320x568"]);
 const GROUP_SAVE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 /** The sizes where the sweep measures the Dice panel's pass (docs/design-v1-dice-pass.md 11.3). */
 const DICE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
-/** The sizes where the sweep measures the combat controls, as their own e2e files do (docs/design-v1-combat-controls.md 9). */
-const COMBAT_AT = new Set([...PHONE_ROOTS, "1440x900"]);
+/**
+ * The sizes where the sweep measures the combat controls, as their own e2e
+ * files do, and a phone held sideways, where the token bar docks beside the
+ * alerts column and the turn card gives way to it (docs/design-v1-combat-controls.md 9).
+ */
+const COMBAT_AT = new Set([...PHONE_ROOTS, "844x390", "1440x900"]);
+/** The lane rule's smallest screen, measured for the combat controls alone (9): 480 x 320 at 130%. */
+const COMBAT_SMALL: Size = { name: "480x320", width: 480, height: 320, touch: true };
 
 let server: Server;
 let srd: readonly SrdMonster[] = [];
@@ -206,8 +212,11 @@ const SOME_SIZES: Record<string, number> = {
   "dp-card-tabs": 6,
   "dp-card-wolf": 6,
   "dp-groups-wolf": 6,
-  // The DM's turn card folds under 600 px wide, so on the phones only.
-  "cu-turn-folded": 4,
+  // The DM's turn card folds under 600 px wide, so on the upright phones and at 480 x 320 at 130%.
+  "cu-turn-folded": 5,
+  // With the dragon's bar across the column, the turn card folds to its row, or leaves the column where even its row would meet the bar (4.2).
+  "cu-turn-fold-bar": 6,
+  "cu-turn-hidden-bar": 8,
 };
 
 /**
@@ -1196,10 +1205,23 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await closeBar(dragon.bar);
   } else await sweep.missing(page, "cu-bar-drawer", "a tap on the dragon opened no window");
 
+  // The row's chips for what the dragon spent, on their own line under its LA and LR.
+  const chips = (await openTracker(page)).locator("li[data-entry-row]").filter({ has: page.getByRole("button", { name: `${RED_DRAGON} options` }) }).locator("[data-spent-chips]");
+  await chips.getByText("Fire Breath used", { exact: true }).waitFor();
+  await chips.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "cu-row-chips", chips);
+  await closeSheets(page);
+
   await turnTo(run.fight.dragon);
   const recharge = await alertCard(page, `Fire Breath can recharge (5–6). ${RED_DRAGON}`);
-  if (recharge) await sweep.measure(page, "cu-recharge", recharge);
-  else await sweep.missing(page, "cu-recharge", "the dragon's turn showed no recharge card");
+  if (recharge) {
+    await sweep.measure(page, "cu-recharge", recharge);
+    // Rolled, the card says how with Done (4.5).
+    await recharge.getByRole("button", { name: "Roll", exact: true }).click();
+    await recharge.getByRole("status").getByText(/^Rolled \d+: Fire Breath /).waitFor();
+    await recharge.getByRole("button", { name: "Done", exact: true }).waitFor();
+    await sweep.measure(page, "cu-recharge-rolled", recharge);
+  } else await sweep.missing(page, "cu-recharge", "the dragon's turn showed no recharge card");
   await escapeAll(page);
   let turn = await alertCard(page, `${RED_DRAGON}'s turn`);
   if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
@@ -1207,9 +1229,22 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await turn.getByRole("button", { name: `Show ${RED_DRAGON}'s turn` }).click();
     turn = await alertCard(page, `${RED_DRAGON}'s turn`);
   }
-  if (turn) await sweep.measure(page, "cu-turn", turn);
-  else await sweep.missing(page, "cu-turn", "the dragon's turn showed no turn card");
+  if (turn) {
+    await sweep.measure(page, "cu-turn", turn);
+    // Folded back where it was folded, so the bar below decides its form.
+    const collapse = turn.getByRole("button", { name: `Collapse ${RED_DRAGON}'s turn` });
+    if (await visible(collapse)) await collapse.click();
+  } else await sweep.missing(page, "cu-turn", "the dragon's turn showed no turn card");
   await escapeAll(page);
+  // Under the recharge card, then alone once Done puts that card away.
+  await turnBesideBar(sweep, page);
+  const done = await alertCard(page, `Fire Breath can recharge (5–6). ${RED_DRAGON}`);
+  if (done) {
+    await done.getByRole("button", { name: "Done", exact: true }).click();
+    await done.waitFor({ state: "detached" });
+  }
+  await escapeAll(page);
+  await turnBesideBar(sweep, page);
 
   await turnTo(run.fight.troll);
   const regeneration = await alertCard(page, "Regeneration for Troll");
@@ -1224,6 +1259,111 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "cu-death-save-waits", waits);
   } else await sweep.missing(page, "cu-death-save-waits", "the troll's turn at 0 HP showed no death save card");
   await escapeAll(page);
+
+  // Skipped, Regeneration leaves the troll's turn card a row with Reopen, and its death save rolls.
+  const skip = await alertCard(page, "Regeneration for Troll");
+  if (skip) await skip.getByRole("button", { name: "Skip", exact: true }).click();
+  await waitFor("Regeneration skipped", () => (trollRecord()?.settled?.regeneration?.state === "skipped" ? true : null));
+  await escapeAll(page);
+  let trollTurn = await alertCard(page, "Troll's turn");
+  if (trollTurn && (await trollTurn.getAttribute("data-turn-folded")) !== null) {
+    await trollTurn.getByRole("button", { name: "Show Troll's turn" }).click();
+    trollTurn = await alertCard(page, "Troll's turn");
+  }
+  if (trollTurn) {
+    await trollTurn.getByRole("button", { name: "Reopen: Regeneration skipped" }).waitFor();
+    await sweep.measure(page, "cu-turn-skipped", trollTurn);
+  } else await sweep.missing(page, "cu-turn-skipped", "a skipped Regeneration left no turn card");
+  await escapeAll(page);
+  const rolled = await alertCard(page, "Death save for Troll");
+  if (rolled) {
+    await rolled.getByRole("button", { name: "Roll", exact: true }).click();
+    await rolled.getByRole("status").getByText(/^Rolled \d+/).waitFor();
+    await rolled.getByRole("button", { name: "Done", exact: true }).waitFor();
+    await sweep.measure(page, "cu-death-save-rolled", rolled);
+  } else await sweep.missing(page, "cu-death-save-rolled", "the troll's death save card went once Regeneration was skipped");
+  await escapeAll(page);
+
+  // Back on its feet below its maximum, after more Fire, its next turn's Regeneration says so, with the note and its help.
+  await ops.send({ t: "actor.hp", target: { tokenId: run.ids.troll }, change: { kind: "heal", amount: 40 } });
+  await ops.send({ t: "actor.hp", target: { tokenId: run.ids.troll }, change: { kind: "damage", amount: 5, types: ["fire"] } });
+  await turnTo(run.fight.thorn);
+  await turnTo(run.fight.troll);
+  const alive = await alertCard(page, "Regeneration for Troll");
+  if (alive) {
+    await alive.getByText("Troll regenerates 15 HP.", { exact: true }).waitFor();
+    await alive.getByText("Recorded Fire damage may stop Regeneration.", { exact: true }).waitFor();
+    await sweep.measure(page, "cu-regeneration-alive", alive);
+  } else await sweep.missing(page, "cu-regeneration-alive", "the troll's turn below its maximum showed no Regeneration card");
+  await escapeAll(page);
+}
+
+/** The troll's turn record as the DM's copy holds it. */
+function trollRecord() {
+  const t = dmSocket.state?.tokens[run.ids.troll];
+  return t && "inline" in t.actor ? t.actor.inline.turnRecord : undefined;
+}
+
+/** What shows of an element: its box cut by every ancestor that clips, as the column's scroll box cuts the cards past its room. */
+async function shownBox(el: Locator): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  return el.evaluate((node) => {
+    type Box = { l: number; r: number; t: number; b: number };
+    type El = { getBoundingClientRect(): { left: number; right: number; top: number; bottom: number }; parentElement: El | null };
+    const style = (n: El) => (globalThis as unknown as { getComputedStyle(n: El): { overflowX: string; overflowY: string } }).getComputedStyle(n);
+    const rect = (n: El): Box => {
+      const r = n.getBoundingClientRect();
+      return { l: r.left, r: r.right, t: r.top, b: r.bottom };
+    };
+    let b = rect(node as unknown as El);
+    for (let n = (node as unknown as El).parentElement; n; n = n.parentElement) {
+      const s = style(n);
+      if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+      const c = rect(n);
+      b = { l: Math.max(b.l, c.l), r: Math.min(b.r, c.r), t: Math.max(b.t, c.t), b: Math.min(b.b, c.b) };
+    }
+    return b.r - b.l > 0.5 && b.b - b.t > 0.5 ? { x: b.l, y: b.t, width: b.r - b.l, height: b.b - b.t } : null;
+  });
+}
+
+/**
+ * The dragon's turn card with its token bar open (4.2): where the bar,
+ * docked, compact or spanning, stands across the alerts column, the card
+ * folds to its row where it would not stack above the bar, and leaves the
+ * column where even its row would meet it. Either way nothing of it shows
+ * under the bar. Under another card the bar stacks below that card, and
+ * the column stops above the bar, cutting the turn card. Alone, the bar
+ * keeps its place and the card gives way.
+ */
+async function turnBesideBar(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(page);
+  const card = page.locator('[data-alert="turn"]').filter({ visible: true });
+  // Where the column stands across, read before the bar opens, since the card may leave it.
+  const lane = (await card.count()) > 0 ? await card.first().boundingBox() : null;
+  if (!lane || !(await canvasAt(page, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 }))) return;
+  const bar = await selectToken(page, RED_DRAGON, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+  if (!bar) return;
+  // The card's form follows the bar's box once both are drawn.
+  await page.waitForTimeout(400);
+  const barBox = await bar.boundingBox();
+  // Left out of the column, the card is not drawn at all. Cut by the column's room, it is drawn but may show nothing.
+  const drawn = page.locator('[data-alert="turn"]');
+  const kept = (await drawn.count()) > 0;
+  const shows = kept ? await shownBox(drawn.first()) : null;
+  const folded = kept && (await drawn.first().getAttribute("data-turn-folded")) !== null;
+  const across = barBox !== null && barBox.x < lane.x + lane.width && barBox.x + barBox.width > lane.x;
+  console.log(`${sweep.at}: the dragon's bar ${await bar.getAttribute("data-bar-mode")} at ${JSON.stringify(barBox)}, across ${across}, the turn card ${kept ? `${folded ? "folded" : "open"}, showing ${JSON.stringify(shows)}` : "left out"}`);
+  if (across && barBox) {
+    if (!kept) sweep.seen.add("cu-turn-hidden-bar");
+    else {
+      assert.ok(folded, `${sweep.at}: the turn card stands open across a docked bar`);
+      if (shows) {
+        const meets = shows.y < barBox.y + barBox.height && shows.y + shows.height > barBox.y;
+        assert.ok(!meets, `${sweep.at}: what shows of the folded turn card, ${shows.y}-${shows.y + shows.height}, meets the bar at ${barBox.y}-${barBox.y + barBox.height}`);
+        await sweep.measure(page, "cu-turn-fold-bar", drawn.first());
+      } else sweep.seen.add("cu-turn-fold-bar");
+    }
+  }
+  await closeBar(bar);
 }
 
 /** The combat screens at one size: Pat's on his page opened again, then the DM's, in their own fight, which ends with them. */
@@ -2066,6 +2206,24 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       });
     }
   }
+
+  test(`pl3-b${index + 1}. at 480 x 320 at 130%, on touch: the combat controls' screens within ${LIMIT_PX} px`, async () => {
+    const sweep = new Sweep("480x320-130");
+    try {
+      await resetThorn();
+      await restartFight();
+      const page = await dmPageFor(COMBAT_SMALL);
+      page.setDefaultTimeout(10_000);
+      // The DM's copy of the room first, so the combat fight replaces the sweep's own.
+      await openAt(page, COMBAT_SMALL, 1.3);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await combatScreens(sweep, page, COMBAT_SMALL, 1.3);
+      console.log(`480x320-130: measured ${[...sweep.seen].join(", ")}`);
+    } finally {
+      sweep.tally();
+    }
+    assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line at 480x320-130:\n${sweep.lines.join("\n")}`);
+  });
 
   test("pl3-c. the screens that show only at some sizes showed at as many as the polish pass found, and each trap name's pointer was read", () => {
     const short = Object.entries(SOME_SIZES)
