@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { LimitedUse } from "#shared/dice/uses.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { PromptKey } from "#shared/model.ts";
@@ -9,13 +9,15 @@ import { buttonLook } from "../../components/looks.ts";
 import { theme } from "../../lib/theme.ts";
 import type { OnAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { useCardRoll } from "../encounter/CardRoll.tsx";
+import { rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import { useAnyPending } from "../encounter/hooks.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { ClassResourceRows } from "../resources/ResourceRows.tsx";
 import { reasonText } from "../resources/logic.ts";
+import { useOption } from "../dice/optionState.ts";
+import { useReceipts } from "../dice/useReceipt.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
-import { useActsNow, useCreatureUses } from "./state.ts";
+import { rechargeRow, useActsNow, useCreatureUses, useListRolls } from "./state.ts";
 import {
   abilityHead,
   abilityOp,
@@ -71,6 +73,17 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
   const record = currentRecord(encounter, actor);
   const rows = usesRows({ form, uses: props.uses, actor, ownTurn: props.ownTurn, record });
   const [status, setStatus] = useState<{ text: string; refused: boolean } | null>(null);
+  const trouble = useListRollTrouble(
+    holder,
+    rows.flatMap((r) => (r.kind === "ability" && r.use.kind === "recharge" ? [r.use.key] : [])),
+  );
+  // The roll's trouble stands until the list's next tap says something of its own, then stays away for that roll.
+  const [quiet, setQuiet] = useState<string | null>(null);
+  const onStatus = (next: { text: string; refused: boolean } | null) => {
+    setStatus(next);
+    setQuiet(trouble?.tag ?? null);
+  };
+  const shown = status ?? (trouble && trouble.tag !== quiet ? { text: trouble.text, refused: true } : null);
   const waits = props.uses === null && (props.loading || props.failed);
   if (rows.length === 0 && !waits && characterId === undefined) return null;
   return (
@@ -78,15 +91,15 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
       {rows.length > 0 ? (
         <ul aria-label={`${props.name}'s uses`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
           {rows.map((row) => (
-            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} encounter={encounter} actor={actor} onStatus={setStatus} />
+            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} encounter={encounter} actor={actor} onStatus={onStatus} />
           ))}
         </ul>
       ) : null}
       {waits ? props.failed ? <SrdLoadFailed what="The uses" inline /> : <Loading text="Loading the uses…" style={{ minHeight: theme.touch }} /> : null}
       {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} /> : null}
-      {status ? (
-        <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: status.refused ? theme.color.dangerText : theme.color.textMuted }}>
-          {status.text}
+      {shown ? (
+        <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: shown.refused ? theme.color.dangerText : theme.color.textMuted }}>
+          {shown.text}
         </p>
       ) : null}
     </div>
@@ -292,11 +305,12 @@ function useUseSend(onStatus: LineProps["onStatus"]) {
  * settles the turn's open prompt for the key where one is open (2.3).
  */
 function useRechargeRoll(holder: string, key: string, onStatus: LineProps["onStatus"]) {
-  const row = `${holder}|${key}|recharge`;
+  const row = rechargeRow(holder, key);
   const card = useCardRoll(row);
   const blocked = useRollBlocked();
-  // Only the roll this line sent says its result here: the row's older rolls are the Dice panel's to show.
-  const [mine, setMine] = useState<string | null>(null);
+  // Only a roll a uses list sent says its result here: the row's other rolls are the Dice panel's to show.
+  const lists = useListRolls();
+  const mine = lists.rolls[row] ?? null;
   const total = mine !== null && card.tag === mine ? card.rolls[0]?.total : undefined;
   return {
     waiting: card.waiting,
@@ -307,11 +321,32 @@ function useRechargeRoll(holder: string, key: string, onStatus: LineProps["onSta
       const tag = uuidv7();
       if (card.send(rechargeRollOp(tag, target, use, record)) === null) onStatus({ text: "That roll could not be sent. Try again.", refused: true });
       else {
-        setMine(tag);
+        lists.remember(row, tag);
         onStatus(null);
       }
     },
   };
+}
+
+/**
+ * Why the newest Roll recharge a uses list sent for one of these recharges
+ * did not land (CardRoll.tsx rollTrouble): refused, as when another device
+ * settled its prompt first, or lost on the way. The roll goes quiet and its
+ * line watches its receipt, so no toast says it instead.
+ */
+function useListRollTrouble(holder: string, keys: readonly string[]): { tag: string; text: string } | null {
+  const { rolls } = useListRolls();
+  const tags = useOption((s) => s.tags);
+  const tracker = useReceipts();
+  useSyncExternalStore(tracker.subscribe, tracker.version, tracker.version);
+  for (const key of keys) {
+    const row = rechargeRow(holder, key);
+    const tag = rolls[row];
+    if (tag === undefined || tags[row] !== tag) continue;
+    const text = rollTrouble(tracker.state(tag), false);
+    if (text) return { tag, text };
+  }
+  return null;
 }
 
 type UseButtonProps = {

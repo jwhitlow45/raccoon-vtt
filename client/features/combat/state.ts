@@ -12,13 +12,27 @@ import { actorOf, actsNow, currentRecord, deathSaveWaits, holderKey, promptsOf }
 /*
  * What this device keeps of a fight's combat uses, per Room page
  * (state/scope.ts): the cards it dismissed for this turn, which only Skip
- * settles for everyone (docs/design-v1-combat-controls.md 4.1), and the
- * turn cards it unfolded. Keys name the turn or the prompt, so a new turn's
- * card or prompt never meets an old dismissal.
+ * settles for everyone (docs/design-v1-combat-controls.md 4.1), the turn
+ * cards it unfolded, and the tag of the last Roll recharge its uses lists
+ * sent per recharge (`rechargeRow`), whose result and trouble those lists
+ * show. Keys name the turn or the prompt, so a new turn's card or prompt
+ * never meets an old dismissal.
  */
-type Local = { dismissed: ReadonlySet<string>; shown: ReadonlySet<string> };
+type Local = { dismissed: ReadonlySet<string>; shown: ReadonlySet<string>; rolls: Readonly<Record<string, string>> };
 
-export const combatLocalSlot = scopeSlot(() => createStore<Local>(() => ({ dismissed: new Set<string>(), shown: new Set<string>() })));
+export const combatLocalSlot = scopeSlot(() => createStore<Local>(() => ({ dismissed: new Set<string>(), shown: new Set<string>(), rolls: {} })));
+
+/** A recharge's row in the options' store, which the Dice panel's Recharge 1d6 and the uses lists' Roll recharge share. */
+export function rechargeRow(holder: string, key: string): string {
+  return `${holder}|${key}|recharge`;
+}
+
+/** The tags this device's uses lists last rolled per recharge row, and the way to remember one. */
+export function useListRolls(): { rolls: Readonly<Record<string, string>>; remember(row: string, tag: string): void } {
+  const store = useScoped(combatLocalSlot);
+  const rolls = useStore(store, (s) => s.rolls);
+  return useMemo(() => ({ rolls, remember: (row: string, tag: string) => store.setState((s) => ({ rolls: { ...s.rolls, [row]: tag } })) }), [store, rolls]);
+}
 
 /** A prompt's key on this device: whose it is, its record and what it asks. A turn's creatures share one record id, the seq that started it. */
 export function promptId(holder: string, record: number, what: string): string {

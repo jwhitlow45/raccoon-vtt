@@ -2,7 +2,8 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { RoomState, Viewer } from "#shared/model.ts";
+import type { RechargeUse } from "#shared/dice/uses.ts";
+import type { RoomState, UseMark, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -20,11 +21,15 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { EntryRow } = await import("../encounter/Row.tsx");
-const { UsesDrawer } = await import("./CombatUses.tsx");
+const { CombatUses, UsesDrawer } = await import("./CombatUses.tsx");
+const { combatLocalSlot, rechargeRow } = await import("./state.ts");
+const { optionSlot } = await import("../dice/optionState.ts");
+const { receiptsSlot } = await import("../dice/useReceipt.ts");
+type Scope = InstanceType<typeof RoomScope>;
 
 const legendary = { actionsMax: 3, actionsUsed: 0, resistMax: 0, resistUsed: 0 };
 
-function provide(state: RoomState, viewer: Viewer, child: ReturnType<typeof createElement>): string {
+function provide(state: RoomState, viewer: Viewer, child: ReturnType<typeof createElement>, scope: Scope = new RoomScope()): string {
   const view = projectState(state, viewer, { sceneId: "s1" });
   const store = createStore(() => ({ view, you: { memberId: viewer.memberId, role: viewer.role }, roomId: "r1", connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
   return renderToStaticMarkup(
@@ -33,7 +38,7 @@ function provide(state: RoomState, viewer: Viewer, child: ReturnType<typeof crea
       actions: { dispatch: () => 1, newId: () => "x" } as never,
       ui: {} as never,
       assets: { url: () => "" } as never,
-      children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: child }),
+      children: createElement(RoomScopeProvider, { scope, children: child }),
     }),
   );
 }
@@ -132,5 +137,78 @@ describe("a controlled mount on its rider's turn: the row and the bar agree it a
     assert.doesNotMatch(rowMenu(f.state, "eh"), OFF);
     assert.doesNotMatch(drawer(f.state, "horse"), OFF);
     assert.match(drawer(f.state, "horse"), /Spend a legendary action/);
+  });
+});
+
+describe("a Roll recharge from the list that did not land says why in the list's status line (CCB-ASTRA-02)", () => {
+  const breath: RechargeUse = { kind: "recharge", key: "actions:fire-breath", name: "Fire Breath", section: "actions", min: 5 };
+  const mark: UseMark = { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 };
+  const state = room();
+  state.tokens.dragon = token("dragon", { name: "Dragon", actor: { inline: actor({ uses: { [breath.key]: mark } }) } });
+  const row = rechargeRow("t:dragon", breath.key);
+
+  /** The list as it stands once this device's list sent `tag`, the Dice panel's row holding `rowTag`. */
+  function listAfter(scope: Scope, tag: string, rowTag = tag): string {
+    // A server render reads a store's initial state, so each store's state now stands as its initial one (as LibraryGrid.test.ts does).
+    const local = scope.get(combatLocalSlot);
+    local.setState({ rolls: { [row]: tag } });
+    local.getInitialState = local.getState;
+    const options = scope.get(optionSlot);
+    options.setState({ tags: { [row]: rowTag } });
+    options.getInitialState = options.getState;
+    return provide(state, DM, createElement(CombatUses, { target: { tokenId: "dragon" }, form: "list", uses: [breath], loading: false, failed: false, ownTurn: false, name: "Dragon" }), scope);
+  }
+  const statusOf = (markup: string) => /<p role="status"[^>]*>([^<]*)<\/p>/.exec(markup)?.[1] ?? null;
+
+  test("refused, as when another device settled its prompt first", () => {
+    const scope = new RoomScope();
+    const tracker = scope.get(receiptsSlot);
+    tracker.sending("r1", 0);
+    tracker.answer("r1", 0, "refused", { code: "invalid", message: "Not saved. It was settled meanwhile.", text: "Not saved. It was settled meanwhile." });
+    const markup = listAfter(scope, "r1");
+    assert.match(markup, /Roll recharge/);
+    assert.equal(statusOf(markup), "It was settled meanwhile.");
+  });
+
+  test("unknown, an answer lost on the way", async () => {
+    const scope = new RoomScope();
+    const tracker = scope.get(receiptsSlot);
+    tracker.sending("r2", 0);
+    tracker.answer("r2", 0, "unknown");
+    // With no server to ask, the lookup settles the part unknown.
+    await tracker.lookup("r2");
+    assert.equal(tracker.state("r2")?.state, "unknown");
+    assert.equal(statusOf(listAfter(scope, "r2")), "This may have happened. Check the log.");
+  });
+
+  test("a roll it sent that landed says its result while the mark agrees, and gives way to a spend after it (CCB-ASTRA-01)", () => {
+    const rolled = (uses: Record<string, UseMark>) => {
+      const scope = new RoomScope();
+      const s = { ...state, tokens: { dragon: token("dragon", { name: "Dragon", actor: { inline: actor({ uses }) } }) } };
+      s.log = [{ id: "5:0", at: "2026-10-23T20:00:00.000Z", kind: "event", data: { type: "dice", by: "dm1", to: "all", tag: "own", rolls: [{ formula: "1d6", faces: [6], total: 6, label: "Fire Breath recharge" }] } }];
+      scope.get(receiptsSlot).sending("own", 0);
+      scope.get(receiptsSlot).answer("own", 0, "taken");
+      const local = scope.get(combatLocalSlot);
+      local.setState({ rolls: { [row]: "own" } });
+      local.getInitialState = local.getState;
+      const options = scope.get(optionSlot);
+      options.setState({ tags: { [row]: "own" } });
+      options.getInitialState = options.getState;
+      return provide(s, DM, createElement(CombatUses, { target: { tokenId: "dragon" }, form: "list", uses: [breath], loading: false, failed: false, ownTurn: false, name: "Dragon" }), scope);
+    };
+    assert.match(rolled({}), />, Rolled 6: ready</);
+    assert.match(rolled({ [breath.key]: mark }), />, Used</, "spent again after the ready roll");
+  });
+
+  test("never for a roll that landed, nor for the Dice panel's own roll of that recharge", () => {
+    const scope = new RoomScope();
+    const tracker = scope.get(receiptsSlot);
+    tracker.sending("r3", 0);
+    tracker.answer("r3", 0, "refused", { code: "invalid", message: "It was settled meanwhile.", text: "It was settled meanwhile." });
+    assert.equal(statusOf(listAfter(scope, "r3", "panel-tag")), null, "the row's newest roll is the panel's");
+    const landed = new RoomScope();
+    landed.get(receiptsSlot).sending("r4", 0);
+    landed.get(receiptsSlot).answer("r4", 0, "taken");
+    assert.equal(statusOf(listAfter(landed, "r4")), null);
   });
 });
