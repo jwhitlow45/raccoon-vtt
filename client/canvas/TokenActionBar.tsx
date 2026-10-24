@@ -1881,7 +1881,8 @@ function vitalsWords(items: readonly VitalItem[]): string[] {
  * name. `status.sentence` is what needs more room than that line.
  */
 function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; critInRow: boolean; active: boolean }): { status: RestStatus; node: ReactNode } {
-  const lineRef = useRef<HTMLSpanElement>(null);
+  // State, not a ref, so a line the header draws afresh is measured and watched again.
+  const [line, setLine] = useState<HTMLSpanElement | null>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
   const [noteWidth, setNoteWidth] = useState<number | null>(null);
   const [titleWidth, setTitleWidth] = useState<number | null>(null);
@@ -1889,7 +1890,6 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
   const [status, setStatus] = useState<RestStatus>(() => restStatus({ ...input.entry, idle: input.idle, critInRow: input.critInRow, fit: FITS_ALL }));
   // The widths it measures against, read again as the frame or the title changes width (a turn, a new interface size, a header button).
   useLayoutEffect(() => {
-    const line = lineRef.current;
     const frameEl = line?.closest<HTMLElement>('[role="dialog"]');
     if (!input.active || !line) return;
     const read = () => {
@@ -1901,18 +1901,17 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
     watch.observe(line);
     if (frameEl) watch.observe(frameEl);
     return () => watch.disconnect();
-  }, [input.active]);
+  }, [input.active, line]);
   useLayoutEffect(() => {
     const [entry, idle, critInRow] = JSON.parse(key) as [EntryStatus, string[], boolean];
-    const line = lineRef.current;
     const probe = probeRef.current;
     const fit = input.active && line && probe && titleWidth !== null ? measuredFit(line, probe, noteWidth) : FITS_ALL;
     const next = restStatus({ ...entry, idle, critInRow, fit });
     setStatus((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
-  }, [key, input.active, titleWidth, noteWidth]);
+  }, [key, input.active, line, titleWidth, noteWidth]);
   const node = (
     <span
-      ref={lineRef}
+      ref={setLine}
       // What needs more room than the line, for the frame to draw over the title or in the note (9.2), and for tests to read.
       data-rest-status=""
       data-rest-sentence={status.sentence?.text}
