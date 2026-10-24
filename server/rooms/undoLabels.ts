@@ -253,8 +253,13 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return "moving to the next turn";
     case "encounter.prev":
       return "going back a turn";
-    case "encounter.update":
-      return "changing an Initiative entry";
+    case "encounter.update": {
+      // In lair changes the creature's counts too (docs/design-v1-combat-controls.md 3.5).
+      if (op.patch.inLair === undefined || Object.keys(op.patch).length !== 1) return "changing an Initiative entry";
+      const row = before.encounter?.entries.find((e) => e.id === op.entryId);
+      const who = row?.tokenId !== undefined ? token(row.tokenId) : row?.characterId !== undefined ? quoted(before.characters[row.characterId]?.name, "a character") : quoted(row?.label, "a creature");
+      return op.patch.inLair ? `putting ${who} in its lair` : `taking ${who} out of its lair`;
+    }
     case "log.chat":
     case "log.whisper":
       return "sending a message";

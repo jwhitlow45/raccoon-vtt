@@ -332,6 +332,26 @@ export function encounterUpdate(tx: Tx, op: OpOf<"encounter.update">): void {
   const entries = [...encounter.entries];
   entries[index] = next;
   writeEncounter(tx, { ...encounter, entries });
+  if (op.counts) lairCounts(tx, entry, op.counts);
+}
+
+/**
+ * In lair's counts (docs/design-v1-combat-controls.md 2.4): the row's
+ * creature takes the block's lair or base legendary counts and XP, which
+ * the op carries since the reducer never reads a block. What it spent stays,
+ * cut to the new counts.
+ */
+function lairCounts(tx: Tx, entry: InitEntry, counts: NonNullable<OpOf<"encounter.update">["counts"]>): void {
+  const resolved = entry.tokenId !== undefined ? tx.tryResolveActor({ tokenId: entry.tokenId }) : entry.characterId !== undefined ? tx.tryResolveActor({ characterId: entry.characterId }) : undefined;
+  if (!resolved) return;
+  const was = resolved.actor.legendary;
+  const legendary = {
+    actionsMax: counts.actionsMax,
+    actionsUsed: Math.min(was?.actionsUsed ?? 0, counts.actionsMax),
+    resistMax: counts.resistMax,
+    resistUsed: Math.min(was?.resistUsed ?? 0, counts.resistMax),
+  };
+  tx.putActor(resolved, { ...resolved.actor, legendary, ...(counts.xp !== undefined ? { xp: counts.xp } : {}) });
 }
 
 function holderId(resolved: ResolvedActor): string {

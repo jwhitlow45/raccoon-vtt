@@ -28,6 +28,7 @@ import {
   syncOwners,
 } from "./companions.ts";
 import { removeEntries } from "./encounter.ts";
+import { linkOf } from "./uses.ts";
 import { applyPcStatsPatch, EMPTY_PC_STATS, pcNumbersFromBlock, pcStatsFits, pcStatsTooBig, WILD_SHAPE_ALONE, withPcActorNumbers, withUnshaped } from "../rules/pcStats.ts";
 import { gone, invalid, Refuse, type Env, type ResolvedActor, type Tx } from "./tx.ts";
 
@@ -177,6 +178,8 @@ export function applyActorPatch(tx: Tx, resolved: ResolvedActor, patch: ActorPat
   setOrDelete(actor, "sheetUrl", patch.sheetUrl);
   setOrDelete(actor, "legendary", patch.legendary);
   if (resolved.holder === "character" && shapeKeepsOwnNumbers(tx.env.opVersion)) actor = withUnshaped(resolved.actor, actor, patch);
+  // Marks are keyed by the block's entries, so a new block, or a shape taken or ended, takes them (docs/design-v1-combat-controls.md 2.4).
+  if (actor.uses !== undefined && linkOf(actor) !== linkOf(resolved.actor)) delete actor.uses;
   return { actor, events };
 }
 

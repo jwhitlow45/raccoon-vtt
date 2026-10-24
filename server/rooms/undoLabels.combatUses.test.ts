@@ -40,4 +40,12 @@ describe("combat uses' undo step labels (docs/design-v1-combat-controls.md 3.5)"
   test("an update of a character's class resources names them", () => {
     assert.equal(describeOp({ t: "character.update", characterId: "thorn", patch: { resources: [] } }, state()), "changing Thorn's class resources");
   });
+
+  test("In lair names the creature it puts in or takes out of its lair", () => {
+    const s = state();
+    s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [{ id: "ed", tokenId: "dragon", value: 20, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false }] };
+    assert.equal(describeOp({ t: "encounter.update", entryId: "ed", patch: { inLair: true }, counts: { actionsMax: 4, resistMax: 4 } }, s), "putting Adult Red Dragon in its lair");
+    assert.equal(describeOp({ t: "encounter.update", entryId: "ed", patch: { inLair: false } }, s), "taking Adult Red Dragon out of its lair");
+    assert.equal(describeOp({ t: "encounter.update", entryId: "ed", patch: { hidden: true } }, s), "changing an Initiative entry");
+  });
 });
