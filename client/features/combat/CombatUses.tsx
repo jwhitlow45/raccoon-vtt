@@ -15,7 +15,7 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { ClassResourceRows } from "../resources/ResourceRows.tsx";
 import { reasonText } from "../resources/logic.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
-import { useCreatureUses } from "./state.ts";
+import { useActsNow, useCreatureUses } from "./state.ts";
 import {
   abilityHead,
   abilityOp,
@@ -93,10 +93,11 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
   );
 }
 
-/** CombatUses for a creature, reading its block itself: the tracker row's Uses group and the token bar's Uses drawer. */
-export function CreatureUses(props: { target: ActorTarget; form: UsesForm; ownTurn: boolean; name: string }) {
+/** The off-turn list for a creature, reading its block and whose turn it is itself: the tracker row's Uses group, a companion's and the token bar's Uses drawer. */
+export function CreatureUses(props: { target: ActorTarget; name: string }) {
   const read = useCreatureUses(props.target);
-  return <CombatUses {...props} uses={read.uses} loading={read.loading} failed={read.failed} />;
+  const ownTurn = useActsNow(props.target);
+  return <CombatUses {...props} form="list" ownTurn={ownTurn} uses={read.uses} loading={read.loading} failed={read.failed} />;
 }
 
 /**
@@ -105,7 +106,7 @@ export function CreatureUses(props: { target: ActorTarget; form: UsesForm; ownTu
  * on its first button, so a keyboard lands in it, and Escape closes it
  * alone, never the bar around it.
  */
-export function UsesDrawer(props: { target: ActorTarget; ownTurn: boolean; name: string; onClose(): void }) {
+export function UsesDrawer(props: { target: ActorTarget; name: string; onClose(): void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const box = ref.current;
@@ -128,7 +129,7 @@ export function UsesDrawer(props: { target: ActorTarget; ownTurn: boolean; name:
       style={{ display: "grid", gap: theme.space(1) }}
     >
       <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Uses</div>
-      <CreatureUses target={props.target} form="list" ownTurn={props.ownTurn} name={props.name} />
+      <CreatureUses target={props.target} name={props.name} />
     </div>
   );
 }

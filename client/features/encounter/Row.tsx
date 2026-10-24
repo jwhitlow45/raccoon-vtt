@@ -285,7 +285,6 @@ export function EntryRow(props: {
           entry={entry}
           name={name}
           role={role}
-          active={active}
           drag={drag}
           roll={rollBeside ? null : rollButton}
           legendaryTarget={legendaryTarget(token, characterId)}
@@ -455,8 +454,6 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
  */
 function CompanionMenu(props: { token: Token; entryId: string; name: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; spent: boolean; dead: boolean; statBlock: boolean }) {
   const { token, dm } = props;
-  // A companion acts on its character's turn, so its row's turn is its own.
-  const ownTurn = useRoomView((s) => s.view?.encounter?.activeEntryId === props.entryId);
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
@@ -481,7 +478,7 @@ function CompanionMenu(props: { token: Token; entryId: string; name: string; dm:
         onChange={(on) => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { companionReaction: on } })}
       />
       <ReadyControls answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} target={target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} />
-      <UsesGroup target={target} ownTurn={ownTurn} name={props.name} />
+      <UsesGroup target={target} name={props.name} />
       {props.statBlock ? (
         <div style={{ display: "flex" }}>
           <Button size="sm" onClick={() => openStatBlock(scope, ui, token.id, { from: here })}>
@@ -836,8 +833,6 @@ function RowMenu(props: {
   roll?: ReactNode;
   /** The DM's "Move after Bree" on a controlled mount's acting row (docs/design-v1-attach.md 7.1, attach/tags.ts). */
   moveAfter?: ReturnType<typeof moveAfterRider>;
-  /** The row acts now, when its creature's legendary actions wait for another creature's turn. */
-  active: boolean;
 }) {
   const { entry, role, drag } = props;
   const reviveNoteId = useId();
@@ -922,7 +917,7 @@ function RowMenu(props: {
             </div>
           ) : null}
           {props.target ? (
-            <UsesGroup target={props.target} ownTurn={props.active} name={props.name}>
+            <UsesGroup target={props.target} name={props.name}>
               {legendary && legendary.actionsMax > 0 ? (
                 <Pips
                   label="Legendary Actions used"
@@ -971,7 +966,7 @@ function RowMenu(props: {
             onChange={(reactionUsed) => reaction.send({ t: "encounter.update", entryId: entry.id, patch: { reactionUsed } })}
           />
           {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
-          {props.target ? <UsesGroup target={props.target} ownTurn={props.active} name={props.name} /> : null}
+          {props.target ? <UsesGroup target={props.target} name={props.name} /> : null}
           {props.statBlockTokenId !== null ? (
             <div style={{ display: "flex" }}>
               <Button size="sm" onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!, { from: here })}>
@@ -996,14 +991,14 @@ function RowMenu(props: {
  * same list as its token bar's Uses drawer, then the pips, which set the
  * counts by hand. Nothing for a creature with no use.
  */
-function UsesGroup(props: { target: ActorTarget; ownTurn: boolean; name: string; children?: ReactNode }) {
+function UsesGroup(props: { target: ActorTarget; name: string; children?: ReactNode }) {
   // The pips come only with legendary counts, which make a row of the list, so presence alone decides.
   const presence = useUsesPresence(props.target);
   if (presence === "no") return null;
   return (
     <div role="group" aria-label={`${props.name}'s uses`} data-uses-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Uses</span>
-      <CreatureUses target={props.target} form="list" ownTurn={props.ownTurn} name={props.name} />
+      <CreatureUses target={props.target} name={props.name} />
       {props.children}
     </div>
   );

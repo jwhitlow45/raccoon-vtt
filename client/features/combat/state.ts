@@ -7,7 +7,7 @@ import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { creatureBlock, srdNeeds } from "../dice/creature.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
-import { actorOf, currentRecord, deathSaveWaits, holderKey, promptsOf } from "./logic.ts";
+import { actorOf, actsNow, currentRecord, deathSaveWaits, holderKey, promptsOf } from "./logic.ts";
 
 /*
  * What this device keeps of a fight's combat uses, per Room page
@@ -100,6 +100,11 @@ export function useDeathSaveWaits(target: ActorTarget | null): boolean {
   if (!record || !actor) return false;
   const prompts = promptsOf({ record, actor, regeneration: regenerationIn(uses) });
   return deathSaveWaits(prompts.regeneration, local.dismissed.has(promptId(holder, record.id, "regeneration")));
+}
+
+/** Whether a creature acts now (logic.ts actsNow), which every off-turn list of its uses asks. */
+export function useActsNow(target: ActorTarget | null): boolean {
+  return useRoomView((s) => (target && s.view ? actsNow(s.view, target) : false));
 }
 
 /** "Waiting for Regeneration", the reason every waiting death save Roll gives (4.4). */

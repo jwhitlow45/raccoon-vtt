@@ -16,7 +16,6 @@ import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useOptionStore } from "../features/dice/optionState.ts";
 import { UsesDrawer, useUsesPresence } from "../features/combat/CombatUses.tsx";
-import { currentRecord } from "../features/combat/logic.ts";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { useSend } from "../features/encounter/hooks.ts";
@@ -144,23 +143,6 @@ function ButtonRow(props: { row: "passing" | "play" | "less"; children: ReactNod
 }
 
 type Drawer = "conditions" | "uses" | null;
-
-/**
- * Whether a token's creature acts now, when its legendary actions wait for
- * another creature's turn (docs/design-v1-combat-controls.md 5): its row
- * acts, or a turn it shares with another row's creature started for it.
- */
-function actsNow(
-  encounter: { activeEntryId: string | null; round: number; entries: readonly { id: string; tokenId?: string; characterId?: string }[] } | null | undefined,
-  token: ViewToken,
-  characterId: string | undefined,
-  actor: Pick<Actor, "turnRecord"> | undefined,
-): boolean {
-  const active = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
-  if (!active) return false;
-  if (active.tokenId === token.id || (characterId !== undefined && active.tokenId === undefined && active.characterId === characterId)) return true;
-  return currentRecord(encounter, actor) !== null;
-}
 
 /**
  * Where focus goes once Revive leaves the bar: its frame, which announces
@@ -295,7 +277,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const undoIds = barTokenIds(tokens, token);
   // Its combat uses (docs/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
   const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);
-  const ownTurn = actsNow(encounter, token, character?.id, actor);
   const rows = barButtons({
     dm: access.dm,
     owner: access.owner,
@@ -500,7 +481,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       ) : null}
 
       {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
-      {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} ownTurn={ownTurn} name={displayName(token)} onClose={() => setDrawer(null)} /> : null}
+      {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token)} onClose={() => setDrawer(null)} /> : null}
 
       {rows.passing.length > 0 ? (
         <ButtonRow row="passing">{rows.passing.map(button)}</ButtonRow>

@@ -2,6 +2,7 @@ import type { DayUse, LegendaryUse, LimitedUse, RechargeUse, RegenerationUse, Re
 import type { Actor, ClassResource, Encounter, PromptKey, RoomState, Settled, TurnRecord, UseKey, UseMark } from "#shared/model.ts";
 import type { ProjectedActor } from "#shared/project.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
+import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { marksTime } from "../attach/tags.ts";
 import { entryName, ownsEntry, playerOwnedEntry } from "../encounter/logic.ts";
@@ -46,6 +47,25 @@ export function characterIdOf(view: Pick<RoomState, "tokens">, target: ActorTarg
   if ("characterId" in target) return target.characterId;
   const token = view.tokens[target.tokenId];
   return token && "ref" in token.actor ? token.actor.ref : undefined;
+}
+
+/**
+ * Whether a creature acts now, when its legendary actions wait for another
+ * creature's turn (5, 13.1): the acting row is its own, it is a companion
+ * that acts on that row's character's turn, or a turn it shares with
+ * another row's creature started for it, as a controlled mount's does with
+ * its rider's (its current record). The tracker row, a companion's
+ * sub-row and the token bar all ask this, so they never disagree.
+ */
+export function actsNow(view: View, target: ActorTarget): boolean {
+  const encounter = view.encounter;
+  const active = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
+  if (!encounter || !active) return false;
+  const acting = active.tokenId !== undefined ? holderKey(view, { tokenId: active.tokenId }) : active.characterId !== undefined ? `c:${active.characterId}` : null;
+  if (acting !== null && acting === holderKey(view, target)) return true;
+  const token = "tokenId" in target ? view.tokens[target.tokenId] : undefined;
+  if (token?.companion && actsOnCharacterTurn(token) && acting === `c:${token.companion.of}`) return true;
+  return currentRecord(encounter, actorOf(view, target)) !== null;
 }
 
 /** A creature of the turn now (2.3): the landing row's own, or another with a current record, by its holder. */
