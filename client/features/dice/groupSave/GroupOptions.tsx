@@ -271,8 +271,8 @@ function useSharedAttacksStore() {
  * and back never shows the old hits, and a selection that no longer shares
  * an attack drops that one, so a phone's Dice sheet closed while the DM
  * selects others never brings back hits a selection in between lost.
- * Where a selected creature's block has yet to load, its selection says
- * nothing of sharing, and the view's own check settles it once drawn.
+ * A selected creature whose block has yet to load drops nothing, since it
+ * may share what it holds, and the view's own check settles it once drawn.
  * `srd` is the SRD as loaded so far. Hands back the end of the watch.
  */
 export function watchSelection(attacks: StoreApi<SharedAttacks>, room: Pick<RoomViewStore, "subscribe">, srd: () => DiceView["srd"]): () => void {
@@ -286,18 +286,17 @@ export function watchSelection(attacks: StoreApi<SharedAttacks>, room: Pick<Room
       attacks.setState({ byName: {} });
       return;
     }
-    const names = sharedNow(s, ids, srd());
-    if (names !== null) attacks.setState((a) => keepShared(a, names));
+    const gone = unshared(s, ids, Object.keys(attacks.getState().byName), srd());
+    if (gone.length > 0) attacks.setState((a) => keepShared(a, Object.keys(a.byName).filter((name) => !gone.includes(name))));
   });
 }
 
-/** The attacks these selected creatures share by name, or null while any of their blocks has yet to load. */
-function sharedNow(s: Pick<RoomView, "view" | "you">, ids: readonly string[], srd: DiceView["srd"]): string[] | null {
-  if (!s.view || !s.you) return null;
+/** Of these kept attacks, the ones some selected creature whose block has loaded lacks by name, so they are no longer shared whatever the rest hold. */
+function unshared(s: Pick<RoomView, "view" | "you">, ids: readonly string[], names: readonly string[], srd: DiceView["srd"]): string[] {
+  if (!s.view || !s.you) return [];
   const dice: DiceView = { you: s.you, view: s.view, srd };
-  const creatures = ids.map((tokenId): ActorTarget => ({ tokenId }));
-  if (creatures.some((c) => creatureRolls(dice, c) === null)) return null;
-  return sharedAttacksOf(dice, creatures).map((a) => a.name);
+  const loaded = ids.flatMap((tokenId) => creatureRolls(dice, { tokenId }) ?? []);
+  return names.filter((name) => loaded.some((rolls) => !rolls.named.some((r) => r.attack !== undefined && r.name === name)));
 }
 
 /** One attack's state changed, the others as they were. */

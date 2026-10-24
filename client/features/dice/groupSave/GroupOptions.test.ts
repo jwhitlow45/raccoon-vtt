@@ -273,10 +273,11 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
   });
 
   test("a selection that stops sharing the attack drops its state, even while the view of several is away, and one sharing it all along keeps it", () => {
-    // Dara and Eli carry a club, not a rapier. Fen carries a rapier.
+    // Dara and Eli carry a club, not a rapier. Fen carries a rapier and a dagger, Gil a rapier alone.
     const state = table();
     const CLUB: PcStats = { ...STATS, rolls: [{ id: "c1", name: "Club", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d4", mod: true, type: "bludgeoning" }] }] };
-    for (const [id, name, stats] of [["d", "Dara", CLUB], ["e", "Eli", CLUB], ["f", "Fen", STATS]] as const) {
+    const RAPIER: PcStats = { ...STATS, rolls: STATS.rolls.filter((r) => r.name === "Rapier") };
+    for (const [id, name, stats] of [["d", "Dara", CLUB], ["e", "Eli", CLUB], ["f", "Fen", STATS], ["g", "Gil", RAPIER]] as const) {
       state.characters[id] = { ...character(id, { name, ownerIds: ["p1"], level: 5 }), stats };
       state.tokens[`t${id}`] = token(`t${id}`, { kind: "pc", name, ownerIds: ["p1"], actor: { ref: id } });
     }
@@ -292,12 +293,26 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     assert.ok(along.attacks.getState().byName.Rapier, "Vex and Fen share the rapier, so its state stays");
     along.stop();
 
-    // A goblin's block waits for the SRD, so a selection with it says nothing of sharing yet.
+    // A goblin's block waits for the SRD, so it alone says nothing of sharing yet, but a loaded block that lacks the attack drops it.
     state.tokens.gob = token("gob", { actor: { inline: { ...actor(), srdId: "goblin-warrior" } } });
     const waiting = watched(state, ["ta", "tb"]);
     waiting.room.setState({ local: { selectedIds: ["ta", "gob"] } });
     assert.ok(waiting.attacks.getState().byName.Rapier, "kept until the view of several reads the goblin's block");
+    waiting.room.setState({ local: { selectedIds: ["td", "gob"] } });
+    assert.deepEqual(waiting.attacks.getState().byName, {}, "Dara's loaded block has no rapier, whatever the goblin's holds");
     waiting.stop();
+
+    // Two attacks kept: the one a loaded block lacks goes, and the one the loaded blocks hold waits on the goblin.
+    const both = watched(state, ["ta", "tb"]);
+    both.attacks.setState((a) => patchShared(a, "Dagger", { ac: 13 }));
+    both.room.setState({ local: { selectedIds: ["ta", "gob", "tf"] } });
+    assert.deepEqual(Object.keys(both.attacks.getState().byName), ["Rapier", "Dagger"], "Thorn and Fen hold both, and the goblin's block has yet to load");
+    const rapierOnly = watched(state, ["ta", "tb"]);
+    rapierOnly.attacks.setState((a) => patchShared(a, "Dagger", { ac: 13 }));
+    rapierOnly.room.setState({ local: { selectedIds: ["ta", "gob", "tg"] } });
+    assert.deepEqual(Object.keys(rapierOnly.attacks.getState().byName), ["Rapier"], "Gil has no dagger, so it goes while the rapier waits on the goblin");
+    both.stop();
+    rapierOnly.stop();
   });
 
   test("the slot's watch ends with its Room, and a Room used again after that watches anew", () => {
