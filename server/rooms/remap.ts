@@ -35,6 +35,7 @@ import type {
   TrapDue,
   TrapRig,
   Token,
+  TurnUses,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
@@ -163,8 +164,14 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   };
   // A link to a room monster follows its new id, and one to a monster that did not come through is dropped (wave 5). So does
   // a link to a companion block (docs/design-v1-companion-stat-blocks.md 3.6).
-  const actor = <A extends { effects: Effect[]; monsterId?: string; blockId?: string }>(a: A): A => {
+  //
+  // A turn record is named by the seq of the op that started its turn, a seq of the old room, and the new room counts from
+  // its snapshot again (gateway.ts), so a later turn could take the same number. The record goes, and the damage types
+  // taken with it, which only a record's start reads (docs/design-v1-combat-controls.md 3.6).
+  const actor = <A extends { effects: Effect[]; monsterId?: string; blockId?: string; turnRecord?: unknown; hurt?: unknown }>(a: A): A => {
     const next: A = { ...a, effects: a.effects.map(effect) };
+    delete next.turnRecord;
+    delete next.hurt;
     if (a.monsterId !== undefined) {
       if (monsters.has(a.monsterId)) next.monsterId = monsters.of(a.monsterId);
       else delete next.monsterId;
@@ -384,6 +391,17 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   };
   if (state.encounter) out.encounter = encounter(state.encounter);
   const holder = (id: string): string | null => (tokens.has(id) ? tokens.of(id) : characters.has(id) ? characters.of(id) : null);
+  // A saved turn's block link (TurnUses.link) as the remapped actor's own reads: a room monster or companion block by its
+  // new id, or none when it did not come through, as the actor's link goes then.
+  const savedLink = (link: string | undefined): string | undefined => {
+    if (link === undefined) return undefined;
+    const colon = link.indexOf(":");
+    const kind = link.slice(0, colon);
+    const id = link.slice(colon + 1);
+    if (kind === "monster") return monsters.has(id) ? `monster:${monsters.of(id)}` : undefined;
+    if (kind === "block") return blocks.has(id) ? `block:${blocks.of(id)}` : undefined;
+    return link;
+  };
   out.encounterHistory = state.encounterHistory.map((snap): EncounterSnapshot => {
     const effects: Record<string, Effect[]> = {};
     for (const [holderId, list] of Object.entries(snap.effects)) {
@@ -400,6 +418,15 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (snap.legendary && legendaryHolder) next.legendary = { holderId: legendaryHolder, actionsUsed: snap.legendary.actionsUsed };
     const reactions = (snap.companionReactions ?? []).filter((id) => tokens.has(id)).map((id) => tokens.of(id));
     if (reactions.length > 0) next.companionReactions = reactions;
+    const turnUses = (snap.turnUses ?? []).flatMap((saved): TurnUses[] => {
+      const holderId = holder(saved.holderId);
+      // The record each start replaced goes as the actors' records do, so Previous leaves a record as it is (3.6).
+      const { record: _record, link, ...kept } = saved;
+      if (holderId === null || (kept.marks === undefined && kept.actionsUsed === undefined)) return [];
+      const mappedLink = savedLink(link);
+      return [{ ...kept, holderId, ...(mappedLink !== undefined ? { link: mappedLink } : {}) }];
+    });
+    if (turnUses.length > 0) next.turnUses = turnUses;
     return next;
   });
   for (const h of Object.values(state.handouts)) {

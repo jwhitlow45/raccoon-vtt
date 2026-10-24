@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
+import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
   MAX_ALT_IMAGES,
@@ -20,6 +21,7 @@ import {
   MAX_RULER_STOPS,
   MAX_TURN_TIMER_SEC,
   actorSchemaForImport,
+  combatUseSchemas,
   areaSlows,
   areaTriggersSchema,
   moveAnyTokenSchema,
@@ -300,6 +302,12 @@ const character = z.strictObject({
   knownForms: knownFormsSchema.optional(),
   // Backups from before re-sync have no record (docs/design-v1-resync.md 4).
   ddbSync: ddbSyncForImport.optional(),
+  // Backups from before combat uses have no class resources (docs/design-v1-combat-controls.md 3.6).
+  resources: z
+    .array(combatUseSchemas.resourceStored)
+    .max(LIMITS.resourcesPerCharacter)
+    .refine((list) => new Set(list.map((r) => r.id)).size === list.length, { message: "a resource is listed twice" })
+    .optional(),
 });
 
 const areaFeet = z.number().min(5).max(1_000);
@@ -406,6 +414,19 @@ const encounterSnapshot = z.strictObject({
   revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(600),
   legendary: z.strictObject({ holderId: id, actionsUsed: z.number().int().min(0).max(10) }).optional(),
   companionReactions: z.array(id).max(600).optional(),
+  // What a turn start replaced for each of its creatures (docs/design-v1-combat-controls.md 3.3), none in backups from before it.
+  turnUses: z
+    .array(
+      z.strictObject({
+        holderId: id,
+        record: combatUseSchemas.turnRecord.nullable().optional(),
+        marks: combatUseSchemas.uses.optional(),
+        actionsUsed: z.number().int().min(0).max(10).optional(),
+        link: z.string().min(1).max(100).optional(),
+      }),
+    )
+    .max(600)
+    .optional(),
   at: iso,
 });
 
@@ -535,12 +556,25 @@ const logEvent = z.discriminatedUnion("type", [
         removed: z.array(effectStored).max(32).optional(),
         anchors: z.record(id, z.union([z.strictObject({ tokenId: id }), z.strictObject({ characterId: id })])).optional(),
         shapeTemp: z.strictObject({ before: actorSchemaForImport.shape.srdId, after: actorSchemaForImport.shape.srdId }).optional(),
+        record: combatUseSchemas.turnRecordId.optional(),
       })
       .optional(),
     back: z.literal(true).optional(),
     of: z.string().regex(/^\d{1,18}:\d{1,6}$/).optional(),
   }),
   z.strictObject({ type: z.literal("life"), ...holder, life: lifeState }),
+  // A creature's use of a limited ability (docs/design-v1-combat-controls.md 8).
+  z.strictObject({
+    type: z.literal("use"),
+    ...holder,
+    what: z.enum(["legendary", "resist", "ability", "resource"]),
+    name: combatUseSchemas.useName.optional(),
+    cost: z.number().int().min(1).max(LIMITS.resourcePoolMax).optional(),
+    left: z.number().int().min(0).max(LIMITS.resourcePoolMax).optional(),
+    max: z.number().int().min(0).max(LIMITS.resourcePoolMax).optional(),
+    back: z.literal(true).optional(),
+    hidden: z.literal(true).optional(),
+  }),
   z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("saveEnds"), ...holder, effectId: id, key: effectKey, ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(1).max(50) }),
@@ -627,6 +661,7 @@ const logEvent = z.discriminatedUnion("type", [
           initiative: z.literal(true).optional(),
           save: z.enum(ABILITY_KEYS).optional(),
           hidden: z.literal(true).optional(),
+          type: z.enum(DAMAGE_TYPES).optional(),
         }),
       )
       .max(LIMITS.diceRollsPerOp),

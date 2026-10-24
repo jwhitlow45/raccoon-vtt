@@ -475,6 +475,12 @@ export function randomState(r: () => number): RoomState {
     // Without drawing from r, so the rest of every random room stays as it was.
     if (i !== 1) c.level = 3 + 4 * i;
     if (i !== 0) c.knownForms = i === 1 ? ["wolf", "owl"] : ["black-bear"];
+    if (i === 0) {
+      c.resources = [
+        { id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne", preset: "rage", level: 3, atLevel: 3 },
+        { id: "loh", name: "Lay on Hands", max: 25, used: 0, reset: "long", pool: true },
+      ];
+    }
     state.characters[id] = c;
   }
 
@@ -518,6 +524,11 @@ export function randomState(r: () => number): RoomState {
       const a = actor({ hp: { cur: int(r, 0, 20), max: 20, temp: int(r, 0, 5) }, initScore: 12 });
       a.life = a.hp.cur === 0 ? pick(r, ["dying", "stable", "dead"] as const) : "alive";
       if (chance(r, 0.3)) a.legendary = { actionsMax: 3, actionsUsed: int(r, 0, 3), resistMax: 3, resistUsed: 0 };
+      // Spent abilities on every third, without drawing from r, so the rest of every random room stays as it was.
+      if (i % 3 === 1) {
+        a.uses = { "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 }, "legendaryActions:pounce": { kind: "turn", name: "Pounce", used: 1, max: 1 } };
+        a.hurt = ["fire"];
+      }
       t.actor = { inline: a };
     }
     state.tokens[id] = t;
