@@ -2,7 +2,8 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import { actor, character, room, token } from "#shared/testutil.ts";
+import type { Effect } from "#shared/model.ts";
+import { actor, character, effect, room, token } from "#shared/testutil.ts";
 import { partyEntries } from "./party.ts";
 
 /*
@@ -92,9 +93,9 @@ describe("the side panel's party bar", () => {
 });
 
 describe("a party member's row", () => {
-  const rowOf = (life: "alive" | "dead", max = 24) => {
+  const rowOf = (life: "alive" | "dead", max = 24, effects: Effect[] = []) => {
     const state = room({
-      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ ac: 15, passivePerception: 13, life, hp: { cur: life === "dead" || max === 0 ? 0 : 18, max, temp: 0 } }) }) },
+      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ ac: 15, passivePerception: 13, life, effects, hp: { cur: life === "dead" || max === 0 ? 0 : 18, max, temp: 0 } }) }) },
       tokens: { a1: token("a1", { kind: "pc", sceneId: "s1", actor: { ref: "ayla" } }) },
     });
     const [entry] = partyEntries(state, "s1");
@@ -116,6 +117,20 @@ describe("a party member's row", () => {
   test("keeps its HP in view beside a long name: one column no wider than the row", () => {
     const markup = rowOf("alive");
     assert.match(markup, /display:grid;grid-template-columns:minmax\(0, 1fr\)/);
+  });
+
+  // The chips first drew their art alone, and an exhaustion chip lost its level, which the tracker's chip beside it kept (ICONS2 F4, ASTRA-01).
+  test("keeps every exhaustion level in view as E1 to E6, in the chip's 20 px box", () => {
+    for (let level = 1; level <= 6; level++) {
+      const markup = rowOf("alive", 24, [effect("x1", { key: "exhaustion", level })]);
+      assert.match(markup, new RegExp(`title="Exhaustion ${level}"[^>]*min-width:20px[^>]*>E${level}</span>`), `level ${level}`);
+    }
+  });
+
+  test("draws a condition's art in place of its letters, and a custom status keeps its glyph", () => {
+    const markup = rowOf("alive", 24, [effect("x1", { key: "poisoned" }), effect("x2", { key: "custom", label: "Marked", glyph: "Mk" })]);
+    assert.match(markup, /title="Poisoned"[^>]*><span[^>]*mask-image:url\(\/icons\/conditions\/poisoned\.svg\)[^>]*><\/span><\/span>/);
+    assert.match(markup, /title="Marked"[^>]*>Mk<\/span>/);
   });
 
   test("hides a dead member's AC, as the token and the tracker do", () => {

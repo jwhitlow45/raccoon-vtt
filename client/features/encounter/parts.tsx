@@ -4,12 +4,17 @@ import { Spinner as SharedSpinner } from "../../components/Loading.tsx";
 import { Tag as SharedTag, type TagTone } from "../../components/Tag.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
-import { DISPOSITION_RING, effectChip, effectCount, initials } from "../../lib/tokenView.ts";
+import { Icon } from "../../components/Icon.tsx";
+import { ChipFace } from "../tokens/EffectIcon.tsx";
+import { DISPOSITION_RING, effectChip, initials } from "../../lib/tokenView.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
 import { entryName, onAnotherScene, portraitDisposition, type HpView } from "./logic.ts";
 import { clockText, type TimerState } from "./timer.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { IconDisk } from "../images/IconDisk.tsx";
+
+/** The art inside an 18 px chip: as large as its height leaves room for, as the map's chips draw it. */
+const CHIP_ART = 14;
 
 /** Small pieces the tracker panel and the top strip share. */
 
@@ -77,16 +82,17 @@ export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterI
 }
 
 /**
- * Condition chips: a glyph on the condition's color, never color alone, with
- * the full name for screen readers. One hidden from players, which only the
- * DM's view holds, is dimmed with a dashed edge.
+ * Condition chips: the condition's art on its color, as the map's chips and
+ * the Token panel draw it (docs/design-v1-icons-2.md 4), never color alone,
+ * with the full name for screen readers. Its face (`ChipFace`) is the
+ * party bar's too. One hidden from players, which only the DM's view
+ * holds, is dimmed with a dashed edge.
  */
 export function Chips(props: { effects: readonly Effect[]; max?: number }) {
-  // An exhaustion glyph ("E2") already carries its level.
   const all = props.effects.map((effect) => ({
     ...effectChip(effect),
+    effect,
     hidden: effect.hiddenFromPlayers === true,
-    count: effect.key === "exhaustion" ? null : effectCount(effect),
   }));
   const shown = props.max !== undefined && all.length > props.max ? all.slice(0, props.max - 1) : all;
   const overflow = all.length - shown.length;
@@ -114,8 +120,7 @@ export function Chips(props: { effects: readonly Effect[]; max?: number }) {
             justifyContent: "center",
           }}
         >
-          {chip.glyph}
-          {chip.count !== null ? <span style={{ fontSize: theme.font.tiny, marginLeft: theme.space(0.5) }}>{chip.count}</span> : null}
+          <ChipFace effect={chip.effect} size={CHIP_ART} counts />
         </span>
       ))}
       {overflow > 0 ? (
@@ -305,7 +310,7 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
  * picture, the name, "Your turn" and End Turn, and at a large interface
  * size on a narrow phone it pushed End Turn off the screen.
  */
-export function TimerClock(props: { state: TimerState; size?: number; stack?: boolean }) {
+export function TimerClock(props: { state: TimerState; size?: number; stack?: boolean; icon?: boolean }) {
   const { state } = props;
   const color = state.over ? theme.color.dangerText : state.warning ? theme.color.warning : theme.color.textMuted;
   const text = clockText(state);
@@ -321,7 +326,9 @@ export function TimerClock(props: { state: TimerState; size?: number; stack?: bo
     );
   }
   return (
-    <span role="timer" aria-label={label} style={style}>
+    <span role="timer" aria-label={label} style={props.icon ? { ...style, display: "inline-flex", alignItems: "center", gap: theme.space(1), verticalAlign: "bottom" } : style}>
+      {/* Where the room has the clock read alone, such as the tracker's round header: a timer at the text's size, so the line keeps its height (docs/design-v1-icons-2.md 4). */}
+      {props.icon ? <Icon name="timer" size={props.size ?? theme.font.small} /> : null}
       {state.over ? `Time's up${past ? ` ${text}` : ""}` : text}
     </span>
   );

@@ -242,7 +242,7 @@ function TurnControls(props: { compact: boolean }) {
       {timer && active ? (
         <>
           {" "}
-          <TimerClock state={timer} size={theme.font.body14} />
+          <TimerClock state={timer} size={theme.font.body14} icon />
         </>
       ) : null}{" "}
       <span style={{ color: theme.color.textMuted }}>{line}</span>
@@ -252,7 +252,7 @@ function TurnControls(props: { compact: boolean }) {
       {/* Beside the DM's Previous and Next, "Time's up +1:05" leaves no room, so the clock goes under the round rather than splitting "Round" from its number. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2) }}>
         <span style={{ fontSize: theme.font.title, fontWeight: theme.weight.bold, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
-        {timer && active ? <TimerClock state={timer} size={theme.font.body14} /> : null}
+        {timer && active ? <TimerClock state={timer} size={theme.font.body14} icon /> : null}
       </div>
       <div style={{ color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line}</div>
     </div>

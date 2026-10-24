@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "zustand";
-import type { LogEntry } from "#shared/model.ts";
+import type { Effect, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
+import { Icon } from "../../components/Icon.tsx";
 import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
@@ -13,6 +14,7 @@ import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
+import { EffectArt, effectHasArt } from "../tokens/EffectIcon.tsx";
 import { dockSlot, drawn, drawsPaneRow, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
 import { SheetHeader } from "../../components/SheetHeader.tsx";
@@ -477,7 +479,7 @@ const unknownDot: CSSProperties = {
 
 // ---------------------------------------------------------------- alerts
 
-type Notice = { id: string; text: string };
+type Notice = { id: string; text: string; key?: Effect["key"] };
 
 /**
  * The column of alert cards under the top bar. On a phone in portrait an
@@ -1121,9 +1123,9 @@ function FightAlerts() {
         <div data-alert="rolls" style={{ display: "contents" }}>
           <RollAlerts />
         </div>
-        {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger onDismiss={timeUp.dismiss} /> : null}
+        {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger lead={<Icon name="timer" size="sm" />} onDismiss={timeUp.dismiss} /> : null}
         {notices.map((n) => (
-          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} onDismiss={() => dismissNotice(n.id)} />
+          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} lead={n.key && effectHasArt(n.key) ? <EffectArt effectKey={n.key} size={theme.icon.sm} /> : undefined} onDismiss={() => dismissNotice(n.id)} />
         ))}
         {/* Last, since it lasts the whole turn and gives way: the card above it is the column's real first card, which the bar keeps whole (design 4.6). */}
         {combat.turn && !turnHidden ? (
@@ -1180,7 +1182,7 @@ const OVERLAY_PAD = theme.space(2);
  * (docs/design-v1-look-pass-2.md D27). Focusable from script, not by Tab,
  * so a summary's tap can show it (pages/fold.ts focusAlert).
  */
-function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string; danger?: boolean; onDismiss(): void }) {
+function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string; danger?: boolean; lead?: ReactNode; onDismiss(): void }) {
   return (
     <section
       role="group"
@@ -1190,12 +1192,12 @@ function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string
       data-alert-id={props.id}
       style={{ ...card, display: "flex", alignItems: "center", gap: theme.space(2), minHeight: theme.touch, ...(props.danger ? { borderColor: theme.color.danger } : null) }}
     >
+      {/* Its kind before its words: the timer for time up, the effect's own art for one that ended (docs/design-v1-icons-2.md 4). Dismiss is the close every card's header draws, which leaves the words more room than they had. */}
+      {props.lead ? <span style={{ flex: "none", display: "grid", placeItems: "center", color: props.danger ? theme.color.dangerText : theme.color.textMuted }}>{props.lead}</span> : null}
       <p role="status" style={{ flex: 1, minWidth: 0, margin: 0, fontSize: theme.font.body14 }}>
         {props.text}
       </p>
-      <Button size="sm" variant="quiet" aria-label={`Dismiss ${props.text.replace(/[.!]+$/, "")}`} onClick={props.onDismiss}>
-        Dismiss
-      </Button>
+      <Button size="sm" variant="quiet" icon="close" iconOnly="always" aria-label={`Dismiss ${props.text.replace(/[.!]+$/, "")}`} onClick={props.onDismiss} />
     </section>
   );
 }
@@ -1338,7 +1340,7 @@ function useLogAlerts() {
       if (expiry) {
         const who = entryName(view, expiry.target);
         const what = effectChip({ key: expiry.key, ...(expiry.spell !== undefined ? { spell: expiry.spell } : {}) }).label;
-        newNotices.push({ id: entry.id, text: `${what} ended on ${who}.` });
+        newNotices.push({ id: entry.id, text: `${what} ended on ${who}.`, key: expiry.key });
       }
     }
     if (newPrompts.length > 0) setPrompts((p) => [...p, ...newPrompts]);

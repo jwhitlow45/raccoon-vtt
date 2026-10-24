@@ -8,6 +8,7 @@ import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { footprint } from "../../lib/scene.ts";
+import { ChipFace } from "../tokens/EffectIcon.tsx";
 import { effectChip } from "../../lib/tokenView.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
@@ -266,7 +267,8 @@ export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
                   justifyContent: "center",
                 }}
               >
-                {chip.glyph}
+                {/* The tracker's chip face with no counter, as before (docs/design-v1-icons-2.md 4): exhaustion keeps "E2". */}
+                <ChipFace effect={effect} size={14} />
               </span>
             );
           })}
