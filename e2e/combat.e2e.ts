@@ -1518,7 +1518,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
   });
 
-  test("13j. by keyboard, a press that takes a uses list's last button away hands focus to what stays: the row's next button across a recharge's turn, the turn card after its sole Use, the bar's frame after the only other row's Restore, the drawer after a Restore beside Regeneration, and the reopened card after Reopen (D-261024-43)", async () => {
+  test("13j. by keyboard, a press that takes a uses list's last button away hands focus to what stays: the row's next button across a recharge's turn, the turn card after its sole Use, the bar's frame after the only other row's Restore, the drawer after a Restore beside Regeneration, a tracker row's own button after the last Restore in its options, and the reopened card after Reopen (D-261024-43)", async () => {
     const focused = () =>
       dm.evaluate(() => {
         const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
@@ -1609,6 +1609,18 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await limbDrawer.waitFor({ state: "detached" });
       assert.equal(await limbBar.isVisible(), true, "Escape closed the bar, not the drawer");
       await limbBar.getByRole("button", { name: "Close", exact: true }).first().click();
+
+      // The goblin's row options hold the same lone row: Restore takes the row's Uses group away, and focus goes to the row's own button.
+      await ops.send({ t: "actor.use", target: { tokenId: old }, use: { kind: "ability", key: "actions:old-breath", name: "Old Breath", limit: "recharge", min: 5, max: 1 } });
+      await openTracker(dm);
+      const oldOptions = dm.getByRole("button", { name: "Old Goblin options", exact: true });
+      await press(oldOptions);
+      const rowUses = dm.locator(`[data-round-section] [data-uses-group][aria-label="Old Goblin's uses"]`);
+      await press(rowUses.getByRole("button", { name: "Restore Old Breath" }));
+      await waitFor("the mark gone again", () => (marked(old, "actions:old-breath") ? null : true));
+      await rowUses.waitFor({ state: "detached" });
+      await lands(/^button Old Goblin\. Show it on the map/, "the last Restore in the row's options handed focus to the row");
+      await oldOptions.click();
 
       // The limb's turn: its Regeneration skipped, then Reopen, the turn card's only button, takes the card away with it: focus goes to the card it reopened.
       await ops.send({ t: "encounter.next" });
