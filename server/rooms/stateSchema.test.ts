@@ -6,11 +6,22 @@ import { migrateSnapshot } from "#shared/migrate.ts";
 import { MAX_PATH_STOPS } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import type { Op } from "#shared/protocol.ts";
-import { actor, apply, castAsk, castTable, character, companionBlock, customMonster, DM, drawing, imageRef, randomState, rng, room, srdImage, template, token } from "#shared/testutil.ts";
+import { actor, apply, castAsk, castTable, character, companionBlock, customMonster, DM, drawing, entry, imageRef, randomState, rng, room, srdImage, template, token } from "#shared/testutil.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 describe("roomStateSchema", () => {
+  test("an encounter holds as many rows as the room's limit allows, so a big fight's backup imports", () => {
+    const withRows = (count: number) => {
+      const state = room();
+      state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: Array.from({ length: count }, (_, i) => entry(`e${i}`, { label: `Row ${i}`, value: 10, tieOrder: i })) };
+      return JSON.parse(JSON.stringify(state));
+    };
+    assert.ok(parseRoomState(withRows(601)).ok, "past the old bound of 600");
+    assert.ok(parseRoomState(withRows(LIMITS.encounterRows)).ok);
+    assert.equal(parseRoomState(withRows(LIMITS.encounterRows + 1)).ok, false);
+  });
+
   test("a new room lets a player create a character, and a stored room from before the setting still forbids it", () => {
     const at = new Date().toISOString();
     const fresh = createInitialState({ roomName: "R", dm: { id: "m1", rev: 1, name: "DM", color: "#f38400", kind: "dm", createdAt: at } });

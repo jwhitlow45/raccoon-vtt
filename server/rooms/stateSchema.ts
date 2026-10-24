@@ -402,7 +402,7 @@ const encounter = z.strictObject({
   rev,
   round: z.number().int().min(0).max(100_000),
   activeEntryId: id.nullable(),
-  entries: z.array(entry).max(600),
+  entries: z.array(entry).max(LIMITS.encounterRows),
   // Backups from before the turn-start marker have none.
   turnStart: turnStart.optional(),
   startSeq: z.number().int().min(0).optional(),
@@ -413,9 +413,9 @@ const effectStored = effectSchema;
 const encounterSnapshot = z.strictObject({
   encounter,
   effects: z.record(id, z.array(effectStored).max(32)),
-  revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(600),
+  revealed: z.array(z.strictObject({ tokenId: id, visibility, fogExemptAuto: z.boolean() })).max(LIMITS.encounterRows),
   legendary: z.strictObject({ holderId: id, actionsUsed: z.number().int().min(0).max(10) }).optional(),
-  companionReactions: z.array(id).max(600).optional(),
+  companionReactions: z.array(id).max(LIMITS.encounterRows).optional(),
   // What a turn start replaced for each of its creatures (docs/design-v1-combat-controls.md 3.3), none in backups from before it.
   turnUses: z
     .array(
@@ -427,12 +427,12 @@ const encounterSnapshot = z.strictObject({
         link: z.string().min(1).max(100).optional(),
       }),
     )
-    .max(600)
+    .max(LIMITS.encounterRows)
     .optional(),
   // The row flags a Next changed (design 9.4), none in backups from before op version 21.
   turnFlags: z
     .array(z.strictObject({ entryId: id, flags: z.array(z.enum(TURN_FLAGS)).min(1).max(TURN_FLAGS.length) }))
-    .max(600)
+    .max(LIMITS.encounterRows)
     .optional(),
   // What a Next changed in each creature's effects, and a turn whose row has left the fight (design 9.4, op version 21).
   effectChanges: z

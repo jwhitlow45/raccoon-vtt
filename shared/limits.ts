@@ -68,6 +68,14 @@ export const LIMITS = {
    */
   savedEncountersPerRoom: 100,
   /**
+   * Rows of the running fight. An op adds at most 100 (MAX_ENTRIES_PER_OP) but
+   * nothing else bounded the fight, so a room could outgrow the backup
+   * schema and export a file it could not import. The schema's bounds on
+   * everything keyed by a row (stateSchema.ts) follow this one, and it is far
+   * above any table's fight, so no backup that imports today stops importing.
+   */
+  encounterRows: 2_000,
+  /**
    * Companion stat blocks (docs/design-v1-companion-stat-blocks.md 3.4).
    * One block has the monsters' bound. A character keeps at most 100 and
    * 512 KiB of them, so 32 long blocks fill its bytes before its count. A
@@ -528,6 +536,9 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
   if (!monsters.ok) return monsters;
   if (Object.keys(state.srdImages).length > LIMITS.srdImagesPerRoom) return roomFull(`${n(LIMITS.srdImagesPerRoom)} SRD monster images`);
   if (Object.keys(state.savedEncounters).length > LIMITS.savedEncountersPerRoom) return roomFull(`${n(LIMITS.savedEncountersPerRoom)} saved encounters`);
+  if (state.encounter && state.encounter.entries.length > LIMITS.encounterRows && (!before || (before.encounter?.entries.length ?? 0) < state.encounter.entries.length)) {
+    return roomFull(`${n(LIMITS.encounterRows)} initiative rows`);
+  }
   const journal = checkJournal(state);
   if (!journal.ok) return journal;
   const blocks = checkCompanionBlocks(state);

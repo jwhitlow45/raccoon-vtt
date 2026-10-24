@@ -3,9 +3,20 @@ import { describe, test } from "node:test";
 import { roomHandoutPages } from "./handouts.ts";
 import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, checkLimits, serializedBytes, utf8Bytes } from "./limits.ts";
 import type { CompanionBlock, EdgeFeature, FreeWall, RoomState } from "./model.ts";
-import { actor, character, companionBlock, customMonster, drawing, room, srdImage, token } from "./testutil.ts";
+import { actor, character, companionBlock, customMonster, drawing, entry, room, srdImage, token } from "./testutil.ts";
 
 describe("checkLimits", () => {
+  test("an encounter past the row limit refuses the op that adds the row, and an import of it", () => {
+    const rows = (count: number) => Array.from({ length: count }, (_, i) => entry(`e${i}`, { label: `Row ${i}`, value: 10, tieOrder: i }));
+    const at = (count: number): RoomState => ({ ...room(), encounter: { rev: 0, round: 1, activeEntryId: null, entries: rows(count) } });
+    assert.deepEqual(checkLimits(at(LIMITS.encounterRows)), { ok: true });
+    const over = at(LIMITS.encounterRows + 1);
+    assert.ok(!checkLimits(over).ok, "an import is held to the bound");
+    const refused = checkLimits(over, null, at(LIMITS.encounterRows));
+    assert.ok(!refused.ok && refused.code === "quota");
+    assert.deepEqual(checkLimits(over, null, over), { ok: true }, "a room already past it keeps working");
+  });
+
   test("passes an ordinary room and fails past each count", () => {
     const state = room();
     assert.deepEqual(checkLimits(state, "s1"), { ok: true });
