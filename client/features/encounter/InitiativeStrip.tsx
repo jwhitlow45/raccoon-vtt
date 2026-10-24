@@ -815,7 +815,7 @@ function FightAlerts() {
       }
       // Over the screen the cards are as wide as it, so they say nothing of the column: its last measures stand.
       if (overlay) return;
-      const measured = drawn(cards) ? { content: cards.getBoundingClientRect().height / zoom, first: firstCardHeight(cards) / zoom } : null;
+      const measured = drawn(cards) ? { content: cards.getBoundingClientRect().height / zoom, first: firstCardHeight(cards) / zoom, cover: firstCardHeight(cards, true) / zoom } : null;
       if (measured) setFirstHeight(measured.first);
       const prev = dock.getState().column;
       const next = columnFacts(prev, { top: colTop, measured, ...(row === undefined ? null : { row }) });
@@ -1117,13 +1117,15 @@ function FightAlerts() {
  * The first card as drawn: the first child with a box, looking inside a
  * wrapper with `display: contents`, as the rolls' is. A turn card is never
  * it: it lasts the whole turn, so it never moves the bar or forces the
- * summary row (docs/design-v1-combat-controls.md 4.2).
+ * summary row (docs/design-v1-combat-controls.md 4.2). With `turn` it may
+ * be, for a toast, which keeps under whatever card leads (barDock.ts
+ * toastTop).
  */
-function firstCard(cards: HTMLElement): HTMLElement | null {
+function firstCard(cards: HTMLElement, turn = false): HTMLElement | null {
   for (const child of cards.children) {
-    if (!(child instanceof HTMLElement) || child.dataset.alert === "turn") continue;
+    if (!(child instanceof HTMLElement) || (!turn && child.dataset.alert === "turn")) continue;
     if (getComputedStyle(child).display === "contents") {
-      const inner = firstCard(child);
+      const inner = firstCard(child, turn);
       if (inner) return inner;
       continue;
     }
@@ -1133,8 +1135,8 @@ function firstCard(cards: HTMLElement): HTMLElement | null {
 }
 
 /** The first card's height as drawn (firstCard). */
-function firstCardHeight(cards: HTMLElement): number {
-  return firstCard(cards)?.getBoundingClientRect().height ?? 0;
+function firstCardHeight(cards: HTMLElement, turn = false): number {
+  return firstCard(cards, turn)?.getBoundingClientRect().height ?? 0;
 }
 
 /** The alerts over the screen: their header's height, SheetHeader's one row with its rule, and the padding above and below their cards. */

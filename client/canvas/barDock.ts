@@ -583,8 +583,11 @@ export type Lane = "none" | "stacked" | "beside" | "summary";
  * and its first card's. `row` is where its summary row stands while it has
  * risen from the column's top (InitiativeStrip.tsx FightAlerts), over the
  * band or the top bar's row, so the bar under it may take the room it left.
+ * `cover` is the height of its first card counting a turn card, which only
+ * a toast keeps under (toastTop): the bar's lane and a pane skip a turn
+ * card, so a turn card alone gives facts whose `first` is 0.
  */
-export type ColumnFacts = { top: number; content: number; first: number; row?: number };
+export type ColumnFacts = { top: number; content: number; first: number; cover?: number; row?: number };
 
 /** The left edge of the lane, the right 312 px of the free area. */
 export function laneLeft(free: Box): number {
@@ -700,7 +703,7 @@ export function paneLane(input: { laneLeft: number; roomLeft: number; width: num
  * card, or while a sheet folds the column.
  */
 export function paneLaneBox(input: { viewport: Size; chrome: Chrome | null; column: ColumnFacts | null; folded: boolean }): PaneLaneBox | null {
-  if (!input.chrome || !input.column || input.folded) return null;
+  if (!input.chrome || !input.column || input.column.first <= 0 || input.folded) return null;
   return { left: laneLeft(freeArea(input.viewport, input.chrome)), top: input.column.row ?? input.column.top };
 }
 
@@ -1113,12 +1116,12 @@ export function noticePlace(free: Box): { left: number; width: number } | null {
  * moves the summary row that shows, and the bar must follow it. The same
  * object back when nothing changed, so nothing renders for nothing.
  */
-export function columnFacts(prev: ColumnFacts | null, input: { top: number; measured: { content: number; first: number } | null; row?: number }): ColumnFacts | null {
+export function columnFacts(prev: ColumnFacts | null, input: { top: number; measured: { content: number; first: number; cover?: number } | null; row?: number }): ColumnFacts | null {
   const { top, measured, row } = input;
   if (!measured) return prev && (prev.top !== top || prev.row !== row) ? withRow({ ...prev, top }, row) : prev;
-  if (measured.first <= 0) return null;
-  if (prev && prev.top === top && prev.content === measured.content && prev.first === measured.first && prev.row === row) return prev;
-  return withRow({ top, content: measured.content, first: measured.first }, row);
+  if (measured.first <= 0 && !((measured.cover ?? 0) > 0)) return null;
+  if (prev && prev.top === top && prev.content === measured.content && prev.first === measured.first && prev.cover === measured.cover && prev.row === row) return prev;
+  return withRow({ top, content: measured.content, first: Math.max(0, measured.first), ...(measured.cover !== undefined ? { cover: measured.cover } : null) }, row);
 }
 
 function withRow(facts: ColumnFacts, row: number | undefined): ColumnFacts {
@@ -1248,9 +1251,10 @@ export const TOAST_MIN = 44;
 
 /**
  * Where a toast that shows now starts on a phone (docs/design-v1-bar-dock.md
- * 1.3): 8 px under the alerts column's first card, its top plus its
- * height, while the notices span the map over the column and it shows a
- * card (`cards`), so the toast never covers that card's buttons. Null
+ * 1.3): 8 px under the alerts column's first card, a turn card included
+ * (`cover`), its top plus its height, while the notices span the map over
+ * the column and it shows a card (`cards`), so the toast never covers that
+ * card's buttons. Null
  * keeps it at the top of the notices as before: beside the lane, with no
  * card, with the cards folded or a summary row standing for them, or with
  * under 44 px left above the tool's options (`optionsTop`). In the chrome's
@@ -1260,8 +1264,9 @@ export const TOAST_MIN = 44;
  */
 export function toastTop(input: { spanning: boolean; column: ColumnFacts | null; cards: boolean; optionsTop: number }): number | null {
   const { column } = input;
-  if (!input.spanning || !input.cards || !column || column.first <= 0) return null;
-  const top = column.top + column.first + EDGE;
+  const reach = column ? (column.cover ?? column.first) : 0;
+  if (!input.spanning || !input.cards || !column || reach <= 0) return null;
+  const top = column.top + reach + EDGE;
   return input.optionsTop - top >= TOAST_MIN ? top : null;
 }
 
