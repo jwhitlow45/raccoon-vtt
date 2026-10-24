@@ -633,50 +633,72 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     }
   });
 
-  test("cu-b-11. on the DM's phone held sideways, a notice or the time-up line stays whole above the dragon's docked bar, with its turn card under it", async () => {
+  test("cu-b-11. on the DM's phone held sideways, a notice or the time-up line stays whole above the dragon's docked bar and the column's fade, with a turn card or a second notice under it", async () => {
     await setUp(phone, phoneCdp, SIDEWAYS);
     const bar = phone.getByRole("dialog", { name: `${DRAGON} actions` });
+    // The dragon's turn brings its turn card. The goblin's brings none, so there two notices stack alone.
+    const cases = [
+      { lead: "notice", turnOf: "e-dragon", before: "e-thorn" },
+      { lead: "timeUp", turnOf: "e-dragon", before: "e-thorn" },
+      { lead: "notice", turnOf: "e-goblin", before: "e-troll" },
+    ] as const;
     try {
-      for (const lead of ["notice", "timeUp"] as const) {
-        await turnTo("e-thorn");
+      for (const { lead, turnOf, before } of cases) {
+        const what = `${lead} on ${turnOf}`;
+        await turnTo(before);
         // Fire Breath ready, so no recharge card comes: the line is the column's first card, and the turn card the only other.
         if (dragon()?.uses?.[BREATH]) {
           await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use: { kind: "ability", key: BREATH, name: "Fire Breath", limit: "recharge", max: 1, min: 5 }, back: true });
           await waitFor("Fire Breath ready", () => (dragon()?.uses?.[BREATH] === undefined ? true : null));
         }
-        // An effect that ends as the dragon's turn starts gives the DM a notice. A 4 s turn timer gives the time-up line 4 s into the turn.
-        if (lead === "notice") await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: randomUUID(), key: "blessed", duration: { mode: "turnStart", of: { entryId: "e-dragon" } } } });
+        // Effects that end as the turn starts give the DM a notice each. A 4 s turn timer gives the time-up line 4 s into the turn.
+        const ending = turnOf === "e-goblin" ? (["blessed", "hasted"] as const) : (["blessed"] as const);
+        if (lead === "notice") for (const key of ending) await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin }, effect: { id: randomUUID(), key, duration: { mode: "turnStart", of: { entryId: turnOf } } } });
         else await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
         // The bar opens before the turn, since a notice lasts only 6 s.
         await closeSheets(phone);
         await tapCell(phone, run.bounds, DRAGON_AT);
         await bar.waitFor();
-        await turnTo("e-dragon");
+        await turnTo(turnOf);
         const line = alerts(phone, lead).first();
         await line.waitFor({ timeout: 15_000 });
-        await alerts(phone, "turn").waitFor({ state: "attached" });
+        const next = turnOf === "e-goblin" ? alerts(phone, "notice").nth(1) : alerts(phone, "turn");
+        await next.waitFor({ state: "attached" });
+        if (turnOf === "e-goblin") assert.equal(await alerts(phone, "turn").count(), 0, "the goblin's turn brought a turn card");
         // The column takes the bar's place once both are drawn.
         await phone.waitForTimeout(400);
         const box = await line.boundingBox();
-        const turn = await alerts(phone, "turn").boundingBox();
+        const after = await next.boundingBox();
         const barBox = await bar.boundingBox();
-        // How much of the line its column's scroll box cuts off.
-        const cut = await line.evaluate((node) => {
-          type El = { getBoundingClientRect(): { bottom: number }; parentElement: El | null };
+        // How much of the line its column's scroll box cuts off, and where the column's "Scroll for more" fade stands, if it shows.
+        const { cut, fade } = await line.evaluate((node) => {
+          type Rect = { top: number; bottom: number };
+          type El = { getBoundingClientRect(): Rect; parentElement: El | null; querySelectorAll(s: string): ArrayLike<El & { textContent: string | null; childElementCount: number }> };
           const style = (n: El) => (globalThis as unknown as { getComputedStyle(n: El): { overflowY: string } }).getComputedStyle(n);
           const el = node as unknown as El;
           const full = el.getBoundingClientRect().bottom;
           let bottom = full;
-          for (let n = el.parentElement; n; n = n.parentElement) if (style(n).overflowY !== "visible") bottom = Math.min(bottom, n.getBoundingClientRect().bottom);
-          return full - bottom;
+          let scroller: El | null = null;
+          for (let n = el.parentElement; n; n = n.parentElement) {
+            if (style(n).overflowY === "visible") continue;
+            scroller ??= n;
+            bottom = Math.min(bottom, n.getBoundingClientRect().bottom);
+          }
+          const label = scroller ? Array.from(scroller.querySelectorAll("div")).find((d) => d.childElementCount === 0 && d.textContent?.trim() === "Scroll for more") : undefined;
+          const rect = label?.getBoundingClientRect();
+          return { cut: full - bottom, fade: rect ? { top: rect.top, bottom: rect.bottom } : null };
         });
-        assert.ok(box && turn && barBox, `${lead}: no box for the line, the turn card or the bar`);
-        assert.ok(barBox.x < box.x + box.width && barBox.x + barBox.width > box.x, `${lead}: the bar at ${JSON.stringify(barBox)} is not docked across the column`);
-        assert.ok(cut <= 1, `${lead}: the column cuts ${cut} px off the line`);
-        assert.ok(box.y + box.height <= barBox.y, `${lead}: the line's foot at ${box.y + box.height} is under the bar's top at ${barBox.y}`);
-        assert.ok(box.y < turn.y, `${lead}: the line at ${box.y} is not drawn above the turn card at ${turn.y}`);
-        await measure(phone, line, `${lead} above the turn card at 844x390`);
-        await shots.take(phone, `cu-b-${lead}-above-turn-sideways`);
+        assert.ok(box && after && barBox, `${what}: no box for the line, the card after it or the bar`);
+        const foot = box.y + box.height;
+        console.log(`${what}: the line ${box.y}-${foot}, the card after it from ${after.y}, the bar from ${barBox.y}, the fade ${fade ? `${fade.top}-${fade.bottom}` : "not shown"}`);
+        assert.ok(barBox.x < box.x + box.width && barBox.x + barBox.width > box.x, `${what}: the bar at ${JSON.stringify(barBox)} is not docked across the column`);
+        assert.ok(cut <= 1, `${what}: the column cuts ${cut} px off the line`);
+        assert.ok(foot <= barBox.y, `${what}: the line's foot at ${foot} is under the bar's top at ${barBox.y}`);
+        // The fade's whole box at or below the line's foot, so it covers none of its words or its Dismiss (review CCB-ASTRA-08).
+        assert.ok(fade === null || fade.top >= foot - 0.5, `${what}: the column's fade at ${fade?.top}-${fade?.bottom} lies over the line, whose foot is at ${foot}`);
+        assert.ok(box.y < after.y, `${what}: the line at ${box.y} is not drawn above the card after it at ${after.y}`);
+        await measure(phone, line, `${lead} above ${turnOf === "e-goblin" ? "a second notice" : "the turn card"} at 844x390`);
+        await shots.take(phone, `cu-b-${lead}-${turnOf}-sideways`);
         await closeBar(phone);
         if (lead === "timeUp") await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
       }
