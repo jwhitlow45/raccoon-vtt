@@ -22,6 +22,7 @@ import {
   legendaryOffText,
   legendaryOp,
   legendaryText,
+  listRollTrouble,
   markChips,
   openRecord,
   otherBackOp,
@@ -36,10 +37,12 @@ import {
   regenerationNote,
   regenerationWords,
   skippedWords,
+  turnKey,
   turnParticipants,
   usesCount,
   usesPresence,
   usesRows,
+  type ListRoll,
   type UseRow,
 } from "./logic.ts";
 import { promptId, turnId } from "./state.ts";
@@ -591,5 +594,100 @@ describe("the cards of a turn, from what the reducer wrote at its start", () => 
     assert.equal(answersFor(ridden, patYou, { tokenId: "thorn" }), true);
     assert.equal(answersFor(ridden, dmYou, { tokenId: "thorn" }), false);
     assert.equal(answersFor(ridden, dmYou, { tokenId: "troll" }), true);
+  });
+});
+
+describe("the list's trouble line: the newest failure of its own rolls, on the turn they were sent (CCB-ASTRA-06, CCB-OPUS-12)", () => {
+  const T1 = "e1|1|7";
+  const T2 = "e2|1|8";
+  // uuidv7 tags, in the order they were rolled.
+  const A = "0190a000-0000-7000-8000-00000000000a";
+  const B = "0190a000-0001-7000-8000-00000000000b";
+  const rows = ["t:dragon|actions:fire-breath|recharge", "t:dragon|actions:frost-breath|recharge"] as const;
+  const none: ReadonlySet<string> = new Set();
+
+  /** The list over two recharges, A's roll on the first row and B's on the second, with what each receipt says. */
+  function line(input: { answers: Record<string, string | null>; turn: string | null; rolled?: (string | null)[]; silenced?: string[]; seen?: string[]; opened?: { seen?: string[]; failed?: string[] } }) {
+    const turns = input.rolled ?? [T1, T1];
+    const rolls: Record<string, ListRoll> = { [rows[0]]: { tag: A, turn: turns[0] ?? null }, [rows[1]]: { tag: B, turn: turns[1] ?? null } };
+    return listRollTrouble({
+      rows,
+      rolls,
+      newest: { [rows[0]]: A, [rows[1]]: B },
+      turn: input.turn,
+      trouble: (tag) => input.answers[tag] ?? null,
+      silenced: new Set(input.silenced),
+      seen: new Set(input.seen),
+      opened: { seen: new Set(input.opened?.seen), failed: new Set(input.opened?.failed) },
+    });
+  }
+
+  test("A refused, then B refused or unknown, in one open list: B's, whether or not the tap that rolled B silenced A", () => {
+    // A refused, then a tap on B's Roll recharge silences what the line shows.
+    assert.deepEqual(line({ answers: { [A]: "A was settled meanwhile." }, turn: T1 }).shown, { tag: A, text: "A was settled meanwhile." });
+    for (const b of ["B was settled meanwhile.", "This may have happened. Check the log."]) {
+      const answers = { [A]: "A was settled meanwhile.", [B]: b };
+      assert.deepEqual(line({ answers, turn: T1, silenced: [A], seen: [A] }).shown, { tag: B, text: b }, "A silenced");
+      assert.deepEqual(line({ answers, turn: T1 }).shown, { tag: B, text: b }, "the newest, not the first row's");
+    }
+    // B landed: A stays silenced.
+    assert.equal(line({ answers: { [A]: "A was settled meanwhile." }, turn: T1, silenced: [A] }).shown, null);
+  });
+
+  test("a failure shows only while the turn it was rolled on is current, and a list opened after one showed it never shows it again", () => {
+    const answers = { [A]: "A was settled meanwhile." };
+    assert.equal(line({ answers, turn: T2, opened: { failed: [A] } }).shown, null, "opened in a later turn");
+    assert.equal(line({ answers, turn: null, opened: { failed: [A] } }).shown, null, "opened once the fight ended");
+    assert.equal(line({ answers, turn: T1, seen: [A], opened: { seen: [A], failed: [A] } }).shown, null, "opened again on its turn");
+    // Not shown before, as when it failed while no list was open, it shows on its turn.
+    assert.deepEqual(line({ answers, turn: T1, opened: { failed: [A] } }).shown, { tag: A, text: "A was settled meanwhile." });
+    // In the list that showed it, it stays.
+    assert.deepEqual(line({ answers, turn: T1, seen: [A] }).shown, { tag: A, text: "A was settled meanwhile." });
+  });
+
+  test("a failure that comes once its turn passed is not shown but passed on for a toast, unless a list showed it or it was in before the list opened", () => {
+    const answers = { [A]: "A was settled meanwhile.", [B]: "This may have happened. Check the log." };
+    const late = line({ answers, turn: T2 });
+    assert.equal(late.shown, null);
+    assert.deepEqual(late.passed, [
+      { tag: A, text: "A was settled meanwhile." },
+      { tag: B, text: "This may have happened. Check the log." },
+    ]);
+    assert.deepEqual(line({ answers, turn: T2, seen: [A] }).passed.map((p) => p.tag), [B], "A shown on its turn, or told already");
+    assert.deepEqual(line({ answers, turn: T2, opened: { failed: [A, B] } }).passed, [], "both in before the list opened, as the receipts' own toast told them");
+    assert.deepEqual(line({ answers: {}, turn: T2 }).passed, [], "nothing failed");
+  });
+
+  test("a roll sent with no turn says so only in a list open as it failed, until that list's next tap", () => {
+    const answers = { [A]: "A was settled meanwhile." };
+    const rolled = [null, null];
+    assert.deepEqual(line({ answers, turn: null, rolled }).shown, { tag: A, text: "A was settled meanwhile." });
+    assert.deepEqual(line({ answers, turn: T1, rolled }).shown, { tag: A, text: "A was settled meanwhile." }, "a turn starting meanwhile");
+    assert.equal(line({ answers, turn: null, rolled, silenced: [A] }).shown, null, "the next tap");
+    assert.equal(line({ answers, turn: null, rolled, opened: { failed: [A] } }).shown, null, "a list opened after it failed");
+    assert.deepEqual(line({ answers, turn: null, rolled }).passed, []);
+  });
+
+  test("never for a row the Dice panel rolled since", () => {
+    const out = listRollTrouble({
+      rows,
+      rolls: { [rows[0]]: { tag: A, turn: T1 } },
+      newest: { [rows[0]]: "panel" },
+      turn: T2,
+      trouble: () => "Refused.",
+      silenced: none,
+      seen: none,
+      opened: { seen: none, failed: none },
+    });
+    assert.deepEqual(out, { shown: null, passed: [] });
+  });
+
+  test("a turn's id: its row, round and starting seq, the row and round where the seq is missing or another row's, none without a turn", () => {
+    const at = { tokenId: "t1", sceneId: "s1", x: 0, y: 0, elevation: 0 };
+    assert.equal(turnKey({ activeEntryId: "e1", round: 2, turnStart: { ...at, entryId: "e1", seq: 41 } }), "e1|2|41");
+    assert.equal(turnKey({ activeEntryId: "e1", round: 2 }), "e1|2|");
+    assert.equal(turnKey({ activeEntryId: "e1", round: 2, turnStart: { ...at, entryId: "e0", seq: 40 } }), "e1|2|");
+    assert.equal(turnKey({ activeEntryId: null, round: 2 }), null);
+    assert.equal(turnKey(undefined), null);
   });
 });

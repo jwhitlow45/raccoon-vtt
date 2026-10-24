@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useStore } from "zustand";
 import type { LimitedUse } from "#shared/dice/uses.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { PromptKey } from "#shared/model.ts";
@@ -7,8 +8,9 @@ import { Button } from "../../components/Button.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { theme } from "../../lib/theme.ts";
+import { useScoped } from "../../state/scope.ts";
 import type { OnAnswer } from "../../state/types.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import { useAnyPending } from "../encounter/hooks.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
@@ -17,7 +19,7 @@ import { reasonText } from "../resources/logic.ts";
 import { useOption } from "../dice/optionState.ts";
 import { useReceipts } from "../dice/useReceipt.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
-import { rechargeRow, useActsNow, useCreatureUses, useListRolls } from "./state.ts";
+import { combatLocalSlot, rechargeRow, tellPassed, useActsNow, useCreatureUses, useListRolls } from "./state.ts";
 import {
   abilityHead,
   abilityOp,
@@ -32,6 +34,7 @@ import {
   legendaryOffText,
   legendaryOp,
   legendaryText,
+  listRollTrouble,
   openRecord,
   otherBackOp,
   otherHead,
@@ -40,6 +43,7 @@ import {
   regenerationLine,
   resistHead,
   resistOp,
+  turnKey,
   usesPresence,
   usesRows,
   type LegendaryButton,
@@ -71,19 +75,25 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
   const characterId = useRoomView((s) => (s.view ? characterIdOf(s.view, target) : undefined));
   const holder = useRoomView((s) => (s.view ? holderKey(s.view, target) : ""));
   const record = currentRecord(encounter, actor);
+  const turn = turnKey(encounter);
   const rows = usesRows({ form, uses: props.uses, actor, ownTurn: props.ownTurn, record });
   const [status, setStatus] = useState<{ text: string; refused: boolean } | null>(null);
   const trouble = useListRollTrouble(
     holder,
     rows.flatMap((r) => (r.kind === "ability" && r.use.kind === "recharge" ? [r.use.key] : [])),
+    turn,
   );
   // The roll's trouble stands until the list's next tap says something of its own, then stays away for that roll.
-  const [quiet, setQuiet] = useState<string | null>(null);
   const onStatus = (next: { text: string; refused: boolean } | null) => {
     setStatus(next);
-    setQuiet(trouble?.tag ?? null);
+    trouble.silence();
   };
-  const shown = status ?? (trouble && trouble.tag !== quiet ? { text: trouble.text, refused: true } : null);
+  const shown = status ?? (trouble.shown ? { text: trouble.shown.text, refused: true } : null);
+  const seenTag = status === null ? (trouble.shown?.tag ?? null) : null;
+  const see = trouble.see;
+  useEffect(() => {
+    if (seenTag !== null) see(seenTag);
+  }, [seenTag, see]);
   const waits = props.uses === null && (props.loading || props.failed);
   if (rows.length === 0 && !waits && characterId === undefined) return null;
   return (
@@ -91,7 +101,7 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
       {rows.length > 0 ? (
         <ul aria-label={`${props.name}'s uses`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
           {rows.map((row) => (
-            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} encounter={encounter} actor={actor} onStatus={onStatus} />
+            <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} turn={turn} encounter={encounter} actor={actor} onStatus={onStatus} />
           ))}
         </ul>
       ) : null}
@@ -178,6 +188,8 @@ type LineProps = {
   holder: string;
   form: UsesForm;
   record: number | undefined;
+  /** The turn the list shows (logic.ts turnKey), kept with each Roll recharge it sends. */
+  turn: string | null;
   encounter: Parameters<typeof openRecord>[0];
   actor: Parameters<typeof openRecord>[1];
   onStatus(status: { text: string; refused: boolean } | null): void;
@@ -187,7 +199,7 @@ type LineProps = {
 function UseLine(props: LineProps) {
   const { row, target, form } = props;
   const send = useUseSend(props.onStatus);
-  const recharge = useRechargeRoll(props.holder, row.kind === "ability" ? row.use.key : "", props.onStatus);
+  const recharge = useRechargeRoll(props.holder, row.kind === "ability" ? row.use.key : "", props.turn, props.onStatus);
   const id = useId();
   let head: ReactNode;
   let state: string | null = null;
@@ -304,13 +316,13 @@ function useUseSend(onStatus: LineProps["onStatus"]) {
  * Dice panel's own row for that recharge, so its result shows in both. It
  * settles the turn's open prompt for the key where one is open (2.3).
  */
-function useRechargeRoll(holder: string, key: string, onStatus: LineProps["onStatus"]) {
+function useRechargeRoll(holder: string, key: string, turn: string | null, onStatus: LineProps["onStatus"]) {
   const row = rechargeRow(holder, key);
   const card = useCardRoll(row);
   const blocked = useRollBlocked();
   // Only a roll a uses list sent says its result here: the row's other rolls are the Dice panel's to show.
   const lists = useListRolls();
-  const mine = lists.rolls[row] ?? null;
+  const mine = lists.rolls[row]?.tag ?? null;
   const total = mine !== null && card.tag === mine ? card.rolls[0]?.total : undefined;
   return {
     waiting: card.waiting,
@@ -321,7 +333,7 @@ function useRechargeRoll(holder: string, key: string, onStatus: LineProps["onSta
       const tag = uuidv7();
       if (card.send(rechargeRollOp(tag, target, use, record)) === null) onStatus({ text: "That roll could not be sent. Try again.", refused: true });
       else {
-        lists.remember(row, tag);
+        lists.remember(row, { tag, turn });
         onStatus(null);
       }
     },
@@ -329,24 +341,47 @@ function useRechargeRoll(holder: string, key: string, onStatus: LineProps["onSta
 }
 
 /**
- * Why the newest Roll recharge a uses list sent for one of these recharges
- * did not land (CardRoll.tsx rollTrouble): refused, as when another device
+ * Why a Roll recharge the uses lists sent for one of these recharges did
+ * not land (logic.ts listRollTrouble): refused, as when another device
  * settled its prompt first, or lost on the way. The roll goes quiet and its
- * line watches its receipt, so no toast says it instead.
+ * line watches its receipt, so no toast says it, except one that came once
+ * its turn had passed, which this list then toasts itself, once for every
+ * list. `silence` puts away what it shows, for the list's next tap, and
+ * `see` marks what it showed.
  */
-function useListRollTrouble(holder: string, keys: readonly string[]): { tag: string; text: string } | null {
-  const { rolls } = useListRolls();
-  const tags = useOption((s) => s.tags);
+function useListRollTrouble(holder: string, keys: readonly string[], turn: string | null) {
+  const local = useScoped(combatLocalSlot);
+  const rolls = useStore(local, (s) => s.rolls);
+  const silenced = useStore(local, (s) => s.silenced);
+  const seen = useStore(local, (s) => s.seen);
+  const newest = useOption((s) => s.tags);
   const tracker = useReceipts();
   useSyncExternalStore(tracker.subscribe, tracker.version, tracker.version);
-  for (const key of keys) {
-    const row = rechargeRow(holder, key);
-    const tag = rolls[row];
-    if (tag === undefined || tags[row] !== tag) continue;
-    const text = rollTrouble(tracker.state(tag), false);
-    if (text) return { tag, text };
-  }
-  return null;
+  const ui = useRoomUi();
+  const trouble = (tag: string) => rollTrouble(tracker.state(tag), false);
+  // What stood as this list opened, so it never shows a failure again that a list showed, nor one with no turn from before.
+  const [opened] = useState(() => {
+    const now = local.getState();
+    return { seen: new Set(now.seen), failed: new Set(Object.values(now.rolls).flatMap((r) => (trouble(r.tag) ? [r.tag] : []))) };
+  });
+  const { shown, passed } = listRollTrouble({ rows: keys.map((key) => rechargeRow(holder, key)), rolls, newest, turn, trouble, silenced, seen, opened });
+  const passedTags = passed.map((p) => p.tag).join(" ");
+  useEffect(() => {
+    if (passedTags) tellPassed(passedTags.split(" "), local, tracker, (text, tone) => ui.notify(text, tone));
+  }, [passedTags, local, tracker, ui]);
+  const see = useCallback(
+    (tag: string) => {
+      if (!local.getState().seen.has(tag)) local.setState((s) => ({ seen: new Set([...s.seen, tag]) }));
+    },
+    [local],
+  );
+  return {
+    shown,
+    silence: () => {
+      if (shown) local.setState((s) => ({ silenced: new Set([...s.silenced, shown.tag]) }));
+    },
+    see,
+  };
 }
 
 type UseButtonProps = {

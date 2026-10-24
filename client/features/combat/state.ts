@@ -1,39 +1,68 @@
 import { useMemo } from "react";
 import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
+import { createStore, type StoreApi } from "zustand/vanilla";
 import { hasLair, lairCounts, limitedUses, type LimitedUse, type RegenerationUse } from "#shared/dice/uses.ts";
 import type { Token } from "#shared/model.ts";
 import type { ActorTarget, EntryInput } from "#shared/protocol.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { creatureBlock, srdNeeds, type DiceView } from "../dice/creature.ts";
+import type { ReceiptTracker } from "../dice/useReceipt.ts";
+import { ownResultText } from "../dice/useRollToasts.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { joinEntry } from "../encounters/drop.ts";
-import { actorOf, actsNow, currentRecord, deathSaveWaits, holderKey, promptsOf } from "./logic.ts";
+import { actorOf, actsNow, currentRecord, deathSaveWaits, holderKey, promptsOf, type ListRoll } from "./logic.ts";
 
 /*
  * What this device keeps of a fight's combat uses, per Room page
  * (state/scope.ts): the cards it dismissed for this turn, which only Skip
  * settles for everyone (docs/design-v1-combat-controls.md 4.1), the turn
- * cards it unfolded, and the tag of the last Roll recharge its uses lists
- * sent per recharge (`rechargeRow`), whose result and trouble those lists
- * show. Keys name the turn or the prompt, so a new turn's card or prompt
- * never meets an old dismissal.
+ * cards it unfolded, and the last Roll recharge its uses lists sent per
+ * recharge (`rechargeRow`), with the turn they showed, whose result and
+ * trouble those lists show. Of those rolls' failures it keeps the ones a
+ * list's later tap silenced and the ones a list showed, so a list opened
+ * again never brings them back (logic.ts listRollTrouble). Keys name the
+ * turn or the prompt, so a new turn's card or prompt never meets an old
+ * dismissal.
  */
-type Local = { dismissed: ReadonlySet<string>; shown: ReadonlySet<string>; rolls: Readonly<Record<string, string>> };
+type Local = {
+  dismissed: ReadonlySet<string>;
+  shown: ReadonlySet<string>;
+  rolls: Readonly<Record<string, ListRoll>>;
+  silenced: ReadonlySet<string>;
+  seen: ReadonlySet<string>;
+};
 
-export const combatLocalSlot = scopeSlot(() => createStore<Local>(() => ({ dismissed: new Set<string>(), shown: new Set<string>(), rolls: {} })));
+export const combatLocalSlot = scopeSlot(() =>
+  createStore<Local>(() => ({ dismissed: new Set<string>(), shown: new Set<string>(), rolls: {}, silenced: new Set<string>(), seen: new Set<string>() })),
+);
 
 /** A recharge's row in the options' store, which the Dice panel's Recharge 1d6 and the uses lists' Roll recharge share. */
 export function rechargeRow(holder: string, key: string): string {
   return `${holder}|${key}|recharge`;
 }
 
-/** The tags this device's uses lists last rolled per recharge row, and the way to remember one. */
-export function useListRolls(): { rolls: Readonly<Record<string, string>>; remember(row: string, tag: string): void } {
+/** The rolls this device's uses lists last sent per recharge row, and the way to remember one. */
+export function useListRolls(): { rolls: Readonly<Record<string, ListRoll>>; remember(row: string, roll: ListRoll): void } {
   const store = useScoped(combatLocalSlot);
   const rolls = useStore(store, (s) => s.rolls);
-  return useMemo(() => ({ rolls, remember: (row: string, tag: string) => store.setState((s) => ({ rolls: { ...s.rolls, [row]: tag } })) }), [store, rolls]);
+  return useMemo(() => ({ rolls, remember: (row: string, roll: ListRoll) => store.setState((s) => ({ rolls: { ...s.rolls, [row]: roll } })) }), [store, rolls]);
+}
+
+/**
+ * Toasts the uses lists' roll failures that came once their turn had
+ * passed (logic.ts listRollTrouble `passed`), in the words the receipts'
+ * own toast gives a roll nobody saw land (dice/useRollToasts.ts). Each is
+ * marked seen before its toast, so it is told once for every list open on
+ * its creature, and no list shows it after.
+ */
+export function tellPassed(tags: readonly string[], local: StoreApi<Local>, tracker: Pick<ReceiptTracker, "state">, notify: (text: string, tone: "error" | "info") => void): void {
+  for (const tag of tags) {
+    const state = tracker.state(tag);
+    if (local.getState().seen.has(tag) || !state || (state.state !== "refused" && state.state !== "unknown")) continue;
+    local.setState((s) => ({ seen: new Set([...s.seen, tag]) }));
+    notify(ownResultText(state), state.state === "refused" ? "error" : "info");
+  }
 }
 
 /** A prompt's key on this device: whose it is, its record and what it asks. A turn's creatures share one record id, the seq that started it. */

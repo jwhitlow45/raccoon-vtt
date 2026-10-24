@@ -26,6 +26,68 @@ export function currentRecord(encounter: Turn, actor: Pick<Actor, "turnRecord"> 
   return record;
 }
 
+/**
+ * The turn a display shows, as one id, or null with no turn: its row, its
+ * round and the seq of the op that started it (`TurnStart.seq`), which
+ * Previous puts back with the turn and Next after Previous makes anew. A
+ * player's view may lack the seq, so there the row and round name it.
+ */
+export function turnKey(encounter: Pick<Encounter, "activeEntryId" | "round" | "turnStart"> | null | undefined): string | null {
+  if (!encounter?.activeEntryId) return null;
+  const start = encounter.turnStart;
+  const seq = start?.entryId === encounter.activeEntryId ? start.seq : undefined;
+  return `${encounter.activeEntryId}|${encounter.round}|${seq ?? ""}`;
+}
+
+/** A Roll recharge a uses list sent (combat/state.ts useListRolls): its tag, and the turn the list showed as it rolled (`turnKey`). */
+export type ListRoll = { tag: string; turn: string | null };
+
+/** A list roll's failure: its tag and the words its status line or a toast gives it. */
+export type ListTrouble = { tag: string; text: string };
+
+/**
+ * What a uses list says of its own Roll recharge that did not land
+ * (CardRoll.tsx rollTrouble, reviews CCB-ASTRA-02, CCB-ASTRA-06 and
+ * CCB-OPUS-12). Its rows' rolls count while each is still its row's newest
+ * (`newest`, the Dice panel's row may have rolled since). Among their
+ * failures that a later tap did not silence, it shows the newest by tag,
+ * uuidv7 and so in time order. A roll sent on a turn says so only while
+ * that turn is current, and never again in a list opened after one showed
+ * it. One sent with no turn says so only in a list that was open as it
+ * failed, until that list's next tap. `passed` are the failures that came
+ * once their turn had passed, which no list showed, for a toast, since a
+ * list roll goes quiet and nothing else would tell them. `opened` is what
+ * stood as the list opened: the failures shown before, and those already
+ * in.
+ */
+export function listRollTrouble(input: {
+  rows: readonly string[];
+  rolls: Readonly<Record<string, ListRoll>>;
+  newest: Readonly<Record<string, string>>;
+  turn: string | null;
+  trouble(tag: string): string | null;
+  silenced: ReadonlySet<string>;
+  seen: ReadonlySet<string>;
+  opened: { seen: ReadonlySet<string>; failed: ReadonlySet<string> };
+}): { shown: ListTrouble | null; passed: ListTrouble[] } {
+  let shown: ListTrouble | null = null;
+  const passed: ListTrouble[] = [];
+  for (const row of input.rows) {
+    const roll = input.rolls[row];
+    if (!roll || input.newest[row] !== roll.tag) continue;
+    const text = input.trouble(roll.tag);
+    if (!text) continue;
+    const { tag } = roll;
+    if (roll.turn !== null && roll.turn !== input.turn) {
+      if (!input.opened.failed.has(tag) && !input.seen.has(tag)) passed.push({ tag, text });
+      continue;
+    }
+    if (input.silenced.has(tag) || input.opened.seen.has(tag) || (roll.turn === null && input.opened.failed.has(tag))) continue;
+    if (!shown || tag > shown.tag) shown = { tag, text };
+  }
+  return { shown, passed };
+}
+
 /** The holder of a creature's uses as one id: its character for a token that plays one, as the reducer resolves it. */
 export function holderKey(view: Pick<RoomState, "tokens">, target: ActorTarget): string {
   if ("characterId" in target) return `c:${target.characterId}`;

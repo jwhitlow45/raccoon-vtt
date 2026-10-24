@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RechargeUse } from "#shared/dice/uses.ts";
+import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState, UseMark, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, actor, character, entry, env, room, token } from "#shared/testutil.ts";
+import type { ReceiptTracker as Tracker } from "../dice/useReceipt.ts";
 
 /*
  * The combat uses where the DM meets them off a creature's turn
@@ -22,7 +24,7 @@ const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { EntryRow } = await import("../encounter/Row.tsx");
 const { CombatUses, UsesDrawer } = await import("./CombatUses.tsx");
-const { combatLocalSlot, rechargeRow } = await import("./state.ts");
+const { combatLocalSlot, rechargeRow, tellPassed } = await import("./state.ts");
 const { optionSlot } = await import("../dice/optionState.ts");
 const { receiptsSlot } = await import("../dice/useReceipt.ts");
 type Scope = InstanceType<typeof RoomScope>;
@@ -140,25 +142,30 @@ describe("a controlled mount on its rider's turn: the row and the bar agree it a
   });
 });
 
+/** The words of a uses list's status line, or null with none. */
+const statusOf = (markup: string) => /<p role="status"[^>]*>([^<]*)<\/p>/.exec(markup)?.[1] ?? null;
+
 describe("a Roll recharge from the list that did not land says why in the list's status line (CCB-ASTRA-02)", () => {
   const breath: RechargeUse = { kind: "recharge", key: "actions:fire-breath", name: "Fire Breath", section: "actions", min: 5 };
   const mark: UseMark = { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 };
   const state = room();
   state.tokens.dragon = token("dragon", { name: "Dragon", actor: { inline: actor({ uses: { [breath.key]: mark } }) } });
+  // The dragon's turn, which the list's rolls were sent on.
+  state.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "dragon" })] };
+  const TURN = "e1|1|";
   const row = rechargeRow("t:dragon", breath.key);
 
-  /** The list as it stands once this device's list sent `tag`, the Dice panel's row holding `rowTag`. */
+  /** The list as it stands once this device's list sent `tag` on the dragon's turn, the Dice panel's row holding `rowTag`. */
   function listAfter(scope: Scope, tag: string, rowTag = tag): string {
     // A server render reads a store's initial state, so each store's state now stands as its initial one (as LibraryGrid.test.ts does).
     const local = scope.get(combatLocalSlot);
-    local.setState({ rolls: { [row]: tag } });
+    local.setState({ rolls: { [row]: { tag, turn: TURN } } });
     local.getInitialState = local.getState;
     const options = scope.get(optionSlot);
     options.setState({ tags: { [row]: rowTag } });
     options.getInitialState = options.getState;
     return provide(state, DM, createElement(CombatUses, { target: { tokenId: "dragon" }, form: "list", uses: [breath], loading: false, failed: false, ownTurn: false, name: "Dragon" }), scope);
   }
-  const statusOf = (markup: string) => /<p role="status"[^>]*>([^<]*)<\/p>/.exec(markup)?.[1] ?? null;
 
   test("refused, as when another device settled its prompt first", () => {
     const scope = new RoomScope();
@@ -189,7 +196,7 @@ describe("a Roll recharge from the list that did not land says why in the list's
       scope.get(receiptsSlot).sending("own", 0);
       scope.get(receiptsSlot).answer("own", 0, "taken");
       const local = scope.get(combatLocalSlot);
-      local.setState({ rolls: { [row]: "own" } });
+      local.setState({ rolls: { [row]: { tag: "own", turn: TURN } } });
       local.getInitialState = local.getState;
       const options = scope.get(optionSlot);
       options.setState({ tags: { [row]: "own" } });
@@ -210,5 +217,83 @@ describe("a Roll recharge from the list that did not land says why in the list's
     landed.get(receiptsSlot).sending("r4", 0);
     landed.get(receiptsSlot).answer("r4", 0, "taken");
     assert.equal(statusOf(listAfter(landed, "r4")), null);
+  });
+});
+
+describe("the list's trouble line on a creature with two recharges, and a remount in a later turn (CCB-ASTRA-06, CCB-OPUS-12)", () => {
+  const fire: RechargeUse = { kind: "recharge", key: "actions:fire-breath", name: "Fire Breath", section: "actions", min: 5 };
+  const frost: RechargeUse = { kind: "recharge", key: "actions:frost-breath", name: "Frost Breath", section: "actions", min: 6 };
+  const used = (u: RechargeUse): UseMark => ({ kind: "recharge", name: u.name, used: 1, max: 1, min: u.min });
+  const rowA = rechargeRow("t:dragon", fire.key);
+  const rowB = rechargeRow("t:dragon", frost.key);
+  // Rolled in this order, A first.
+  const A = uuidv7(1_000);
+  const B = uuidv7(2_000);
+  const refuse = (tracker: Tracker, tag: string, text: string) => {
+    tracker.sending(tag, 0);
+    tracker.answer(tag, 0, "refused", { code: "invalid", message: text, text });
+  };
+  const lose = async (tracker: Tracker, tag: string) => {
+    tracker.sending(tag, 0);
+    tracker.answer(tag, 0, "unknown");
+    await tracker.lookup(tag);
+  };
+
+  /** The dragon's list in `round`, its two rolls sent on round 1's turn, as the list that rolled B (silencing A) left them, or a list opened after one showed `seen`. */
+  async function statusAfter(input: { answer(tracker: Tracker): void | Promise<void>; round: number; silenced?: string[]; seen?: string[] }): Promise<string | null> {
+    const scope = new RoomScope();
+    await input.answer(scope.get(receiptsSlot));
+    const s = room();
+    s.tokens.dragon = token("dragon", { name: "Dragon", actor: { inline: actor({ uses: { [fire.key]: used(fire), [frost.key]: used(frost) } }) } });
+    s.encounter = { rev: 0, round: input.round, activeEntryId: "e1", entries: [entry("e1", { tokenId: "dragon" })] };
+    const local = scope.get(combatLocalSlot);
+    local.setState({ rolls: { [rowA]: { tag: A, turn: "e1|1|" }, [rowB]: { tag: B, turn: "e1|1|" } }, silenced: new Set(input.silenced), seen: new Set(input.seen) });
+    local.getInitialState = local.getState;
+    const options = scope.get(optionSlot);
+    options.setState({ tags: { [rowA]: A, [rowB]: B } });
+    options.getInitialState = options.getState;
+    return statusOf(provide(s, DM, createElement(CombatUses, { target: { tokenId: "dragon" }, form: "list", uses: [fire, frost], loading: false, failed: false, ownTurn: false, name: "Dragon" }), scope));
+  }
+
+  test("A refused, then B refused: B's reason, with A silenced by the tap that rolled B or not", async () => {
+    const both = (tracker: Tracker) => {
+      refuse(tracker, A, "Fire Breath was settled meanwhile.");
+      refuse(tracker, B, "Frost Breath was settled meanwhile.");
+    };
+    assert.equal(await statusAfter({ answer: both, round: 1, silenced: [A] }), "Frost Breath was settled meanwhile.");
+    assert.equal(await statusAfter({ answer: both, round: 1 }), "Frost Breath was settled meanwhile.");
+  });
+
+  test("A refused, then B unknown: B's", async () => {
+    const answer = async (tracker: Tracker) => {
+      refuse(tracker, A, "Fire Breath was settled meanwhile.");
+      await lose(tracker, B);
+    };
+    assert.equal(await statusAfter({ answer, round: 1, silenced: [A] }), "This may have happened. Check the log.");
+  });
+
+  test("A refused, then the list opened in a later turn, or again once a list showed it: nothing", async () => {
+    const answer = (tracker: Tracker) => refuse(tracker, A, "Fire Breath was settled meanwhile.");
+    assert.equal(await statusAfter({ answer, round: 1 }), "Fire Breath was settled meanwhile.", "on its turn, shown by no list yet");
+    assert.equal(await statusAfter({ answer, round: 2 }), null);
+    assert.equal(await statusAfter({ answer, round: 1, seen: [A] }), null);
+  });
+
+  test("a failure that came once its turn passed goes to one toast for every list, in the receipts' own words", async () => {
+    const scope = new RoomScope();
+    const tracker = scope.get(receiptsSlot);
+    refuse(tracker, A, "Fire Breath was settled meanwhile.");
+    await lose(tracker, B);
+    const local = scope.get(combatLocalSlot);
+    const told: [string, string][] = [];
+    const notify = (text: string, tone: string) => void told.push([text, tone]);
+    tellPassed([A, B], local, tracker, notify);
+    // A second list open on the same creature finds them told.
+    tellPassed([A, B], local, tracker, notify);
+    assert.deepEqual(told, [
+      ["Fire Breath was settled meanwhile.", "error"],
+      ["A roll may have happened. Check the log.", "info"],
+    ]);
+    assert.deepEqual([...local.getState().seen], [A, B], "no list shows them after");
   });
 });
