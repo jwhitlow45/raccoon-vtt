@@ -1286,7 +1286,8 @@ function BarFrame(props: {
   };
   const collapse = () => dockStore.setState({ expanded: false, expandedHeight: null });
   const shiftOnExpand = useRef(false);
-  const frameKey = JSON.stringify([layout.width, layout.height, props.viewport.width, props.viewport.height, chrome, restFoot, column ? [column.top, column.first] : null]);
+  // The column's content counts, since a card that comes after the first changes the room it leaves (barDock.ts firstFoot).
+  const frameKey = JSON.stringify([layout.width, layout.height, props.viewport.width, props.viewport.height, chrome, restFoot, column ? [column.top, column.first, column.content] : null]);
   const frozenFor = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (restState !== "expanded") {
