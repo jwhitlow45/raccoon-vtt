@@ -1,5 +1,7 @@
-# Every check on a push to main or to a ci/ branch, on Linux: the typecheck,
-# unit and integration tests, and the e2e files in eight shards.
+# Every check on a push to main or to a ci/ branch, on Linux: the typecheck
+# with the integration tests, the unit tests, and the e2e files in 13 shards.
+# That is 16 jobs with the build, so two runs overlapping stay inside the 20
+# Linux jobs of a public repository.
 #
 # The e2e shards run on Ubuntu, since macOS runners are far slower and a
 # public repository runs up to 20 Linux jobs at a time. The app draws its
@@ -69,7 +71,10 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  checks:
+  # The typecheck and the integration tests share a job: together they take
+  # about as long as one e2e shard, and only the integration tests need the
+  # database. The unit tests have a job of their own, which needs none.
+  typecheck-int:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
@@ -104,29 +109,45 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - id: install
         run: pnpm install --frozen-lockfile
-      # Each check runs even when an earlier one failed, so one push reports all three.
+      # Each check runs even when an earlier one failed, so one push reports both.
       - name: Typecheck
         run: pnpm -s typecheck
-      - name: Unit tests
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: pnpm -s test
       - name: Integration tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm -s test:int
 
+  # About 5 minutes alone, which ends before the e2e shards do, so they are
+  # not split further.
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Unit tests
+        run: pnpm -s test
+
   e2e:
     needs: build
     runs-on: ubuntu-24.04
-    # Eight shards of about 7 minutes each on a laptop, balanced by
-    # scripts/e2e-shard.ts from e2e/durations.json. The shard's deadline
+    # 13 shards of about 6 minutes each, balanced by scripts/e2e-shard.ts
+    # from e2e/durations.json, which holds the seconds a file took in CI. The shard's deadline
     # keeps it inside this limit even when a file hangs.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     services:
-      # The same database as the checks job's, one per shard.
+      # The same database as the typecheck-int job's, one per shard.
       postgres:
         image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
         env:

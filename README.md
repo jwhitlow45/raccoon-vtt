@@ -120,9 +120,10 @@ Actions tab. It needs no secrets and deploys nothing.
 These jobs run on Ubuntu:
 
 - **build**: `pnpm build` once, kept for the e2e shards.
-- **checks**: `pnpm typecheck`, `pnpm test` and `pnpm test:int`, against a
-  postgres service container like the one in `docker-compose.yml`.
-- **e2e**, eight shards at once: each shard installs, downloads the build,
+- **typecheck-int**: `pnpm typecheck` and `pnpm test:int`, the second
+  against a postgres service container like the one in `docker-compose.yml`.
+- **unit**: `pnpm test`, which needs no database.
+- **e2e**, 13 shards at once: each shard installs, downloads the build,
   gets a postgres service container of its own and runs its share of
   `e2e/*.e2e.ts`, one file at a time, in Google Chrome.
 
@@ -154,7 +155,10 @@ logs kept, rather than the job being cut off.
 `e2e/durations.json`: the longest file first, each onto the shard with the
 least time so far. A file missing there counts as `defaultSeconds`. Each
 shard prints the time every file took, so after a file grows or a new one
-lands, copy its time into the list.
+lands, copy its time into the list. The list holds CI seconds, the largest
+of several green runs, and the shard count is chosen so the longest shard
+plans about 6 minutes. The whole run stays at 16 jobs, so two runs can
+overlap inside a public repository's 20 Linux jobs.
 
 A shard runs on a laptop too, against the dev postgres. Build first, then
 give the shard's number and the shard count. `--list` prints what every
