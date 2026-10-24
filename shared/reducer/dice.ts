@@ -62,6 +62,8 @@ function diceLine(tx: Tx, op: Sys, asked: Asked<"dice.roll">): void {
       if (initiativeHidden(tx.state, roll.creature)) out.hidden = true;
     }
     if (roll.save !== undefined && roll.creature) out.save = roll.save;
+    // A damage roll's type as its roller asked it, which an HP entry filled from the roll sends on (docs/design-v1-combat-controls.md 3.4).
+    if (roll.type !== undefined) out.type = roll.type;
     return out;
   });
   const line: Extract<LogEvent, { type: "dice" }> = { type: "dice", tag: asked.tag, batch: op.batch, by: tx.actor.memberId, to: asked.to, rolls };

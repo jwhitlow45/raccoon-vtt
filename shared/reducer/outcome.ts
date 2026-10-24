@@ -39,7 +39,7 @@ export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
       tx.putActor(resolved, { ...resolved.actor, legendary: { ...legendary, resistUsed: legendary.resistUsed + 1 } });
     }
     for (const effectId of item.remove ?? []) effectRemove(tx, { t: "actor.effect.remove", target: item.target, effectId });
-    if (item.amount !== undefined) actorHp(tx, { t: "actor.hp", target: item.target, change: { kind: "damage", amount: item.amount } });
+    if (item.amount !== undefined) actorHp(tx, { t: "actor.hp", target: item.target, change: { kind: "damage", amount: item.amount, ...(item.types ? { types: item.types } : {}) } });
     for (const effect of item.effects ?? []) effectAdd(tx, { t: "actor.effect.add", target: item.target, effect });
   }
 }

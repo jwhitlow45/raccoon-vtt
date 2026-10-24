@@ -1,4 +1,4 @@
-import { healRevivesDead, reviveToOne } from "../migrate.ts";
+import { combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
 import type { Effect } from "../model.ts";
 import { MAX_EFFECTS, type DurationInput, type OpOf } from "../protocol.ts";
 import { resolveDuration } from "../rules/durations.ts";
@@ -17,6 +17,7 @@ import {
 import { applyRest } from "../rules/rest.ts";
 import { hpRevertOf } from "./hpUndo.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
+import { typeUnion } from "./uses.ts";
 
 export function actorHp(tx: Tx, op: OpOf<"actor.hp">): void {
   const resolved = tx.resolveActor(op.target);
@@ -32,7 +33,10 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">): void {
           ? applyTemp(resolved.actor, c.amount)
           : applyHpSet(resolved.actor, c, resolved.kind, settings, revivesDead);
   if (r.actor === resolved.actor) return;
-  tx.putActor(resolved, r.actor);
+  // The types a hit of at least 1 dealt, for the Regeneration note (docs/design-v1-combat-controls.md 3.4), as the op carried them: the
+  // reducer reads no block to filter them. Temporary HP that took the hit still count, and a take back of the hit leaves them.
+  const hurt = c.kind === "damage" && c.types !== undefined && c.amount >= 1 && combatUses(tx.env.opVersion) ? typeUnion(r.actor.hurt, c.types) : undefined;
+  tx.putActor(resolved, hurt ? { ...r.actor, hurt } : r.actor);
   // The HP after the change, and what it replaced, so the log reads "3/7 left" and the DM can take it back (features section 10).
   const left = { ...r.actor.hp };
   const revert = hpRevertOf(resolved.actor, r.actor, tx.state.encounter?.entries ?? []);
@@ -63,7 +67,7 @@ export function actorDamageMany(tx: Tx, op: OpOf<"actor.damageMany">): void {
     const holder = `${resolved.holder}:${resolved.id}`;
     if (holders.has(holder)) throw invalid("a creature is listed twice");
     holders.add(holder);
-    actorHp(tx, { t: "actor.hp", target: hit.target, change: { kind: "damage", amount: hit.amount } });
+    actorHp(tx, { t: "actor.hp", target: hit.target, change: { kind: "damage", amount: hit.amount, ...(hit.types ? { types: hit.types } : {}) } });
   }
 }
 
