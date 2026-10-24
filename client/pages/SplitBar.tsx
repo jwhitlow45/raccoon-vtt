@@ -159,6 +159,7 @@ export function SplitBar(props: {
       return {
         id: p.id,
         title: p.title,
+        glyph: <Icon name={p.icon} size="sm" />,
         checked: p.id === props.below.id,
         ...(p.id === props.top.id ? { note: "on top", description: "Shown on top" } : null),
         ...(n > 0 ? { badge: <Badge count={n} label={props.badgeLabels[p.id]} /> } : null),
@@ -220,7 +221,8 @@ export function SplitBar(props: {
         {...PILL_FOCUS}
         style={{ ...NAME, ...tabLook(true).button }}
       >
-        {/* The title cuts in its own span, and the name keeps the whole title and says where it is, so speech input that says "Token" finds it. */}
+        {/* The panel's icon before its name, as its tab draws it (docs/design-v1-icons-2.md 3.1). The title cuts in its own span, and the name keeps the whole title and says where it is, so speech input that says "Token" finds it. */}
+        <Icon name={props.below.icon} size="sm" style={{ marginRight: theme.space(0.5) }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
           {props.below.title}
           <span style={VISUALLY_HIDDEN}> below</span>

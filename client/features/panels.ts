@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type { IconName } from "../components/Icon.tsx";
 import type { HeaderBack } from "../components/SheetHeader.tsx";
 import { retryableLazy } from "../lib/retryableLazy.ts";
 import { scopeSlot, useScopedIfAny } from "../state/scope.ts";
@@ -37,7 +38,7 @@ import "./starter/catalog.ts";
  *     return <ul>{Object.values(handouts ?? {}).map((h) => <li key={h.id}>{h.title}</li>)}</ul>;
  *   }
  *
- * and here: `panel({ id: "handouts", title: "Handouts", order: 60, load: () => import("../panels/HandoutsPanel.tsx") }),`
+ * and here, with its icon from components/Icon.tsx: `panel({ id: "handouts", title: "Handouts", icon: "library", order: 60, load: () => import("../panels/HandoutsPanel.tsx") }),`
  */
 
 /**
@@ -74,6 +75,8 @@ export type PanelGroup = "play" | "prepare" | "room";
 export type PanelDef = {
   id: string;
   title: string;
+  /** Its icon, before its name in a tab, More's list and a phone's Panels list, or alone in a tab row too narrow for both (docs/design-v1-icons-2.md 3). */
+  icon: IconName;
   dmOnly: boolean;
   /** Only where panels are sheets, below 900 px: from there up the side panel shows it another way. */
   narrowOnly: boolean;
@@ -90,6 +93,7 @@ export type PanelDef = {
 function panel(def: {
   id: string;
   title: string;
+  icon: IconName;
   order: number;
   group: PanelGroup;
   dmOnly?: boolean;
@@ -103,6 +107,7 @@ function panel(def: {
   return {
     id: def.id,
     title: def.title,
+    icon: def.icon,
     order: def.order,
     group: def.group,
     dmOnly,
@@ -121,22 +126,22 @@ function panel(def: {
  * side panel's default tab.
  */
 export const PANELS: readonly PanelDef[] = [
-  panel({ id: "token", title: "Token", order: 10, group: "play", subject: "selection", guide: "tokens", load: () => import("../panels/TokenPanel.tsx") }),
-  panel({ id: "tracker", title: "Initiative", order: 12, group: "play", guide: "initiative", load: () => import("../panels/TrackerPanel.tsx") }),
-  panel({ id: "dice", title: "Dice", order: 15, group: "play", subject: "selection", guide: "dice", load: () => import("./dice/DicePanel.tsx") }),
-  panel({ id: "scenes", title: "Scenes", order: 24, group: "play", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
-  panel({ id: "library", title: "Library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
-  panel({ id: "areas", title: "Areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
-  panel({ id: "log", title: "Log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
-  panel({ id: "journal", title: "Journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
-  panel({ id: "characters", title: "Characters", order: 44, group: "prepare", guide: "characters-and-their-stat-blocks", load: () => import("./tokens/CharactersPanel.tsx") }),
-  panel({ id: "monsters", title: "Monsters", order: 40, group: "prepare", dmOnly: true, guide: "monsters", load: () => import("./tokens/MonstersPanel.tsx") }),
-  panel({ id: "encounters", title: "Encounters", order: 42, group: "prepare", dmOnly: true, guide: "encounters", load: () => import("./encounters/EncountersPanel.tsx") }),
+  panel({ id: "token", title: "Token", icon: "token", order: 10, group: "play", subject: "selection", guide: "tokens", load: () => import("../panels/TokenPanel.tsx") }),
+  panel({ id: "tracker", title: "Initiative", icon: "combat", order: 12, group: "play", guide: "initiative", load: () => import("../panels/TrackerPanel.tsx") }),
+  panel({ id: "dice", title: "Dice", icon: "dice", order: 15, group: "play", subject: "selection", guide: "dice", load: () => import("./dice/DicePanel.tsx") }),
+  panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 24, group: "play", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
+  panel({ id: "library", title: "Library", icon: "library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
+  panel({ id: "areas", title: "Areas", icon: "areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
+  panel({ id: "log", title: "Log", icon: "log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
+  panel({ id: "journal", title: "Journal", icon: "journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
+  panel({ id: "characters", title: "Characters", icon: "characters", order: 44, group: "prepare", guide: "characters-and-their-stat-blocks", load: () => import("./tokens/CharactersPanel.tsx") }),
+  panel({ id: "monsters", title: "Monsters", icon: "monsters", order: 40, group: "prepare", dmOnly: true, guide: "monsters", load: () => import("./tokens/MonstersPanel.tsx") }),
+  panel({ id: "encounters", title: "Encounters", icon: "encounters", order: 42, group: "prepare", dmOnly: true, guide: "encounters", load: () => import("./encounters/EncountersPanel.tsx") }),
   // From 900 px up the party bar sits atop the side panel instead (features/party/PartyDock.tsx).
-  panel({ id: "party", title: "Party", order: 14, group: "play", dmOnly: true, narrowOnly: true, load: () => import("./party/PartyPanel.tsx") }),
-  panel({ id: "dm", title: "DM", order: 22, group: "play", dmOnly: true, guide: "dm-panel", load: () => import("../panels/DmPanel.tsx") }),
-  panel({ id: "outliner", title: "Outliner", order: 46, group: "prepare", dmOnly: true, guide: "outliner", load: () => import("./outliner/OutlinerPanel.tsx") }),
-  panel({ id: "menu", title: "Menu", order: 90, group: "room", load: () => import("../panels/MenuPanel.tsx") }),
+  panel({ id: "party", title: "Party", icon: "group", order: 14, group: "play", dmOnly: true, narrowOnly: true, load: () => import("./party/PartyPanel.tsx") }),
+  panel({ id: "dm", title: "DM", icon: "dm", order: 22, group: "play", dmOnly: true, guide: "dm-panel", load: () => import("../panels/DmPanel.tsx") }),
+  panel({ id: "outliner", title: "Outliner", icon: "outliner", order: 46, group: "prepare", dmOnly: true, guide: "outliner", load: () => import("./outliner/OutlinerPanel.tsx") }),
+  panel({ id: "menu", title: "Menu", icon: "more", order: 90, group: "room", load: () => import("../panels/MenuPanel.tsx") }),
 ];
 
 export function panelsFor(role: "dm" | "player", wide = false): PanelDef[] {

@@ -89,3 +89,46 @@ export function nameCut(fit: TabFit, w: TabWidths, index: number): boolean {
   const tab = w.tabs[index];
   return tab !== undefined && index >= fit.count && tab.more > fit.moreRoom;
 }
+
+/** How the row draws its tabs (docs/design-v1-icons-2.md 3.1): each panel's icon before its name, or its icon alone. */
+export type TabLook = "named" | "icon";
+
+/** A tab that draws its icon alone: the 44 px touch target, at least as narrow as any named tab. */
+export const ICON_TAB = 44;
+
+/**
+ * Icon and name where the row then holds as many tabs as the names alone
+ * would, else the icons alone, so an icon never costs the row a tab. The
+ * icons alone never hold fewer than the names, since no tab is narrower
+ * than its 44 px target. Null while either fit is (a hidden side panel).
+ */
+export function tabLook(words: TabWidths, named: TabWidths): TabLook | null {
+  const plain = fitTabs(words);
+  const withIcons = fitTabs(named);
+  if (plain === null || withIcons === null) return null;
+  return withIcons.count >= plain.count ? "named" : "icon";
+}
+
+/** The widths the fit reads for a look: the named tabs as measured, or each tab at ICON_TAB. More keeps its icon and name in both. */
+export function widthsFor(look: TabLook, named: TabWidths): TabWidths {
+  return look === "named" ? named : { ...named, tabs: named.tabs.map((t) => ({ ...t, rest: ICON_TAB })) };
+}
+
+/**
+ * Whether the row shows the open panel's name: a named tab in the row, or
+ * More's uncut name for a panel it holds.
+ */
+export function rowNamesOpen(look: TabLook, held: boolean, moreCut: boolean): boolean {
+  return held ? !moreCut : look === "named";
+}
+
+/**
+ * Whether the side panel names the open panel above it
+ * (docs/design-v1-panel-tabs.md 3.8, as docs/design-v1-icons-2.md 3.1
+ * amends it): where the row does not, on a touch pointer only, so a tap
+ * never needs a long press to learn which panel is open. A computer shows
+ * the name on hover and focus (first pass 3.2) and keeps the panel's height.
+ */
+export function headerNamesOpen(look: TabLook, held: boolean, moreCut: boolean, coarse: boolean): boolean {
+  return coarse && !rowNamesOpen(look, held, moreCut);
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { fitTabs, MORE_CAP, moreReserve, nameCut, rowWidth, type TabWidths } from "./tabFit.ts";
+import { fitTabs, headerNamesOpen, ICON_TAB, MORE_CAP, moreReserve, nameCut, rowNamesOpen, rowWidth, tabLook, widthsFor, type TabWidths } from "./tabFit.ts";
 
 /*
  * The side panel's one row of tabs (docs/design-v1-panel-tabs.md 3.2).
@@ -16,20 +16,20 @@ import { fitTabs, MORE_CAP, moreReserve, nameCut, rowWidth, type TabWidths } fro
 type Font = { tab: Record<string, number>; more: Record<string, number> };
 
 const MACOS: Font = {
-  tab: { Token: 54.2, Initiative: 71.9, Log: 44, Journal: 64.6, Areas: 53, DM: 44, Scenes: 63.3, Monsters: 77.3, Encounters: 90.6, Characters: 88.7, Outliner: 68.3, Library: 61.8, Menu: 51.4 },
-  more: { Token: 72.2, Initiative: 89.9, Log: 56.8, Journal: 82.6, Areas: 71, DM: 54.6, Scenes: 81.3, Monsters: 95.3, Encounters: 108.6, Characters: 106.7, Outliner: 86.3, Library: 79.8, Menu: 69.4, More: 66.4 },
+  tab: { Token: 54.2, Initiative: 71.9, Dice: 44, Log: 44, Journal: 64.6, Areas: 53, DM: 44, Scenes: 63.3, Monsters: 77.3, Encounters: 90.6, Characters: 88.7, Outliner: 68.3, Library: 61.8, Menu: 51.4 },
+  more: { Token: 72.2, Initiative: 89.9, Dice: 62, Log: 56.8, Journal: 82.6, Areas: 71, DM: 54.6, Scenes: 81.3, Monsters: 95.3, Encounters: 108.6, Characters: 106.7, Outliner: 86.3, Library: 79.8, Menu: 69.4, More: 66.4 },
 };
 const SEGOE: Font = {
-  tab: { Token: 53.7, Initiative: 70.4, Log: 44, Journal: 61.4, Areas: 49.9, DM: 44, Scenes: 57.7, Monsters: 74.1, Encounters: 85.4, Characters: 81.9, Outliner: 66.8, Library: 58.6, Menu: 51.2 },
-  more: { Token: 71.7, Initiative: 88.4, Log: 55.9, Journal: 79.4, Areas: 67.9, DM: 55.3, Scenes: 75.7, Monsters: 92.1, Encounters: 103.4, Characters: 99.9, Outliner: 84.8, Library: 76.6, Menu: 69.2, More: 66.4 },
+  tab: { Token: 53.7, Initiative: 70.4, Dice: 44, Log: 44, Journal: 61.4, Areas: 49.9, DM: 44, Scenes: 57.7, Monsters: 74.1, Encounters: 85.4, Characters: 81.9, Outliner: 66.8, Library: 58.6, Menu: 51.2 },
+  more: { Token: 71.7, Initiative: 88.4, Dice: 60.1, Log: 55.9, Journal: 79.4, Areas: 67.9, DM: 55.3, Scenes: 75.7, Monsters: 92.1, Encounters: 103.4, Characters: 99.9, Outliner: 84.8, Library: 76.6, Menu: 69.2, More: 66.4 },
 };
 const DEJAVU: Font = {
-  tab: { Token: 59.7, Initiative: 85, Log: 44, Journal: 69.9, Areas: 59, DM: 44, Scenes: 69.7, Monsters: 87.3, Encounters: 102.8, Characters: 99.8, Outliner: 78.5, Library: 70.1, Menu: 57.4 },
-  more: { Token: 77.7, Initiative: 103, Log: 60.6, Journal: 87.9, Areas: 77, DM: 57.6, Scenes: 87.7, Monsters: 105.3, Encounters: 120.8, Characters: 117.8, Outliner: 96.5, Library: 88.1, Menu: 75.4, More: 72 },
+  tab: { Token: 59.7, Initiative: 85, Dice: 48.2, Log: 44, Journal: 69.9, Areas: 59, DM: 44, Scenes: 69.7, Monsters: 87.3, Encounters: 102.8, Characters: 99.8, Outliner: 78.5, Library: 70.1, Menu: 57.4 },
+  more: { Token: 77.7, Initiative: 103, Dice: 66.2, Log: 60.6, Journal: 87.9, Areas: 77, DM: 57.6, Scenes: 87.7, Monsters: 105.3, Encounters: 120.8, Characters: 117.8, Outliner: 96.5, Library: 88.1, Menu: 75.4, More: 72 },
 };
 const INTER: Font = {
-  tab: { Token: 55.2, Initiative: 71.6, Log: 44, Journal: 65.2, Areas: 53.6, DM: 44, Scenes: 64.1, Monsters: 78, Encounters: 91.2, Characters: 88.9, Outliner: 68, Library: 61.8, Menu: 52.3 },
-  more: { Token: 73.2, Initiative: 89.6, Log: 57.2, Journal: 83.2, Areas: 71.6, DM: 55, Scenes: 82.1, Monsters: 96, Encounters: 109.2, Characters: 106.9, Outliner: 86, Library: 79.8, Menu: 70.3, More: 67 },
+  tab: { Token: 55.2, Initiative: 71.6, Dice: 44.2, Log: 44, Journal: 65.2, Areas: 53.6, DM: 44, Scenes: 64.1, Monsters: 78, Encounters: 91.2, Characters: 88.9, Outliner: 68, Library: 61.8, Menu: 52.3 },
+  more: { Token: 73.2, Initiative: 89.6, Dice: 62.2, Log: 57.2, Journal: 83.2, Areas: 71.6, DM: 55, Scenes: 82.1, Monsters: 96, Encounters: 109.2, Characters: 106.9, Outliner: 86, Library: 79.8, Menu: 70.3, More: 67 },
 };
 /** DejaVu Sans with today's 8 px padding, which 3.4 replaces. */
 const DEJAVU_8: Font = {
@@ -181,5 +181,65 @@ describe("the measured fonts (3.2)", () => {
     assert.equal(nameCut(fit, w, 1), false, "Initiative, in the row, wider than More's room");
     assert.equal(nameCut(fit, w, 7), true, "Monsters");
     assert.equal(nameCut(fit, w, 99), false);
+  });
+});
+
+describe("each panel's icon in the row (docs/design-v1-icons-2.md 3.1)", () => {
+  // Today's registry, with Dice after Initiative. Its widths in the four fonts were measured as the others were, in Chrome on 2026-10-24. The panel-tabs cases above keep the registry they were written for.
+  const DM_NOW = [DM[0]!, DM[1]!, ["Dice", "play"] as const, ...DM.slice(2)];
+  const PLAYER_NOW = [PLAYER[0]!, PLAYER[1]!, ["Dice", "play"] as const, ...PLAYER.slice(2)];
+  // A named tab is its words' tab with the 16 px icon and its 2 px margin before them, and More draws the icon too.
+  const named = (w: TabWidths): TabWidths => ({ ...w, tabs: w.tabs.map((t) => ({ ...t, rest: t.rest + 18, more: t.more + 18 })) });
+
+  test("icon and name where the row still holds as many tabs, else the icons alone", () => {
+    const wide = widths(INTER, DM_NOW, 1200);
+    assert.equal(tabLook(wide, named(wide)), "named", "a room for every named tab keeps the names");
+    for (const room of [236, 248, 295]) {
+      const w = widths(INTER, DM_NOW, room);
+      assert.equal(tabLook(w, named(w)), "icon", `at ${room} a named row would lose a tab`);
+    }
+  });
+
+  test("the icons alone never hold fewer tabs than the names, at every room up to the side panel's", () => {
+    for (let room = 0; room <= 360; room++) {
+      for (const font of [INTER, MACOS, SEGOE, DEJAVU]) {
+        for (const panels of [DM_NOW, PLAYER_NOW]) {
+          const w = widths(font, panels, room);
+          const look = tabLook(w, named(w));
+          if (look === null) continue;
+          const drawn = fitTabs(widthsFor(look, named(w)))!.count;
+          assert.ok(drawn >= fitTabs(w)!.count, `${room}: ${drawn} tabs drawn, the names alone held ${fitTabs(w)!.count}`);
+        }
+      }
+    }
+  });
+
+  test("an icon alone is its 44 px target, and a 295 px row then holds Token, Initiative, Dice and Log in every font, where names held three", () => {
+    for (const font of [INTER, MACOS, SEGOE, DEJAVU]) {
+      for (const panels of [DM_NOW, PLAYER_NOW]) {
+        const w = widths(font, panels, 295);
+        assert.ok(widthsFor("icon", named(w)).tabs.every((t) => t.rest === ICON_TAB));
+        assert.deepEqual(panels.slice(0, fitTabs(widthsFor("icon", named(w)))!.count).map(([t]) => t), ["Token", "Initiative", "Dice", "Log"]);
+        assert.equal(fitTabs(w)!.count, 3, "the names alone");
+      }
+    }
+  });
+
+  test("the row shows the open panel's name in a named tab or More's whole name, not an icon-only tab or More's icon alone", () => {
+    assert.equal(rowNamesOpen("icon", false, false), false, "an icon-only tab in the row");
+    assert.equal(rowNamesOpen("named", false, false), true, "a named tab in the row");
+    assert.equal(rowNamesOpen("icon", true, false), true, "More's icon and whole name");
+    assert.equal(rowNamesOpen("icon", true, true), false, "More's icon alone");
+    assert.equal(rowNamesOpen("named", true, true), false);
+  });
+
+  // The header line cost a computer's panel 45 px for nearly every panel, where hover and focus already name a tab (D-261024-36 amended).
+  test("the header names it on a touch pointer only", () => {
+    for (const [look, held, cut] of [["icon", false, false], ["icon", true, true]] as const) {
+      assert.equal(headerNamesOpen(look, held, cut, true), true, `${look} ${held} ${cut} on touch`);
+      assert.equal(headerNamesOpen(look, held, cut, false), false, `${look} ${held} ${cut} on a computer`);
+    }
+    assert.equal(headerNamesOpen("named", false, false, true), false, "a named tab needs no header");
+    assert.equal(headerNamesOpen("icon", true, false, true), false, "nor More's whole name");
   });
 });

@@ -150,15 +150,17 @@ The cost is the X-card, which sits at the top of Menu. On a wide screen it takes
 
 The row is the same on a short layout. The `ScrollStrip`, its chevron and the rule before Hide panels go (`Room.tsx:1815-1818,1824`), since nothing scrolls. The party bar's folded start on a short layout stays (the layout design's 4.1).
 
-### 3.8 The full name above a cut one
+### 3.8 The full name above, on a touch pointer
 
-Today the side panel draws a header only for a subpage, "since the chosen tab already names the panel" (`Room.tsx` `SidePanel`'s comment). A cut name on More breaks that reason, so the rule becomes: **the side panel draws its header whenever the row does not show the open page's whole name.**
+Today the side panel draws a header only for a subpage, "since the chosen tab already names the panel" (`Room.tsx` `SidePanel`'s comment). A cut name on More breaks that reason, and since the second icon pass so does an icon-only tab, so the rule becomes: **the side panel draws its header for a subpage, and on a touch pointer whenever the row does not show the open page's whole name.**
 
 - **A subpage**: as today, the subpage's name with "Back to" its panel's whole name.
-- **A panel whose name More cuts**: the panel's whole name, with no Back. The fit says when: the open panel is in More and its More width is over More's room. It is worked out from the fit's numbers, not read from the span, so it never flickers.
-- **Otherwise** no header, as today.
+- **A panel whose name More cuts**: the panel's whole name, with no Back. The fit says when: the open panel is in More and its More width is over More's room. It is worked out from the fit's numbers, not read from the span, so it never flickers. Since the second icon pass More then draws the panel's icon alone (docs/design-v1-icons-2.md 3.1).
+- **A tab that draws its icon alone** (docs/design-v1-icons-2.md 3.1, decision D-261024-36): the panel's whole name, with no Back, worked out from the fit's numbers in the same way (`tabFit.ts` `headerNamesOpen`).
+- **On a touch pointer only** (D-261024-36 amended): a computer names an icon tab, and More's icon alone, on hover and focus, so its panel keeps its height.
+- **Otherwise** no header, as today. A phone's sheet names the panel in its own header, and the split bar names the panel below, so neither draws this one.
 
-This header moves no focus and is not a subpage: `useSubpageFocus` keys on subpages only. It costs the body the header's height while it shows, which happens only with a font as wide as DejaVu Sans, or on a large phone held sideways (9.1).
+This header moves no focus and is not a subpage: `useSubpageFocus` keys on subpages only. It costs the body the header's height while it shows: 45 px on a 1180 x 820 tablet. Since the second icon pass draws the tabs as icons alone in today's 295 px row, it shows for nearly every open panel on a tablet, not only with a font as wide as DejaVu Sans or on a large phone held sideways (9.1). On a computer it would cost 45 px at 100% (38 at 85%, 52 at 115%, 58 at 130%), which is why it draws on a touch pointer only.
 
 ## 4. The More menu
 

@@ -2726,6 +2726,7 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
               <li key={p.id}>
                 <Row
                   opener={panelTile(p.id)}
+                  leading={<Icon name={p.icon} size="md" style={{ color: current ? theme.color.accent : theme.color.textMuted }} />}
                   title={p.title}
                   trailing={count > 0 ? <Badge count={count} label={props.badgeLabels[p.id]} /> : undefined}
                   chosen={current}
@@ -3217,7 +3218,7 @@ function SidePane(props: {
   const header = props.subpage ? (
     <SheetHeader compact title={props.subpage.title} back={subpageBack(props.subpage)} titleRef={titleRef} />
   ) : props.cutTitle ? (
-    // A name More cuts is named in full above the panel (docs/design-v1-panel-tabs.md 3.8). A subpage's header names it in its Back instead.
+    // On a touch pointer, a name the tab row does not show, an icon-only tab's or one More cuts, is named in full above the panel (docs/design-v1-panel-tabs.md 3.8, docs/design-v1-icons-2.md 3.1). A subpage's header names it in its Back instead.
     <SheetHeader compact title={props.cutTitle} />
   ) : null;
   return (

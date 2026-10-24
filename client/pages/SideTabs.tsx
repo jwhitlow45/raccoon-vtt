@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { headerRow, Pill, PILL_FOCUS, PILL_HOST } from "../components/HeaderRow.tsx";
 import { Icon } from "../components/Icon.tsx";
+import { useTooltip } from "../components/Tooltip.tsx";
 import { PRESSED } from "../components/looks.ts";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type Rect } from "../components/Popover.tsx";
 import { HideButton } from "../components/SheetHeader.tsx";
 import { panelSections, type PanelDef } from "../features/panels.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { isCoarsePointer } from "../lib/device.ts";
 import { theme } from "../lib/theme.ts";
 import { Badge } from "./RoomChrome.tsx";
-import { fitTabs, GROUP_GAP, nameCut, TAB_GAP, type TabFit, type TabWidths } from "./tabFit.ts";
+import { fitTabs, GROUP_GAP, nameCut, TAB_GAP, headerNamesOpen, tabLook as pickLook, widthsFor, type TabFit, type TabLook, type TabWidths } from "./tabFit.ts";
 
 /**
  * The side panel's tabs in one row (docs/design-v1-panel-tabs.md): the
@@ -59,6 +61,9 @@ export function tabLook(chosen: boolean): { button: CSSProperties; pill: CSSProp
   return { button: { ...TAB_REST, ...(chosen ? { color: theme.color.accent } : null) }, pill: chosen ? PRESSED : null };
 }
 
+/** A panel's icon before its name, 2 px more than the row's gap apart, as every tab and More draw it and the measuring row measures it. */
+const NAMED_ICON: CSSProperties = { marginRight: theme.space(0.5) };
+
 /** More's place among the row's stops for the tab keys. */
 const MORE = "\u0000more";
 
@@ -81,12 +86,13 @@ const BELOW_MARK: CSSProperties = {
   pointerEvents: "none",
 };
 
-type Layout = { fit: TabFit; widths: TabWidths };
+type Layout = { fit: TabFit; widths: TabWidths; look: TabLook };
 
 function sameLayout(a: Layout | null, b: Layout | null): boolean {
   if (a === null || b === null) return a === b;
   const near = (x: number, y: number) => Math.abs(x - y) < 0.5;
   return (
+    a.look === b.look &&
     a.fit.count === b.fit.count &&
     near(a.fit.moreRoom, b.fit.moreRoom) &&
     near(a.widths.room, b.widths.room) &&
@@ -127,9 +133,10 @@ export function SideTabs(props: {
    */
   split: { on: boolean; fits: boolean | null; below: string | null; onToggle(): void };
   /**
-   * The chosen panel's full name while More cuts it (3.8), else null, for
-   * the side panel to name above the top panel, where it takes room from
-   * that panel alone and never from the split.
+   * The chosen panel's full name while the row does not show it on a touch
+   * pointer, its tab an icon alone or More's name cut (3.8,
+   * docs/design-v1-icons-2.md 3.1), else null, for the side panel to name above the top panel, where it takes
+   * room from that panel alone and never from the split.
    */
   onCutTitle(title: string | null): void;
   /** The chosen tab, More while the open panel is in it. */
@@ -173,14 +180,17 @@ export function SideTabs(props: {
     if (list && row) {
       const width = (el: Element | null) => (el ? el.getBoundingClientRect().width / zoom : 0);
       const rest = [...row.querySelectorAll("[data-rest]")].map(width);
+      const named = [...row.querySelectorAll("[data-named]")].map(width);
       const more = [...row.querySelectorAll("[data-more]")].map(width);
-      const widths: TabWidths = {
-        tabs: panels.map((p, i) => ({ rest: rest[i] ?? 0, more: more[i] ?? 0, group: p.group })),
-        moreRest: width(row.querySelector("[data-more-rest]")),
-        room: width(list),
-      };
-      const fit = fitTabs(widths);
-      next = fit ? { fit, widths } : null;
+      const moreRest = width(row.querySelector("[data-more-rest]"));
+      const room = width(list);
+      const tabsOf = (at: number[]) => panels.map((p, i) => ({ rest: at[i] ?? 0, more: more[i] ?? 0, group: p.group }));
+      // Each panel's icon before its name where the row then holds as many tabs as the names alone, else the icons alone (docs/design-v1-icons-2.md 3.1).
+      const withNames: TabWidths = { tabs: tabsOf(named), moreRest, room };
+      const look = pickLook({ tabs: tabsOf(rest), moreRest, room }, withNames);
+      const widths = look ? widthsFor(look, withNames) : withNames;
+      const fit = look ? fitTabs(widths) : null;
+      next = fit && look ? { fit, widths, look } : null;
     }
     setLayout((was) => {
       if (sameLayout(was, next)) return was;
@@ -306,6 +316,7 @@ export function SideTabs(props: {
         return {
           id: p.id,
           title: p.title,
+          glyph: <Icon name={p.icon} size="sm" />,
           checked: p.id === tab,
           ...(p.id === below ? { note: "below", description: "Shown below" } : null),
           ...(n > 0 ? { badge: <Badge count={n} label={props.badgeLabels[p.id]} /> } : null),
@@ -315,7 +326,14 @@ export function SideTabs(props: {
   ];
   const pick = (id: string) => (id === SPLIT_ITEM ? split.onToggle() : props.onTab(id));
   const chosenIndex = tabs.findIndex((p) => p.id === tab);
-  const cutTitle = layout && chosenHeld && nameCut(layout.fit, layout.widths, chosenIndex) ? chosenHeld.title : null;
+  // More draws a held panel's icon alone where its name would be cut.
+  const moreCut = layout !== null && chosenHeld !== undefined && nameCut(layout.fit, layout.widths, chosenIndex);
+  // On a touch pointer, wherever the row does not show the open panel's name, the side panel names it above the panel (docs/design-v1-panel-tabs.md 3.8 as docs/design-v1-icons-2.md 3.1 amends it): an icon-only tab, or More's icon alone. A computer shows the name on hover and focus instead and keeps the panel's height.
+  const chosenPanel = tabs[chosenIndex];
+  const named = layout !== null && chosenPanel !== undefined && headerNamesOpen(layout.look, chosenHeld !== undefined, moreCut, isCoarsePointer());
+  const cutTitle = named ? chosenPanel.title : null;
+  // More with its icon alone shows the held panel's name as every icon-only tab does, on hover, keyboard focus and a long press (docs/design-v1-icons-2.md 6).
+  const moreTip = useTooltip(chosenHeld?.title ?? "More panels");
   // Before paint, so the name and the panel under it draw in one frame.
   const onCutTitle = useRef(props.onCutTitle);
   onCutTitle.current = props.onCutTitle;
@@ -332,29 +350,25 @@ export function SideTabs(props: {
             const opensGroup = i > 0 && row[i - 1]?.group !== p.group;
             const look = tabLook(chosen);
             return (
-              <button
+              <PanelTab
                 key={p.id}
-                ref={chosen ? tabRef : undefined}
+                panel={p}
+                alone={layout?.look === "icon"}
+                tabRef={chosen ? tabRef : undefined}
                 id={props.tabId(p.id)}
-                type="button"
-                role="tab"
-                aria-selected={chosen}
-                aria-controls={chosen ? props.panelId : undefined}
-                aria-describedby={marked ? belowDescribedId : undefined}
-                tabIndex={p.id === stop ? 0 : -1}
-                data-active={chosen}
-                data-stop={p.id}
-                data-index={i}
-                {...PILL_FOCUS}
+                chosen={chosen}
+                controls={chosen ? props.panelId : undefined}
+                describedBy={marked ? belowDescribedId : undefined}
+                stop={p.id === stop}
+                index={i}
                 onClick={() => props.onTab(p.id)}
-                style={{ ...TAB_BOX, ...PILL_HOST, flex: "none", marginLeft: opensGroup ? GROUP_GAP - TAB_GAP : 0, ...look.button, cursor: "pointer" }}
+                style={{ marginLeft: opensGroup ? GROUP_GAP - TAB_GAP : 0, ...look.button }}
               >
-                {p.title}
                 <Pill look={look.pill}>
                   <Badge count={props.badges[p.id] ?? 0} corner label={props.badgeLabels[p.id]} />
                   {marked ? <span aria-hidden data-below-mark="" style={BELOW_MARK} /> : null}
                 </Pill>
-              </button>
+              </PanelTab>
             );
           })}
           {fit && held.length > 0 ? (
@@ -368,17 +382,18 @@ export function SideTabs(props: {
               aria-haspopup="menu"
               aria-expanded={menu.open}
               aria-controls={menu.open ? menu.contentId : chosenHeld ? props.panelId : undefined}
-              aria-describedby={description ? describedId : undefined}
               tabIndex={stop === MORE ? 0 : -1}
               data-active={chosenHeld !== undefined}
               data-stop={MORE}
               {...PILL_FOCUS}
+              {...(moreCut ? moreTip.anchor({ "aria-describedby": description ? describedId : undefined }) : { "aria-describedby": description ? describedId : undefined })}
               onClick={menu.onAnchorClick}
               onKeyDown={menu.onAnchorKeyDown}
               style={{ ...TAB_BOX, ...PILL_HOST, flex: "0 1 auto", maxWidth: fit.moreRoom, ...tabLook(chosenHeld !== undefined).button, cursor: "pointer" }}
             >
-              {/* The title cuts in its own span, so the corner badge never does. Its name keeps the whole title. */}
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {/* The held panel's icon before its name, or alone where its name would be cut, so More never cuts a word: the side panel then names the panel above it (3.8). Its name keeps the whole title. */}
+              {chosenHeld ? <Icon name={chosenHeld.icon} size="sm" style={NAMED_ICON} /> : null}
+              <span style={moreCut ? VISUALLY_HIDDEN : { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {chosenHeld ? (
                   chosenHeld.title
                 ) : (
@@ -394,6 +409,7 @@ export function SideTabs(props: {
               </Pill>
             </button>
           ) : null}
+          {moreCut ? moreTip.tip : null}
         </div>
         <Popover handle={menu} side="below" bound={() => innerBox(listRef.current?.closest("aside") ?? document.body, latest.current.zoom)}>
           <Menu label="More panels" sections={sections} onPick={pick} data={{ "data-tabs-menu": "" }} />
@@ -417,7 +433,14 @@ export function SideTabs(props: {
               </span>
             ))}
             {tabs.map((p) => (
+              <span key={`named-${p.id}`} data-named="" style={{ ...TAB_BOX, flex: "none" }}>
+                <Icon name={p.icon} size="sm" style={NAMED_ICON} />
+                {p.title}
+              </span>
+            ))}
+            {tabs.map((p) => (
               <span key={`more-${p.id}`} data-more="" style={{ ...TAB_BOX, flex: "none" }}>
+                <Icon name={p.icon} size="sm" style={NAMED_ICON} />
                 <span>{p.title}</span>
                 <Icon name="chevronDown" size="sm" />
               </span>
@@ -429,6 +452,58 @@ export function SideTabs(props: {
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+/**
+ * One panel's tab: its icon before its name, or its icon alone where the
+ * row is too narrow for both (docs/design-v1-icons-2.md 3.1). Alone, its
+ * name is a visually hidden title, never an `aria-label`, so the badge's
+ * hidden words stay in it ("Log 2 unread", docs/design-v1-panel-tabs.md
+ * 3.5), and shows on hover, keyboard focus and a long press, as every
+ * icon-only control's does (docs/design-v1-icons.md 3.2).
+ * Either way the box is the measured one, so the fit holds what it drew.
+ */
+export function PanelTab(props: {
+  panel: PanelDef;
+  alone: boolean;
+  tabRef: RefObject<HTMLButtonElement | null> | undefined;
+  id: string;
+  chosen: boolean;
+  controls: string | undefined;
+  describedBy: string | undefined;
+  stop: boolean;
+  index: number;
+  onClick(): void;
+  style: CSSProperties;
+  children: ReactNode;
+}) {
+  const { panel, alone } = props;
+  const tooltip = useTooltip(panel.title);
+  return (
+    <>
+      <button
+        ref={props.tabRef}
+        id={props.id}
+        type="button"
+        role="tab"
+        aria-selected={props.chosen}
+        aria-controls={props.controls}
+        tabIndex={props.stop ? 0 : -1}
+        data-active={props.chosen}
+        data-stop={panel.id}
+        data-index={props.index}
+        {...PILL_FOCUS}
+        {...(alone ? tooltip.anchor({ "aria-describedby": props.describedBy }) : { "aria-describedby": props.describedBy })}
+        onClick={props.onClick}
+        style={{ ...TAB_BOX, ...PILL_HOST, flex: "none", ...(alone ? { padding: 0 } : null), ...props.style, cursor: "pointer" }}
+      >
+        <Icon name={panel.icon} size={alone ? "md" : "sm"} style={alone ? undefined : NAMED_ICON} />
+        {alone ? <span style={VISUALLY_HIDDEN}>{panel.title}</span> : panel.title}
+        {props.children}
+      </button>
+      {alone ? tooltip.tip : null}
     </>
   );
 }
