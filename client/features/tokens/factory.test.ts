@@ -224,6 +224,26 @@ describe("other token sources", () => {
     assert.deepEqual(state.tokens.g2!.rangeRings, [30, 120]);
   });
 
+  test("a duplicate starts with no spent uses, damage types, turn record or unshaped numbers, so the op the bar sends is one the server takes (docs/design-v1-combat-controls.md 2.4)", () => {
+    const dragon = token("dragon", {
+      actor: {
+        inline: actor({
+          hp: { cur: 120, max: 256, temp: 0 },
+          legendary: { actionsMax: 3, actionsUsed: 1, resistMax: 3, resistUsed: 1 },
+          uses: { "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 }, "legendaryActions:fiery-rays": { kind: "turn", name: "Fiery Rays", used: 1, max: 1 } },
+          hurt: ["fire"],
+          turnRecord: { id: 40, entryId: "e1", round: 2, hp: 130, life: "alive", took: ["cold"], due: ["actions:fire-breath"], settled: { "recharge:actions:fire-breath": { state: "done", total: 2, outcome: "used" } } },
+          unshaped: { ac: 12, speeds: { walk: 30 } },
+        }),
+      },
+    });
+    const copy = duplicateToken(dragon, { id: "dragon2", at: { x: 4, y: 3 }, chunks: {} });
+    valid({ t: "token.create", token: copy });
+    assert.ok("inline" in copy.actor);
+    for (const field of ["uses", "hurt", "turnRecord", "unshaped"]) assert.equal(field in copy.actor.inline, false, field);
+    assert.deepEqual(copy.actor.inline.legendary, { actionsMax: 3, actionsUsed: 0, resistMax: 3, resistUsed: 0 });
+  });
+
   test("a carried token's duplicate comes without its link, and the op the bar sends is one the server takes (docs/design-v1-attach.md 5.2)", () => {
     const torch = token("torch", { kind: "object", size: "tiny", attached: { to: "thorn", kind: "carry" } });
     const copy = duplicateToken(torch, { id: "torch2", at: { x: 4, y: 3 }, chunks: {} });

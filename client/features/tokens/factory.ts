@@ -200,8 +200,14 @@ export function duplicateToken(
 }
 
 function freshActor(actor: Actor, blocks: Readonly<Record<string, CompanionBlock | undefined>> | undefined): Actor {
+  /*
+   * What the reducer writes alone, which no op's actor may carry (shared/protocol.ts actorSchemaForImport): a copy
+   * starts with no spent uses, damage types or turn record (docs/design-v1-combat-controls.md 2.4), and no numbers
+   * kept from before a shape.
+   */
+  const { uses: _uses, hurt: _hurt, turnRecord: _record, unshaped: _unshaped, ...own } = actor;
   const next: Actor = {
-    ...actor,
+    ...own,
     hp: { cur: actor.hp.max, max: actor.hp.max, temp: 0 },
     life: "alive",
     speeds: { ...actor.speeds },
