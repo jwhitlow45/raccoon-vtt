@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { barButtons, barCapacity, barShort, isCompanion, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
+import { barButtons, barCapacity, barShort, isCompanion, restFit, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
 import { DEFAULT_SPOT, placeBar, type Chrome } from "./barDock.ts";
 
 const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, companion: false, attach: [] };
@@ -202,5 +202,100 @@ describe("a short bar", () => {
     assert.notEqual(placeBar(small)?.hang.room, placeBar(tall)?.hang.room);
     assert.equal(barShort(small), barShort(tall));
     assert.equal(barCapacity(small), barCapacity(tall));
+  });
+});
+
+/*
+ * The strip's drawn widths in layout px at 100% (docs/design-v1-bar-compact.md
+ * Appendix B.2). The lead is the toggle, Apply and their two 4 px gaps, its
+ * field counted apart at its 56 px least: 174 in all.
+ */
+const DRAWN = { mode: 118, crit: 51, roll: 51, useRoll: 65, uses: 60, details: 72, hidden: 98, conditions: 99, multiSelect: 108, countLeg: 121, undoMove: 44 } as const;
+const GAP = 4;
+const FIELD_MIN = 56;
+/** The quick row's inner width at each phone (B.2). */
+const INNER = { p390: 348, p375: 333, p440: 398, p320at130: 205, p390at130: 258, p320: 278 } as const;
+const pick = (...ids: (keyof typeof DRAWN)[]) => Object.fromEntries(ids.map((id) => [id, DRAWN[id]]));
+
+describe("the resting strip's quick row (docs/design-v1-bar-compact.md 3.3)", () => {
+  test("the measured fits of B.2 for the DM or an owner on a creature with HP, at the six phone sizes", () => {
+    const owner = pick("mode", "conditions", "roll", "multiSelect");
+    assert.deepEqual(restFit(owner, INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restFit(owner, INNER.p375, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restFit({ ...owner, uses: DRAWN.uses }, INNER.p440, GAP, FIELD_MIN), ["mode", "conditions", "roll", "uses"]);
+    assert.deepEqual(restFit(owner, INNER.p320at130, GAP, FIELD_MIN), ["mode"]);
+    // Conditions (99) is skipped, and Roll after it still fits.
+    assert.deepEqual(restFit(owner, INNER.p390at130, GAP, FIELD_MIN), ["mode", "roll"]);
+    assert.deepEqual(restFit(owner, INNER.p320, GAP, FIELD_MIN), ["mode", "conditions"]);
+  });
+
+  test("fitting goes by its own order, apart from the order shown: Crit and Conditions before Roll's place, then Use 9, Multi-select, Uses, Hidden and Details", () => {
+    const all = pick("mode", "crit", "useRoll", "conditions", "roll", "multiSelect", "uses", "hidden", "details");
+    // At 0 HP: Crit comes before Conditions, and Roll no longer fits at 390.
+    assert.deepEqual(restFit(pick("mode", "crit", "conditions", "roll"), INNER.p390, GAP, FIELD_MIN), ["mode", "crit", "conditions"]);
+    assert.deepEqual(restFit(pick("mode", "crit", "conditions", "roll"), INNER.p440, GAP, FIELD_MIN), ["mode", "crit", "conditions", "roll"]);
+    // Use 9 shows before Conditions but fits after Roll: a room that takes only one of them keeps Conditions and Roll.
+    assert.deepEqual(restFit(pick("mode", "useRoll", "conditions", "roll"), 340, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restFit(pick("mode", "useRoll", "conditions", "roll"), 401, GAP, FIELD_MIN), ["mode", "useRoll", "conditions", "roll"]);
+    // With room for all, every candidate shows, in the order shown.
+    assert.deepEqual(restFit(all, 2000, GAP, FIELD_MIN), ["mode", "crit", "useRoll", "conditions", "roll", "multiSelect", "uses", "hidden", "details"]);
+  });
+
+  test("a passing action takes Roll's place where it fits whole there, and never puts Conditions out", () => {
+    // Undo move as its 44 px arrow, at 390 and 375 (D-261024-12).
+    const undo = pick("mode", "conditions", "undoMove", "roll", "multiSelect");
+    assert.deepEqual(restFit(undo, INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", "undoMove"]);
+    assert.deepEqual(restFit(undo, INNER.p375, GAP, FIELD_MIN), ["mode", "conditions", "undoMove"]);
+    // Doesn't count (121) does not fit Roll's place at 390, so Roll stays.
+    assert.deepEqual(restFit(pick("mode", "conditions", "countLeg", "roll"), INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    // Nothing fits after the lead at 320 x 568 at 130%: Undo move waits behind Expand.
+    assert.deepEqual(restFit(undo, INNER.p320at130, GAP, FIELD_MIN), ["mode"]);
+    // Only the first passing action is offered the place: Doesn't count never stands in for an Undo move that does not fit.
+    assert.deepEqual(restFit({ ...pick("mode", "conditions", "roll"), undoMove: 103, countLeg: 40 }, INNER.p375, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    // With no Roll, as for a player on another's creature, the passing action still takes the place.
+    assert.deepEqual(restFit(pick("undoMove", "multiSelect", "details"), INNER.p390, GAP, FIELD_MIN), ["undoMove", "multiSelect", "details"]);
+    // Whatever passes, Conditions shows wherever it does without one.
+    for (const room of Object.values(INNER)) {
+      for (const passing of ["undoMove", "countLeg"] as const) {
+        const without = restFit(pick("mode", "crit", "conditions", "roll"), room, GAP, FIELD_MIN).includes("conditions");
+        assert.equal(restFit(pick("mode", "crit", "conditions", passing, "roll"), room, GAP, FIELD_MIN).includes("conditions"), without, `${passing} at ${room}`);
+      }
+    }
+  });
+
+  test("one that does not fit is skipped, and a narrower one after it may still fit", () => {
+    // At 440, Multi-select (108) does not fit the 66 px Roll leaves, and Uses (60) does.
+    assert.deepEqual(restFit(pick("mode", "conditions", "roll", "multiSelect", "uses"), INNER.p440, GAP, FIELD_MIN), ["mode", "conditions", "roll", "uses"]);
+    // The DM on the barrel at 375: Conditions, Doesn't count in Roll's place, then Hidden in the room Multi-select leaves.
+    assert.deepEqual(restFit({ ...pick("conditions", "roll", "multiSelect", "hidden", "details"), countLeg: 121 }, INNER.p375, GAP, FIELD_MIN), ["conditions", "countLeg", "hidden"]);
+  });
+
+  test("the field counts at its 56 px least: at 72, Roll no longer fits at 375 (R14)", () => {
+    const owner = pick("mode", "conditions", "roll");
+    assert.deepEqual(restFit(owner, INNER.p375, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restFit(owner, INNER.p375, GAP, 72), ["mode", "conditions"]);
+  });
+
+  test("a candidate fits whole or not at all, gaps counted between candidates only", () => {
+    // 174 + 4 + 99 + 4 + 51 = 332.
+    const owner = pick("mode", "conditions", "roll");
+    assert.deepEqual(restFit(owner, 332, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restFit(owner, 331.9, GAP, FIELD_MIN), ["mode", "conditions"]);
+    // With no lead, the first candidate takes no gap before it.
+    assert.deepEqual(restFit(pick("multiSelect"), 108, GAP, FIELD_MIN), ["multiSelect"]);
+    assert.deepEqual(restFit(pick("multiSelect"), 107.9, GAP, FIELD_MIN), []);
+  });
+
+  test("no room: the lead alone shows, its field giving up room, and with no lead nothing does", () => {
+    assert.deepEqual(restFit(pick("mode", "conditions", "roll"), 100, GAP, FIELD_MIN), ["mode"]);
+    assert.deepEqual(restFit(pick("mode", "conditions", "roll"), 0, GAP, FIELD_MIN), ["mode"]);
+    assert.deepEqual(restFit(pick("conditions", "roll", "multiSelect"), 0, GAP, FIELD_MIN), []);
+    assert.deepEqual(restFit({}, INNER.p390, GAP, FIELD_MIN), []);
+  });
+
+  test("an id the strip does not know fits after the known ones, in the order given", () => {
+    assert.deepEqual(restFit({ mode: 118, extra: 40, conditions: 99, other: 30 }, 360, GAP, FIELD_MIN), ["mode", "conditions", "extra", "other"]);
+    // It never takes room from a known one: here only Conditions fits after the lead.
+    assert.deepEqual(restFit({ extra: 60, mode: 118, conditions: 99 }, 280, GAP, FIELD_MIN), ["mode", "conditions"]);
   });
 });

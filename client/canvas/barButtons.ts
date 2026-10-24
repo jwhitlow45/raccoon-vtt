@@ -1,4 +1,4 @@
-import { barMode, compactHang, freeArea, placeBar, spanRoomAtWorst } from "./barDock.ts";
+import { barMode, compactHang, freeArea, placeBar, restOrder, spanRoomAtWorst } from "./barDock.ts";
 
 /*
  * The single-token bar's buttons and its short layout
@@ -152,3 +152,57 @@ export function barShort(room: BarRoom): boolean {
   const spans = barMode(room.layout, freeArea(room.viewport, room.chrome, room.foot).height) === "span";
   return capacity < (spans ? SPAN_SHORT_BAR_PX : SHORT_BAR_PX);
 }
+
+// ------------------------------------------------------------ an upright phone's resting strip
+
+/** The passing actions, newest first, which take Roll's place in the strip while one applies (docs/design-v1-bar-compact.md 3.3). */
+const PASSING: readonly string[] = ["undoMove", "countLeg", "door"];
+
+/*
+ * The order the quick row fills by, apart from the order it shows in
+ * (barDock.ts restOrder), so a passing action that comes and goes can
+ * never put Conditions out (3.3, D-261024-12). "place" is Roll's place:
+ * the first passing action where it fits whole there, and else Roll.
+ */
+const REST_FIT: readonly string[] = ["mode", "crit", "conditions", "place", "useRoll", "multiSelect", "uses", "hidden", "details"];
+
+/**
+ * Which of the quick row's candidates show, in the order they show
+ * (3.3). `widths` holds each candidate's drawn width, so the font, the
+ * interface size and the browser's least font size count. "mode", the
+ * HP entry's lead, is given without its field, which counts `fieldMin`
+ * and takes what the others leave. Each other candidate shows where it
+ * fits whole in the `room` left after those before it in the fitting
+ * order, `gap` apart. One that does not fit is skipped, and a narrower
+ * one after it may still fit. The lead always shows: it is the strip's
+ * reason to be, and its field gives up room before it goes.
+ */
+export function restFit(widths: Readonly<Record<string, number>>, room: number, gap: number, fieldMin: number): string[] {
+  const ids = Object.keys(widths);
+  const shown: string[] = [];
+  let used = 0;
+  const fits = (width: number) => used + (shown.length > 0 ? gap : 0) + width <= room + FIT_SLACK;
+  const take = (id: string, width: number) => {
+    used += (shown.length > 0 ? gap : 0) + width;
+    shown.push(id);
+  };
+  const width = (id: string) => widths[id] ?? 0;
+  const unknown = ids.filter((id) => !REST_FIT.includes(id) && !PASSING.includes(id) && id !== "roll");
+  for (const slot of [...REST_FIT, ...unknown]) {
+    if (slot === "mode") {
+      if (ids.includes("mode")) take("mode", width("mode") + fieldMin);
+      continue;
+    }
+    if (slot === "place") {
+      const passing = PASSING.find((id) => ids.includes(id));
+      if (passing !== undefined && fits(width(passing))) take(passing, width(passing));
+      else if (ids.includes("roll") && fits(width("roll"))) take("roll", width("roll"));
+      continue;
+    }
+    if (ids.includes(slot) && fits(width(slot))) take(slot, width(slot));
+  }
+  return restOrder(shown);
+}
+
+/** Drawn widths are fractions of a pixel, so a sum may land a hair over the room it fills exactly. */
+const FIT_SLACK = 0.01;
