@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { barButtons, barCapacity, barShort, isCompanion, restFit, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
-import { DEFAULT_SPOT, placeBar, type Chrome } from "./barDock.ts";
+import { DEFAULT_SPOT, freeArea, placeBar, spanRoomAtWorst, type Chrome } from "./barDock.ts";
 
 const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, companion: false, attach: [] };
 const DM: BarButtonInput = { ...NOTHING, dm: true };
@@ -308,5 +308,37 @@ describe("a quick row candidate that draws nothing", () => {
     assert.deepEqual(restFit({ multiSelect: 0, details: 72 }, INNER.p390, GAP, FIELD_MIN), ["details"]);
     // The lead shows whatever its measure.
     assert.deepEqual(restFit({ mode: 0 }, INNER.p390, GAP, FIELD_MIN), ["mode"]);
+  });
+});
+
+describe("an upright phone's capacity follows the mode its frame draws in (docs/design-v1-bar-compact.md 2 and 9.4)", () => {
+  // 320 x 568 at 130%: the free area runs 60 to 369, 309 tall, and a 170 px roll card at the foot takes it to 139.
+  // The token stands low, where today's bar would get more room than the screen's least, so the capacity shows it reads the screen alone.
+  const layout = { width: 246, height: 437 };
+  const room: BarRoom = { ...desk(437), layout, viewport: layout, chrome: chrome({ side: 0, bottom: 0 }), foot: 170, anchor: { x: 123, y: 300 } };
+  const free = freeArea(layout, room.chrome, room.foot);
+
+  test("the first render with a card standing, no mode held yet, gets the strip's layout, as placeBar's opening rule gives the strip (review BC-OPUS-33)", () => {
+    assert.equal(free.height, 139);
+    const standing: BarRoom = { ...room, cardAt: "foot" };
+    assert.equal(placeBar({ ...standing, height: 200 })?.mode, "span");
+    assert.equal(barCapacity(standing), spanRoomAtWorst(free));
+    // Counted as today, the card's foot makes the bar compact, with the overlay's own capacity.
+    assert.equal(placeBar({ ...room, height: 200 })?.mode, "compact");
+    assert.notEqual(barCapacity(room), spanRoomAtWorst(free));
+  });
+
+  test("a card summoned onto the toolbar or the screen counts its foot, as the opening rule does", () => {
+    for (const cardAt of ["toolbar", "screen"] as const) {
+      assert.equal(placeBar({ ...room, cardAt, height: 200 })?.mode, "compact", cardAt);
+      assert.equal(barCapacity({ ...room, cardAt }), barCapacity(room), cardAt);
+    }
+  });
+
+  test("a held strip keeps the strip's layout as its free area falls under 148, and lets go of it on its side (review BC-OPUS-32)", () => {
+    const held: BarRoom = { ...room, heldMode: "span" };
+    assert.equal(barCapacity(held), spanRoomAtWorst(free));
+    const side: BarRoom = { ...held, layout: { width: 437, height: 246 }, viewport: { width: 437, height: 246 }, foot: 0 };
+    assert.equal(barCapacity(side), barCapacity({ ...side, heldMode: null }));
   });
 });

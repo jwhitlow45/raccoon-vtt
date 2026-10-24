@@ -1,4 +1,4 @@
-import { barMode, compactHang, freeArea, placeBar, restOrder, spanRoomAtWorst } from "./barDock.ts";
+import { compactHang, freeArea, heldOrOpenMode, placeBar, restOrder, spanRoomAtWorst, type BarMode, type Box } from "./barDock.ts";
 
 /*
  * The single-token bar's buttons and its short layout
@@ -121,17 +121,19 @@ export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
  * "More stats", or the short layout itself, never changes it. It counts
  * what the lane gives the bar, so tall alert cards over a docked bar count.
  *
- * A bar that spans an upright phone hangs above or below its token, so its
- * room changes with where the tapped token stands. Its capacity is the
- * least room any token's bar gets on that screen instead (barDock.ts
- * spanRoomAtWorst), the screen's alone, so a phone keeps one layout, and
- * Apply one place in view, whichever token is tapped. A tall or zoomed
- * token is the exception: the bar over it clears its drawn height, so it
- * may get less room than that, and it scrolls (review FU24-OPUS-2).
+ * On an upright phone the bar rests as a strip and expands up from it
+ * (docs/design-v1-bar-compact.md 5.1), so its capacity is the expanded
+ * bar's room on that screen (barDock.ts spanRoomAtWorst), the screen's
+ * alone: a phone keeps one layout, and Apply one place in view, whichever
+ * token is tapped. That room leaves the full layout's Apply out of view
+ * only on the smallest phones at a larger interface size, such as
+ * 320 x 568 at 130%. The mode is the one the frame draws in (roomMode),
+ * so a held strip keeps its layout as its free area shrinks, and the
+ * first render with a roll card standing at the foot gets the strip's.
  */
 export function barCapacity(room: BarRoom): number | null {
   const free = freeArea(room.viewport, room.chrome, room.foot);
-  if (barMode(room.layout, free.height) === "span") return spanRoomAtWorst(free);
+  if (roomMode(room, free) === "span") return spanRoomAtWorst(free);
   const placed = placeBar({ ...room, height: Number.POSITIVE_INFINITY });
   if (!placed) return null;
   if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome, room.width).room;
@@ -141,16 +143,27 @@ export function barCapacity(room: BarRoom): number | null {
 /**
  * A short bar (3.3): a phone held sideways at any interface size, a large
  * phone held sideways in the wide layout, every screen too short to dock or
- * span, a docked bar under tall alert cards while they stand there, and a
- * spanning bar wherever a token in the middle of the screen would leave
- * its full layout's Apply out of view, as on an upright phone at 130%. It
- * keeps AC, HP and the HP entry at the top, and "More stats" holds the rest.
+ * span, a docked bar under tall alert cards while they stand there, and an
+ * upright phone's bar where the expanded bar's room would leave its full
+ * layout's Apply out of view, which now holds only on the smallest phones
+ * at a larger interface size (docs/design-v1-bar-compact.md 9.1). It keeps
+ * AC, HP and the HP entry at the top, and "More stats" holds the rest.
  */
 export function barShort(room: BarRoom): boolean {
   const capacity = barCapacity(room);
   if (capacity === null) return false;
-  const spans = barMode(room.layout, freeArea(room.viewport, room.chrome, room.foot).height) === "span";
+  const spans = roomMode(room, freeArea(room.viewport, room.chrome, room.foot)) === "span";
   return capacity < (spans ? SPAN_SHORT_BAR_PX : SHORT_BAR_PX);
+}
+
+/**
+ * The mode the bar draws in, by the rule placeBar uses (barDock.ts
+ * heldOrOpenMode): the strip held since it showed, or else the opening
+ * rule, which counts a roll card standing at the foot as map
+ * (docs/design-v1-bar-compact.md 2).
+ */
+function roomMode(room: BarRoom, free: Box): BarMode {
+  return heldOrOpenMode({ layout: room.layout, free, foot: room.foot, cardAt: room.cardAt ?? null, heldMode: room.heldMode ?? null });
 }
 
 // ------------------------------------------------------------ an upright phone's resting strip
