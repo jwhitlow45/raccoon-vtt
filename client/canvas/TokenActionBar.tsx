@@ -15,6 +15,8 @@ import { GRIP_ATTR, PaneHeader, STICKY_HEADER_ATTR, type PaneHandle } from "../c
 import { useLayoutSize } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useOptionStore } from "../features/dice/optionState.ts";
+import { UsesDrawer, useUsesPresence } from "../features/combat/CombatUses.tsx";
+import { currentRecord } from "../features/combat/logic.ts";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { useSend } from "../features/encounter/hooks.ts";
@@ -141,7 +143,24 @@ function ButtonRow(props: { row: "passing" | "play" | "less"; children: ReactNod
   );
 }
 
-type Drawer = "conditions" | null;
+type Drawer = "conditions" | "uses" | null;
+
+/**
+ * Whether a token's creature acts now, when its legendary actions wait for
+ * another creature's turn (docs/design-v1-combat-controls.md 5): its row
+ * acts, or a turn it shares with another row's creature started for it.
+ */
+function actsNow(
+  encounter: { activeEntryId: string | null; round: number; entries: readonly { id: string; tokenId?: string; characterId?: string }[] } | null | undefined,
+  token: ViewToken,
+  characterId: string | undefined,
+  actor: Pick<Actor, "turnRecord"> | undefined,
+): boolean {
+  const active = encounter?.entries.find((e) => e.id === encounter.activeEntryId);
+  if (!active) return false;
+  if (active.tokenId === token.id || (characterId !== undefined && active.tokenId === undefined && active.characterId === characterId)) return true;
+  return currentRecord(encounter, actor) !== null;
+}
 
 /**
  * Where focus goes once Revive leaves the bar: its frame, which announces
@@ -274,6 +293,9 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
 
   const path = pathNow(encounter, token, you?.role ?? "player");
   const undoIds = barTokenIds(tokens, token);
+  // Its combat uses (docs/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
+  const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);
+  const ownTurn = actsNow(encounter, token, character?.id, actor);
   const rows = barButtons({
     dm: access.dm,
     owner: access.owner,
@@ -284,6 +306,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     light: (scene !== undefined && visionOn(scene)) || (token.light !== undefined && (token.light.bright > 0 || token.light.dim > 0)),
     companion: isCompanion(token),
     attach: attachSlots,
+    uses: usesPresence,
   });
   const button = (id: BarButtonId): ReactNode => {
     switch (id) {
@@ -303,6 +326,13 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         return (
           <BarButton key={id} onClick={openRolls}>
             Roll
+          </BarButton>
+        );
+      // Held while its block loads, then dropped if the block lists no use, so the buttons after it do not jump.
+      case "uses":
+        return (
+          <BarButton key={id} disabled={usesPresence === "loading"} pressed={drawer === "uses"} onClick={() => setDrawer((d) => (d === "uses" ? null : "uses"))}>
+            Uses
           </BarButton>
         );
       // Toggles named for the state they are in, lit while it holds, so a lit button never reads as the opposite.
@@ -470,6 +500,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       ) : null}
 
       {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
+      {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} ownTurn={ownTurn} name={displayName(token)} onClose={() => setDrawer(null)} /> : null}
 
       {rows.passing.length > 0 ? (
         <ButtonRow row="passing">{rows.passing.map(button)}</ButtonRow>

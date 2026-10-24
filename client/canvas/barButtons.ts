@@ -16,6 +16,7 @@ export type BarButtonId =
   | "detach"
   | "multiSelect"
   | "roll"
+  | "uses"
   | "locked"
   | "duplicate"
   | "delete"
@@ -42,6 +43,13 @@ export type BarButtonInput = {
    * (docs/design-v1-attach.md 4.1 and 4.3), in that order. Empty for neither.
    */
   attach: readonly ("detach" | "attach")[];
+  /**
+   * The creature's combat uses (docs/design-v1-combat-controls.md 6): "yes"
+   * for an actor with legendary counts, spent uses or class resources, or a
+   * block that lists a use, "loading" while its block loads, whose place is
+   * held, and "no" for none. Left out, none.
+   */
+  uses?: "yes" | "loading" | "no";
 };
 
 /**
@@ -51,8 +59,9 @@ export type BarButtonInput = {
  * them shows. The steady line starts with Conditions, Hidden and
  * Multi-select, which the default width keeps on one line
  * (docs/design-v1-token-window.md 3.2), so nothing that comes and goes
- * moves them: Roll, Light and Attach (after Get off on a carried token)
- * follow, on the same line where room is left.
+ * moves them: Roll, Uses for a creature with combat uses, Light and
+ * Attach (after Get off on a carried token) follow, on the same line where
+ * room is left.
  * Roll opens the Dice panel's options, whose Ask switch asks the player of
  * a creature a player plays, so the single bar has no Request a roll
  * (docs/design-v1-roll-options.md 4.5). The less-often row keeps the
@@ -73,6 +82,8 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   play.push("multiSelect");
   // After Multi-select: any earlier, Roll would push Multi-select to a second line at the default width.
   if (dm || owner) play.push("roll");
+  // After Roll, held while the block loads, so Light and Attach do not jump when it shows (docs/design-v1-combat-controls.md 6).
+  if ((dm || owner) && input.uses !== undefined && input.uses !== "no") play.push("uses");
   if ((dm || owner) && input.light) play.push("light");
   play.push(...input.attach);
   const less: BarButtonId[] = [];

@@ -8,6 +8,14 @@ const DM: BarButtonInput = { ...NOTHING, dm: true };
 const OWNER: BarButtonInput = { ...NOTHING, owner: true };
 
 describe("the bar's rows", () => {
+  test("Uses after Roll for the DM and an owner on a creature with combat uses, held while its block loads (docs/design-v1-combat-controls.md 6)", () => {
+    assert.deepEqual(barButtons({ ...DM, uses: "yes", light: true }).play, ["conditions", "hidden", "multiSelect", "roll", "uses", "light"]);
+    assert.deepEqual(barButtons({ ...OWNER, uses: "loading" }).play, ["conditions", "multiSelect", "roll", "uses"]);
+    assert.deepEqual(barButtons({ ...DM, uses: "no" }).play, ["conditions", "hidden", "multiSelect", "roll"]);
+    assert.deepEqual(barButtons({ ...NOTHING, uses: "yes" }).play, ["multiSelect"], "another player's creature shows none");
+  });
+
+
   test("the DM on a monster, alive or dead: the steady line with Roll after Multi-select, then the setup and destructive row, with no Move bar or Reset bar position", () => {
     assert.deepEqual(barButtons(DM), {
       passing: [],
