@@ -1636,6 +1636,26 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     assert.equal(largerShift({ ...room(450, 586, null, 128), toastFoot: 450 - 128 - EDGE + 1 }), largerShift(room(450, 586, null, 128)), "the tall token's top, not 40 px above its foot");
   });
 
+  test("over a token taller than 40 px the bar clears the token's drawn height, and Larger over it keeps the token's label in the free area (review BS-F1)", () => {
+    // Low on the screen, a 128 px token: 102 px below it, and 640 - 34 - 128 - 108 = 370 above it.
+    const tall = 128;
+    const over = after(640, 586, 0, null, tall);
+    assert.equal(over.box.top + over.box.height, 640 - OFFSET_Y - tall);
+    assert.equal(over.room, 370);
+    assert.ok(over.clear && over.inside, JSON.stringify(over));
+    // A 40 px token, and one smaller, keep the 40 px clearance.
+    for (const height of [FLIP_CLEARANCE, 24]) {
+      const small = after(640, 586, 0, null, height);
+      assert.equal(small.box.top + small.box.height, 640 - OFFSET_Y - FLIP_CLEARANCE, `a ${height} px token`);
+    }
+    // Larger asks for 494 px and the side lacks 124, but the map moves down only 102, so the token's label stays above the free area's foot.
+    const dy = largerShift(room(640, 586, null, tall));
+    assert.equal(dy, 776 - OFFSET_Y - 640);
+    const moved = after(640, 586, dy, null, tall);
+    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
+    assert.equal(moved.room, 370 + dy);
+  });
+
   test("a tall or zoomed token keeps its top in the free area: Larger asks for less under a 128 px token, Smaller moves back less over a 64 px one, and a token too tall for more room moves nothing (review BS-ASTRA-01)", () => {
     // Under a 128 px token Larger leaves its label gap, its height and 12 px: 668 - 174 = 494, so the map moves up 143, not 197.
     const tall = 128;

@@ -919,7 +919,7 @@ function BarFrame(props: {
   useLayoutEffect(measure, [clipped]);
 
   // The anchor is always given here, so a placement always comes back.
-  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, height: barHeight, column, width, size, resizable: finePointer })!;
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, tokenHeight: props.tokenHeight, spot, height: barHeight, column, width, size, resizable: finePointer })!;
   const { free, mode, resizable } = placed;
 
   // Actions in the Multi-select bar shows the bar and focuses its frame, once it is drawn.

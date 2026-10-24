@@ -779,27 +779,33 @@ export function clearAnchor(point: { x: number; y: number }, viewport: Size, bar
 
 /** Below the token's name label, which hangs about 30 px under the footprint. */
 export const OFFSET_Y = 34;
-/** Room above the token's bottom edge for the token itself when the bar flips above it. */
+/** Room above the token's bottom edge for the token itself when the bar flips above it, at the least. A taller token takes its drawn height (flipClearance). */
 export const FLIP_CLEARANCE = 40;
+
+/** The room a bar over its token leaves for the token above the label gap: its drawn height, but never under FLIP_CLEARANCE (review BS-F1). */
+function flipClearance(tokenHeight: number): number {
+  return Math.max(FLIP_CLEARANCE, tokenHeight);
+}
 
 /**
  * An upright phone's bar, the screen's width less the free area's margins:
  * below its token when it fits there, else above it, whichever has more
  * room. `top` is how high it may reach, the free area's top or under the
- * alerts column's first card. It never covers its token while the side it
+ * alerts column's first card, and `tokenHeight` how far the token's top
+ * stands above the anchor (SpanRoom). It never covers its token while the side it
  * takes leaves it its floor, `min(120, the room it has)`: a bar over the
  * creature it acts on is the very thing the dock exists to stop. Only on a
  * screen so short that neither side does, as at 320 x 480 at 130% under a
  * check, does it keep its floor over the token rather than shrink below
  * its header and buttons.
  */
-function spanHang(anchor: Point, free: Box, height: number, top: number): Hang {
+function spanHang(anchor: Point, free: Box, height: number, top: number, tokenHeight: number): Hang {
   const bottom = free.top + free.height;
   const ceiling = Math.max(free.top, top);
   const floor = Math.min(BAR_FLOOR, Math.max(0, bottom - ceiling));
   const topBelow = Math.max(ceiling, anchor.y + OFFSET_Y);
   const spaceBelow = bottom - topBelow;
-  const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - FLIP_CLEARANCE);
+  const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - flipClearance(tokenHeight));
   const spaceAbove = bottomAbove - ceiling;
   if (height <= spaceBelow || spaceBelow >= spaceAbove) {
     const at = spaceBelow >= floor ? topBelow : bottom - floor;
@@ -817,7 +823,7 @@ function spanHang(anchor: Point, free: Box, height: number, top: number): Hang {
  * one side is larger, and the bar takes that one.
  */
 export function spanRoomAtWorst(free: Box): number {
-  return spanHang({ x: free.left + free.width / 2, y: free.top + (free.height + FLIP_CLEARANCE) / 2 }, free, Number.POSITIVE_INFINITY, free.top).room;
+  return spanHang({ x: free.left + free.width / 2, y: free.top + (free.height + FLIP_CLEARANCE) / 2 }, free, Number.POSITIVE_INFINITY, free.top, FLIP_CLEARANCE).room;
 }
 
 /**
@@ -843,6 +849,8 @@ export function placeBar(input: {
   foot: number;
   /** Under the selected token, for a bar that spans. */
   anchor: Point | null;
+  /** How far the token's top stands above `anchor` as drawn (SpanRoom), FLIP_CLEARANCE when not given. */
+  tokenHeight?: number;
   spot: Spot;
   /** The bar's content height. */
   height: number;
@@ -860,7 +868,7 @@ export function placeBar(input: {
   if (mode === "span") {
     if (!input.anchor) return null;
     const { lane, floor } = spanLane(free, input.column);
-    const hang = spanHang(input.anchor, free, input.height, floor);
+    const hang = spanHang(input.anchor, free, input.height, floor, input.tokenHeight ?? FLIP_CLEARANCE);
     if (lane !== "beside") return { mode, free, hang, lane, resizable: false, room: free };
     const width = Math.min(barWidth, free.width - LANE_WIDTH);
     return { mode, free, hang: { ...hang, left: laneLeft(free) - width, width }, lane, resizable: false, room: free };
@@ -1008,18 +1016,22 @@ export function largerRoom(layout: Size, free: Box, top: number, tokenHeight: nu
  * bar under its token, or down for one over it, by what its side lacks of
  * the larger room or of its content, whichever is less. The bar keeps its
  * side, and the token stays in view beside it. Zero where its side has that
- * room already, and where the bar does not span.
+ * room already, and where the bar does not span. Over a tall or zoomed
+ * token, which the bar clears by its drawn height (review BS-F1), the map
+ * moves down no further than keeps the token's label in the free area:
+ * LARGER_LEAVES allows for the label and a token of 52 px at most.
  */
 export function largerShift(input: SpanRoom): number {
   const larger = largerHang(input);
   if (!larger) return 0;
   const { free, top, want, hang } = larger;
+  const bottom = free.top + free.height;
   if (hang.anchor === "top") {
-    const below = free.top + free.height - Math.max(top, input.anchor.y + OFFSET_Y);
+    const below = bottom - Math.max(top, input.anchor.y + OFFSET_Y);
     return below < want ? -(want - below) : 0;
   }
-  const above = Math.min(free.top + free.height, input.anchor.y - OFFSET_Y - FLIP_CLEARANCE) - top;
-  return above < want ? want - above : 0;
+  const above = Math.min(bottom, input.anchor.y - OFFSET_Y - flipClearance(input.tokenHeight)) - top;
+  return above < want ? Math.max(0, Math.min(want - above, bottom - OFFSET_Y - input.anchor.y)) : 0;
 }
 
 /**
@@ -1038,7 +1050,7 @@ function largerHang(input: SpanRoom): { free: Box; top: number; want: number; ha
   if (!room) return null;
   const { free, top } = room;
   const want = Math.min(input.height, largerRoom(input.layout, free, top, input.tokenHeight));
-  const hang = spanHang(input.anchor, free, want, top);
+  const hang = spanHang(input.anchor, free, want, top, input.tokenHeight);
   if (hang.anchor !== "top" || input.toastFoot == null || input.toastFoot + EDGE > input.anchor.y - input.tokenHeight) return { free, top, want, hang };
   return { free, top, want: Math.min(want, largerRoom(input.layout, free, Math.max(top, input.toastFoot + EDGE), input.tokenHeight)), hang };
 }
@@ -1072,7 +1084,7 @@ export function smallerShift(input: Omit<SpanRoom, "height"> & { moved: number }
   if (!room || input.moved === 0) return 0;
   const { free, top } = room;
   if (input.moved < 0) return Math.min(-input.moved, Math.max(0, free.top + free.height - OFFSET_Y - input.anchor.y));
-  const back = Math.min(input.moved, Math.max(0, input.anchor.y - Math.max(FLIP_CLEARANCE, input.tokenHeight) - top));
+  const back = Math.min(input.moved, Math.max(0, input.anchor.y - flipClearance(input.tokenHeight) - top));
   return back > 0 ? -back : 0;
 }
 
