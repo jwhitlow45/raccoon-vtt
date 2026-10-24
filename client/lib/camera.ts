@@ -122,15 +122,38 @@ export function sceneMinScale(viewport: Size, bounds: { w: number; h: number }):
  * can never leave the screen empty with no way back to the map. The margin
  * counts only in the part of the viewport that `insets` leave clear, since
  * a sliver of map under a toolbar is as good as gone.
+ *
+ * `from` is the camera before the gesture. Where it already stood past a
+ * bound, as when an upright phone's token bar appeared over the map's
+ * edge, that bound gives way to where its edge stood, so the camera may
+ * come toward the bound or stay, and never jumps to it
+ * (docs/design-v1-bar-compact.md 4, review BC-OPUS-7). The edges are
+ * compared on screen, so a pinch that changes the scale keeps the rule.
  */
-export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets = NO_INSETS, marginPx = 64): Camera {
-  const clampAxis = (pos: number, start: number, end: number, length: number) => {
+export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets = NO_INSETS, marginPx = 64, from?: Camera): Camera {
+  const clampAxis = (pos: number, start: number, end: number, size: number, was: number | undefined, wasLength: number) => {
+    const length = size * cam.scale;
     const margin = Math.min(marginPx, Math.max(0, end - start) / 2, length / 2);
-    return Math.min(end - margin, Math.max(start + margin - length, pos));
+    // The near edge may stand no lower than `end - margin`, and the far edge no higher than `start + margin`, unless it already did.
+    const nearMost = was === undefined ? end - margin : Math.max(end - margin, was);
+    const farLeast = was === undefined ? start + margin : Math.min(start + margin, was + wasLength);
+    return Math.min(nearMost, Math.max(farLeast - length, pos));
   };
-  const x = clampAxis(cam.x, insets.left, viewport.width - insets.right, bounds.w * cam.scale);
-  const y = clampAxis(cam.y, insets.top, viewport.height - insets.bottom, bounds.h * cam.scale);
+  const x = clampAxis(cam.x, insets.left, viewport.width - insets.right, bounds.w, from?.x, from ? bounds.w * from.scale : 0);
+  const y = clampAxis(cam.y, insets.top, viewport.height - insets.bottom, bounds.h, from?.y, from ? bounds.h * from.scale : 0);
   return x === cam.x && y === cam.y ? cam : { x, y, scale: cam.scale };
+}
+
+/**
+ * The camera after an upright phone's token bar moves the map to clear its
+ * token (docs/design-v1-bar-compact.md 3.6, review BAR-ASTRA-07): `dy` in
+ * the canvas's px, the move bounded as a pan from the camera as it stands
+ * is, by the scene's bounds and the insets with the bar's cover. So the
+ * move never takes the map further out than a pan could, and a camera
+ * already past the bound may come toward it but never go further past.
+ */
+export function barShift(cam: Camera, dy: number, viewport: Size, bounds: { w: number; h: number }, insets: Insets): Camera {
+  return keepInView(panBy(cam, 0, dy), viewport, bounds, insets, 64, cam);
 }
 
 export function sameCamera(a: Camera, b: Camera): boolean {

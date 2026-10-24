@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  barShift,
   cameraForView,
+  keepInView,
   clampScale,
   fitRect,
   rectClear,
@@ -91,6 +93,50 @@ describe("camera", () => {
     const under = screenToWorld(next, { x: 260, y: 180 });
     close(under.x, pinned.x);
     close(under.y, pinned.y);
+  });
+});
+
+describe("the camera's bounds with a token bar over the map (docs/design-v1-bar-compact.md 4 and 3.6)", () => {
+  // A 390 x 844 canvas, a 30 x 20 scene at 44 px a cell (1320 x 880), and the strip's cover of 182 px at the foot over a 52 px top bar.
+  const viewport = { width: 390, height: 844 };
+  const bounds = { w: 30, h: 20 };
+  const insets = { top: 52, right: 0, bottom: 182, left: 0 };
+
+  test("a pan clamps as before where the camera stood inside its bounds", () => {
+    // The map's top edge may come down to 64 px above the strip, at 844 - 182 - 64 = 598.
+    const from = { x: 0, y: 500, scale: 44 };
+    assert.deepEqual(keepInView({ x: 0, y: 700, scale: 44 }, viewport, bounds, insets, 64, from), { x: 0, y: 598, scale: 44 });
+    assert.deepEqual(keepInView({ x: 0, y: 700, scale: 44 }, viewport, bounds, insets), { x: 0, y: 598, scale: 44 });
+  });
+
+  test("a camera the strip appeared over, past the bound, may come toward it or stay, and never jumps to it or goes further out (BC-OPUS-7)", () => {
+    const from = { x: 0, y: 650, scale: 44 };
+    assert.deepEqual(keepInView({ x: 0, y: 640, scale: 44 }, viewport, bounds, insets, 64, from), { x: 0, y: 640, scale: 44 }, "toward the bound");
+    const still = { x: 10, y: 650, scale: 44 };
+    assert.equal(keepInView(still, viewport, bounds, insets, 64, from), still, "a sideways pan leaves it");
+    assert.deepEqual(keepInView({ x: 0, y: 700, scale: 44 }, viewport, bounds, insets, 64, from), { x: 0, y: 650, scale: 44 }, "no further out");
+    // With no `from`, the old clamp jumps it.
+    assert.deepEqual(keepInView({ x: 0, y: 650, scale: 44 }, viewport, bounds, insets), { x: 0, y: 598, scale: 44 });
+    // The far edge keeps the same rule: a map whose bottom stood 20 px under the top bar stays, and goes no higher.
+    const high = { x: 0, y: 52 + 20 - 880, scale: 44 };
+    assert.deepEqual(keepInView({ x: 0, y: high.y - 30, scale: 44 }, viewport, bounds, insets, 64, high), high);
+    // A pinch from there compares the edges on screen, whatever the scale.
+    const zoomed = keepInView({ x: 0, y: 700, scale: 22 }, viewport, bounds, insets, 64, from);
+    assert.equal(zoomed.y, 650);
+    // Pinched out from the high map, its bottom edge, at 72 on screen, still goes no higher: 72 - 440 at 22 px a cell.
+    assert.equal(keepInView({ x: 0, y: high.y - 30, scale: 22 }, viewport, bounds, insets, 64, high).y, 72 - 440);
+  });
+
+  test("the clearing move goes up just as asked inside the bounds, stops at the pan limit, and never past it (BAR-ASTRA-07)", () => {
+    const cam = { x: 0, y: -100, scale: 44 };
+    assert.deepEqual(barShift(cam, -72, viewport, bounds, insets), { x: 0, y: -172, scale: 44 });
+    // The map's bottom edge may rise to 64 px under the top bar, at 116: y = 116 - 880 = -764.
+    const low = { x: 0, y: -740, scale: 44 };
+    assert.deepEqual(barShift(low, -72, viewport, bounds, insets), { x: 0, y: -764, scale: 44 }, "at the pan limit");
+    const past = { x: 0, y: -790, scale: 44 };
+    assert.deepEqual(barShift(past, -72, viewport, bounds, insets), past, "past the limit already: it goes no further");
+    // At 130% the frame's 72 chrome px are 93.6 canvas px.
+    close(barShift(cam, -72 * 1.3, viewport, bounds, insets).y, -100 - 93.6);
   });
 });
 
