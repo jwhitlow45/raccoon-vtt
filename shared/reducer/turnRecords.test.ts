@@ -284,3 +284,28 @@ describe("a fight's end (docs/design-v1-combat-controls.md 2.4)", () => {
     assert.deepEqual(f.of("dragon").uses, { "legendaryActions:fiery-rays": rays });
   });
 });
+
+describe("pips of a turn's other creatures (docs/design-v1-combat-controls.md 2.4)", () => {
+  test("a mount's spent pips refill at its rider's start, saved in the step, and Previous puts them back", () => {
+    const f = fight((s) => {
+      s.tokens.horse = { ...s.tokens.horse!, actor: { inline: { ...(s.tokens.horse!.actor as { inline: Actor }).inline, legendary: { ...legendary, actionsUsed: 2 } } } };
+    });
+    f.run({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 4, elevation: 0 });
+    f.next().next().next().next();
+    assert.equal(f.active(), "bree");
+    assert.equal(f.of("horse").legendary!.actionsUsed, 0);
+    assert.ok(f.state.encounterHistory.at(-1)!.turnUses!.some((u) => u.holderId === "horse" && u.actionsUsed === 2));
+    f.prev();
+    assert.equal(f.of("horse").legendary!.actionsUsed, 2);
+  });
+
+  test("Previous puts the landing creature's pips back within the counts In lair set since", () => {
+    const f = fight().next();
+    f.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 3 } });
+    f.next().next().next().next().next();
+    assert.equal(f.active(), "dragon");
+    f.run({ t: "encounter.update", entryId: "ed", patch: { inLair: false }, counts: { actionsMax: 2, resistMax: 3 } });
+    f.prev();
+    assert.equal(f.of("dragon").legendary!.actionsUsed, 2, "at most the new count");
+  });
+});

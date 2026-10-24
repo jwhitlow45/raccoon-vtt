@@ -294,3 +294,30 @@ describe("a Regeneration prompt (docs/design-v1-combat-controls.md 4.3)", () => 
     assert.equal(g.state.log.length, before, "no HP line for a heal that did nothing");
   });
 });
+
+describe("prompts that end before their roll (docs/design-v1-combat-controls.md 2.3)", () => {
+  test("a rest that readies the ability mid-turn leaves its recharge prompt settled", () => {
+    const f = fight().run({ t: "encounter.next" });
+    f.run({ t: "actor.rest", target: { tokenId: "dragon" }, kind: "short", heal: 0 });
+    assert.equal(f.of("dragon").uses, undefined);
+    assert.equal(f.before(recharge("dragon", f.record("dragon"))), SETTLED_MEANWHILE);
+  });
+
+  test("a recharge roll never readies a mark of another kind under its key", () => {
+    const f = fight();
+    f.state.tokens.dragon = { ...f.state.tokens.dragon!, actor: { inline: actor({ uses: { "actions:fire-breath": { kind: "day", name: "Fire Breath", used: 1, max: 1 } } }) } };
+    f.roll(recharge("dragon"), 6);
+    assert.deepEqual(f.of("dragon").uses, { "actions:fire-breath": { kind: "day", name: "Fire Breath", used: 1, max: 1 } });
+  });
+
+  test("a Regeneration heal taken back after its turn reopens nothing", () => {
+    const f = fight().run({ t: "encounter.next" }).run({ t: "encounter.next" }).run({ t: "encounter.next" });
+    f.run({ t: "actor.use", target: { tokenId: "troll" }, use: { kind: "regenerate", key: "traits:regeneration", amount: 10, record: f.record("troll") } });
+    f.run({ t: "encounter.next" });
+    const line = f.state.log.find((e) => e.data?.type === "hp" && e.data.change === "heal")!;
+    const undo = hpUndoRestore(f.state, line.id);
+    assert.ok(undo.ok);
+    f.run({ t: "sys.restore", entries: undo.entries, from: "undo", deps: true, undid: line.id });
+    assert.deepEqual(f.settled("troll", "regeneration"), { state: "done", total: 10 });
+  });
+});

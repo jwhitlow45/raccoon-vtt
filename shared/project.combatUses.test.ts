@@ -184,3 +184,30 @@ describe("no log numbering reaches an owner's actor (docs/design-v1-combat-contr
     assert.doesNotMatch(JSON.stringify(fields(wolf(busy))), /"\d+:\d+"/, "no log line id among them");
   });
 });
+
+describe("use lines and sight (docs/design-v1-combat-controls.md 8)", () => {
+  test("a use no other player could see stays with the owners after the creature comes into view", () => {
+    const state = table();
+    state.tokens.dragon = { ...state.tokens.dragon!, visibility: "dm" };
+    const used = run(state, fieryRays, DM, 2);
+    const ids = used.log.map((e) => e.id);
+    const shown = run(used.state, { t: "token.update", tokenId: "dragon", patch: { visibility: "all" } }, DM, 3).state;
+    assert.equal(read(shown, P2, ids), null);
+  });
+
+  test("a hidden creature's use read by its owner alone goes from them once they no longer own it", () => {
+    const lent = lend(table(), "hidden", ["p1"], 2);
+    const used = run(lent, { t: "actor.use", target: { tokenId: "hidden" }, use: { kind: "resist" } }, DM, 3);
+    const ids = used.log.map((e) => e.id);
+    assert.ok(read(used.state, P1, ids), "the owner's copy");
+    const taken = lend(used.state, "hidden", [], 4);
+    assert.equal(read(taken, P1, ids), null);
+  });
+
+  test("an owner whose creature is out of their sight now reads none of its lines", () => {
+    const used = run(lend(table(), "dragon", ["p1"], 2), fieryRays, DM, 3);
+    const ids = used.log.map((e) => e.id);
+    const away = run(used.state, { t: "token.update", tokenId: "dragon", patch: { sceneId: "s2" } }, DM, 4).state;
+    assert.equal(read(away, P1, ids), null);
+  });
+});
