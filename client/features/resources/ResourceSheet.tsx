@@ -32,6 +32,7 @@ import {
   tick,
   updateOutcome,
   updateTitle,
+  type Outcome,
   type OwnDraft,
   type PickDraft,
   type Reset,
@@ -121,6 +122,11 @@ export function ResourceSheet(props: { character: Character; mode: SheetMode; op
     }
   };
 
+  const sendOutcome = (outcome: Outcome) => {
+    if (outcome.ok) send(outcome.resources);
+    else setError(outcome.error);
+  };
+
   const submit = () => {
     const ctx = { resources, block, characterLevel: character.level, newId: () => actions.newId() };
     const outcome =
@@ -131,8 +137,7 @@ export function ResourceSheet(props: { character: Character; mode: SheetMode; op
           : tab === "own"
             ? ownOutcome(own, ctx)
             : addOutcome(draft, ctx);
-    if (outcome.ok) send(outcome.resources);
-    else setError(outcome.error);
+    sendOutcome(outcome);
   };
 
   const fresh = rows.filter((r) => r.ticked && !r.have).length;
@@ -213,7 +218,7 @@ export function ResourceSheet(props: { character: Character; mode: SheetMode; op
             {mode.kind === "edit" && editing ? (
               <Section label="Remove" divider={false}>
                 <div>
-                  <ConfirmButton confirm="Tap again to remove" wrap onConfirm={() => send(removeOutcome(resources, editing.id))}>
+                  <ConfirmButton confirm="Tap again to remove" wrap onConfirm={() => sendOutcome(removeOutcome(resources, editing.id))}>
                     {`Remove ${editing.name}`}
                   </ConfirmButton>
                 </div>

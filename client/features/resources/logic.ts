@@ -1,6 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { ClassResource, PcStats } from "#shared/model.ts";
-import { combatUseSchemas } from "#shared/protocol.ts";
+import { clientOpSchema, combatUseSchemas } from "#shared/protocol.ts";
 import { abilityMod } from "#shared/statBlock.ts";
 import {
   asInputs,
@@ -126,6 +126,22 @@ export function blockModifiers(stats: Pick<PcStats, "abilities"> | undefined): P
 export type Outcome = { ok: true; resources: ResourceInput[] } | { ok: false; error: string };
 
 const FULL = `A character holds at most ${LIMITS.resourcesPerCharacter} class resources.`;
+
+/**
+ * A list a sheet built, checked against the server's own schema for
+ * character.update, so the sheet names what is wrong rather than sending
+ * an op the server refuses: "Lay on Hands: a count is at most 99, a pool's
+ * 200." A list stored before a rule tightened can hold such a resource.
+ */
+function checked(resources: ResourceInput[]): Outcome {
+  const parsed = clientOpSchema.safeParse({ t: "character.update", characterId: "check", patch: { resources } });
+  if (parsed.success) return { ok: true, resources };
+  const issue = parsed.error.issues[0];
+  const at = issue?.path[2];
+  const name = typeof at === "number" ? resources[at]?.name : undefined;
+  const detail = (issue?.message ?? "the server would refuse it").replace(/\.$/, "");
+  return { ok: false, error: `${name ? `${name}: ` : ""}${detail}.` };
+}
 
 /**
  * Picking from a class (7.1): the class, its level, the presets ticked,
@@ -277,7 +293,7 @@ export function addOutcome(
   if (fresh.length === 0) return { ok: false, error: "Tick a resource to add." };
   const resources = [...asInputs(input.resources), ...fresh];
   if (resources.length > LIMITS.resourcesPerCharacter) return { ok: false, error: `${FULL} Untick ${resources.length - LIMITS.resourcesPerCharacter} or remove one first.` };
-  return { ok: true, resources };
+  return checked(resources);
 }
 
 /**
@@ -296,7 +312,7 @@ export function updateOutcome(
   const typed = Object.fromEntries(Object.entries(draft.modifiers).filter(([, v]) => typeof v === "number")) as Partial<Record<CountAbility, number>>;
   const resources = updateClass(input.resources, { classId: draft.classId, classLevel: draft.classLevel, characterLevel: input.characterLevel, modifiers: { ...typed, ...input.block }, add: fresh });
   if (resources.length > LIMITS.resourcesPerCharacter) return { ok: false, error: `${FULL} Untick ${resources.length - LIMITS.resourcesPerCharacter} or remove one first.` };
-  return { ok: true, resources };
+  return checked(resources);
 }
 
 /** Where an update starts: its class at the level guessed from the rise, and the class's own presets that level adds ticked. */
@@ -336,29 +352,32 @@ export function ownOutcome(draft: OwnDraft, input: { resources: readonly ClassRe
   if (typeof fields === "string") return { ok: false, error: fields };
   const list = asInputs(input.resources);
   if (list.length >= LIMITS.resourcesPerCharacter) return { ok: false, error: `${FULL} Remove one first.` };
-  return { ok: true, resources: [...list, { id: input.newId(), name: fields.name, max: fields.max, reset: draft.reset, ...(draft.pool ? { pool: true as const } : {}) }] };
+  return checked([...list, { id: input.newId(), name: fields.name, max: fields.max, reset: draft.reset, ...(draft.pool ? { pool: true as const } : {}) }]);
 }
 
 /**
  * Save an edit in place. A new count marks it `edited`, so an update for a
- * level never changes it, while a name, a rest or a pool alone does not.
+ * level never changes it, and so does a pool other than its preset's: an
+ * update would otherwise give Lay on Hands, kept as a count, 100 uses where
+ * a count holds at most 99. A name or a rest alone does not.
  */
 export function editOutcome(draft: OwnDraft, input: { resources: readonly ClassResource[] | undefined; id: string }): Outcome {
   const fields = ownFields(draft);
   if (typeof fields === "string") return { ok: false, error: fields };
   const list = asInputs(input.resources);
   if (!list.some((r) => r.id === input.id)) return { ok: false, error: "It was removed meanwhile." };
-  return {
-    ok: true,
-    resources: list.map((r) => {
+  return checked(
+    list.map((r) => {
       if (r.id !== input.id) return r;
       const { pool: _pool, ...rest } = r;
-      return { ...rest, name: fields.name, max: fields.max, reset: draft.reset, ...(draft.pool ? { pool: true as const } : {}), ...(r.edited || fields.max !== r.max ? { edited: true as const } : {}) };
+      const preset = presetById(r.preset);
+      const typed = r.edited || fields.max !== r.max || (preset !== undefined && draft.pool !== (preset.pool === true));
+      return { ...rest, name: fields.name, max: fields.max, reset: draft.reset, ...(draft.pool ? { pool: true as const } : {}), ...(typed ? { edited: true as const } : {}) };
     }),
-  };
+  );
 }
 
 /** Remove one. The list left, empty when it was the last, which removes them all. */
-export function removeOutcome(resources: readonly ClassResource[] | undefined, id: string): ResourceInput[] {
-  return asInputs(resources).filter((r) => r.id !== id);
+export function removeOutcome(resources: readonly ClassResource[] | undefined, id: string): Outcome {
+  return checked(asInputs(resources).filter((r) => r.id !== id));
 }

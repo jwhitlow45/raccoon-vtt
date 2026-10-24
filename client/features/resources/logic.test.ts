@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
 import type { ClassResource } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { presetById } from "#shared/rules/classResources.ts";
+import { asInputs, fromPreset, presetById } from "#shared/rules/classResources.ts";
 import {
   addOutcome,
   amountOutcome,
@@ -341,14 +341,46 @@ describe("one of the player's own, and an edit (7.1)", () => {
     assert.deepEqual(editOutcome({ ...editDraft(big), pool: false }, { resources: [big], id: "hands" }), { ok: false, error: "A count is 1 to 99." }, "150 fits a pool, not a count");
   });
 
+  test("unticking a preset's Spend an amount marks it typed by hand, so Lay on Hands at Paladin 19 keeps 95 through an update to 20 (CC-AC-ASTRA-05)", () => {
+    const hands19: ClassResource = { ...fromPreset(presetById("paladin-lay-on-hands")!, { id: "hands", classLevel: 19, characterLevel: 19 })!, used: 0 };
+    const edited = editOutcome({ ...editDraft(hands19), pool: false }, { resources: [hands19], id: "hands" });
+    assert.ok(edited.ok);
+    assert.deepEqual(edited.resources[0], { id: "hands", name: "Lay on Hands", max: 95, reset: "long", preset: "paladin-lay-on-hands", level: 19, atLevel: 19, edited: true });
+    const stored = edited.resources.map((r) => ({ ...r, used: 0 }));
+    const updated = updateOutcome(startUpdate(stored, { classId: "paladin", classLevel: 19, guess: 20 }), { resources: stored, block: {}, characterLevel: 20, newId: ids() });
+    assert.ok(updated.ok, updated.ok ? "" : updated.error);
+    assert.deepEqual(updated.resources[0], { id: "hands", name: "Lay on Hands", max: 95, reset: "long", preset: "paladin-lay-on-hands", level: 20, atLevel: 20, edited: true });
+    sendable(updated.resources);
+    const back = editOutcome({ ...editDraft(hands19), pool: true }, { resources: [hands19], id: "hands" });
+    assert.ok(back.ok);
+    assert.equal(back.resources[0]?.edited, undefined, "the preset's own pool and count are not typed by hand");
+    const own = editOutcome({ ...editDraft({ id: "ki", name: "Ki", max: 5, used: 0, reset: "short" }), pool: true }, { resources: [{ id: "ki", name: "Ki", max: 5, used: 0, reset: "short" }], id: "ki" });
+    assert.ok(own.ok);
+    assert.equal(own.resources[0]?.edited, undefined, "one of the player's own has no preset to differ from");
+  });
+
+  test("Add, Update and Edit say what the server would refuse in place of sending it", () => {
+    // A count past 99 with no pool, as a list from before the pool rule above could hold.
+    const old: ClassResource = { id: "old", name: "Lay on Hands", max: 95, used: 0, reset: "long", preset: "paladin-lay-on-hands", level: 19, atLevel: 19 };
+    const refused = { ok: false, error: "Lay on Hands: a count is at most 99, a pool's 200." };
+    assert.deepEqual(updateOutcome(startUpdate([old], { classId: "paladin", classLevel: 19, guess: 20 }), { resources: [old], block: {}, characterLevel: 20, newId: ids() }), refused);
+    const past: ClassResource = { ...old, max: 120 };
+    assert.deepEqual(addOutcome(pickClass(startPick([past], 5), "barbarian", [past], 5), { resources: [past], block: {}, characterLevel: 5, newId: ids() }), refused);
+    assert.deepEqual(ownOutcome({ name: "Luck", count: "3", reset: "long", pool: false }, { resources: [past], newId: ids() }), refused);
+    assert.deepEqual(editOutcome({ ...editDraft(rage), name: "Big Rage" }, { resources: [rage, past], id: "rage" }), refused);
+    assert.deepEqual(removeOutcome([rage, past], "rage"), refused, "Remove too, of another one");
+    assert.deepEqual(removeOutcome([rage, past], "old"), { ok: true, resources: [asInputs([rage])[0]] }, "removing the one the server would refuse goes");
+  });
+
   test("an edit of one removed meanwhile says so, and Remove leaves the rest", () => {
     assert.deepEqual(editOutcome(editDraft(rage), { resources: [focus], id: "rage" }), { ok: false, error: "It was removed meanwhile." });
+    const left = removeOutcome([rage, focus], "rage");
+    assert.ok(left.ok);
     assert.deepEqual(
-      removeOutcome([rage, focus], "rage").map((r) => r.id),
+      left.resources.map((r) => r.id),
       ["focus"],
     );
-    assert.deepEqual(removeOutcome([rage], "rage"), [], "an empty list removes them all");
-    sendable(removeOutcome([rage], "rage"));
+    assert.deepEqual(removeOutcome([rage], "rage"), { ok: true, resources: [] }, "an empty list removes them all");
   });
 
   test("every preset the data has is found by its id", () => {
