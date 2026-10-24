@@ -1,10 +1,11 @@
 import { useState } from "react";
-import type { Actor } from "#shared/model.ts";
+import type { Actor, ClassResource } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Segmented } from "../../components/Segmented.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { restBackText } from "../resources/logic.ts";
 import { MAX_HP_AMOUNT } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
 
@@ -26,8 +27,11 @@ const KINDS: { value: Kind; label: string }[] = [
  * but a table may still want one mid-fight, after a skip ahead or for a
  * creature far from it, so a running fight only says so, once a rest is
  * chosen.
+ *
+ * A character's class resources come back with the rest, so a chosen rest
+ * names those it gives back (docs/design-v1-combat-controls.md 7.2).
  */
-export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefined; target: ActorTarget }) {
+export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefined; target: ActorTarget; resources?: readonly ClassResource[] }) {
   const actions = useRoomActions();
   const [kind, setKind] = useState<Kind | null>(null);
   const [heal, setHeal] = useState<number | null>(null);
@@ -36,6 +40,8 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
   // A rest chosen and not yet finished keeps the sheet from a swipe's close: only its button sends it (docs/design-v1-sheet-swipe.md 4.5).
   useUnsavedInput(canRest && kind !== null);
   const fighting = useRoomView((s) => !!s.view?.encounter);
+  const back = kind ? restBackText(props.resources, kind) : null;
+  const tracked = (props.resources?.length ?? 0) > 0;
 
   const finish = () => {
     if (kind === "short") actions.dispatch({ t: "actor.rest", target: props.target, kind, ...(heal !== null && heal > 0 ? { heal } : {}) });
@@ -54,13 +60,17 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
       {canRest && kind === "short" ? (
         <>
           <Note>Roll each Hit Point Die you spend and add your Constitution modifier, at least 1 HP a die. Keep count of the dice on your sheet.</Note>
+          {back ? <Note tone="info">{back}</Note> : null}
           <FieldRow label="HP regained">
             <NumberField label="HP regained from Hit Point Dice" value={heal ?? undefined} min={0} max={MAX_HP_AMOUNT} nullable placeholder="0" onCommit={setHeal} />
           </FieldRow>
         </>
       ) : null}
       {canRest && kind === "long" ? (
-        <Note>All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and features are on your sheet.</Note>
+        <>
+          <Note>{`All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and ${tracked ? "other " : ""}features are on your sheet.`}</Note>
+          {back ? <Note tone="info">{back}</Note> : null}
+        </>
       ) : null}
       {canRest && kind ? (
         <div style={{ display: "flex", gap: theme.space(2) }}>
