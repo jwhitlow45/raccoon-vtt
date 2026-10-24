@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { barButtons, barCapacity, barShort, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom } from "./barButtons.ts";
+import { barButtons, barCapacity, barShort, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restDead, restFit, restStatus, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
+import type { HpTarget } from "../features/tokens/groupHp.ts";
+import { parseHpInput } from "../features/tokens/hpInput.ts";
 import { DEFAULT_SPOT, freeArea, placeBar, spanRoomAtWorst, type Chrome } from "./barDock.ts";
 
 const NOTHING: BarButtonInput = { dm: false, owner: false, undoMove: false, movedThisTurn: false, door: false, light: false, companion: false, attach: [] };
@@ -392,5 +394,187 @@ describe("the strip's candidates by role and token (docs/design-v1-bar-compact.m
     assert.equal(nextRestMode("heal"), "damage");
     assert.equal(nextRestMode("set"), "damage");
     assert.equal(nextRestMode("temp"), "damage");
+  });
+});
+
+/*
+ * A stand-in for the browser's measure: 7 px a letter, near the 13 px
+ * status font's digits (Appendix B.4), wrapped at spaces as the note's
+ * text wraps, a word longer than a line broken where it must.
+ */
+function linesAt(text: string, width: number): number {
+  const perLine = Math.floor(width / 7);
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(" ")) {
+    let w = [...word].length;
+    if (used > 0 && used + 1 + w <= perLine) {
+      used += 1 + w;
+      continue;
+    }
+    if (used > 0) lines++;
+    while (w > perLine) {
+      w -= perLine;
+      lines++;
+    }
+    used = w;
+  }
+  return lines;
+}
+
+/** The strip at 320 x 568 at 130% (B.4): a 109 px title, a 206 px note. */
+const AT320: RestFit = { line: (t) => linesAt(t, 109) <= 1, title: (t) => linesAt(t, 109) <= 2, note: (t) => linesAt(t, 206) <= 2 };
+/** The strip at 390 x 844: a 252 px title. */
+const AT390: RestFit = { line: (t) => linesAt(t, 252) <= 1, title: (t) => linesAt(t, 252) <= 2, note: (t) => linesAt(t, 350) <= 2 };
+
+const QUIET: EntryStatus = { error: null, dead: null, preview: null, typed: false, crit: false, reach: 1, left: [], standing: null };
+const status = (over: Partial<RestStatusInput>, fit: RestFit = AT390) => restStatus({ ...QUIET, critInRow: false, idle: ["AC 14", "HP 24/24"], fit, ...over });
+/** What the strip shows, wherever it shows it. */
+const said = (over: Partial<RestStatusInput>, fit: RestFit = AT390) => {
+  const s = status(over, fit);
+  return s.sentence?.text ?? s.line.text;
+};
+const LONG = "Aldric Thornwood, Sworn Warden of the Sunken Citadel and Keeper of the Last Fire";
+
+function hpTarget(name: string, over: Partial<HpTarget> = {}): HpTarget {
+  return { holder: `token:${name}`, target: { tokenId: name }, name, access: "all", atZero: false, dead: false, max: 7, ...over };
+}
+
+describe("the strip's status line (docs/design-v1-bar-compact.md 3.3)", () => {
+  test("the first that applies: an error, a dead line, the preview, a kept crit, a group's standing note, then the vitals", () => {
+    const all: Partial<RestStatusInput> = { error: "Use a positive number, or start with + or -.", dead: { kind: "heal", name: "Thorn", dm: true }, preview: "7 damage", typed: true, crit: true, standing: "Damage and healing only, since some of them are not yours." };
+    assert.equal(said(all), "Use a positive number, or start with + or -.");
+    assert.equal(status(all).line.error || status(all).sentence?.error, true, "an error shows in the error tone");
+    assert.equal(said({ ...all, error: null }), "Healing does nothing while Thorn is dead. Revive first.");
+    assert.equal(said({ ...all, error: null, dead: null }), "7 damage, Critical Hit");
+    assert.equal(said({ ...all, error: null, dead: null, preview: null, typed: false }), "Critical Hit");
+    assert.equal(said({ ...all, error: null, dead: null, preview: null, typed: false, crit: false }), "Damage and healing only, since some of them are not yours.");
+    assert.equal(said({}), "AC 14 · HP 24/24");
+    assert.equal(status({}).line.error, false);
+  });
+
+  test("a kept crit with valid text is named while the Crit toggle is not in the row, and not where it is", () => {
+    assert.equal(said({ preview: "7 damage", typed: true, crit: true }, AT320), "7 damage, Critical Hit");
+    assert.equal(said({ preview: "7 damage", typed: true, crit: true, critInRow: true }), "7 damage");
+    assert.equal(said({ typed: false, crit: true, critInRow: true }), "AC 14 · HP 24/24");
+    // Text that does not parse yet: the field is not empty, so no "Critical Hit" line, and the vitals stay.
+    assert.equal(said({ typed: true, crit: true }), "AC 14 · HP 24/24");
+  });
+
+  test("a sentence that fits one line stands under the name, which stays", () => {
+    assert.deepEqual(status({ preview: "7 damage", typed: true }), { line: { text: "7 damage", error: false }, sentence: null, full: "7 damage" });
+    // A group's standing note waits while text that does not parse yet is in the field.
+    assert.equal(said({ standing: "Damage and healing only, since some of them are not yours.", typed: true }), "AC 14 · HP 24/24");
+  });
+
+  test("a crit kept into Heal, or once the target is above 0 HP, is never sent, so never named", () => {
+    const heal = parseHpInput("5", "heal");
+    assert.equal(critSent({ crit: true, atZero: true, mode: "heal", preview: heal }), false);
+    assert.equal(critSent({ crit: true, atZero: true, mode: "heal", preview: null }), false);
+    // Typed math under Damage that heals.
+    assert.equal(critSent({ crit: true, atZero: true, mode: "damage", preview: parseHpInput("+5", "damage") }), false);
+    assert.equal(critSent({ crit: true, atZero: false, mode: "damage", preview: parseHpInput("7", "damage") }), false);
+    assert.equal(critSent({ crit: true, atZero: true, mode: "damage", preview: parseHpInput("7", "damage") }), true);
+    assert.equal(critSent({ crit: true, atZero: true, mode: "heal", preview: parseHpInput("-7", "heal") }), true);
+    assert.equal(critSent({ crit: false, atZero: true, mode: "damage", preview: null }), false);
+    for (const preview of [heal, null]) {
+      const crit = critSent({ crit: true, atZero: true, mode: "heal", preview });
+      assert.equal(said({ preview: preview?.ok ? preview.summary : null, typed: preview !== null, crit }).includes("Critical Hit"), false);
+    }
+  });
+
+  test("a group's preview names whom it leaves out, after the crit, and its standing note shows with the field empty", () => {
+    assert.equal(said({ preview: "7 damage", typed: true, reach: 3, left: ["Goblin 2"] }), "7 damage, to each of 3, not Goblin 2");
+    assert.equal(said({ preview: "7 damage", typed: true, reach: 3, left: ["Goblin 2"], crit: true }), "7 damage, Critical Hit, to each of 3, not Goblin 2");
+    assert.equal(said({ preview: "Heal 5", typed: true, reach: 2, left: ["Goblin 2", "Goblin 3"] }), "Heal 5, to each of 2, not Goblin 2, Goblin 3");
+    assert.equal(said({ standing: "Leaves out Goblin 2: you cannot change their HP." }), "Leaves out Goblin 2: you cannot change their HP.");
+    assert.equal(said({ standing: "Leaves out Goblin 2: you cannot change their HP.", preview: "7 damage", typed: true, reach: 3, left: ["Goblin 2"] }), "7 damage, to each of 3, not Goblin 2");
+  });
+
+  test("at 320 x 568 at 130%, the group's preview takes the note, its full sentence kept, and the line keeps the vitals", () => {
+    const s = status({ preview: "7 damage", typed: true, reach: 3, left: ["Goblin 2"] }, AT320);
+    assert.equal(s.sentence?.place, "note");
+    assert.equal(s.sentence?.text, "7 damage, to each of 3, not Goblin 2");
+    assert.equal(s.full, "7 damage, to each of 3, not Goblin 2");
+    assert.equal(s.line.text, "HP 24/24");
+    // One that fits the title's two lines takes them in the name's place.
+    const crit = status({ preview: "7 damage", typed: true, crit: true }, AT320);
+    assert.deepEqual(crit.sentence, { text: "7 damage, Critical Hit", error: false, place: "title" });
+  });
+
+  test("the vitals give up AC first where they do not fit one line", () => {
+    assert.equal(said({}, AT320), "HP 24/24");
+    assert.equal(said({ idle: ["AC 14", "Healthy"] }, AT390), "AC 14 · Healthy");
+    assert.equal(said({ idle: ["Dying"] }, AT320), "Dying");
+    assert.equal(said({ idle: [] }), "");
+  });
+
+  test("the strip's dead lines name the creature once, and a group's follow with whom it leaves out", () => {
+    const dm = { revives: false, dm: true };
+    const player = { revives: false, dm: false };
+    const thorn = [hpTarget("Thorn", { dead: true })];
+    assert.deepEqual(restDead(thorn, { kind: "heal" }, dm), { kind: "heal", name: "Thorn", dm: true });
+    assert.equal(said({ dead: restDead(thorn, { kind: "heal" }, dm) }), "Healing does nothing while Thorn is dead. Revive first.");
+    assert.equal(said({ dead: restDead(thorn, { kind: "heal" }, player) }), "Healing does nothing while Thorn is dead.");
+    assert.equal(said({ dead: restDead(thorn, { kind: "set", cur: 5 }, dm) }), "Thorn stays dead at the new HP. Only Revive brings them back.");
+    assert.equal(restDead(thorn, { kind: "damage" }, dm), null);
+    assert.equal(restDead(thorn, { kind: "temp" }, dm), null);
+    // A group heal with a dead creature and Goblin 2 left out.
+    const group = [hpTarget("Goblin 1", { dead: true }), hpTarget("Goblin 3"), hpTarget("Goblin 2", { access: "none" })];
+    assert.equal(said({ dead: restDead(group, { kind: "heal" }, dm), left: ["Goblin 2"] }), "Healing does nothing to the 1 dead. Leaves out Goblin 2.");
+    assert.equal(said({ dead: restDead(group, { kind: "set" }, dm) }), "1 dead stays dead. Only Revive brings them back.");
+    const two = [hpTarget("Goblin 1", { dead: true }), hpTarget("Goblin 3", { dead: true })];
+    assert.equal(said({ dead: restDead(two, { kind: "set" }, dm) }), "2 dead stay dead. Only Revive brings them back.");
+    // With healing bringing back the dead, a heal or a set above 0 counts those it brings back, and a maximum of 0 brings none.
+    const revives = { revives: true, dm: true };
+    assert.equal(said({ dead: restDead(two, { kind: "heal" }, revives) }), "Brings back 2 dead creatures.");
+    assert.equal(said({ dead: restDead(thorn, { kind: "set", cur: 5 }, revives) }), "Brings back 1 dead creature.");
+    assert.equal(restDead(thorn, { kind: "set", cur: 0 }, revives), null);
+    assert.equal(restDead([hpTarget("Thorn", { dead: true, max: 0 })], { kind: "heal" }, revives), null);
+    // Two tokens of one character count once, and a creature left out is not among the dead.
+    const shared = [hpTarget("Thorn", { dead: true, holder: "character:t" }), hpTarget("Thorn copy", { dead: true, holder: "character:t" })];
+    assert.deepEqual(restDead(shared, { kind: "heal" }, dm), { kind: "heal", name: "Thorn", dm: true });
+    assert.equal(restDead([hpTarget("Goblin 2", { dead: true, access: "none" })], { kind: "heal" }, dm), null);
+  });
+
+  test("an 80-letter name in the note at 320 x 568 at 130%: two lines at most, the name cut by width from its end, the warning and recovery whole", () => {
+    const cases: { over: Partial<RestStatusInput>; keeps: (cut: string) => string }[] = [
+      { over: { dead: { kind: "heal", name: LONG, dm: true } }, keeps: (n) => `Healing does nothing while ${n} is dead. Revive first.` },
+      { over: { dead: { kind: "heal", name: LONG, dm: false } }, keeps: (n) => `Healing does nothing while ${n} is dead.` },
+      { over: { dead: { kind: "set", name: LONG } }, keeps: (n) => `${n} stays dead at the new HP. Only Revive brings them back.` },
+      { over: { preview: "7 damage", typed: true, crit: true, reach: 3, left: [LONG] }, keeps: (n) => `7 damage, Critical Hit, to each of 3, not ${n}` },
+    ];
+    for (const { over, keeps } of cases) {
+      const s = status(over, AT320);
+      assert.equal(s.sentence?.place, "note");
+      const text = s.sentence!.text;
+      assert.ok(linesAt(text, 206) <= 2, `${text} passes two lines`);
+      assert.equal(s.full, keeps(LONG));
+      // The name is cut to its most letters that still fit: one more letter passes two lines.
+      const cutTo = (k: number) => `${[...LONG].slice(0, k).join("").trimEnd()}…`;
+      const letters = [...LONG].findLastIndex((_, i) => keeps(cutTo(i + 1)) === text) + 1;
+      assert.ok(letters >= 1 && letters < LONG.length, `${text} keeps a cut of the name`);
+      assert.ok(linesAt(keeps(cutTo(letters + 1)), 206) > 2, `${text} could keep another letter`);
+    }
+  });
+
+  test("on the 94 px strip and with every group line, the note keeps two lines, left-out names becoming a count only where a cut name will not do", () => {
+    // Several left out are counted at once where their names pass two lines.
+    const many = status({ preview: "7 damage", typed: true, crit: true, reach: 12, left: Array.from({ length: 12 }, (_, i) => `Goblin Warrior ${i + 1}`) }, AT320);
+    assert.equal(many.sentence?.text, "7 damage, Critical Hit, to each of 12, not 12 of them");
+    const heal = status({ dead: { kind: "healMany", count: 12 }, left: Array.from({ length: 12 }, (_, i) => `Goblin Warrior ${i + 1}`) }, AT320);
+    assert.equal(heal.sentence?.text, "Healing does nothing to the 12 dead. Leaves out 12.");
+    // One left out with a short name keeps it whole.
+    assert.equal(status({ dead: { kind: "healMany", count: 1 }, left: ["Goblin 2"] }, AT320).sentence?.text, "Healing does nothing to the 1 dead. Leaves out Goblin 2.");
+    // A note so narrow that no cut of the one name fits counts it instead.
+    const narrow: RestFit = { line: () => false, title: () => false, note: (t) => linesAt(t, 130) <= 2 };
+    assert.equal(status({ dead: { kind: "healMany", count: 1 }, left: [LONG] }, narrow).sentence?.text, "Healing does nothing to the 1 dead. Leaves out 1.");
+    // A dead creature's name and one left out: the dead name is cut, the left-out name never by the same letters.
+    const both = status({ dead: { kind: "heal", name: LONG, dm: false }, left: ["Goblin 2"] }, { ...AT320, note: (t) => linesAt(t, 350) <= 2 }).sentence!.text;
+    assert.ok(both.endsWith(" Leaves out Goblin 2."), both);
+    assert.ok(both.startsWith("Healing does nothing while Aldric"), both);
+    // Where no cut of the dead name fits beside the names left out, they become a count, and the name keeps what then fits.
+    const counted = status({ dead: { kind: "heal", name: LONG, dm: false }, left: ["Goblin Warrior 2"] }, { ...AT320, note: (t) => linesAt(t, 200) <= 2 }).sentence!.text;
+    assert.equal(counted, "Healing does nothing while Aldr… is dead. Leaves out 1.");
   });
 });

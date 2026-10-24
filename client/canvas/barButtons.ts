@@ -1,5 +1,6 @@
 import { compactHang, freeArea, heldOrOpenMode, placeBar, restOrder, spanRoomAtWorst, type BarMode, type Box } from "./barDock.ts";
-import type { HpMode } from "../features/tokens/hpInput.ts";
+import type { EntryOperation, HpTarget } from "../features/tokens/groupHp.ts";
+import type { HpMode, HpParse } from "../features/tokens/hpInput.ts";
 
 /*
  * The single-token bar's buttons and its short layout
@@ -267,4 +268,218 @@ export function groupRestButtons(input: { dm: boolean; lead: boolean; conditions
  */
 export function nextRestMode(mode: HpMode): HpMode {
   return mode === "damage" ? "heal" : "damage";
+}
+
+// ------------------------------------------------------------ the strip's status line
+
+/**
+ * A line on the dead in the strip's wording (3.3): the header names the
+ * creature, so a line names it once, and a group's drops the words it
+ * can spare, so each fits the note's two lines. The cases follow the
+ * entry's own lines (groupHp.ts deadLines), whose sentences stay the
+ * field's description.
+ */
+export type RestDead =
+  | { kind: "heal"; name: string; dm: boolean }
+  | { kind: "set"; name: string }
+  | { kind: "healMany"; count: number }
+  | { kind: "setMany"; count: number }
+  | { kind: "back"; count: number };
+
+/** The strip's line on the dead among an entry's targets, for what it will send, by the rule of groupHp.ts deadLines. Null for none. */
+export function restDead(targets: readonly HpTarget[], operation: EntryOperation, ctx: { revives: boolean; dm: boolean }): RestDead | null {
+  const seen = new Set<string>();
+  const reached: HpTarget[] = [];
+  for (const t of targets) {
+    if (t.access === "none" || seen.has(t.holder)) continue;
+    seen.add(t.holder);
+    reached.push(t);
+  }
+  const dead = reached.filter((t) => t.dead);
+  if (dead.length === 0) return null;
+  const one = reached.length === 1 ? dead[0] : undefined;
+  if (ctx.revives) {
+    const healing = operation.kind === "heal" || (operation.kind === "set" && operation.cur !== undefined && operation.cur > 0);
+    if (!healing) return null;
+    const back = dead.filter((t) => t.max === undefined || t.max > 0).length;
+    return back === 0 ? null : { kind: "back", count: back };
+  }
+  if (operation.kind === "heal") return one ? { kind: "heal", name: one.name, dm: ctx.dm } : { kind: "healMany", count: dead.length };
+  if (operation.kind === "set") return one ? { kind: "set", name: one.name } : { kind: "setMany", count: dead.length };
+  return null;
+}
+
+/**
+ * Whether Apply sends a Critical Hit (design section 9.6): the kept tick,
+ * on a creature at 0 HP, for what will be sent as damage, the typed text
+ * once it parses and the chosen mode otherwise. So a tick kept into Heal,
+ * or past the creature's rise above 0 HP, sends none and is named nowhere.
+ */
+export function critSent(input: { crit: boolean; atZero: boolean; mode: HpMode; preview: HpParse | null }): boolean {
+  return input.crit && input.atZero && (input.preview?.ok ? input.preview.change.kind === "damage" : input.mode === "damage");
+}
+
+/** What the HP entry has to say (3.3), as the entry hands it to the status line. */
+export type EntryStatus = {
+  /** The entry's error, or the refusal of what was typed. */
+  error: string | null;
+  dead: RestDead | null;
+  /** The typed change's summary while the field's text parses, such as "7 damage". */
+  preview: string | null;
+  /** The field holds text. */
+  typed: boolean;
+  /** A Critical Hit that Apply will send (`crit && showCrit`). */
+  crit: boolean;
+  /** How many creatures the entry reaches, and the names of those it leaves out. */
+  reach: number;
+  left: readonly string[];
+  /** A group's standing note while its field is empty. */
+  standing: string | null;
+};
+
+/** Whether a text fits: on the status line's one line, the title's two lines, or the note's two lines. */
+export type RestFit = { line(text: string): boolean; title(text: string): boolean; note(text: string): boolean };
+
+export type RestStatusInput = EntryStatus & {
+  /** The Crit toggle stands in the quick row (RestRow's fit). */
+  critInRow: boolean;
+  /** What the line says with nothing else to say, in parts that give way from the front: AC, then HP for a token. */
+  idle: readonly string[];
+  fit: RestFit;
+};
+
+/**
+ * The strip's status line (3.3, R12, R21): the line under the name, and
+ * a sentence that needs more room, over the title's two lines in the
+ * name's place, or in the note on the strip's top edge, where it is cut
+ * by width to two lines. `full` is the sentence uncut, null with none.
+ */
+export type RestStatus = {
+  line: { text: string; error: boolean };
+  sentence: { text: string; error: boolean; place: "title" | "note" } | null;
+  full: string | null;
+};
+
+/**
+ * How a sentence gives way in the note: its creature's name cut to so
+ * many letters, and the names left out as their count. The name is the
+ * dead creature's, else the one creature a group leaves out while they
+ * are named.
+ */
+type Cut = { letters?: number; count?: boolean };
+type Sentence = { error: boolean; words(cut: Cut): string; name(cut: Cut): string | null };
+
+/**
+ * The first of 3.3's six that applies: an error or refusal, a line on the
+ * dead (with a group's left-out creatures after it), the preview, a kept
+ * Critical Hit, a group's standing note, then the idle line. A sentence
+ * (the first three) takes the line where it fits there, else the title's
+ * two lines, else the note, and the line keeps the idle words meanwhile.
+ * In the note the creature's name is cut from its end, by `fit.note`,
+ * never by a count of characters, then left-out names become a count.
+ * The warning and the recovery always stay whole.
+ */
+export function restStatus(input: RestStatusInput): RestStatus {
+  const idle = idleLine(input.idle, input.fit);
+  const sentence = sentenceOf(input);
+  if (sentence === null) {
+    if (input.crit && !input.critInRow && !input.typed) return { line: { text: "Critical Hit", error: false }, sentence: null, full: null };
+    if (input.standing !== null && !input.typed) return { line: { text: input.standing, error: false }, sentence: null, full: null };
+    return { line: { text: idle, error: false }, sentence: null, full: null };
+  }
+  const full = sentence.words({});
+  if (input.fit.line(full)) return { line: { text: full, error: sentence.error }, sentence: null, full };
+  const place = input.fit.title(full) ? "title" : "note";
+  const text = place === "title" ? full : noteWords(sentence, input.left.length > 0, input.fit.note);
+  return { line: { text: idle, error: false }, sentence: { text, error: sentence.error, place }, full };
+}
+
+/** The idle line, dropping its first parts while it does not fit one line. The last part stays, and ends in an ellipsis where it must. */
+function idleLine(parts: readonly string[], fit: RestFit): string {
+  for (let from = 0; from < parts.length - 1; from++) {
+    const text = parts.slice(from).join(" · ");
+    if (fit.line(text)) return text;
+  }
+  return parts[parts.length - 1] ?? "";
+}
+
+function sentenceOf(input: RestStatusInput): Sentence | null {
+  if (input.error !== null) {
+    const error = input.error;
+    return { error: true, words: () => error, name: () => null };
+  }
+  const dead = input.dead;
+  const named = dead !== null && (dead.kind === "heal" || dead.kind === "set") ? dead.name : null;
+  // The one name the note may cut: the dead creature's, else the one creature left out while it is named.
+  const name = (cut: Cut) => named ?? (!cut.count && input.left.length === 1 ? input.left[0]! : null);
+  const cut = (whose: string, by: Cut) => (by.letters !== undefined ? cutName(whose, by.letters) : whose);
+  const leftOut = (by: Cut) => {
+    if (by.count) return String(input.left.length);
+    return named === null && input.left.length === 1 ? cut(input.left[0]!, by) : input.left.join(", ");
+  };
+  if (dead !== null) {
+    return {
+      error: false,
+      name,
+      words: (by) => `${deadWords(dead, named === null ? "" : cut(named, by))}${input.left.length > 0 ? ` Leaves out ${leftOut(by)}.` : ""}`,
+    };
+  }
+  if (input.preview !== null) {
+    const preview = input.preview;
+    const crit = input.crit && !input.critInRow ? ", Critical Hit" : "";
+    const each = input.reach > 1 ? `, to each of ${input.reach}` : "";
+    return {
+      error: false,
+      name,
+      words: (cut) => `${preview}${crit}${each}${input.left.length > 0 ? `, not ${leftOut(cut)}${cut.count ? " of them" : ""}` : ""}`,
+    };
+  }
+  return null;
+}
+
+function deadWords(dead: RestDead, name: string): string {
+  switch (dead.kind) {
+    case "heal":
+      return `Healing does nothing while ${name} is dead.${dead.dm ? " Revive first." : ""}`;
+    case "set":
+      return `${name} stays dead at the new HP. Only Revive brings them back.`;
+    case "healMany":
+      return `Healing does nothing to the ${dead.count} dead.`;
+    case "setMany":
+      return `${dead.count} dead ${dead.count === 1 ? "stays" : "stay"} dead. Only Revive brings them back.`;
+    case "back":
+      return dead.count === 1 ? "Brings back 1 dead creature." : `Brings back ${dead.count} dead creatures.`;
+  }
+}
+
+/**
+ * The sentence as the note's two lines hold it: whole, else with its
+ * name's most letters that fit, at least one, and only then with the
+ * names left out as their count, cutting the name again there if it must.
+ * Where nothing fits, the shortest form shows.
+ */
+function noteWords(sentence: Sentence, hasLeft: boolean, fits: (text: string) => boolean): string {
+  for (const count of hasLeft ? [false, true] : [false]) {
+    const whole = sentence.words({ count });
+    if (fits(whole)) return whole;
+    const name = sentence.name({ count });
+    if (name === null) continue;
+    let lo = 1;
+    let hi = [...name].length - 1;
+    let best = 0;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (fits(sentence.words({ letters: mid, count }))) {
+        best = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    if (best > 0) return sentence.words({ letters: best, count });
+  }
+  return sentence.words({ letters: 1, count: hasLeft });
+}
+
+/** A name cut to its first `letters` letters, by code point, with an ellipsis. */
+function cutName(name: string, letters: number): string {
+  return `${[...name].slice(0, letters).join("").trimEnd()}…`;
 }
