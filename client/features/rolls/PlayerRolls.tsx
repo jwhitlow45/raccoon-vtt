@@ -21,7 +21,7 @@ import { GRAB_ATTR, GRAB_STYLE, useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { useStore } from "zustand";
-import { barDockSlot } from "../../canvas/barDock.ts";
+import { barDockSlot, stripSqueezed, type CardAt } from "../../canvas/barDock.ts";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { useScoped } from "../../state/scope.ts";
 import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
@@ -191,6 +191,9 @@ export function PlayerRolls() {
   const dockStore = useScoped(barDockSlot);
   const zoom = useUiScale();
   const compactBar = useStore(dockStore, (s) => s.bar?.mode === "compact");
+  // An upright phone's strip held open, shown or hidden for a drag: a card that would take the free area under 148 folds for it (docs/design-v1-bar-compact.md 3.2, review BC-OPUS-21).
+  const heldStrip = useStore(dockStore, (s) => s.heldMode === "span" && s.barOpen);
+  const footHeight = useStore(dockStore, (s) => s.foot);
   const chrome = useStore(dockStore, (s) => s.chrome);
   const [need, setNeed] = useState(FOOT_NEED_ESTIMATE);
   const measured = useCallback((next: FootNeed) => setNeed((n) => (n.whole === next.whole && n.least === next.least ? n : next)), []);
@@ -199,7 +202,8 @@ export function PlayerRolls() {
   const room = chrome ? size.height - chrome.top - chrome.bottom : Infinity;
   const tooShort = atFoot && room < need.whole;
   const onToolbar = tooShort && summoned === shown?.id;
-  const yieldsToBar = atFoot && (compactBar || (tooShort && !onToolbar));
+  const squeezed = chrome !== null && stripSqueezed({ viewport: size, chrome, foot: footHeight, held: heldStrip });
+  const yieldsToBar = atFoot && (compactBar || (tooShort && !onToolbar) || squeezed);
   const toolbarRoom = chrome ? size.height - chrome.top - chrome.toolbar : Infinity;
   const screenRoom = chrome ? size.height - chrome.safe.top - chrome.toolbar : Infinity;
   const stand: FootStand = !onToolbar ? "options" : toolbarRoom >= need.whole ? "toolbar" : "screen";
@@ -207,6 +211,11 @@ export function PlayerRolls() {
   useLayoutEffect(() => {
     dockStore.setState({ footYields: yieldsToBar });
   }, [dockStore, yieldsToBar]);
+  // Where the card stands, for the bar's opening rule (barDock.ts openMode, review BAR-ASTRA-10): standing or folded at the foot, or summoned onto the toolbar or the screen.
+  const cardAt: CardAt = !atFoot ? null : !onToolbar ? "foot" : stand === "screen" ? "screen" : "toolbar";
+  useLayoutEffect(() => {
+    if (dockStore.getState().cardAt !== cardAt) dockStore.setState({ cardAt });
+  }, [dockStore, cardAt]);
   // Asked for in the alerts column, by its chip or a summary, the card must show whole there or over the screen (InitiativeStrip.tsx FightAlerts).
   const columnRollAsked = shown !== undefined && summoned === shown.id && width >= CARD_MIN_WIDTH;
   useLayoutEffect(() => {
@@ -229,7 +238,7 @@ export function PlayerRolls() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [dockStore, atFoot, zoom, shown?.id]);
-  useLayoutEffect(() => () => dockStore.setState({ foot: 0, footYields: false }), [dockStore]);
+  useLayoutEffect(() => () => dockStore.setState({ foot: 0, footYields: false, cardAt: null }), [dockStore]);
   const foldsUnderSheet = cardFoldsUnderSheet({ width, height: size.height, wideMinWidth: theme.layout.wideMinWidth });
   const toolPopover = useStore(dockStore, (s) => s.toolPopover);
   const foldedBySheet = covered && foldsUnderSheet;

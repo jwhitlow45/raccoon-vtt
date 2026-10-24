@@ -548,11 +548,13 @@ export function MapStage(props: {
    */
   const barOpen = actionBar && selecting && selectedId !== null;
   useLayoutEffect(() => {
-    if (barOpen) return;
     const dock = scope.get(barDockSlot);
     const d = dock.getState();
+    if (d.barOpen !== barOpen) dock.setState({ barOpen });
+    if (barOpen) return;
     if (d.expanded || d.expandedHeight !== null || d.clearRequest !== null) dock.setState({ expanded: false, expandedHeight: null, clearRequest: null });
   }, [barOpen, scope]);
+  useLayoutEffect(() => () => scope.get(barDockSlot).setState({ barOpen: false }), [scope]);
   const shapeRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     const layout = layoutSize(window, zoom);
