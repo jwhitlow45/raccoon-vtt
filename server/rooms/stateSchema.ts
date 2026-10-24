@@ -22,6 +22,7 @@ import {
   MAX_TURN_TIMER_SEC,
   actorSchemaForImport,
   combatUseSchemas,
+  durationRemainingSchema,
   effectDueSchema,
   areaSlows,
   areaTriggersSchema,
@@ -439,11 +440,15 @@ const encounterSnapshot = z.strictObject({
       z.strictObject({
         holderId: id,
         ended: z.array(z.strictObject({ at: z.number().int().min(0).max(MAX_EFFECTS), effect: effectStored })).max(MAX_EFFECTS).optional(),
-        counted: z.array(z.strictObject({ id, from: z.number().int(), to: z.number().int() })).max(MAX_EFFECTS).optional(),
+        // A Next crosses each row's boundary once at most, so a count it lowered is one less (rules/durations.ts tickEffects).
+        counted: z
+          .array(z.strictObject({ id, from: durationRemainingSchema, to: durationRemainingSchema }).refine((c) => c.to === c.from - 1, "a count a Next lowered is one less than it was"))
+          .max(MAX_EFFECTS)
+          .optional(),
         asked: z.array(z.strictObject({ id, from: effectDueSchema.nullable(), to: effectDueSchema })).max(MAX_EFFECTS).optional(),
       }),
     )
-    .max(600)
+    // One for each creature a Next changed, as `effects` holds them: up to every creature in the room, which the state's byte limit bounds.
     .optional(),
   resumesGone: z.literal(true).optional(),
   at: iso,

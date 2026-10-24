@@ -205,8 +205,10 @@ const durationInput = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("rounds"), rounds: z.number().int().min(1).max(1_000), of: durationAnchor }),
 ]);
 
+const durationRemaining = z.number().int().min(0).max(10_000);
+
 const durationStored = z.strictObject({
-  remaining: z.number().int().min(0).max(10_000),
+  remaining: durationRemaining,
   boundary: z.enum(["turnStart", "turnEnd"]),
   anchor: durationAnchor,
 });
@@ -2339,6 +2341,8 @@ export const fogOpSchema = fogOp;
 export const effectInputSchema = effectInput;
 /** A save-ends occurrence as an effect holds it, for a saved step's record of the ones a Next opened (server/rooms/stateSchema.ts). */
 export const effectDueSchema = effectDue;
+/** The turns a stored duration has left, for a saved step's record of the counts a Next lowered. */
+export const durationRemainingSchema = durationRemaining;
 /**
  * A file's actor also holds `unshaped`, which only the reducer writes, so no
  * op's actor carries it (W7B-P-9).

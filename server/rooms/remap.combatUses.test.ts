@@ -5,6 +5,7 @@ import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
 import { DM, actor, character, companionBlock, customMonster, effect, entry, env, room, token } from "#shared/testutil.ts";
+import { assertWithinLimits } from "./importRoom.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -269,13 +270,51 @@ describe("a saved step through an import keeps the turns that left the fight (de
     assert.deepEqual(c.inline.effects[0]!.duration?.anchor, { tokenId: "b" }, "paused on B, whom the import did not bring");
   });
 
+  test("a saved count takes the stored durations' range and is one less than it was, as a Next lowers it (reviews FU26-ASTRA-6 and FU26-OPUS-8)", () => {
+    const onB = play(abc(), [NEXT, NEXT]);
+    assert.deepEqual(onB.encounterHistory.at(-1)!.effectChanges, [{ holderId: "c", counted: [{ id: "mk", from: 3, to: 2 }] }]);
+    const parses = (from: number, to: number) => {
+      const file = JSON.parse(JSON.stringify(onB)) as RoomState;
+      file.encounterHistory.at(-1)!.effectChanges![0]!.counted![0] = { id: "mk", from, to };
+      return parseRoomState(file).ok;
+    };
+    assert.equal(parses(3, 2), true);
+    assert.equal(parses(10_000, 9_999), true);
+    assert.equal(parses(3, 1), false, "lowered by two");
+    assert.equal(parses(2, 3), false, "raised");
+    assert.equal(parses(3, 3), false, "unchanged");
+    assert.equal(parses(10_001, 10_000), false, "past the stored range");
+    assert.equal(parses(0, -1), false, "below it");
+    assert.equal(parses(2.5, 1.5), false, "not a whole number");
+  });
+
+  test("a Next that counts the durations of 601 creatures over two scenes comes through an export and an import, and Previous puts every count back (review FU26-ASTRA-5)", () => {
+    const tokens: RoomState["tokens"] = { a: token("a", { name: "A" }), b: token("b", { name: "B" }) };
+    for (let i = 0; i < 601; i++) {
+      const marked = actor({ effects: [effect("mk", { key: "custom", label: "Marked", duration: { remaining: 3, boundary: "turnStart", anchor: { entryId: "eb" } } })] });
+      tokens[`m${i}`] = token(`m${i}`, { name: `M${i}`, sceneId: i < 300 ? "s1" : "s2", actor: { inline: marked } });
+    }
+    const state = room({ tokens });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("ea", { tokenId: "a", value: 20 }), entry("eb", { tokenId: "b", value: 15, tieOrder: 1 })] };
+    const onB = play(state, [NEXT, NEXT]);
+    assert.equal(onB.encounterHistory.at(-1)!.effectChanges?.length, 601);
+    const room1 = imported(onB);
+    assertWithinLimits(room1);
+    assert.equal(room1.encounterHistory.at(-1)!.effectChanges?.length, 601);
+    const back = play(room1, [PREV]);
+    assert.equal(acting(back), "A");
+    const counts = Object.values(back.tokens).flatMap((t) => ("inline" in t.actor ? t.actor.inline.effects.map((e) => e.duration?.remaining) : []));
+    assert.deepEqual(counts, Array.from({ length: 601 }, () => 3));
+  });
+
   test("a companion whose rows the import takes out, as one acting on its character's turn, is walked past too", () => {
     const state = room({
       characters: { hero: character("hero", { name: "Hero" }) },
       tokens: {
         a: token("a", { kind: "pc", name: "A", actor: { ref: "hero" } }),
         b: token("b", { kind: "npc", name: "B", companion: { of: "hero", turn: "own" } }),
-        c: token("c", { name: "C" }),
+        // Marked until the start of B's turn three times, counted once on B's turn.
+        c: token("c", { name: "C", actor: { inline: actor({ effects: [effect("mk", { key: "custom", label: "Marked", duration: { remaining: 3, boundary: "turnStart", anchor: { entryId: "eb" } } })] }) } }),
       },
     });
     state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [entry("ea", { tokenId: "a", value: 20 }), entry("eb", { tokenId: "b", value: 15, tieOrder: 1 }), entry("ec", { tokenId: "c", value: 10, tieOrder: 2 })] };
@@ -288,6 +327,11 @@ describe("a saved step through an import keeps the turns that left the fight (de
     assert.ok(!top.encounter.entries.some((e) => e.tokenId !== undefined && room1.tokens[e.tokenId]?.name === "B"));
     const back = play(room1, [PREV]);
     assert.equal(acting(back), "A");
+    // The count B's turn lowered goes back, the duration now counting A's row as the import rebound it (review FU26-ASTRA-3).
+    const aRow = back.encounter!.entries.find((e) => back.tokens[e.tokenId!]?.name === "A")!.id;
+    const c = Object.values(back.tokens).find((t) => t.name === "C")!.actor;
+    assert.ok("inline" in c);
+    assert.deepEqual(c.inline.effects.map((e) => e.duration), [{ remaining: 3, boundary: "turnStart", anchor: { entryId: aRow } }]);
   });
 });
 
