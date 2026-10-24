@@ -668,6 +668,32 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     assert.equal(await status.count(), 0, "a whole give-back reads as no refusal either");
   });
 
+  test("fu26-b. the DM's Long Rest for the party says in one line that it also gives back every class resource, and its card lines up at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+    const rage = stored().find((x) => x.name === "Rage")!;
+    if (rage.used === 0) await ops.send({ t: "actor.use", target: { characterId: run.thorn }, use: { kind: "resource", id: rage.id } });
+    await waitFor("a Rage spent", () => ((stored().find((x) => x.name === "Rage")?.used ?? 0) > 0 ? true : null), 10_000);
+    const off: string[] = [];
+    for (const view of [DESK, { ...DESK, scale: 1.3 }, PHONE, { ...PHONE, scale: 1.3 }, SMALL, { ...SMALL, scale: 1.3 }]) {
+      const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(dm, dmCdp, view);
+      const panel = await openCharacters(dm);
+      await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
+      const finish = panel.getByRole("button", { name: "Finish the Long Rest", exact: true });
+      await finish.waitFor();
+      await panel.getByText(/Exhaustion level\. It also gives back every class resource\./).waitFor();
+      // The card: the innermost box that holds both its words and its buttons.
+      const card = panel.locator("div").filter({ has: dm.getByRole("button", { name: "Finish the Long Rest", exact: true }) }).filter({ hasText: "It also gives back every class resource." }).last();
+      await card.scrollIntoViewIfNeeded();
+      const lines = alignmentLines(await measureAlignment(card), `the party's Long Rest at ${at}`);
+      off.push(...lines);
+      await shots.take(dm, `fu26-party-rest-${view.width}-${Math.round(view.scale * 100)}`);
+      await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+      await finish.waitFor({ state: "detached" });
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+    await setUp(dm, dmCdp, DESK);
+  });
+
   test("cr-c-13. no console errors on any page", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page");
     assert.deepEqual(patConsole.errors, [], "Pat's page");

@@ -19,6 +19,7 @@ import {
   firstLevel,
   joinWords,
   ownOutcome,
+  partyRestBackText,
   pickClass,
   pickHelp,
   pickLevel,
@@ -106,6 +107,14 @@ describe("what a rest gives back (7.2)", () => {
     assert.equal(restBackText([hands], "long"), null);
     assert.equal(joinWords(["Rage"]), "Rage");
     assert.equal(joinWords([]), "");
+  });
+
+  test("the party's Long Rest says in one line that it gives back every class resource, once any of theirs is spent (LP20-CC-4)", () => {
+    const line = "It also gives back every class resource.";
+    assert.equal(partyRestBackText([{ resources: [hands] }, { resources: [{ ...rage, used: 1 }] }]), line);
+    assert.equal(partyRestBackText([{ resources: [hands, { ...surge, used: 1 }, { ...focus, used: 5 }] }]), line, "one line however many are spent");
+    assert.equal(partyRestBackText([{ resources: [hands, { ...rage, used: 0 }] }, {}]), null, "nothing spent reads nothing new");
+    assert.equal(partyRestBackText([]), null);
   });
 });
 

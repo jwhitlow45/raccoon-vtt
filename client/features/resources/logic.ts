@@ -101,6 +101,16 @@ export function restBackText(resources: readonly ClassResource[] | undefined, ki
 }
 
 /**
+ * What the party's Long Rest also gives back (7.2, LP20-CC-4): one line for
+ * every character it rests, since a line per resource would grow its card
+ * past a phone's sheet. Null when none of them has one spent, as a chosen
+ * rest reads nothing new then.
+ */
+export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[] }[]): string | null {
+  return characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "It also gives back every class resource." : null;
+}
+
+/**
  * An amount typed for a pool: a whole number from 1 to `most`, the most
  * left to spend or the most spent to give back. Anything else says the
  * range.

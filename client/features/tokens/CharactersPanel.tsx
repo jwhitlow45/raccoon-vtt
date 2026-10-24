@@ -20,6 +20,7 @@ import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
+import { partyRestBackText } from "../resources/logic.ts";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
 import { characterPageSlot, DISCARD, formFields, openForm, pageBackTo, patchForm, shownPage, staleList, useKeepDraft, useKeptDraft, useLeaveForm, usePendingNumbers, type LeaveFor } from "./characterPage.ts";
@@ -253,6 +254,7 @@ function PartyLongRest(props: { characters: Character[] }) {
   const [asking, setAsking] = useState(false);
   const resting = props.characters.filter((c) => c.actor.life === "alive" && c.actor.hp.cur >= 1);
   const left = props.characters.length - resting.length;
+  const back = partyRestBackText(resting);
   if (!asking) {
     return (
       <Button size="sm" disabled={resting.length === 0} onClick={() => setAsking(true)}>
@@ -273,6 +275,7 @@ function PartyLongRest(props: { characters: Character[] }) {
     >
       <Help>
         {resting.length === 1 ? "1 character gets" : `${resting.length} characters get`} all HP back, lose Temporary HP and one Exhaustion level.
+        {back ? ` ${back}` : ""}
         {left > 0 ? ` ${left === 1 ? "1 character at 0 HP stays" : `${left} characters at 0 HP stay`} as they are.` : ""}
       </Help>
       <div style={{ display: "flex", gap: theme.space(2) }}>
