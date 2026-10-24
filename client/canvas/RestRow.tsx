@@ -1,13 +1,10 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { theme } from "../lib/theme.ts";
 import { restOrder } from "./barDock.ts";
-import { restFit } from "./barButtons.ts";
+import { REST_FIELD_MIN, restFit } from "./barButtons.ts";
 
 /** One candidate of the quick row: its id in the strip's order (barDock.ts restOrder) and what it draws. */
 export type RestItem = { id: string; node: ReactNode };
-
-/** The HP field's least width in the lead (docs/design-v1-bar-compact.md R14). */
-const FIELD_MIN = 56;
 
 /**
  * How far the focus ring reaches past a control: its 2 px outline and its
@@ -78,7 +75,7 @@ export function RestRow(props: { items: readonly RestItem[]; onFit?(shown: reado
       const natural = el.scrollWidth > el.clientWidth + 1 ? el.scrollWidth * scale : width;
       widths[id] = Math.max(0, natural - (field?.getBoundingClientRect().width ?? 0));
     }
-    const fit = restFit(widths, rowWidth, theme.space(1) * scale, FIELD_MIN * scale);
+    const fit = restFit(widths, rowWidth, theme.space(1) * scale, REST_FIELD_MIN * scale);
     setShown((prev) => (prev !== null && prev.length === fit.length && prev.every((id, i) => id === fit[i]) ? prev : fit));
   }, [orderKey, measures]);
   // A width that changes after, as a font arriving, a chip's words or the row's own width, fits the row again.
