@@ -2236,18 +2236,24 @@ function measuredFit(probe: HTMLElement, box: StatusBox): RestFit {
  * Multi-select's press. Turning it on in an upright phone's expanded bar
  * also rests the bar, moving nothing (R3), so the map is free for the
  * taps that gather (docs/design-v1-bar-compact.md 5.3, D-261024-22).
- * Turning it off leaves the bar as it is. The expanded body the button
- * stands in goes as the bar rests, so focus moves to Expand, where
- * Collapse leaves it.
+ * Turning it off leaves the bar as it is. It reads the dock store's
+ * `expanded`, not the state drawn, so a press in the scrolling strip a
+ * roll card made of the expanded bar ends the state too, and the bar
+ * rests once the card goes (review BB-OPUS-11). Drawn expanded, the body
+ * the button stands in goes as the bar rests, so focus moves to Expand,
+ * where Collapse leaves it. In the scrolling strip the button stays, and
+ * so does focus.
  */
 function useMultiToggle(rest: FrameControls["rest"], multi: boolean): { ref: RefObject<HTMLButtonElement | null>; toggle(): void } {
   const ui = useRoomUi();
   const ref = useRef<HTMLButtonElement>(null);
+  const expanded = useStore(useScoped(barDockSlot), (s) => s.expanded);
   const toggle = () => {
     ui.setMultiSelect(!multi);
-    if (multi || !rest || rest.resting) return;
+    if (multi || !rest || !expanded) return;
     const frame = ref.current?.closest<HTMLElement>('[role="dialog"]') ?? null;
     rest.collapse();
+    if (rest.resting) return;
     requestAnimationFrame(() => frame?.querySelector<HTMLElement>('button[aria-label="Expand"]')?.focus({ preventScroll: true }));
   };
   return { ref, toggle };

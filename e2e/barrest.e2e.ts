@@ -1682,6 +1682,35 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         pats.close();
       }
     });
+
+    test("br-f-21. Multi-select turned on in the scrolling strip a roll card makes of the expanded bar ends the expanded state too, so the bar rests as the card goes, focus kept on Multi-select (review BB-OPUS-11)", async () => {
+      await homeTokens();
+      const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+      const thorn = bar(pat, "Thorn");
+      const state = (s: string) => waitFor(`the bar's state ${s}`, async () => ((await thorn.getAttribute("data-bar-state")) === s ? true : null), 5_000);
+      const id = randomUUID();
+      try {
+        await setUp(pat, { width: 375, height: 667, scale: 1 });
+        await openOn(pat, run.thorn);
+        await expandBar(thorn);
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await card.waitFor();
+        await state("scrolls");
+        const multi = await barControl(thorn, "Multi-select");
+        await multi.tap();
+        await pat.getByRole("toolbar", { name: "Select options" }).waitFor();
+        await sleep(300);
+        assert.equal(await multi.evaluate((el) => el.ownerDocument.activeElement === el), true, "focus left Multi-select in the scrolling strip");
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        await card.waitFor({ state: "detached" });
+        await sleep(600);
+        assert.equal(await thorn.getAttribute("data-bar-state"), "rest", "the bar expanded again with Multi-select on");
+        await shots.take(pat, "br-f-21-multi-from-scrolls-rests");
+        await pat.getByRole("toolbar", { name: "Select options" }).getByRole("button", { name: "Done", exact: true }).click();
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+      }
+    });
   });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)
