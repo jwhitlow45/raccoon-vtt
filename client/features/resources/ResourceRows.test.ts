@@ -7,7 +7,7 @@ import { character, room } from "#shared/testutil.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { ClassResourceRows } = await import("./ResourceRows.tsx");
+const { amountFor, ClassResourceRows } = await import("./ResourceRows.tsx");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 
@@ -90,5 +90,21 @@ describe("a character's class resource rows", () => {
 
   test("every button is a 44 px target", () => {
     for (const b of buttons(rows([rage, hands], "list"))) assert.match(b, /min-height:44px/, b);
+  });
+});
+
+describe("a pool's amount field once its counts change under it (CCAC-OPUS-6)", () => {
+  const spend = { verb: "Spend" as const, text: "5", error: "Spend 1 to 15." };
+  const giveBack = { verb: "Give back" as const, text: "", error: null };
+
+  test("it stays open while there is something to spend or give back", () => {
+    assert.deepEqual(amountFor(null, hands), { amount: null, gone: null });
+    assert.deepEqual(amountFor(spend, { ...hands, used: 24 }), { amount: spend, gone: null });
+    assert.deepEqual(amountFor(giveBack, { ...hands, used: 1 }), { amount: giveBack, gone: null });
+  });
+
+  test("it closes with the row's own words once another device spent the last or gave back the rest, never reading 1 to 0", () => {
+    assert.deepEqual(amountFor(spend, { ...hands, used: 25 }), { amount: null, gone: "No Lay on Hands is left." });
+    assert.deepEqual(amountFor(giveBack, hands), { amount: null, gone: "Lay on Hands is full." });
   });
 });

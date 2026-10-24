@@ -55,7 +55,20 @@ export function ResourceList(props: { characterId: CharacterId; resources: reado
   );
 }
 
-type Amount = { verb: "Spend" | "Give back"; text: string; error: string | null };
+export type Amount = { verb: "Spend" | "Give back"; text: string; error: string | null };
+
+/**
+ * What a pool's open amount field becomes as its counts change under it:
+ * the same field while there is something to spend or give back, else
+ * closed, with the row's own words for why, once another device spent the
+ * last or gave back the rest. It never asks for 1 to 0.
+ */
+export function amountFor(opened: Amount | null, r: Pick<ClassResource, "name" | "max" | "used" | "pool">): { amount: Amount | null; gone: string | null } {
+  if (!opened) return { amount: null, gone: null };
+  if (opened.verb === "Spend" && left(r) === 0) return { amount: null, gone: emptyText(r) };
+  if (opened.verb === "Give back" && r.used === 0) return { amount: null, gone: fullText(r) };
+  return { amount: opened, gone: null };
+}
 
 /**
  * One resource: its name and count over the rest that brings it back, and
@@ -70,8 +83,10 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
   const actions = useRoomActions();
   const [sent, setSent] = useState<{ n: number; back: boolean } | null>(null);
   const busy = useAnyPending(sent === null ? [] : [sent.n]);
-  const [amount, setAmount] = useState<Amount | null>(null);
+  const [opened, setAmount] = useState<Amount | null>(null);
+  const { amount, gone } = amountFor(opened, r);
   const amountField = useRef<HTMLInputElement>(null);
+  const fieldFocused = useRef(false);
   const useButton = useRef<HTMLButtonElement>(null);
   const id = useId();
   const remaining = left(r);
@@ -82,6 +97,15 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
   useEffect(() => {
     if (verb) amountField.current?.focus();
   }, [verb]);
+
+  // The field closed under the player, as its pool emptied or filled elsewhere: the list's status line says why, and focus it held goes to Use….
+  useEffect(() => {
+    if (gone === null) return;
+    setAmount(null);
+    props.onStatus(gone);
+    if (fieldFocused.current) useButton.current?.focus();
+    fieldFocused.current = false;
+  }, [gone]);
 
   const closeAmount = () => {
     setAmount(null);
@@ -132,7 +156,9 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
               label={backLabel(r)}
               off={r.used === 0 ? `${id}-full` : undefined}
               busy={busy && amount === null && sent?.back === true}
-              expanded={pool ? verb === "Give back" : undefined} onClick={() => (pool ? toggle("Give back") : use(true))}>
+              expanded={pool ? verb === "Give back" : undefined}
+              onClick={() => (pool ? toggle("Give back") : use(true))}
+            >
               {pool ? "Give back…" : "Give one back"}
             </RowButton>
           ) : null}
@@ -156,6 +182,8 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
             e.preventDefault();
             submitAmount();
           }}
+          onFocus={() => (fieldFocused.current = true)}
+          onBlur={() => (fieldFocused.current = false)}
           style={{ display: "grid", gap: theme.space(1) }}
         >
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>

@@ -22,7 +22,8 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, t
  * - A Short Rest gives back one Rage and all Superiority Dice, and says
  *   so, and a Long Rest everything.
  * - A Use sent offline after the DM spent the last Rage comes back
- *   refused, its reason in the list's status line.
+ *   refused, its reason in the list's status line, and a pool's open
+ *   field closes once the DM spends the last of it.
  * - Thorn's level rises: each class asks to update once, Barbarian's
  *   counts follow, and Paladin's stays where Pat keeps it.
  * - Edit changes a count and Remove takes one off, with a second tap.
@@ -604,6 +605,26 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       "the amount field with its error",
     ]);
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
+  test("cr-c-12b. a pool's open field closes when the DM spends the last of it, the status line saying why, focus back on Use…", async () => {
+    await setUp(pat, patCdp, PHONE);
+    const page = await thornsPage(pat);
+    const hands = row(page, "Lay on Hands");
+    await hands.getByRole("button", { name: "Use Lay on Hands, 15 of 15 left" }).tap();
+    const field = hands.getByRole("textbox", { name: "Lay on Hands to spend, up to 15" });
+    await field.waitFor();
+    assert.equal(await field.evaluate((el) => el === (globalThis as unknown as Doc).document.activeElement), true, "the field has focus");
+    const id = stored().find((x) => x.name === "Lay on Hands")!.id;
+    await ops.send({ t: "actor.use", target: { characterId: run.thorn }, use: { kind: "resource", id, amount: 15 } });
+    await field.waitFor({ state: "detached" });
+    const status = section(page).getByRole("status");
+    assert.equal((await status.textContent())?.trim(), "No Lay on Hands is left.");
+    assert.equal(await hands.getByText(/to 0/).count(), 0, "nothing reads 1 to 0");
+    await waitFor("focus back on Use…", () => pat.evaluate(() => (globalThis as unknown as Doc).document.activeElement?.getAttribute("aria-label") ?? "").then((n) => (n === "Use Lay on Hands, 0 of 15 left" ? true : null)), 5_000);
+    await shots.take(pat, "cr-c-pool-emptied-elsewhere");
+    await ops.send({ t: "actor.use", target: { characterId: run.thorn }, use: { kind: "resource", id, amount: 15 }, back: true });
+    await countReads(page, "Lay on Hands", "15 of 15");
   });
 
   test("cr-c-13. no console errors on any page", () => {
