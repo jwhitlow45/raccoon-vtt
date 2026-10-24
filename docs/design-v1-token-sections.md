@@ -1,6 +1,6 @@
 # raccoon-vtt v1: what each token section holds
 
-Status: designed, not built. Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing) and the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built). Measured in the browser against a short local prototype that was not kept (section 5).
+Status: designed, not built. Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing) and the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built). Measured in the browser against a short local prototype that was not kept (section 5). Amended for D-261024-39: Range rings stay in Combat.
 
 The project owner, 2026-10-24: "It feels a little weird that the token pop up has uses but the combat section doesn't. Up to ideas of what all should be included in the various sections"
 
@@ -8,10 +8,10 @@ Decided under guess mode as D-261024-38: the Token panel and a character's page 
 
 ## 1. The answer in short
 
-- **Combat** holds, in order: Hit points, Conditions, **Uses**, **Reaction**, Rest. On the Token panel and a character's page alike.
+- **Combat** holds, in order: Hit points, Conditions, **Uses**, **Reaction**, Range rings, Rest. On the Token panel and a character's page alike, which has no rings.
 - **Uses** is the bar's Uses drawer and the tracker row's Uses group: one list, `CombatUses` in its `list` form. For a character it is also where class resources are edited and added, so the Class resources section goes. For the DM it holds the legendary pips the tracker holds, which leave Stats.
 - **Reaction** is new, shown while the creature has a row in the fight: the tracker's Reaction used switch and its Ready controls.
-- **Range rings** move from Combat to **Position**, a map aid beside elevation and facing.
+- **Range rings** stay in Combat, where the owner grouped them (D-261024-39).
 - The panel gains what only the bar offered: **Duplicate** (the DM), **Dismiss** (a companion's player) and **Attach** with Get off, Put down and Let go.
 - **The tracker row's options** list the creature's things first, in Combat's order, then the row's own setup.
 - **Exempt from the rule**, by name: map gestures (Undo move, Doesn't count, a door, Multi-select) and links that open another panel (Roll, Details). The turn card's frame (Collapse, Show, Dismiss) is the card's own.
@@ -34,7 +34,7 @@ Every control and section on each surface, for the DM and a player, on a monster
 | Reaction used | | a switch, own (a shared companion's is its own) | | **missing** | **missing** | **gap** |
 | Ready, "It fired: Reaction used" | | Ready controls, own | | **missing** (Readied is listed in Conditions) | **missing** | **gap** |
 | A skipped prompt's Reopen | | | Reopen | **missing** | **missing** | **gap**: lost after the card's Dismiss |
-| Range rings | | | | Combat | | **misplaced**: they mark the map |
+| Range rings | | | | Combat | | **misplaced**: they mark the map. Decided by D-261024-39: they stay in Combat |
 | Rest | | | | Combat › Rest | Combat › Rest | ok |
 | Stat block, saves and defenses | / Stat block, saves line (the DM) | Stat block | | Stat block group | Stat block | ok: links into the panel |
 | Elevation, facing | / −5 and +5 | | | Position | | ok |
@@ -65,13 +65,13 @@ The panel's order stays header, stat block, groups by use, setup (docs/design-v1
 | Part | Holds, in order | Who | Folded summary | Starts |
 |---|---|---|---|---|
 | Header, Stat block, Notes, Image, Companion, Owners | as today | as today | as today | as today |
-| **Combat** | Hit points, Conditions, **Uses**, **Reaction**, Rest | everyone, each section by its own rule | "HP 52/60 · 1 condition · Reaction used" | open everywhere, as today |
-| **Position** | Elevation and facing, **Range rings**, **Attach**, Sight | the DM and owners, and a player on another creature only while it has rings, which they read | "On the ground, facing 90°, rings 30 ft" | folded, as today |
+| **Combat** | Hit points, Conditions, **Uses**, **Reaction**, Range rings, Rest | everyone, each section by its own rule | "HP 52/60 · 1 condition · Reaction used · rings 30 ft" | open everywhere, as today |
+| **Position** | Elevation and facing, **Attach**, Sight | the DM and owners, as today | "On the ground, facing 90°", as today | folded, as today |
 | **Stats** | Size, the card's fields, the legendary maxima only, Sheet link | as today | | folded |
 | **Token settings** | as today, then **Duplicate** (the DM) | as today | | folded |
 | **Remove** | Delete this token (the DM), or **Dismiss {name}** (a companion's player) | | | |
 
-**A character's page**: header, Place a token, Stat block, Combat (Hit points, Conditions, Uses, Reaction, Rest), Companions, Notes, Image, Stats, Played by, Remove. Nothing of a token on a map, as today.
+**A character's page**: header, Place a token, Stat block, Combat (Hit points, Conditions, Uses, Reaction, Rest: no rings, as today), Companions, Notes, Image, Stats, Played by, Remove. Nothing of a token on a map, as today.
 
 ### 3.1 Uses
 
@@ -81,7 +81,7 @@ The panel's order stays header, stat block, groups by use, setup (docs/design-v1
   - **For a character**: Edit (the pencil alone, "Edit Rage") on each resource's button line, the level-up line ("Your level went up. Update Barbarian resources?" with Update), then "Add a class resource" or the limit's line. With nothing to list, the help line of today's section. ResourceSheet opens from Edit, Update and Add, and gives focus back to its opener.
   - **For the DM**: the tracker's pips under the list, "Legendary Actions used" and "Legendary Resistances used today". Stats keeps "Legendary Actions per round" and "Legendary Resistance per day".
 - **Skipped prompts** join the list form while their record is current (`usesRows`' card-only branch becomes both forms), so Reopen stays reachable from the panel, the row and the bar after the card's Dismiss. After Next the record is not current, so the rows go.
-- **Order inside Combat**: after Conditions, which everyone reads and which is short. Before Reaction, since a DM spends legendary actions after nearly every turn.
+- **Order inside Combat**: after Conditions, which everyone reads and which is short. Before Reaction, since a DM spends legendary actions after nearly every turn. Uses and Reaction go before Range rings, which keep their place just above Rest: both are spent turn by turn, while rings are set once and read on the map, and today's sections keep their order among themselves (docs/design-v1-token-panel-groups.md 2). Rejected: rings before Uses, as they stand after Conditions today, which puts a control set once between Conditions and the list a fight spends from.
 
 ### 3.2 Reaction
 
@@ -92,7 +92,6 @@ The panel's order stays header, stat block, groups by use, setup (docs/design-v1
 
 ### 3.3 Position
 
-- **Range rings** follow Elevation and facing. For a viewer who may not change them they read as today's labelled line ("30/60 ft" under RANGE RINGS), and Position draws for another's creature only to hold that line.
 - **Attach**: the bar's `AttachButton` (a popover from 900 px up, a sheet on a phone, as the class resource sheet opens over the panel's sheet today), the bar's group line with its names and Let go or Put down, Get off with its note. Steer stays under the header's tags, where it is read with "Riding Warhorse".
 - **Sight** keeps its parts. Its light row reads **Light**, the bar's word.
 
@@ -123,22 +122,22 @@ Today the DM's Uses group comes tenth, after the row's Roll, Hidden, In lair, ro
 
 ## 5. Measures
 
-Seeded room (Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity, the dragon with Fire Breath used, Skitter, a goblin, a fight under way), opened by a tap on the tracker row as the DM and as Pat. Heights are the Combat group's in screen px, open, today and with the prototype of sections 3.1 to 3.3 (Uses, Reaction, rings moved, without the pips or Edit).
+Seeded room (Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity, the dragon with Fire Breath used, Skitter, a goblin, a fight under way), opened by a tap on the tracker row as the DM and as Pat. Heights are the Combat group's in screen px, open, today and as proposed. The prototype drew Uses and Reaction with the rings moved out, without the pips or Edit. The proposed heights add the rings back by sum: the prototype's height, plus the Range rings section as today's panel measured it for the same creature and size, plus one gap between sections. The gap is the difference between today's and the prototype's height left after their sections, 16 px at 1280 and 20.8 at 130%, the same for every creature. The page has no rings, so its row adds Reaction and that gap to today's.
 
 | Creature, viewer | 1280 x 800 | 390 x 844 at 130% | 320 x 568 at 130% |
 |---|---|---|---|
-| Adult red dragon, DM | 698 to 975 | 933 to 1293 | 1015 to 1421 |
-| Thorn, DM | 1070 to 1057 | 1463 to 1446 | 1571 to 1515 |
-| Thorn, Pat | 1018 to 1005 | 1396 to 1379 | 1503 to 1447 |
-| Skitter, DM | 627 to 747 | 842 to 998 | 904 to 1021 |
-| Goblin, DM | 627 to 642 | 842 to 862 | 904 to 886 |
-| Thorn's page, DM | 910 to about 1041 | 1255 to about 1425 | 1300 to about 1494 |
+| Adult red dragon, DM | 698 to 1135 | 933 to 1501 | 1015 to 1691 |
+| Thorn, DM | 1070 to 1217 | 1463 to 1654 | 1571 to 1785 |
+| Thorn, Pat | 1018 to 1165 | 1396 to 1587 | 1503 to 1718 |
+| Skitter, DM | 627 to 878 | 842 to 1169 | 904 to 1255 |
+| Goblin, DM | 627 to 774 | 842 to 1033 | 904 to 1119 |
+| Thorn's page, DM | 910 to 1057 | 1255 to 1446 | 1300 to 1515 |
 | The scroller's view | 647 (Pat 755) | 328 | 159 |
 | Combat folded | 49 | 63.4 | 63.4 |
 
-- **Parts, at the three sizes**: the dragon's Uses 274, 356 and 440. Thorn's Uses 356, 510 and 510, the same as today's Class resources section. Skitter's 88, 115 and 115. Reaction 131, 170 and 194, mostly the Ready field. Range rings leaving Combat: 144, 187 and 250. The page's Reaction is added from the panel's, not drawn. The DM's two pips are not drawn: two 44 px rows, about 100 px more at 100% and 120 at 130%, on a legendary creature only.
-- **Folded**: Combat's row is unchanged in height. Its summary loses "rings" and gains "Reaction used" while spent. At 320 x 568 at 130% it was cut before and is after ("HP 200/256 · 1 condition").
-- **What scrolls**: one scroller per panel, the side panel's body at 1280 and the sheet's body on a phone. Nothing in it is sticky. On a phone Combat starts 150 to 310 px down, below the first view at 320 x 568 at 130% as today. Open, it is 2.6 to 4.4 views of the sheet at 390 x 844 at 130%, 5.6 to 9.5 at 320 x 568 at 130%, and 1 to 1.6 views at 1280. At 1280 the dragon's stat block, open by default there, puts Combat 1725 px down, as today.
+- **Parts, at the three sizes**: the dragon's Uses 274, 356 and 440. Thorn's Uses 356, 510 and 510, the same as today's Class resources section. Skitter's 88, 115 and 115. Reaction 131, 170 and 194, mostly the Ready field. Range rings, kept: 144, 187 and 250 with a ring on (the dragon, Thorn), 116, 150 and 213 with none (Skitter, the goblin). The page's Reaction is added from the panel's, not drawn. The DM's two pips are not drawn: two 44 px rows, about 100 px more at 100% and 120 at 130%, on a legendary creature only.
+- **Folded**: Combat's row is unchanged in height. Its summary keeps "rings" last and gains "Reaction used" before it while spent. At 390 and 320 at 130% it was cut before and is after ("HP 200/256 · 1 condition · rings 60 ft").
+- **What scrolls**: one scroller per panel, the side panel's body at 1280 and the sheet's body on a phone. Nothing in it is sticky. On a phone Combat starts 150 to 310 px down, below the first view at 320 x 568 at 130% as today. Open, it is 3.1 to 5.0 views of the sheet at 390 x 844 at 130% (2.6 to 4.5 today), 7.0 to 11.2 at 320 x 568 at 130% (5.7 to 9.9 today), and 1.2 to 1.9 views at 1280 (1.0 to 1.7 today). At 1280 the dragon's stat block, open by default there, puts Combat 1725 px down, as today.
 - **Default folds**: unchanged. Combat opens everywhere, since Hit points leads it and is the first thing wanted. No section inside it folds on its own.
 - **Shots**: today in `screenshots/sections/audit2/`, the prototype in `screenshots/sections/proposal2/`, named `token-{viewer}-{creature}-{top|combat-end}-{size}` and `page-{viewer}-thorn-…`, for the DM on the dragon, Thorn, Skitter and the goblin and Pat on Thorn and Skitter, and both on Thorn's page. A player on another creature was read from the code: Pat's tracker lists only his rows.
 
@@ -146,7 +145,7 @@ Seeded room (Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity, 
 
 1. **Uses is a section of Combat, after Conditions**, the bar's list. Rejected: a Uses group of its own, folded, which hides the owner's ask behind a tap, and D-261024-38 puts it in Combat. Rejected: a second, panel-only view (D-261024-38).
 2. **Class resources fold into Uses for a character**, with Edit, Update and Add there. Rejected: a Class resources section beside Uses, which shows Rage twice in one group. Rejected: Uses without class resources in the panel, which then differs from the bar's.
-3. **Range rings move to Position.** They mark the map, are set rather than spent, and no rule of a fight changes them. Combat gains Uses, and Position's folded summary still names the rings. Rejected: keeping them in Combat, as the owner grouped them on 2026-10-17.
+3. **Range rings stay in Combat** (D-261024-39), after Reaction and before Rest. The owner grouped them there on 2026-10-17 ("the hp/conditions/range rings/rest should probably have their own drop down"), and they are read in a fight for reach and range. Rejected: Position, where they would sit beside elevation and facing as a map aid, since it reverses the owner's own grouping and folds them away mid-fight.
 4. **Reaction is a section while the creature is in the fight.** Rejected: leaving Reaction used and Ready in the tracker alone, which breaks D-261024-38's rule. Rejected: a Turn section with the initiative value and Roll, a second place to reorder the fight, which W7B-P-6 kept a stray tap from doing.
 5. **Initiative**: the bonus stays a quick number ("Init +2") and a Stats field, the value and its Roll stay the row's. Rejected: the value in the panel.
 6. **Death saves stay in Hit points**, beside the 0 HP that brings them. Rejected: a section of their own. The turn-start card stays a prompt, not their home.
@@ -163,14 +162,14 @@ Seeded room (Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity, 
 - **Loading**: Uses keeps the list's own: counts at once, rows that need the block under the shared Loading ("Loading the uses…", after 200 ms), the inline reload on failure, and each button busy until the server answers. Reaction used is busy for a player until answered. Duplicate and Dismiss as the bar's.
 - **Keys and focus**: no new keys. Edit, Update and Add hand ResourceSheet their button for focus to return to. Escape in a pool's amount field closes only the field, never the sheet. Dismiss's second tap is a new name on the same focused button.
 - **Screen readers**: headings "Uses" and "Reaction" (h4) in Combat. The list is named "{name}'s uses". An off button keeps its focus and reads why. The pips keep the row's names.
-- **Large sizes**: every new section was drawn at 130% (section 5). Edit shares the resource's button line: by an estimate Use…, Restore… and Edit take about 196 of 214 layout px at 320 x 568 at 130%, so the builder measures it. Rings' orphan field (section 2) is fixed or allowed as it moves.
-- **The exact words**: "Uses", "Reaction", "Reaction used" with the three help lines of 3.2, "Add a class resource", "Legendary Actions used", "Legendary Resistances used today", "Legendary Actions per round", "Legendary Resistance per day", "Light", "Row hidden from players", "Duplicate", "Dismiss", "Dismiss {name}?", Position's "rings 30 ft".
+- **Large sizes**: every new section was drawn at 130% (section 5). Edit shares the resource's button line: by an estimate Use…, Restore… and Edit take about 196 of 214 layout px at 320 x 568 at 130%, so the builder measures it. Rings' orphan field (section 2) is fixed or allowed in S2, which redraws Combat.
+- **The exact words**: "Uses", "Reaction", "Reaction used" with the three help lines of 3.2, "Add a class resource", "Legendary Actions used", "Legendary Resistances used today", "Legendary Actions per round", "Legendary Resistance per day", "Light", "Row hidden from players", "Duplicate", "Dismiss", "Dismiss {name}?", Combat's "rings 30 ft".
 
 ## 8. Cases
 
 | Case | Expected | Test |
 |---|---|---|
-| The DM on the dragon, off its turn | Combat: Hit points, Conditions, Uses with Fiery Rays live and the pips, Reaction, Rest. Rings under Position | tokenpanel |
+| The DM on the dragon, off its turn | Combat: Hit points, Conditions, Uses with Fiery Rays live and the pips, Reaction, Range rings, Rest | tokenpanel |
 | Fiery Rays from the panel | A pip spent, the row's LA chip and the bar's drawer show it | combatuses |
 | Pat on Thorn | Uses: Rage 2 of 3 with Use, Restore and Edit, Add. No Class resources heading | classresources |
 | Pat adds a resource from the panel's Uses | The sheet opens, Add returns focus to "Add a class resource" | classresources |
@@ -179,7 +178,7 @@ Seeded room (Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity, 
 | No fight | No Reaction section | panelOrder.test |
 | Skitter sharing Thorn's turn | Reaction is its own switch with its help line | tokenpanel |
 | Reaction used toggled in the panel | The row's "Reaction used" tag and switch follow | combat |
-| Pat on the dragon | HP as allowed and Conditions. No Uses, no Reaction, Position only for its rings | tokenpanel |
+| Pat on the dragon | HP as allowed, Conditions and its rings' line. No Uses, no Reaction, no Position | tokenpanel |
 | A monster whose block loads | Uses holds the list's loading line, then its rows | combatuses |
 | Regeneration skipped, then the turn card dismissed | Reopen in the panel's Uses, the row's group and the drawer, gone after Next | combatuses, logic.test |
 | The DM's row options | Uses before Row hidden from players | combat |
@@ -190,9 +189,9 @@ Seeded room (Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity, 
 
 ## 9. Tests
 
-- `panelOrder.test.ts`: Combat's order for the DM, an owner, another player, a character, a companion and an object. Uses only with presence or a character's resources for the DM and its players. Reaction only with a row and full access. Rings in Position, and Position for another's creature only with rings. Every section once.
+- `panelOrder.test.ts`: Combat's order for the DM, an owner, another player, a character, a companion and an object. Uses only with presence or a character's resources for the DM and its players. Reaction only with a row and full access. Range rings after Reaction and before Rest, Position as today. Every section once.
 - `logic.test.ts` (`usesRows`): skipped rows in the list form while the record is current, none after Next.
-- e2e, the touched files plus `reach`: `tokenpanel`, `classresources`, `combatuses`, `combat`, `characters`, `companions`, `attach`, `alignment` (the Uses and Reaction sections and Position with rings as roots, at the sweep's sizes).
+- e2e, the touched files plus `reach`: `tokenpanel`, `classresources`, `combatuses`, `combat`, `characters`, `companions`, `attach`, `alignment` (the Uses and Reaction sections as roots, at the sweep's sizes).
 - **Mutation**: COMBAT in today's order fails panelOrder.test. Skipped rows card-only fails logic.test and combatuses. The old menu order fails combat's order step. Stats' used steppers back fail tokenpanel.
 
 ## 10. Lane plan
@@ -205,8 +204,8 @@ It builds after the bar stack and the second icon pass land. The bar edits Chara
 | **S2, the groups**, in the icon pass's lane right after its Token panel part | tokens/panelOrder.ts, panels/TokenPanel.tsx, tokens/CharacterCard.tsx, vision/TokenSight.tsx, a `useDuplicate` hook out of canvas/TokenActionBar.tsx, resources/ClassResourcesSection.tsx deleted, panelOrder.test.ts | tokenpanel, characters, companions, attach, alignment |
 
 - **S1's first commit** exports `UsesSection({ target, name, character? })` and `ReactionSection({ self, name })`, so S2 starts from it.
-- **Why S2 shares the icon lane**: both change the same group headers and summaries in TokenPanel.tsx and CharacterCard.tsx, and the icon pass's summary floor (its 3.3) cuts the new Combat and Position summaries. Built after it, S2 measures them against the floor.
-- **Docs**, in S2's last commit: FEATURES.md lines 126 (the groups), 177 (Reaction used), 290 (Uses in the panel and page), 375 (class resources in Uses), and docs/dm-guide.md 473 (Combat and Position), 591 to 592 (the options' order, the renamed switch, Reaction in the panel) and 1079 (class resources in Uses).
+- **Why S2 shares the icon lane**: both change the same group headers and summaries in TokenPanel.tsx and CharacterCard.tsx, and the icon pass's summary floor (its 3.3) cuts the new Combat summary. Built after it, S2 measures them against the floor.
+- **Docs**, in S2's last commit: FEATURES.md lines 126 (the groups), 177 (Reaction used), 290 (Uses in the panel and page), 375 (class resources in Uses), and docs/dm-guide.md 473 (Combat's sections), 591 to 592 (the options' order, the renamed switch, Reaction in the panel) and 1079 (class resources in Uses).
 
 ## As built
 
