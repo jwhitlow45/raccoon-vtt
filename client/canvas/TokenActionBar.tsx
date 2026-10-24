@@ -874,9 +874,11 @@ type FrameControls = {
    * The bar spans an upright phone: it rests as the strip or is expanded,
    * and the button left of Close switches. `scrolls` is the strip where
    * Expand is not offered, which holds the whole bar under its quick row
-   * and scrolls (5.4). Null where the bar docks or opens compact.
+   * and scrolls (5.4). `words` is a strip wide enough for Expand's and
+   * Collapse's words beside the chevron. Null where the bar docks or opens
+   * compact.
    */
-  rest: { resting: boolean; scrolls: boolean; expand(): void; collapse(): void } | null;
+  rest: { resting: boolean; scrolls: boolean; expand(): void; collapse(): void; words: boolean } | null;
   /** The grip a button or its dots, and where an elevation badge goes, by the docked window's width (barDock.ts headerLayout). */
   header: { grip: "button" | "dots"; badgeInHeader: boolean };
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
@@ -901,6 +903,18 @@ const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: t
 const NO_RAISE = () => {};
 
 const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE, strip: null });
+
+/**
+ * The strip's width, in layout px, from which Expand and Collapse show
+ * their words beside the chevron (docs/design-v1-icons-2.md 8): 374, the
+ * strip of a 390 x 844 phone at 100%, and the 57 the words add to the
+ * button. From there the title keeps the 252 px it has on that phone with
+ * the chevron alone, the room the bar design fits the HP entry's sentences
+ * to, so the words never send a sentence such as "7 damage, not Goblin 1,
+ * Goblin 2" from its line to the title's two lines. That leaves the words
+ * to a phone at 85%, such as 390 x 844 (443 px).
+ */
+const EXPAND_WORDS_MIN = 431;
 
 /** Reset's name and tooltip, on every device. */
 const RESET_LABEL = "Reset window position and size";
@@ -940,12 +954,18 @@ function BarHeader(props: { title: string; status?: ReactNode; sentence?: RestSe
     errorWas.current = error;
     if (came && rest?.scrolls) strip?.toTop();
   }, [error, rest?.scrolls, strip]);
+  const summary = resting && strip?.summary ? <HeaderSummaryButton summary={strip.summary} /> : null;
+  // Expand and Collapse change the whole bar, so they say so in words beside the chevron where the strip is wide enough and no summary stands beside them, else the chevron alone names itself (D-261024-37 amended).
+  const restWords = rest !== null && rest.words && summary === null;
   const sizeButton = !rest ? null : rest.scrolls ? (
     <IconButton icon="scrollMore" label="Scroll for more" onClick={() => strip?.scrollMore()} />
+  ) : restWords ? (
+    <Button size="sm" variant="quiet" icon={rest.resting ? "chevronUp" : "chevronDown"} data-bar-size="" onClick={rest.resting ? rest.expand : rest.collapse} style={{ flex: "none" }}>
+      {rest.resting ? "Expand" : "Collapse"}
+    </Button>
   ) : (
-    <IconButton icon={rest.resting ? "chevronUp" : "chevronDown"} label={rest.resting ? "Expand" : "Collapse"} onClick={rest.resting ? rest.expand : rest.collapse} />
+    <IconButton icon={rest.resting ? "chevronUp" : "chevronDown"} label={rest.resting ? "Expand" : "Collapse"} data-bar-size="" onClick={rest.resting ? rest.expand : rest.collapse} />
   );
-  const summary = resting && strip?.summary ? <HeaderSummaryButton summary={strip.summary} /> : null;
   // Reset shows only while the window docks, and the size only while the bar spans, so the two never stand together.
   const beforeClose = place?.moved ? (
     <IconButton icon="windowHome" label={RESET_LABEL} onClick={place.reset} onFocus={() => place.onResetFocus(true)} onBlur={() => place.onResetFocus(false)} />
@@ -1573,7 +1593,7 @@ function BarFrame(props: {
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
   const short = barShort({ layout, viewport: props.viewport, chrome, foot, restFoot, anchor: props.anchor, spot, column, width, size, resizable: finePointer, heldMode, cardAt });
   const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
-  const rest: FrameControls["rest"] = mode === "span" ? { resting: restState === "rest", scrolls, expand, collapse } : null;
+  const rest: FrameControls["rest"] = mode === "span" ? { resting: restState === "rest", scrolls, expand, collapse, words: placed.hang.width >= EXPAND_WORDS_MIN } : null;
   /*
    * The scrolling strip (5.4): Scroll for more brings the row at its foot
    * to its top, its window less a quick row, and the header and quick row
@@ -2255,7 +2275,8 @@ function useMultiToggle(rest: FrameControls["rest"], multi: boolean): { ref: Ref
     const frame = ref.current?.closest<HTMLElement>('[role="dialog"]') ?? null;
     rest.collapse();
     if (rest.resting) return;
-    requestAnimationFrame(() => frame?.querySelector<HTMLElement>('button[aria-label="Expand"]')?.focus({ preventScroll: true }));
+    // Found by its mark, since Expand in words carries no aria-label.
+    requestAnimationFrame(() => frame?.querySelector<HTMLElement>("button[data-bar-size]")?.focus({ preventScroll: true }));
   };
   return { ref, toggle };
 }

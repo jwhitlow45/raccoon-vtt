@@ -2526,5 +2526,85 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await thornAlive();
       }
     });
+
+    test("ic2-bar-1. Expand and Collapse show their words beside the chevron where the strip has room, at 390 x 844 at 85%, its name whole, its status line keeping AC and HP and focus kept on Expand, and the chevron alone at 390 x 844 at 130% to 100% and 320 x 568, their words their name (docs/design-v1-icons-2.md 8)", async () => {
+      /** The header's Expand or Collapse: its words, whether its chevron draws, and its width in layout px. */
+      const sizeControl = (bar: Locator) =>
+        bar
+          .getByRole("button", { name: /^(Expand|Collapse)$/ })
+          .first()
+          .evaluate((el) => {
+            const button = el as unknown as PageEl & { currentCSSZoom?: number };
+            return { words: (button.textContent ?? "").trim(), chevron: button.querySelector("svg") !== null, width: Math.round(button.getBoundingClientRect().width / (button.currentCSSZoom ?? 1)) };
+          });
+      /** Whether the strip's name is cut, and the status line under it. */
+      const titleAndLine = (bar: Locator) =>
+        bar.evaluate((el) => {
+          const frame = el as unknown as PageEl;
+          const title = frame.querySelector("strong");
+          const cut = title !== null && [title, ...title.querySelectorAll("span")].some((s) => s.scrollWidth > s.clientWidth + 0.5);
+          return { cut, line: frame.querySelector("[data-rest-status]")?.getAttribute("data-rest-line") ?? "" };
+        });
+      const state = (bar: Locator, want: string) => until(`the bar ${want}`, () => bar.getAttribute("data-bar-state"), (s) => s === want);
+      // The words need a strip of 431 px, which keeps the title as wide as at 390 x 844 with the chevron alone: 443 at 390 x 844 at 85%, and 374 at 100%.
+      const views = [
+        { view: { width: 320, height: 568, scale: 1.3 }, words: false },
+        { view: { width: 390, height: 844, scale: 1.3 }, words: false },
+        { view: { width: 390, height: 844, scale: 1.15 }, words: false },
+        { view: { width: 390, height: 844, scale: 1 }, words: false },
+        { view: { width: 390, height: 844, scale: 0.85 }, words: true },
+        { view: { width: 320, height: 568, scale: 1 }, words: false },
+      ];
+      /** Whether focus stands on the strip's Expand. */
+      const focusOnExpand = (bar: Locator) => expandButton(bar).evaluate((el) => el.ownerDocument.activeElement === el);
+      // A longer name and a longer status line than Thorn's, by Goblin 1 named as the bar design's dragon.
+      const dragon = { ...run.goblin1, name: "Adult Red Dragon" };
+      await ops.send({ t: "token.update", tokenId: dragon.id, patch: { name: dragon.name } });
+      await waitFor("Goblin 1 named Adult Red Dragon", () => dmSocket.state?.tokens[dragon.id]?.name === dragon.name);
+      try {
+        for (const { view, words } of views) {
+          const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+          await setUp(dm, view);
+          for (const t of [run.thorn, dragon]) {
+            const at = `${label}, ${t.name}`;
+            const bar = await openBar(dm, t);
+            await state(bar, "rest");
+            const expand = await sizeControl(bar);
+            if (words) {
+              assert.deepEqual({ words: expand.words, chevron: expand.chevron }, { words: "Expand", chevron: true }, `${at}: Expand`);
+              const header = await titleAndLine(bar);
+              assert.equal(header.cut, false, `${at}: the name is cut beside Expand's words`);
+              assert.match(header.line, /^AC \d+ · HP \d+\/\d+/, `${at}: the status line beside Expand's words`);
+            } else assert.deepEqual(expand, { words: "", chevron: true, width: 44 }, `${at}: Expand`);
+            assert.deepEqual(await alignmentOf(dm, bar, `the strip at ${at}`), []);
+            await shots.take(dm, `ic2-bar-1-${view.width}-${Math.round(view.scale * 100)}-${t.name.replaceAll(" ", "-").toLowerCase()}`);
+            await expandButton(bar).tap();
+            await state(bar, "expanded");
+            const collapse = await sizeControl(bar);
+            if (words) assert.deepEqual({ words: collapse.words, chevron: collapse.chevron }, { words: "Collapse", chevron: true }, `${at}: Collapse`);
+            else assert.deepEqual(collapse, { words: "", chevron: true, width: 44 }, `${at}: Collapse`);
+            assert.deepEqual(await alignmentOf(dm, bar.locator("[data-sticky-header]"), `the expanded bar's header at ${at}`), []);
+            await collapseButton(bar).click();
+            await state(bar, "rest");
+            await until(`${at}: focus on Expand after Collapse`, () => focusOnExpand(bar), (on) => on);
+            if (words) {
+              // Multi-select from the expanded bar rests it and hands focus to Expand, which its words leave with no aria-label (review BB-OPUS-11).
+              await expandButton(bar).click();
+              await state(bar, "expanded");
+              await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
+              await state(bar, "rest");
+              await until(`${at}: focus on Expand after Multi-select`, () => focusOnExpand(bar), (on) => on);
+              await press(bar, "Multi-select");
+              await waitFor("Multi-select off", async () => ((await dm.getByRole("toolbar", { name: "Select options" }).count()) === 0 ? true : null), 3_000);
+            }
+            await closeBars(dm);
+          }
+        }
+      } finally {
+        await ops.send({ t: "token.update", tokenId: dragon.id, patch: { name: run.goblin1.name } });
+        await waitFor("Goblin 1 named again", () => dmSocket.state?.tokens[dragon.id]?.name === run.goblin1.name);
+        await setUp(dm, PHONES[0]);
+      }
+    });
   });
 });
