@@ -1256,6 +1256,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
             await openOn(dm, run.goblin2);
             const goblin = bar(dm, "Goblin 2");
             await goblin.locator("[data-rest-row] [data-rest-mode]").click();
+            // The note stands while the field holds something (review BARBUILD-ASTRA-07).
+            await goblin.locator("[data-rest-row]").getByRole("textbox", { name: "HP change" }).fill("5");
             const note = goblin.locator("[data-rest-note]");
             await note.waitFor();
             await lined(note, "the strip's note");
