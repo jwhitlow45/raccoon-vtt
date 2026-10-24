@@ -84,6 +84,31 @@ async function breesPage(page: Page): Promise<Locator> {
   return panel;
 }
 
+async function checkRow(summary: string, label: string): Promise<void> {
+  for (const view of SIZES) {
+    const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+    await anaCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+    await ana.setViewportSize({ width: view.width, height: view.height });
+    await ana.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+    await ana.goto(`${server.origin}/r/${run.roomId}`);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    await ana.locator(".konvajs-content").first().waitFor();
+    const panel = await breesPage(ana);
+    const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+    const take = panel.getByRole("button", { name: "Take a shape, 4 known forms", exact: true });
+    await take.waitFor();
+    assert.equal((await take.textContent())?.trim(), "4 shapes");
+    assert.equal(await panel.getByText(/known forms?$/).count(), 0, `${at}: the summary counts no forms`);
+    await panel.getByText(summary, { exact: true }).waitFor();
+    assert.equal(await textLines(take), 1, `${at}: 4 shapes stays on one line`);
+    assert.equal(await panel.getByRole("heading", { name: "Known forms" }).count(), 0, `${at}: no Known forms section`);
+    const row = take.locator(`xpath=ancestor::*[.//button[normalize-space()="Stat block"]][1]`);
+    assert.deepEqual(alignmentLines(await measureAlignment(row), `the folded Stat block row ${label} at ${at}`), [], "out of line by more than 1 px");
+    await shots.take(ana, `fu28-forms-${label}-${view.width}-130`);
+  }
+}
+
 describe("raccoon-vtt: a Druid's Take a shape row", { timeout: 300_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -145,29 +170,13 @@ describe("raccoon-vtt: a Druid's Take a shape row", { timeout: 300_000 }, () => 
   });
 
   test("fu28-forms-1. the folded row says Level 5, PB +3 with no known forms, and Take a shape reads 4 shapes on one line, in line, at 390 x 844 and 320 x 568 at 130%", async () => {
-    for (const view of SIZES) {
-      const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
-      await anaCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
-      await ana.setViewportSize({ width: view.width, height: view.height });
-      await ana.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
-      await ana.goto(`${server.origin}/r/${run.roomId}`);
-      await ana.getByRole("status", { name: "Connected" }).first().waitFor();
-      await ana.locator(".konvajs-content").first().waitFor();
-      const panel = await breesPage(ana);
-      const fold = panel.getByRole("button", { name: "Stat block", exact: true });
-      if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
-      const take = panel.getByRole("button", { name: "Take a shape, 4 known forms", exact: true });
-      await take.waitFor();
-      assert.equal((await take.textContent())?.trim(), "4 shapes");
-      assert.equal(await panel.getByText(/known forms?$/).count(), 0, `${at}: the summary counts no forms`);
-      await panel.getByText("Level 5, PB +3", { exact: true }).waitFor();
-      const lines = await textLines(take);
-      assert.equal(lines, 1, `${at}: 4 shapes stays on one line`);
-      const row = take.locator(`xpath=ancestor::*[.//button[normalize-space()="Stat block"]][1]`);
-      const found = alignmentLines(await measureAlignment(row), `the folded Stat block row at ${at}`);
-      assert.deepEqual(found, [], "out of line by more than 1 px");
-      await shots.take(ana, `fu28-forms-${view.width}-130`);
-    }
+    await checkRow("Level 5, PB +3", "block");
+  });
+
+  test("fu28-forms-1b. in Wild Shape as a Giant Constrictor Snake the button stays on the row as 4 shapes, on one line and in line, at the same sizes", async () => {
+    await ops.send({ t: "character.update", characterId: run.bree, patch: { actor: { srdId: "giant-constrictor-snake", wildShape: true } } });
+    await waitFor("the shape", () => (anaSocket.state?.characters[run.bree]?.actor.srdId === "giant-constrictor-snake" ? true : null));
+    await checkRow("Wild Shape: Giant Constrictor Snake", "wild");
   });
 
   test("fu28-forms-2. no console errors", () => {

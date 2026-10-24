@@ -4,7 +4,7 @@ import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts"
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { Group, Help, Section } from "../../components/Panel.tsx";
+import { Group, Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -14,14 +14,13 @@ import { pcBlockSummary } from "../tokens/creatureKind.ts";
 import { useSrdList } from "../tokens/StatSummary.tsx";
 import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
-import { knownFormPatch, knownFormsIn, missingFormText, rememberedDruidLevel } from "./knownForms.ts";
 import { useOpenPcStats, useOpenResync } from "./open.ts";
 import { lastSyncedLine, resyncNumber } from "./resync.ts";
 import { ddbCharacterId } from "#shared/ddb/link.ts";
 import { PcStatsView } from "./PcStatsView.tsx";
 import { END_SHAPE, shapeNote } from "./shape.ts";
 import { useCharacterRollNumbers } from "./useRollNumbers.ts";
-import { noFormsText, ShapePicker } from "./ShapePicker.tsx";
+import { ShapePicker } from "./ShapePicker.tsx";
 
 /**
  * A player character's "Stat block" section (docs/design-v1-pc-stats.md
@@ -35,8 +34,8 @@ import { noFormsText, ShapePicker } from "./ShapePicker.tsx";
  * view and Edit. Edit has "Re-sync from D&D Beyond" beside it, in a shape
  * too, for a character synced from D&D Beyond or linked to it, and when it
  * last synced under them (docs/design-v1-resync.md 1.1). A Druid's known
- * forms come first, each a one-tap Wild Shape, in no shape or in Wild
- * Shape (docs/design-v1-known-forms.md 5.3).
+ * forms live in the Take a shape picker, which the button opens in no shape
+ * or in Wild Shape (docs/design-v1-known-forms.md 5.3, D-261024-29).
  */
 export function PcStatBlock(props: {
   character: Character;
@@ -49,13 +48,11 @@ export function PcStatBlock(props: {
   // A token's owner who does not own its character gets no section at all (statBlockShown), and never the buttons that change it.
   const edits = editsPcStats(you, character);
   const [picking, setPicking] = useState(false);
-  // The known forms step the section's Change opens, kept here so removing the last form, which can drop the section, leaves it open in the user's hands.
-  const [choosingForms, setChoosingForms] = useState(false);
   const shaped = pcShape(character) !== "none";
-  // In another shape, such as Polymorph, the forms are not drawn: End the shape first.
+  // In another shape, such as Polymorph, the button is hidden: End the shape first. In Wild Shape it stays, as the way to change form or forms.
   const formCount = edits && pcShape(character) !== "other" ? (character.knownForms?.length ?? 0) : 0;
   // The count lives on the button, not in the folded summary, which would crowd the row (D-261024-26, D-261024-27). The name stays an action.
-  const take = shaped || !edits ? null : (
+  const take = !edits || pcShape(character) === "other" ? null : (
     <SmallButton wrap label={formCount > 0 ? `Take a shape, ${formCount} known ${formCount === 1 ? "form" : "forms"}` : undefined} onClick={() => setPicking(true)}>
       {formCount > 0 ? `${formCount} ${formCount === 1 ? "shape" : "shapes"}` : "Take a shape"}
     </SmallButton>
@@ -69,20 +66,15 @@ export function PcStatBlock(props: {
   const picker = (
     <>
       {picking ? <ShapePicker character={character} onClose={() => setPicking(false)} /> : null}
-      {choosingForms ? <ShapePicker character={character} start="forms" onClose={() => setChoosingForms(false)} /> : null}
     </>
   );
-  // In Wild Shape, Take a shape is hidden, so the section shows even with no forms, as the one way to choose them without ending the shape.
-  const showsForms = formCount > 0 || (edits && pcShape(character) === "wild");
-  const forms = showsForms ? <KnownFormsSection character={character} onChange={() => setChoosingForms(true)} /> : null;
   // Folded, the row says what the block holds, so it reads without opening (docs/design-v1-look-pass.md 3.3).
   const summary = pcBlockSummary(character);
   if (!character.stats && !shaped) {
     return (
       <>
         <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
-          {forms}
-          {edits ? (
+            {edits ? (
             <>
               <Help>Add this character's stat block, or take a shape such as Wild Shape.</Help>
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
@@ -99,7 +91,6 @@ export function PcStatBlock(props: {
   return (
     <>
       <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary} action={take}>
-        {forms}
         {shaped ? <ShapeBody character={character} edits={edits} /> : <PcStatsView character={character} />}
         {edits ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
@@ -116,70 +107,6 @@ export function PcStatBlock(props: {
       </Group>
       {picker}
     </>
-  );
-}
-
-/**
- * A Druid's known forms as one-tap buttons, sorted as in Take a shape. One
- * takes the form as Wild Shape, as there. In Wild Shape the buttons are
- * toggles: the current form is pressed and unavailable, keeping the focus a
- * tap just gave it, and the others change to theirs, which is using Wild
- * Shape again. The reducer keeps the first AC and speeds to put back, and
- * the new form's Temporary HP go only where they are more than held. Out of
- * a shape they are plain buttons, never toggles. Each button's text names
- * it, with no `label`, which would also set a native tooltip.
- *
- * Change, in the label's action slot, opens the step that chooses them,
- * "Choose known forms" while there are none (docs/design-v1-look-pass.md 5,
- * docs/design-v1-look-pass-2.md D19).
- */
-function KnownFormsSection(props: { character: Character; onChange(): void }) {
-  const { character } = props;
-  const actions = useRoomActions();
-  const roomId = useRoomView((s) => s.roomId);
-  const { list, failed } = useSrdList(true);
-  const known = knownFormsIn(character.knownForms, list ?? []);
-  const current = pcShape(character) === "wild" ? character.actor.srdId : undefined;
-  const none = (character.knownForms?.length ?? 0) === 0;
-  const change = (
-    <SmallButton wrap onClick={props.onChange}>
-      {none ? "Choose known forms" : "Change"}
-    </SmallButton>
-  );
-  if (none) {
-    return (
-      <Section label="Known forms" action={change}>
-        <Help>{noFormsText(character.name)}</Help>
-      </Section>
-    );
-  }
-  return (
-    <Section label="Known forms" action={change}>
-      {failed ? (
-        <SrdLoadFailed what="The known forms" inline />
-      ) : !list ? (
-        <Loading text="Loading the known forms…" />
-      ) : (
-        <>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-            {known.forms.map((m) => (
-              <SmallButton
-                key={m.srdId}
-                wrap
-                pressed={current !== undefined ? m.srdId === current : undefined}
-                unavailable={m.srdId === current}
-                onClick={() => actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: knownFormPatch(m, character, rememberedDruidLevel(roomId, character.id)) } })}
-              >
-                {m.name}
-              </SmallButton>
-            ))}
-          </div>
-          {known.missing.map((id) => (
-            <Note key={id}>{missingFormText(id)}</Note>
-          ))}
-        </>
-      )}
-    </Section>
   );
 }
 
