@@ -478,6 +478,9 @@ export function recordTooBigText(name: string): string {
 
 export const NOTHING_NEW = "Nothing new from D&D Beyond.";
 
+/** The editor's notice when a Save was refused because the class resources changed elsewhere (docs/design-v1-ddb-resources.md 6.2). */
+export const RESOURCES_STALE = (name: string) => `${whose(name)} class resources changed on another device before this saved, so nothing was saved. Check the review again.`;
+
 /** The dialog's other words (3.2 to 3.5). */
 export const RESYNC_WORDS = {
   getting: (name: string) => `Getting ${name} from D&D Beyond…`,

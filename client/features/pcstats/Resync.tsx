@@ -21,9 +21,9 @@ import { blockTooBigText, doneLine, lateApplyText, lateUndoText, recordTooBigTex
 import { openResync, stepResync, type ResyncEffect, type ResyncEvent, type ResyncState, type SyncAnswer, type SyncOp } from "./resyncFlow.ts";
 import { SyncReview, type ReviewSection } from "./SyncReview.tsx";
 
-/** Every line a plan lists, by id, as the flow keeps ticks for them. */
+/** Every line a plan lists, by id, as the flow keeps ticks for them: the class resources' spent lines too. */
 function lineIds(plan: SyncPlan): string[] {
-  return [...plan.items.map((i) => i.id), ...plan.also.map((a) => a.id)];
+  return [...plan.items.map((i) => i.id), ...plan.also.map((a) => a.id), ...plan.spent.map((s) => s.id)];
 }
 
 function planFor(character: Character, fill: PcFill): SyncPlan {

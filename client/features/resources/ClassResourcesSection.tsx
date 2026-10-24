@@ -39,7 +39,7 @@ export function ClassResourcesSection(props: { character: Character }) {
       {resources.length > 0 ? (
         <ResourceList characterId={character.id} resources={resources} back edit={(r, from) => open({ kind: "edit", id: r.id }, from)} />
       ) : (
-        <Help>Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level or typed.</Help>
+        <Help>Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, typed, or brought in with Re-sync from D&D Beyond.</Help>
       )}
       {full ? (
         <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>

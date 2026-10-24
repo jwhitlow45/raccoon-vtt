@@ -29,11 +29,11 @@ function fillOf(stats: Partial<PcStats>): PcFill {
 
 const bree = (stats?: PcStats): Character => character("bree", { name: "Bree", level: 5, ...(stats ? { stats } : {}), actor: actor({ ac: 15, hp: { cur: 38, max: 38, temp: 0 }, speeds: { walk: 30 }, senses: "", sheetUrl: SHEET }) });
 
-function render(c: Character, fill: PcFill, ticks?: Set<string>, mode: "resync" | "editor" = "resync"): { html: string; plan: SyncPlan } {
+function render(c: Character, fill: PcFill, ticks?: Set<string>, mode: "resync" | "editor" = "resync", only?: "resources"): { html: string; plan: SyncPlan } {
   const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill });
   const t = ticks ?? defaultTicks(plan);
   const result = syncResult(plan, t);
-  const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}` }));
+  const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}`, ...(only ? { only } : {}) }));
   return { html, plan };
 }
 
@@ -116,5 +116,46 @@ describe("the review's spacing and chevrons (docs/design-v1-look-pass-2.md 2.5 a
     const sections = [...editor.html.matchAll(/<section style="([^"]+)"/g)].map((m) => m[1]);
     assert.ok(sections.length > 0);
     for (const style of sections) assert.match(style ?? "", /grid-template-columns:minmax\(0, 1fr\);gap:8px/);
+  });
+});
+
+describe("the review's class resources (docs/design-v1-ddb-resources.md 6.1 and 6.3)", () => {
+  const rage = { name: "Rage", max: 3, reset: "shortOne" as const, preset: "barbarian-rage", level: 3, classId: "barbarian" as const, used: 0 };
+  const withResources = (fill: PcFill, resources: NonNullable<PcFill["resources"]>): PcFill => ({ ...fill, read: { weapon: true, spell: true, other: true, resource: true }, resources });
+  function synced(): Character {
+    const c0 = bree();
+    const fill = withResources(fillOf({ spellAbility: "wis" }), [rage]);
+    const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill });
+    return { ...c0, ...afterSync(c0, syncPatch(c0, syncResult(p0, defaultTicks(p0)))!.patch, "2026-10-20T19:00:00.000Z") } as Character;
+  }
+
+  test("a spent line is a checkbox in Also set, before the name, named by its words and described by its help", () => {
+    const base = synced();
+    const spent = { ...base, resources: base.resources!.map((r) => ({ ...r, used: 2 })) };
+    const { html } = render(spent, { ...withResources(fillOf({ spellAbility: "wis" }), [rage]), name: "Bree Tallow" });
+    assert.match(html, /id="label-also"/);
+    const words = html.indexOf("Rage 3 of 3 left, now 1 of 3");
+    assert.ok(words > 0 && words < html.indexOf("Name Bree Tallow, now Bree"), "before the name's line");
+    assert.match(html, /Unticked keeps what was spent here\./);
+    assert.doesNotMatch(html.slice(html.lastIndexOf("<input", words), words), /checked=""/, "unticked");
+  });
+
+  test("Class resources is a group of Changes, after Rolls, with its own words", () => {
+    const { html } = render(synced(), withResources(fillOf({ spellAbility: "wis" }), [rage, { name: "Luck Points", max: 3, reset: "long", used: 1 }]));
+    assert.match(html, />Adds Luck Points: 3 uses, back on a Long Rest, 2 of 3 left</);
+  });
+
+  test("after a refused Save, the class resources alone: no other group, Check these or name line", () => {
+    const base = synced();
+    const spent = { ...base, resources: base.resources!.map((r) => ({ ...r, used: 2 })) };
+    const fill = { ...withResources(fillOf({ spellAbility: "cha" }), [{ ...rage, max: 4 }]), name: "Bree Tallow", warnings: ["A warning."] };
+    const all = render(spent, fill).html;
+    assert.match(all, /Spellcasting ability/);
+    const only = render(spent, fill, undefined, "resync", "resources").html;
+    assert.doesNotMatch(only, /Spellcasting ability/);
+    assert.doesNotMatch(only, /A warning\./);
+    assert.doesNotMatch(only, /Name Bree Tallow/);
+    assert.match(only, /Updates Rage: 4 uses, now 3/);
+    assert.match(only, /Rage 4 of 4 left, now 2 of 4/);
   });
 });

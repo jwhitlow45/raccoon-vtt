@@ -40,7 +40,7 @@ describe("the Class resources section", () => {
   test("with none: what it is for, and Add", () => {
     const markup = section({});
     assert.match(markup, /Class resources<\/h/);
-    assert.match(markup, />Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level or typed.</);
+    assert.match(markup, />Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, typed, or brought in with Re-sync from D&amp;D Beyond.</);
     assert.match(markup, />Add a class resource<\/button>/);
   });
 

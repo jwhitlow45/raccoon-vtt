@@ -8,6 +8,9 @@ import { actor } from "#shared/testutil.ts";
 import { openDraft } from "./draft.ts";
 import { alsoPatch } from "./fill.ts";
 import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { expectHash } from "#shared/permissions.ts";
+import { hash12 } from "#shared/rules/pcSync.ts";
+import { goneDroppedLine } from "./resync.ts";
 import { alsoLine } from "./resync.ts";
 
 /** The editor's steps and Save (docs/design-v1-pc-stats.md 7.2). */
@@ -34,7 +37,7 @@ describe("the editor's flow", () => {
     let state = run(openFlow(opened.draft), { t: "open", step: "ddb" }).state;
     const first = editorSyncPlan(read("read-1"), state, opened, bare);
     assert.equal(first.source, "first");
-    state = run(state, { t: "read", fill: read("read-1"), lines: [], ticks: defaultTicks(first) }, { t: "use", sync: editorSyncUse(syncResult(first, defaultTicks(first)), bare) }).state;
+    state = run(state, { t: "read", fill: read("read-1"), lines: [], ticks: defaultTicks(first) }, { t: "use", sync: editorSyncUse(syncResult(first, defaultTicks(first)), bare, { fill: read("read-1"), ticks: defaultTicks(first) }) }).state;
     assert.deepEqual(state.draft.stats.rolls.map((r) => r.name), ["Sling"]);
     assert.ok(state.record);
     // Deleting the roll leaves the draft as it opened, with the record still pending.
@@ -63,7 +66,7 @@ describe("the editor's flow", () => {
       state = run(state, { t: "read", fill: f, lines: [], ticks }).state;
       return plan;
     };
-    const use = (plan: ReturnType<typeof fill>) => (state = run(state, { t: "use", sync: editorSyncUse(syncResult(plan, defaultTicks(plan)), saved) }).state);
+    const use = (plan: ReturnType<typeof fill>) => (state = run(state, { t: "use", sync: editorSyncUse(syncResult(plan, defaultTicks(plan)), saved, { fill: plan.input.fill, ticks: defaultTicks(plan) }) }).state);
     use(fill(read(35)));
     assert.equal(state.also.hpMax, 35);
     const plan = fill(read(45));
@@ -90,7 +93,7 @@ describe("the editor's flow", () => {
       state = run(state, { t: "open", step: "ddb" }).state;
       const plan = editorSyncPlan(f, state, opened, saved);
       const ticks = defaultTicks(plan);
-      state = run(state, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: editorSyncUse(syncResult(plan, ticks), saved) }).state;
+      state = run(state, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: editorSyncUse(syncResult(plan, ticks), saved, { fill: f, ticks }) }).state;
       return plan;
     };
 
@@ -141,10 +144,10 @@ describe("the editor's flow", () => {
     assert.deepEqual([...state.review!.ticks!], ["also:ac"]);
     assert.equal(run(state, { t: "use" }).state.step, "review", "Use it needs what the editor worked out");
     const record = { base: { level: 6 }, rolls: {} };
-    const used = run(state, { t: "use", sync: { stats: { ...BLOCK, saves: ["wis"] }, level: 6, also: { level: 6, ac: 16 }, record } }).state;
+    const used = run(state, { t: "use", sync: { stats: { ...BLOCK, saves: ["wis"] }, level: 6, also: { level: 6, ac: 16 }, record, resources: null } }).state;
     assert.deepEqual([used.step, used.draft.stats.saves, used.draft.level, used.also, used.record], ["block", ["wis"], 6, { level: 6, ac: 16 }, record]);
     // A later Use it replaces the record, and null, one equal to the saved record, drops it.
-    const again = run(used, { t: "open", step: "ddb" }, { t: "read", fill: ddb, lines: [], ticks: new Set() }, { t: "use", sync: { stats: used.draft.stats, level: 6, also: {}, record: null } }).state;
+    const again = run(used, { t: "open", step: "ddb" }, { t: "read", fill: ddb, lines: [], ticks: new Set() }, { t: "use", sync: { stats: used.draft.stats, level: 6, also: {}, record: null, resources: null } }).state;
     assert.equal(again.record, null);
     const pasted = run(start, { t: "open", step: "paste" }, { t: "read", fill: FILL, lines: [] }, { t: "tick", id: "x" }).state.review!;
     assert.equal(pasted.ticks, undefined, "pasted text keeps today's review");
@@ -182,7 +185,7 @@ describe("the fill flow under random taps and answers (docs/design-v1-pc-stats.m
    * nothing more is sent.
    */
   test("its invariants hold over 300 sequences of 80 steps", () => {
-    const reached = { stale: 0, used: 0, refused: 0, taken: 0, gotFill: 0, gotError: 0, abortedByGet: 0, closedMidFetch: 0, afterClose: 0 };
+    const reached = { stale: 0, used: 0, refused: 0, taken: 0, gotFill: 0, gotError: 0, abortedByGet: 0, closedMidFetch: 0, afterClose: 0, resourcesAgain: 0 };
     for (let seed = 1; seed <= 300; seed++) {
       const r = rng(seed);
       const pick = <T>(items: readonly T[]): T => items[Math.floor(r() * items.length)]!;
@@ -200,9 +203,9 @@ describe("the fill flow under random taps and answers (docs/design-v1-pc-stats.m
           () => ({ t: "toggle", key: "ac" }),
           () => ({ t: "tick", id: pick(["also:ac", "field:spellAbility"]) }),
           () => ({ t: "use" }),
-          () => ({ t: "use", sync: { stats: { ...BLOCK, saves: [pick(["wis", "cha"] as const)] }, level: 1 + Math.floor(r() * 20), also: {}, record: r() < 0.5 ? { base: {}, rolls: {} } : null } }),
+          () => ({ t: "use", sync: { stats: { ...BLOCK, saves: [pick(["wis", "cha"] as const)] }, level: 1 + Math.floor(r() * 20), also: {}, record: r() < 0.5 ? { base: {}, rolls: {} } : null, resources: r() < 0.5 ? { fill, ticks: new Set(), expect: "000000000000" } : null } }),
           () => ({ t: "save" }),
-          () => ({ t: "saved", answer: pick(["taken", "refused", "unknown", "refused"] as const) }),
+          () => ({ t: "saved", answer: pick(["taken", "refused", "unknown", "refused"] as const), ...(r() < 0.3 ? { stale: true } : {}) }),
           () => ({ t: "get" }),
           () => ({ t: "got", id: issued.length > 0 ? pick(issued) : 99, result: r() < 0.6 ? { fill, lines: [] } : { error: "D&D Beyond did not answer." } }),
           () => ({ t: r() < 0.1 ? "close" : "back" }),
@@ -250,6 +253,13 @@ describe("the fill flow under random taps and answers (docs/design-v1-pc-stats.m
           } else {
             reached.refused++;
             assert.equal(state.draft, before.draft, "a refusal leaves the draft as it was");
+            assert.equal(state.also, before.also, "and the fields beside it");
+            // Refused for the class resources: they alone are reviewed again, from the read Use it held, with no fetch (6.2 c).
+            if (event.stale && before.resources) {
+              reached.resourcesAgain++;
+              assert.deepEqual([state.step, state.review?.only, state.review?.fill], ["review", "resources", before.resources.fill]);
+              assert.deepEqual(effects, []);
+            }
           }
         }
         if (before.closed) {
@@ -259,5 +269,111 @@ describe("the fill flow under random taps and answers (docs/design-v1-pc-stats.m
       }
     }
     for (const [path, count] of Object.entries(reached)) assert.ok(count > 0, `the run reached ${path}`);
+  });
+});
+
+/** The editor's D&D Beyond step with class resources (docs/design-v1-ddb-resources.md 6.2), one row per letter. */
+describe("the editor's class resources", () => {
+  const AT = "2026-10-24T10:00:00.000Z";
+  const SHEET = "https://www.dndbeyond.com/characters/12345678";
+  const rageRead = (used = 0, max = 3) => ({ name: "Rage", max, reset: "shortOne" as const, preset: "barbarian-rage", level: 3, classId: "barbarian" as const, used });
+  const read = (resources: NonNullable<PcFill["resources"]>): PcFill => ({ source: "ddb", stats: { rolls: [] }, level: 5, name: "Bree", actor: { sheetUrl: SHEET }, warnings: [], read: { weapon: true, spell: true, other: true, resource: true }, resources });
+  /** Bree as saved: synced once with Rage, which she has spent 1 of since. */
+  function savedBree(): SyncCharacter {
+    const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ sheetUrl: SHEET }) };
+    const p = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: read([rageRead()]) });
+    const synced = afterSync(bare, syncPatch(bare, syncResult(p, defaultTicks(p)))!.patch, AT);
+    return { ...synced, resources: synced.resources!.map((r) => ({ ...r, used: 1 })) };
+  }
+  const review = (saved: SyncCharacter, f: PcFill, state: FlowState, ticks?: ReadonlySet<string>) => {
+    const opened = openDraft(saved);
+    const plan = editorSyncPlan(f, state, opened, saved);
+    const t = ticks ?? defaultTicks(plan);
+    return { plan, ticks: t, use: editorSyncUse(syncResult(plan, t), saved, { fill: f, ticks: t }) };
+  };
+
+  test("(a) Use it holds the fill, its ticks, the list and the hash of the list it was planned from", () => {
+    const saved = savedBree();
+    const f = read([rageRead(0, 4), { name: "Luck Points", max: 3, reset: "long", used: 1 }]);
+    const start = run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state;
+    const { use, ticks } = review(saved, f, start);
+    const state = run(start, { t: "read", fill: f, lines: [], ticks }, { t: "use", sync: use }).state;
+    assert.equal(state.resources?.fill, f);
+    assert.deepEqual(state.resources?.list?.map((r) => [r.name, r.max]), [["Rage", 4], ["Luck Points", 3]]);
+    assert.equal(state.resources?.expect, expectHash(saved as never, "resources"));
+    assert.ok(state.record?.res && Object.keys(state.record.res).length === 2);
+  });
+
+  test("(b) a later read plans against the live list and the saved record's part, never the pending record's new ids", () => {
+    const saved = savedBree();
+    const start = run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state;
+    const f = read([rageRead(), { name: "Luck Points", max: 3, reset: "long" }]);
+    const one = review(saved, f, start);
+    const state = run(start, { t: "read", fill: f, lines: [], ticks: one.ticks }, { t: "use", sync: one.use }, { t: "open", step: "ddb" }).state;
+    // The pending record names Luck Points by an id the live list lacks: read again, it is still an addition, never "you removed it".
+    const two = review(saved, f, state);
+    assert.deepEqual(two.plan.items.filter((i) => i.type === "resource").map((i) => i.type === "resource" && i.case), ["add"]);
+  });
+
+  test("(c) refused for the class resources: they alone are reviewed again against the live list, the draft and Also set kept, and Use it then Save sends again", () => {
+    const saved = savedBree();
+    const f = read([rageRead(0, 4)]);
+    const start = run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }, { t: "edit", update: (d) => ({ ...d, level: 6 }) }, { t: "open", step: "ddb" }).state;
+    const one = review(saved, f, start);
+    let state = run(start, { t: "read", fill: f, lines: [], ticks: one.ticks }, { t: "use", sync: one.use }).state;
+    const draft = state.draft;
+    state = run(state, { t: "save" }, { t: "saved", answer: "refused", stale: true }).state;
+    assert.deepEqual([state.step, state.review?.only], ["review", "resources"]);
+    assert.equal(state.draft, draft);
+    // Another device spent a second Rage meanwhile: the review reads the live list.
+    const live: SyncCharacter = { ...saved, resources: saved.resources!.map((r) => ({ ...r, used: 2 })) };
+    const again = review(live, f, state, state.review!.ticks);
+    assert.deepEqual(again.plan.spent.map((x) => [x.theirs, x.now]), [[0, 2]]);
+    const { effects, state: used } = run(state, { t: "use", sync: again.use }, { t: "save" });
+    assert.equal(used.draft, draft, "the draft stays");
+    assert.equal(used.resources?.expect, expectHash(live as never, "resources"));
+    assert.deepEqual(effects, ["send"]);
+  });
+
+  test("(d) a held result that changes nothing: no resources and no expect, so a spend meanwhile never refuses the Save", () => {
+    const saved = savedBree();
+    const { use } = review(saved, read([rageRead(1)]), run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state);
+    assert.equal(use.resources, null);
+    assert.equal(use.record, null);
+  });
+
+  test("(e) only a spent line ticked: held, so it counts as unsaved and Save sends it, with the record as saved", () => {
+    const saved = savedBree();
+    const start = run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state;
+    const plain = review(saved, read([rageRead(0)]), start);
+    assert.equal(plain.use.resources, null, "unticked, nothing to hold");
+    const ticked = review(saved, read([rageRead(0)]), start, new Set([...plain.ticks, plain.plan.spent[0]!.id]));
+    assert.equal(ticked.use.record, null, "the record is as saved");
+    assert.deepEqual(ticked.use.resources?.list?.map((r) => r.used), [0]);
+    const state = run(start, { t: "read", fill: read([rageRead(0)]), lines: [], ticks: ticked.ticks }, { t: "use", sync: ticked.use }).state;
+    assert.ok(state.resources, "unsaved, and Save sends it");
+  });
+
+  test("only the record's resource part changes, a removed resource's marker: held with no list, so Save expects the resources and sends the record", () => {
+    const saved0 = savedBree();
+    const saved: SyncCharacter = { ...saved0, resources: [] };
+    const { use } = review(saved, read([rageRead()]), run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state);
+    assert.ok(use.resources, "held");
+    assert.equal(use.resources.list, undefined, "the list is as it is");
+    assert.deepEqual(use.record?.gone, [`r:${hash12("barbarian:rage")}`]);
+  });
+
+  test("an editor splice past 40 markers drops the oldest, and the line names what dropped (OP-21)", () => {
+    const saved0 = savedBree();
+    const rollMarkers = Array.from({ length: 40 }, (_, i) => `o:${i.toString(16).padStart(12, "0")}`);
+    const rageId = saved0.resources![0]!.id;
+    const saved: SyncCharacter = { ...saved0, resources: [], ddbSync: { ...saved0.ddbSync!, gone: rollMarkers } };
+    const f: PcFill = { ...read([rageRead()]), read: { weapon: true, spell: true, other: false, resource: true } };
+    const { plan, ticks } = review(saved, f, run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state);
+    const result = syncResult(plan, ticks);
+    assert.equal(result.record.gone!.length, 40);
+    assert.equal(result.record.gone!.at(-1), `r:${hash12("barbarian:rage")}`);
+    assert.equal(goneDroppedLine(result.goneDropped), "A roll you deleted may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.");
+    assert.ok(!Object.keys(result.record.res ?? {}).includes(hash12(rageId)));
   });
 });

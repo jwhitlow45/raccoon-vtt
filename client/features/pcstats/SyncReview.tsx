@@ -9,7 +9,7 @@ import { SectionLabel } from "../../components/Panel.tsx";
 import { Row, RowChevron, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
-import { alsoLine, changeLine, checkLines, differentIntro, groupSummary, keptRow, lossesText, NOTHING_NEW, ownRollsLine, replacesLine, syncReadLine, type ReadingBlocks } from "./resync.ts";
+import { alsoLine, changeLine, checkLines, differentIntro, groupSummary, keptRow, lossesText, NOTHING_NEW, ownRollsLine, replacesLine, spentLine, syncReadLine, type ReadingBlocks } from "./resync.ts";
 
 /**
  * A D&D Beyond read's review (docs/design-v1-resync.md 3.3), for the
@@ -23,6 +23,11 @@ import { alsoLine, changeLine, checkLines, differentIntro, groupSummary, keptRow
  * Each section's label can take focus (`tabIndex` -1): when a live change
  * removes the row that had it, focus goes to its section's label, and the
  * dialog finds that label by `labelId`.
+ *
+ * Also set holds the class resources' spent lines, unticked, before the
+ * name (docs/design-v1-ddb-resources.md 6.1). After the editor's Save was
+ * refused for them, `only` shows the Class resources group and those lines
+ * alone (6.2).
  */
 
 /** The review's sections, in its order, as focus names them. */
@@ -64,20 +69,27 @@ export function SyncReview(props: {
   firstRef?: Ref<HTMLParagraphElement>;
   labelId(section: ReviewSection): string;
   onFocusSection?(section: ReviewSection): void;
+  /** The class resources alone, after a Save refused for them. */
+  only?: "resources";
 }) {
   const { plan, result, ticks, name } = props;
+  const only = props.only === "resources";
   const blocks: ReadingBlocks = {
     now: { stats: plan.input.stats ?? (EMPTY_PC_STATS as PcStats), level: plan.input.level },
     after: { stats: result.stats, level: result.level },
   };
   const first = plan.source === "first";
-  const of = (section: SyncSection) => plan.items.filter((i) => i.section === section);
+  const of = (section: SyncSection) => plan.items.filter((i) => i.section === section && (!only || i.group === "Class resources"));
   const changes = of("changes");
   const kept = of("kept");
   const different = of("different");
   const replaces = of("replaces");
-  const checks = checkLines(plan, result, name);
-  const losses = lossesText(plan, name);
+  const checks = only ? [] : checkLines(plan, result, name);
+  const losses = only ? null : lossesText(plan, name);
+  // The name's line stays last, after the counts spent.
+  const also = only ? [] : plan.also.filter((a) => a.key !== "name");
+  const nameLine = only ? undefined : plan.also.find((a) => a.key === "name");
+  const spent = result.spent;
   const overwrite = [...bulkIds(plan, "kept"), ...bulkIds(plan, "different")];
   const overwriteAll = overwrite.length > 0 ? <BulkButton ids={overwrite} ticks={ticks} onBulk={props.onBulk} disabled={props.disabled} words="Overwrite all" /> : null;
   const section = (key: ReviewSection, label: string, body: ReactNode, action?: ReactNode) => (
@@ -123,11 +135,20 @@ export function SyncReview(props: {
         : props.nothingNew
           ? section("changes", "Changes from D&D Beyond", <p style={LINE}>{NOTHING_NEW}</p>)
           : null}
-      {plan.also.length > 0
+      {also.length + spent.length + (nameLine ? 1 : 0) > 0
         ? section(
             "also",
             "Also set",
-            plan.also.map((item) => <AlsoRow key={item.id} item={item} character={props.character} source={plan.input.fill.source} ticked={ticks.has(item.id)} onTick={props.onTick} disabled={props.disabled} />),
+            <>
+              {also.map((item) => (
+                <AlsoRow key={item.id} item={item} character={props.character} source={plan.input.fill.source} ticked={ticks.has(item.id)} onTick={props.onTick} disabled={props.disabled} />
+              ))}
+              {spent.map((line) => {
+                const words = spentLine(line);
+                return <Checkbox key={line.id} label={words.text} help={words.help} checked={ticks.has(line.id)} disabled={props.disabled} onChange={() => props.onTick(line.id)} />;
+              })}
+              {nameLine ? <AlsoRow item={nameLine} character={props.character} source={plan.input.fill.source} ticked={ticks.has(nameLine.id)} onTick={props.onTick} disabled={props.disabled} /> : null}
+            </>,
           )
         : null}
       {kept.length > 0
@@ -181,7 +202,7 @@ export function SyncReview(props: {
             <BulkButton ids={bulkIds(plan, "replaces")} ticks={ticks} onBulk={props.onBulk} disabled={props.disabled} words="Keep all of yours" />,
           )
         : null}
-      {plan.ownRolls > 0 ? <p style={{ ...LINE, color: theme.color.textMuted }}>{ownRollsLine(plan.ownRolls)}</p> : null}
+      {plan.ownRolls > 0 && !only ? <p style={{ ...LINE, color: theme.color.textMuted }}>{ownRollsLine(plan.ownRolls)}</p> : null}
     </div>
   );
 }

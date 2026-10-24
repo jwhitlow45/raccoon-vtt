@@ -1,8 +1,11 @@
 import type { Character, PcStats } from "#shared/model.ts";
+import { expectHash, type ExpectSubject } from "#shared/permissions.ts";
 import type { DdbSyncPatch } from "#shared/protocol.ts";
+import { resourcesAfter, type ResourceSent } from "#shared/rules/classResources.ts";
 import type { FillMerge, PcFill } from "#shared/rules/pcFill.ts";
 import { mergeFill } from "#shared/rules/pcFill.ts";
 import { planSync, sameRecord, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
+import { resourcePart, sameButLevels } from "#shared/rules/resourceSync.ts";
 import { draftDirty, type PcDraft } from "./draft.ts";
 import { alsoSet, pendingCharacter, type AlsoKey, type AlsoLine, type AlsoSet } from "./fill.ts";
 
@@ -25,6 +28,11 @@ import { alsoSet, pendingCharacter, type AlsoKey, type AlsoLine, type AlsoSet } 
  * A later read before Save is reviewed against what the earlier one took
  * (`editorSyncPlan`), and its record replaces the earlier one.
  *
+ * The class resources live beside the block, so a D&D Beyond read's Use it
+ * holds their part of the result apart (`HeldResources`), planned against
+ * the live list and the saved record (docs/design-v1-ddb-resources.md
+ * 6.2). Save expects that list, and a refusal reviews the resources again.
+ *
  * `step` returns the next state and the effects the editor runs: send the
  * Save's op, fetch or abort a D&D Beyond request, or close.
  */
@@ -36,7 +44,25 @@ export type Step = "block" | "paste" | "ddb" | "review";
  * the other fields it sets, ticked or not. A D&D Beyond read has `ticks`,
  * the re-sync review's, in place of `merge` and `lines`, which stay empty.
  */
-export type Review = { fill: PcFill; merge?: FillMerge; lines: AlsoLine[]; from: "paste" | "ddb"; ticks?: ReadonlySet<string> };
+export type Review = {
+  fill: PcFill;
+  merge?: FillMerge;
+  lines: AlsoLine[];
+  from: "paste" | "ddb";
+  ticks?: ReadonlySet<string>;
+  /** A Save refused because the class resources changed elsewhere: the review shows them alone, and its Use it sets them alone (6.2 c). */
+  only?: "resources";
+};
+
+/**
+ * A D&D Beyond read's class resources as its Use it left them (6.2 a): the
+ * read and its ticks, for a review again after a refusal, the list Save
+ * sends when it changes, and the hash of the live list it was planned
+ * from, which Save expects. Held only when it changes the list or the
+ * record's resource part (6.2 d), and until Save lands, a read's Use it
+ * replaces it, or the editor closes.
+ */
+export type HeldResources = { fill: PcFill; ticks: ReadonlySet<string>; list?: ResourceSent[]; expect: string };
 
 /**
  * What a D&D Beyond review's Use it sets: the merged block and level, the
@@ -44,7 +70,7 @@ export type Review = { fill: PcFill; merge?: FillMerge; lines: AlsoLine[]; from:
  * saved one. Either way it replaces the record an earlier Use it made, so
  * a record equal to the saved one drops that earlier record.
  */
-export type SyncUse = { stats: PcStats; level: number | undefined; also: AlsoSet; record: DdbSyncPatch | null };
+export type SyncUse = { stats: PcStats; level: number | undefined; also: AlsoSet; record: DdbSyncPatch | null; resources: HeldResources | null };
 
 /**
  * A D&D Beyond read in the editor, planned as a re-sync against the
@@ -58,10 +84,13 @@ export function editorSyncPlan(
   fill: PcFill,
   state: Pick<FlowState, "draft" | "also" | "record">,
   opened: { draft: PcDraft; had: boolean },
-  saved: Pick<Character, "name" | "actor" | "ddbSync">,
+  saved: Pick<Character, "name" | "actor" | "ddbSync" | "resources">,
 ): SyncPlan {
   const block = opened.had || state.record !== null || draftDirty(opened.draft, state.draft) ? state.draft.stats : undefined;
-  return planSync({ mode: "editor", stats: block, level: state.draft.level, character: pendingCharacter(saved, state.also, state.record), fill });
+  // The class resources plan against the live list and the saved record's part, never a pending record, whose new ids the live list lacks (6.2 b).
+  const character = { ...pendingCharacter(saved, state.also, state.record), ...(saved.resources ? { resources: saved.resources } : {}) };
+  const resourceRecord = saved.ddbSync ? { ...(saved.ddbSync.res ? { res: saved.ddbSync.res } : {}), ...(saved.ddbSync.gone ? { gone: saved.ddbSync.gone } : {}) } : null;
+  return planSync({ mode: "editor", stats: block, level: state.draft.level, character, fill, resourceRecord });
 }
 
 /**
@@ -74,10 +103,32 @@ export function editorHelpCharacter(plan: SyncPlan, saved: Pick<Character, "acto
   return { name: plan.input.character.name, actor: saved.actor };
 }
 
-/** A review's Use it, with its record compared with the saved one (`SyncUse`). */
-export function editorSyncUse(result: SyncResult, saved: Pick<Character, "ddbSync"> | undefined): SyncUse {
+/**
+ * A review's Use it, with its record compared with the saved one, and its
+ * class resources held when they change the live list or the record's
+ * resource part (`SyncUse`, 6.2). The result's record is already the
+ * pending one with its resource part planned against the saved record's,
+ * spliced and cut to 40 markers (pcSync.ts syncResult).
+ */
+export function editorSyncUse(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }): SyncUse {
   const record = saved && sameRecord(result.record, saved.ddbSync) ? null : result.record;
-  return { stats: result.stats, level: result.level, also: result.also, record };
+  return { stats: result.stats, level: result.level, also: result.also, record, resources: heldResources(result, saved, read) };
+}
+
+function heldResources(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }): HeldResources | null {
+  if (result.resources === undefined || !saved) return null;
+  // A preset's level alone is not a change, so a spend meanwhile never refuses a Save over it (OP-19).
+  const list = !sameButLevels(resourcesAfter(saved.resources, result.resources), saved.resources);
+  const part = resourcePart(result.record) !== resourcePart(saved.ddbSync);
+  if (!list && !part) return null;
+  return { fill: read.fill, ticks: read.ticks, ...(list ? { list: result.resources } : {}), expect: expectHash(saved, "resources") };
+}
+
+/** The pending record with a resources-only review's part in place of its own (6.2 c), or the review's record when there was none pending. */
+function spliceResources(pending: DdbSyncPatch | null, from: DdbSyncPatch | null): DdbSyncPatch | null {
+  if (!pending || !from) return from ?? pending;
+  const { res: _res, gone: _gone, ...rest } = pending;
+  return { ...rest, ...(from.res ? { res: from.res } : {}), ...(from.gone ? { gone: from.gone } : {}) };
 }
 
 export type FlowState = {
@@ -87,6 +138,8 @@ export type FlowState = {
   also: AlsoSet;
   /** The sync record a D&D Beyond "Use it" made, sent with the next Save (docs/design-v1-resync.md 1.1). */
   record: DdbSyncPatch | null;
+  /** The class resources a D&D Beyond "Use it" set, sent with the next Save (docs/design-v1-ddb-resources.md 6.2). */
+  resources: HeldResources | null;
   review: Review | null;
   /** A Save's op waits for its answer. */
   saving: boolean;
@@ -111,7 +164,8 @@ export type FlowEvent =
   /** Use it. A D&D Beyond review's carries what it sets. */
   | { t: "use"; sync?: SyncUse }
   | { t: "save" }
-  | { t: "saved"; answer: "taken" | "refused" | "unknown" }
+  /** A Save's answer. `stale` when the server refused it because the class resources changed elsewhere. */
+  | { t: "saved"; answer: "taken" | "refused" | "unknown"; stale?: boolean }
   | { t: "close" }
   | { t: "get" }
   /** A D&D Beyond request's answer: its fill and lines, or why it read nothing. */
@@ -120,7 +174,7 @@ export type FlowEvent =
 export type FlowEffect = { kind: "send" } | { kind: "close" } | { kind: "fetch"; id: number } | { kind: "abort"; id: number };
 
 export function openFlow(draft: PcDraft): FlowState {
-  return { step: "block", draft, also: {}, record: null, review: null, saving: false, closed: false, get: null, nextGet: 1, error: null };
+  return { step: "block", draft, also: {}, record: null, resources: null, review: null, saving: false, closed: false, get: null, nextGet: 1, error: null };
 }
 
 /** The request in flight, aborted, for a step that leaves it behind. */
@@ -191,8 +245,10 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
         // A D&D Beyond review: the editor merged it from the draft as it is now, so it never undoes an edit made since it was read.
         const sync = event.sync;
         if (!sync) return { state, effects: NONE };
+        // After a refusal the review was of the class resources alone: the draft, its rolls and Also set stay (6.2 c).
+        if (review.only === "resources") return { state: { ...state, step: "block", review: null, record: spliceResources(state.record, sync.record), resources: sync.resources }, effects: NONE };
         const draft: PcDraft = { stats: sync.stats, level: sync.level };
-        return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record }, effects: NONE };
+        return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record, resources: sync.resources }, effects: NONE };
       }
       const also = { ...state.also, ...alsoSet(review.fill, review.lines) };
       // The block is merged again from the draft as it is now, so the review never undoes an edit made since it was read.
@@ -206,6 +262,11 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
     case "saved":
       if (!state.saving) return { state, effects: NONE };
       if (event.answer === "taken") return { state: { ...state, saving: false, closed: true }, effects: [{ kind: "close" }] };
+      // Nothing was saved because the class resources changed elsewhere: they are reviewed again, from the read Use it held, with no new fetch (6.2 c).
+      if (event.stale && state.resources) {
+        const held = state.resources;
+        return { state: { ...state, saving: false, step: "review", review: { fill: held.fill, lines: [], from: "ddb", ticks: held.ticks, only: "resources" } }, effects: NONE };
+      }
       // A refusal, or a lost answer, leaves the draft as it was, for the player to act on.
       return { state: { ...state, saving: false }, effects: NONE };
     case "close": {

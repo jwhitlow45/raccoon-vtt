@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey } from "#shared/model.ts";
+import { CHARACTER_CHANGED } from "#shared/limits.ts";
 import { MAX_PC_DICE_PARTS, MAX_PC_ROLLS, type CharacterPatch } from "#shared/protocol.ts";
 import { fillSummary, type PcFill } from "#shared/rules/pcFill.ts";
 import { defaultTicks, leavesAsIs, recordFits, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
@@ -47,7 +48,7 @@ import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
 import { parseStatBlockText } from "../monsters/parse.ts";
 import { closePcStats, openPcStatsSlot, openResyncSlot } from "./open.ts";
 import { ResyncDialog } from "./Resync.tsx";
-import { recordTooBigText } from "./resync.ts";
+import { recordTooBigText, RESOURCES_STALE } from "./resync.ts";
 import { SyncReview } from "./SyncReview.tsx";
 import { partsText, rollReading } from "./reading.ts";
 
@@ -108,9 +109,12 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   const [ddbJson, setDdbJson] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
   const [readingJson, setReadingJson] = useState(false);
+  // A Save refused because the class resources changed elsewhere: their review again says so.
+  const [resourcesStale, setResourcesStale] = useState(false);
   const problems = useMemo(() => draftProblems(draft), [draft]);
   const size = useMemo(() => sizeOf(draft.stats), [draft.stats]);
-  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || flow.record !== null || pasted.trim() !== "" || ddbJson.trim() !== "";
+  // Class resources a D&D Beyond read set are unsaved too, even with the block and its record as saved (docs/design-v1-ddb-resources.md 6.2 e).
+  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || flow.record !== null || flow.resources !== null || pasted.trim() !== "" || ddbJson.trim() !== "";
   const held = flow.saving;
   // An answer that comes after the editor closed may only say what became of the save.
   const open = useRef(true);
@@ -183,8 +187,14 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   /** The Save's one op: the parts that differ from the block as it opened, and what a fill set beside it, against the character as it is now. */
   const sendSave = (state: FlowState) => {
     const live = store.getState().view?.characters[props.characterId];
-    // A D&D Beyond fill's record goes with the block it describes (docs/design-v1-resync.md 1.1).
-    const patch: CharacterPatch = { ...(savePatch(opened.draft, opened.had, state.draft) ?? {}), ...(live ? alsoPatch(state.also, live) : {}), ...(state.record ? { ddbSync: state.record } : {}) };
+    const held = state.resources;
+    // A D&D Beyond fill's record goes with the block it describes (docs/design-v1-resync.md 1.1), and its class resources with both, expecting the list they were planned from (docs/design-v1-ddb-resources.md 6.2 d).
+    const patch: CharacterPatch = {
+      ...(savePatch(opened.draft, opened.had, state.draft) ?? {}),
+      ...(live ? alsoPatch(state.also, live) : {}),
+      ...(state.record ? { ddbSync: state.record } : {}),
+      ...(held?.list ? { resources: held.list } : {}),
+    };
     if (Object.keys(patch).length === 0) {
       send({ t: "saved", answer: "taken" });
       return;
@@ -196,6 +206,13 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         if (text) ui.notify(text, "error");
         return;
       }
+      // Only the class resources are expected, so this refusal means they changed elsewhere: the review shows them again, with its own notice (6.2 c).
+      if (held && answer === "refused" && refused?.message.trim() === CHARACTER_CHANGED) {
+        setRefusal(null);
+        setResourcesStale(true);
+        send({ t: "saved", answer, stale: true });
+        return;
+      }
       const outcome = saveOutcome(answer, refused, who);
       if (outcome.kind === "problem") {
         setRefusal(outcome.text);
@@ -205,7 +222,8 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     };
     setRefusal(null);
     // In "view as a player" nothing is sent: the preview says so, and the draft stays.
-    if (actions.dispatch({ t: "character.update", characterId: props.characterId, patch }, { onAnswer, quiet: true }) === null) send({ t: "saved", answer: "refused" });
+    const op = { t: "character.update" as const, characterId: props.characterId, patch, ...(held ? { expect: { resources: held.expect } } : {}) };
+    if (actions.dispatch(op, { onAnswer, quiet: true }) === null) send({ t: "saved", answer: "refused" });
   };
 
   const setDraft = (update: (d: PcDraft) => PcDraft) => send({ t: "edit", update });
@@ -271,6 +289,11 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     </>
   ) : null;
   const status = leaving ? <DiscardQuestion /> : retryAt !== null ? "You can save again in a few seconds." : null;
+  // A stale rebuild moves focus to the review's first line (docs/design-v1-resync.md 3.6).
+  const staleFirst = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (flow.step === "review" && flow.review?.only === "resources") staleFirst.current?.focus();
+  }, [flow.step, flow.review]);
   const back = { label: "Back to the stat block", onBack: () => send({ t: "back" }) };
   const reviewId = useId();
 
@@ -352,7 +375,8 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         return;
       }
       if (recordBig) return;
-      send({ t: "use", sync: editorSyncUse(result, saved) });
+      setResourcesStale(false);
+      send({ t: "use", sync: editorSyncUse(result, saved, { fill: review.fill, ticks: ticks ?? new Set() }) });
     };
     return (
       <Dialog
@@ -373,11 +397,17 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
           )
         }
       >
+        {review.only === "resources" && resourcesStale ? (
+          <Notice tone="danger" role="alert">
+            {RESOURCES_STALE(name.current)}
+          </Notice>
+        ) : null}
         {plan && result && ticks ? (
           <SyncReview
             plan={plan}
             result={result}
             ticks={ticks}
+            {...(review.only ? { only: review.only, firstRef: staleFirst } : {})}
             onTick={(id) => send({ t: "tick", id })}
             onBulk={(next) => send({ t: "ticks", ticks: next })}
             name={name.current}

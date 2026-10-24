@@ -310,7 +310,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
   test("cr-c-2. Pat on a phone adds Barbarian resources at level 5: Rage, 3 uses, one back on a Short Rest", async () => {
     const page = await thornsPage(pat);
     const empty = section(page);
-    await empty.getByText("Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level or typed.", { exact: true }).waitFor();
+    await empty.getByText("Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, typed, or brought in with Re-sync from D&D Beyond.", { exact: true }).waitFor();
     const add = await openAdd(page);
     await add.getByText("Choose a class to see its resources at its level.", { exact: true }).waitFor();
     await add.getByRole("combobox", { name: "Class" }).selectOption("barbarian");
