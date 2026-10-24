@@ -140,27 +140,34 @@ const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointer
  * report theirs so a fitted map keeps clear of them, whatever the safe
  * areas, the interface size and however many rows a tool's options wrap
  * onto. A zoomed bar's own size does not change with the interface size, so
- * a new size measures again (features/device/layout.ts barInset).
+ * a new size measures again (features/device/layout.ts barInset). The
+ * height comes rounded, as the map's insets take it, and exact, for the
+ * token bar's free area: at a zoomed interface size the rounding can take
+ * a third of a pixel from it, enough to open the compact overlay where
+ * the strip's 148 px fit (320 x 360 at 130%, docs/design-v1-bar-compact.md 3.1).
  */
-function useHeight(scale: number): [(el: HTMLElement | null) => (() => void) | undefined, number] {
-  const [height, setHeight] = useState(0);
+function useHeight(scale: number): [(el: HTMLElement | null) => (() => void) | undefined, number, number] {
+  const [height, setHeight] = useState({ rounded: 0, exact: 0 });
   const ref = useCallback(
     (el: HTMLElement | null) => {
       if (!el) return undefined;
-      const measure = () => setHeight(barInset(el.getBoundingClientRect()));
+      const measure = () => {
+        const exact = el.getBoundingClientRect().height;
+        setHeight((was) => (was.exact === exact ? was : { rounded: barInset({ height: exact }), exact }));
+      };
       const observer = new ResizeObserver(measure);
       // The border box, since the safe areas pad the bars: a home bar or notch that comes or goes leaves their content the same size.
       observer.observe(el, { box: "border-box" });
       measure();
       return () => {
         observer.disconnect();
-        setHeight(0);
+        setHeight({ rounded: 0, exact: 0 });
       };
     },
     // The scale is read through the element's rectangle, but a change must measure again.
     [scale],
   );
-  return [ref, height];
+  return [ref, height.rounded, height.exact];
 }
 
 /** What the tool's options take from the map's foot, in screen px, measured as drawn (docs/design-v1-tool-options.md 10.2). */
@@ -295,8 +302,8 @@ function RoomPage() {
 
   const ui = useRoomUi();
   const store = useRoomStore();
-  const [topBarRef, topBarHeight] = useHeight(zoom);
-  const [toolbarMeasure, toolbarHeight] = useHeight(zoom);
+  const [topBarRef, topBarHeight, topBarExact] = useHeight(zoom);
+  const [toolbarMeasure, toolbarHeight, toolbarExact] = useHeight(zoom);
   const toolbarEl = useRef<HTMLElement | null>(null);
   const toolbarRef = useCallback(
     (el: HTMLElement | null) => {
@@ -712,18 +719,18 @@ function RoomPage() {
   // Until both bars have a height, the bar keeps its defaults rather than reaching under them.
   const chrome = useMemo<Chrome | null>(
     () =>
-      topBarHeight > 0 && toolbarHeight > 0
+      topBarExact > 0 && toolbarExact > 0
         ? {
-            top: topBarHeight / zoom,
-            bottom: (toolbarHeight + optionsBottom) / zoom,
-            controls: (toolbarHeight + optionsBox.controls) / zoom,
-            toolbar: toolbarHeight / zoom,
+            top: topBarExact / zoom,
+            bottom: (toolbarExact + optionsBottom) / zoom,
+            controls: (toolbarExact + optionsBox.controls) / zoom,
+            toolbar: toolbarExact / zoom,
             // Beside the side panel the map never touches the right edge, so its free area keeps no right inset.
             safe: { top: safe.top, right: sideShown ? 0 : safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
           }
         : null,
-    [topBarHeight, toolbarHeight, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
+    [topBarExact, toolbarExact, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
   );
   useLayoutEffect(() => {
     barDock.setState({ chrome });
