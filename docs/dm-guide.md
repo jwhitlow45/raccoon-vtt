@@ -448,7 +448,7 @@ The monsters go on the scene you are viewing, with average HP and their monsters
 
 ## Tokens
 
-Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar rests at the foot of the map, and Expand shows all of it. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
+Tap a token with the **Select** tool to open its **action bar**. On a phone held upright, the bar rests at the foot of the map, and **Expand** (a chevron pointing up, with its name beside it where there is room) shows all of it. On a wider screen, it opens as a window at the bottom right of the map, which you can drag by its header to move it. For everything about the selected token, open the **Token** panel.
 
 ![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll and Attach, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
@@ -458,7 +458,7 @@ The action bar holds, from top to bottom:
 - **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel.
 - **Elevation**, with **−5** and **+5** (or Page Down and Page Up).
 - **Doesn't count**, on a line of its own once the creature whose turn it is has moved (see [Measuring and movement](#measuring-and-movement)). Players also get **Undo move** there, and **Open door** or **Close door** when their token stands by a door.
-- **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel), **Uses**, **Light** and **Attach** (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)). **Uses** appears for a creature with something to spend, such as legendary actions, a breath weapon that recharges or a character's Rage, and opens the same list as its tracker row's **Uses** (see [Rows and what they hold](#rows-and-what-they-hold)) right under the buttons, where Conditions opens. Tap it again to close it.
+- **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel), **Uses** (after a lightning bolt), **Light** and **Attach** (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)). **Uses** appears for a creature with something to spend, such as legendary actions, a breath weapon that recharges or a character's Rage, and opens the same list as its tracker row's **Uses** (see [Rows and what they hold](#rows-and-what-they-hold)) right under the buttons, where Conditions opens. Tap it again to close it.
 - **Size**, whose **−** and **+** step the creature one size smaller or larger, for Enlarge, Wild Shape or a polymorph.
 - **Locked** (a padlock: once it is on, nobody can drag the token, you included), **Duplicate** (two pages and a plus) and **Delete** (a trash can, which asks "Sure?" before it deletes anything).
 
