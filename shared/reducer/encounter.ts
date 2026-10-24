@@ -10,13 +10,14 @@ import {
   tickEffects,
   unbindFromEntry,
 } from "../rules/durations.ts";
-import { attaches, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew } from "../migrate.ts";
+import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
 import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
+import { restoreTurnUses, startTurnUses, withoutTurnScoped } from "./uses.ts";
 
 /** How many `next` steps `prev` can walk back. */
 export const MAX_HISTORY = 20;
@@ -199,6 +200,14 @@ export function encounterEnd(tx: Tx): void {
   for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : 1))) {
     clearAutoExempt(tx, token.id);
   }
+  // A fight's end is no rest (docs/design-v1-combat-controls.md 2.4): counted uses, recharges and pips stay. What lasts a
+  // turn goes from every actor, a creature removed from the fight earlier included, since the next fight starts anew.
+  if (combatUses(tx.env.opVersion)) {
+    for (const resolved of tx.actors()) {
+      const next = withoutTurnScoped(resolved.actor);
+      if (next !== resolved.actor) tx.putActor(resolved, next);
+    }
+  }
   tx.write(keys.encounter, null);
   if (tx.state.encounterHistory.length > 0) tx.write(keys.encounterHistory, []);
   tx.addEvent({ type: "encounter", action: "end" });
@@ -251,7 +260,20 @@ export function removeEntries(tx: Tx, entryIds: string[]): void {
     clearAutoExempt(tx, entry.tokenId);
   }
   const landing = activeEntryId !== encounter.activeEntryId ? kept.entries.find((e) => e.id === activeEntryId) : undefined;
+  // The turn passed on starts for its creatures as Next starts one, with no saved step: the removal's undo takes it back.
+  if (landing && combatUses(tx.env.opVersion)) startTurn(tx, tx.state.encounter ?? kept, landing, null);
   if (landing) tx.addEvent({ type: "turn", entryId: landing.id, round: encounter.round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
+}
+
+/**
+ * Starts a turn for every creature of it (docs/design-v1-combat-controls.md
+ * 3.3), Next's and a removal's alike: its records and resets (uses.ts
+ * startTurnUses). A row that only marks time this round starts nothing: its
+ * mount's turn began with its rider's, which gave it its record.
+ */
+export function startTurn(tx: Tx, encounter: Encounter, landing: InitEntry, snapshot: EncounterSnapshot | null): void {
+  if (landing.markRound === encounter.round) return;
+  startTurnUses(tx, encounter, landing, sharedCompanions(tx, landing).map((t) => t.id), snapshot);
 }
 
 export function encounterRemove(tx: Tx, op: OpOf<"encounter.remove">): void {
@@ -396,11 +418,15 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   const ended = encounter.activeEntryId === null ? undefined : encounter.entries.find((e) => e.id === encounter.activeEntryId);
   if (ended) askSavesAtTurnEnd(tx, ended, snapshot);
 
-  const landingActor = landing.tokenId !== undefined
-    ? tx.tryResolveActor({ tokenId: landing.tokenId })
-    : landing.characterId !== undefined
-      ? tx.tryResolveActor({ characterId: landing.characterId })
-      : undefined;
+  // Ops stored before combat uses refilled the landing row's pips alone, a row that marks time included, and replay so.
+  const combat = combatUses(tx.env.opVersion);
+  const landingActor = combat
+    ? undefined
+    : landing.tokenId !== undefined
+      ? tx.tryResolveActor({ tokenId: landing.tokenId })
+      : landing.characterId !== undefined
+        ? tx.tryResolveActor({ characterId: landing.characterId })
+        : undefined;
   if (landingActor?.actor.legendary && landingActor.actor.legendary.actionsUsed !== 0) {
     snapshot.legendary = { holderId: holderId(landingActor), actionsUsed: landingActor.actor.legendary.actionsUsed };
     tx.putActor(landingActor, { ...landingActor.actor, legendary: { ...landingActor.actor.legendary, actionsUsed: 0 } });
@@ -412,6 +438,8 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   if (mounted) turned = withMounts(tx, turned, true);
   entries = turned.entries;
   writeEncounter(tx, turned);
+  // After the mounts join, which are the turn's creatures too (docs/design-v1-combat-controls.md 2.3).
+  if (combat) startTurn(tx, turned, landing, snapshot);
   tx.write(keys.encounterHistory, [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
   tx.addEvent({ type: "turn", entryId: step.landing, round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
 }
@@ -453,18 +481,25 @@ function askSavesAtTurnEnd(tx: Tx, ended: InitEntry, snapshot: EncounterSnapshot
  * saved step for Previous, which absent means none.
  */
 function clearCompanionReactions(tx: Tx, landing: InitEntry, snapshot: EncounterSnapshot): void {
-  const characterId = rowCharacter(tx.state, landing);
-  if (characterId === undefined) return;
-  const sceneId = landing.tokenId !== undefined ? tx.state.tokens[landing.tokenId]?.sceneId : tx.state.meta.playerSceneId;
   const cleared: string[] = [];
-  for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : 1))) {
-    const companion = token.companion;
-    if (companion?.of !== characterId || companion.turn !== "shared" || !companion.reactionUsed || token.sceneId !== sceneId) continue;
+  for (const token of sharedCompanions(tx, landing)) {
+    const companion = token.companion!;
+    if (!companion.reactionUsed) continue;
     const { reactionUsed: _spent, ...link } = companion;
     tx.write(keys.token(token.id), { ...token, companion: link });
     cleared.push(token.id);
   }
   if (cleared.length > 0) snapshot.companionReactions = cleared;
+}
+
+/** The `shared` companions a row's turn is also theirs (clearCompanionReactions), by id. */
+function sharedCompanions(tx: Tx, landing: InitEntry): Token[] {
+  const characterId = rowCharacter(tx.state, landing);
+  if (characterId === undefined) return [];
+  const sceneId = landing.tokenId !== undefined ? tx.state.tokens[landing.tokenId]?.sceneId : tx.state.meta.playerSceneId;
+  return Object.values(tx.state.tokens)
+    .sort((a, b) => (a.id < b.id ? -1 : 1))
+    .filter((token) => token.companion?.of === characterId && token.companion.turn === "shared" && token.sceneId === sceneId);
 }
 
 /**
@@ -491,6 +526,7 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
     restoreEffects(tx, id, effects);
   }
   if (snapshot.legendary) restoreLegendary(tx, snapshot.legendary);
+  if (snapshot.turnUses) restoreTurnUses(tx, snapshot.turnUses);
   for (const revealed of snapshot.revealed) {
     const token = tx.state.tokens[revealed.tokenId];
     if (!token) continue;
@@ -522,8 +558,11 @@ function restoreLegendary(tx: Tx, saved: NonNullable<EncounterSnapshot["legendar
     ? tx.tryResolveActor({ characterId: saved.holderId })
     : tx.tryResolveActor({ tokenId: saved.holderId });
   const legendary = resolved?.actor.legendary;
-  if (!resolved || !legendary || legendary.actionsUsed === saved.actionsUsed) return;
-  tx.putActor(resolved, { ...resolved.actor, legendary: { ...legendary, actionsUsed: saved.actionsUsed } });
+  if (!resolved || !legendary) return;
+  // In lair may have lowered the count since (docs/design-v1-combat-controls.md 2.4). Older ops put the pips back as they were.
+  const actionsUsed = combatUses(tx.env.opVersion) ? Math.min(saved.actionsUsed, legendary.actionsMax) : saved.actionsUsed;
+  if (legendary.actionsUsed === actionsUsed) return;
+  tx.putActor(resolved, { ...resolved.actor, legendary: { ...legendary, actionsUsed } });
 }
 
 function restoreEffects(tx: Tx, id: string, effects: Effect[]): void {

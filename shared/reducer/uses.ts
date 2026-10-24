@@ -1,8 +1,9 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
-import type { Actor, ClassResource, LogEvent, UseKey, UseMark } from "../model.ts";
-import { seenByNonOwners } from "../project.ts";
+import type { Actor, ClassResource, Encounter, EncounterSnapshot, InitEntry, LogEvent, TurnRecord, TurnUses, UseKey, UseMark } from "../model.ts";
+import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
+import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
 import { invalid, type ResolvedActor, type Tx } from "./tx.ts";
 
 /**
@@ -192,4 +193,176 @@ function resourceUse(tx: Tx, resolved: ResolvedActor, use: Extract<UseOp["use"],
   const line: Omit<UseLine, "tokenId" | "characterId" | "seen"> = { type: "use", what: "resource", name: resource.name, left: resource.max - used, max: resource.max, ...lineFlags(op) };
   if (resource.pool) line.cost = Math.abs(resource.used - used);
   addUseLine(tx, resolved, line);
+}
+
+/**
+ * The stat block a creature's marks are keyed by (2.4): its SRD creature,
+ * as Wild Shape or another shape, its room monster or its companion block.
+ * A change of it takes the marks, whose keys named the old block.
+ */
+export function linkOf(actor: Pick<Actor, "srdId" | "wildShape" | "monsterId" | "blockId">): string | undefined {
+  if (actor.srdId !== undefined) return `${actor.wildShape ? "wild" : "srd"}:${actor.srdId}`;
+  if (actor.monsterId !== undefined) return `monster:${actor.monsterId}`;
+  if (actor.blockId !== undefined) return `block:${actor.blockId}`;
+  return undefined;
+}
+
+/** Damage types together, each once, in the rules' order, so every device and a replay hold the same list. */
+export function typeUnion(...lists: (readonly DamageType[] | undefined)[]): DamageType[] {
+  const held = new Set(lists.flatMap((list) => list ?? []));
+  return DAMAGE_TYPES.filter((type) => held.has(type));
+}
+
+/** The actor without what lasts only a turn or a fight (2.4): its `turn` marks, `hurt` and `turnRecord`, the very same actor when it holds none. */
+export function withoutTurnScoped(actor: Actor): Actor {
+  const marks = actor.uses ?? {};
+  const turns = Object.keys(marks).filter((key) => marks[key]!.kind === "turn");
+  if (turns.length === 0 && actor.hurt === undefined && actor.turnRecord === undefined) return actor;
+  const uses = { ...marks };
+  for (const key of turns) delete uses[key];
+  const { hurt: _hurt, turnRecord: _record, ...rest } = withUses(actor, uses);
+  return rest;
+}
+
+/**
+ * The creatures a turn starts for (2.3): the landing row's own, the
+ * `shared` companions of its character on the row token's scene, or the
+ * players' scene for a row with no token, as Next clears their Reactions,
+ * and the controlled mounts that joined the turn. Each once, by holder.
+ */
+function participants(tx: Tx, encounter: Encounter, landing: InitEntry, companions: readonly string[]): { resolved: ResolvedActor; landing: boolean }[] {
+  const out: { resolved: ResolvedActor; landing: boolean }[] = [];
+  const seen = new Set<string>();
+  const add = (resolved: ResolvedActor | undefined, isLanding: boolean) => {
+    const holder = resolved && `${resolved.holder}:${resolved.id}`;
+    if (!resolved || seen.has(holder!)) return;
+    seen.add(holder!);
+    out.push({ resolved, landing: isLanding });
+  };
+  add(landing.tokenId !== undefined ? tx.tryResolveActor({ tokenId: landing.tokenId }) : landing.characterId !== undefined ? tx.tryResolveActor({ characterId: landing.characterId }) : undefined, true);
+  for (const id of companions) add(tx.tryResolveActor({ tokenId: id }), false);
+  for (const id of encounter.turnStart?.mounts ?? []) add(tx.tryResolveActor({ tokenId: id }), false);
+  return out;
+}
+
+/**
+ * Whether the landing row's own creature needs a turn record (2.3): only
+ * where a card or a reset could apply, so a healthy goblin with nothing to
+ * track does not change every turn. Every other creature of the turn gets
+ * one, since they are few.
+ */
+function needsRecord(resolved: ResolvedActor, due: readonly string[]): boolean {
+  const actor = resolved.actor;
+  return (
+    actor.hp.cur < actor.hp.max ||
+    actor.life !== "alive" ||
+    due.length > 0 ||
+    (actor.hurt?.length ?? 0) > 0 ||
+    Object.keys(actor.uses ?? {}).length > 0 ||
+    actor.legendary !== undefined ||
+    (resolved.character?.resources?.length ?? 0) > 0
+  );
+}
+
+/**
+ * A turn starts (docs/design-v1-combat-controls.md 2.3, 2.4 and 3.3): each
+ * creature of it gets its turn record where 2.3 says, stamped with the seq
+ * of the op, the turn's row and round, its HP and life, the damage types of
+ * the window it closes (`took`, which empties `hurt`) and the recharges due
+ * (`due`). Its once a turn marks go and its legendary actions refill. With
+ * a saved step (`snapshot`, Next's), what each start replaced goes in it
+ * for Previous: the landing creature's pips in `legendary`, as before, and
+ * the rest in `turnUses`. A start passed on by a removal saves nothing, and
+ * the removal's own undo takes it back.
+ */
+export function startTurnUses(tx: Tx, encounter: Encounter, landing: InitEntry, companions: readonly string[], snapshot: EncounterSnapshot | null): void {
+  for (const { resolved, landing: isLanding } of participants(tx, encounter, landing, companions)) {
+    const actor = resolved.actor;
+    const marks = actor.uses ?? {};
+    // Keys sorted, since a map's order is not kept through a jsonb round trip and the record must replay the same.
+    const held = Object.keys(marks).sort();
+    const due = held.filter((key) => marks[key]!.kind === "recharge").slice(0, LIMITS.dueUses);
+    const turns = held.filter((key) => marks[key]!.kind === "turn");
+    const saved: TurnUses = { holderId: resolved.id };
+    let next: Actor = { ...actor };
+    if (!isLanding || needsRecord(resolved, due)) {
+      const record: TurnRecord = { id: tx.env.seq, entryId: landing.id, round: encounter.round, hp: actor.hp.cur, life: actor.life };
+      if (actor.hurt && actor.hurt.length > 0) record.took = actor.hurt;
+      if (due.length > 0) record.due = due;
+      next.turnRecord = record;
+      delete next.hurt;
+      saved.record = actor.turnRecord ?? null;
+    } else if (actor.turnRecord) {
+      // An earlier turn's record would only ever say that turn is over.
+      delete next.turnRecord;
+      saved.record = actor.turnRecord;
+    }
+    if (turns.length > 0) {
+      const uses = { ...marks };
+      const removed: Record<UseKey, UseMark> = {};
+      for (const key of turns) {
+        removed[key] = marks[key]!;
+        delete uses[key];
+      }
+      next = withUses(next, uses);
+      saved.marks = removed;
+    }
+    const legendary = actor.legendary;
+    if (legendary && legendary.actionsUsed !== 0) {
+      next.legendary = { ...legendary, actionsUsed: 0 };
+      if (!isLanding) saved.actionsUsed = legendary.actionsUsed;
+      else if (snapshot) snapshot.legendary = { holderId: resolved.id, actionsUsed: legendary.actionsUsed };
+    }
+    if (stableStringify(next) === stableStringify(actor)) continue;
+    tx.putActor(resolved, next);
+    const link = linkOf(actor);
+    if (link !== undefined) saved.link = link;
+    if (snapshot && (saved.record !== undefined || saved.marks !== undefined || saved.actionsUsed !== undefined)) (snapshot.turnUses ??= []).push(saved);
+  }
+}
+
+/**
+ * A creature exactly as a saved turn named it: its character's actor, or a
+ * token's own. A token that plays a character now holds no actor of its
+ * own, so it was converted and gets nothing back.
+ */
+function holderNamed(tx: Tx, holderId: string): ResolvedActor | undefined {
+  if (tx.state.characters[holderId]) return tx.tryResolveActor({ characterId: holderId });
+  const token = tx.state.tokens[holderId];
+  return token && "inline" in token.actor ? tx.tryResolveActor({ tokenId: holderId }) : undefined;
+}
+
+/**
+ * Previous puts back what the turn's start replaced (3.3, 3.4): the record
+ * it replaced, or none for `null`, `hurt` as the union of the removed
+ * record's `took` and the creature's `hurt` now, the once a turn marks it
+ * removed, while the mark bound holds, and the pips of its other creatures.
+ * Uses spent during the turn stay spent. A creature deleted, converted or
+ * relinked since gets nothing back, as a companion's Reaction does not.
+ */
+export function restoreTurnUses(tx: Tx, saved: readonly TurnUses[]): void {
+  for (const entry of saved) {
+    const resolved = holderNamed(tx, entry.holderId);
+    if (!resolved || linkOf(resolved.actor) !== entry.link) continue;
+    const actor = resolved.actor;
+    let next: Actor = { ...actor };
+    if (entry.record !== undefined) {
+      const hurt = typeUnion(actor.turnRecord?.took, actor.hurt);
+      if (hurt.length > 0) next.hurt = hurt;
+      else delete next.hurt;
+      if (entry.record === null) delete next.turnRecord;
+      else next.turnRecord = entry.record;
+    }
+    if (entry.marks) {
+      const uses: Record<UseKey, UseMark> = { ...next.uses };
+      for (const key of Object.keys(entry.marks).sort()) {
+        // A mark that would not fit is left off, which can only let an action be taken again.
+        if (Object.hasOwn(uses, key) || Object.keys(uses).length >= LIMITS.usesPerActor) continue;
+        uses[key] = entry.marks[key]!;
+      }
+      next = withUses(next, uses);
+    }
+    if (entry.actionsUsed !== undefined && next.legendary) next.legendary = { ...next.legendary, actionsUsed: Math.min(entry.actionsUsed, next.legendary.actionsMax) };
+    if (stableStringify(next) !== stableStringify(actor)) tx.putActor(resolved, next);
+  }
 }

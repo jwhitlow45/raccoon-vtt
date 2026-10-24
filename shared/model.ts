@@ -1022,12 +1022,16 @@ export type ClassResource = {
  * removes the new one), the `turn` marks it removed, whole with their
  * names, and the legendary actions it refilled for a participant other than
  * the landing row's creature, whose stay in `EncounterSnapshot.legendary`.
+ * `link` is the stat block the participant's marks were keyed by then
+ * (`srd:`, `wild:`, `monster:` or `block:` and its id), so Previous skips
+ * one relinked since, whose keys name another block.
  */
 export type TurnUses = {
   holderId: TokenId | CharacterId;
   record?: TurnRecord | null;
   marks?: Record<UseKey, UseMark>;
   actionsUsed?: number;
+  link?: string;
 };
 
 export type Character = {
