@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { checkedFill, type FillResource, type PcFill } from "../rules/pcFill.ts";
+import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncCharacter } from "../rules/pcSync.ts";
+import { EMPTY_PC_STATS } from "../rules/pcStats.ts";
+import { actor } from "../testutil.ts";
+import type { PcStats } from "../model.ts";
 import { readDdbCharacter } from "./read.ts";
 import { resourceNameKey, resourceNameOf } from "./resources.ts";
 
@@ -548,5 +552,55 @@ describe("the read's lines", () => {
     const fill = read(bree({ class: actions }));
     const line = fill.warnings.find((w) => /another way/.test(w));
     assert.ok(line && line.length <= 400 && / and others come back/.test(line));
+  });
+});
+
+describe("an action list cut or not a list (DDBBUILD-ASTRA-01)", () => {
+  const CUT_LINE = "Some of D&D Beyond's actions were not read, since a list of them was too long or did not read. Rolls and class resources here that they would change stay as they are.";
+  const steps = (count: number) => Array.from({ length: count }, (_, i) => act(`Step ${i}`, null));
+  const wild = () => act("Wild Shape", lu({ maxUses: 3, resetType: 1 }));
+
+  test("past 200 actions in a list, those past it are not read, and the read is not whole, with its line", () => {
+    const fill = read(bree({ class: [...steps(200), wild()] }));
+    assert.deepEqual(fill.resources, []);
+    assert.equal(fill.read?.resource, false);
+    assert.equal(fill.read?.other, false, "the other rolls read the same list");
+    assert.ok(fill.warnings.includes(CUT_LINE));
+    const at = read(bree({ class: [...steps(199), wild()] }));
+    assert.equal(at.read?.resource, true, "200 is read whole");
+    assert.ok(!at.warnings.includes(CUT_LINE));
+  });
+
+  test("a list that is not an array is not read and the read is not whole. Null or absent reads as empty, whole", () => {
+    for (const bad of [{}, "class", 3, true]) {
+      const fill = read(bree({}, undefined, { actions: { class: [wild()], race: bad, feat: [] } }));
+      assert.equal(fill.read?.resource, false, JSON.stringify(bad));
+      assert.equal(fill.read?.other, false);
+      assert.ok(fill.warnings.includes(CUT_LINE));
+    }
+    for (const actions of [{ class: [wild()], race: null, feat: [] }, { class: [wild()] }]) {
+      const fill = read(bree({}, undefined, { actions }));
+      assert.equal(fill.read?.resource, true);
+      assert.equal(fill.read?.other, true);
+      assert.ok(!fill.warnings.includes(CUT_LINE));
+      assert.deepEqual(fill.resources?.map((r) => r.name), ["Wild Shape"]);
+    }
+  });
+
+  test("reader to merge: a linked Wild Shape past the cut, or beside a list that does not read, stays with its entry", () => {
+    const sync = (c: SyncCharacter, json: J): SyncCharacter => {
+      const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(json) });
+      const sent = syncPatch(c, syncResult(p, defaultTicks(p)));
+      return sent ? afterSync(c, sent.patch, "2026-10-24T10:00:00.000Z") : c;
+    };
+    const before: SyncCharacter = { name: "Bree Holloway", level: 6, stats: structuredClone(EMPTY_PC_STATS) as PcStats, actor: actor({ sheetUrl: "https://www.dndbeyond.com/characters/87654321" }) };
+    const linked = sync(before, bree({ class: [wild()] }));
+    assert.deepEqual(linked.resources?.map((r) => r.name), ["Wild Shape"]);
+    for (const json of [bree({ class: [...steps(200), wild()] }), bree({}, undefined, { actions: { class: [], race: {}, feat: [] } })]) {
+      const after = sync(linked, json);
+      assert.deepEqual(after.resources, linked.resources);
+      assert.deepEqual(after.ddbSync?.res, linked.ddbSync?.res);
+    }
+    assert.deepEqual(sync(linked, bree({ class: [] })).resources, undefined, "a whole read without it removes it");
   });
 });

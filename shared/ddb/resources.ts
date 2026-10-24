@@ -102,6 +102,22 @@ const ABILITY_BY_ID: Record<number, AbilityKey> = { 1: "str", 2: "dex", 3: "con"
 type Kind = "class" | "race" | "feat";
 const KINDS: readonly Kind[] = ["class", "race", "feat"];
 
+/**
+ * Whether every action list was read to its end: each is null, absent, or
+ * a list of at most 200. One cut at its bound, or not a list, may hold a
+ * linked resource or roll, so a merge must not read it as gone (rule 7 of
+ * docs/design-v1-ddb-resources.md, DDBBUILD-ASTRA-01). read.ts says so once
+ * for the other rolls and the class resources, which read the same lists.
+ */
+export function actionsWhole(data: Obj): boolean {
+  const groups = obj(data.actions);
+  if (!groups) return true;
+  return KINDS.every((kind) => {
+    const list = groups[kind];
+    return list === null || list === undefined || (Array.isArray(list) && list.length <= MAX.actions);
+  });
+}
+
 type ClassInfo = { classId: ClassId | undefined; level: number };
 type Feature = { cls: number; requiredLevel: number; name: string | null };
 
@@ -417,7 +433,7 @@ export function readResources(data: Obj, src: Sources & { who: string }): Resour
 
   return {
     resources: out.map((r) => r.resource),
-    whole: over === 0 && unread === 0 && ability.length === 0 && prof.length === 0,
+    whole: over === 0 && unread === 0 && ability.length === 0 && prof.length === 0 && actionsWhole(data),
     warnings: lines,
   };
 }

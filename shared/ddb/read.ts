@@ -7,7 +7,7 @@ import type { PcFill, PcFillStats } from "../rules/pcFill.ts";
 import { cantripTier, srdOnPass } from "../rules/pcStats.ts";
 import { abilityMod } from "../statBlock.ts";
 import { ddbSheetUrl } from "./link.ts";
-import { readResources } from "./resources.ts";
+import { actionsWhole, readResources } from "./resources.ts";
 
 /**
  * A D&D Beyond character's JSON read into a fill (docs/design-v1-pc-stats.md
@@ -585,6 +585,10 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const actions = sent.actions ? actionRolls(data, ctx) : null;
   const cut = cutRolls(weapons, spells?.rolls ?? null, actions);
   stats.rolls = cut.rolls;
+  if (sent.actions && !actionsWhole(data)) {
+    cut.read.other = false;
+    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's actions were not read, since a list of them was too long or did not read. Rolls and class resources here that they would change stay as they are.");
+  }
   if (spells && spells.unhalved.length > 0) {
     // Up to 8 names, fewer when long ones would pass a warning's 400 characters, which would refuse the whole fill.
     const unhalved = (n: number) =>
