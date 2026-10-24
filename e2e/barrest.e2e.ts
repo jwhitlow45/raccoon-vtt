@@ -1412,6 +1412,62 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await ops.send({ t: "room.update", settings: { playersApplyDamage: false } });
       }
     });
+
+    test("br-f-17. a drawer opened from the strip stays open as a roll card turns the expanded bar into the scrolling strip and back, and closed meanwhile, by either button, it rests the bar once the card goes (5.3, 5.4, review BB-OPUS-4)", async () => {
+      await homeTokens();
+      const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+      const asked: string[] = [];
+      const ask = async () => {
+        const id = randomUUID();
+        asked.push(id);
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await card.waitFor();
+      };
+      const answered = async () => {
+        await ops.send({ t: "roll.close", rollIds: [asked[asked.length - 1]!] });
+        await card.waitFor({ state: "detached" });
+      };
+      const thorn = bar(pat, "Thorn");
+      const state = (s: string) => waitFor(`the bar's state ${s}`, async () => ((await thorn.getAttribute("data-bar-state")) === s ? true : null), 5_000);
+      const drawer = thorn.getByRole("group", { name: "Conditions" });
+      const fromRest = thorn.locator("[data-rest-row]").getByRole("button", { name: "Conditions", exact: true });
+      try {
+        await setUp(pat, { width: 375, height: 667, scale: 1 });
+        await openOn(pat, run.thorn);
+        await fromRest.tap();
+        await drawer.waitFor();
+        await state("expanded");
+        // The card turns the expanded bar into the scrolling strip with its state kept, the drawer open, and the bar expands again as the card goes.
+        await ask();
+        await state("scrolls");
+        assert.equal(await drawer.count(), 1, "the card closed the drawer");
+        await answered();
+        await state("expanded");
+        assert.equal(await drawer.count(), 1, "the drawer closed as the bar expanded again");
+        // Closed during the card by the last Conditions the strip draws, the body's where it shows one: the bar rests once the card goes.
+        await ask();
+        await state("scrolls");
+        await thorn.getByRole("button", { name: "Conditions", exact: true }).last().tap();
+        await drawer.waitFor({ state: "detached" });
+        await answered();
+        await sleep(600);
+        assert.equal(await thorn.getAttribute("data-bar-state"), "rest", "the bar expanded again with its drawer closed");
+        // And by the strip's own Conditions.
+        await fromRest.tap();
+        await drawer.waitFor();
+        await state("expanded");
+        await ask();
+        await state("scrolls");
+        await fromRest.tap();
+        await drawer.waitFor({ state: "detached" });
+        await answered();
+        await sleep(600);
+        assert.equal(await thorn.getAttribute("data-bar-state"), "rest", "the bar expanded again after the strip's Conditions closed its drawer");
+        await shots.take(pat, "br-f-17-drawer-closed-rests");
+      } finally {
+        if (asked.length > 0) await ops.send({ t: "roll.close", rollIds: asked });
+      }
+    });
   });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)

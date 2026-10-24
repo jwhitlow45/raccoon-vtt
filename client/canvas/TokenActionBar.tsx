@@ -2202,22 +2202,27 @@ function useMultiToggle(rest: FrameControls["rest"], multi: boolean): { ref: Ref
  * drawer open and focus on its button there, and closing the drawer by
  * its button rests the bar again, focus back on the strip's button.
  * Where Expand is not offered, the drawer opens inside the scrolling
- * strip instead. A Collapse with such a drawer open closes it too.
+ * strip instead. The drawer opened from the strip closes as the bar's
+ * expanded state ends, by Collapse or by Multi-select turned on, and not
+ * as a roll card turns the expanded bar into the scrolling strip with the
+ * state kept (5.4). Closed there by either button, it ends the state
+ * too, so the bar rests once the card goes (review BB-OPUS-4).
  */
 function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: (d: Drawer) => void) {
   const [opened, setOpened] = useState<Drawer>(null);
   const [focus, setFocus] = useState<{ place: "rest" | "play"; id: string; tries: number } | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const resting = rest?.resting === true;
-  const wasResting = useRef(resting);
+  const expanded = useStore(useScoped(barDockSlot), (s) => s.expanded);
+  const wasExpanded = useRef(expanded);
   useLayoutEffect(() => {
-    const collapsed = resting && !wasResting.current;
-    wasResting.current = resting;
+    const collapsed = wasExpanded.current && !expanded;
+    wasExpanded.current = expanded;
     if (collapsed && opened !== null) {
       setDrawer(null);
       setOpened(null);
     }
-  }, [resting, opened, setDrawer]);
+  }, [expanded, opened, setDrawer]);
   /*
    * The strip's button may draw a render late: its row fits the candidates
    * the bar just gave it before it shows them. So the focus waits a few
@@ -2233,7 +2238,7 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
   });
   const close = () => {
     setDrawer(null);
-    if (opened !== null && rest && !rest.resting) {
+    if (opened !== null && rest && expanded) {
       setFocus({ place: "rest", id: opened, tries: 0 });
       setOpened(null);
       rest.collapse();
@@ -2246,7 +2251,8 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
     },
     fromRest(id: "conditions" | "uses") {
       if (!rest || rest.scrolls) {
-        setDrawer(drawer === id ? null : id);
+        if (drawer === id) close();
+        else setDrawer(id);
         return;
       }
       setDrawer(id);
