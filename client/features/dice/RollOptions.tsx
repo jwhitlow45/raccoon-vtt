@@ -117,11 +117,15 @@ export function RollOptions(_props: PanelProps) {
   // A panel shown afresh, as a phone's Dice sheet reopened after picking targets on the map, brings the open block back into view and takes the focus to it, as its opening did.
   useEffect(() => () => options.setState({ castFocused: 0 }), [options]);
   // A bar's Roll opens the panel on its tokens and scrolls it, after the render that lists them, once per tap (4.1).
+  // Options that were not showing before this tap open already landed: a glide from the panel's top would leave them below the view while their rows are on screen, the longer on a slow device.
+  const shownBefore = useRef(false);
   useEffect(() => {
+    const fresh = !shownBefore.current;
+    shownBefore.current = true;
     if (focus === 0 || options.getState().focused === focus) return;
     options.setState({ focused: focus });
     requestAnimationFrame(() => {
-      const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const still = fresh || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
       if (ref.current) landOnModes(ref.current, !still);
     });
   }, [focus, options]);
