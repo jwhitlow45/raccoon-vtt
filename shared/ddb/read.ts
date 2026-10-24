@@ -245,12 +245,18 @@ function speedsOf(data: Obj): Actor["speeds"] | null {
 
 type Ctx = { warnings: string[]; newId: () => string };
 
-function weaponRolls(data: Obj, ctx: Ctx, scores: Record<AbilityKey, number>, sneak: string | null): PcRoll[] {
+function weaponRolls(data: Obj, ctx: Ctx, scores: Record<AbilityKey, number>, sneak: string | null): { rolls: PcRoll[]; whole: boolean } {
   const out: PcRoll[] = [];
+  let whole = true;
   for (const raw of arr(data.inventory, MAX.inventory)) {
     const item = obj(raw);
     const def = obj(item?.definition);
     if (!item || !def || item.equipped !== true || def.filterType !== "Weapon") continue;
+    // Read in part, its properties or bonuses would read the weapon short, so it is left out and the weapons are not whole (DDBBUILD-ASTRA-06).
+    if (!wholeList(def.properties, MAX.properties) || !wholeList(def.grantedModifiers, MAX.modifiers)) {
+      whole = false;
+      continue;
+    }
     const wname = name(def.name, 48);
     const dice = formula(obj(def.damage)?.diceString);
     if (!wname || !dice) continue;
@@ -274,7 +280,7 @@ function weaponRolls(data: Obj, ctx: Ctx, scores: Record<AbilityKey, number>, sn
       if (two) out.push({ id: ctx.newId(), name: `${wname} (two hands)`, kind: "weapon", ability, attack, dice: [part(two), ...rider], ddb: true });
     }
   }
-  return out;
+  return { rolls: out, whole };
 }
 
 /** A damage or healing modifier's dice at the character's level, and how it grows: a cantrip by the tier rule, a spell per slot. */
@@ -341,6 +347,11 @@ function spellRolls(data: Obj, ctx: Ctx, characterLevel: number, casting: Abilit
     const usable = granted || level === 0 || entry.prepared === true || entry.alwaysPrepared === true || entry.countsAsKnownSpell === true;
     const key = `${sname.toLowerCase()}:${level}`;
     if (!usable || seen.has(key)) continue;
+    // Read in part, its dice or how they grow would read the spell short, so it is left out and the spells are not whole (DDBBUILD-ASTRA-06).
+    if (!wholeList(def.modifiers, MAX.modifiers) || arr(def.modifiers, MAX.modifiers).some((m) => !wholeList(obj(obj(m)?.atHigherLevels)?.higherLevelDefinitions, MAX.defs))) {
+      whole = false;
+      continue;
+    }
     const scale = typeof def.scaleType === "string" ? def.scaleType : null;
     const parts: PcDice[] = [];
     const typed: { type: DamageType; dice: string }[] = [];
@@ -648,11 +659,15 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const weapons = inventory && level !== null && scores ? weaponRolls(data, ctx, scores, rogue ? `${Math.ceil(rogue.level / 2)}d6` : null) : null;
   const spells = sent.spellLists && level !== null ? spellRolls(data, ctx, level, spellAbility) : null;
   const actions = sent.actions ? actionRolls(data, ctx) : null;
-  const cut = cutRolls(weapons, spells?.rolls ?? null, actions);
+  const cut = cutRolls(weapons?.rolls ?? null, spells?.rolls ?? null, actions);
   stats.rolls = cut.rolls;
   if (spells && !spells.whole) {
     cut.read.spell = false;
-    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's spells were not read, since a list of them was too long or did not read. Spells here that they would change stay as they are.");
+    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's spells were not read, since a list was too long or did not read. Spells here that they would change stay as they are.");
+  }
+  if (weapons && !weapons.whole) {
+    cut.read.weapon = false;
+    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's weapons were not read, since a list was too long or did not read. Weapons here that they would change stay as they are.");
   }
   if (sent.actions && !actionsWhole(data)) {
     cut.read.other = false;

@@ -278,7 +278,7 @@ describe("readDdbCharacter: what does not read", () => {
   });
 
   test("a spell or equipment list cut at its bound or not a list leaves its rolls read not whole, with its line (DDBBUILD-ASTRA-01)", () => {
-    const SPELLS_CUT = "Some of D&D Beyond's spells were not read, since a list of them was too long or did not read. Spells here that they would change stay as they are.";
+    const SPELLS_CUT = "Some of D&D Beyond's spells were not read, since a list was too long or did not read. Spells here that they would change stay as they are.";
     const gearLine = (w: string) => w.startsWith("Part of the equipment in D&D Beyond could not be read");
     const bolt = spell("Fire Bolt", 0, { requiresAttackRoll: true, modifiers: [damage("fire", "1d10")] });
     const sleeps = (count: number) => Array.from({ length: count }, (_, i) => spell(`Sleep ${i}`, 1, { modifiers: [] }));
@@ -541,6 +541,33 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
         const fill = cutLeavesOut(aura, partial, ["abilities", "adjust", "actor.ac", "actor.hpMax"], CUT.scores);
         assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"], key);
       }
+    });
+
+    test("a weapon or a spell whose own list is cut at its bound or not a list is left out, and its kind not read whole, with its line", () => {
+      const WEAPONS_CUT = "Some of D&D Beyond's weapons were not read, since a list was too long or did not read. Weapons here that they would change stay as they are.";
+      const SPELLS_CUT = "Some of D&D Beyond's spells were not read, since a list was too long or did not read. Spells here that they would change stay as they are.";
+      const own = wren().inventory as J[];
+      const withRapier = (over: J) => own.map((item) => ((item.definition as J).name === "Rapier" ? { ...item, definition: { ...(item.definition as J), ...over } } : item));
+      const many = (count: number, of: () => J) => Array.from({ length: count }, of);
+      for (const over of [{ properties: [{ name: "Finesse" }, ...many(20, () => ({ name: "Light" }))] }, { properties: "Finesse" }, { grantedModifiers: many(601, () => ({ type: "bonus", subType: "magic", fixedValue: 0 })) }]) {
+        const fill = readDdbCharacter(rich({ inventory: withRapier(over) }), ids)!;
+        assert.deepEqual(names(fill).filter((n) => !["Fire Bolt", "Second Wind"].includes(n)), ["Longsword", "Longsword (two hands)", "Shortbow"], JSON.stringify(Object.keys(over)));
+        assert.equal(fill.read?.weapon, false);
+        assert.ok(fill.warnings.includes(WEAPONS_CUT));
+      }
+      const plain = readDdbCharacter(rich({ inventory: withRapier({ properties: null, grantedModifiers: null }) }), ids)!;
+      assert.equal(plain.read?.weapon, true, "null lists are empty");
+      assert.ok(!plain.warnings.includes(WEAPONS_CUT));
+      const bolt = (definition: J) => spell("Fire Bolt", 0, { requiresAttackRoll: true, modifiers: [damage("fire", "1d10")], ...definition });
+      const grows = (count: number) => damage("fire", "1d10", many(count, () => ({ level: 5, dice: { diceString: "2d10" } })));
+      for (const definition of [{ modifiers: [...many(600, () => ({ type: "bonus", subType: "nothing-read" })), damage("fire", "1d10")] }, { modifiers: "fire" }, { modifiers: [grows(21)] }, { modifiers: [{ ...damage("fire", "1d10"), atHigherLevels: { higherLevelDefinitions: "5" } }] }]) {
+        const fill = readDdbCharacter(ione([bolt(definition), spell("Ray of Frost", 0, { requiresAttackRoll: true, modifiers: [damage("cold", "1d8")] })]), ids)!;
+        assert.deepEqual(names(fill), ["Ray of Frost"]);
+        assert.equal(fill.read?.spell, false);
+        assert.ok(fill.warnings.includes(SPELLS_CUT));
+      }
+      const fine = readDdbCharacter(ione([bolt({ modifiers: [grows(20)] }), bolt({ modifiers: null })]), ids)!;
+      assert.equal(fine.read?.spell, true, "20 levels and a null list are whole");
     });
 
     test("reader to merge: a cut modifier list or an equipped item past 400 leaves the saves, defenses and scores as synced", () => {
