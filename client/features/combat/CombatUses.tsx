@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, 
 import { useStore } from "zustand";
 import type { LimitedUse } from "#shared/dice/uses.ts";
 import { uuidv7 } from "#shared/ids.ts";
-import type { PromptKey } from "#shared/model.ts";
+import type { ClassResource, PromptKey } from "#shared/model.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -63,18 +63,26 @@ import {
  * on the actor show at once and the rows that need the block wait under
  * the shared Loading.
  *
+ * Two slots serve the Combat section's Uses (UsesSection.tsx) and the
+ * tracker row's group: `edit` puts Edit on each class resource's button
+ * line, and `pips`, the DM's legendary pips, stand under the list and its
+ * status line. Both sit inside the list's box, so a press that takes the
+ * list's last use button away hands focus to them before anything around
+ * the list (usesFocusTarget).
+ *
  * Each button waits for the server's answer, busy and deaf to a second
  * tap, since a use's rules are the server's. One status line under the
  * list says why a tap was refused, or why an off button cannot act now: an
  * off button keeps its focus and its tap (`aria-disabled`), so a touch
  * reaches its reason too.
  */
-export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: readonly LimitedUse[] | null; loading: boolean; failed: boolean; ownTurn: boolean; name: string }) {
+export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesForm; uses: readonly LimitedUse[] | null; loading: boolean; failed: boolean; ownTurn: boolean; name: string }) {
   const { target, form } = props;
   const actor = useRoomView((s) => (s.view ? actorOf(s.view, target) : undefined));
   const encounter = useRoomView((s) => s.view?.encounter);
   const characterId = useRoomView((s) => (s.view ? characterIdOf(s.view, target) : undefined));
   const holder = useRoomView((s) => (s.view ? holderKey(s.view, target) : ""));
+  const resourceCount = useRoomView((s) => (characterId !== undefined ? (s.view?.characters[characterId]?.resources?.length ?? 0) : 0));
   const record = currentRecord(encounter, actor);
   const turn = turnKey(encounter);
   const rows = usesRows({ form, uses: props.uses, actor, ownTurn: props.ownTurn, record });
@@ -96,7 +104,8 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
     if (seenTag !== null) see(seenTag);
   }, [seenTag, see]);
   const waits = props.uses === null && (props.loading || props.failed);
-  if (rows.length === 0 && !waits && characterId === undefined) return null;
+  // Nothing to show draws nothing, not an empty box that would take a gap in the section around it.
+  if (rows.length === 0 && !waits && resourceCount === 0) return null;
   return (
     <div data-combat-uses={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       {rows.length > 0 ? (
@@ -107,18 +116,22 @@ export function CombatUses(props: { target: ActorTarget; form: UsesForm; uses: r
         </ul>
       ) : null}
       {waits ? props.failed ? <SrdLoadFailed what="The uses" inline /> : <Loading text="Loading the uses…" style={{ minHeight: theme.touch }} /> : null}
-      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} /> : null}
+      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} edit={props.edit} /> : null}
       {shown ? (
         <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: shown.refused ? theme.color.dangerText : theme.color.textMuted }}>
           {shown.text}
         </p>
       ) : null}
+      {props.pips}
     </div>
   );
 }
 
-/** The off-turn list for a creature, reading its block and whose turn it is itself: the tracker row's Uses group, a companion's and the token bar's Uses drawer. */
-export function CreatureUses(props: { target: ActorTarget; name: string }) {
+/** What a uses list adds where it stands: Edit on each class resource's line, and the DM's legendary pips under it. */
+export type UsesSlots = { edit?(resource: ClassResource, opener: HTMLElement): void; pips?: ReactNode };
+
+/** The off-turn list for a creature, reading its block and whose turn it is itself: the tracker row's Uses group, a companion's, the token bar's Uses drawer and the Combat section's Uses. */
+export function CreatureUses(props: UsesSlots & { target: ActorTarget; name: string }) {
   const read = useCreatureUses(props.target);
   const ownTurn = useActsNow(props.target);
   return <CombatUses {...props} form="list" ownTurn={ownTurn} uses={read.uses} loading={read.loading} failed={read.failed} />;

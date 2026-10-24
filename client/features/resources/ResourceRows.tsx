@@ -22,14 +22,15 @@ export type ResourceRowsForm = "card" | "list";
  * A character's class resources as rows, each with its count and Use, Use…
  * for a pool, and Restore (docs/design-v1-combat-controls.md 7.2).
  * The turn card shows Use alone, as its rows are the turn's menu, and the
- * off-turn list adds Restore. Nothing at all for a character with
- * none, or for a viewer whose copy holds none, since they reach only the
- * DM and the character's players.
+ * off-turn list adds Restore, and Edit where the Combat section's Uses
+ * passes `edit`. Nothing at all for a character with none, or for a
+ * viewer whose copy holds none, since they reach only the DM and the
+ * character's players.
  */
-export function ClassResourceRows(props: { characterId: CharacterId; form: ResourceRowsForm }) {
+export function ClassResourceRows(props: { characterId: CharacterId; form: ResourceRowsForm; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const resources = useRoomView((s) => s.view?.characters[props.characterId]?.resources);
   if (!resources || resources.length === 0) return null;
-  return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} ownLine />;
+  return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} ownLine edit={props.edit} />;
 }
 
 /**
@@ -183,7 +184,8 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
             </RowButton>
           ) : null}
           {props.edit ? (
-            <Button size="sm" icon="edit" iconOnly="always" onClick={(e) => props.edit?.(r, e.currentTarget)}>
+            // The pencil alone, at its 44 px, so Use and Restore take the rest of the line (docs/design-v1-token-sections.md 3.1).
+            <Button size="sm" icon="edit" iconOnly="always" onClick={(e) => props.edit?.(r, e.currentTarget)} style={{ flex: "none" }}>
               {`Edit ${r.name}`}
             </Button>
           ) : null}

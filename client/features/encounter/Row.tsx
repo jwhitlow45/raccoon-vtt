@@ -34,6 +34,8 @@ import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollR
 import { Chips, DescribedHp, DescribedItems, Portrait, RollBadge, Spinner } from "./parts.tsx";
 import { readiedEffect, rowTarget, type ReactionTarget } from "./ready.ts";
 import { ReadyControls } from "./ReadyControls.tsx";
+import { LegendaryPips } from "./Pips.tsx";
+import { ReactionSwitch } from "./ReactionSection.tsx";
 import { CreatureUses, useUsesPresence } from "../combat/CombatUses.tsx";
 import { markChips } from "../combat/logic.ts";
 import { useLairCounts } from "../combat/state.ts";
@@ -288,8 +290,6 @@ export function EntryRow(props: {
           role={role}
           drag={drag}
           roll={rollBeside ? null : rollButton}
-          legendaryTarget={legendaryTarget(token, characterId)}
-          actor={actor}
           target={rowTarget({ tokens: token ? { [token.id]: token } : {}, characters: character ? { [character.id]: character } : {} }, entry)}
           readied={readied}
           playerOwned={playerOwned}
@@ -439,7 +439,6 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
           dm={dm}
           readied={readied}
           playerOwned={playerOwned}
-          spent={spent}
           dead={dead}
           statBlock={dm ? token.kind === "monster" || token.kind === "npc" : playerBlock}
         />
@@ -453,9 +452,8 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
  * character's turn, its stat block, for the DM as on any monster or NPC
  * and for its players while it has one, and for the DM Revive.
  */
-function CompanionMenu(props: { token: Token; entryId: string; name: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; spent: boolean; dead: boolean; statBlock: boolean }) {
+function CompanionMenu(props: { token: Token; entryId: string; name: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; dead: boolean; statBlock: boolean }) {
   const { token, dm } = props;
-  const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
   const here = usePanelHere();
@@ -472,12 +470,7 @@ function CompanionMenu(props: { token: Token; entryId: string; name: string; dm:
         </div>
       ) : null}
       {/* Its own patch, which a device that holds the token predicts at once (shared/reads.ts). */}
-      <Switch
-        label="Reaction used"
-        help="Its own, which clears when its character's turn starts"
-        checked={props.spent}
-        onChange={(on) => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { companionReaction: on } })}
-      />
+      <ReactionSwitch answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} dm={dm} />
       <ReadyControls answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} target={target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} />
       <UsesGroup target={target} name={props.name} />
       {props.statBlock ? (
@@ -494,12 +487,6 @@ function CompanionMenu(props: { token: Token; entryId: string; name: string; dm:
 /** A row's own Reaction and turn, for its Ready (ready.ts reactionTarget's answer for a creature with its own row). */
 function rowAnswer(entry: InitEntry): ReactionTarget {
   return entry.tokenId !== undefined ? { kind: "row", entryId: entry.id, tokenId: entry.tokenId } : { kind: "row", entryId: entry.id };
-}
-
-function legendaryTarget(token: { id: string; actor: { ref: string } | { inline: unknown } } | undefined, characterId: string | undefined) {
-  if (token && "inline" in token.actor) return { tokenId: token.id };
-  if (characterId !== undefined) return { characterId };
-  return null;
 }
 
 /** Whether a row draws the drag handle's slot: the DM's, tied or in a wide order (RowDrag.slot). */
@@ -809,15 +796,11 @@ function RollLanding(props: { at: RollAt; indent: number }) {
   );
 }
 
-type Legendary = { actionsMax: number; actionsUsed: number; resistMax: number; resistUsed: number };
-
 function RowMenu(props: {
   entry: InitEntry;
   name: string;
   role: "dm" | "player";
   drag: RowDrag | null;
-  legendaryTarget: { tokenId: string } | { characterId: string } | null;
-  actor: { legendary?: Legendary } | undefined;
   /** The row's creature for effect ops, when this view holds it. */
   target: ActorTarget | null;
   readied: Effect | undefined;
@@ -842,10 +825,9 @@ function RowMenu(props: {
   const scope = useRoomScope();
   const here = usePanelHere();
   const remove = useSend();
-  const reaction = useSend();
   const moving = useSendAll();
   const dm = role === "dm";
-  const update = (patch: { hidden?: boolean; reactionUsed?: boolean; advantage?: "adv" | "dis" | null }) =>
+  const update = (patch: { hidden?: boolean; advantage?: "adv" | "dis" | null }) =>
     actions.dispatch({ t: "encounter.update", entryId: entry.id, patch });
   // In lair applies the block's lair or base counts with the switch (docs/design-v1-combat-controls.md 3.1), so it waits for the block.
   const lair = useLairCounts(dm ? props.target : null);
@@ -855,14 +837,6 @@ function RowMenu(props: {
     const counts = lair.counts(inLair);
     lairSend.send({ t: "encounter.update", entryId: entry.id, patch: { inLair }, ...(counts ? { counts } : {}) });
   };
-  const legendary = props.actor?.legendary;
-  const setLegendary = (next: Legendary) => {
-    const target = props.legendaryTarget;
-    if (!target) return;
-    if ("tokenId" in target) actions.dispatch({ t: "token.update", tokenId: target.tokenId, patch: { actor: { legendary: next } } });
-    else actions.dispatch({ t: "character.update", characterId: target.characterId, patch: { actor: { legendary: next } } });
-  };
-
   return (
     <div
       style={{
@@ -890,7 +864,7 @@ function RowMenu(props: {
       {dm ? (
         <>
           <Switch label="Hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />
-          <Switch label="Reaction used" help="Clears at the start of its turn" checked={entry.reactionUsed} onChange={(reactionUsed) => update({ reactionUsed })} />
+          <ReactionSwitch answer={rowAnswer(entry)} dm />
           <Switch
             label="In lair"
             help={lair.counts(true) ? "Its lair's legendary counts and XP" : undefined}
@@ -926,26 +900,7 @@ function RowMenu(props: {
               </Button>
             </div>
           ) : null}
-          {props.target ? (
-            <UsesGroup target={props.target} name={props.name}>
-              {legendary && legendary.actionsMax > 0 ? (
-                <Pips
-                  label="Legendary Actions used"
-                  max={legendary.actionsMax}
-                  used={legendary.actionsUsed}
-                  onChange={(actionsUsed) => setLegendary({ ...legendary, actionsUsed })}
-                />
-              ) : null}
-              {legendary && legendary.resistMax > 0 ? (
-                <Pips
-                  label="Legendary Resistances used today"
-                  max={legendary.resistMax}
-                  used={legendary.resistUsed}
-                  onChange={(resistUsed) => setLegendary({ ...legendary, resistUsed })}
-                />
-              ) : null}
-            </UsesGroup>
-          ) : null}
+          {props.target ? <UsesGroup target={props.target} name={props.name} pips={<LegendaryPips target={props.target} />} /> : null}
           {props.moveAfter ? (
             <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>For after its turn: its rider's initiative, right after its rider</span>
@@ -968,13 +923,7 @@ function RowMenu(props: {
         </>
       ) : (
         <>
-          <Switch
-            label="Reaction used"
-            help="Clears at the start of your turn"
-            checked={entry.reactionUsed}
-            busy={reaction.waiting}
-            onChange={(reactionUsed) => reaction.send({ t: "encounter.update", entryId: entry.id, patch: { reactionUsed } })}
-          />
+          <ReactionSwitch answer={rowAnswer(entry)} dm={false} />
           {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
           {props.target ? <UsesGroup target={props.target} name={props.name} /> : null}
           {props.statBlockTokenId !== null ? (
@@ -1001,15 +950,14 @@ function RowMenu(props: {
  * same list as its token bar's Uses drawer, then the pips, which set the
  * counts by hand. Nothing for a creature with no use.
  */
-function UsesGroup(props: { target: ActorTarget; name: string; children?: ReactNode }) {
+function UsesGroup(props: { target: ActorTarget; name: string; pips?: ReactNode }) {
   // The pips come only with legendary counts, which make a row of the list, so presence alone decides.
   const presence = useUsesPresence(props.target);
   if (presence === "no") return null;
   return (
     <div role="group" aria-label={`${props.name}'s uses`} data-uses-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Uses</span>
-      <CreatureUses target={props.target} name={props.name} />
-      {props.children}
+      <CreatureUses target={props.target} name={props.name} pips={props.pips} />
     </div>
   );
 }
@@ -1042,48 +990,4 @@ function spentChips(marks: Parameters<typeof markChips>[0]): ReactNode[] {
       />
     </span>,
   ];
-}
-
-/** Tap a pip to mark that many used. Tapping the last used pip gives one back. */
-function Pips(props: { label: string; max: number; used: number; onChange(used: number): void }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-      <span style={{ flex: 1, fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
-        {props.label}: {props.used} of {props.max}
-      </span>
-      <div role="group" aria-label={props.label} style={{ display: "flex" }}>
-        {Array.from({ length: props.max }, (_, i) => {
-          const filled = i < props.used;
-          return (
-            <button
-              key={i}
-              type="button"
-              aria-label={`${i + 1} used`}
-              aria-pressed={filled}
-              onClick={() => props.onChange(props.used === i + 1 ? i : i + 1)}
-              style={{
-                width: theme.touch,
-                minHeight: theme.touch,
-                display: "grid",
-                placeItems: "center",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-              }}
-            >
-              <span
-                style={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: theme.radius.round,
-                  border: `${theme.line.strong}px solid ${theme.color.accent}`,
-                  background: filled ? theme.color.accent : "transparent",
-                }}
-              />
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
