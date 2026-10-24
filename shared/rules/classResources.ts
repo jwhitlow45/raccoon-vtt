@@ -50,7 +50,12 @@ export type ClassPreset = {
   /** The id a resource stores as `preset`, its class first, so the Cleric's and the Paladin's Channel Divinity stay two. */
   id: string;
   classId: ClassId;
-  /** The feature's name as SRD 5.2.1 prints it. */
+  /**
+   * The feature's name as SRD 5.2.1 prints it. A feature with two uses that
+   * each come back on their own, as Natural Recovery's free spell and its
+   * spell slots do, is two presets, each naming its use in parentheses, so
+   * spending one never spends the other.
+   */
   name: string;
   /** The SRD 5.2.1 subclass the feature belongs to, when it is a subclass's. */
   subclass?: string;
@@ -75,7 +80,8 @@ export const PRESETS: readonly ClassPreset[] = [
   { id: "cleric-channel-divinity", classId: "cleric", name: "Channel Divinity", unlock: 2, count: { by: "table", steps: [[2, 2], [6, 3], [18, 4]] }, reset: "shortOne" },
   { id: "cleric-divine-intervention", classId: "cleric", name: "Divine Intervention", ...one(10) },
   { id: "druid-wild-shape", classId: "druid", name: "Wild Shape", unlock: 2, count: { by: "table", steps: [[2, 2], [6, 3], [17, 4]] }, reset: "shortOne" },
-  { id: "druid-natural-recovery", classId: "druid", name: "Natural Recovery", subclass: "Circle of the Land", ...one(6) },
+  { id: "druid-natural-recovery", classId: "druid", name: "Natural Recovery (free spell)", subclass: "Circle of the Land", ...one(6) },
+  { id: "druid-natural-recovery-slots", classId: "druid", name: "Natural Recovery (spell slots)", subclass: "Circle of the Land", ...one(6) },
   { id: "fighter-second-wind", classId: "fighter", name: "Second Wind", unlock: 1, count: { by: "table", steps: [[1, 2], [4, 3], [10, 4]] }, reset: "shortOne" },
   { id: "fighter-action-surge", classId: "fighter", name: "Action Surge", unlock: 2, count: { by: "table", steps: [[2, 1], [17, 2]] }, reset: "short" },
   { id: "fighter-indomitable", classId: "fighter", name: "Indomitable", unlock: 9, count: { by: "table", steps: [[9, 1], [13, 2], [17, 3]] }, reset: "long" },

@@ -579,6 +579,14 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       await level.selectOption("14");
       await add.getByText("Path of the Berserker. 1 use. Back on a Long Rest.", { exact: true }).waitFor();
       await measure(page, add, `the Add sheet from a class at ${at}`);
+      // Natural Recovery's two uses stand as two rows of a subclass, each left unticked.
+      await add.getByRole("combobox", { name: "Class" }).selectOption("druid");
+      await add.getByRole("combobox", { name: "Druid level" }).selectOption("6");
+      const recovery = add.getByRole("checkbox", { name: /^Natural Recovery/ });
+      await add.getByRole("checkbox", { name: "Natural Recovery (spell slots)", exact: true }).waitFor();
+      assert.deepEqual(await Promise.all((await recovery.all()).map((box) => box.isChecked())), [false, false], "both unticked");
+      assert.equal(await add.getByText("Circle of the Land. 1 use. Back on a Long Rest.", { exact: true }).count(), 2, "each says what it counts");
+      await measure(page, add, `the Add sheet from a class at ${at}`);
       await add.getByRole("combobox", { name: "Class" }).selectOption("bard");
       await add.getByRole("textbox", { name: "Charisma modifier" }).waitFor();
       await measure(page, add, `the Add sheet asking a modifier at ${at}`);

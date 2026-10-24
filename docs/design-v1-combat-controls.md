@@ -409,7 +409,8 @@ Recommendations inferred from past decisions, apart from the recorded picks abov
 | Channel Divinity | Cleric 2 | 2, 3 at 6, 4 at 18 | Short, one |
 | Divine Intervention | Cleric 10 | 1 | Long |
 | Wild Shape | Druid 2 | 2, 3 at 6, 4 at 17 | Short, one |
-| Natural Recovery (Land) | Druid 6 | 1 | Long |
+| Natural Recovery, free spell (Land) | Druid 6 | 1 | Long |
+| Natural Recovery, spell slots (Land) | Druid 6 | 1 | Long |
 | Second Wind | Fighter 1 | 2, 3 at 4, 4 at 10 | Short, one |
 | Action Surge | Fighter 2 | 1, 2 at 17 | Short |
 | Indomitable | Fighter 9 | 1, 2 at 13, 3 at 17 | Long |

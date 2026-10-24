@@ -34,6 +34,7 @@ const APPENDIX: { id: string; unlock: number; counts: [number, number][] | "leve
   { id: "cleric-divine-intervention", unlock: 10, counts: [[10, 1]], reset: "long" },
   { id: "druid-wild-shape", unlock: 2, counts: [[2, 2], [6, 3], [17, 4]], reset: "shortOne" },
   { id: "druid-natural-recovery", unlock: 6, counts: [[6, 1]], reset: "long" },
+  { id: "druid-natural-recovery-slots", unlock: 6, counts: [[6, 1]], reset: "long" },
   { id: "fighter-second-wind", unlock: 1, counts: [[1, 2], [4, 3], [10, 4]], reset: "shortOne" },
   { id: "fighter-action-surge", unlock: 2, counts: [[2, 1], [17, 2]], reset: "short" },
   { id: "fighter-indomitable", unlock: 9, counts: [[9, 1], [13, 2], [17, 3]], reset: "long" },
@@ -137,18 +138,39 @@ describe("class resources: Appendix A (docs/design-v1-combat-controls.md 7.1)", 
 
   test("every class has its presets, and the subclass ones name their subclass", () => {
     const counts = Object.fromEntries(CLASS_IDS.map((c) => [c, classPresets(c).length])) as Record<ClassId, number>;
-    assert.deepEqual(counts, { barbarian: 3, bard: 1, cleric: 2, druid: 2, fighter: 3, monk: 3, paladin: 3, ranger: 2, rogue: 1, sorcerer: 4, warlock: 3, wizard: 1 });
+    assert.deepEqual(counts, { barbarian: 3, bard: 1, cleric: 2, druid: 3, fighter: 3, monk: 3, paladin: 3, ranger: 2, rogue: 1, sorcerer: 4, warlock: 3, wizard: 1 });
     assert.deepEqual(
       PRESETS.filter((p) => p.subclass).map((p) => `${p.name}: ${p.subclass}`),
       [
         "Intimidating Presence: Path of the Berserker",
-        "Natural Recovery: Circle of the Land",
+        "Natural Recovery (free spell): Circle of the Land",
+        "Natural Recovery (spell slots): Circle of the Land",
         "Wholeness of Body: Warrior of the Open Hand",
         "Holy Nimbus: Oath of Devotion",
         "Dragon Wings: Draconic Sorcery",
         "Dark One’s Own Luck: Fiend Patron",
         "Hurl Through Hell: Fiend Patron",
       ],
+    );
+  });
+
+  test("Natural Recovery's free spell and its spell slots are two presets, each back on a Long Rest of its own", () => {
+    const uses = PRESETS.filter((p) => p.name.startsWith("Natural Recovery"));
+    assert.deepEqual(
+      uses.map((p) => [p.name, p.classId, p.subclass, p.unlock, presetCount(p, 6), presetCount(p, 20), presetReset(p, 20)]),
+      [
+        ["Natural Recovery (free spell)", "druid", "Circle of the Land", 6, 1, 1, "long"],
+        ["Natural Recovery (spell slots)", "druid", "Circle of the Land", 6, 1, 1, "long"],
+      ],
+    );
+    const added = uses.map((p, i) => fromPreset(p, { id: `nr${i}`, classLevel: 6 }));
+    assert.deepEqual(
+      added.map((r) => r && [r.name, r.max, r.preset]),
+      [
+        ["Natural Recovery (free spell)", 1, "druid-natural-recovery"],
+        ["Natural Recovery (spell slots)", 1, "druid-natural-recovery-slots"],
+      ],
+      "two resources, so spending one leaves the other",
     );
   });
 
