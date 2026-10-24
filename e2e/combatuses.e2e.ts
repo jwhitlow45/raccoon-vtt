@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { limitedUses } from "#shared/dice/uses.ts";
 import type { Actor, LogEvent, RoomState } from "#shared/model.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "#shared/srd/monsters.ts";
-import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { alignmentLines, measureAlignment, toastsUnderCards } from "./helpers/alignment.ts";
 import { ConsoleWatch, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -30,6 +31,13 @@ import { ConsoleWatch, OpSocket, openPage, Shots, SocketWatch, startServer, tapC
  *   on its turn card.
  * - Thorn at 0 HP gets his death save card on Pat's phone and the DM's,
  *   settled once by Pat's roll.
+ * - A toast on the DM's phone starts under a lone turn card, folded and
+ *   open.
+ * - Dragons placed in their lair join with In lair on through the group
+ *   bar's Start a fight and Add to the fight and the tracker's own.
+ * - The Dice panel's X/Day Use with none left says so on a tap.
+ * - Where the SRD's stat blocks did not load, In lair and every join
+ *   stay off beside the failure's reload.
  * Every new screen is measured with the alignment check at 1440 x 900,
  * 390 x 844 and 320 x 568, at 100% and 130%.
  *
@@ -77,6 +85,8 @@ const run = {
   dragon: randomUUID(),
   troll: randomUUID(),
   goblin: randomUUID(),
+  lair: [randomUUID(), randomUUID(), randomUUID()],
+  dretch: randomUUID(),
 };
 
 const DRAGON = "Adult Red Dragon";
@@ -181,6 +191,65 @@ async function closeBar(page: Page): Promise<void> {
   if ((await bar.count()) === 0) return;
   await bar.getByRole("button", { name: "Close", exact: true }).first().click();
   await bar.waitFor({ state: "detached" });
+}
+
+/** Taps away the toasts left standing, by their own buttons. */
+async function dismissToasts(page: Page): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    const toast = page.locator("button[data-toast], div[data-toast] > button").filter({ visible: true });
+    if ((await toast.count()) === 0) return;
+    await toast.first().click({ timeout: 1000 }).catch(() => {});
+  }
+}
+
+/** The three dragons placed in their lair, each where a tap on its middle cell finds it. */
+const LAIR_AT = [
+  { x: 1, y: 14 },
+  { x: 6, y: 14 },
+  { x: 11, y: 14 },
+];
+const lairName = (i: number) => `Lair Dragon ${i + 1}`;
+const lairCell = (i: number) => ({ x: LAIR_AT[i]!.x + 1, y: LAIR_AT[i]!.y + 1 });
+
+/** The DM's rows for the lair dragons: whether each is in the fight, and with In lair on. */
+function lairRows(): (boolean | null)[] {
+  return run.lair.map((id) => {
+    const entry = deskSocket.state?.encounter?.entries.find((e) => e.tokenId === id);
+    return entry ? entry.inLair : null;
+  });
+}
+
+/** Lets go of the desk's selection and its group, so the next tap selects afresh. */
+async function deselect(page: Page): Promise<void> {
+  await page.keyboard.press("Escape");
+  const none = page.getByRole("button", { name: "Deselect all" }).first();
+  if (await none.isVisible()) await none.click();
+  const done = page.getByRole("button", { name: "Done", exact: true });
+  if (await done.isVisible()) await done.click();
+  await page.keyboard.press("Escape");
+}
+
+/** The desk's group bar for these lair dragons, selected by Multi-select from none. */
+async function groupOf(page: Page, which: readonly number[]): Promise<Locator> {
+  await deselect(page);
+  await dismissToasts(page);
+  await tapCell(page, run.bounds, lairCell(which[0]!));
+  const bar = page.getByRole("dialog", { name: `${lairName(which[0]!)} actions` });
+  await bar.waitFor();
+  await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
+  for (const i of which.slice(1)) await tapCell(page, run.bounds, lairCell(i));
+  const group = page.getByRole("dialog", { name: `${which.length} selected tokens` });
+  await group.waitFor();
+  return group;
+}
+
+/** A tracker section on a desk by its heading, such as "Add to the fight", with a fight or before one. */
+async function trackerSection(page: Page, heading: string): Promise<Locator> {
+  const tab = page.getByRole("tab", { name: "Initiative" }).first();
+  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+  const section = page.locator("section").filter({ has: page.getByRole("heading", { name: heading, exact: true }) }).last();
+  await section.waitFor();
+  return section;
 }
 
 /** The alerts column's cards of one kind. */
@@ -533,7 +602,146 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
   });
 
-  test("cu-b-10. no console errors on any page", () => {
+  test("cu-b-10. a toast on the DM's phone at 390 x 844 starts under a lone turn card, folded and open", async () => {
+    await setUp(phone, phoneCdp, PHONE);
+    // The dragon's turn from cu-b-9: its recharge card put away on this page, the turn card stands alone.
+    const recharge = phone.getByRole("group", { name: `Fire Breath can recharge (5–6). ${DRAGON}` });
+    await recharge.waitFor();
+    await recharge.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await recharge.waitFor({ state: "detached" });
+    await alerts(phone, "turn").waitFor();
+    assert.equal(await phone.locator("[data-alert]").filter({ visible: true }).count(), 1, "the turn card stands alone");
+    const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ") });
+    try {
+      for (const form of ["folded", "open"] as const) {
+        if (form === "open") await alerts(phone, "turn").getByRole("button", { name: `Show ${DRAGON}'s turn` }).click();
+        await waitFor(`the turn card ${form}`, async () => (((await alerts(phone, "turn").getAttribute("data-turn-folded")) !== null) === (form === "folded") ? true : null));
+        const words = `A whisper over the ${form} turn card.`;
+        await patOps.send({ t: "log.whisper", to: [deskSocket.you!.memberId], text: words });
+        const toast = phone.locator("[data-toast]").filter({ hasText: words }).filter({ visible: true }).first();
+        await toast.waitFor();
+        const card = await alerts(phone, "turn").boundingBox();
+        const box = await toast.boundingBox();
+        assert.ok(card && box && box.y >= card.y + card.height, `the toast starts at ${box?.y}, over the ${form} turn card, whose foot is at ${card ? card.y + card.height : "?"}`);
+        assert.ok((await toastsUnderCards(phone)) > 0, `no toast stood under the ${form} turn card`);
+        await shots.take(phone, `cu-b-toast-under-turn-${form}`);
+        await dismissToasts(phone);
+      }
+    } finally {
+      patOps.close();
+    }
+  });
+
+  test("cu-b-11. dragons placed in their lair join with In lair on through the group bar's Start a fight and Add to the fight, and the tracker's", async () => {
+    const m = srd.find((x) => x.srdId === "adult-red-dragon")!;
+    const placed: Actor = { ...srdActor("adult-red-dragon"), legendary: { actionsMax: 4, actionsUsed: 0, resistMax: 4, resistUsed: 0 }, xp: m.xpInLair! };
+    for (const [i, id] of run.lair.entries()) {
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, visibility: "all", kind: "monster", name: lairName(i), size: "huge", ...LAIR_AT[i]!, disposition: "hostile", actor: { inline: placed } } });
+    }
+    await ops.send({ t: "encounter.end" });
+    await waitFor("no fight", () => (deskSocket.state?.encounter ? null : true));
+    await setUp(desk, deskCdp, DESK);
+
+    // The group bar starts a fight with two of them.
+    let group = await groupOf(desk, [0, 1]);
+    await group.getByRole("button", { name: "Start a fight", exact: true }).click();
+    await waitFor("the group bar's start", () => (lairRows().join() === "true,true," ? true : null));
+    // The tracker adds the third, selected.
+    await deselect(desk);
+    await tapCell(desk, run.bounds, lairCell(2));
+    await desk.getByRole("dialog", { name: `${lairName(2)} actions` }).waitFor();
+    await (await trackerSection(desk, "Add to the fight")).getByRole("button", { name: lairName(2), exact: true }).click();
+    await waitFor("the tracker's add", () => (lairRows().join() === "true,true,true" ? true : null));
+    await shots.take(desk, "cu-b-lair-joins");
+
+    // Again the other way round: the tracker starts it, and the group bar adds.
+    await ops.send({ t: "encounter.end" });
+    await waitFor("no fight", () => (deskSocket.state?.encounter ? null : true));
+    await deselect(desk);
+    await tapCell(desk, run.bounds, lairCell(2));
+    await desk.getByRole("dialog", { name: `${lairName(2)} actions` }).waitFor();
+    await (await trackerSection(desk, "Start a fight with")).getByRole("button", { name: lairName(2), exact: true }).click();
+    await waitFor("the tracker's start", () => (lairRows().join() === ",,true" ? true : null));
+    group = await groupOf(desk, [0, 1]);
+    await group.getByRole("button", { name: "Add to the fight", exact: true }).click();
+    await waitFor("the group bar's add", () => (lairRows().join() === "true,true,true" ? true : null));
+    await deselect(desk);
+  });
+
+  test("cu-b-12. the Dice panel's X/Day Use with none left says so on a tap, and sends nothing", async () => {
+    const m = srd.find((x) => x.srdId === "dretch")!;
+    const cloud = limitedUses(m).find((u) => u.kind === "day")!;
+    assert.ok(cloud.kind === "day");
+    await ops.send({ t: "token.create", token: { id: run.dretch, sceneId: run.sceneId, visibility: "all", kind: "monster", name: "Dretch", size: "small", x: 24, y: 14, disposition: "hostile", actor: { inline: srdActor("dretch") } } });
+    for (let i = 0; i < cloud.max; i++) await ops.send({ t: "actor.use", target: { tokenId: run.dretch }, use: { kind: "ability", key: cloud.key, name: cloud.name, limit: "day", max: cloud.max } });
+    await waitFor("its uses spent", () => (actorOf(deskSocket.state, run.dretch)?.uses?.[cloud.key]?.used === cloud.max ? true : null));
+    await deselect(desk);
+    await tapCell(desk, run.bounds, { x: 24, y: 14 });
+    const bar = desk.getByRole("dialog", { name: "Dretch actions" });
+    await bar.waitFor();
+    await bar.getByRole("button", { name: "Roll", exact: true }).click();
+    const use = desk.getByRole("button", { name: `Use ${cloud.name}, 0 of ${cloud.max} left` });
+    await use.waitFor();
+    assert.equal(await use.getAttribute("aria-disabled"), "true");
+    const seq = deskSocket.state?.log.length;
+    // A real tap, which a chip that is only aria-disabled still takes.
+    await use.click({ force: true });
+    await desk.getByRole("status").filter({ hasText: "No uses left" }).filter({ visible: true }).first().waitFor();
+    await shots.take(desk, "cu-b-day-none-left");
+    assert.equal(deskSocket.state?.log.length, seq, "nothing was sent");
+    assert.equal(actorOf(deskSocket.state, run.dretch)?.uses?.[cloud.key]?.used, cloud.max);
+    await deselect(desk);
+  });
+
+  test("cu-b-13. where the SRD's stat blocks did not load, In lair and every join stay off beside the failure's reload", async () => {
+    // A third lair dragon out of the fight, for the joins.
+    await ops.send({ t: "encounter.remove", entryIds: deskSocket.state!.encounter!.entries.filter((e) => e.tokenId === run.lair[2]).map((e) => e.id) });
+    await waitFor("the third out of the fight", () => (lairRows()[2] === null ? true : null));
+    const context = await browser.newContext({ viewport: DESK });
+    try {
+      await context.addCookies(await deskContext.cookies(server.origin));
+      const page = await context.newPage();
+      await page.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
+      await openPage(page, `${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      const before = JSON.stringify(deskSocket.state?.encounter?.entries);
+
+      const tracker = await openTracker(page);
+      const toggle = tracker.getByRole("button", { name: `${lairName(0)} options` });
+      if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+      const lair = tracker.getByRole("switch", { name: /^In lair/ });
+      await page.getByText("Its stat block did not load. Reload to try again.", { exact: true }).first().waitFor();
+      assert.ok(await lair.isDisabled(), "In lair is off while the block is unread");
+      const add = await trackerSection(page, "Add to the fight");
+      await add.getByText("The stat blocks did not load. Reload to try again.", { exact: true }).waitFor();
+      assert.ok(await add.getByRole("button", { name: /^Everyone here/ }).isDisabled(), "the tracker's join is off");
+      // What this changed in the row's options and the tracker's adds: the switch off, and the failure's line with its reload.
+      await measure(page, lair, "In lair off with its block not loaded at 1440 x 900 at 100%");
+      await measure(page, tracker.getByRole("alert").filter({ hasText: "Its stat block did not load" }), "In lair's failure line at 1440 x 900 at 100%");
+      await measure(page, add.getByRole("alert"), "the tracker's join failure line at 1440 x 900 at 100%");
+      await shots.take(page, "cu-b-srd-failed-tracker");
+
+      // The third dragon and Thorn, both out of the fight, on the map's left, clear of a bar docked at its right.
+      await tapCell(page, run.bounds, lairCell(2));
+      const bar = page.getByRole("dialog", { name: `${lairName(2)} actions` });
+      await bar.waitFor();
+      await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
+      await tapCell(page, run.bounds, THORN_AT);
+      const group = page.getByRole("dialog", { name: "2 selected tokens" });
+      await group.waitFor();
+      await group.getByText("The stat blocks did not load. Reload to try again.", { exact: true }).waitFor();
+      assert.ok(await group.getByRole("button", { name: "Add to the fight", exact: true }).isDisabled(), "the group bar's join is off");
+      await measure(page, group, "the group bar with its blocks not loaded at 1440 x 900 at 100%");
+      assert.deepEqual(sweep, [], "out of line by more than 1 px");
+      await shots.take(page, "cu-b-srd-failed-group");
+      assert.equal(JSON.stringify(deskSocket.state?.encounter?.entries), before, "nothing joined and no In lair changed");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("cu-b-14. no console errors on any page", () => {
     assert.deepEqual(deskConsole.errors, [], "the desk");
     assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
