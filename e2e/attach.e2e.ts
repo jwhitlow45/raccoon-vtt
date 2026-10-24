@@ -97,9 +97,6 @@ function bar(page: Page, name: string): Locator {
 
 /** Selects a token by a tap or a click on it: on its cell's center, or for a Tiny one at its own middle. */
 async function select(page: Page, name: string, cell: { x: number; y: number }, tiny = false): Promise<Locator> {
-  // An expanded bar lasts through a drag and covers the map under it, which a drop never moves (docs/design-v1-bar-compact.md 5.3): it rests first, as a player would.
-  const expanded = page.locator('[role="dialog"][data-bar-state="expanded"]');
-  if ((await expanded.count()) > 0) await expanded.getByRole("button", { name: "Collapse", exact: true }).first().click();
   if (tiny) {
     const p = await pagePoint(page, BOUNDS, { x: cell.x + 0.25, y: cell.y + 0.25 });
     await page.mouse.click(p.x, p.y);

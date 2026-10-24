@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, multiSelect, OpSocket, pagePoint, pickTool, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, multiSelect, OpSocket, pagePoint, pickTool, readCamera, reopenRoom, Shots, sleep, SocketWatch, startServer, Touches, touchSwipe, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token action bar at rest on a phone held upright
@@ -338,6 +338,27 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         if (Math.abs(v.cam.x - after.cam.x) < 1 && Math.abs(v.cam.y - after.cam.y) < 1) return onPage(after, w);
       }
       return onPage(await view(page), w);
+    }
+    /**
+     * Pans the map by `dy` with two fingers at the window's sides, from a
+     * height that keeps them above `floor` the whole way: in Multi-select
+     * one finger on the map draws a box that gathers.
+     */
+    async function panTwo(page: Page, cdp: CDPSession, dy: number, floor: number): Promise<void> {
+      const width = page.viewportSize()!.width;
+      const y0 = Math.min(floor - 40, floor - 40 - dy);
+      const fingers = new Touches(cdp);
+      await fingers.start([
+        { x: 12, y: y0, id: 1 },
+        { x: width - 12, y: y0, id: 2 },
+      ]);
+      for (let i = 1; i <= 12; i++)
+        await fingers.move([
+          { x: 12, y: y0 + (dy * i) / 12, id: 1 },
+          { x: width - 12, y: y0 + (dy * i) / 12, id: 2 },
+        ]);
+      await fingers.end();
+      await sleep(600);
     }
     const bar = (page: Page, name: string) => page.getByRole("dialog", { name: `${name} actions` });
     /** Puts every token back on its own cell, as a step that dragged one may have left it. */
@@ -889,22 +910,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       // Multi-select is behind Expand on the DM's strip at 390 x 844, and the strip rests again after, lifted by Multi-select's options row.
       await multiSelect(bar(dm, "Thorn"));
       const lifted = await steady(dm);
-      // In Multi-select one finger on the map draws a box that gathers, so two pan it, Goblin 2 just above the strip, its label meeting it.
-      const before = await middle(dm, run.goblin2);
-      const dy = lifted.top - 12 - before.y;
-      const fingers = new Touches(dmCdp);
-      const y0 = Math.min(lifted.top - 40, lifted.top - 40 - dy);
-      await fingers.start([
-        { x: 12, y: y0, id: 1 },
-        { x: 378, y: y0, id: 2 },
-      ]);
-      for (let i = 1; i <= 12; i++)
-        await fingers.move([
-          { x: 12, y: y0 + (dy * i) / 12, id: 1 },
-          { x: 378, y: y0 + (dy * i) / 12, id: 2 },
-        ]);
-      await fingers.end();
-      await sleep(600);
+      // Two fingers pan Goblin 2 just above the strip, its label meeting it.
+      await panTwo(dm, dmCdp, lifted.top - 12 - (await middle(dm, run.goblin2)).y, lifted.top);
       const gathered = await readCamera(dm);
       const g2 = await middle(dm, run.goblin2);
       assert.ok(g2.y < lifted.top - 4 && g2.y + 30 > lifted.top, `Goblin 2 does not stand just above the lifted strip, so the taps test nothing: ${JSON.stringify({ g2, lifted })}`);
@@ -1275,6 +1282,39 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await ops.send({ t: "encounter.end" });
         await ops.send({ t: "actor.hp", target: thorn, change: { kind: "heal", amount: 30 } });
       }
+    });
+
+    test("br-f-14. Multi-select turned on in an expanded bar rests it with no map move, so the map under it is free, and turned off in a group's expanded bar leaves it expanded (D-261024-22)", async () => {
+      await homeTokens();
+      await setUp(dm, { ...PHONE, scale: 1 });
+      await openOn(dm, run.thorn);
+      const thorn = bar(dm, "Thorn");
+      await expandBar(thorn);
+      assert.equal(await thorn.getAttribute("data-bar-state"), "expanded", "Thorn's bar did not expand");
+      const cam = await readCamera(dm);
+      await thorn.getByRole("button", { name: "Multi-select", exact: true }).click();
+      await dm.getByRole("toolbar", { name: "Select options" }).waitFor();
+      await waitFor("Thorn's bar to rest", async () => ((await thorn.getAttribute("data-bar-state")) === "rest" ? true : null), 3_000);
+      await sleep(400);
+      assert.deepEqual(await readCamera(dm), cam, "the rest moved the map");
+      await shots.take(dm, "br-f-14-token-rests");
+
+      // Goblin 1 gathered where the map shows it, then the group's bar expanded and Multi-select turned off there.
+      const strip = await steady(dm);
+      await panTwo(dm, dmCdp, strip.top - 150 - (await middle(dm, run.goblin1)).y, strip.top);
+      const g1 = await middle(dm, run.goblin1);
+      await dm.touchscreen.tap(g1.x, g1.y);
+      const group = dm.getByRole("dialog", { name: "2 selected tokens" });
+      await group.waitFor();
+      assert.equal(await group.getAttribute("data-bar-state"), "rest", "the group's bar opened expanded");
+      await expandBar(group);
+      assert.equal(await group.getAttribute("data-bar-state"), "expanded", "the group's bar did not expand");
+      await group.getByRole("button", { name: "Multi-select", exact: true }).click();
+      await waitFor("Multi-select off", async () => ((await dm.getByRole("toolbar", { name: "Select options" }).count()) === 0 ? true : null), 3_000);
+      await sleep(400);
+      assert.equal(await group.getAttribute("data-bar-state"), "expanded", "turning Multi-select off rested the group's bar");
+      await shots.take(dm, "br-f-14-group-stays");
+      await group.getByRole("button", { name: "Deselect all", exact: true }).first().click();
     });
   });
 

@@ -510,16 +510,15 @@ export async function expandBar(bar: Locator): Promise<void> {
 }
 
 /**
- * Turns Multi-select on from a token's bar, by barControl. A strip that
- * expanded for it rests again after, as a player would leave it, so the
- * map it covered takes the taps that gather (docs/design-v1-bar-compact.md 5.3).
+ * Turns Multi-select on from a token's bar, by barControl, and waits for
+ * an upright phone's bar to rest: Multi-select pressed in the expanded
+ * bar rests it, so the map it covered takes the taps that gather
+ * (docs/design-v1-bar-compact.md 5.3, D-261024-22).
  */
 export async function multiSelect(bar: Locator): Promise<void> {
-  const before = await bar.getAttribute("data-bar-state");
   await (await barControl(bar, "Multi-select")).click();
-  if (before !== "rest" || (await bar.getAttribute("data-bar-state")) !== "expanded") return;
-  await bar.getByRole("button", { name: "Collapse", exact: true }).click();
-  await waitFor("the strip to rest", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null), 5_000);
+  if ((await bar.getAttribute("data-bar-mode")) !== "span") return;
+  await waitFor("the strip to rest", async () => ((await bar.getAttribute("data-bar-state")) !== "expanded" ? true : null), 5_000);
 }
 
 /** Numbered screenshots that never overwrite an earlier run's. */

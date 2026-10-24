@@ -1361,7 +1361,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
-  test("bs-3. at 390 x 844 with Thorn's bar expanded, a tap on another token opens its bar expanded, Collapse rests it with the map where it stood, and the group's bar as Multi-select gathers the other token stays expanded, as does Thorn's as it lets go (reviews LP19-BS-1 and LP19-OPUS-4, docs/design-v1-bar-compact.md 5.3)", async () => {
+  test("bs-3. at 390 x 844 with Thorn's bar expanded, a tap on another token opens its bar expanded, Collapse rests it with the map where it stood, Multi-select pressed in the expanded bar rests it, and expanded again, the group's bar as Multi-select gathers the other token stays expanded, as does Thorn's as it lets go (reviews LP19-BS-1 and LP19-OPUS-4, D-261024-22, docs/design-v1-bar-compact.md 5.3)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
     const effects = MANY.map((key) => ({ id: randomUUID(), key }));
@@ -1411,7 +1411,9 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const top = (await barFacts(bar)).top;
       if (echoAt.y > top - 120) await panBy(Math.min(echoAt.y, top - 8), top - 120 - echoAt.y);
       await (await barControl(bar, "Multi-select")).tap();
-      await player.waitForTimeout(400);
+      // Pressed in the expanded bar, Multi-select rests it, so the map is free for gathering. Expanded again, the state carries through the gathering.
+      await waitFor("Multi-select to rest Thorn's bar", async () => ((await state(bar)) === "rest" ? true : null), 3_000);
+      await expand(bar);
       await touch([await cellPoint({ x: 9, y: 6 })]);
       await groupBar.waitFor();
       await player.waitForTimeout(500);

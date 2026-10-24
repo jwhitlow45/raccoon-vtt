@@ -239,6 +239,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   // The ids the quick row drew (RestRow's fit), null until it first fits.
   const [drawn, setDrawn] = useState<readonly string[] | null>(null);
   const drawers = useRestDrawers(rest, drawer, setDrawer);
+  const multiToggle = useMultiToggle(rest, multi);
   const attachSlots = useAttachSlots(token);
   const detach = useDetach(token, attachSlots.includes("detach"));
   const detachNoteId = useId();
@@ -368,7 +369,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         return <DetachButton key={id} token={token} detach={detach} noteId={detachNoteId} />;
       case "multiSelect":
         return (
-          <BarButton key={id} pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
+          <BarButton key={id} ref={multiToggle.ref} pressed={multi} onClick={multiToggle.toggle}>
             Multi-select
           </BarButton>
         );
@@ -638,6 +639,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const resting = rest?.resting === true;
   const scrolls = resting && rest.scrolls;
   const drawers = useRestDrawers(rest, drawer, setDrawer);
+  const multiToggle = useMultiToggle(rest, multi);
   const [entry, setEntry] = useState<EntryStatus>(QUIET_ENTRY);
   // The ids the quick row drew (RestRow's fit), null until it first fits.
   const [drawn, setDrawn] = useState<readonly string[] | null>(null);
@@ -664,7 +666,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
     </BarButton>
   );
   const multiButton = (
-    <BarButton pressed={multi} onClick={() => ui.setMultiSelect(!multi)}>
+    <BarButton ref={multiToggle.ref} pressed={multi} onClick={multiToggle.toggle}>
       Multi-select
     </BarButton>
   );
@@ -2171,6 +2173,27 @@ function measuredFit(probe: HTMLElement, box: StatusBox): RestFit {
     title: (text) => measure(text, box.line).lines <= 2,
     note: (text) => measure(text, box.note ?? box.line).lines <= 2,
   };
+}
+
+/**
+ * Multi-select's press. Turning it on in an upright phone's expanded bar
+ * also rests the bar, moving nothing (R3), so the map is free for the
+ * taps that gather (docs/design-v1-bar-compact.md 5.3, D-261024-22).
+ * Turning it off leaves the bar as it is. The expanded body the button
+ * stands in goes as the bar rests, so focus moves to Expand, where
+ * Collapse leaves it.
+ */
+function useMultiToggle(rest: FrameControls["rest"], multi: boolean): { ref: RefObject<HTMLButtonElement | null>; toggle(): void } {
+  const ui = useRoomUi();
+  const ref = useRef<HTMLButtonElement>(null);
+  const toggle = () => {
+    ui.setMultiSelect(!multi);
+    if (multi || !rest || rest.resting) return;
+    const frame = ref.current?.closest<HTMLElement>('[role="dialog"]') ?? null;
+    rest.collapse();
+    requestAnimationFrame(() => frame?.querySelector<HTMLElement>('button[aria-label="Expand"]')?.focus({ preventScroll: true }));
+  };
+  return { ref, toggle };
 }
 
 /**
