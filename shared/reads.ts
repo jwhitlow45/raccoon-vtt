@@ -73,6 +73,10 @@ export function reads(op: Op, state: RoomState): Reads {
     case "dice.roll":
     case "roll.dice":
     case "actor.deathRoll":
+    case "actor.rechargeRoll":
+    // Combat uses wait for the server until their rules land (docs/design-v1-combat-controls.md 3.1).
+    case "actor.use":
+    case "actor.prompt":
     // An ask reads its damage roll's lines from the log, which only the server holds whole (docs/design-v1-player-save-spell.md 5.6).
     case "cast.ask":
       return NEVER;

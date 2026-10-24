@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 21;
-export const OP_VERSION = 19;
+export const SNAPSHOT_VERSION = 22;
+export const OP_VERSION = 20;
 
 export type MigrationStep = {
   from: number;
@@ -152,6 +152,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // neither and is a v21 room as it is. The number moves so that an older build, which would show a copy and its `to`
   // to whoever plays its creature then, refuses a v21 snapshot instead of loading it.
   { from: 20, to: 21, apply: (state) => state },
+  // Combat uses (docs/design-v1-combat-controls.md 3.6): an actor's spent `uses`, its `hurt` and `turnRecord`, a
+  // character's `resources` and a saved turn's `turnUses` are optional fields whose absence reads as before, so a v21
+  // room is a v22 room as it is. The number moves so that an older build, whose strict state schema refuses the fields
+  // and whose reducer would drop them on the next turn, refuses a v22 snapshot instead of loading it.
+  { from: 21, to: 22, apply: (state) => state },
 ];
 
 /**
@@ -566,6 +571,28 @@ export const opMigrations: MigrationStep[] = [
     to: 19,
     apply: (op) => op,
   },
+  {
+    // Combat uses (docs/design-v1-combat-controls.md 3.6): `actor.use`,
+    // `actor.prompt` and `actor.rechargeRoll` are new, and a death roll's
+    // `record`, a hit's `types`, a roll's `type`, an outcome's `quiet` and
+    // In lair's `counts` are new optional fields, so no stored op changes
+    // shape and the step is the identity. The reducer writes what a turn
+    // start adds from this version (`combatUses`): turn records, their
+    // resets, the pips of the turn's other creatures, the marked-time rule,
+    // a saved turn's `turnUses`, the damage types taken and the clear at a
+    // fight's end, and a Legendary Resistance's use line in a group save's
+    // outcome. Older ops replay by the rules they were written under, so a
+    // stored restore's hash guards still match and no line id moves.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 20, and the shutdown writes version 22 snapshots
+    // (snapshotMigrations). Rollback: restore the backup taken before the
+    // deploy, as for any snapshot version bump. An older build refuses a
+    // version 22 snapshot and a version 20 op (runMigrations).
+    from: 19,
+    to: 20,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -947,6 +974,22 @@ export function revealsRowAnew(opVersion: number | undefined): boolean {
  */
 export function logsByAudience(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 19);
+}
+
+/**
+ * Whether the reducer writes what combat uses add on its own
+ * (docs/design-v1-combat-controls.md 3.3): a turn start's records and
+ * resets for every creature of the turn, the pips of its other creatures,
+ * a landing row that only marks time starting nothing, the saved turn's
+ * `turnUses`, the damage types taken, the clear at a fight's end, and the
+ * use line of a group save's Legendary Resistance. Ops stored before
+ * version 20 wrote none of them and replay by that rule: Next refills the
+ * landing row's pips alone, a marked row's included, and a removal that
+ * passes the turn on writes no actor. Live ops carry no stored version and
+ * take today's rule.
+ */
+export function combatUses(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 20);
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

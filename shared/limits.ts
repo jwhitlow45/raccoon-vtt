@@ -459,6 +459,25 @@ export const LIMITS = {
   remindedSharedBytes: 128 * 1024,
   remindedPerPlayerBytes: 24 * 1024,
   remindedDmBytes: 128 * 1024,
+  /**
+   * Combat uses (docs/design-v1-combat-controls.md 2.4): the spent marks an
+   * actor holds, the keys a turn record's `due` names, an ability's key and
+   * the characters of a mark's name, which a custom stat block's entry name
+   * bounds. A spend that would add a mark past the cap is refused.
+   */
+  usesPerActor: 16,
+  dueUses: 16,
+  useKeyChars: 64,
+  useNameChars: 120,
+  /** An ability used X times a day, X at most this. */
+  usesPerDay: 9,
+  /** A character's class resources, each name's characters, a count's most and a pool's most (7). */
+  resourcesPerCharacter: 12,
+  resourceNameChars: 40,
+  resourceMax: 99,
+  resourcePoolMax: 200,
+  /** The HP one Regeneration heals. */
+  regenerateMax: 999,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

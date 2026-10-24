@@ -708,6 +708,9 @@ function forPlayer(op: Op, c: Check): Decision {
     case "actor.deathSave":
     // A death save rolled on the server, as its counts are set (docs/design-v1-dice.md 4.1).
     case "actor.deathRoll":
+    case "actor.rechargeRoll":
+    case "actor.use":
+    case "actor.prompt":
     case "actor.rest": {
       const t = c.target(op.target);
       if (!t.visible) return GONE;

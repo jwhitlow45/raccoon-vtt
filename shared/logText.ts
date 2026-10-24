@@ -524,6 +524,8 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       return diceLineText(data, names);
     case "cast":
       return castText(data, creatureName(names, data));
+    case "use":
+      return `${creatureName(names, data)} used ${data.name ?? "a limited use"}.`;
     case "trap": {
       // The DM's trap log (docs/design-v1-traps.md 6.3): the name the trap had when it went off.
       const who = creatureList(names, data.by, data.more);

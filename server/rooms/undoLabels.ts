@@ -132,6 +132,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     }
     case "actor.saveDue":
       return op.state === "resolved" ? `accepting a failed save for ${target(op.target)}` : `dismissing a save for ${target(op.target)}`;
+    case "actor.use":
+      return `using an ability for ${target(op.target)}`;
+    case "actor.prompt":
+      return `answering a prompt for ${target(op.target)}`;
     case "character.create":
       return `adding ${the("character", op.character.name)}`;
     case "character.update": {
@@ -322,6 +326,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `rolling for ${target(op.target)}`;
     case "actor.deathRoll":
       return `rolling a Death Save for ${target(op.target)}`;
+    case "actor.rechargeRoll":
+      return `rolling a recharge for ${target(op.target)}`;
     case "undo":
     case "redo":
       return op.t;

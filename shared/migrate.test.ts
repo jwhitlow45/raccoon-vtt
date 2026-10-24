@@ -23,6 +23,7 @@ import {
   walksOffFromGround,
   hiddenRowsShareNoMount,
   logsByAudience,
+  combatUses,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -992,9 +993,9 @@ describe("follow-up batch 21: op version 18, snapshot version 20 (docs/design-v1
 });
 
 describe("follow-up batch 23: op version 19, snapshot version 21 (design 7.3, Log)", () => {
-  test("is the version now", () => {
-    assert.equal(OP_VERSION, 19);
-    assert.equal(SNAPSHOT_VERSION, 21);
+  test("came before combat uses' versions", () => {
+    assert.ok(OP_VERSION >= 19);
+    assert.ok(SNAPSHOT_VERSION >= 21);
   });
 
   test("the snapshot step is the identity, and a version 21 snapshot never migrates down", () => {
@@ -1126,5 +1127,47 @@ describe("follow-up batch 23: op version 19, snapshot version 21 (design 7.3, Lo
         assert.deepEqual([...pages, ...live].map((e) => e.id), readable.map((e) => e.id), `${name}, ${viewer.memberId}: the archive's pages and the live log together hold every line`);
       }
     }
+  });
+});
+
+describe("combat uses: op version 20, snapshot version 22 (docs/design-v1-combat-controls.md 3.6)", () => {
+  test("is the version now", () => {
+    assert.equal(OP_VERSION, 20);
+    assert.equal(SNAPSHOT_VERSION, 22);
+  });
+
+  test("the snapshot step is the identity, a room holding every new field included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 21, 22, snapshotMigrations), plain);
+    const held = room({
+      characters: {
+        bree: character("bree", {
+          resources: [{ id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne", preset: "rage", level: 3, atLevel: 3 }],
+          actor: actor({ uses: { "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } }, hurt: ["fire"], turnRecord: { id: 4, entryId: "e1", round: 1, hp: 10, life: "alive" } }),
+        }),
+      },
+    });
+    assert.equal(runMigrations(held, 21, 22, snapshotMigrations), held);
+    assert.throws(() => runMigrations(held, 22, 21, snapshotMigrations), /down/);
+  });
+
+  test("the op step is the identity", () => {
+    const ops: unknown[] = [
+      { t: "encounter.next" },
+      { t: "actor.use", target: { tokenId: "g1" }, use: { kind: "resist" } },
+      { t: "actor.deathRoll", tag: "r1", target: { characterId: "bree" }, record: 4 },
+      { t: "encounter.update", entryId: "e1", patch: { inLair: true }, counts: { actionsMax: 4, resistMax: 4 } },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 19, 20, opMigrations), op);
+  });
+
+  test("only ops stored before version 20 replay without what combat uses write", () => {
+    assert.equal(combatUses(19), false);
+    assert.equal(combatUses(20), true);
+    assert.equal(combatUses(undefined), true);
+  });
+
+  test("a version 20 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 20, 19, opMigrations), /down/);
   });
 });

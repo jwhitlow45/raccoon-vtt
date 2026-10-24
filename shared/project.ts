@@ -1445,6 +1445,7 @@ export function eventReach(state: RoomState, data: LogEvent): Reach {
     case "trap":
     case "trapSeen":
     case "trapNotice":
+    case "use":
       return [];
   }
 }
@@ -1774,6 +1775,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     case "trap":
     case "trapSeen":
     case "trapNotice":
+    case "use":
       return null;
   }
 }

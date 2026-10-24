@@ -31,6 +31,8 @@ export function sysDice(tx: Tx, op: Sys): void {
       return rolledAnswer(tx, op, asked);
     case "actor.deathRoll":
       return deathRoll(tx, op, asked);
+    case "actor.rechargeRoll":
+      throw invalid("a recharge roll is not available yet");
   }
 }
 

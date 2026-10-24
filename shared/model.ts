@@ -907,8 +907,127 @@ export type Actor = {
   effects: Effect[];
   deathSaves: { ok: number; fail: number };
   legendary?: { actionsMax: number; actionsUsed: number; resistMax: number; resistUsed: number };
+  /**
+   * The creature's spent abilities (docs/design-v1-combat-controls.md 2.2),
+   * by the ability's key in its stat block, at most `LIMITS.usesPerActor`.
+   * Each mark keeps the ability's name, so it reads and can be given back
+   * without the block. Absent when none. Its owners receive it, other
+   * players never, as for `hurt` and `turnRecord`.
+   */
+  uses?: Record<UseKey, UseMark>;
+  /**
+   * The damage types it took since its turn record's start, each once
+   * (3.4), for the Regeneration card's advisory note. Absent when none.
+   * Only type names, never anything counted from the log.
+   */
+  hurt?: DamageType[];
+  /** What its last turn start stamped on it (2.3): the turn it belongs to, the prompts due then and how each was settled. */
+  turnRecord?: TurnRecord;
   notes: string;
   dmNotes: string;
+};
+
+/**
+ * An ability's key in its stat block (shared/dice/named.ts entryKeys):
+ * `section:slug`, 1 to 64 characters, the same on every device that reads
+ * the block.
+ */
+export type UseKey = string;
+
+/**
+ * A spent ability (docs/design-v1-combat-controls.md 2.2). `recharge` comes
+ * back on a roll of `min` or more at a turn start, or on any rest. `rest`
+ * comes back on a Short or Long Rest. `day` counts its X uses in `used`, of
+ * `max` 1 to 9, back on a Long Rest, or a Short Rest too with `short`.
+ * `turn` is a once-per-turn legendary action, gone at its creature's next
+ * turn start. Every kind but `day` has `max` 1. `name` is the ability as
+ * printed, 1 to 120 characters.
+ */
+export type UseMark = {
+  kind: "recharge" | "rest" | "day" | "turn";
+  name: string;
+  used: number;
+  max: number;
+  min?: number;
+  short?: true;
+};
+
+/**
+ * A prompt of a turn (2.3): Regeneration, a death save, or one recharge
+ * roll, `recharge:` and the ability's key.
+ */
+export type PromptKey = "regeneration" | "deathSave" | `recharge:${UseKey}`;
+
+/**
+ * What a creature's turn start stamped on it (docs/design-v1-combat-controls.md
+ * 2.3), so every device, a reload and a late join show the same prompt
+ * cards with the same results. `id` is the seq of the op that started the
+ * turn, which names it and no other, since seqs only grow. Its cards show
+ * only while `entryId` acts in `round`. `hp` and `life` are the creature's
+ * at the start, `took` the damage types of the window the start closed
+ * (`Actor.hurt` then), and `due` the keys of its recharge marks then, at
+ * most `LIMITS.dueUses`. Each prompt is settled once, in `settled`, with
+ * its result.
+ */
+export type TurnRecord = {
+  id: number;
+  entryId: EntryId;
+  round: number;
+  hp: number;
+  life: LifeState;
+  took?: DamageType[];
+  due?: UseKey[];
+  settled?: Partial<Record<PromptKey, Settled>>;
+};
+
+/**
+ * How a prompt was settled: `done` by its roll or its Apply, with the roll's
+ * total or the heal's amount, or `skipped`. A death save keeps its outcome
+ * by the rules (dice/roll.ts naturalOf), and a recharge roll whether the
+ * ability is ready again.
+ */
+export type Settled = {
+  state: "done" | "skipped";
+  total?: number;
+  outcome?: "success" | "failure" | "twoFailures" | "regain" | "ready" | "used";
+};
+
+/**
+ * A class resource a character's player tracks
+ * (docs/design-v1-combat-controls.md 7): Rage, Focus Points and the like.
+ * `id` is a plain id, `name` 1 to `LIMITS.resourceNameChars` on one line.
+ * `max` is 1 to 99, a pool's to `LIMITS.resourcePoolMax`, and `used` 0 to
+ * `max`. `shortOne` gives one back on a Short Rest and all on a Long Rest.
+ * A `pool` spends an amount. `preset` names its Appendix A preset, `level`
+ * the class level its counts were read at, `atLevel` the character's level
+ * when it was added or updated, and `edited` marks a count typed by hand,
+ * which an update keeps.
+ */
+export type ClassResource = {
+  id: string;
+  name: string;
+  max: number;
+  used: number;
+  reset: "long" | "short" | "shortOne";
+  pool?: true;
+  preset?: string;
+  level?: number;
+  atLevel?: number;
+  edited?: true;
+};
+
+/**
+ * What one turn start replaced for one participant (2.3, 3.3), so Previous
+ * puts it back: the record it replaced (null when it had none, so Previous
+ * removes the new one), the `turn` marks it removed, whole with their
+ * names, and the legendary actions it refilled for a participant other than
+ * the landing row's creature, whose stay in `EncounterSnapshot.legendary`.
+ */
+export type TurnUses = {
+  holderId: TokenId | CharacterId;
+  record?: TurnRecord | null;
+  marks?: Record<UseKey, UseMark>;
+  actionsUsed?: number;
 };
 
 export type Character = {
@@ -946,6 +1065,12 @@ export type Character = {
    * sync writes one, in rooms from before it, and once the block is removed.
    */
   ddbSync?: DdbSync;
+  /**
+   * The character's class resources (docs/design-v1-combat-controls.md 7),
+   * at most `LIMITS.resourcesPerCharacter`, in the order added. Absent is
+   * none. Its players and the DM read them, other players never.
+   */
+  resources?: ClassResource[];
 };
 
 /**
@@ -1533,6 +1658,8 @@ export type EncounterSnapshot = {
   legendary?: { holderId: TokenId | CharacterId; actionsUsed: number };
   /** The `shared` companions whose Reaction this `next` cleared, so `prev` can set them again. Absent when it cleared none. */
   companionReactions?: TokenId[];
+  /** What the turn start replaced for each participant (docs/design-v1-combat-controls.md 3.3). Absent when nothing. */
+  turnUses?: TurnUses[];
   at: string;
 };
 
@@ -2146,7 +2273,19 @@ export type LogEvent =
    */
   | { type: "trapSeen"; by: TokenId[]; more?: number; message: string; sound?: TrapSound }
   /** The Passive Perception hint (4.6), in the DM's trap log: this creature would notice the trap, on its scene. */
-  | { type: "trapNotice"; trapId: TrapId; sceneId: SceneId; tokenId: TokenId; passive: number; dc: number };
+  | { type: "trapNotice"; trapId: TrapId; sceneId: SceneId; tokenId: TokenId; passive: number; dc: number }
+  /**
+   * A creature used one of its limited abilities, or had one given back
+   * (docs/design-v1-combat-controls.md 8): a legendary action, Legendary
+   * Resistance, an ability of its block, or a class resource. `name` is the
+   * ability's or the resource's, absent for Resistance and for a plain
+   * legendary action spent by hand. The private parts are `cost` (a
+   * legendary action's cost above 1, or a pool's amount), `left` and `max`,
+   * which reach only those who may read them when written. `back` is a give
+   * back, and `hidden` a use after a secret roll: both reach only the DM and
+   * the creature's owners.
+   */
+  | (AboutCreature & { type: "use"; what: "legendary" | "resist" | "ability" | "resource"; name?: string; cost?: number; left?: number; max?: number; back?: true; hidden?: true });
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and
@@ -2158,9 +2297,11 @@ export type LogEvent =
  * again and a condition that fails it still records the fail. `hidden` marks the
  * initiative of a creature whose place in the order players did not know
  * then (docs/design-v1-combat-flow.md 11.3): only the DM and the creature's
- * own players get that roll.
+ * own players get that roll. `type` is a damage roll's damage type as the
+ * roller asked it (docs/design-v1-combat-controls.md 3.4), since a label is
+ * cut to fit or typed by hand and so names no type for certain.
  */
-export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true };
+export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true; type?: DamageType };
 
 export type LogEntry = {
   /** `"<seq>:<index>"`, so a replay can never insert the same entry twice. */

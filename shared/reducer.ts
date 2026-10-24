@@ -437,12 +437,17 @@ function dispatch(tx: Tx, op: Op): void {
       return castClose(tx, op);
     case "sys.dice":
       return sysDice(tx, op);
+    // Combat uses (docs/design-v1-combat-controls.md 3.1) apply once their rules land.
+    case "actor.use":
+    case "actor.prompt":
+      throw invalid(`${op.t} is not available yet`);
     case "undo":
     case "redo":
     // The server rolls (docs/design-v1-dice.md 4.2): the actor stores the `sys.dice` it resolves in place of each.
     case "dice.roll":
     case "roll.dice":
     case "actor.deathRoll":
+    case "actor.rechargeRoll":
       throw invalid(`${op.t} is resolved by the server before it reaches the reducer`);
   }
 }

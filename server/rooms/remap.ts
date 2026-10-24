@@ -492,7 +492,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       case "concentration":
       case "deathSave":
       case "rest":
-      case "saveEnds": {
+      case "saveEnds":
+      case "use": {
         const next = { ...data };
         if (data.tokenId !== undefined) next.tokenId = tokens.of(data.tokenId);
         if (data.characterId !== undefined) next.characterId = characters.of(data.characterId);

@@ -130,6 +130,16 @@ const edgeKey = z.string().regex(/^-?\d{1,4},-?\d{1,4},[nw]$/);
 const sheetUrl = line(500).regex(/^https:\/\//);
 const areaFeet = z.number().min(5).max(1_000);
 const memberIds = z.array(id).max(MAX_OWNERS);
+/**
+ * An id as every id the app makes, such as a trap's or a class resource's:
+ * so each list the reducer writes stays within its reserve
+ * (docs/design-v1-traps.md 6.1).
+ */
+const plainId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "not a plain id");
+/** Half of a surrogate pair alone, which JSON escapes to six bytes: trap text refuses it, so it costs at most 3 bytes a unit (6.1). */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const wholeText = { message: "text cannot hold half a character" };
+const whole = (s: string) => !LONE_SURROGATE.test(s);
 
 const assetImage = z.strictObject({
   assetId: id,
@@ -810,6 +820,84 @@ export const EXPECT_PARTS = [
 export type ExpectPart = (typeof EXPECT_PARTS)[number];
 const characterExpect = z.strictObject(Object.fromEntries(EXPECT_PARTS.map((part) => [part, syncHash.optional()])) as { [P in ExpectPart]: z.ZodOptional<typeof syncHash> });
 
+// Combat uses (docs/design-v1-combat-controls.md 3.1).
+
+/**
+ * An ability's key in its stat block (shared/dice/named.ts entryKeys): its
+ * section, a colon and a slug of its name, at most 64 characters. A roll's
+ * suffixes such as `:hit` never reach it.
+ */
+const USE_KEY = /^[a-z][A-Za-z]*:[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const useKey = z.string().max(LIMITS.useKeyChars).regex(USE_KEY, "not an ability key");
+/** An ability's name as printed, bounded as a custom stat block's entry name is (statEntries). */
+const useName = line(LIMITS.useNameChars).min(1);
+/** The seq of the op that started a turn, which names its turn record (TurnRecord.id). */
+const turnRecordId = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/** A prompt of a turn (PromptKey): Regeneration, a death save, or `recharge:` and the key of the ability it recharges. */
+const PROMPT_KEY = new RegExp(`^(?:regeneration|deathSave|recharge:${USE_KEY.source.slice(1, -1)})$`);
+const promptKey = z.string().max("recharge:".length + LIMITS.useKeyChars).regex(PROMPT_KEY, "not a prompt");
+/** The damage types a hit dealt, each once (3.4). */
+const damageTypes = z.array(z.enum(DAMAGE_TYPES)).min(1).max(DAMAGE_TYPES.length).refine(unique, { message: "a damage type is listed twice" });
+const resourceName = z
+  .string()
+  .min(1)
+  .max(LIMITS.resourceNameChars)
+  .regex(NAME_CHARS, "names cannot hold control or text direction characters")
+  .refine(whole, wholeText);
+const resourceFields = {
+  id: plainId,
+  name: resourceName,
+  max: z.number().int().min(1).max(LIMITS.resourcePoolMax),
+  reset: z.enum(["long", "short", "shortOne"]),
+  pool: z.literal(true).optional(),
+  preset: z.string().max(40).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "not a preset").optional(),
+  level: characterLevel.optional(),
+  atLevel: characterLevel.optional(),
+  edited: z.literal(true).optional(),
+};
+const countFits = (r: { max: number; pool?: true | undefined }) => r.pool === true || r.max <= LIMITS.resourceMax;
+const countFitsText = { message: `a count is at most ${LIMITS.resourceMax}, a pool's ${LIMITS.resourcePoolMax}` };
+/** A class resource as an update sends it: no `used`, which the reducer keeps by id (character.update). */
+const resourceInput = z.strictObject(resourceFields).refine(countFits, countFitsText);
+const resourceStored = z
+  .strictObject({ ...resourceFields, used: z.number().int().min(0).max(LIMITS.resourcePoolMax) })
+  .refine(countFits, countFitsText)
+  .refine((r) => r.used <= r.max, { message: "a resource uses at most its count" });
+const resources = z
+  .array(resourceInput)
+  .max(LIMITS.resourcesPerCharacter)
+  .refine((list) => unique(list.map((r) => r.id)), { message: "a resource is listed twice" });
+
+/** A spent ability as stored (UseMark): `used` 1 to `max`, and `max` above 1 only for a use a day. */
+const useMark = z
+  .strictObject({
+    kind: z.enum(["recharge", "rest", "day", "turn"]),
+    name: useName,
+    used: z.number().int().min(1).max(LIMITS.usesPerDay),
+    max: z.number().int().min(1).max(LIMITS.usesPerDay),
+    min: z.number().int().min(2).max(6).optional(),
+    short: z.literal(true).optional(),
+  })
+  .refine((m) => m.used <= m.max && (m.kind === "day" || m.max === 1), { message: "a mark uses at most its count" })
+  .refine((m) => (m.kind === "recharge") === (m.min !== undefined) && (m.short === undefined || m.kind === "day"), { message: "a mark's range and Short Rest fit its kind" });
+const uses = z.record(useKey, useMark).refine((r) => Object.keys(r).length <= LIMITS.usesPerActor, { message: `a creature holds at most ${LIMITS.usesPerActor} spent uses` });
+const settled = z.strictObject({
+  state: z.enum(["done", "skipped"]),
+  total: z.number().int().min(-100_000).max(100_000).optional(),
+  outcome: z.enum(["success", "failure", "twoFailures", "regain", "ready", "used"]).optional(),
+});
+/** A turn record as stored (TurnRecord). */
+const turnRecord = z.strictObject({
+  id: turnRecordId,
+  entryId: id,
+  round: z.number().int().min(0).max(100_000),
+  hp: hpValue,
+  life: lifeState,
+  took: damageTypes.optional(),
+  due: z.array(useKey).min(1).max(LIMITS.dueUses).refine(unique, { message: "a recharge is due twice" }).optional(),
+  settled: z.record(promptKey, settled).optional(),
+});
+
 const characterInput = z.strictObject({
   id,
   name,
@@ -834,6 +922,12 @@ const characterPatch = z.strictObject({
   knownForms: knownForms.optional(),
   /** The record of a D&D Beyond sync, whole (docs/design-v1-resync.md 2.1). Null removes it. */
   ddbSync: ddbSyncPatch.nullable().optional(),
+  /**
+   * The class resources, whole and in order (docs/design-v1-combat-controls.md 3.1),
+   * each with no `used`: the reducer keeps it by id, clamped to the new
+   * count, and a new id starts at 0. An empty list removes them.
+   */
+  resources: resources.optional(),
 });
 
 /** A stat block line the DM reads as text, such as the skills or the languages. */
@@ -1069,6 +1163,13 @@ const entryPatch = z.strictObject({
   groupKey: shortText.nullable().optional(),
 });
 
+/**
+ * A creature's legendary counts and XP, in its lair or not, from its block
+ * (docs/design-v1-combat-controls.md 3.1): In lair sends them with the row's
+ * switch, since the reducer never reads a block.
+ */
+const lairCounts = z.strictObject({ actionsMax: legendaryCount, resistMax: legendaryCount, xp: z.number().int().min(0).max(1_000_000).optional() });
+
 const moveFields = { tokenId: id, x: coord, y: coord, elevation: feet.optional(), rotation: degrees.optional() };
 
 /**
@@ -1112,7 +1213,8 @@ const handoutInput = z.union([
 const handoutDocInput = z.strictObject({ id, title: name, pages: handoutPages });
 
 const hpChange = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional() }),
+  /** `types` are the damage types the hit dealt, for the Regeneration note (docs/design-v1-combat-controls.md 3.4). */
+  z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional(), types: damageTypes.optional() }),
   z.strictObject({ kind: z.literal("heal"), amount: z.number().int().min(0).max(100_000) }),
   z.strictObject({ kind: z.literal("set"), cur: hpValue.optional(), max: hpValue.optional(), temp: hpValue.optional() }),
   z.strictObject({ kind: z.literal("temp"), amount: hpValue }),
@@ -1270,6 +1372,8 @@ const diceRollInput = z.strictObject({
    * (docs/design-v1-combat-flow.md 11.3). Ignored without `creature`.
    */
   initiative: z.literal(true).optional(),
+  /** A damage roll's damage type (docs/design-v1-combat-controls.md 3.4), kept on its line. */
+  type: z.enum(DAMAGE_TYPES).optional(),
 });
 const diceRollFields = {
   /** The receipt's key (1.2): one tag for a whole group, and `part` 0 to 19 for each batch of it. */
@@ -1326,13 +1430,31 @@ const rollDiceFields = {
   change: id.optional(),
 };
 
-/** A death save rolled on the server and counted from the state then (docs/design-v1-roll-options.md 4.3). */
+/**
+ * A death save rolled on the server and counted from the state then (docs/design-v1-roll-options.md 4.3).
+ * `record` names the turn record whose open death save it settles (docs/design-v1-combat-controls.md 2.3).
+ */
 const deathRollFields = {
   tag: id,
   target: actorTarget,
   mode: advantageMode.optional(),
   cancelled: z.literal(true).optional(),
   extra: line(LIMITS.diceExtraChars).optional(),
+  record: turnRecordId.optional(),
+};
+
+/**
+ * An ability's recharge roll on the server (docs/design-v1-combat-controls.md 3.1):
+ * 1d6, and `min` or more makes it ready. `record` names the turn record
+ * whose open prompt for the key it settles.
+ */
+const rechargeRollFields = {
+  tag: id,
+  target: actorTarget,
+  key: useKey,
+  name: useName,
+  min: z.number().int().min(2).max(6),
+  record: turnRecordId.optional(),
 };
 
 /** An extra that parses, in the grammar's own words when it does not. */
@@ -1346,6 +1468,7 @@ function extraParses(o: { extra?: string | undefined }, ctx: z.RefinementCtx): v
 const diceRollAsked = z.strictObject({ t: z.literal("dice.roll"), ...diceRollFields });
 const rollDiceAsked = z.strictObject({ t: z.literal("roll.dice"), ...rollDiceFields });
 const deathRollAsked = z.strictObject({ t: z.literal("actor.deathRoll"), ...deathRollFields });
+const rechargeRollAsked = z.strictObject({ t: z.literal("actor.rechargeRoll"), ...rechargeRollFields });
 
 /** What the server drew for one roll (DiceResult). Bounded by shape alone, as `asked` is. */
 const diceResult = z.strictObject({
@@ -1391,12 +1514,6 @@ const manyTokenIds = z
 
 // Traps (docs/design-v1-traps.md 6.1 and 6.2).
 
-/** A trap's own id, as every id the app makes: so each list the reducer writes stays within its reserve (6.1). */
-const plainId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "not a plain id");
-/** Half of a surrogate pair alone, which JSON escapes to six bytes: trap text refuses it, so it costs at most 3 bytes a unit (6.1). */
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-const wholeText = { message: "text cannot hold half a character" };
-const whole = (s: string) => !LONE_SURROGATE.test(s);
 const trapName = name.refine(whole, wholeText);
 const trapLine = (max: number) => line(max).min(1).refine(whole, wholeText);
 const trapNote = z.string().max(LIMITS.trapNoteChars).regex(MULTI_LINE, "control characters are not allowed").refine(whole, wholeText);
@@ -1539,6 +1656,38 @@ const trapPatch = z
 /** An occurrence by its line in the DM's trap log (TrapDue.id). */
 const trapDue = z.string().regex(/^\d{1,18}:\d{1,6}$/);
 
+/**
+ * What an `actor.use` spends (docs/design-v1-combat-controls.md 3.1). The
+ * sending device reads the block, so the op carries its facts: a legendary
+ * action's cost and once-per-turn limit, an ability's limit, X, range and
+ * Short Rest, Regeneration's amount. No key is the plain "Spend one" for
+ * counts set by hand. `ifReady` is the Dice panel's mark of a recharge it
+ * shows ready, which changes nothing on an ability already used.
+ */
+const useKind = z.discriminatedUnion("kind", [
+  z
+    .strictObject({ kind: z.literal("legendary"), cost: z.number().int().min(1).max(3), key: useKey.optional(), name: useName.optional(), once: z.literal(true).optional() })
+    .refine((u) => (u.key === undefined) === (u.name === undefined), { message: "a legendary action's key comes with its name" })
+    .refine((u) => u.once === undefined || u.key !== undefined, { message: "a once a turn action names its key" }),
+  z.strictObject({ kind: z.literal("resist") }),
+  z
+    .strictObject({
+      kind: z.literal("ability"),
+      key: useKey,
+      name: useName,
+      limit: z.enum(["recharge", "rest", "day"]),
+      max: z.number().int().min(1).max(LIMITS.usesPerDay),
+      min: z.number().int().min(2).max(6).optional(),
+      short: z.literal(true).optional(),
+      ifReady: z.literal(true).optional(),
+    })
+    .refine((u) => u.limit === "day" || u.max === 1, { message: "only a use a day counts more than one" })
+    .refine((u) => (u.limit === "recharge") === (u.min !== undefined), { message: "a recharge, and only a recharge, names its range" })
+    .refine((u) => u.short === undefined || u.limit === "day", { message: "only a use a day comes back on a Short Rest by itself" }),
+  z.strictObject({ kind: z.literal("regenerate"), key: useKey, amount: z.number().int().min(1).max(LIMITS.regenerateMax), record: turnRecordId }),
+  z.strictObject({ kind: z.literal("resource"), id: plainId, amount: z.number().int().min(1).max(LIMITS.resourcePoolMax).optional() }),
+]);
+
 const op = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) => z.strictObject({ t: z.literal(t), ...shape });
 
 /** Ops a client may send (design 8.1). */
@@ -1679,16 +1828,20 @@ export const clientOps = [
           effects: z.array(effectInput).min(1).max(LIMITS.outcomeEffectsEach).optional(),
           remove: z.array(id).min(1).max(LIMITS.outcomeEffectsEach).optional(),
           resist: z.literal(true).optional(),
+          /** The damage types of the creature's adjusted parts above 0 (docs/design-v1-combat-controls.md 3.4). */
+          types: damageTypes.optional(),
         }),
       )
       .max(LIMITS.outcomeTargets),
+    /** The saves were rolled in secret, so a Legendary Resistance's use line reaches only the DM and the creature's owners (8). */
+    quiet: z.literal(true).optional(),
   })
     .refine((o) => serializedBytes(o) <= LIMITS.outcomeOpBytes, { message: OUTCOME_TOO_BIG })
     .refine((o) => o.cast === undefined || o.trap === undefined, { message: "an outcome settles one thing" })
     // A trap's springing that everyone passed with nothing to take settles with no creature (docs/design-v1-traps.md 4.4).
     .refine((o) => o.targets.length > 0 || o.trap !== undefined, { message: "an outcome names at least one creature" }),
   op("actor.damageMany", {
-    hits: z.array(z.strictObject({ target: actorTarget, amount: z.number().int().min(1).max(100_000) })).min(1).max(MAX_ENTRIES_PER_OP),
+    hits: z.array(z.strictObject({ target: actorTarget, amount: z.number().int().min(1).max(100_000), types: damageTypes.optional() })).min(1).max(MAX_ENTRIES_PER_OP),
   }),
   op("actor.deathSave", {
     target: actorTarget,
@@ -1725,6 +1878,22 @@ export const clientOps = [
    * card. `due` is the occurrence, so a tap on an older card changes nothing.
    */
   op("actor.saveDue", { target: actorTarget, effectId: id, due: z.string().regex(/^\d{1,18}:\d{1,6}$/), state: z.enum(["resolved", "dismissed"]) }),
+  /**
+   * Spends one of a creature's limited uses, or with `back` gives one back
+   * (docs/design-v1-combat-controls.md 3.1): a legendary action, Legendary
+   * Resistance, an ability of its block, Regeneration's heal, or a class
+   * resource. `quiet` says the use follows a secret roll, so its line
+   * reaches only the DM and the creature's owners (8).
+   */
+  op("actor.use", { target: actorTarget, use: useKind, back: z.literal(true).optional(), quiet: z.literal(true).optional() })
+    .refine((o) => o.back === undefined || o.use.kind !== "regenerate", { message: "Regeneration is taken back with its HP" })
+    .refine((o) => o.back === undefined || o.use.kind !== "ability" || o.use.ifReady === undefined, { message: "a give back is never the Dice panel's mark" }),
+  /**
+   * Skips a turn's prompt, or reopens a skipped one while its turn runs
+   * (docs/design-v1-combat-controls.md 3.1): `what` names it in the record
+   * `record`, Regeneration, a death save or `recharge:` and a key.
+   */
+  op("actor.prompt", { target: actorTarget, record: turnRecordId, what: promptKey, state: z.enum(["skipped", "open"]) }),
   op("character.create", { character: characterInput }),
   /**
    * `expect` holds a hash of each part the sender saw before it wrote
@@ -1862,7 +2031,10 @@ export const clientOps = [
    */
   op("encounter.next", { from: turnRef.optional() }),
   op("encounter.prev", { from: turnRef.optional() }),
-  op("encounter.update", { entryId: id, patch: entryPatch }),
+  /** `counts` goes only with `patch.inLair`: the block's lair or base counts, which the row's creature takes (docs/design-v1-combat-controls.md 3.1). */
+  op("encounter.update", { entryId: id, patch: entryPatch, counts: lairCounts.optional() }).refine((o) => o.counts === undefined || o.patch.inLair !== undefined, {
+    message: "lair counts go with In lair",
+  }),
   op("log.chat", { text: longText.min(1) }),
   op("log.whisper", { to: z.array(id).min(1).max(MAX_OWNERS), text: longText.min(1) }),
   op("handout.show", { handout: handoutInput }),
@@ -1969,6 +2141,8 @@ export const clientOps = [
     }),
   /** A death save rolled on the server (docs/design-v1-dice.md 4.1), permitted as `actor.deathSave` is. */
   op("actor.deathRoll", deathRollFields).superRefine(extraParses),
+  /** An ability's recharge roll on the server (docs/design-v1-combat-controls.md 3.1), permitted as `actor.use` is. */
+  op("actor.rechargeRoll", rechargeRollFields),
   op("undo", {
     /**
      * The `n` of this client's op that made the step the undo is meant for,
@@ -2060,7 +2234,7 @@ export const serverOnlyOps = [
    * every die drawn. The reducer only copies them, so replay never rolls.
    */
   op("sys.dice", {
-    asked: z.discriminatedUnion("t", [diceRollAsked, rollDiceAsked, deathRollAsked]),
+    asked: z.discriminatedUnion("t", [diceRollAsked, rollDiceAsked, deathRollAsked, rechargeRollAsked]),
     batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/, "not a batch id"),
     results: z.array(diceResult).min(1).max(LIMITS.diceRollsPerOp),
     /** A request's answer rolled with the bonus the player typed, since the server knew none (4.1). */
@@ -2169,7 +2343,13 @@ export const effectInputSchema = effectInput;
  */
 export const actorSchemaForImport = actorSchema.extend({
   unshaped: z.strictObject({ ac: z.number().int().min(0).max(100), speeds, shapeTemp: z.literal(true).optional() }).optional(),
+  /** The reducer writes these alone, so no op's actor carries them either (docs/design-v1-combat-controls.md 3.6). */
+  uses: uses.optional(),
+  hurt: damageTypes.optional(),
+  turnRecord: turnRecord.optional(),
 });
+/** The stored shapes of combat uses, so the stored-state schema checks imports by the same bounds (docs/design-v1-combat-controls.md 3.6). */
+export const combatUseSchemas = { useKey, useMark, uses, turnRecord, damageTypes, resourceStored, turnRecordId };
 /** The stat block's fields, so the stored-state schema checks imported monsters by the same bounds. */
 export const statBlockFieldsForImport = statBlockFields;
 /** A custom monster as a create op carries it, for the editor to check a draft before it saves. */
