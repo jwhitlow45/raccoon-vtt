@@ -70,6 +70,29 @@ const DDB_JSON = {
   },
 };
 
+/**
+ * Wren again with fixture C's limited uses (docs/design-v1-ddb-resources.md
+ * 9): a Breath Weapon and Luck Points by the proficiency bonus, in the
+ * shape of public sample characters' actions, and a wand whose charges
+ * stay out.
+ */
+function withResources(): typeof DDB_JSON {
+  const use = (name: string, type: number, id: number) => ({
+    name,
+    componentTypeId: type,
+    componentId: id,
+    limitedUse: { name: null, statModifierUsesId: null, resetType: 2, numberUsed: 1, minNumberConsumed: 1, maxNumberConsumed: 1, maxUses: 0, operator: 1, useProficiencyBonus: true, proficiencyBonusOperator: 1, resetDice: null },
+  });
+  return {
+    ...DDB_JSON,
+    data: {
+      ...DDB_JSON.data,
+      inventory: [...DDB_JSON.data.inventory, { equipped: true, limitedUse: { maxUses: 7, numberUsed: 1, resetType: "Dawn" }, definition: { id: 2, name: "Wand of Sparks", filterType: "Wand" } }],
+      actions: { class: [], race: [use("Breath Weapon", 1960452172, 7001)], feat: [use("Luck Points", 1088085227, 8001)] },
+    } as typeof DDB_JSON.data,
+  };
+}
+
 function actor(over: Record<string, unknown> = {}) {
   return { hp: { cur: 24, max: 24, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "", ...over };
 }
@@ -722,6 +745,35 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     assert.equal(after.stats!.rolls.find((r) => r.name === "Rapier")?.ddb, true);
     assert.equal(after.actor.sheetUrl, "https://www.dndbeyond.com/characters/87654321");
     await panel.locator("[data-pc-stats]").getByText("Rapier.", { exact: false }).waitFor();
+  });
+
+  test("ddbres-5. the editor's D&D Beyond step with fixture C's limited uses lists the Class resources group, and Save adds them", async () => {
+    const panel = await showBree(ana);
+    await panel.getByRole("button", { name: "Edit", exact: true }).click();
+    const sheet = editor(ana);
+    await sheet.getByRole("button", { name: "D&D Beyond", exact: true }).click();
+    const step = ana.getByRole("dialog", { name: "D&D Beyond" });
+    await step.getByRole("button", { name: "Paste its JSON instead" }).click();
+    await step.locator("textarea").fill(JSON.stringify(withResources()));
+    await step.getByRole("button", { name: "Read it", exact: true }).click();
+    const review = ana.getByRole("dialog", { name: "Check what was read" });
+    await review.getByText("Adds Breath Weapon: 3 uses, back on a Long Rest, 2 of 3 left", { exact: true }).waitFor();
+    await review.getByText("Adds Luck Points: 3 uses, back on a Long Rest, 2 of 3 left", { exact: true }).waitFor();
+    assert.equal(await review.getByText(/Wand of Sparks/).count(), 0, "an item's charges stay out");
+    await shots.take(ana, "ddbres-editor-review");
+    await review.getByRole("button", { name: "Use it" }).click();
+    await editor(ana).getByRole("button", { name: "Save", exact: true }).click();
+    await editor(ana).waitFor({ state: "detached" });
+    const resources = await waitFor("the class resources saved", () => anaSocket.state?.characters[run.bree.characterId]?.resources ?? null);
+    assert.deepEqual(
+      resources.map((r) => [r.name, r.max, r.used, r.reset]),
+      [
+        ["Breath Weapon", 3, 1, "long"],
+        ["Luck Points", 3, 1, "long"],
+      ],
+    );
+    assert.equal(Object.keys(anaSocket.state!.characters[run.bree.characterId]!.ddbSync!.res ?? {}).length, 2, "the record links both");
+    assert.equal("resources" in (cySocket.state?.characters[run.bree.characterId] ?? {}), false, "Cy's device never holds them");
   });
 
   test("6. no page logged an error", () => {

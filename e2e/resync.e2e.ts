@@ -24,7 +24,11 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * open review, each fetch error shows its words under the prefilled
  * field, a sheet link to another number is a new source, the DM's
  * re-sync runs by keys alone on Bree's page with the toolbar's Undo
- * naming it, and a 46-roll character folds its rolls on a phone.
+ * naming it, and a 46-roll character folds its rolls on a phone. The
+ * ddbres steps bring in class resources (docs/design-v1-ddb-resources.md
+ * 9): additions with their counts spent, a spend here kept against D&D
+ * Beyond's, a live spend while the review is open, an edit kept with
+ * Overwrite and its Undo, and 14 limited uses cut to 12 at every size.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus twenty-six, one file
  * after another as the others. The other environment variables are the
@@ -97,7 +101,7 @@ const MOONBEAM: Json = { prepared: true, definition: { name: "Moonbeam", level: 
  * armor AC 10 plus her Dexterity modifier, 12. Her max HP is the base plus
  * +2 a level: 38 at level 5 from a base of 28.
  */
-function bree(o: { id?: number; name?: string; level?: number; scores?: number[]; baseHp?: number; inventory?: Json[]; spells?: Json[]; caster?: number; saves?: string[]; skills?: string[] } = {}): Json {
+function bree(o: { id?: number; name?: string; level?: number; scores?: number[]; baseHp?: number; inventory?: Json[]; spells?: Json[]; caster?: number; saves?: string[]; skills?: string[]; classFeatures?: Json[]; actions?: Json } = {}): Json {
   return {
     success: true,
     data: {
@@ -108,7 +112,7 @@ function bree(o: { id?: number; name?: string; level?: number; scores?: number[]
       overrideStats: [],
       baseHitPoints: o.baseHp ?? 28,
       race: { weightSpeeds: { normal: { walk: 30 } } },
-      classes: [{ level: o.level ?? 5, definition: { name: "Druid", spellCastingAbilityId: o.caster ?? 5 }, classFeatures: [] }],
+      classes: [{ level: o.level ?? 5, definition: { name: "Druid", spellCastingAbilityId: o.caster ?? 5 }, classFeatures: o.classFeatures ?? [] }],
       modifiers: {
         race: [],
         class: (o.saves ?? ["intelligence", "wisdom"]).map((a) => proficiency(`${a}-saving-throws`)),
@@ -120,10 +124,49 @@ function bree(o: { id?: number; name?: string; level?: number; scores?: number[]
       inventory: o.inventory ?? [SHORTBOW],
       classSpells: [{ spells: o.spells ?? [cantrip("Shillelagh", "1d8", "bludgeoning")] }],
       spells: { race: [], class: [], item: [], feat: [] },
-      actions: { race: [], class: [], feat: [] },
+      actions: o.actions ?? { race: [], class: [], feat: [] },
     },
   };
 }
+
+/* Limited uses in the shape of public sample characters' (shared/ddb/resources.ts): a cost of 1 to 1, as every action's is. */
+
+const CLASS_FEATURE = 12168134;
+const SPECIES_TRAIT = 1960452172;
+const FEAT = 1088085227;
+
+function limited(name: string, use: { maxUses: number; resetType: number; numberUsed?: number; pb?: boolean }, source: { type: number; id: number }): Json {
+  return {
+    name,
+    componentTypeId: source.type,
+    componentId: source.id,
+    limitedUse: { name: null, statModifierUsesId: null, resetType: use.resetType, numberUsed: use.numberUsed ?? 0, minNumberConsumed: 1, maxNumberConsumed: 1, maxUses: use.maxUses, operator: 1, useProficiencyBonus: use.pb === true, proficiencyBonusOperator: 1, resetDice: null },
+  };
+}
+
+/** A wand whose charges come back at dawn by a roll: an item's limited use, which the reader leaves out. */
+const WAND: Json = { equipped: true, limitedUse: { maxUses: 7, numberUsed: 1, resetType: "Dawn" }, definition: { id: 301, name: "Wand of Sparks", filterType: "Wand" } };
+
+/**
+ * Fixture C: Bree as a Druid 6 with Wild Shape, 2 of its 3 spent, a Breath
+ * Weapon and Luck Points by her proficiency bonus, and the wand. `luck`
+ * is Luck Points' base, 0 for 3 uses and 1 for 4 (fixture C2).
+ */
+function fixtureC(luck = 0): Json {
+  return bree({
+    level: 6,
+    inventory: [SHORTBOW, WAND],
+    classFeatures: [{ definition: { id: 601, name: "Wild Shape", requiredLevel: 2 } }],
+    actions: {
+      class: [limited("Wild Shape", { maxUses: 3, resetType: 1, numberUsed: 2 }, { type: CLASS_FEATURE, id: 601 })],
+      race: [limited("Breath Weapon", { maxUses: 0, resetType: 2, pb: true }, { type: SPECIES_TRAIT, id: 7001 })],
+      feat: [limited("Luck Points", { maxUses: luck, resetType: 2, pb: true }, { type: FEAT, id: 8001 })],
+    },
+  });
+}
+
+/** Fixture D: 14 limited uses, two past the 12 a character holds. */
+const fixtureD = () => bree({ level: 6, actions: { class: [], race: [], feat: Array.from({ length: 14 }, (_, i) => limited(`Knack ${i + 1}`, { maxUses: 2, resetType: 2 }, { type: FEAT, id: 9000 + i })) } });
 
 /** Fixture A: Bree as the DM typed her, but casting with Wisdom. */
 const fixtureA = () => bree();
@@ -857,6 +900,177 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const discard = ana.getByRole("button", { name: /^Discard/ });
     if (await discard.count()) await discard.first().click();
     await sheet.waitFor({ state: "detached" });
+  });
+
+  test("ddbres-1. at 390 x 844 Re-sync lists Wild Shape with its spent count, the Breath Weapon and Luck Points, and no wand, and Apply brings them in", async () => {
+    // A fresh start with no record and no class resources, at fixture C's level.
+    await ops.send({ t: "character.update", characterId: run.bree.characterId, patch: { level: 6, resources: [], ddbSync: null } });
+    await waitFor("Bree at level 6 with no record", () => (breeIn(anaSocket)?.level === 6 && breeIn(anaSocket)?.ddbSync === undefined ? true : null));
+    await reopen(ana, PHONE);
+    anaDdb.next({ fixture: () => fixtureC() });
+    const review = await openResync(ana);
+    await review.getByText("Adds Wild Shape: 3 uses, one back on a Short Rest, all on a Long Rest, 1 of 3 left", { exact: true }).waitFor();
+    await review.getByText("Adds Breath Weapon: 3 uses, back on a Long Rest", { exact: true }).waitFor();
+    await review.getByText("Adds Luck Points: 3 uses, back on a Long Rest", { exact: true }).waitFor();
+    assert.equal(await review.getByText(/Wand of Sparks/).count(), 0, "an item's charges stay out");
+    await shots.take(ana, "ddbres-review-390");
+    await review.getByRole("button", { name: "Apply", exact: true }).click();
+    const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
+    await done.getByRole("status").waitFor();
+    const resources = await waitFor("the class resources in Ana's view", () => (breeIn(anaSocket)?.resources?.length === 3 ? breeIn(anaSocket)!.resources! : null));
+    assert.deepEqual(
+      resources.map((r) => [r.name, r.max, r.used, r.reset]),
+      [
+        ["Wild Shape", 3, 2, "shortOne"],
+        ["Breath Weapon", 3, 0, "long"],
+        ["Luck Points", 3, 0, "long"],
+      ],
+    );
+    assert.equal(Object.keys(breeIn(anaSocket)!.ddbSync!.res ?? {}).length, 3, "the record links all three");
+    await done.getByRole("button", { name: "Done", exact: true }).click();
+    await done.waitFor({ state: "detached" });
+    // The Class resources section shows them, Wild Shape 1 of 3.
+    const wild = ana.getByRole("button", { name: "Use Wild Shape, 1 of 3 left", exact: true });
+    const panel = await breeBlock(ana);
+    if ((await wild.count()) === 0) await panel.getByRole("button", { name: /^Combat/ }).first().click();
+    await wild.first().waitFor();
+  });
+
+  test("ddbres-2. Wild Shape spent in a fight, then a re-sync with fixture C at every size: Nothing new, Also set's unticked spent line in line, and Done sends nothing. Ticked, Apply gives back D&D Beyond's count", async () => {
+    await ops.send({ t: "actor.use", target: { characterId: run.bree.characterId }, use: { kind: "resource", id: breeIn(dmSocket)!.resources![0]!.id } });
+    await waitFor("Wild Shape 0 of 3", () => (breeIn(anaSocket)?.resources?.[0]?.used === 3 ? true : null));
+    const aligned: string[] = [];
+    for (const { size, scale } of [
+      { size: { width: 1440, height: 900 }, scale: 1 },
+      { size: { width: 1440, height: 900 }, scale: 1.3 },
+      { size: PHONE, scale: 1 },
+      { size: PHONE, scale: 1.3 },
+      { size: { width: 320, height: 568 }, scale: 1 },
+      { size: { width: 320, height: 568 }, scale: 1.3 },
+    ]) {
+      await reopen(ana, size, scale);
+      anaDdb.next({ fixture: () => fixtureC() });
+      const review = await openResync(ana);
+      await review.getByText("Nothing new from D&D Beyond.", { exact: true }).waitFor();
+      const line = review.getByRole("checkbox", { name: "Wild Shape 1 of 3 left, now 0 of 3", exact: true });
+      assert.equal(await line.isChecked(), false, "the spent line starts unticked");
+      await review.getByText("Unticked keeps what was spent here.", { exact: true }).waitFor();
+      assert.equal(await review.getByRole("button", { name: "Apply", exact: true }).count(), 0, "Done is the one button");
+      aligned.push(...alignmentLines(await measureAlignment(review), `the spent line's review at ${size.width} x ${size.height} at ${scale * 100}%`));
+      await shots.take(ana, `ddbres-spent-${size.width}-${scale * 100}`);
+      const sent = anaOps.length;
+      await review.getByRole("button", { name: "Done", exact: true }).click();
+      await review.waitFor({ state: "detached" });
+      await sleep(300);
+      assert.equal(anaOps.length, sent, "Done sent no op");
+      assert.equal(breeIn(anaSocket)!.resources![0]!.used, 3, "the room's count stays");
+    }
+    assert.deepEqual(aligned, [], "the spent line's review is out of line");
+    anaDdb.next({ fixture: () => fixtureC() });
+    const review = await openResync(ana);
+    await review.getByRole("checkbox", { name: "Wild Shape 1 of 3 left, now 0 of 3", exact: true }).check();
+    await review.getByRole("button", { name: "Apply", exact: true }).click();
+    const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
+    await done.getByRole("status").waitFor();
+    await waitFor("Wild Shape 1 of 3 again", () => (breeIn(anaSocket)?.resources?.[0]?.used === 2 ? true : null));
+    await done.getByRole("button", { name: "Done", exact: true }).click();
+    await done.waitFor({ state: "detached" });
+    await reopen(ana, DESKTOP, 1);
+  });
+
+  test("ddbres-3. fixture C2 raises Luck Points to 4. The DM spends Breath Weapon while Ana's review is open: the status says Bree changed, an unticked Breath Weapon line appears, and Apply lands with Luck Points 4 and the DM's spend kept", async () => {
+    anaDdb.next({ fixture: () => fixtureC(1) });
+    const review = await openResync(ana);
+    await review.getByText("Updates Luck Points: 4 uses, now 3", { exact: true }).waitFor();
+    assert.equal(await review.getByRole("checkbox", { name: /^Breath Weapon / }).count(), 0);
+    const breathId = breeIn(dmSocket)!.resources!.find((r) => r.name === "Breath Weapon")!.id;
+    await ops.send({ t: "actor.use", target: { characterId: run.bree.characterId }, use: { kind: "resource", id: breathId } });
+    await review.getByText("Bree changed on another device. The lists show the latest.", { exact: true }).waitFor();
+    const line = review.getByRole("checkbox", { name: "Breath Weapon 3 of 3 left, now 2 of 3", exact: true });
+    await line.waitFor();
+    assert.equal(await line.isChecked(), false);
+    await shots.take(ana, "ddbres-live-spend");
+    await review.getByRole("button", { name: "Apply", exact: true }).click();
+    const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
+    await done.getByRole("status").waitFor();
+    const after = await waitFor("Luck Points 4", () => (breeIn(anaSocket)?.resources?.find((r) => r.name === "Luck Points")?.max === 4 ? breeIn(anaSocket)!.resources! : null));
+    assert.equal(after.find((r) => r.name === "Breath Weapon")!.used, 1, "the DM's spend kept");
+    await done.getByRole("button", { name: "Done", exact: true }).click();
+    await done.waitFor({ state: "detached" });
+  });
+
+  test("ddbres-4. Wild Shape edited to 4 uses, then a re-sync: Kept with Overwrite. Overwrite all, Apply, and Undo gives back 4 uses and the count spent", async () => {
+    const before = breeIn(dmSocket)!.resources!;
+    const edited = before.map(({ used: _used, ...r }) => (r.name === "Wild Shape" ? { ...r, max: 4, edited: true as const } : r));
+    await ops.send({ t: "character.update", characterId: run.bree.characterId, patch: { resources: edited } });
+    await waitFor("Wild Shape at 4", () => (breeIn(anaSocket)?.resources?.[0]?.max === 4 ? true : null));
+    const spent = breeIn(anaSocket)!.resources![0]!.used;
+    anaDdb.next({ fixture: () => fixtureC(1) });
+    const review = await openResync(ana);
+    const kept = row(review, "Wild Shape, as you changed it: 4 uses, one back on a Short Rest, all on a Long Rest");
+    await kept.getByText("D&D Beyond says 3 uses, one back on a Short Rest, all on a Long Rest.", { exact: true }).waitFor();
+    await kept.getByRole("checkbox", { name: "Overwrite with D&D Beyond's", exact: true }).waitFor();
+    await review.getByRole("button", { name: "Overwrite all", exact: true }).click();
+    await review.getByRole("button", { name: "Apply", exact: true }).click();
+    const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
+    await done.getByRole("status").waitFor();
+    await waitFor("Wild Shape back at 3", () => (breeIn(anaSocket)?.resources?.[0]?.max === 3 ? true : null));
+    await done.getByRole("button", { name: "Undo the re-sync", exact: true }).click();
+    const undone = ana.getByRole("dialog", { name: "Re-sync undone" });
+    await undone.getByText("Bree is as before the re-sync.", { exact: true }).waitFor();
+    const back = await waitFor("Wild Shape at 4 again", () => (breeIn(anaSocket)?.resources?.[0]?.max === 4 ? breeIn(anaSocket)!.resources![0]! : null));
+    assert.deepEqual([back.max, back.used, back.edited], [4, spent, true], "4 uses and the count spent, exactly");
+    await undone.getByRole("button", { name: "Done", exact: true }).click();
+    await undone.waitFor({ state: "detached" });
+  });
+
+  test("ddbres-6. fixture D's 14 limited uses: the cut warning and 12 in the review at every size, nothing over 1 px or sideways, and Cy's device never holds them", async () => {
+    await ops.send({ t: "character.update", characterId: run.bree.characterId, patch: { resources: [], ddbSync: null } });
+    await waitFor("Bree with no class resources", () => (breeIn(anaSocket)?.resources === undefined && breeIn(anaSocket)?.ddbSync === undefined ? true : null));
+    const aligned: string[] = [];
+    const sizes = [
+      { size: { width: 1440, height: 900 }, scale: 1 },
+      { size: { width: 1440, height: 900 }, scale: 1.3 },
+      { size: PHONE, scale: 1 },
+      { size: PHONE, scale: 1.3 },
+      { size: { width: 320, height: 568 }, scale: 1 },
+      { size: { width: 320, height: 568 }, scale: 1.3 },
+    ];
+    for (const { size, scale } of sizes) {
+      const at = `${size.width} x ${size.height} at ${scale * 100}%`;
+      await reopen(ana, size, scale);
+      anaDdb.next({ fixture: fixtureD });
+      const review = await openResync(ana);
+      await review.getByText("D&D Beyond has 14 class resources for Bree Tallow, more than the 12 a character holds, so 2 were not read. Class resources here that they would change stay as they are.", { exact: true }).waitFor();
+      const group = review.getByRole("button", { name: "Class resources", exact: true });
+      const summary = await group.evaluate((el) => el.ownerDocument.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
+      assert.equal(summary, "12: Adds Knack 1, and 11 more", `${at}: the group's summary`);
+      await group.click();
+      await review.getByText("Adds Knack 12: 2 uses, back on a Long Rest", { exact: true }).waitFor();
+      const sideways = await review.evaluate((dialog) => {
+        const doc = dialog.ownerDocument;
+        const past = [...dialog.querySelectorAll("*")].filter((el) => el.getBoundingClientRect().right > doc.documentElement.clientWidth + 1).map((el) => `${el.tagName} ${(el.textContent ?? "").slice(0, 40)}`);
+        return { page: doc.documentElement.scrollWidth - doc.documentElement.clientWidth, past: past.slice(0, 5) };
+      });
+      assert.deepEqual(sideways, { page: 0, past: [] }, `${at}: nothing scrolls sideways`);
+      aligned.push(...alignmentLines(await measureAlignment(review), `the 12-resource review at ${at}`));
+      await shots.take(ana, `ddbres-12-${size.width}-${scale * 100}`);
+      await review.getByRole("button", { name: "Cancel", exact: true }).click();
+      await review.waitFor({ state: "detached" });
+    }
+    assert.deepEqual(aligned, [], "the 12-resource review is out of line");
+    anaDdb.next({ fixture: fixtureD });
+    const review = await openResync(ana);
+    await review.getByRole("button", { name: "Apply", exact: true }).click();
+    const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
+    await done.getByRole("status").waitFor();
+    await waitFor("12 class resources", () => (breeIn(anaSocket)?.resources?.length === 12 ? true : null));
+    await done.getByRole("button", { name: "Done", exact: true }).click();
+    await done.waitFor({ state: "detached" });
+    await waitFor("Cy's view of Bree", () => breeIn(cySocket) ?? null);
+    assert.equal("resources" in breeIn(cySocket)!, false, "Cy's device never holds the class resources");
+    assert.equal(cySocket.everSaw("Knack 1"), false, "no frame to Cy names one");
+    await reopen(ana, DESKTOP, 1);
   });
 
   test("rs-12. no page logged an error, and every import request was planned", () => {
