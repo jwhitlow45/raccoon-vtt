@@ -414,7 +414,7 @@ Filters stay on for this room on this device, and the encounter builder shares t
 1. Set **How many** (1 to 20).
 2. Keep **Average HP**, or untick it and type the **HP for each**. The app doesn't roll Hit Points for you.
 3. Tick **Hidden from players** for an ambush. Players' devices never receive hidden tokens, so nobody can find them early.
-4. For a monster with a lair, tick **In its lair** to give it the extra legendary uses and XP it has in its lair. It then joins a fight with **In lair** already on in its tracker row.
+4. For a monster with a lair, tick **In its lair** to give it the extra legendary uses and XP it has in its lair. It then joins a fight with **In lair** already on in its tracker row, however you add it: from the tracker, or by selecting it with others and pressing **Start a fight** or **Add to the fight**.
 5. Press **Place on the map** (or **Place 4 on the map**), then tap the map. The copies spread out to the nearest free squares around your tap.
 
 The copies are numbered for you: "Goblin Warrior 1", "Goblin Warrior 2" and so on. Each token placed is its own undo step.
@@ -588,10 +588,10 @@ Sometimes you want the opposite: the token in plain sight, but its row kept out 
 
 Tap a row to select its token and open its action bar. Each row's **⋯** holds a few more controls for you:
 
-- **Hidden from players**, **Reaction used** (which clears at the start of the creature's turn) and **In lair**, which puts a "Lair" tag on the row that players see too, and gives the monster its lair's Legendary Action and Legendary Resistance counts and XP. Turn it off, and the monster goes back to its own counts. What it already used stays used.
+- **Hidden from players**, **Reaction used** (which clears at the start of the creature's turn) and **In lair**, which puts a "Lair" tag on the row that players see too, and gives the monster its lair's Legendary Action and Legendary Resistance counts and XP. Turn it off, and the monster goes back to its own counts. What it already used stays used. The switch waits a moment while the monster's stat block loads. If the stat block can't load, the switch stays off and offers a reload, so the counts never go out of step with it.
 - The Ready controls, for a creature that readies an action. Type its trigger ("if the door opens") and press **Ready**. The row and token show "Readied" until its next turn. Players see the trigger only for a creature a player plays, or when you turn on **Show the trigger to players**. When the trigger happens, **It fired: Reaction used** ends the readied action and marks the creature's Reaction as spent.
 - **Uses**, for a creature with something to spend, read from its stat block. A legendary monster's actions are buttons by name, such as **Fiery Rays** or **Pounce**, and a tap spends its pips. A button is off, and says why when you tap it, on the monster's own turn ("After another creature's turn"), when the block says it can't take that action again until its next turn, or when too few pips are left ("Needs 2"). **Use** spends a Legendary Resistance. A breath weapon reads "Fire Breath, Recharge 5–6, Ready", with **Use**, and once used, **Roll recharge** and **Mark ready**. An ability with uses per day reads "Dominate Mind, 2/Day, 1 left", and Regeneration says how much it heals. A character's class resources sit here too. **Give one back** takes back a mis-tap. Under them are the pips, **Legendary Actions used** and **Legendary Resistances used today**, which you can still tap. Your players see the uses of their own creatures in their rows, but never a monster's.
-- The row's "LA 3/3" and "LR 2/3" tags show what is left, to you alone, and chips such as "Fire Breath used" or "Dominate Mind 1/2" show what is spent, up to three, then "+2 more".
+- The row's "LA 3/3" and "LR 2/3" tags show what is left, to you alone, and chips such as "Fire Breath used" or "Dominate Mind 1/2", on a line of their own under them, show what is spent, up to three, then "+2 more".
 - **Revive**, for a dead creature, which brings it back with 1 HP.
 - **Remove**, which takes the creature out of the fight. Its token stays on the map.
 
