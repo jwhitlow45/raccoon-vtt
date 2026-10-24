@@ -525,7 +525,7 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
     case "cast":
       return castText(data, creatureName(names, data));
     case "use":
-      return `${creatureName(names, data)} used ${data.name ?? "a limited use"}.`;
+      return useText(data, creatureName(names, data));
     case "trap": {
       // The DM's trap log (docs/design-v1-traps.md 6.3): the name the trap had when it went off.
       const who = creatureList(names, data.by, data.more);
@@ -543,6 +543,44 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       const it = trap ? (what ? `${what} of ${trap.name}` : trap.name) : "a trap";
       return `${possessive(creatureName(names, { tokenId: data.tokenId }))} Passive Perception (${data.passive}) would notice ${it} (DC ${data.dc}).`;
     }
+  }
+}
+
+/**
+ * A creature's use of a limited ability, or one given back
+ * (docs/design-v1-combat-controls.md 8), with the counts the reader's line
+ * kept: "Adult Red Dragon used Fiery Rays (legendary action, 2 of 3 left)."
+ * for the DM and its owners, "Adult Red Dragon used Fiery Rays, a legendary
+ * action." for other players, and "Young Red Dragon: Fire Breath is ready
+ * again." for a give back.
+ */
+export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): string {
+  const counts = data.left !== undefined && data.max !== undefined ? `${data.left} of ${data.max} left` : undefined;
+  const after = counts ? ` (${counts})` : "";
+  const several = data.cost !== undefined && data.cost > 1;
+  if (data.back) {
+    switch (data.what) {
+      case "legendary":
+        return `${who}: ${data.name ?? (several ? `${data.cost} legendary actions` : "a legendary action")} given back${after}.`;
+      case "resist":
+        return `${who}: a Legendary Resistance given back${after}.`;
+      case "ability":
+        return counts ? `${who}: a use of ${data.name ?? "an ability"} given back${after}.` : `${who}: ${data.name ?? "an ability"} is ready again.`;
+      case "resource":
+        return `${who}: ${data.cost !== undefined ? `${data.cost} of ` : ""}${data.name ?? "a class resource"} given back${after}.`;
+    }
+  }
+  switch (data.what) {
+    case "legendary":
+      if (!counts) return data.name ? `${who} used ${data.name}, a legendary action.` : `${who} used a legendary action.`;
+      if (data.name) return `${who} used ${data.name} (${several ? `${data.cost} actions` : "legendary action"}, ${counts}).`;
+      return `${who} used ${several ? `${data.cost} legendary actions` : "a legendary action"}${after}.`;
+    case "resist":
+      return `${who} used Legendary Resistance${after}.`;
+    case "ability":
+      return `${who} used ${data.name ?? "an ability"}${after}.`;
+    case "resource":
+      return `${who} used ${data.cost !== undefined ? `${data.cost} of ` : ""}${data.name ?? "a class resource"}${after}.`;
   }
 }
 

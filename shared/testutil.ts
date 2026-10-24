@@ -1417,6 +1417,8 @@ export function randomOp(r: () => number, state: RoomState, who: Viewer): Op {
   if (chance(r, 0.07)) return attachOp(r, state, anyToken);
   // Traps (docs/design-v1-traps.md), about one in sixteen.
   if (chance(r, 0.06)) return trapOp(r, state, anyToken, seqId);
+  // Combat uses (docs/design-v1-combat-controls.md 3.1), about one in sixteen.
+  if (chance(r, 0.06)) return combatUseOp(r, target);
 
   if (who.role === "player") {
     // Wave 4's moves, doors and lights, now and then.
@@ -1916,6 +1918,34 @@ function trackerOp(
     }
     default:
       return { t: "encounter.update", entryId: anyEntry(), patch: { reactionUsed: chance(r, 0.6) } };
+  }
+}
+
+/** A spend or a give back of every kind of combat use (docs/design-v1-combat-controls.md 3.1), some after a secret roll. */
+export function combatUseOp(r: () => number, target: () => { tokenId: string } | { characterId: string }): Op {
+  const back = chance(r, 0.3);
+  const flags = { ...(back ? { back: true as const } : {}), ...(chance(r, 0.2) ? { quiet: true as const } : {}) };
+  const legendary = pick(r, [
+    { key: "legendaryActions:pounce", name: "Pounce" },
+    { key: "legendaryActions:fiery-rays", name: "Fiery Rays" },
+  ]);
+  switch (int(r, 0, 5)) {
+    case 0:
+      return { t: "actor.use", target: target(), use: chance(r, 0.3) ? { kind: "legendary", cost: int(r, 1, 3) } : { kind: "legendary", cost: int(r, 1, 2), ...legendary, ...(chance(r, 0.5) ? { once: true as const } : {}) }, ...flags };
+    case 1:
+      return { t: "actor.use", target: target(), use: { kind: "resist" }, ...flags };
+    case 2: {
+      const ifReady = !back && chance(r, 0.4) ? { ifReady: true as const } : {};
+      return { t: "actor.use", target: target(), use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: int(r, 4, 6), ...ifReady }, ...flags };
+    }
+    case 3:
+      return { t: "actor.use", target: target(), use: { kind: "ability", key: "actions:dominate-mind", name: "Dominate Mind", limit: "day", max: int(r, 1, 3), ...(chance(r, 0.3) ? { short: true as const } : {}) }, ...flags };
+    case 4:
+      return { t: "actor.use", target: target(), use: { kind: "ability", key: "actions:phantasms", name: "Phantasms", limit: "rest", max: 1 }, ...flags };
+    default: {
+      const pool = chance(r, 0.5);
+      return { t: "actor.use", target: target(), use: pool ? { kind: "resource", id: "loh", amount: int(r, 1, 10) } : { kind: "resource", id: pick(r, ["rage", "rage", "missing"]) }, ...flags };
+    }
   }
 }
 

@@ -1406,6 +1406,7 @@ export function eventReach(state: RoomState, data: LogEvent): Reach {
     case "concentration":
     case "effect":
     case "area":
+    case "use":
       return creatureReach(state, data, false);
     case "deathSave":
     case "life":
@@ -1445,7 +1446,6 @@ export function eventReach(state: RoomState, data: LogEvent): Reach {
     case "trap":
     case "trapSeen":
     case "trapNotice":
-    case "use":
       return [];
   }
 }
@@ -1573,6 +1573,9 @@ function partsOf(data: LogEvent, anyone: Read, reads: readonly Read[]): LinePart
     case "turn":
       if (data.to !== undefined) set("to", narrow(field("to")));
       break;
+    case "use":
+      if (data.cost !== undefined || data.left !== undefined || data.max !== undefined) set("exact", narrow((r) => field("cost")(r) || field("left")(r) || field("max")(r)));
+      break;
     case "dice": {
       const kept = new Map([anyone, ...reads].map((r) => [r, new Set(keptRolls(r.ctx, data))]));
       const rolls = data.rolls.map((_, i) => narrow((r) => kept.get(r)!.has(i)));
@@ -1612,6 +1615,11 @@ function withinParts(data: LogEvent, parts: LineParts, memberId: string): LogEve
     case "turn": {
       if (!lacks(parts.to)) return data;
       const { to: _to, toSeen: _toSeen, ...rest } = data;
+      return rest;
+    }
+    case "use": {
+      if (!lacks(parts.exact)) return data;
+      const { cost: _cost, left: _left, max: _max, ...rest } = data;
       return rest;
     }
     case "dice": {
@@ -1764,6 +1772,16 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     }
     case "dice":
       return projectDiceCtx(ctx, data);
+    case "use": {
+      // The DM's and its owners' read the counts (docs/design-v1-combat-controls.md 8). Others read only a public use, by name.
+      const holder = holderInSight(ctx, data);
+      if (!holder) return null;
+      const owns = (holder.token !== undefined && ownsToken(ctx.state, ctx.viewer, holder.token)) || (holder.character !== undefined && ownsCharacter(ctx.viewer, holder.character));
+      const { cost, left, max, hidden, ...rest } = data;
+      if (owns) return { ...rest, ...(cost !== undefined ? { cost } : {}), ...(left !== undefined ? { left } : {}), ...(max !== undefined ? { max } : {}) };
+      // A give back, and a use after a secret roll, say nothing to anyone else.
+      return data.back || hidden ? null : rest;
+    }
     case "cast":
       // As the ask itself (projectCastCtx): its caster's players, never behind a pause.
       return ctx.paused ? null : data;
@@ -1775,7 +1793,6 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     case "trap":
     case "trapSeen":
     case "trapNotice":
-    case "use":
       return null;
   }
 }
