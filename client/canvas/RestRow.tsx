@@ -66,9 +66,12 @@ export function RestRow(props: { items: readonly RestItem[]; onFit?(shown: reado
         widths[id] = width;
         continue;
       }
-      // The lead counts without its field, which the fit gives its least.
+      // The lead counts without its field, which the fit gives its least. Drawn squeezed, as on the first render where every
+      // candidate is drawn, its parts overflow its box at the field's least, so its scroll width is its natural one, and the
+      // fit never reads a squeezed lead as room for more.
       const field = el.querySelector<HTMLElement>("[data-rest-field]") ?? el.querySelector<HTMLElement>("input");
-      widths[id] = Math.max(0, width - (field?.getBoundingClientRect().width ?? 0));
+      const natural = el.scrollWidth > el.clientWidth + 1 ? el.scrollWidth * scale : width;
+      widths[id] = Math.max(0, natural - (field?.getBoundingClientRect().width ?? 0));
     }
     const fit = restFit(widths, rowWidth, theme.space(1) * scale, FIELD_MIN * scale);
     setShown((prev) => (prev !== null && prev.length === fit.length && prev.every((id, i) => id === fit[i]) ? prev : fit));
