@@ -78,41 +78,48 @@ import {
   arrowStep,
   barDockSlot,
   barChrome,
-  carriedMove,
   clampMove,
+  clearShift,
   DEFAULT_SPOT,
+  expandedRoom,
+  expandOffered,
+  freeArea,
   handleCorner,
   hangBox,
   hasSize,
   headAsksToasts,
   headerLayout,
+  heldOrOpenMode,
   heldPlace,
   isDefaultSpot,
   keySize,
   keySpot,
   laneLeft,
-  largerShift,
   limitMet,
   NO_SIZE,
+  NOTE_INSET as STRIP_NOTE_INSET,
   placeBar,
   releaseSize,
   releaseSpot,
   RESET_WORDS,
   resizeBox,
   resizeLimits,
+  REST_HEIGHT,
+  REST_TIGHT,
   sizeWords,
-  smallerShift,
   spanToastSlot,
   spotWords,
-  writeLarger,
+  stripSqueezed,
   writeSize,
   writeSpot,
   type BarFacts,
   type BarSize,
   type Box,
   type Corner,
+  type HeaderSummary,
   type ResizeLimits,
   type ResizePart,
+  type RestState,
   type Spot,
 } from "./barDock.ts";
 import { barButtons, barShort, isCompanion, type BarButtonId } from "./barButtons.ts";
@@ -866,63 +873,170 @@ type FrameControls = {
   short: boolean;
   /** Stands the bar over the notices while a popover of its own is open (docs/design-v1-tool-options.md 7.6). */
   raise(on: boolean): void;
+  /** The strip's own controls for its header, while the bar spans an upright phone. */
+  strip: StripControls | null;
 };
+
+/**
+ * What the strip's header needs of its frame (docs/design-v1-bar-compact.md
+ * 3.5 and 5.4): Scroll for more and the way back to the top in the
+ * scrolling strip, and the alerts' summary row while it stands in the
+ * header for want of a spot over the band.
+ */
+type StripControls = { scrollMore(): void; toTop(): void; summary: HeaderSummary | null };
 
 /** The header wherever the window does not dock, or docks at its full width. */
 const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: true };
 
 const NO_RAISE = () => {};
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE, strip: null });
 
 /** Reset's name and tooltip, on every device. */
 const RESET_LABEL = "Reset window position and size";
 
 /**
+ * A sentence of the HP entry's that the strip shows over its title or in
+ * its note (docs/design-v1-bar-compact.md 3.3): the content measures it,
+ * decides where it goes, and cuts it for the note.
+ */
+type RestSentence = { text: string; error: boolean; place: "title" | "note" };
+
+/**
  * The bar's header: the grip while it docks, its name on at most two
  * lines, the elevation badge, Reset while the window is away from its
- * default, the size button while it spans an upright phone, and Close.
- * Sticky while it docks or spans. While the strip rests the name takes
- * one line and `status`, which the content passes, the line under it
- * (docs/design-v1-bar-compact.md 3.3).
+ * default, Expand or Collapse while it spans an upright phone, and Close.
+ * Sticky while it docks or is expanded.
+ *
+ * While the strip rests (docs/design-v1-bar-compact.md 3.3) the name takes
+ * one line and `status`, which the content passes, the line under it. A
+ * `sentence` placed "title" takes both lines in their place, and one
+ * placed "note" stands on the strip's top edge, its words the field's
+ * description already, so the note itself is hidden from screen readers.
+ * Where Expand is not offered the header scrolls with the strip, and
+ * Scroll for more takes Expand's place (5.4). The alerts' summary row,
+ * where no spot is left for it over the band, stands left of that button
+ * (3.5).
  */
-function BarHeader(props: { title: string; status?: ReactNode; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
+function BarHeader(props: { title: string; status?: ReactNode; sentence?: RestSentence | null; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
   const frame = useContext(FrameContext);
-  const { place, rest } = frame;
+  const { place, rest, strip } = frame;
+  const resting = rest?.resting === true;
+  // An error or a refusal brings the scrolling strip's header and quick row back into view (5.4).
+  const error = resting && props.sentence?.error === true;
+  useLayoutEffect(() => {
+    if (error && rest?.scrolls) strip?.toTop();
+  }, [error, rest?.scrolls, strip]);
+  const sizeButton = !rest ? null : rest.scrolls ? (
+    <IconButton icon="scrollMore" label="Scroll for more" onClick={() => strip?.scrollMore()} />
+  ) : (
+    <IconButton icon={rest.resting ? "chevronUp" : "chevronDown"} label={rest.resting ? "Expand" : "Collapse"} onClick={rest.resting ? rest.expand : rest.collapse} />
+  );
+  const summary = resting && strip?.summary ? <HeaderSummaryButton summary={strip.summary} /> : null;
   // Reset shows only while the window docks, and the size only while the bar spans, so the two never stand together.
   const beforeClose = place?.moved ? (
     <IconButton icon="windowHome" label={RESET_LABEL} onClick={place.reset} onFocus={() => place.onResetFocus(true)} onBlur={() => place.onResetFocus(false)} />
-  ) : rest ? (
-    <IconButton icon={rest.resting ? "chevronUp" : "chevronDown"} label={rest.resting ? "Larger" : "Smaller"} onClick={rest.resting ? rest.expand : rest.collapse} />
+  ) : sizeButton ? (
+    <>
+      {summary}
+      {sizeButton}
+    </>
   ) : null;
   const handle = frame.handle && frame.header.grip === "dots" ? { ...frame.handle, grip: { ...frame.handle.grip, dots: true } } : frame.handle;
-  const status = rest?.resting && props.status !== undefined ? props.status : null;
+  const sentence = resting ? (props.sentence ?? null) : null;
+  const status = resting && props.status !== undefined ? props.status : null;
+  const title =
+    sentence?.place === "title" ? (
+      <span style={{ ...SENTENCE_LINES, fontSize: theme.font.small, fontWeight: theme.weight.regular, color: sentence.error ? theme.color.dangerText : theme.color.text }}>{sentence.text}</span>
+    ) : status !== null ? (
+      <>
+        <span style={RESTING_LINE}>{props.title}</span>
+        <span style={{ ...RESTING_LINE, color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>{status}</span>
+      </>
+    ) : (
+      props.title
+    );
   return (
-    <PaneHeader
-      title={
-        status === null ? (
-          props.title
-        ) : (
-          <>
-            <span style={RESTING_LINE}>{props.title}</span>
-            <span style={{ ...RESTING_LINE, color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>{status}</span>
-          </>
-        )
-      }
-      actions={props.actions}
-      beforeClose={beforeClose}
-      onClose={props.onClose}
-      closeLabel={props.closeLabel}
-      closeRef={place?.closeRef}
-      handle={handle ?? undefined}
-      sticky={frame.sticky}
-      lines={status === null ? 2 : undefined}
-    />
+    <>
+      <PaneHeader
+        title={title}
+        actions={props.actions}
+        beforeClose={beforeClose}
+        onClose={props.onClose}
+        closeLabel={props.closeLabel}
+        closeRef={place?.closeRef}
+        handle={handle ?? undefined}
+        sticky={frame.sticky}
+        lines={status === null && sentence?.place !== "title" ? 2 : undefined}
+      />
+      {sentence?.place === "note" ? (
+        <div aria-hidden data-rest-note="" style={{ ...NOTE_BOX, color: sentence.error ? theme.color.dangerText : theme.color.text }}>
+          <span style={SENTENCE_LINES}>{sentence.text}</span>
+        </div>
+      ) : null}
+    </>
   );
 }
 
 /** A line of the resting header's title, cut with an ellipsis. */
 const RESTING_LINE: CSSProperties = { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+/** A sentence over the title's two lines, or the note's: never more than two, on the status line's 18 px lines. */
+const SENTENCE_LINES: CSSProperties = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", whiteSpace: "normal", lineHeight: "18px", overflowWrap: "anywhere" };
+
+/**
+ * The strip's note (3.3): on its top edge across the frame, its words
+ * barDock.ts NOTE_INSET in from each side (imported as STRIP_NOTE_INSET,
+ * beside the content's own copy) and 8 px from its top and foot, so two
+ * lines take the 52 px the band and the gap hold above the strip. Its
+ * containing block is the frame, so the scroller never clips it.
+ */
+const NOTE_BOX: CSSProperties = {
+  position: "absolute",
+  left: -theme.line.border,
+  right: -theme.line.border,
+  bottom: "100%",
+  boxSizing: "border-box",
+  padding: `${theme.space(2)}px ${STRIP_NOTE_INSET}px`,
+  background: theme.color.surface,
+  border: `${theme.line.border}px solid ${theme.color.border}`,
+  borderRadius: theme.radius.lg,
+  boxShadow: theme.shadow.pane,
+  fontSize: theme.font.small,
+  pointerEvents: "none",
+};
+
+/** The alerts' summary row standing in the strip's header (3.5): its count, named and tipped by its words, with the row's own tap. */
+function HeaderSummaryButton(props: { summary: HeaderSummary }) {
+  const tip = useTooltip(props.summary.name);
+  return (
+    <>
+      <button
+        type="button"
+        data-rest-summary=""
+        aria-label={props.summary.name}
+        onClick={props.summary.press}
+        {...tip.anchor()}
+        style={{
+          flex: "none",
+          width: theme.touch,
+          height: theme.touch,
+          borderRadius: theme.radius.md,
+          border: `${theme.line.border}px solid ${theme.color.warning}`,
+          background: theme.color.warningFill,
+          color: theme.color.text,
+          fontFamily: theme.font.body,
+          fontSize: theme.font.body14,
+          fontWeight: theme.weight.bold,
+          cursor: "pointer",
+        }}
+      >
+        {props.summary.count}
+      </button>
+      {tip.tip}
+    </>
+  );
+}
 
 /** How long the window's keys rest before its status speaks. */
 const KEYS_REST_MS = 500;
@@ -941,7 +1055,10 @@ type Drag = { kind: "move" | ResizePart; pointerId: number; el: HTMLElement; x: 
  * header, its grip or the grip's arrow keys, and this device remembers
  * the spot (`rvtt.tokenBarSpot`, barDock.ts). Reset in its header brings
  * it home (docs/design-v1-token-window.md 4). A
- * phone held upright spans the screen under or over its token, as before.
+ * phone held upright rests it as a strip at the foot of the map's free
+ * area, 114 px tall, which never follows its token, and Expand grows it up
+ * from the same foot (docs/design-v1-bar-compact.md). Where Expand would
+ * add less than a header, the strip scrolls to the rest of the bar instead.
  * A screen too short for either opens it compact: a taller overlay over
  * the Multi-select bar, and over the toolbar when even that is short,
  * which scrolls as a whole and does not move. In each, a bar that meets
@@ -951,8 +1068,15 @@ type Drag = { kind: "move" | ResizePart; pointerId: number; el: HTMLElement; x: 
  *
  * It scrolls inside when its content outgrows its room, with a "Scroll
  * for more" fade at the bottom while anything is hidden, so Duplicate or
- * Delete never sit out of view without a hint. While it docks or spans
- * its header sticks to the top, so the handle and Close never scroll away.
+ * Delete never sit out of view without a hint. While it docks or is
+ * expanded its header sticks to the top, so the handle and Close never
+ * scroll away. The resting strip draws no fade, and its scrolling form's
+ * header scrolls with it, Scroll for more in Expand's place.
+ *
+ * The strip clears its own token once, by moving the map, as the viewer
+ * opens it or shows another token in it, and as it comes back after a
+ * drop: it consumes the dock store's `clearRequest`, which Stage sets for
+ * those alone (3.6). Expand clears the expanded bar's token the same way.
  *
  * Under a portrait sheet it folds (pages/fold.ts, docs/design-v1-visual.md
  * 3.2.1): the frame takes the `hidden` attribute, which the global
@@ -996,6 +1120,25 @@ function BarFrame(props: {
   const foot = useStore(dockStore, (s) => s.foot);
   const heldMode = useStore(dockStore, (s) => s.heldMode);
   const cardAt = useStore(dockStore, (s) => s.cardAt);
+  const expanded = useStore(dockStore, (s) => s.expanded);
+  const expandedHeight = useStore(dockStore, (s) => s.expandedHeight);
+  const clearRequest = useStore(dockStore, (s) => s.clearRequest);
+  const headerSummary = useStore(dockStore, (s) => s.headerSummary);
+  /*
+   * An upright phone's strip (docs/design-v1-bar-compact.md 2 and 3): its
+   * mode as held or as the opening rule gives it, the foot it stands on (a
+   * roll card that would take the free area under 148 folds into the
+   * alerts instead, stripSqueezed), whether Expand is offered there, and
+   * whether it rests, is expanded or scrolls where Expand is not offered.
+   * A bar expanded when Expand stops being offered keeps `expanded` and
+   * scrolls until it is offered again.
+   */
+  const spans = heldOrOpenMode({ layout, free: freeArea(props.viewport, chrome, foot), foot, cardAt, heldMode }) === "span";
+  const restFoot = spans && stripSqueezed({ viewport: props.viewport, chrome, foot, held: true }) ? 0 : foot;
+  const stripFree = freeArea(props.viewport, chrome, restFoot);
+  const offered = spans && expandOffered({ layout, free: stripFree });
+  const restState: RestState = spans && expanded && offered ? "expanded" : "rest";
+  const scrolls = spans && !offered;
   const barRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1079,9 +1222,11 @@ function BarFrame(props: {
   // The fade's height, once it shows.
   useLayoutEffect(measure, [clipped]);
 
-  // The anchor is always given here, so a placement always comes back.
-  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, tokenHeight: props.tokenHeight, spot, height: barHeight, column, width, size, resizable: finePointer, heldMode, cardAt })!;
+  // Every mode places a bar, so a placement always comes back.
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, spot, height: barHeight, column, width, size, resizable: finePointer, heldMode, cardAt, state: restState, expandedHeight, restFoot })!;
   const { free, mode, resizable } = placed;
+  // The strip and the expanded bar draw exactly their room, never their content's height (3.1).
+  const drawnHeight = mode === "span" ? placed.hang.room : barHeight;
 
   // Actions in the Multi-select bar shows the bar and focuses its frame, once it is drawn.
   useLayoutEffect(() => {
@@ -1098,7 +1243,7 @@ function BarFrame(props: {
    * drag, dropped, put back by Escape or cancelled, publishes the latest,
    * alerts that arrived meanwhile included.
    */
-  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, barHeight), mode, lane: placed.lane, laneLeft: laneLeft(free), freeRight: free.left + free.width };
+  const facts: BarFacts | null = folded ? null : { box: hangBox(placed.hang, drawnHeight), mode, lane: placed.lane, laneLeft: laneLeft(free), freeRight: free.left + free.width };
   const factsKey = facts ? JSON.stringify(facts) : "";
   const dragging = dragBox !== null;
   useLayoutEffect(() => {
@@ -1118,64 +1263,90 @@ function BarFrame(props: {
   };
 
   /*
-   * An upright phone's Larger or Smaller (docs/design-v1-bar-dock.md 1.5).
-   * Larger moves the map once as the bar opens, after its content is
-   * measured, and once at the press. A map the viewer pans meanwhile is
-   * left alone, so the bar never fights a pan. Smaller moves the map back
-   * by what Larger moved it for this opening, and for the bar it took over
-   * from without closing.
+   * The strip's mode is held from the moment it shows (2), so a free area
+   * that shrinks later never turns it compact. Stage lets it go as the
+   * selection goes, the screen turns or the interface size changes.
    */
-  const larger = useStore(dockStore, (s) => s.larger);
-  const roomStore = useRoomStore();
-  const spanToast = useScoped(spanToastSlot);
-  const spanRoom = { layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, column, tokenHeight: props.tokenHeight };
-  // Read as Larger acts, so the toasts standing then keep the token below them (barDock.ts largerHang).
-  const larging = () => ({ ...spanRoom, height: barHeight, toastFoot: spanToast.foot });
-  const shift = (dy: number) => {
-    if (dy !== 0) props.onShift?.(dy);
-  };
-  const toggleSize = () => {
-    const next = !larger;
-    if (!preview) writeLarger(next);
-    const dock = dockStore.getState();
-    if (next) {
-      const dy = largerShift(larging());
-      dockStore.setState({ larger: true, largerFor: props.opening, largerMoved: dy });
-      shift(dy);
-    } else {
-      const dy = dock.largerFor === props.opening ? smallerShift({ ...spanRoom, moved: dock.largerMoved }) : 0;
-      dockStore.setState({ larger: false, largerMoved: 0 });
-      shift(dy);
-    }
-  };
-  const openChecked = useRef(false);
   useLayoutEffect(() => {
-    if (!contentMeasured || openChecked.current) return;
-    openChecked.current = true;
-    const dock = dockStore.getState();
-    // Back after a token drag, which hides the bar, the map stays where the drop left it.
-    if (dock.largerFor === props.opening) return;
-    const dy = dock.larger && !folded ? largerShift(larging()) : 0;
-    // Taking over from a bar still open, this opening keeps that one's move on its side for Smaller.
-    const carried = dock.largerFor === null ? 0 : carriedMove(larging(), dock.largerMoved);
-    dockStore.setState({ largerFor: props.opening, largerMoved: carried + dy });
-    shift(dy);
-    // Once per opening, on the first render with the content measured.
-  }, [contentMeasured]);
+    if (mode === "span" && dockStore.getState().heldMode !== "span") dockStore.setState({ heldMode: "span" });
+  }, [mode, dockStore]);
+
   /*
-   * Where the header stands while the bar spans an upright phone, for the
-   * toasts (barDock.ts spanToastSlot): a toast that shows over it moves
-   * under it, so Close and Larger or Smaller stay in reach (review
-   * LP19-BS-2). Read after each render, as the bar moves with its token,
-   * without drawing anything again, except that while the bar opens, and
-   * once the header goes down into the toasts placed under it, the toasts
-   * look again (headAsksToasts, reviews LP19-Q1 and LP19-OPUS-3). Each
-   * time the header shows it starts a new opening, the key that owns a
-   * stack of toasts placed under it (barStack, review FU24-OPUS-1). A count,
-   * since two openings can fall in the same millisecond.
+   * Expand and Collapse (5.3). The expanded bar's height is worked out at
+   * Expand, for each new token (each token's bar is a frame of its own)
+   * and on a change of the map's frame, from its content then, and frozen
+   * otherwise (5.1, review BC-OPUS-8): a stat block that loads late or a
+   * drawer opened inside scrolls under Scroll for more. Collapse moves
+   * nothing (R3). Expand moves the map once, as a clear request does, for
+   * the expanded bar's top (5.2).
+   */
+  const expand = () => {
+    shiftOnExpand.current = true;
+    dockStore.setState({ expanded: true, expandedHeight: null });
+  };
+  const collapse = () => dockStore.setState({ expanded: false, expandedHeight: null });
+  const shiftOnExpand = useRef(false);
+  const frameKey = JSON.stringify([layout.width, layout.height, props.viewport.width, props.viewport.height, chrome, restFoot, column ? [column.top, column.first] : null]);
+  const frozenFor = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (restState !== "expanded") {
+      frozenFor.current = null;
+      return;
+    }
+    const content = contentRef.current;
+    if (frozenFor.current === frameKey || !content || content.offsetHeight === 0) return;
+    frozenFor.current = frameKey;
+    const height = expandedRoom({ layout, free: stripFree, column, content: content.offsetHeight + 2 * theme.line.border });
+    if (dockStore.getState().expandedHeight !== height) dockStore.setState({ expandedHeight: height });
+  });
+
+  /*
+   * The clearing move (3.6, 5.2): once for each clear request this frame
+   * can use, as the viewer opens the bar, shows another token in it or
+   * drops a token, and once at the Expand press, after the expanded bar's
+   * height is known and before paint. The move clears the token's label
+   * of the bar's top and goes through Stage, which bounds it by the
+   * camera's limits (lib/camera.ts barShift). A docked, compact or folded
+   * bar drops a request, and so does an expanded one for a drop, which
+   * comes back with no map move (5.3). A request for another token is
+   * not this frame's.
+   */
+  const spanToast = useScoped(spanToastSlot);
+  useLayoutEffect(() => {
+    const request = clearRequest;
+    if (request === null && !shiftOnExpand.current) return;
+    const mine = request !== null && (props.opening === "group" || request.tokenId === props.opening);
+    const usable = mode === "span" && !folded;
+    if (usable && restState === "expanded" && expandedHeight === null) return;
+    const asked = usable && (shiftOnExpand.current || (mine && !(request.drop === true && restState === "expanded")));
+    shiftOnExpand.current = false;
+    if (request !== null) dockStore.setState({ clearRequest: null });
+    if (!asked) return;
+    const top = hangBox(placed.hang, placed.hang.room).top;
+    const dy = clearShift({ anchor: props.anchor, tokenHeight: props.tokenHeight, free: stripFree, barTop: top, toastFoot: spanToast.foot });
+    if (dy !== 0) props.onShift?.(dy);
+    // Read as the request comes, from the frame as it stands then.
+  }, [clearRequest, restState, expandedHeight, mode, folded]);
+
+  /*
+   * Where the expanded bar's header stands, for the toasts (barDock.ts
+   * spanToastSlot): a toast that shows over it moves under it, so Close
+   * and Collapse stay in reach (review LP19-BS-2). The resting strip
+   * publishes no header, since the toasts keep above it, but its top,
+   * which their room ends 60 px above (3.5), and asks them to look again
+   * as resting begins and each time its top rises. Read after each
+   * render, without drawing anything again, except that while the header
+   * opens, and once it goes down into the toasts placed under it, the
+   * toasts look again (headAsksToasts, reviews LP19-Q1 and LP19-OPUS-3).
+   * Each time the header shows it starts a new opening, the key that owns
+   * a stack of toasts placed under it (barStack, review FU24-OPUS-1). A
+   * count, since two openings can fall in the same millisecond.
    */
   useLayoutEffect(() => {
-    const header = mode === "span" && !folded ? barRef.current?.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`) : null;
+    const strip = mode === "span" && restState === "rest" && !folded ? hangBox(placed.hang, placed.hang.room).top : null;
+    const rose = strip !== null && (spanToast.restTop === null || strip < spanToast.restTop - 0.5);
+    spanToast.restTop = strip;
+    const header = mode === "span" && restState === "expanded" && !folded ? barRef.current?.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`) : null;
     const box = header?.getBoundingClientRect();
     const head = box && box.height > 0 ? { top: box.top / zoom, bottom: box.bottom / zoom } : null;
     const was = spanToast.head;
@@ -1183,6 +1354,7 @@ function BarFrame(props: {
     if (head === null) {
       spanToast.shownAt = null;
       spanToast.opening = null;
+      if (rose) spanToast.recheck?.();
       return;
     }
     const now = Date.now();
@@ -1198,16 +1370,17 @@ function BarFrame(props: {
       spanToast.head = null;
       spanToast.shownAt = null;
       spanToast.opening = null;
+      spanToast.restTop = null;
+      spanToast.recheck?.();
     },
     [spanToast],
   );
+  // A request left when the frame goes is for a bar no longer shown: a close, a switch away from Select, a drag's start or a blackout.
   useLayoutEffect(
     () => () => {
-      const { local } = roomStore.getState();
-      // A token drag hides the bar and keeps the selection. Anything else that takes the bar away ends the opening.
-      if (!local.actionBar || local.selectedId === null) dockStore.setState({ largerFor: null, largerMoved: 0 });
+      if (dockStore.getState().clearRequest !== null) dockStore.setState({ clearRequest: null });
     },
-    [roomStore, dockStore],
+    [dockStore],
   );
   /*
    * Escape or a cancelled pointer during a drag or a resize puts the window
@@ -1391,27 +1564,39 @@ function BarFrame(props: {
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
   const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer, heldMode, cardAt });
   const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
-  const rest: FrameControls["rest"] =
+  const rest: FrameControls["rest"] = mode === "span" ? { resting: restState === "rest", scrolls, expand, collapse } : null;
+  /*
+   * The scrolling strip (5.4): Scroll for more brings the row at its foot
+   * to its top, its window less a quick row, and the header and quick row
+   * come back as the HP field takes focus or an error shows.
+   */
+  const toTop = () => {
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollTop = 0;
+  };
+  const strip: StripControls | null =
     mode === "span"
       ? {
-          resting: !larger,
-          scrolls: false,
-          expand: () => {
-            if (!larger) toggleSize();
+          scrollMore: () => {
+            const scroller = scrollRef.current;
+            if (scroller) scroller.scrollBy({ top: Math.max(0, scroller.clientHeight - theme.touch) });
           },
-          collapse: () => {
-            if (larger) toggleSize();
-          },
+          toTop,
+          summary: headerSummary,
         }
       : null;
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place, rest, header, short, raise: setRaised };
+  const controls: FrameControls = { handle, sticky: mode === "dock" || (mode === "span" && !scrolls), place, rest, header, short, raise: setRaised, strip };
 
   const { hang } = placed;
   const where = dragBox
     ? heldPlace(dragBox, spot.corner, props.viewport)
-    : hang.anchor === "top"
-      ? { left: hang.left, top: hang.at, width: hang.width, maxHeight: hang.room }
-      : { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, maxHeight: hang.room };
+    : mode === "span"
+      ? { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, height: hang.room }
+      : hang.anchor === "top"
+        ? { left: hang.left, top: hang.at, width: hang.width, maxHeight: hang.room }
+        : { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, maxHeight: hang.room };
+  // The resting strip's paddings and gap, which give way in that order where the free area makes it shorter than 114 (3.1).
+  const pads = mode === "span" && restState === "rest" ? stripPads(hang.room) : null;
   // The handle stands at the corner opposite the spot's, and its bands along the two edges that meet there (5.3).
   const handleAt = handleCorner(spot.corner);
   const resizeHandlers = (kind: ResizePart) => ({
@@ -1431,6 +1616,7 @@ function BarFrame(props: {
       aria-label={props.label}
       hidden={folded}
       data-bar-mode={mode}
+      data-bar-state={mode === "span" ? (scrolls ? "scrolls" : restState) : undefined}
       // Focusable from script, not by Tab: the dock's Show, a closing sheet and Actions move focus here, which announces the bar and opens no keyboard.
       tabIndex={-1}
       style={{
@@ -1452,6 +1638,10 @@ function BarFrame(props: {
         ref={scrollRef}
         data-bar-scroll=""
         onScroll={measure}
+        onFocus={(e) => {
+          // The HP field taking focus brings the scrolling strip's header and quick row back into view (5.4).
+          if (scrolls && e.target instanceof Element && e.target.closest("[data-rest-row]") && e.target.matches("input")) toTop();
+        }}
         style={{
           flex: "1 1 auto",
           minHeight: 0,
@@ -1467,17 +1657,17 @@ function BarFrame(props: {
           <div
             ref={contentRef}
             style={{
-              padding: `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
+              padding: pads ? `${pads.top}px ${theme.space(3)}px ${pads.bottom}px` : `${theme.space(1)}px ${theme.space(3)}px ${theme.space(3)}px`,
               display: "grid",
               // One column no wider than the bar: an auto column grows to its widest unbreakable child, such as a long name, and pushes the buttons out of view.
               gridTemplateColumns: "minmax(0, 1fr)",
-              gap: theme.space(2),
+              gap: pads ? pads.gap : theme.space(2),
             }}
           >
             {props.children}
           </div>
         </FrameContext.Provider>
-        {clipped ? <ScrollForMore /> : null}
+        {clipped && !(mode === "span" && restState === "rest") ? <ScrollForMore /> : null}
       </div>
       {resizable && !folded ? (
         <>
@@ -1506,6 +1696,24 @@ function BarFrame(props: {
       </div>
     </div>
   );
+}
+
+/**
+ * The resting strip's top padding, the gap between its header and quick
+ * row, and its bottom padding (3.1): 4, 8 and 8 at its 114 px, given up in
+ * that order as the strip shortens, so its header and quick row stay whole
+ * down to 94.
+ */
+function stripPads(height: number): { top: number; gap: number; bottom: number } {
+  let short = Math.max(0, Math.min(REST_HEIGHT - REST_TIGHT, REST_HEIGHT - height));
+  const give = (pad: number) => {
+    const given = Math.min(pad, short);
+    short -= given;
+    return pad - given;
+  };
+  const top = give(theme.space(1));
+  const gap = give(theme.space(2));
+  return { top, gap, bottom: give(theme.space(2)) };
 }
 
 /** The resize handle's disc. Its center sits on the frame's outer corner, so half of it lies past the window, inside the handle's reach (barDock.ts HANDLE_REACH). */

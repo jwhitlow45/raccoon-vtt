@@ -23,6 +23,7 @@ import { StopNoteHost } from "../features/movement/StopNote.tsx";
 import { SightOverlay } from "../features/vision/SightOverlay.tsx";
 import { useDrawnFogTiles, useSightMode } from "../features/vision/stageHooks.ts";
 import {
+  barShift,
   cameraForView,
   fitRect,
   keepInView,
@@ -64,11 +65,11 @@ import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { addsToSelection, barDismiss } from "../state/selection.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
-import { sheetOpen as sheetIsOpen } from "../state/types.ts";
+import { sheetOpen as sheetIsOpen, type Opening } from "../state/types.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
-import { barChrome, barCover, barDockSlot, clearAnchor, largerEach, pastBars, restingBar } from "./barDock.ts";
+import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
@@ -300,9 +301,9 @@ export function MapStage(props: {
   /*
    * What the token action bar covers of the map, in screen pixels
    * (canvas/barDock.ts barCover), for Fit, Find and the pans that bring a
-   * token into view. A docked or compact bar counts by the box it
-   * published. A spanning bar is placed by its token, so it counts for
-   * nothing. `opening` also counts a bar the change that asked for the move
+   * token into view. A bar counts by the box it published: an upright
+   * phone's strip, or its expanded bar, covers the map's foot from its top
+   * (docs/design-v1-bar-compact.md 4). `opening` also counts a bar the change that asked for the move
    * is about to show, as a tracker row's tap does: its box does not exist
    * yet, so it rests at its spot with the height it last had. `fresh`
    * places it anew for the canvas as it is now, as a refit after a
@@ -324,20 +325,17 @@ export function MapStage(props: {
     const z = uiScale();
     const layout = layoutSize(window, z);
     if (!shows) return NO_INSETS;
-    const resting = () => restingBar({ layout, viewport: sizeInZoomed(viewport, z), chrome: barChrome(dock), spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column, width: dock.defaultWidth, size: dock.size, resizable: dock.finePointer });
-    const bar =
-      source === "fresh"
-        ? resting()
-        : dock.bar
-          ? dock.bar.mode === "span"
-            ? null
-            : { box: dock.bar.box, laneLeft: dock.bar.laneLeft, freeRight: dock.bar.freeRight }
-          : source === "opening"
-            ? resting()
-            : null;
+    const resting = () => {
+      const chrome = barChrome(dock);
+      const zoomed = sizeInZoomed(viewport, z);
+      // A roll card that folds for a held strip leaves the strip on the toolbar (barDock.ts stripSqueezed).
+      const restFoot = stripSqueezed({ viewport: zoomed, chrome, foot: dock.foot, held: dock.heldMode === "span" }) ? 0 : dock.foot;
+      return restingBar({ layout, viewport: zoomed, chrome, spot: dock.spot, height: dock.lastHeight, foot: dock.foot, column: dock.column, width: dock.defaultWidth, size: dock.size, resizable: dock.finePointer, heldMode: dock.heldMode, cardAt: dock.cardAt, restFoot, state: dock.expanded ? "expanded" : "rest", expandedHeight: dock.expandedHeight });
+    };
+    const bar = source === "fresh" ? resting() : dock.bar ? dock.bar : source === "opening" ? resting() : null;
     if (!bar) return NO_INSETS;
     const box = { left: bar.box.left * z, top: bar.box.top * z, width: bar.box.width * z, height: bar.box.height * z };
-    return barCover(viewport, insetsRef.current, { box, laneLeft: bar.laneLeft * z, freeRight: bar.freeRight * z });
+    return barCover(viewport, insetsRef.current, { box, laneLeft: bar.laneLeft * z, freeRight: bar.freeRight * z, mode: bar.mode });
   };
 
   /*
@@ -448,12 +446,19 @@ export function MapStage(props: {
     setCam(controlled(size));
   }, [controlled, size, scene.id]);
 
-  // An upright phone's larger token bar moves the map up or down to make its room by its token (barDock.ts largerShift), in the chrome's pixels.
+  /*
+   * An upright phone's strip or expanded bar moves the map once to clear
+   * its token (barDock.ts clearShift), `dy` in the chrome's pixels. It goes
+   * through the camera's bounds with the bar's cover, as a pan from the
+   * camera as it stands (lib/camera.ts barShift, review BAR-ASTRA-07). A
+   * pan whose frame is still pending is the viewer's, and the move gives
+   * way to it (docs/design-v1-bar-compact.md 3.6).
+   */
   const shiftForBar = useCallback((dy: number) => {
-    const c = pendingCamRef.current ?? camRef.current;
-    if (!c) return;
-    pendingCamRef.current = null;
-    const next = panBy(c, 0, dy * uiScale());
+    const s = sizeRef.current;
+    const c = camRef.current;
+    if (!s || !c || pendingCamRef.current) return;
+    const next = barShift(c, dy * uiScale(), s, sceneRef.current.bounds, largerEach(insetsRef.current, barCoverRef.current(s, "drawn")));
     camRef.current = next;
     setCam(next);
   }, []);
@@ -514,6 +519,49 @@ export function MapStage(props: {
 
   // A selected token that was deleted, or left this scene, drops out of the selection.
   useEffect(() => ui.keepSelected((id) => tokensById.has(id)), [tokensById, ui]);
+
+  /*
+   * An opening's intent (state/types.ts LocalUi `opening`) is judged once,
+   * at the commit after it, so the calls of one handler count together:
+   * where the bar now shows a new token (barDock.ts keepsOpening), the
+   * strip clears it once (docs/design-v1-bar-compact.md 3.6, review
+   * BAR-ASTRA-09). Any other is dropped, never to replay. One found as
+   * Stage mounts, as after a blackout, counts as judged.
+   */
+  const opening = useRoomView((s) => s.local.opening);
+  const shownGroup = selectedIds.filter((id) => tokensById.has(id)).length;
+  const barSubject: BarSubject = actionBar && selecting && draggingId === null && selectedId !== null && tokensById.has(selectedId) ? (shownGroup >= 2 ? "group" : selectedId) : null;
+  const judged = useRef<{ opening: Opening | null; subject: BarSubject }>({ opening, subject: null });
+  useLayoutEffect(() => {
+    const was = judged.current;
+    if (opening !== was.opening && opening !== null && barSubject !== null && selectedId !== null && keepsOpening(was.subject, barSubject, opening.gather)) {
+      scope.get(barDockSlot).setState({ clearRequest: { tokenId: selectedId } });
+    }
+    judged.current = { opening, subject: barSubject };
+  });
+  /*
+   * A close ends the bar's expanded state and any request (5.3): a let-go,
+   * a hide and a switch away from Select, though not a drag, which keeps
+   * the bar open while it hides. The held strip goes as the selection is
+   * let go, the screen turns between upright and on its side, or the
+   * interface size changes (2, review BC-OPUS-33).
+   */
+  const barOpen = actionBar && selecting && selectedId !== null;
+  useLayoutEffect(() => {
+    if (barOpen) return;
+    const dock = scope.get(barDockSlot);
+    const d = dock.getState();
+    if (d.expanded || d.expandedHeight !== null || d.clearRequest !== null) dock.setState({ expanded: false, expandedHeight: null, clearRequest: null });
+  }, [barOpen, scope]);
+  const shapeRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const layout = layoutSize(window, zoom);
+    const shape = `${layout.width < DOCK_MIN_WIDTH && layout.width <= layout.height}:${zoom}`;
+    const turned = shapeRef.current !== null && shapeRef.current !== shape;
+    shapeRef.current = shape;
+    const dock = scope.get(barDockSlot);
+    if ((turned || selectedIds.length === 0) && dock.getState().heldMode !== null) dock.setState({ heldMode: null });
+  });
 
   const scale = cam?.scale ?? 1;
 
@@ -737,9 +785,11 @@ export function MapStage(props: {
   const refusedPressRef = useRef<{ pointerId: number; start: Point; text: string } | null>(null);
 
   const scheduleCam = useCallback((wanted: Camera) => {
-    // A pan or a zoom never leaves the screen without some of the map on it.
+    // A pan or a zoom never leaves the screen without some of the map on it, nor puts the map's edge under an upright phone's strip, unless it already stood there (docs/design-v1-bar-compact.md 4).
     const s = sizeRef.current;
-    const next = s ? keepInView(wanted, s, sceneRef.current.bounds, insetsRef.current) : wanted;
+    const strip = s && scope.get(barDockSlot).getState().bar?.mode === "span" ? barCoverRef.current(s, "drawn") : NO_INSETS;
+    const from = pendingCamRef.current ?? camRef.current ?? undefined;
+    const next = s ? keepInView(wanted, s, sceneRef.current.bounds, largerEach(insetsRef.current, strip), 64, from) : wanted;
     pendingCamRef.current = next;
     if (frameRef.current) return;
     frameRef.current = requestAnimationFrame(() => {
@@ -883,6 +933,9 @@ export function MapStage(props: {
       if (e.pointerType === "mouse" && e.button !== 0 && !mousePan) return;
       const c = currentCam();
       if (!c) return;
+      // A finger down on the map before the bar has cleared its token is the viewer's own move, and the clearing move gives way to it (3.6).
+      const dock = scope.get(barDockSlot);
+      if (dock.getState().clearRequest !== null) dock.setState({ clearRequest: null });
       const p = local(e);
       panMovedRef.current = false;
       if (mousePan) {
@@ -1153,6 +1206,9 @@ export function MapStage(props: {
       const watch = watchDrop({ role: facts.role, store: facts.store, moves: dropped, notify: (text) => uiRef.current.notify(text) });
       // The moves land in the view before the spots go, so an aura on a token never jumps back.
       const sent = dragStopsRef.current.send(plan, watch?.answer);
+      // The bar comes back after a drop and clears its token once, as it does when it opens (docs/design-v1-bar-compact.md 3.6).
+      const after = facts.store.getState().local;
+      if (after.actionBar && after.selectedId !== null && group.some((t) => t.id === after.selectedId || after.selectedIds.includes(t.id))) scope.get(barDockSlot).setState({ clearRequest: { tokenId: after.selectedId, drop: true } });
       watch?.sent(sent.length);
       const note = intoFogText(swallowed.map((t) => displayName(t)));
       if (note) uiRef.current.notify(note);

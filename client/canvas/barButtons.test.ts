@@ -175,9 +175,10 @@ describe("a short bar", () => {
     const cases = [
       { width: 390, height: 844, band: 0, short: false, label: "390 x 844" },
       { width: 390, height: 844, band: 48, short: false, label: "390 x 844 with the band" },
-      { width: 300, height: 649, band: 0, short: true, label: "390 x 844 at 130%" },
-      { width: 300, height: 649, band: 48, short: true, label: "390 x 844 at 130% with the band" },
-      { width: 320, height: 548, band: 0, short: true, label: "320 x 548" },
+      // The expanded reach, F - 128, holds the full layout there now (docs/design-v1-bar-compact.md 9.1, BC-OPUS-9): 312, 264 and 211.
+      { width: 300, height: 649, band: 0, short: false, label: "390 x 844 at 130%" },
+      { width: 300, height: 649, band: 48, short: false, label: "390 x 844 at 130% with the band" },
+      { width: 320, height: 548, band: 0, short: false, label: "320 x 548" },
     ];
     for (const c of cases) {
       const room = (y: number): BarRoom => ({ ...desk(c.height), layout: { width: c.width, height: c.height }, viewport: { width: c.width, height: c.height }, chrome: { ...chrome({ side: 0, bottom: 34 }), top: 52 + 47 + c.band }, anchor: { x: c.width / 2, y } });
@@ -185,12 +186,13 @@ describe("a short bar", () => {
       const answers = [160 + c.band, c.height / 2, c.height - 140].map((y) => barShort(room(y)));
       assert.deepEqual(answers, [c.short, c.short, c.short], `${c.label}: the token's place changed the layout, or it is ${c.short ? "full" : "short"}`);
       assert.equal(barShort({ ...room(c.height / 2), anchor: null }), c.short, `${c.label}: it needs no token to say so`);
-      // The capacity is the least room any token's bar gets: no token leaves its bar less.
+      // The resting strip stands in one place whatever the token, and the capacity is its expanded reach, which reads no token.
       const capacity = barCapacity(room(c.height / 2))!;
+      const mid = placeBar({ ...room(c.height / 2), height: Number.POSITIVE_INFINITY });
       for (let y = 120; y < c.height - 120; y += 20) {
-        const placed = placeBar({ ...room(y), height: Number.POSITIVE_INFINITY });
-        assert.ok(placed && placed.hang.room >= capacity - 1, `${c.label}: a token at ${y} leaves its bar ${placed?.hang.room} px, under the capacity ${capacity}`);
+        assert.deepEqual(placeBar({ ...room(y), height: Number.POSITIVE_INFINITY }), mid, `${c.label}: a token at ${y} moved the strip`);
       }
+      assert.equal(capacity, c.height - (52 + 47 + c.band) - 94 - 16 - 128, `${c.label}: the expanded reach`);
       // Where it is full, that least room still shows the full layout's Apply.
       if (!c.short) assert.ok(capacity >= SPAN_SHORT_BAR_PX, `${c.label}: ${capacity} px leaves Apply out of view`);
     }

@@ -15,9 +15,7 @@ import {
   columnEdges,
   DEFAULT_CHROME,
   EDGE,
-  FLIP_CLEARANCE,
   LANE_WIDTH,
-  carriedMove,
   clampBox,
   clearAnchor,
   columnFacts,
@@ -32,9 +30,6 @@ import {
   heldPlace,
   keySize,
   LARGER_KEY,
-  LARGER_LEAVES,
-  largerRoom,
-  largerShift,
   limitMet,
   moveRoom,
   NO_SIZE,
@@ -88,16 +83,13 @@ import {
   toastLayerPlace,
   type ToastPlace,
   type ToastPlaces,
-  readLarger,
   readSpot,
   releaseSpot,
   restingBar,
   shareLane,
   SPOT_KEY,
   spotHang,
-  smallerShift,
   spotText,
-  writeLarger,
   writeSpot,
   heldOrOpenMode,
   openMode,
@@ -115,6 +107,8 @@ import {
   keepsOpening,
   toastsOverBars,
   restFloor,
+  spanRoomAtWorst,
+  forgetLarger,
   type Box,
   type Chrome,
   type Hang,
@@ -667,34 +661,39 @@ describe("the right lane", () => {
     assert.deepEqual({ at: clear.hang.at, room: clear.hang.room }, { at: 380, room: 40 }, "a bar already clear of the card stays where it is");
   });
 
-  test("an upright span keeps below the column's first card and never covers its token, above it or below it", () => {
-    // The DM at 390 x 844 with one 122 px check: the bar may reach up to 190, and the token sits low on the screen.
+  test("an upright phone's strip stands at the free area's foot whatever its token and content, and the column stacks above it or shows its summary row (docs/design-v1-bar-compact.md 3)", () => {
     const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const phoneView = { width: 390, height: 844 };
-    const column = { top: 60, content: 122, first: 122 };
-    for (const y of [300, 440, 480, 520, 560, 700]) {
-      for (const height of [200, 418, 900]) {
-        const placed = placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y }, spot: DEFAULT_SPOT, height, column });
+    const at = (y: number, height: number, column: { top: number; content: number; first: number } | null, extra: Record<string, unknown> = {}) =>
+      placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y }, spot: DEFAULT_SPOT, height, column, ...extra });
+    const check = { top: 60, content: 122, first: 122 };
+    for (const y of [120, 300, 560, 700, 900]) {
+      for (const height of [80, 200, 900]) {
+        const placed = at(y, height, check);
         assert.ok(placed && placed.mode === "span");
-        const box = hangBox(placed.hang, height);
-        // The token stands in the 74 px above the anchor (FLIP_CLEARANCE and OFFSET_Y), its label in the 34 below.
-        const clear = box.top + box.height <= y - 74 + 0.5 || box.top >= y + 34 - 0.5;
-        assert.ok(clear, `a ${height} px bar over a token at ${y}: ${JSON.stringify(box)}`);
-        assert.ok(box.top >= 190 - 0.5, `the bar reaches over the check: ${JSON.stringify(box)}`);
-        assert.ok(box.top + box.height <= 844 - 60 - 8 + 0.5, "the bar runs under the toolbar");
+        assert.deepEqual(hangBox(placed.hang, placed.hang.room), { left: 8, top: 662, width: 374, height: 114 }, `a ${height} px bar for a token at ${y}`);
+        assert.equal(placed.lane, "stacked");
       }
     }
-    // With room on both sides it takes the side with more of it, and with no card it may reach to the top bars again.
-    const low = placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y: 560 }, spot: DEFAULT_SPOT, height: 418, column });
-    assert.equal(low?.hang.anchor, "bottom");
-    assert.equal(hangBox(low!.hang, 418).top, 190);
-    const bare = placeBar({ layout: phoneView, viewport: phoneView, chrome, foot: 0, anchor: { x: 200, y: 560 }, spot: DEFAULT_SPOT, height: 418, column: null });
-    assert.equal(hangBox(bare!.hang, 418).top, 560 - 74 - 418);
-    // Where neither side leaves its floor, as at 320 x 480 at 130% under a check's summary row, it keeps the floor rather than shrink to nothing.
+    // A first card that leaves under 44 px of map above the strip gives way to the summary row.
+    assert.equal(at(300, 200, { top: 60, content: 543, first: 543 })?.lane, "summary");
+    assert.equal(at(300, 200, null)?.lane, "none");
+    // Expanded, from the same foot up, and the column stacks only where the bar keeps 166 px under its first card.
+    const expanded = at(300, 200, check, { state: "expanded", expandedHeight: 400 });
+    assert.deepEqual(hangBox(expanded!.hang, expanded!.hang.room), { left: 8, top: 376, width: 374, height: 400 });
+    assert.equal(expanded?.lane, "stacked");
+    assert.equal(at(300, 200, { top: 60, content: 543, first: 543 }, { state: "expanded", expandedHeight: 400 })?.lane, "summary");
+    // Before its height is worked out, an expanded bar draws as the strip.
+    assert.equal(at(300, 200, check, { state: "expanded", expandedHeight: null })?.hang.room, 114);
+    // A roll card standing at the foot lifts it, and one that yields leaves it on the toolbar.
+    assert.equal(at(300, 200, null, { foot: 120 })?.hang.at, 776 - 120);
+    assert.equal(at(300, 200, null, { foot: 120, restFoot: 0 })?.hang.at, 776);
+    // At 320 x 480 at 130% under a check's summary row, a held strip keeps its 94 px whatever the free area does.
     const tiny = { width: 246, height: 369 };
-    const cramped = placeBar({ layout: tiny, viewport: tiny, chrome: phone({ band: false, options: false, safe: { top: 44, side: 0, bottom: 34 } }), foot: 0, anchor: { x: 60, y: 230 }, spot: DEFAULT_SPOT, height: 400, column: { top: 104, content: 140, first: 140 } });
+    const cramped = placeBar({ layout: tiny, viewport: tiny, chrome: phone({ band: false, options: false, safe: { top: 44, side: 0, bottom: 34 } }), foot: 0, anchor: { x: 60, y: 230 }, spot: DEFAULT_SPOT, height: 400, column: { top: 104, content: 140, first: 140 }, heldMode: "span" });
+    assert.equal(cramped?.mode, "span");
     assert.equal(cramped?.lane, "summary");
-    assert.equal(cramped?.hang.room, 111, "the floor, all the lane under the summary row");
+    assert.equal(cramped?.hang.room, restHeight(369 - 96 - 94 - 16));
   });
 
   test("beside at exactly 230 px left of the lane, and the summary row at 229", () => {
@@ -1637,215 +1636,18 @@ describe("toasts already showing as the bar opens or its header goes down (revie
   });
 });
 
-describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)", () => {
-  // The DM at 390 x 844 in a fight: the top bar and the turn band take 100 px, the toolbar 60, so the free area runs from 108 to 776.
-  const view = { width: 390, height: 844 };
-  const chrome = phone({ band: true, options: false, safe: { top: 0, side: 0, bottom: 0 } });
-  const free = freeArea(view, chrome);
-  const room = (y: number, height: number, column: { top: number; content: number; first: number } | null = null, tokenHeight = FLIP_CLEARANCE) => ({ layout: view, viewport: view, chrome, foot: 0, anchor: { x: 200, y }, column, height, tokenHeight });
-  /**
-   * Where the bar hangs once the map has moved by `dy`, and whether the
-   * token, `tokenHeight` tall above the anchor, and its label in the
-   * OFFSET_Y below, stay clear of it and inside the free area.
-   */
-  const after = (y: number, height: number, dy: number, column: { top: number; content: number; first: number } | null = null, tokenHeight = FLIP_CLEARANCE) => {
-    const placed = placeBar({ ...room(y + dy, height, column, tokenHeight), spot: DEFAULT_SPOT });
-    assert.ok(placed && placed.mode === "span");
-    const box = hangBox(placed.hang, height);
-    const token = { top: y + dy - tokenHeight, bottom: y + dy + OFFSET_Y };
-    const clear = box.top + box.height <= token.top + 0.5 || box.top >= token.bottom - 0.5;
-    const inside = token.top >= free.top - 0.5 && token.bottom <= free.top + free.height + 0.5;
-    return { box, room: placed.hang.room, clear, inside };
-  };
-
-  test("the choice is stored as 1 for Larger and as no key for Smaller, and storage that throws reads as Smaller", () => {
-    const kept = new Map<string, string>();
-    const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
-    assert.equal(readLarger(storage), false);
-    writeLarger(true, storage);
-    assert.equal(kept.get(LARGER_KEY), "1");
-    assert.equal(readLarger(storage), true);
-    writeLarger(false, storage);
+describe("the stored Larger is removed once (docs/design-v1-bar-compact.md 5.3, R1)", () => {
+  test("the key goes, and storage that throws changes nothing", () => {
+    const kept = new Map<string, string>([[LARGER_KEY, "1"]]);
+    forgetLarger({ removeItem: (k: string) => void kept.delete(k) });
     assert.equal(kept.has(LARGER_KEY), false);
-    for (const odd of ["0", "true", "larger", ""]) {
-      kept.set(LARGER_KEY, odd);
-      assert.equal(readLarger(storage), false, odd);
-    }
-    const blocked = {
-      getItem: (): string | null => {
-        throw new Error("blocked");
-      },
-      setItem: () => {
-        throw new Error("blocked");
-      },
-      removeItem: () => {
-        throw new Error("blocked");
-      },
-    };
-    assert.equal(readLarger(blocked), false);
-    assert.doesNotThrow(() => writeLarger(true, blocked));
-  });
-
-  test("Larger asks for two thirds of the screen, and leaves its token 120 px of the free area under the column's first card", () => {
-    assert.deepEqual(free, { left: 8, top: 108, width: 374, height: 668 });
-    // Two thirds of 844 is 563, but the band leaves 668, so 548 keeps the token's 120.
-    assert.equal(largerRoom(view, free, free.top, FLIP_CLEARANCE), 668 - LARGER_LEAVES);
-    // With no band, two thirds.
-    const bare = freeArea(view, phone({ band: false, options: false, safe: { top: 0, side: 0, bottom: 0 } }));
-    assert.equal(largerRoom(view, bare, bare.top, FLIP_CLEARANCE), 563);
-    // A 440 x 956 phone.
-    const big = { width: 440, height: 956 };
-    assert.equal(largerRoom(big, freeArea(big, chrome), 108, FLIP_CLEARANCE), 637);
-    // Under a check's card, which ends at 230, the bar may reach 238 at the highest.
-    assert.equal(largerRoom(view, free, 238, FLIP_CLEARANCE), 776 - 238 - LARGER_LEAVES);
-    assert.equal(largerRoom(view, free, 900, FLIP_CLEARANCE), 0);
-  });
-
-  test("a bar under its token moves the map up by what its side lacks, and then has that room with its token clear and in view", () => {
-    // Thorn's anchor at 391: 351 px below him, and the DM's 586 px of content.
-    const dy = largerShift(room(391, 586));
-    assert.equal(dy, -(548 - 351));
-    const moved = after(391, 586, dy);
-    assert.equal(moved.room, 548);
-    assert.equal(moved.box.top, 776 - 548);
-    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
-    // Content shorter than the larger room asks only for itself: at 460 there are 282 px below and 278 above.
-    const short = largerShift(room(460, 400));
-    assert.equal(short, -(400 - 282));
-    assert.equal(after(460, 400, short).box.height, 400);
-  });
-
-  test("a bar over its token moves the map down, and keeps over it", () => {
-    // Low on the screen: 102 px below, 458 above.
-    const dy = largerShift(room(640, 586));
-    assert.equal(dy, 548 - 458);
-    const moved = after(640, 586, dy);
-    assert.equal(moved.room, 548);
-    assert.equal(moved.box.top, free.top);
-    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
-  });
-
-  test("under the column's first card the bar asks for less, and its token stays below the card", () => {
-    const column = { top: 108, content: 122, first: 122 };
-    const dy = largerShift(room(391, 586, column));
-    assert.equal(dy, -(418 - 351));
-    const moved = after(391, 586, dy, column);
-    assert.equal(moved.room, 418);
-    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
-    assert.ok(391 + dy - 74 >= 238, "the token went under the card");
-  });
-
-  test("the map stays where the side already has the room, the content fits, or the bar does not span", () => {
-    // High on the screen, 592 px below.
-    assert.equal(largerShift(room(150, 586)), 0);
-    // 300 px of content fit the 351 below.
-    assert.equal(largerShift(room(391, 300)), 0);
-    // Docked on its side, and compact on a screen too short to span.
-    const side = { width: 844, height: 390 };
-    assert.equal(largerShift({ layout: side, viewport: side, chrome, foot: 0, anchor: { x: 200, y: 200 }, column: null, height: 586, tokenHeight: FLIP_CLEARANCE }), 0);
-    const tiny = { width: 246, height: 300 };
-    assert.equal(largerShift({ layout: tiny, viewport: tiny, chrome, foot: 0, anchor: { x: 100, y: 150 }, column: null, height: 586, tokenHeight: FLIP_CLEARANCE }), 0);
-  });
-
-  test("Smaller moves the map back by what Larger moved it, never so far that the token leaves the free area", () => {
-    const base = { layout: view, viewport: view, chrome, foot: 0, column: null, tokenHeight: FLIP_CLEARANCE };
-    // Back down from a shift up, and back up from a shift down.
-    assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 194 }, moved: -197 }), 197);
-    assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 730 }, moved: 90 }), -90);
-    // The viewer panned meanwhile: the token's label keeps above the free area's foot, and the token below its top.
-    assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 700 }, moved: -197 }), 776 - 34 - 700);
-    assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 150 }, moved: 90 }), -(150 - 40 - 108));
-    assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 100 }, moved: 90 }), 0);
-    assert.equal(smallerShift({ ...base, anchor: { x: 200, y: 400 }, moved: 0 }), 0);
-    // Larger then Smaller puts the bar back as it was.
-    const dy = largerShift(room(391, 586));
-    const back = smallerShift({ ...base, anchor: { x: 200, y: 391 + dy }, moved: dy });
-    assert.equal(back, -dy);
-    assert.deepEqual(after(391, 586, dy + back).box, after(391, 586, 0).box);
-  });
-
-  test("a bar that opens while another is still open keeps that one's move on its side, so Smaller puts the map back past both, and a move for the other side stays (review LP19-BS-1)", () => {
-    const base = { layout: view, viewport: view, chrome, foot: 0, column: null, tokenHeight: FLIP_CLEARANCE };
-    // Thorn's bar under him moved the map up 197. Kira, a cell below him, then opens under her with 520 px below: her own move is 28.
-    const first = largerShift(room(391, 586));
-    const kira = 391 + first + 28;
-    const own = largerShift(room(kira, 586));
-    assert.equal(own, -(548 - 520));
-    const carried = carriedMove(room(kira, 586), first);
-    assert.equal(carried, first);
-    // Smaller on her bar moves the map back by both, to where it stood before Thorn's Larger.
-    const back = smallerShift({ ...base, anchor: { x: 200, y: kira + own }, moved: carried + own });
-    assert.equal(kira + own + back, 391 + 28);
-    assert.deepEqual(after(391 + 28, 586, own + first + back).box, after(391 + 28, 586, 0).box);
-    // The same token's bar over it, as the group's takes over from the single bar, keeps the move down.
-    const down = largerShift(room(640, 586));
-    assert.equal(carriedMove(room(640 + down, 586), down), down);
-    // A bar over its token keeps none of a move up, which undone would grow it, nor a bar that docks, nor a closed bar's.
-    assert.equal(carriedMove(room(700, 586), first), 0);
-    const side = { width: 844, height: 390 };
-    assert.equal(carriedMove({ ...room(200, 586), layout: side, viewport: side }, first), 0);
-    assert.equal(carriedMove(room(kira, 586), 0), 0);
-  });
-
-  test("under its token, Larger leaves the token below the toasts over the map, and over it asks as before (review LP19-BS-3)", () => {
-    // A trap's toast under the column's card ends at 237: Thorn's anchor at 391 moves up only 60, not 197, so his top stays 8 px under the toast.
-    const foot = 237;
-    const dy = largerShift({ ...room(391, 586), toastFoot: foot });
-    assert.equal(dy, -(776 - (foot + EDGE) - LARGER_LEAVES - 351));
-    assert.ok(391 + dy - FLIP_CLEARANCE >= foot + EDGE, `the token's top went to ${391 + dy - FLIP_CLEARANCE}, under the toast's foot at ${foot}`);
-    assert.ok(after(391, 586, dy).clear, "the bar meets the token");
-    // A tall token keeps its whole height below the toast too: without it, its top would go to 120.
-    assert.equal(450 + largerShift(room(450, 586, null, 128)) - 128, 120);
-    const tall = largerShift({ ...room(450, 586, null, 128), toastFoot: foot });
-    assert.ok(tall < 0 && 450 + tall - 128 >= foot + EDGE, `the tall token's top went to ${450 + tall - 128}`);
-    // No toast, or a bar over its token, which stands between the toasts and the token: as before.
-    assert.equal(largerShift({ ...room(391, 586), toastFoot: null }), largerShift(room(391, 586)));
-    assert.equal(largerShift({ ...room(640, 586), toastFoot: foot }), largerShift(room(640, 586)));
-    // A stack that ends 8 px above the token's top still counts, and leaves the bar as it is. One that reaches past it, as a stack in the middle of the screen does, leaves Larger as with no toast (review LP19-OPUS-1).
-    const tokenTop = 391 - FLIP_CLEARANCE;
-    assert.equal(largerShift({ ...room(391, 586), toastFoot: tokenTop - EDGE }), 0);
-    assert.equal(largerShift({ ...room(391, 586), toastFoot: tokenTop - EDGE + 1 }), largerShift(room(391, 586)));
-    assert.equal(largerShift({ ...room(391, 586), toastFoot: 700 }), largerShift(room(391, 586)));
-    assert.equal(largerShift({ ...room(450, 586, null, 128), toastFoot: 450 - 128 - EDGE + 1 }), largerShift(room(450, 586, null, 128)), "the tall token's top, not 40 px above its foot");
-  });
-
-  test("over a token taller than 40 px the bar clears the token's drawn height, and Larger over it keeps the token's label in the free area (review BS-F1)", () => {
-    // Low on the screen, a 128 px token: 102 px below it, and 640 - 34 - 128 - 108 = 370 above it.
-    const tall = 128;
-    const over = after(640, 586, 0, null, tall);
-    assert.equal(over.box.top + over.box.height, 640 - OFFSET_Y - tall);
-    assert.equal(over.room, 370);
-    assert.ok(over.clear && over.inside, JSON.stringify(over));
-    // A 40 px token, and one smaller, keep the 40 px clearance.
-    for (const height of [FLIP_CLEARANCE, 24]) {
-      const small = after(640, 586, 0, null, height);
-      assert.equal(small.box.top + small.box.height, 640 - OFFSET_Y - FLIP_CLEARANCE, `a ${height} px token`);
-    }
-    // Larger asks for 494 px and the side lacks 124, but the map moves down only 102, so the token's label stays above the free area's foot.
-    const dy = largerShift(room(640, 586, null, tall));
-    assert.equal(dy, 776 - OFFSET_Y - 640);
-    const moved = after(640, 586, dy, null, tall);
-    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
-    assert.equal(moved.room, 370 + dy);
-  });
-
-  test("a tall or zoomed token keeps its top in the free area: Larger asks for less under a 128 px token, Smaller moves back less over a 64 px one, and a token too tall for more room moves nothing (review BS-ASTRA-01)", () => {
-    // Under a 128 px token Larger leaves its label gap, its height and 12 px: 668 - 174 = 494, so the map moves up 143, not 197.
-    const tall = 128;
-    assert.equal(largerRoom(view, free, free.top, tall), 668 - (OFFSET_Y + tall + 12));
-    const dy = largerShift(room(391, 586, null, tall));
-    assert.equal(dy, -(494 - 351));
-    assert.ok(391 + dy - tall >= free.top, `the token's top went to ${391 + dy - tall}, over the free area's top at ${free.top}`);
-    const moved = after(391, 586, dy, null, tall);
-    assert.equal(moved.room, 494);
-    assert.ok(moved.clear && moved.inside, JSON.stringify(moved));
-    // Smaller after the viewer panned Thorn up to 200: a 64 px token's top stops at the free area's top, 28 px back rather than 52.
-    const back = smallerShift({ layout: view, viewport: view, chrome, foot: 0, column: null, anchor: { x: 200, y: 200 }, moved: 90, tokenHeight: 64 });
-    assert.equal(back, -(200 - 64 - free.top));
-    assert.ok(200 + back - 64 >= free.top, `the token's top went to ${200 + back - 64}`);
-    // A token too tall to leave the bar any more room leaves it as it is.
-    assert.equal(largerRoom(view, free, free.top, 640), 0);
-    assert.equal(largerShift(room(391, 586, null, 640)), 0);
+    assert.doesNotThrow(() =>
+      forgetLarger({
+        removeItem: () => {
+          throw new Error("blocked");
+        },
+      }),
+    );
   });
 });
 
@@ -2019,6 +1821,18 @@ describe("the strip's lane, its expanded bar, the clearing move and a card it fo
     assert.equal(keepsOpening("group", "a", false), true, "a plain tap from a group's bar");
     assert.equal(keepsOpening("group", "a", true), false, "a removal in Multi-select");
     assert.equal(keepsOpening("a", null, false), false, "the bar hides");
+  });
+
+  test("the room an upright phone's bar gets whatever its token is the expanded reach, so the short layout holds only on the smallest phones at a larger size (9.1, BC-OPUS-9)", () => {
+    const at = (width: number, height: number) => {
+      const layout = { width, height };
+      return spanRoomAtWorst(freeArea(layout, DEFAULT_CHROME), layout);
+    };
+    assert.equal(at(320, 568), 312, "320 x 568");
+    assert.equal(Math.round(at(390 / 1.3, 844 / 1.3)), 393, "390 x 844 at 130%");
+    assert.equal(Math.round(at(320 / 1.3, 568 / 1.3)), 181, "320 x 568 at 130%");
+    assert.equal(at(390, 844), 563, "390 x 844, two thirds of the screen");
+    assert.equal(spanRoomAtWorst(freeArea({ width: 390, height: 844 }, DEFAULT_CHROME)), 716 - 128, "with no layout, the free area's reach");
   });
 
   test("the newest toast takes one row over the top bar's row where the strip leaves it under 44 px (3.5)", () => {

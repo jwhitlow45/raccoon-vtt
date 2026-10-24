@@ -802,81 +802,33 @@ export function clearAnchor(point: { x: number; y: number }, viewport: Size, bar
 
 /** Below the token's name label, which hangs about 30 px under the footprint. */
 export const OFFSET_Y = 34;
-/** Room above the token's bottom edge for the token itself when the bar flips above it, at the least. A taller token takes its drawn height (flipClearance). */
-export const FLIP_CLEARANCE = 40;
-
-/** The room a bar over its token leaves for the token above the label gap: its drawn height, but never under FLIP_CLEARANCE (review BS-F1). */
-function flipClearance(tokenHeight: number): number {
-  return Math.max(FLIP_CLEARANCE, tokenHeight);
-}
-
 /**
- * An upright phone's bar, the screen's width less the free area's margins:
- * below its token when it fits there, else above it, whichever has more
- * room. `top` is how high it may reach, the free area's top or under the
- * alerts column's first card, and `tokenHeight` how far the token's top
- * stands above the anchor (SpanRoom). It never covers its token while the side it
- * takes leaves it its floor, `min(120, the room it has)`: a bar over the
- * creature it acts on is the very thing the dock exists to stop. Only on a
- * screen so short that neither side does, as at 320 x 480 at 130% under a
- * check, does it keep its floor over the token rather than shrink below
- * its header and buttons.
+ * The room an upright phone's bar gets on this screen whichever token is
+ * tapped: the expanded bar's reach with no content
+ * (docs/design-v1-bar-compact.md 9.1), which never reads a token. Given no
+ * layout, the reach the free area alone leaves, which only a layout over
+ * about 770 px tall caps lower.
  */
-function spanHang(anchor: Point, free: Box, height: number, top: number, tokenHeight: number): Hang {
-  const bottom = free.top + free.height;
-  const ceiling = Math.max(free.top, top);
-  const floor = Math.min(BAR_FLOOR, Math.max(0, bottom - ceiling));
-  const topBelow = Math.max(ceiling, anchor.y + OFFSET_Y);
-  const spaceBelow = bottom - topBelow;
-  const bottomAbove = Math.min(bottom, anchor.y - OFFSET_Y - flipClearance(tokenHeight));
-  const spaceAbove = bottomAbove - ceiling;
-  if (height <= spaceBelow || spaceBelow >= spaceAbove) {
-    const at = spaceBelow >= floor ? topBelow : bottom - floor;
-    return { left: free.left, width: free.width, anchor: "top", at, room: Math.max(0, bottom - at) };
-  }
-  const at = spaceAbove >= floor ? bottomAbove : ceiling + floor;
-  return { left: free.left, width: free.width, anchor: "bottom", at, room: Math.max(0, at - ceiling) };
+export function spanRoomAtWorst(free: Box, layout?: Size): number {
+  return expandReach({ layout: layout ?? { width: 0, height: Number.POSITIVE_INFINITY }, free });
 }
 
 /**
- * The least room a spanning bar gets on this screen, whichever token is
- * tapped: a token where the room below it and above it are equal, a little
- * under the free area's middle since a bar above its token also clears the
- * token itself. Each side there is about half the free area. Anywhere else
- * one side is larger, and the bar takes that one. It counts a token of the
- * 40 px FLIP_CLEARANCE. A bar over a taller or zoomed token clears that
- * token's drawn height (review BS-F1), so its room can fall below this by
- * up to half the height over 40 px, and that bar scrolls (review
- * FU24-OPUS-2).
- */
-export function spanRoomAtWorst(free: Box): number {
-  return spanHang({ x: free.left + free.width / 2, y: free.top + (free.height + FLIP_CLEARANCE) / 2 }, free, Number.POSITIVE_INFINITY, free.top, FLIP_CLEARANCE).room;
-}
-
-/**
- * An upright span crosses the whole map, so it always meets the column:
- * it keeps below the first card, or moves beside the lane, and never
- * covers its token either way. `floor` is the highest it may reach.
- */
-function spanLane(free: Box, column: ColumnFacts | null): { lane: Lane; floor: number } {
-  return laneChoice({ laneTop: free.top, laneHeight: free.height, column, besideRoom: free.width - LANE_WIDTH });
-}
-
-/**
- * Where the bar hangs, before a drag: by its token when it spans, at its
- * spot when it docks, and the overlay's place when compact, then shared
- * with the column when they meet across. The one rule for the bar drawn
- * (TokenActionBar.tsx) and for where a pan expects it (restingBar). Null
- * only where the bar would span and no token is given to hang it by.
+ * Where the bar hangs, before a drag: at the free area's foot as the strip
+ * or its expanded bar on an upright phone, whatever its token does
+ * (docs/design-v1-bar-compact.md 3), at its spot when it docks, and the
+ * overlay's place when compact, then shared with the column when they
+ * meet across. The one rule for the bar drawn (TokenActionBar.tsx) and for
+ * where a pan expects it (restingBar).
  */
 export function placeBar(input: {
   layout: Size;
   viewport: Size;
   chrome: Chrome;
   foot: number;
-  /** Under the selected token, for a bar that spans. */
-  anchor: Point | null;
-  /** How far the token's top stands above `anchor` as drawn (SpanRoom), FLIP_CLEARANCE when not given. */
+  /** The selected token's anchor, which no placement reads: the strip and the window keep their places whatever the token does. */
+  anchor?: Point | null;
+  /** How far the token's top stands above `anchor`, which no placement reads either. */
   tokenHeight?: number;
   spot: Spot;
   /** The bar's content height. */
@@ -892,17 +844,21 @@ export function placeBar(input: {
   heldMode?: HeldMode;
   /** Where a player's roll card stands (the dock store's `cardAt`), which the opening rule reads (openMode). */
   cardAt?: CardAt;
+  /** The strip rests, or is expanded to `expandedHeight` (the dock store's, frozen at Expand), while it spans. */
+  state?: RestState;
+  expandedHeight?: number | null;
+  /** The foot the strip places by: `foot`, or 0 while a roll card at the foot yields to it (stripSqueezed). */
+  restFoot?: number;
 }): { mode: BarMode; free: Box; hang: Hang; lane: Lane; resizable: boolean; room: Box } | null {
   const barWidth = input.width ?? BAR_WIDTH;
   const free = freeArea(input.viewport, input.chrome, input.foot);
   const mode = heldOrOpenMode({ layout: input.layout, free, foot: input.foot, cardAt: input.cardAt ?? null, heldMode: input.heldMode ?? null });
   if (mode === "span") {
-    if (!input.anchor) return null;
-    const { lane, floor } = spanLane(free, input.column);
-    const hang = spanHang(input.anchor, free, input.height, floor, input.tokenHeight ?? FLIP_CLEARANCE);
-    if (lane !== "beside") return { mode, free, hang, lane, resizable: false, room: free };
-    const width = Math.min(barWidth, free.width - LANE_WIDTH);
-    return { mode, free, hang: { ...hang, left: laneLeft(free) - width, width }, lane, resizable: false, room: free };
+    const strip = input.restFoot === undefined ? free : freeArea(input.viewport, input.chrome, input.restFoot);
+    const state = input.state ?? "rest";
+    const hang = restHang(strip, state, input.expandedHeight ?? null);
+    const lane = state === "expanded" && input.expandedHeight != null ? expandedLane(input.column, strip) : restLane(input.column, hang.at - hang.room);
+    return { mode, free: strip, hang, lane, resizable: false, room: strip };
   }
   /*
    * A resizable window takes its stored width, never under the default,
@@ -1215,165 +1171,24 @@ export function restFloor(stripTop: number): number {
   return stripTop - EDGE - BAND_MIN - EDGE;
 }
 
-// ------------------------------------------------------------ an upright phone's larger bar
+// ------------------------------------------------------------ the stored Larger
 
 /*
- * An upright phone's bar comes in two sizes, picked by the button left of
- * its Close (design 1.5). It has no resize handle, and where its token
- * stands decides its room. Smaller is the bar as it has always hung: as
- * tall as its content, up to the room on its token's side. Larger asks for
- * two thirds of the screen, and since the bar never covers the creature it
- * acts on, the map moves to make that room by the token. Smaller moves the
- * map back. This device remembers the choice for the next token, stored as
- * "1" for Larger and as no key for Smaller.
+ * An upright phone's bar was once Smaller or Larger, and this device
+ * remembered Larger under this key. Expanded now lasts only while the bar
+ * is open (docs/design-v1-bar-compact.md 5.3, R1), so the dock store
+ * removes the key once as it starts and never writes it.
  */
 export const LARGER_KEY = "rvtt.tokenBarLarger";
 
-/** Whether this device chose Larger. Storage can throw, which reads as Smaller. */
-export function readLarger(storage?: Pick<Storage, "getItem">): boolean {
+/** Removes the stored Larger. Storage can throw, and then there is nothing to remove. */
+export function forgetLarger(storage?: Pick<Storage, "removeItem">): void {
   try {
     const from = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
-    return from?.getItem(LARGER_KEY) === "1";
+    from?.removeItem(LARGER_KEY);
   } catch {
-    return false;
+    // Nothing stored can be read either.
   }
-}
-
-export function writeLarger(larger: boolean, storage?: Pick<Storage, "setItem" | "removeItem">): void {
-  try {
-    const to = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
-    if (larger) to?.setItem(LARGER_KEY, "1");
-    else to?.removeItem(LARGER_KEY);
-  } catch {
-    // The choice then lasts as long as the page.
-  }
-}
-
-/**
- * Two thirds of the layout's height. At 390 x 844 that leaves the top bars,
- * the toolbar and a strip of map for the token, and at 440 x 956 it holds
- * a player's whole bar.
- */
-const LARGER_SHARE = 2 / 3;
-/** What a larger bar leaves of the free area beside it: its token's 34 px label gap, the token and some map around it. */
-export const LARGER_LEAVES = 120;
-/** What a larger bar leaves above a token taller than LARGER_LEAVES allows for, past its label gap and its height. */
-const TALL_TOKEN_MARGIN = 12;
-
-/**
- * What decides where an upright phone's bar hangs, and its content's
- * height. `tokenHeight` is how far the token's top stands above the
- * anchor as drawn, in the chrome's pixels: its height at the map's zoom,
- * and its plate where the anchor hangs under that (Stage.tsx belowLabel).
- */
-export type SpanRoom = {
-  layout: Size;
-  viewport: Size;
-  chrome: Chrome;
-  foot: number;
-  anchor: Point;
-  column: ColumnFacts | null;
-  height: number;
-  tokenHeight: number;
-  /** The foot of the toasts over the map as they stand, or null (spanToastSlot). */
-  toastFoot?: number | null;
-};
-
-/** The free area and the highest the bar may reach, while it spans. Null for a bar that docks or opens compact. */
-function spanRoom(input: SpanRoom): { free: Box; top: number } | null {
-  const free = freeArea(input.viewport, input.chrome, input.foot);
-  if (barMode(input.layout, free.height) !== "span") return null;
-  return { free, top: Math.max(free.top, spanLane(free, input.column).floor) };
-}
-
-/**
- * The room a larger bar asks for: two thirds of the layout's height, but
- * never so much that it leaves its token less of the free area under `top`
- * than LARGER_LEAVES, or, for a tall or zoomed token, than its label gap,
- * its height and 12 px. So the map never moves the token's top under the
- * top bars. Where that leaves nothing, the bar asks for nothing more.
- */
-export function largerRoom(layout: Size, free: Box, top: number, tokenHeight: number): number {
-  const leaves = Math.max(LARGER_LEAVES, OFFSET_Y + tokenHeight + TALL_TOKEN_MARGIN);
-  const most = free.top + free.height - Math.max(free.top, top) - leaves;
-  return Math.max(0, Math.min(Math.round(layout.height * LARGER_SHARE), most));
-}
-
-/**
- * How far Larger moves the map, in the chrome's pixels: up (negative) for a
- * bar under its token, or down for one over it, by what its side lacks of
- * the larger room or of its content, whichever is less. The bar keeps its
- * side, and the token stays in view beside it. Zero where its side has that
- * room already, and where the bar does not span. Over a tall or zoomed
- * token, which the bar clears by its drawn height (review BS-F1), the map
- * moves down no further than keeps the token's label in the free area:
- * LARGER_LEAVES allows for the label and a token of 52 px at most.
- */
-export function largerShift(input: SpanRoom): number {
-  const larger = largerHang(input);
-  if (!larger) return 0;
-  const { free, top, want, hang } = larger;
-  const bottom = free.top + free.height;
-  if (hang.anchor === "top") {
-    const below = bottom - Math.max(top, input.anchor.y + OFFSET_Y);
-    return below < want ? -(want - below) : 0;
-  }
-  const above = Math.min(bottom, input.anchor.y - OFFSET_Y - flipClearance(input.tokenHeight)) - top;
-  return above < want ? Math.max(0, Math.min(want - above, bottom - OFFSET_Y - input.anchor.y)) : 0;
-}
-
-/**
- * Where a larger bar hangs, and the room it asks for, while it spans. A bar
- * under its token, which the map moves up, asks for no more than leaves its
- * token below the toasts over the map as they stand (`toastFoot`), at the
- * notices' top, under the column's card or under a header, so a trap's
- * toast never covers the token (review LP19-BS-3). Only a stack that ends
- * above the token's top counts. One that already reaches past it, as a
- * stack in the middle of the screen does, would leave Larger nothing to
- * do (review LP19-OPUS-1). Over its token the bar stands between the
- * toasts and the token, so they never meet.
- */
-function largerHang(input: SpanRoom): { free: Box; top: number; want: number; hang: Hang } | null {
-  const room = spanRoom(input);
-  if (!room) return null;
-  const { free, top } = room;
-  const want = Math.min(input.height, largerRoom(input.layout, free, top, input.tokenHeight));
-  const hang = spanHang(input.anchor, free, want, top, input.tokenHeight);
-  if (hang.anchor !== "top" || input.toastFoot == null || input.toastFoot + EDGE > input.anchor.y - input.tokenHeight) return { free, top, want, hang };
-  return { free, top, want: Math.min(want, largerRoom(input.layout, free, Math.max(top, input.toastFoot + EDGE), input.tokenHeight)), hang };
-}
-
-/**
- * The move an earlier opening made that a bar taking over from it keeps
- * for Smaller to undo. A bar that opens while another is still open, for
- * another token tapped or as Select several gathers or lets go of tokens,
- * opens on a map that Larger already moved, so its own move is little or
- * nothing. Undoing only that would leave Smaller nothing to put back
- * (review LP19-BS-1). The earlier move counts where it was for the same
- * side of the token as this bar takes: up for a bar under it, down for one
- * over it. A move for the other side stays, since undoing it would grow
- * this bar. `carried` is 0 once the bar has closed.
- */
-export function carriedMove(input: SpanRoom, carried: number): number {
-  const larger = carried === 0 ? null : largerHang(input);
-  if (!larger) return 0;
-  const under = larger.hang.anchor === "top";
-  return (under ? carried < 0 : carried > 0) ? carried : 0;
-}
-
-/**
- * How far Smaller moves the map back: the shift Larger made, undone, but
- * never so far that the token's label runs under the free area's foot, or
- * the token's top, at its drawn height, over the free area's top, should
- * the map have moved since.
- */
-export function smallerShift(input: Omit<SpanRoom, "height"> & { moved: number }): number {
-  const room = spanRoom({ ...input, height: 0 });
-  if (!room || input.moved === 0) return 0;
-  const { free, top } = room;
-  if (input.moved < 0) return Math.min(-input.moved, Math.max(0, free.top + free.height - OFFSET_Y - input.anchor.y));
-  const back = Math.min(input.moved, Math.max(0, input.anchor.y - flipClearance(input.tokenHeight) - top));
-  return back > 0 ? -back : 0;
 }
 
 // ------------------------------------------------------------ notices
@@ -1882,14 +1697,16 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
 // ------------------------------------------------------------ the Room's slot
 
 /*
- * What an upright phone's spanning token bar and the toasts read of each
- * other: the box of the bar's header while it spans (`head`), which a
- * toast that shows over it moves under (barToastTop, review LP19-BS-2),
- * when that header last showed (`shownAt`, for barOpening) and which of
- * the bar's openings it is (`opening`, from a count, `openings`, that goes
- * up each time a header shows), the foot of the toasts over the map
- * (`foot`), which Larger leaves its token below (largerHang, review
- * LP19-BS-3), and the stack the toasts placed under that opening's header
+ * What an upright phone's token bar and the toasts read of each other: the
+ * box of the expanded bar's header (`head`), which a toast that shows over
+ * it moves under (barToastTop, review LP19-BS-2), the resting strip
+ * publishing none (docs/design-v1-bar-compact.md 3.5), when that header
+ * last showed (`shownAt`, for barOpening) and which of the bar's openings
+ * it is (`opening`, from a count, `openings`, that goes up each time a
+ * header shows), the foot of the toasts over the map (`foot`), which the
+ * clearing move leaves its token below (clearShift, review LP19-BS-3), the
+ * top of the resting strip (`restTop`), whose band the toasts keep out
+ * of, and the stack the toasts placed under that opening's header
  * (`stack`, its top and its opening, barStack). In the chrome's px from
  * the page's top, null while there is none. Each side reads the other as
  * it acts, not as it draws, so a toast that comes moves no bar. A pan that
@@ -1904,9 +1721,18 @@ export const spanToastSlot = scopeSlot(() => ({
   opening: null as number | null,
   openings: 0,
   foot: null as number | null,
+  restTop: null as number | null,
   stack: null as { top: number; opening: number } | null,
   recheck: null as (() => void) | null,
 }));
+
+/**
+ * The alerts' summary row while it stands in an upright phone's strip
+ * header, where no spot is left for it over the band
+ * (docs/design-v1-bar-compact.md 3.5): how many alerts wait, its words as
+ * the button's name, and its own tap.
+ */
+export type HeaderSummary = { count: number; name: string; press(): void };
 
 /** The bar as it shows, for the column, the notices and the camera. `freeRight` is the free area's right edge (barCover). */
 export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number };
@@ -1936,15 +1762,21 @@ type BarDockState = {
   lastHeight: number;
   /** Set by Actions: the next bar to show takes focus on its frame. */
   focusFrame: boolean;
-  /** An upright phone's bar opens Larger (LARGER_KEY), read with the spot, and kept to itself by a preview as the spot is. */
-  larger: boolean;
   /**
-   * The tokens of the bar's latest opening, and how far Larger moved the
-   * map for it, which Smaller undoes. A token drag hides the bar and keeps
-   * them, so the bar that shows again after the drop moves the map no more.
+   * An upright phone's bar is expanded (docs/design-v1-bar-compact.md 5.3).
+   * It lasts while the bar stays open, through another token tapped, a
+   * drag, a fold and a turn of the screen, and is never stored.
    */
-  largerFor: string | null;
-  largerMoved: number;
+  expanded: boolean;
+  /** The expanded bar's height (expandedRoom), frozen at Expand, for each new token and on a change of the map's frame. Null until worked out. */
+  expandedHeight: number | null;
+  /**
+   * A request that the bar clear its token once, by moving the map
+   * (clearShift, 3.6): set by Stage for an opening that counts
+   * (keepsOpening) and for a drop (`drop`), a new object each time, and
+   * cleared as the frame consumes it or a cancel drops it.
+   */
+  clearRequest: { tokenId: string; drop?: true } | null;
   /**
    * The height of a roll card standing on a narrow screen's toolbar and options bar
    * (features/rolls/PlayerRolls.tsx), or 0: a docked or spanning bar keeps
@@ -1974,11 +1806,16 @@ type BarDockState = {
   heldMode: HeldMode;
   /** Where a player's roll card stands on a narrow screen (CardAt), for the opening rule (openMode). */
   cardAt: CardAt;
+  /** The alerts' summary row, handed to the strip's header (HeaderSummary). */
+  headerSummary: HeaderSummary | null;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, larger: readLarger(), largerFor: null, largerMoved: 0, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null })),
+  createStore<BarDockState>(() => {
+    forgetLarger();
+    return { chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null };
+  }),
 );
 
 /**
