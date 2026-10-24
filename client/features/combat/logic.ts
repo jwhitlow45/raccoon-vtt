@@ -532,7 +532,7 @@ export function resistOp(target: ActorTarget, back = false): ClientOp {
 /** What an ability's op carries of it, its section aside. */
 export type AbilityFacts = Omit<RechargeUse, "section"> | Omit<RestUse, "section"> | Omit<DayUse, "section">;
 
-/** Spends or gives back one use of a block's ability, its facts read from the block (3.2). `ifReady` is the Dice panel's mark. */
+/** Spends or restores one use of a block's ability, its facts read from the block (3.2). `ifReady` is the Dice panel's mark. */
 export function abilityOp(target: ActorTarget, use: AbilityFacts, opts: { back?: boolean; ifReady?: boolean; quiet?: boolean } = {}): ClientOp {
   return {
     t: "actor.use",
@@ -552,7 +552,7 @@ export function abilityOp(target: ActorTarget, use: AbilityFacts, opts: { back?:
   };
 }
 
-/** Give one back for a mark the block no longer lists, from what the mark keeps (3.2). */
+/** Restore for a mark the block no longer lists, from what the mark keeps (3.2). */
 export function otherBackOp(target: ActorTarget, key: UseKey, mark: UseMark): ClientOp {
   if (mark.kind === "turn") return { t: "actor.use", target, use: { kind: "legendary", cost: 1, key, name: mark.name }, back: true };
   return {

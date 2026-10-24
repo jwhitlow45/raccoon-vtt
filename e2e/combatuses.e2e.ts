@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import { limitedUses } from "#shared/dice/uses.ts";
 import type { Actor, LogEvent, RoomState } from "#shared/model.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "#shared/srd/monsters.ts";
+import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment, toastsUnderCards } from "./helpers/alignment.ts";
 import { ConsoleWatch, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
@@ -266,11 +267,16 @@ function useLines(state: RoomState | null): Extract<LogEvent, { type: "use" }>[]
 /** Each part of the alignment sweep: what it measured, and what was off. */
 const sweep: string[] = [];
 const measured = new Set<string>();
+let restoreSeen = 0;
 
 async function measure(page: Page, root: Locator, screen: string): Promise<void> {
   await root.first().waitFor();
   measured.add(screen.replace(/ at .*$/, ""));
   const lines = alignmentLines(await measureAlignment(root.first()), screen);
+  // A Restore button reads on one line at every size (fu28): its text laid out in more than one box has wrapped.
+  const wrapped = await wrappedButtons(root.first(), "Restore");
+  restoreSeen += wrapped.seen;
+  lines.push(...wrapped.wrapped.map((t) => `${screen}: ${t} wraps`));
   if (lines.length > 0) {
     sweep.push(...lines);
     await shots.take(page, `cu-b-align-${screen.replace(/[^a-z0-9]+/gi, "-")}`);
@@ -604,6 +610,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       "the turn card",
     ]);
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
+    assert.ok(restoreSeen > 0, "the sweep met a Restore button to check for wrapping");
   });
 
   test("cu-b-10. a toast on the DM's phone at 390 x 844 starts under a lone turn card, folded and open", async () => {

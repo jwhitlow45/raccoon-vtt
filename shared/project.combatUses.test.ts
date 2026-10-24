@@ -125,9 +125,13 @@ describe("use lines' words (docs/design-v1-combat-controls.md 8)", () => {
     assert.equal(useText(line({ what: "legendary", left: 2, max: 3 }), "Adult Red Dragon"), "Adult Red Dragon used a legendary action (2 of 3 left).");
     assert.equal(useText(line({ what: "legendary" }), "Adult Red Dragon"), "Adult Red Dragon used a legendary action.");
     assert.equal(useText(line({ name: "Fire Breath", back: true }), "Young Red Dragon"), "Young Red Dragon: Fire Breath is ready again.");
-    assert.equal(useText(line({ name: "Dominate Mind", back: true, left: 2, max: 2 }), "Aboleth"), "Aboleth: a use of Dominate Mind given back (2 of 2 left).");
+    assert.equal(useText(line({ name: "Dominate Mind", back: true, left: 2, max: 2 }), "Aboleth"), "Aboleth regains a use of Dominate Mind (2 of 2 left).");
+    assert.equal(useText(line({ what: "resist", back: true, left: 2, max: 3 }), "Adult Red Dragon"), "Adult Red Dragon regains a Legendary Resistance (2 of 3 left).");
+    assert.equal(useText(line({ what: "legendary", name: "Fiery Rays", back: true, left: 2, max: 3 }), "Adult Red Dragon"), "Adult Red Dragon regains Fiery Rays (2 of 3 left).");
+    assert.equal(useText(line({ what: "legendary", back: true }), "Adult Red Dragon"), "Adult Red Dragon regains a legendary action.");
+    assert.equal(useText(line({ what: "resource", name: "Rage", back: true, left: 2, max: 3 }), "Thorn"), "Thorn regains a use of Rage (2 of 3 left).");
     assert.equal(useText(line({ what: "resource", name: "Rage", left: 2, max: 3 }), "Thorn"), "Thorn used Rage (2 of 3 left).");
-    assert.equal(useText(line({ what: "resource", name: "Lay on Hands", cost: 5, back: true, left: 25, max: 25 }), "Bree"), "Bree: 5 of Lay on Hands given back (25 of 25 left).");
+    assert.equal(useText(line({ what: "resource", name: "Lay on Hands", cost: 5, back: true, left: 25, max: 25 }), "Bree"), "Bree regains 5 of Lay on Hands (25 of 25 left).");
   });
 });
 

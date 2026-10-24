@@ -14,7 +14,7 @@ const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 
 /*
  * The Class resources section as it draws (docs/design-v1-combat-controls.md
- * 7.1 and 7.2): what it is for while empty, its rows with Give one back
+ * 7.1 and 7.2): what it is for while empty, its rows with Restore
  * and Edit, Add after them or the limit in its place, and the question a
  * rise in level asks once per class.
  */
@@ -44,9 +44,9 @@ describe("the Class resources section", () => {
     assert.match(markup, />Add a class resource<\/button>/);
   });
 
-  test("its rows with Give one back and Edit, then Add", () => {
+  test("its rows with Restore and Edit, then Add", () => {
     const markup = section({ resources: [rage, hands], level: 5 });
-    assert.ok(named(markup, "Give one back: Rage"));
+    assert.ok(named(markup, "Restore one use of Rage"));
     assert.match(markup, /aria-label="Edit Rage"/);
     assert.match(markup, /aria-label="Edit Lay on Hands"/);
     assert.ok(markup.indexOf("Edit Lay on Hands") < markup.indexOf("Add a class resource"), "Add after the rows");

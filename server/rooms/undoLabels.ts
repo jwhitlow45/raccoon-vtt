@@ -592,7 +592,7 @@ export function describeHpEvent(event: Extract<LogEvent, { type: "hp" }>, state:
 
 /**
  * A use as its step names it (docs/design-v1-combat-controls.md 3.5): "using
- * Fiery Rays for Adult Red Dragon", "giving back Fire Breath for Young Red
+ * Fiery Rays for Adult Red Dragon", "restoring Fire Breath for Young Red
  * Dragon", "Regeneration for Troll", "using Rage for Thorn".
  */
 function usePhrase(op: OpOf<"actor.use">, before: RoomState, who: string): string {
@@ -606,7 +606,7 @@ function usePhrase(op: OpOf<"actor.use">, before: RoomState, who: string): strin
         : use.kind === "ability"
           ? quoted(use.name, "an ability")
           : quoted(resourceOf(before, op.target, use.id)?.name, "a class resource");
-  return op.back ? `giving back ${name} for ${who}` : `using ${name} for ${who}`;
+  return op.back ? `restoring ${name} for ${who}` : `using ${name} for ${who}`;
 }
 
 function possessive(name: string): string {

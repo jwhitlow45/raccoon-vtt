@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { ClassResource } from "#shared/model.ts";
+import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
@@ -17,9 +18,9 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, t
  *   (Rage, 3 uses), Lay on Hands from Paladin 3, and Superiority Dice of
  *   his own.
  * - In a fight Pat uses Rage from the token panel's row, the turn card
- *   being the combat surfaces' lane, and spends and gives back an amount
+ *   being the combat surfaces' lane, and spends and restores an amount
  *   of Lay on Hands, one too many refused in the field.
- * - A Short Rest gives back one Rage and all Superiority Dice, and says
+ * - A Short Rest restores one Rage and all Superiority Dice, and says
  *   so, and a Long Rest everything.
  * - A Use sent offline after the DM spent the last Rage comes back
  *   refused, its reason in the list's status line, and a pool's open
@@ -199,11 +200,16 @@ async function openAdd(scope: Locator): Promise<Locator> {
 /** Each part of the alignment sweep: what it measured, and what was off. */
 const sweep: string[] = [];
 const measured = new Set<string>();
+let restoreSeen = 0;
 
 async function measure(page: Page, root: Locator, screen: string): Promise<void> {
   await root.first().waitFor();
   measured.add(screen.replace(/ at .*$/, ""));
   const lines = alignmentLines(await measureAlignment(root.first()), screen);
+  // A Restore button reads on one line at every size (fu28): its text laid out in more than one box has wrapped.
+  const wrapped = await wrappedButtons(root.first(), "Restore");
+  restoreSeen += wrapped.seen;
+  lines.push(...wrapped.wrapped.map((t) => `${screen}: ${t} wraps`));
   if (lines.length > 0) {
     sweep.push(...lines);
     await shots.take(page, `cr-c-align-${screen.replace(/[^a-z0-9]+/gi, "-")}`);
@@ -372,7 +378,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await shots.take(pat, "cr-c-rage-used");
   });
 
-  test("cr-c-5. a pool's amount: Use… opens the field, 20 is refused there, 5 is spent, and Give back… returns 2", async () => {
+  test("cr-c-5. a pool's amount: Use… opens the field, 20 is refused there, 5 is spent, and Restore… returns 2", async () => {
     const panel = tokenPanel(pat);
     const hands = row(panel, "Lay on Hands");
     const use = hands.getByRole("button", { name: "Use Lay on Hands, 15 of 15 left" });
@@ -394,14 +400,14 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await field.waitFor({ state: "detached" });
     await usedIs("Lay on Hands", 5);
     await waitFor("focus back on Use…", () => pat.evaluate(() => (globalThis as unknown as Doc).document.activeElement?.getAttribute("aria-label") ?? "").then((n) => (n === "Use Lay on Hands, 10 of 15 left" ? true : null)), 5_000);
-    await hands.getByRole("button", { name: "Give back Lay on Hands" }).tap();
-    await hands.getByRole("textbox", { name: "Lay on Hands to give back, up to 5" }).fill("2");
-    await hands.getByRole("button", { name: "Give back", exact: true }).tap();
+    await hands.getByRole("button", { name: "Restore Lay on Hands" }).tap();
+    await hands.getByRole("textbox", { name: "Lay on Hands to restore, up to 5" }).fill("2");
+    await hands.getByRole("button", { name: "Restore", exact: true }).tap();
     await countReads(panel, "Lay on Hands", "12 of 15");
     await usedIs("Lay on Hands", 3);
   });
 
-  test("cr-c-6. a Short Rest says it gives back one Rage and all Superiority Dice, and does; Lay on Hands waits for a Long Rest", async () => {
+  test("cr-c-6. a Short Rest says it restores one Rage and all Superiority Dice, and does; Lay on Hands waits for a Long Rest", async () => {
     const panel = tokenPanel(pat);
     const dice = row(panel, "Superiority Dice");
     await dice.getByRole("button", { name: "Use Superiority Dice, 4 of 4 left" }).tap();
@@ -413,7 +419,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await ops.send({ t: "encounter.end" });
     await waitFor("the fight over", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
     await panel.getByRole("radio", { name: "Short Rest" }).check();
-    await panel.getByText("A Short Rest also gives back one Rage and all Superiority Dice.", { exact: true }).waitFor();
+    await panel.getByText("A Short Rest also restores one Rage and all Superiority Dice.", { exact: true }).waitFor();
     await shots.take(pat, "cr-c-short-rest-says");
     await panel.getByRole("button", { name: "Finish the Short Rest" }).tap();
     await countReads(panel, "Rage", "2 of 3");
@@ -421,10 +427,10 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await countReads(panel, "Lay on Hands", "12 of 15");
   });
 
-  test("cr-c-7. a Long Rest says what it gives back and gives back all", async () => {
+  test("cr-c-7. a Long Rest says what it restores and restores all", async () => {
     const panel = tokenPanel(pat);
     await panel.getByRole("radio", { name: "Long Rest" }).check();
-    await panel.getByText("A Long Rest also gives back Rage and Lay on Hands.", { exact: true }).waitFor();
+    await panel.getByText("A Long Rest also restores Rage and Lay on Hands.", { exact: true }).waitFor();
     await panel.getByRole("button", { name: "Finish the Long Rest" }).tap();
     await countReads(panel, "Rage", "3 of 3");
     await countReads(panel, "Lay on Hands", "15 of 15");
@@ -451,7 +457,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     const use = row(panel, "Rage").getByRole("button", { name: "Use Rage, 0 of 3 left" });
     assert.equal(await use.getAttribute("aria-disabled"), "true", "off, and still in the Tab order");
     await shots.take(pat, "cr-c-refused");
-    await row(panel, "Rage").getByRole("button", { name: "Give one back: Rage" }).tap();
+    await row(panel, "Rage").getByRole("button", { name: "Restore one use of Rage" }).tap();
     await countReads(panel, "Rage", "1 of 3");
     await status.waitFor({ state: "detached" });
   });
@@ -614,6 +620,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       "the amount field with its error",
     ]);
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
+    assert.ok(restoreSeen > 0, "the sweep met a Restore button to check for wrapping");
   });
 
   test("cr-c-12b. a pool's open field closes when the DM spends the last of it, the status line saying why, focus back on Use…", async () => {
@@ -636,7 +643,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await countReads(page, "Lay on Hands", "15 of 15");
   });
 
-  test("cr-c-12c. Pat spends the whole pool from the field and gives it all back: each closes the field with no status line, offline and once answered", async () => {
+  test("cr-c-12c. Pat spends the whole pool from the field and restores it all: each closes the field with no status line, offline and once answered", async () => {
     const page = await thornsPage(pat);
     const hands = row(page, "Lay on Hands");
     const status = section(page).getByRole("status");
@@ -658,17 +665,17 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     patConsole.expectSocketFailures = false;
     assert.equal(await status.count(), 0, "no status line once the server took it");
 
-    await hands.getByRole("button", { name: "Give back Lay on Hands" }).tap();
-    await hands.getByRole("textbox", { name: "Lay on Hands to give back, up to 15" }).fill("15");
-    await hands.getByRole("button", { name: "Give back", exact: true }).tap();
+    await hands.getByRole("button", { name: "Restore Lay on Hands" }).tap();
+    await hands.getByRole("textbox", { name: "Lay on Hands to restore, up to 15" }).fill("15");
+    await hands.getByRole("button", { name: "Restore", exact: true }).tap();
     await countReads(page, "Lay on Hands", "15 of 15");
     await hands.getByRole("textbox").waitFor({ state: "detached" });
     await usedIs("Lay on Hands", 0);
     await pat.waitForTimeout(300);
-    assert.equal(await status.count(), 0, "a whole give-back reads as no refusal either");
+    assert.equal(await status.count(), 0, "a whole restore reads as no refusal either");
   });
 
-  test("fu26-b. the DM's Long Rest for the party says in one line that it also gives back every class resource, and its card lines up at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+  test("fu26-b. the DM's Long Rest for the party says in one line that it also restores every class resource, and its card lines up at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
     const rage = stored().find((x) => x.name === "Rage")!;
     if (rage.used === 0) await ops.send({ t: "actor.use", target: { characterId: run.thorn }, use: { kind: "resource", id: rage.id } });
     await waitFor("a Rage spent", () => ((stored().find((x) => x.name === "Rage")?.used ?? 0) > 0 ? true : null), 10_000);
@@ -680,9 +687,9 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
       const finish = panel.getByRole("button", { name: "Finish the Long Rest", exact: true });
       await finish.waitFor();
-      await panel.getByText(/Exhaustion level\. It also gives back every class resource\./).waitFor();
+      await panel.getByText(/Exhaustion level\. It also restores every class resource\./).waitFor();
       // The card: the innermost box that holds both its words and its buttons.
-      const card = panel.locator("div").filter({ has: dm.getByRole("button", { name: "Finish the Long Rest", exact: true }) }).filter({ hasText: "It also gives back every class resource." }).last();
+      const card = panel.locator("div").filter({ has: dm.getByRole("button", { name: "Finish the Long Rest", exact: true }) }).filter({ hasText: "It also restores every class resource." }).last();
       await card.scrollIntoViewIfNeeded();
       const lines = alignmentLines(await measureAlignment(card), `the party's Long Rest at ${at}`);
       off.push(...lines);

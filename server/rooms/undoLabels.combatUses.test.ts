@@ -22,7 +22,7 @@ describe("combat uses' undo step labels (docs/design-v1-combat-controls.md 3.5)"
     assert.equal(describeOp({ t: "actor.use", target: { tokenId: "lich" }, use: { kind: "resist" } }, s), "using Legendary Resistance for Lich");
     assert.equal(
       describeOp({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5 }, back: true }, s),
-      "giving back Fire Breath for Adult Red Dragon",
+      "restoring Fire Breath for Adult Red Dragon",
     );
     assert.equal(describeOp({ t: "actor.use", target: { tokenId: "thorn" }, use: { kind: "resource", id: "rage" } }, s), "using Rage for Thorn");
     assert.equal(describeOp({ t: "actor.use", target: { characterId: "thorn" }, use: { kind: "resource", id: "gone" } }, s), "using a class resource for Thorn");

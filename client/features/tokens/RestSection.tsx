@@ -29,7 +29,7 @@ const KINDS: { value: Kind; label: string }[] = [
  * chosen.
  *
  * A character's class resources come back with the rest, so a chosen rest
- * names those it gives back (docs/design-v1-combat-controls.md 7.2).
+ * names those it restores (docs/design-v1-combat-controls.md 7.2).
  */
 export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefined; target: ActorTarget; resources?: readonly ClassResource[] }) {
   const actions = useRoomActions();

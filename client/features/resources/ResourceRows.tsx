@@ -20,9 +20,9 @@ export type ResourceRowsForm = "card" | "list";
 
 /**
  * A character's class resources as rows, each with its count and Use, Use…
- * for a pool, and Give one back (docs/design-v1-combat-controls.md 7.2).
+ * for a pool, and Restore (docs/design-v1-combat-controls.md 7.2).
  * The turn card shows Use alone, as its rows are the turn's menu, and the
- * off-turn list adds Give one back. Nothing at all for a character with
+ * off-turn list adds Restore. Nothing at all for a character with
  * none, or for a viewer whose copy holds none, since they reach only the
  * DM and the character's players.
  */
@@ -62,13 +62,13 @@ export function ResourceList(props: { characterId: CharacterId; resources: reado
   );
 }
 
-export type Amount = { verb: "Spend" | "Give back"; text: string; error: string | null };
+export type Amount = { verb: "Spend" | "Restore"; text: string; error: string | null };
 
 /**
  * What a pool's open amount field becomes as its counts change under it:
- * the same field while there is something to spend or give back, else
+ * the same field while there is something to spend or restore, else
  * closed, with the row's own words for why, once another device spent the
- * last or gave back the rest. It never asks for 1 to 0.
+ * last or restored the rest. It never asks for 1 to 0.
  *
  * `sending` is this row's own use waiting for its answer. The page shows a
  * use before the server answers, so spending the whole pool here empties it
@@ -86,8 +86,8 @@ export function amountFor(opened: Amount | null, r: Pick<ClassResource, "name" |
  * One resource: its name and count over the rest that brings it back, and
  * its buttons at the end of its line, or on a line of their own where the
  * panel is too narrow or the list asks for it (`ownLine`). A pool's Use…
- * and Give back… open an amount field under the row, 16 px and numeric,
- * with Spend or Give back and Cancel. A button waits for the server's
+ * and Restore… open an amount field under the row, 16 px and numeric,
+ * with Spend or Restore and Cancel. A button waits for the server's
  * answer, busy and deaf to a second tap, since the rules of a use are the
  * server's.
  */
@@ -107,7 +107,7 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
   const pool = r.pool === true;
   const verb = amount?.verb;
 
-  // The field takes focus as it opens, and again when Use… and Give back… swap it.
+  // The field takes focus as it opens, and again when Use… and Restore… swap it.
   useEffect(() => {
     if (verb) amountField.current?.focus();
   }, [verb]);
@@ -141,7 +141,7 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
     if (!amount) return;
     const outcome = amountOutcome(amount.text, amount.verb === "Spend" ? remaining : r.used, amount.verb);
     if (!outcome.ok) setAmount({ ...amount, error: outcome.error });
-    else use(amount.verb === "Give back", outcome.amount);
+    else use(amount.verb === "Restore", outcome.amount);
   };
   // A field opened anew takes away the last reason, such as a pool another device emptied, which no longer holds.
   const toggle = (next: Amount["verb"]) => {
@@ -176,10 +176,10 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
               label={backLabel(r)}
               off={r.used === 0 ? `${id}-full` : undefined}
               busy={busy && amount === null && sent?.back === true}
-              expanded={pool ? verb === "Give back" : undefined}
-              onClick={() => (pool ? toggle("Give back") : use(true))}
+              expanded={pool ? verb === "Restore" : undefined}
+              onClick={() => (pool ? toggle("Restore") : use(true))}
             >
-              {pool ? "Give back…" : "Give one back"}
+              {pool ? "Restore…" : "Restore"}
             </RowButton>
           ) : null}
           {props.edit ? (
@@ -209,7 +209,7 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
             <Input
               ref={amountField}
-              aria-label={amount.verb === "Spend" ? `${r.name} to spend, up to ${remaining}` : `${r.name} to give back, up to ${r.used}`}
+              aria-label={amount.verb === "Spend" ? `${r.name} to spend, up to ${remaining}` : `${r.name} to restore, up to ${r.used}`}
               aria-describedby={amount.error ? `${id}-amount` : undefined}
               error={amount.error !== null}
               inputMode="numeric"
@@ -248,7 +248,7 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
 }
 
 /**
- * A row's Use or Give back. Off, it keeps its focus and says why through
+ * A row's Use or Restore. Off, it keeps its focus and says why through
  * the line `off` names (docs/design-v1-combat-controls.md 9), rather than
  * dropping out of the Tab order as a disabled button would.
  */

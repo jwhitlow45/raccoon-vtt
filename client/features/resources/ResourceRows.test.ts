@@ -51,14 +51,14 @@ describe("a character's class resource rows", () => {
     assert.equal([...markup.matchAll(/<li /g)].length, 2);
   });
 
-  test("the off-turn list: Use and Give one back, a pool's Use… and Give back…, each named with its resource", () => {
+  test("the off-turn list: Use and Restore, a pool's Use… and Restore…, each named with its resource", () => {
     const markup = rows([rage, hands], "list");
     assert.ok(named(markup, "Use Rage, 2 of 3 left"));
-    assert.ok(named(markup, "Give one back: Rage"));
+    assert.ok(named(markup, "Restore one use of Rage"));
     assert.ok(named(markup, "Use Lay on Hands, 25 of 25 left"));
-    assert.ok(named(markup, "Give back Lay on Hands"));
+    assert.ok(named(markup, "Restore Lay on Hands"));
     assert.match(markup, />Use…<\/button>/);
-    assert.match(markup, />Give back…<\/button>/);
+    assert.match(markup, />Restore…<\/button>/);
     assert.match(named(markup, "Use Lay on Hands, 25 of 25 left")!, /aria-expanded="false"/, "a pool's Use… opens its amount field");
     assert.doesNotMatch(named(markup, "Use Rage, 2 of 3 left")!, /aria-expanded/, "a count's Use spends at once");
     assert.equal(named(markup, "Edit Rage"), undefined, "Edit is the section's");
@@ -68,11 +68,11 @@ describe("a character's class resource rows", () => {
     const markup = rows([rage, hands], "card");
     assert.ok(named(markup, "Use Rage, 2 of 3 left"));
     assert.ok(named(markup, "Use Lay on Hands, 25 of 25 left"));
-    assert.equal(named(markup, "Give one back: Rage"), undefined);
-    assert.equal(named(markup, "Give back Lay on Hands"), undefined);
+    assert.equal(named(markup, "Restore one use of Rage"), undefined);
+    assert.equal(named(markup, "Restore Lay on Hands"), undefined);
   });
 
-  test("a Use with nothing left and a Give back with nothing spent stay in the Tab order and say why", () => {
+  test("a Use with nothing left and a Restore with nothing spent stay in the Tab order and say why", () => {
     const markup = rows([{ ...rage, used: 3 }, hands], "list");
     const use = named(markup, "Use Rage, 0 of 3 left")!;
     assert.match(use, /aria-disabled="true"/);
@@ -80,11 +80,11 @@ describe("a character's class resource rows", () => {
     const why = /aria-describedby="([^"]+)"/.exec(use)?.[1];
     assert.ok(why);
     assert.match(markup, new RegExp(`<span id="${why}" hidden="">Rage has no uses left.</span>`));
-    const back = named(markup, "Give back Lay on Hands")!;
+    const back = named(markup, "Restore Lay on Hands")!;
     assert.match(back, /aria-disabled="true"/);
     const full = /aria-describedby="([^"]+)"/.exec(back)?.[1];
     assert.match(markup, new RegExp(`<span id="${full}" hidden="">Lay on Hands is full.</span>`));
-    assert.doesNotMatch(named(markup, "Give one back: Rage")!, /aria-disabled/, "one spent can come back");
+    assert.doesNotMatch(named(markup, "Restore one use of Rage")!, /aria-disabled/, "one spent can come back");
     assert.doesNotMatch(named(markup, "Use Lay on Hands, 25 of 25 left")!, /aria-disabled/);
   });
 
@@ -95,22 +95,22 @@ describe("a character's class resource rows", () => {
 
 describe("a pool's amount field once its counts change under it (CCAC-OPUS-6)", () => {
   const spend = { verb: "Spend" as const, text: "5", error: "Spend 1 to 15." };
-  const giveBack = { verb: "Give back" as const, text: "", error: null };
+  const restore = { verb: "Restore" as const, text: "", error: null };
 
-  test("it stays open while there is something to spend or give back", () => {
+  test("it stays open while there is something to spend or restore", () => {
     assert.deepEqual(amountFor(null, hands, false), { amount: null, gone: null });
     assert.deepEqual(amountFor(spend, { ...hands, used: 24 }, false), { amount: spend, gone: null });
-    assert.deepEqual(amountFor(giveBack, { ...hands, used: 1 }, false), { amount: giveBack, gone: null });
+    assert.deepEqual(amountFor(restore, { ...hands, used: 1 }, false), { amount: restore, gone: null });
     assert.deepEqual(amountFor(spend, { ...hands, used: 24 }, true), { amount: spend, gone: null }, "a part spent here leaves the field open until the answer");
   });
 
-  test("it closes with the row's own words once another device spent the last or gave back the rest, never reading 1 to 0", () => {
+  test("it closes with the row's own words once another device spent the last or restored the rest, never reading 1 to 0", () => {
     assert.deepEqual(amountFor(spend, { ...hands, used: 25 }, false), { amount: null, gone: "No Lay on Hands is left." });
-    assert.deepEqual(amountFor(giveBack, hands, false), { amount: null, gone: "Lay on Hands is full." });
+    assert.deepEqual(amountFor(restore, hands, false), { amount: null, gone: "Lay on Hands is full." });
   });
 
   test("it closes with no words while this row's own use of the whole pool waits for its answer, which is no refusal (CCAC-OPUS-11)", () => {
     assert.deepEqual(amountFor(spend, { ...hands, used: 25 }, true), { amount: null, gone: null });
-    assert.deepEqual(amountFor(giveBack, hands, true), { amount: null, gone: null });
+    assert.deepEqual(amountFor(restore, hands, true), { amount: null, gone: null });
   });
 });

@@ -22,7 +22,7 @@ import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 /**
  * The words and the drafts of a character's class resources
  * (docs/design-v1-combat-controls.md 7): what each row reads, what a rest
- * gives back, and the Add, Update and Edit sheets' checks, as plain
+ * restores, and the Add, Update and Edit sheets' checks, as plain
  * functions for node --test. Every sheet sends one character.update with
  * the whole list, each item without `used`, which the reducer keeps by id.
  */
@@ -48,9 +48,9 @@ export function emptyText(r: Pick<ClassResource, "name" | "pool">): string {
   return r.pool ? `No ${r.name} is left.` : `${r.name} has no uses left.`;
 }
 
-/** Give back's name, and why it is off. */
+/** Restore's name, and why it is off. */
 export function backLabel(r: Pick<ClassResource, "name" | "pool">): string {
-  return r.pool ? `Give back ${r.name}` : `Give one back: ${r.name}`;
+  return r.pool ? `Restore ${r.name}` : `Restore one use of ${r.name}`;
 }
 
 export function fullText(r: Pick<ClassResource, "name">): string {
@@ -88,34 +88,34 @@ export function joinWords(words: readonly string[]): string {
 }
 
 /**
- * What a rest also gives back of what is spent (7.2), as the rules of
- * shared/rules/rest.ts give it: "A Short Rest also gives back one Rage and
- * all Focus Points." Null when it gives back none, so a creature with
+ * What a rest also restores of what is spent (7.2), as the rules of
+ * shared/rules/rest.ts give it: "A Short Rest also restores one Rage and
+ * all Focus Points." Null when it restores none, so a creature with
  * nothing spent reads nothing new.
  */
 export function restBackText(resources: readonly ClassResource[] | undefined, kind: "short" | "long"): string | null {
   const spent = (resources ?? []).filter((r) => r.used > 0);
-  if (kind === "long") return spent.length > 0 ? `A Long Rest also gives back ${joinWords(spent.map((r) => r.name))}.` : null;
+  if (kind === "long") return spent.length > 0 ? `A Long Rest also restores ${joinWords(spent.map((r) => r.name))}.` : null;
   const words = spent.flatMap((r) => (r.reset === "shortOne" ? [`one ${r.name}`] : r.reset === "short" ? [r.max > 1 ? `all ${r.name}` : r.name] : []));
-  return words.length > 0 ? `A Short Rest also gives back ${joinWords(words)}.` : null;
+  return words.length > 0 ? `A Short Rest also restores ${joinWords(words)}.` : null;
 }
 
 /**
- * What the party's Long Rest also gives back (7.2, LP20-CC-4): one line for
+ * What the party's Long Rest also restores (7.2, LP20-CC-4): one line for
  * every character it rests, since a line per resource would grow its card
  * past a phone's sheet. Null when none of them has one spent, as a chosen
  * rest reads nothing new then.
  */
 export function partyRestBackText(characters: readonly { resources?: readonly ClassResource[] }[]): string | null {
-  return characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "It also gives back every class resource." : null;
+  return characters.some((c) => (c.resources ?? []).some((r) => r.used > 0)) ? "It also restores every class resource." : null;
 }
 
 /**
  * An amount typed for a pool: a whole number from 1 to `most`, the most
- * left to spend or the most spent to give back. Anything else says the
+ * left to spend or the most spent to restore. Anything else says the
  * range.
  */
-export function amountOutcome(text: string, most: number, verb: "Spend" | "Give back"): { ok: true; amount: number } | { ok: false; error: string } {
+export function amountOutcome(text: string, most: number, verb: "Spend" | "Restore"): { ok: true; amount: number } | { ok: false; error: string } {
   const n = wholeNumber(text);
   if (n === null || n < 1 || n > most) return { ok: false, error: most === 1 ? `${verb} 1.` : `${verb} 1 to ${most}.` };
   return { ok: true, amount: n };

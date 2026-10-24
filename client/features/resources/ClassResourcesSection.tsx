@@ -13,7 +13,7 @@ import { ResourceSheet, type SheetMode } from "./ResourceSheet.tsx";
 /**
  * A character's Class resources (docs/design-v1-combat-controls.md 7.2),
  * after Rest in the token panel's Combat group and on the character's
- * page: each with its count, Use or Use…, Give one back and Edit, then Add.
+ * page: each with its count, Use or Use…, Restore and Edit, then Add.
  * A level that rose past what a class's presets were read at asks once per
  * class to update them. Only the DM and the character's players are given
  * this section, and both may change it all.

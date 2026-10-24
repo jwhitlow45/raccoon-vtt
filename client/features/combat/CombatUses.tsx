@@ -212,7 +212,7 @@ function UseLine(props: LineProps) {
     case "resist":
       head = resistHead(row);
       add("use", { text: "Use", label: `Use Legendary Resistance, ${row.left} left`, off: row.left === 0 ? "No Legendary Resistance left." : null, offId: `${id}-off`, op: resistOp(target), onOff: props.onStatus });
-      if (form === "list" && row.left < row.max) add("back", { text: "Give one back", label: "Give back one Legendary Resistance", op: resistOp(target, true) });
+      if (form === "list" && row.left < row.max) add("back", { text: "Restore", label: "Restore one Legendary Resistance", op: resistOp(target, true) });
       break;
     case "legendary":
       head = legendaryHead(row, form);
@@ -220,7 +220,7 @@ function UseLine(props: LineProps) {
         const off = legendaryOffText(b);
         add(`la${i}`, { text: legendaryText(b), label: legendaryLabel(b, row.left), off: off === null ? null : `${b.name || "A legendary action"}: ${off.toLowerCase()}.`, offId: `${id}-la${i}`, op: legendaryOp(target, b), onOff: props.onStatus });
       }
-      if (form === "list" && row.left < row.max) add("back", { text: "Give one back", label: "Give back one legendary action", op: legendaryBackOp(target, row.buttons, props.actor) });
+      if (form === "list" && row.left < row.max) add("back", { text: "Restore", label: "Restore one legendary action", op: legendaryBackOp(target, row.buttons, props.actor) });
       break;
     case "ability": {
       head = abilityHead(row);
@@ -230,7 +230,7 @@ function UseLine(props: LineProps) {
         const left = dayLeft(use, mark);
         if (form === "card" && left === 0) break;
         add("use", { text: "Use", label: `Use ${use.name}, ${left} left`, off: left === 0 ? `No uses of ${use.name} left.` : null, offId: `${id}-off`, op: abilityOp(target, use), onOff: props.onStatus });
-        if (form === "list" && mark) add("back", { text: "Give one back", label: `Give back one use of ${use.name}`, op: abilityOp(target, use, { back: true }) });
+        if (form === "list" && mark) add("back", { text: "Restore", label: `Restore one use of ${use.name}`, op: abilityOp(target, use, { back: true }) });
         break;
       }
       if (!mark) {
@@ -257,7 +257,7 @@ function UseLine(props: LineProps) {
     }
     case "other":
       head = otherHead(row.mark);
-      add("back", { text: "Give one back", label: `Give back ${row.mark.name}`, op: otherBackOp(target, row.key, row.mark) });
+      add("back", { text: "Restore", label: `Restore ${row.mark.name}`, op: otherBackOp(target, row.key, row.mark) });
       break;
     case "regeneration":
       head = regenerationLine(row.amount);
@@ -276,7 +276,7 @@ function UseLine(props: LineProps) {
       {/*
        * The buttons take a line of their own under the row's words, each growing to fill it, as a card's do. Beside
        * the words where they fit, a row's height would follow how many buttons it holds, so a full Legendary
-       * Resistance's lone Use would stand a line shorter than its Give one back, and than the rows around it.
+       * Resistance's lone Use would stand a line shorter than its Restore, and than the rows around it.
        */}
       {buttons.length > 0 ? <div style={{ flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>{buttons}</div> : null}
     </li>
@@ -284,7 +284,7 @@ function UseLine(props: LineProps) {
 }
 
 /**
- * Give one back for legendary actions: the first once-a-turn action still
+ * Restore for legendary actions: the first once-a-turn action still
  * marked, with its pips, else one pip, so a mis-tap of Fiery Rays frees
  * Fiery Rays again.
  */

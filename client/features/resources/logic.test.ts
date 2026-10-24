@@ -65,9 +65,9 @@ describe("a resource's row", () => {
     assert.equal(useLabel(hands), "Use Lay on Hands, 25 of 25 left");
   });
 
-  test("Give back and an empty Use say what they are about", () => {
-    assert.equal(backLabel(rage), "Give one back: Rage");
-    assert.equal(backLabel(hands), "Give back Lay on Hands");
+  test("Restore and an empty Use say what they are about", () => {
+    assert.equal(backLabel(rage), "Restore one use of Rage");
+    assert.equal(backLabel(hands), "Restore Lay on Hands");
     assert.equal(emptyText(rage), "Rage has no uses left.");
     assert.equal(emptyText(hands), "No Lay on Hands is left.");
   });
@@ -82,17 +82,17 @@ describe("a resource's row", () => {
   test("a pool's amount is a whole number from 1 to what it may take", () => {
     assert.deepEqual(amountOutcome("5", 25, "Spend"), { ok: true, amount: 5 });
     assert.deepEqual(amountOutcome(" 25 ", 25, "Spend"), { ok: true, amount: 25 });
-    assert.deepEqual(amountOutcome("1", 1, "Give back"), { ok: true, amount: 1 });
+    assert.deepEqual(amountOutcome("1", 1, "Restore"), { ok: true, amount: 1 });
     for (const bad of ["", "0", "26", "2.5", "-1", "five", "1e1"]) assert.deepEqual(amountOutcome(bad, 25, "Spend"), { ok: false, error: "Spend 1 to 25." }, bad);
-    assert.deepEqual(amountOutcome("2", 1, "Give back"), { ok: false, error: "Give back 1." });
+    assert.deepEqual(amountOutcome("2", 1, "Restore"), { ok: false, error: "Restore 1." });
   });
 });
 
-describe("what a rest gives back (7.2)", () => {
+describe("what a rest restores (7.2)", () => {
   test("a Short Rest names one of each that comes back one at a time, and all of each that comes back whole", () => {
-    assert.equal(restBackText([rage, focus], "short"), "A Short Rest also gives back one Rage and all Focus Points.");
-    assert.equal(restBackText([rage, focus, surge], "short"), "A Short Rest also gives back one Rage, all Focus Points and Action Surge.");
-    assert.equal(restBackText([{ ...surge, max: 2 }], "short"), "A Short Rest also gives back all Action Surge.");
+    assert.equal(restBackText([rage, focus], "short"), "A Short Rest also restores one Rage and all Focus Points.");
+    assert.equal(restBackText([rage, focus, surge], "short"), "A Short Rest also restores one Rage, all Focus Points and Action Surge.");
+    assert.equal(restBackText([{ ...surge, max: 2 }], "short"), "A Short Rest also restores all Action Surge.");
   });
 
   test("only what is spent, and a Short Rest none that wait for a Long one", () => {
@@ -103,14 +103,14 @@ describe("what a rest gives back (7.2)", () => {
   });
 
   test("a Long Rest names everything spent", () => {
-    assert.equal(restBackText([rage, focus, hands, surge], "long"), "A Long Rest also gives back Rage, Focus Points and Action Surge.");
+    assert.equal(restBackText([rage, focus, hands, surge], "long"), "A Long Rest also restores Rage, Focus Points and Action Surge.");
     assert.equal(restBackText([hands], "long"), null);
     assert.equal(joinWords(["Rage"]), "Rage");
     assert.equal(joinWords([]), "");
   });
 
-  test("the party's Long Rest says in one line that it gives back every class resource, once any of theirs is spent (LP20-CC-4)", () => {
-    const line = "It also gives back every class resource.";
+  test("the party's Long Rest says in one line that it restores every class resource, once any of theirs is spent (LP20-CC-4)", () => {
+    const line = "It also restores every class resource.";
     assert.equal(partyRestBackText([{ resources: [hands] }, { resources: [{ ...rage, used: 1 }] }]), line);
     assert.equal(partyRestBackText([{ resources: [hands, { ...surge, used: 1 }, { ...focus, used: 5 }] }]), line, "one line however many are spent");
     assert.equal(partyRestBackText([{ resources: [hands, { ...rage, used: 0 }] }, {}]), null, "nothing spent reads nothing new");

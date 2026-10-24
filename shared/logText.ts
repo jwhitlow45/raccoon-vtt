@@ -547,12 +547,13 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
 }
 
 /**
- * A creature's use of a limited ability, or one given back
+ * A creature's use of a limited ability, or one it regains
  * (docs/design-v1-combat-controls.md 8), with the counts the reader's line
  * kept: "Adult Red Dragon used Fiery Rays (legendary action, 2 of 3 left)."
  * for the DM and its owners, "Adult Red Dragon used Fiery Rays, a legendary
  * action." for other players, and "Young Red Dragon: Fire Breath is ready
- * again." for a give back.
+ * again." for a recharge, and "Adult Red Dragon regains a Legendary Resistance
+ * (2 of 3 left)." for a use restored.
  */
 export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): string {
   const counts = data.left !== undefined && data.max !== undefined ? `${data.left} of ${data.max} left` : undefined;
@@ -561,13 +562,13 @@ export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): 
   if (data.back) {
     switch (data.what) {
       case "legendary":
-        return `${who}: ${data.name ?? (several ? `${data.cost} legendary actions` : "a legendary action")} given back${after}.`;
+        return `${who} regains ${data.name ?? (several ? `${data.cost} legendary actions` : "a legendary action")}${after}.`;
       case "resist":
-        return `${who}: a Legendary Resistance given back${after}.`;
+        return `${who} regains a Legendary Resistance${after}.`;
       case "ability":
-        return counts ? `${who}: a use of ${data.name ?? "an ability"} given back${after}.` : `${who}: ${data.name ?? "an ability"} is ready again.`;
+        return counts ? `${who} regains a use of ${data.name ?? "an ability"}${after}.` : `${who}: ${data.name ?? "an ability"} is ready again.`;
       case "resource":
-        return `${who}: ${data.cost !== undefined ? `${data.cost} of ` : ""}${data.name ?? "a class resource"} given back${after}.`;
+        return `${who} regains ${data.cost !== undefined ? `${data.cost} of ${data.name ?? "a class resource"}` : `a use of ${data.name ?? "a class resource"}`}${after}.`;
     }
   }
   switch (data.what) {
