@@ -299,3 +299,14 @@ describe("the resting strip's quick row (docs/design-v1-bar-compact.md 3.3)", ()
     assert.deepEqual(restFit({ extra: 60, mode: 118, conditions: 99 }, 280, GAP, FIELD_MIN), ["mode", "conditions"]);
   });
 });
+
+describe("a quick row candidate that draws nothing", () => {
+  test("is left out, so an empty passing action never takes Roll's place", () => {
+    // A door button with no door in reach, or Doesn't count on a resize's leg, draws nothing.
+    assert.deepEqual(restFit({ ...pick("mode", "conditions", "roll"), door: 0 }, INNER.p375, GAP, FIELD_MIN), ["mode", "conditions", "roll"]);
+    assert.deepEqual(restFit({ ...pick("mode", "conditions", "roll"), countLeg: 0, door: 60 }, INNER.p390, GAP, FIELD_MIN), ["mode", "conditions", "door"]);
+    assert.deepEqual(restFit({ multiSelect: 0, details: 72 }, INNER.p390, GAP, FIELD_MIN), ["details"]);
+    // The lead shows whatever its measure.
+    assert.deepEqual(restFit({ mode: 0 }, INNER.p390, GAP, FIELD_MIN), ["mode"]);
+  });
+});

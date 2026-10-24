@@ -175,10 +175,12 @@ const REST_FIT: readonly string[] = ["mode", "crit", "conditions", "place", "use
  * fits whole in the `room` left after those before it in the fitting
  * order, `gap` apart. One that does not fit is skipped, and a narrower
  * one after it may still fit. The lead always shows: it is the strip's
- * reason to be, and its field gives up room before it goes.
+ * reason to be, and its field gives up room before it goes. A candidate
+ * whose width is 0 draws nothing and is left out.
  */
 export function restFit(widths: Readonly<Record<string, number>>, room: number, gap: number, fieldMin: number): string[] {
-  const ids = Object.keys(widths);
+  // A candidate drawn 0 px wide draws nothing, such as a door button with no door in reach, and must not take Roll's place.
+  const ids = Object.keys(widths).filter((id) => id === "mode" || (widths[id] ?? 0) > 0);
   const shown: string[] = [];
   let used = 0;
   const fits = (width: number) => used + (shown.length > 0 ? gap : 0) + width <= room + FIT_SLACK;
