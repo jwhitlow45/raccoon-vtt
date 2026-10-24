@@ -621,7 +621,7 @@ describe("what waits in a creature's groups (docs/design-v1-dice-pass.md 6.4)", 
     for (const phase of ["refused", "unknown", "asked", "closed"] as const) assert.deepEqual(at(phase), { ids: ["open:7"], quiet: ["ask-7"], asked: [], casts: [] }, phase);
   });
 
-  test("an ask for saves waiting in the view opens its row's group by its id, once with its block's send", () => {
+  test("an ask for saves waiting in the view opens its row's group by its id, once, with its block's send only marked seen", () => {
     const casts = {
       k1: castAsk("k1", { caster: "breeTok", spell: "Fireball", area: "a1" }),
       k2: castAsk("k2", { caster: "breeTok", spell: "Hold Person", roll: "s:hold", area: undefined }),
