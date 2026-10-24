@@ -2099,6 +2099,12 @@ const STATUS_LINE_PX = 18;
  * whatever fills it (the name and the line, or a sentence), so a width
  * that changes while a sentence holds the title is still read, and the
  * choice never flips back and forth.
+ *
+ * The note goes as the field empties, Apply succeeds (which empties it)
+ * or focus leaves the strip, and comes back as focus returns or the
+ * sentence changes (3.3). The title's line shows the vitals meanwhile,
+ * as it does under the note, and the field keeps the entry's whole
+ * sentence as its description.
  */
 function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; critInRow: boolean; active: boolean }): { status: RestStatus; node: ReactNode; probe: ReactNode } {
   // State, not a ref, so a probe drawn afresh as the strip rests again finds its frame and title again.
@@ -2106,7 +2112,14 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
   const probeRef = useRef<HTMLSpanElement>(null);
   const [box, setBox] = useState<StatusBox | null>(null);
   const key = JSON.stringify([input.entry, input.idle, input.critInRow]);
-  const [status, setStatus] = useState<RestStatus>(() => restStatus({ ...input.entry, idle: input.idle, critInRow: input.critInRow, fit: FITS_ALL }));
+  const [measured, setMeasured] = useState<RestStatus>(() => restStatus({ ...input.entry, idle: input.idle, critInRow: input.critInRow, fit: FITS_ALL }));
+  // The whole sentence that stood as focus left the strip, which keeps its note away until focus comes back or the sentence changes.
+  const [away, setAway] = useState<string | null>(null);
+  const full = useRef(measured.full);
+  useLayoutEffect(() => {
+    full.current = measured.full;
+    if (away !== null && away !== measured.full) setAway(null);
+  }, [measured.full, away]);
   // Read again as the frame or the title changes width: a turn, a new interface size, a header button.
   useLayoutEffect(() => {
     const frameEl = host?.closest<HTMLElement>('[role="dialog"]');
@@ -2122,15 +2135,27 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
     const watch = new ResizeObserver(read);
     watch.observe(title);
     watch.observe(frameEl);
-    return () => watch.disconnect();
+    const leave = (event: FocusEvent) => {
+      if (!(event.relatedTarget instanceof Node && frameEl.contains(event.relatedTarget))) setAway(full.current);
+    };
+    const enter = () => setAway(null);
+    frameEl.addEventListener("focusout", leave);
+    frameEl.addEventListener("focusin", enter);
+    return () => {
+      watch.disconnect();
+      frameEl.removeEventListener("focusout", leave);
+      frameEl.removeEventListener("focusin", enter);
+    };
   }, [input.active, host]);
   useLayoutEffect(() => {
     const [entry, idle, critInRow] = JSON.parse(key) as [EntryStatus, string[], boolean];
     const probe = probeRef.current;
     const fit = input.active && probe && box ? measuredFit(probe, box) : FITS_ALL;
     const next = restStatus({ ...entry, idle, critInRow, fit });
-    setStatus((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
+    setMeasured((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
   }, [key, input.active, box]);
+  const noteGone = measured.sentence?.place === "note" && (!input.entry.typed || (away !== null && away === measured.full));
+  const status = noteGone ? { ...measured, sentence: null } : measured;
   const node = (
     <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}>
       {status.line.text}
@@ -2139,7 +2164,7 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
   /*
    * A box of no size that clips what it holds, so a long text measured in
    * it never widens what scrolls. It is drawn whenever the strip rests,
-   * so it also carries what the status says, wherever the header draws
+   * so it also carries what the status shows, wherever the header draws
    * it, for tests to read. Its text wraps as the title's and the note's
    * sentences do (SENTENCE_LINES), unclamped so its lines can be counted.
    */

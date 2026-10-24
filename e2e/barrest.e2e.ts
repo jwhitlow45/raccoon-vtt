@@ -1863,6 +1863,15 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       return last as T;
     }
 
+    /** The field's description as a screen reader reads it: the text of every element its aria-describedby names. */
+    async function describedAs(field: Locator): Promise<string> {
+      return field.evaluate((el) => {
+        const { document } = globalThis as unknown as { document: { getElementById(id: string): PageEl | null } };
+        const ids = ((el as unknown as PageEl).getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+        return ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+      });
+    }
+
     async function alignmentOf(page: Page, root: Locator, screen: string): Promise<string[]> {
       const { alignmentLines, measureAlignment } = await alignment();
       return alignmentLines(await measureAlignment(root), screen);
@@ -2288,6 +2297,62 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
     }
 
     const DEAD_LINE = "Healing does nothing while Thorn is dead. Revive first.";
+
+    test("br-c-4. the note goes as the field empties, focus leaves the strip or Apply succeeds, and comes back as focus returns or its sentence changes, the title's line on the vitals meanwhile and the field described by the whole sentence", async () => {
+      await thornDead();
+      try {
+        await setUp(dm, PHONES[3]);
+        const { bar, field, apply } = await deadThornInHeal();
+        const vitals = /HP 0\/24 Dead$/;
+        // The empty field's dead line needs the note at 320 x 568 at 130%, and the note goes as the field empties, so none stands (3.3).
+        await until("the empty field's line", () => said(bar), (t) => vitals.test(t));
+        assert.equal(await drawnSentence(bar), null, "no note, and no sentence in the title, with the field empty");
+        assert.ok((await describedAs(field)).includes("Healing does nothing while Thorn is dead. Revive Thorn first."), "the field is described by the whole dead line");
+        await shots.take(dm, "br-c-4-empty-field-no-note");
+
+        // Typed, the dead line stands in the note, whole, and lines up.
+        await field.fill("5");
+        await until("the note", () => drawnSentence(bar), (d) => d?.place === "note");
+        assert.deepEqual(await drawnSentence(bar), { place: "note", text: DEAD_LINE, cut: false });
+        assert.deepEqual(await alignmentOf(dm, bar, "the dead line's note at 320 x 568 at 130%"), []);
+        await shots.take(dm, "br-c-4-note");
+
+        // Focus leaves the strip: the note goes, the title's line stays on the vitals, and the field keeps the whole sentence.
+        await field.evaluate((el) => (el as unknown as PageEl).blur());
+        await until("the note gone", () => drawnSentence(bar), (d) => d === null);
+        assert.match(await said(bar), vitals);
+        assert.equal(await field.inputValue(), "5");
+        assert.ok((await describedAs(field)).includes("Healing does nothing while Thorn is dead. Revive Thorn first."), "the description stays whole");
+        await shots.take(dm, "br-c-4-blurred");
+
+        // Focus back in the strip brings it back, and it stays as focus moves within the strip.
+        await field.focus();
+        await until("the note back", () => drawnSentence(bar), (d) => d?.place === "note");
+        await bar.locator("[data-rest-row] [data-rest-mode]").focus();
+        await dm.waitForTimeout(150);
+        assert.equal((await drawnSentence(bar))?.place, "note", "focus on the toggle keeps the note");
+
+        // Away again, a new sentence brings it back without focus: healing the dead turned on, then off again, changes it twice.
+        await field.focus();
+        await field.evaluate((el) => (el as unknown as PageEl).blur());
+        await until("the note gone", () => drawnSentence(bar), (d) => d === null);
+        await ops.send({ t: "room.update", settings: { healRevives: true } });
+        await until("healing brings Thorn back", () => said(bar), (t) => t === "Brings back 1 dead creature.");
+        await ops.send({ t: "room.update", settings: { healRevives: false } });
+        await until("the dead line again", () => said(bar), (t) => t === DEAD_LINE);
+        assert.equal((await drawnSentence(bar))?.place, "note", "a sentence that changes while focus is away shows");
+
+        // Apply succeeds and empties the field: the note goes.
+        await field.focus();
+        await apply.tap();
+        await waitFor("the field empty", async () => (await field.inputValue()) === "");
+        await until("the note gone", () => drawnSentence(bar), (d) => d === null);
+        assert.match(await said(bar), vitals);
+        await closeBars(dm);
+      } finally {
+        await thornAlive();
+      }
+    });
 
     /** Picks an interface size live, from Menu's This device, as a viewer does, and closes the menu again. */
     async function interfaceSize(page: Page, label: "100%" | "130%"): Promise<void> {
