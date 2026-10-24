@@ -1,6 +1,6 @@
 import { createContext, useContext, useId, type CSSProperties, type ReactNode, type Ref } from "react";
 import { theme } from "../lib/theme.ts";
-import { Icon } from "./Icon.tsx";
+import { Icon, type IconName } from "./Icon.tsx";
 
 /**
  * The parts every panel lays itself out with (docs/design-v1-visual.md
@@ -213,6 +213,8 @@ export const GROUP_FOLD = "[data-group-fold]";
  */
 export function Group(props: {
   label: string;
+  /** Its icon, after the chevron and before its name (docs/design-v1-icons-2.md 5), in the chevron's muted color. */
+  icon?: IconName;
   /** Absent for a group that never folds, such as a stat block whose character is not in view: the same row, with no chevron. */
   open?: boolean;
   onToggle?(): void;
@@ -233,9 +235,15 @@ export function Group(props: {
       {props.label}
     </span>
   );
+  const lead = props.icon ? (
+    <span aria-hidden style={{ color: theme.color.textMuted, display: "flex" }}>
+      <Icon name={props.icon} size="sm" />
+    </span>
+  ) : null;
   const summary =
     !open && props.summary ? (
-      <span id={summaryId} style={{ flex: 1, minWidth: 0, textAlign: "right", fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      // No more width of its own than a few words, so the name, the icon and the action keep their line while the summary still says something, cut sooner rather than the action wrapping: the one cut the icon pass allows (docs/design-v1-icons-2.md 3.3).
+      <span id={summaryId} style={{ flex: 1, width: 0, minWidth: "4em", textAlign: "right", fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {props.summary}
       </span>
     ) : null;
@@ -277,11 +285,13 @@ export function Group(props: {
               <span style={{ color: theme.color.textMuted, display: "flex" }}>
                 <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
               </span>
+              {lead}
               {name}
               {summary}
             </button>
           ) : (
             <span style={{ display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1 }}>
+              {lead}
               {name}
               {summary}
             </span>

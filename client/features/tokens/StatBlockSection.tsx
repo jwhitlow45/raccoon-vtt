@@ -113,7 +113,7 @@ export function StatBlockSection(props: {
   if ("ref" in token.actor) {
     return (
       <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
-        {pc ? <PcStatBlock character={pc} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" />}
+        {pc ? <PcStatBlock character={pc} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" icon="statBlock" />}
       </div>
     );
   }
@@ -146,7 +146,7 @@ export function StatBlockSection(props: {
     // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.
     <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
       {statBlockFoldable(link) ? (
-        <Group label="Stat block" open={open} onToggle={toggle} foldRef={focusRef} summary={linkedBlockSummary(link, srd.list)}>
+        <Group label="Stat block" icon="statBlock" open={open} onToggle={toggle} foldRef={focusRef} summary={linkedBlockSummary(link, srd.list)}>
           {link.kind === "room" ? (
             <>
               <StatBlockView view={viewOf(link.monster)} source="room" />
@@ -187,6 +187,7 @@ export function StatBlockSection(props: {
       ) : (
         <Group
           label="Stat block"
+          icon="statBlock"
           action={
             (link.kind === "none" || (keeper !== null && (link.kind === "deleted" || link.kind === "deletedBlock"))) && (access.dm || keeper !== null) ? (
               <SmallButton ref={focusRef} wrap onClick={() => setPicking(true)}>

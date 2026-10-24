@@ -1,3 +1,4 @@
+import type { IconName } from "../components/Icon.tsx";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
@@ -23,7 +24,7 @@ import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { characterPageSlot, openCharacterPage } from "../features/tokens/characterPage.ts";
-import { CreatureHeader } from "../features/tokens/CreatureHeader.tsx";
+import { CreatureHeader, type HeaderTag } from "../features/tokens/CreatureHeader.tsx";
 import { kindLine, sizeText, tokenKind } from "../features/tokens/creatureKind.ts";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
@@ -186,7 +187,7 @@ function TokenDetails(props: PanelProps) {
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":
         return actor ? (
-          <Group key={id} label="Stats" {...groupFold("stats")}>
+          <Group key={id} label="Stats" icon="stats" {...groupFold("stats")}>
             <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
             <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} fromBlock={character?.stats !== undefined} />
             {access.canEditActor("sheetUrl") ? (
@@ -198,7 +199,7 @@ function TokenDetails(props: PanelProps) {
         ) : null;
       case "settings":
         return (
-          <Group key={id} label="Token settings" {...groupFold("settings")}>
+          <Group key={id} label="Token settings" icon="settings" {...groupFold("settings")}>
             {access.dm ? <DmSettings token={token} feetPerCell={feetPerCell} update={update} /> : <OwnerNames token={token} access={access} update={update} />}
           </Group>
         );
@@ -218,11 +219,11 @@ function TokenDetails(props: PanelProps) {
   const rings = token.rangeRings ?? [];
   const height = elevationBadge(token.elevation);
   const noteCount = [token.notes, actor?.notes, access.dm ? actor?.dmNotes : undefined].filter((n) => typeof n === "string" && n.trim() !== "").length;
-  const groups: Record<PanelGroupId, { label: string; key: FoldKey; summary?: string }> = {
-    combat: { label: "Combat", key: relationKey("combat", relation), summary: [hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ") },
-    notes: { label: "Notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}` },
-    position: { label: "Position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ") },
-    image: { label: "Image", key: "image" },
+  const groups: Record<PanelGroupId, { label: string; icon: IconName; key: FoldKey; summary?: string }> = {
+    combat: { label: "Combat", icon: "combat", key: relationKey("combat", relation), summary: [hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ") },
+    notes: { label: "Notes", icon: "notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}` },
+    position: { label: "Position", icon: "position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ") },
+    image: { label: "Image", icon: "image", key: "image" },
   };
   return (
     <div style={{ fontSize: theme.font.body14 }}>
@@ -230,7 +231,7 @@ function TokenDetails(props: PanelProps) {
         if (part.group === null) return section(part.id);
         const g = groups[part.group];
         return (
-          <Group key={part.group} label={g.label} {...groupFold(g.key)} summary={g.summary} holds="sections">
+          <Group key={part.group} label={g.label} icon={g.icon} {...groupFold(g.key)} summary={g.summary} holds="sections">
             {part.sections.map(section)}
           </Group>
         );
@@ -263,9 +264,11 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
   const fp = footprint(token);
   // What carries it and what it carries, from the links in this copy (docs/design-v1-attach.md 4.5).
   const linkTags = usePanelLinkTags(token);
-  const tags: string[] = [];
-  if (token.visibility === "dm") tags.push("Hidden from players");
-  if (token.locked) tags.push("Locked");
+  // The tracker's words and icons for the same states (docs/design-v1-icons-2.md 5): "Hidden" with the eye struck through fits a 320 px phone at 130% where "Hidden from players" with it would cut.
+  const tags: (string | HeaderTag)[] = [];
+  if (token.visibility === "dm") tags.push({ text: "Hidden", icon: "hidden", title: "Hidden from players" });
+  if (token.locked) tags.push({ text: "Locked", icon: "locked" });
+  // Words alone: the Hidden tag beside it already draws the struck-out eye (docs/design-v1-icons-2.md 3.2).
   if (token.nameHidden) tags.push("Name hidden");
   tags.push(...linkTags);
   const kind = tokenKind({ token, companionOf: keeper?.name, character: props.character, cr: props.actor?.cr });
@@ -529,7 +532,7 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
   if (token.companion) {
     // A companion's owners are its character's, kept in step by the server (docs/design-v1-combat-flow.md 3.6.4).
     return (
-      <Group label="Owners" {...props.group} summary={names.length > 0 ? names.join(", ") : "None"}>
+      <Group label="Owners" icon="group" {...props.group} summary={names.length > 0 ? names.join(", ") : "None"}>
         <CompanionOwners token={token} />
       </Group>
     );
@@ -538,7 +541,7 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
     .map((id) => members?.[id]?.name)
     .filter((n): n is string => !!n);
   return (
-    <Group label="Owners" {...props.group} summary={everyone.length > 0 ? everyone.join(", ") : "None"}>
+    <Group label="Owners" icon="group" {...props.group} summary={everyone.length > 0 ? everyone.join(", ") : "None"}>
       <Note>Owners can move it and edit what their role allows.</Note>
       <div style={{ display: "grid" }}>
         {list.map((m) => (

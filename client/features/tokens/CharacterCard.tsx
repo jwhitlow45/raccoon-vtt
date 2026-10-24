@@ -128,7 +128,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return <PcStatBlock key={id} character={character} fold={fold("statBlock")} />;
       case "combat":
         return (
-          <Group key={id} label="Combat" {...fold("page.combat")} summary={[hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : ""].filter(Boolean).join(" · ")} holds="sections">
+          <Group key={id} label="Combat" icon="combat" {...fold("page.combat")} summary={[hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : ""].filter(Boolean).join(" · ")} holds="sections">
             <HpSection
               actor={actor}
               hpVisibility={undefined}
@@ -145,7 +145,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return <CharacterCompanions key={id} character={character} canAdd onAdd={props.onAddCompanion} onBlocks={props.onBlocks} close={props.close} group={fold("page.companions")} />;
       case "notes":
         return (
-          <Group key={id} label="Notes" {...fold("page.notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
+          <Group key={id} label="Notes" icon="notes" {...fold("page.notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
             <Labeled label="On the card" hint="The DM and this character's players read it.">
               <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
             </Labeled>
@@ -158,7 +158,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         );
       case "image":
         return (
-          <Group key={id} label="Image" {...fold("page.image")}>
+          <Group key={id} label="Image" icon="image" {...fold("page.image")}>
             <ImageField
               value={character.defaultImage}
               onChange={setImage}
@@ -173,7 +173,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         );
       case "stats":
         return (
-          <Group key={id} label="Stats" {...fold("page.stats")}>
+          <Group key={id} label="Stats" icon="stats" {...fold("page.stats")}>
             {access.canEdit("name") ? (
               <FieldRow label="Name" fill>
                 <TextField label="Character name" value={character.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
@@ -239,7 +239,7 @@ function CharacterOwners(props: { character: Character; members: RoomState["memb
   const players = Object.values(props.members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
   const names = players.filter((m) => owners.includes(m.id)).map((m) => m.name);
   return (
-    <Group label="Played by" {...props.group} summary={names.length > 0 ? names.join(", ") : "No player yet"}>
+    <Group label="Played by" icon="group" {...props.group} summary={names.length > 0 ? names.join(", ") : "No player yet"}>
       {players.length === 0 ? <Help>No players have joined yet.</Help> : null}
       <div>
         {players.map((m) => (

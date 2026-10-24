@@ -69,7 +69,7 @@ export function PcStatBlock(props: {
   if (!character.stats && !shaped) {
     return (
       <>
-        <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
+        <Group label="Stat block" icon="statBlock" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
           {edits ? (
             <>
               <Help>Add this character's stat block, or take a shape such as Wild Shape.</Help>
@@ -86,7 +86,7 @@ export function PcStatBlock(props: {
   }
   return (
     <>
-      <Group label="Stat block" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary} action={take}>
+      <Group label="Stat block" icon="statBlock" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary} action={take}>
         {shaped ? <ShapeBody character={character} edits={edits} /> : <PcStatsView character={character} />}
         {edits ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>

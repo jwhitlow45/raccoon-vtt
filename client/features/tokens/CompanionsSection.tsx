@@ -125,7 +125,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
     });
   };
   return (
-    <Group label="Companions" {...props.group} summary={list.length > 0 ? list.map(displayName).join(", ") : "None yet"}>
+    <Group label="Companions" icon="companion" {...props.group} summary={list.length > 0 ? list.map(displayName).join(", ") : "None yet"}>
       {list.length > 0 ? (
         <RowList label={`${props.character.name}'s companions`}>
           {list.map((t) => (
@@ -493,7 +493,7 @@ export function CompanionSection(props: {
   const staysLine = stored ? <Help style={{ overflowWrap: "anywhere" }}>{`Its stat block is ${name}'s and stays with ${name}.`}</Help> : null;
   return (
     // A group as Owners beside it is, which names its character while folded as Owners names its players.
-    <Group label="Companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>
+    <Group label="Companion" icon="companion" open={props.group?.open} onToggle={props.group?.onToggle} summary={name}>
       {access.dm ? (
         <>
           <FieldRow label="Belongs to" fill>

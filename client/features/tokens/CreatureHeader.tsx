@@ -1,9 +1,13 @@
 import type { ReactNode } from "react";
 import type { ImageRef } from "#shared/model.ts";
+import type { IconName } from "../../components/Icon.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import type { KindLine } from "./creatureKind.ts";
+
+/** A tag with the icon its state wears elsewhere, such as the tracker's Hidden (docs/design-v1-icons-2.md 5), and its full words as its tooltip where they are shorter. */
+export type HeaderTag = { text: string; icon: IconName; title?: string };
 
 /** A character's page's name, found by the focus that lands there. */
 export const CREATURE_HEADING = "[data-creature-heading]";
@@ -39,7 +43,7 @@ export function CreatureHeader(props: {
   onCompanionOf?: (() => void) | null;
   /** The name takes focus from script, as a character's page's heading does after a delete it refused (CREATURE_HEADING). */
   focusable?: boolean;
-  tags: readonly string[];
+  tags: readonly (string | HeaderTag)[];
   afterTags?: ReactNode;
   children?: ReactNode;
 }) {
@@ -71,11 +75,17 @@ export function CreatureHeader(props: {
         </p>
         {props.tags.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-            {props.tags.map((tag) => (
-              <Tag key={tag} cut="100%">
-                {tag}
-              </Tag>
-            ))}
+            {props.tags.map((tag) =>
+              typeof tag === "string" ? (
+                <Tag key={tag} cut="100%">
+                  {tag}
+                </Tag>
+              ) : (
+                <Tag key={tag.text} cut="100%" icon={tag.icon} {...(tag.title ? { title: tag.title } : null)}>
+                  {tag.text}
+                </Tag>
+              ),
+            )}
           </div>
         ) : null}
         {props.afterTags}
