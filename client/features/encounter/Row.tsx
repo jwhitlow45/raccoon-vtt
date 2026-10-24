@@ -1014,23 +1014,33 @@ function UsesGroup(props: { target: ActorTarget; name: string; children?: ReactN
   );
 }
 
-/** The DM's chips for spent uses (logic.ts markChips), as items of a row's description: at most 3, then "+2 more". */
+/**
+ * The DM's chips for spent uses (logic.ts markChips), one item of a row's
+ * description: at most 3, then "+2 more". They take a line of their own
+ * under its other tags, where a chip would otherwise wrap alone under them
+ * on a phone, and wrap among themselves.
+ */
 function spentChips(marks: Parameters<typeof markChips>[0]): ReactNode[] {
   const { chips, more } = markChips(marks);
+  if (chips.length === 0) return [];
   return [
-    ...chips.map((chip) => (
-      // A name of any length: cut, so the row's other tags keep their room.
-      <Tag key={chip.key} tone="turn" dense cut={160}>
-        {chip.text}
-      </Tag>
-    )),
-    ...(more > 0
-      ? [
-          <Tag key="more" tone="muted" dense>
-            +{more} more
-          </Tag>,
-        ]
-      : []),
+    <span key="spent" data-spent-chips="" style={{ flexBasis: "100%", minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+      <DescribedItems
+        items={[
+          ...chips.map((chip) => (
+            // A name of any length: cut, so the row's other tags keep their room.
+            <Tag key={chip.key} tone="turn" dense cut={160}>
+              {chip.text}
+            </Tag>
+          )),
+          more > 0 ? (
+            <Tag key="more" tone="muted" dense>
+              +{more} more
+            </Tag>
+          ) : null,
+        ]}
+      />
+    </span>,
   ];
 }
 
