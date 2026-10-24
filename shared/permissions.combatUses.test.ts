@@ -54,4 +54,17 @@ describe("actor.use permissions (docs/design-v1-combat-controls.md 3.1)", () => 
     assert.deepEqual(hidden, missing, "a hidden monster answers as a missing one");
     assert.ok(!hidden.ok && hidden.code === "gone");
   });
+
+  test("a player lent only a character's token spends none of its class resources, after the token is checked as there", () => {
+    const state = setup();
+    state.tokens.thorn = { ...state.tokens.thorn!, ownerIds: ["p2"] };
+    const rage = spend({ tokenId: "thorn" }, { kind: "resource", id: "rage" });
+    const lent = canApply(rage, P2, state, deps);
+    assert.ok(!lent.ok && lent.code === "forbidden");
+    assert.deepEqual(canApply(rage, P1, state, deps), { ok: true }, "the character's own player still does");
+    assert.deepEqual(canApply(spend({ tokenId: "thorn" }), P2, state, deps), { ok: true }, "and the lent player's other uses stand");
+    state.tokens.thorn = { ...state.tokens.thorn!, sceneId: "s2" };
+    const away = canApply(rage, P2, state, deps);
+    assert.ok(!away.ok && away.code === "gone", "a token on another scene is not there for them");
+  });
 });

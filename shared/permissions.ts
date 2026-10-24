@@ -784,12 +784,22 @@ function forPlayer(op: Op, c: Check): Decision {
     // A death save rolled on the server, as its counts are set (docs/design-v1-dice.md 4.1).
     case "actor.deathRoll":
     case "actor.rechargeRoll":
-    case "actor.use":
     case "actor.prompt":
     case "actor.rest": {
       const t = c.target(op.target);
       if (!t.visible) return GONE;
       return t.owned ? OK : NOT_YOURS;
+    }
+
+    case "actor.use": {
+      const t = c.target(op.target);
+      if (!t.visible) return GONE;
+      if (!t.owned) return NOT_YOURS;
+      // Class resources are the character's players' alone (docs/design-v1-combat-controls.md 7.2), so a player lent
+      // only the token spends none, as they read and edit none.
+      if (op.use.kind !== "resource" || !("tokenId" in op.target)) return OK;
+      const token = c.state.tokens[op.target.tokenId];
+      return token && "ref" in token.actor && !c.ownsCharacterId(token.actor.ref) ? NOT_YOURS : OK;
     }
 
     case "actor.effect.remove": {
