@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page } from "playwright-core";
+import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
@@ -34,6 +35,21 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * measured too, as live play 17 found them: Pat's ask card and Request a
  * roll from the needle trap's Ask to disarm at 390 and 320, and the group
  * save page a trap card's Save and damage opens there and at 1440.
+ *
+ * The combat controls' screens (docs/design-v1-combat-controls.md 9) are
+ * measured at 390 x 844, 320 x 568 and 1440 x 900, at 100% and 130%, in a
+ * fight of their own: Thorn dying with his class resources, an adult red
+ * dragon with Fire Breath used, and a troll at 0 HP that took Fire, with
+ * monsters dying at 0 HP off. Pat measures Thorn's Class resources
+ * section with its level-up question, a pool's amount field open and with
+ * its range error, the Add sheet with no class, from Barbarian 14, Ranger
+ * 3 and Bard with its modifier's error, and of his own with Spend an
+ * amount, the Update and Edit sheets, his death save card, his turn card
+ * with a pool's amount field, and Thorn's Uses in his row and his bar.
+ * The DM measures the section in Thorn's token panel, the dragon's Uses
+ * in its row and its bar, In lair while it waits for the server, the
+ * dragon's recharge card and its turn card folded and open, and the
+ * troll's Regeneration card with its death save card waiting for it.
  *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
@@ -81,8 +97,11 @@ const PHONE_ROOTS = new Set(["390x844", "320x568"]);
 const GROUP_SAVE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 /** The sizes where the sweep measures the Dice panel's pass (docs/design-v1-dice-pass.md 11.3). */
 const DICE_AT = new Set([...PHONE_ROOTS, "1440x900"]);
+/** The sizes where the sweep measures the combat controls, as their own e2e files do (docs/design-v1-combat-controls.md 9). */
+const COMBAT_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
 let server: Server;
+let srd: readonly SrdMonster[] = [];
 let browser: Browser;
 let dmContext: BrowserContext;
 let patContext: BrowserContext;
@@ -114,7 +133,11 @@ const run = {
     mule: randomUUID(),
     dragon: randomUUID(),
     wolf: randomUUID(),
+    redDragon: randomUUID(),
+    troll: randomUUID(),
   },
+  /** The combat screens' fight: its rows, Thorn's first. */
+  fight: { thorn: randomUUID(), dragon: randomUUID(), troll: randomUUID() },
   traps: { pit: randomUUID(), needle: randomUUID(), door: randomUUID(), wire: randomUUID() },
 };
 
@@ -183,6 +206,8 @@ const SOME_SIZES: Record<string, number> = {
   "dp-card-tabs": 6,
   "dp-card-wolf": 6,
   "dp-groups-wolf": 6,
+  // The DM's turn card folds under 600 px wide, so on the phones only.
+  "cu-turn-folded": 4,
 };
 
 /**
@@ -843,6 +868,379 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------ the combat controls (docs/design-v1-combat-controls.md 9)
+
+const RED_DRAGON = "Adult Red Dragon";
+/** The troll's cells, in the board's corner, clear of the traps and the dragon. */
+const TROLL_AT = { x: 1, y: 11 };
+/** Thorn's class resources: Rage from a preset read at level 5, so his level of 7 asks to update it, and a pool. */
+const THORN_RESOURCES = [
+  { id: "rage", name: "Rage", max: 3, reset: "shortOne", preset: "barbarian-rage", level: 5, atLevel: 5 },
+  { id: "loh", name: "Lay on Hands", max: 25, reset: "long", pool: true },
+];
+const LEVEL_UP = "Your level went up. Update Barbarian resources?";
+
+function srdActor(id: string, hp?: number) {
+  const m = srd.find((x) => x.srdId === id);
+  assert.ok(m, `no SRD monster ${id}`);
+  const made = monsterActor(m);
+  return hp === undefined ? made : { ...made, hp: { ...made.hp, cur: hp } };
+}
+
+/** Moves the turn on, as the DM, until `entryId` acts. */
+async function turnTo(entryId: string): Promise<void> {
+  for (let i = 0; i < 4 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
+    const encounter = dmSocket.state!.encounter!;
+    await ops.send({ t: "encounter.next", from: { entry: encounter.activeEntryId, round: encounter.round } });
+    await waitFor("the turn moved", () => (dmSocket.state?.encounter?.activeEntryId !== encounter.activeEntryId || dmSocket.state?.encounter?.round !== encounter.round ? true : null));
+  }
+  assert.equal(dmSocket.state?.encounter?.activeEntryId, entryId);
+}
+
+/**
+ * The combat screens' fight, in place of the sweep's own: Thorn at 0 HP
+ * with no class resources yet, the red dragon with Fire Breath used, and
+ * the troll at 0 HP after Fire, all three in a fight on Thorn's turn, with
+ * monsters dying at 0 HP off so the troll is dying, not dead.
+ */
+async function combatStart(): Promise<void> {
+  await settleTraps();
+  if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+  await ops.send({ t: "room.update", settings: { monstersDieAtZero: false } });
+  const monster = (id: string, extra: Record<string, unknown>) => ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, visibility: "all", kind: "monster", disposition: "hostile", ...extra } });
+  await monster(run.ids.redDragon, { name: RED_DRAGON, size: "huge", ...DRAGON_AT, actor: { inline: srdActor("adult-red-dragon") } });
+  await monster(run.ids.troll, { name: "Troll", size: "large", ...TROLL_AT, actor: { inline: srdActor("troll", 10) } });
+  await ops.send({ t: "actor.hp", target: { tokenId: run.ids.troll }, change: { kind: "damage", amount: 10, types: ["fire"] } });
+  await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "damage", amount: 30 } });
+  await ops.send({ t: "actor.use", target: { tokenId: run.ids.redDragon }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true } });
+  await ops.send({
+    t: "encounter.start",
+    entries: [
+      { id: run.fight.thorn, tokenId: run.ids.thorn, value: 20 },
+      { id: run.fight.dragon, tokenId: run.ids.redDragon, value: 15 },
+      { id: run.fight.troll, tokenId: run.ids.troll, value: 10 },
+    ],
+  });
+  await waitFor("the combat screens' fight", () => dmSocket.state?.encounter?.entries.some((e) => e.id === run.fight.troll) || null);
+  await turnTo(run.fight.thorn);
+  await waitFor("Thorn's turn record, dying", () => (dmSocket.state?.characters[run.ids.thornChar]?.actor.turnRecord?.life === "dying" ? true : null));
+}
+
+/** The sweep's room as it was: no fight of the combat screens, no dragon or troll, Thorn healed with no class resources or level. */
+async function combatEnd(): Promise<void> {
+  consoles.dm.expectSocketFailures = false;
+  await dmContext.setOffline(false);
+  if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+  for (const id of [run.ids.redDragon, run.ids.troll]) await ops.send({ t: "token.delete", tokenId: id }).catch(() => {});
+  await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { resources: [], level: null } });
+  await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "heal", amount: 30 } });
+  await ops.send({ t: "room.update", settings: { monstersDieAtZero: true } });
+}
+
+/** Puts away a phone's open sheets, which would take a tap meant for the map. */
+async function closeSheets(page: Page): Promise<void> {
+  const open = page.locator("dialog[data-rvtt-sheet]").filter({ visible: true });
+  for (let i = 0; i < 3; i++) {
+    const n = await open.count();
+    if (n === 0) return;
+    await open.first().getByRole("button", { name: /^Close / }).first().click();
+    await waitFor("a sheet put away", async () => ((await open.count()) < n ? true : null), 5_000);
+  }
+}
+
+/**
+ * An alert card by its name: in the alerts column, or, where the column
+ * stands as its summary row, in the alerts that row opens over the screen.
+ */
+async function alertCard(page: Page, name: string): Promise<Locator | null> {
+  const inColumn = page.getByRole("group", { name, exact: true }).filter({ visible: true }).first();
+  if (await showsWithin(inColumn, 3_000)) return inColumn;
+  const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
+  if (!(await visible(summary))) return null;
+  await summary.first().click();
+  const overlay = page.getByRole("dialog", { name: "Alerts" });
+  if (!(await showsWithin(overlay, 2_500))) return null;
+  const over = overlay.getByRole("group", { name, exact: true }).first();
+  return (await showsWithin(over, 2_000)) ? over : null;
+}
+
+/** The tracker: the side panel's tab from 900 layout px up, else the sheet the turn strip's button opens. */
+async function openTracker(page: Page): Promise<Locator> {
+  const tab = page.getByRole("tab", { name: "Initiative" });
+  if (await visible(tab)) await tab.first().click();
+  else await page.getByRole("button", { name: /^Initiative, round/ }).first().click();
+  await page.locator("[data-round-header]").first().waitFor();
+  return page.locator("[data-round-section]").first();
+}
+
+/** A creature's Uses group in its tracker row's options, opened. */
+async function rowUses(page: Page, name: string): Promise<{ tracker: Locator; group: Locator }> {
+  const tracker = await openTracker(page);
+  const toggle = tracker.getByRole("button", { name: `${name} options` });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  const group = tracker.getByRole("group", { name: `${name}'s uses` });
+  await group.waitFor();
+  return { tracker, group };
+}
+
+/** A creature's token bar's Uses drawer, opened from a tap on its token, or null where the map has no room for the tap. */
+async function barUses(page: Page, name: string, cell: { x: number; y: number }): Promise<{ bar: Locator; drawer: Locator } | null> {
+  await closeSheets(page);
+  await escapeAll(page);
+  if (!(await canvasAt(page, cell))) return null;
+  const bar = await selectToken(page, name, cell);
+  if (!bar) return null;
+  const uses = bar.getByRole("button", { name: "Uses", exact: true });
+  await waitFor("the Uses button ready", async () => ((await uses.isEnabled()) ? true : null));
+  if ((await uses.getAttribute("aria-pressed")) !== "true") await uses.click();
+  const drawer = bar.locator("[data-uses-drawer]");
+  await drawer.waitFor();
+  return { bar, drawer };
+}
+
+async function closeBar(bar: Locator): Promise<void> {
+  if ((await bar.count()) === 0) return;
+  await bar.getByRole("button", { name: "Close", exact: true }).first().click();
+  await bar.waitFor({ state: "detached" });
+}
+
+/** The Characters panel: the side panel's tab where there is a side panel, else a sheet from the tool bar's Panels list. */
+async function openCharacters(page: Page): Promise<Locator> {
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if (await visible(tabs)) {
+    await openSideTab(page, "Characters");
+    return page.getByRole("tabpanel", { name: sideTabName("Characters") });
+  }
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+  if (await visible(sheet)) return sheet;
+  await closeSheets(page);
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/** Thorn's page, where Pat plays him alone, so the panel lands there. */
+async function thornsPage(page: Page): Promise<Locator> {
+  const panel = await openCharacters(page);
+  const heading = panel.locator("[data-creature-heading]").filter({ hasText: "Thorn" });
+  const opener = panel.locator(`[data-opener="character:${run.ids.thornChar}"]`);
+  await heading.or(opener).first().waitFor();
+  if ((await heading.count()) === 0) await opener.click();
+  await heading.waitFor();
+  return panel;
+}
+
+/** The Class resources section in a panel: the section whose own heading it is. */
+function resourcesSection(scope: Locator): Locator {
+  return scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Class resources"]]');
+}
+
+function resourceRow(scope: Locator, name: string): Locator {
+  return resourcesSection(scope).getByRole("listitem").filter({ has: scope.page().getByText(name, { exact: true }) });
+}
+
+function resourceSheet(page: Page, title: string): Locator {
+  return page.getByRole("dialog", { name: title, exact: true });
+}
+
+/** Closes a class resource sheet by its Cancel. */
+async function cancelSheet(sheet: Locator): Promise<void> {
+  await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+  await sheet.waitFor({ state: "detached" });
+}
+
+/**
+ * Pat's combat screens, on his page opened again at this size: the Add
+ * sheet before Thorn has any class resource, then with Rage and Lay on
+ * Hands at level 7, the section with its level-up question, the Update
+ * sheet, a pool's amount field open and with its error, the Add sheet's
+ * other forms, the Edit sheet, his death save and turn cards on his turn,
+ * and Thorn's Uses in his row and his bar.
+ */
+async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
+  let scope = await thornsPage(page);
+  await resourcesSection(scope).getByRole("button", { name: "Add a class resource" }).click();
+  const add = resourceSheet(page, "Add a class resource");
+  await add.getByText("Choose a class to see its resources at its level.", { exact: true }).waitFor();
+  await sweep.measure(page, "cr-add-no-class", add);
+  await cancelSheet(add);
+
+  await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 7, resources: THORN_RESOURCES } });
+  scope = await thornsPage(page);
+  const section = resourcesSection(scope);
+  await section.getByText(LEVEL_UP, { exact: true }).waitFor();
+  await section.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "cr-section-page", section);
+
+  await section.locator("div").filter({ hasText: /^Your level went up\. Update Barbarian resources\?Update$/ }).getByRole("button", { name: "Update" }).click();
+  const update = resourceSheet(page, "Update Barbarian resources");
+  await update.getByRole("combobox", { name: "Barbarian level" }).waitFor();
+  await sweep.measure(page, "cr-update", update);
+  await cancelSheet(update);
+
+  const hands = resourceRow(scope, "Lay on Hands");
+  await hands.getByRole("button", { name: "Use Lay on Hands, 25 of 25 left" }).click();
+  const field = hands.getByRole("textbox", { name: "Lay on Hands to spend, up to 25" });
+  await field.waitFor();
+  await sweep.measure(page, "cr-amount", hands);
+  await field.fill("99");
+  await hands.getByRole("button", { name: "Spend", exact: true }).click();
+  await hands.getByText("Spend 1 to 25.", { exact: true }).waitFor();
+  await sweep.measure(page, "cr-amount-error", hands);
+  await hands.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await section.getByRole("button", { name: "Add a class resource" }).click();
+  await add.getByRole("combobox", { name: "Class" }).selectOption("barbarian");
+  await add.getByRole("combobox", { name: "Barbarian level" }).selectOption("14");
+  await add.getByText("Path of the Berserker. 1 use. Back on a Long Rest.", { exact: true }).waitFor();
+  await sweep.measure(page, "cr-add-barbarian-14", add);
+  await add.getByRole("combobox", { name: "Class" }).selectOption("ranger");
+  await add.getByRole("combobox", { name: "Ranger level" }).selectOption("3");
+  await add.getByText(/^No Ranger resources yet\./).waitFor();
+  await sweep.measure(page, "cr-add-none-yet", add);
+  await add.getByRole("combobox", { name: "Class" }).selectOption("bard");
+  await add.getByRole("textbox", { name: "Charisma modifier" }).waitFor();
+  await add.getByRole("button", { name: /^Add \d+ resources?$/ }).click();
+  await add.getByText(/^Fill in the Charisma modifier/).waitFor();
+  await sweep.measure(page, "cr-add-modifier-error", add);
+  await add.getByRole("radio", { name: "Your own" }).check();
+  await add.getByRole("checkbox", { name: "Spend an amount" }).check();
+  await sweep.measure(page, "cr-add-own", add);
+  await cancelSheet(add);
+
+  await resourceRow(scope, "Rage").getByRole("button", { name: "Edit Rage" }).click();
+  const edit = resourceSheet(page, "Edit Rage");
+  await edit.getByRole("textbox", { name: "Name" }).waitFor();
+  await sweep.measure(page, "cr-edit", edit);
+  await cancelSheet(edit);
+  await closeSheets(page);
+  await escapeAll(page);
+
+  // His turn's cards: the death save, and the turn's menu with a pool's amount field open. On a phone the turn card stands folded until Show.
+  const save = await alertCard(page, "Death save for Thorn");
+  if (save) await sweep.measure(page, "cu-death-save", save);
+  else await sweep.missing(page, "cu-death-save", "Thorn's turn at 0 HP showed Pat no death save card");
+  let turn = await alertCard(page, "Thorn's turn");
+  if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
+    await turn.getByRole("button", { name: "Show Thorn's turn" }).click();
+    turn = await alertCard(page, "Thorn's turn");
+  }
+  if (turn) {
+    await turn.getByRole("button", { name: /^Use Lay on Hands/ }).click();
+    await turn.getByRole("textbox", { name: /^Lay on Hands to spend/ }).waitFor();
+    await sweep.measure(page, "cu-turn-amount", turn);
+    await turn.getByRole("button", { name: "Cancel", exact: true }).click();
+    // Dismissed here alone, so Thorn's token is free for the bar's tap.
+    await turn.getByRole("button", { name: "Dismiss Thorn's turn" }).click();
+  } else await sweep.missing(page, "cu-turn-amount", "Thorn's turn showed Pat no turn card");
+  const saveAgain = await alertCard(page, "Death save for Thorn");
+  if (saveAgain) await saveAgain.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await escapeAll(page);
+
+  const { group } = await rowUses(page, "Thorn");
+  await sweep.measure(page, "cu-row-uses-thorn", group);
+  await closeSheets(page);
+  const thorn = await barUses(page, "Thorn", { x: 5, y: 5 });
+  if (thorn) {
+    await sweep.measure(page, "cu-bar-drawer-thorn", thorn.drawer);
+    await closeBar(thorn.bar);
+  } else await sweep.missing(page, "cu-bar-drawer-thorn", "a tap on Thorn opened no window");
+}
+
+/**
+ * The DM's combat screens: the section in Thorn's token panel, the
+ * dragon's Uses in its row and its bar, In lair while it waits for the
+ * server, then the dragon's turn with its recharge card and its turn card,
+ * and the troll's with Regeneration and its death save card waiting.
+ */
+async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
+  // Thorn's death save shows the DM too, and could cover a token.
+  const save = await alertCard(page, "Death save for Thorn");
+  if (save) await save.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await escapeAll(page);
+
+  const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
+  if (thorn) {
+    await thorn.getByRole("button", { name: "Details", exact: true }).click();
+    const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
+    await panel.getByRole("heading", { name: "Thorn" }).first().waitFor();
+    const combat = panel.getByRole("button", { name: "Combat", exact: true });
+    if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+    const section = resourcesSection(panel);
+    await section.getByText(LEVEL_UP, { exact: true }).waitFor();
+    await section.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "cr-section-panel", section);
+    await closeSheets(page);
+    await escapeAll(page);
+  } else await sweep.missing(page, "cr-section-panel", "a tap on Thorn opened no window");
+
+  const { tracker, group } = await rowUses(page, RED_DRAGON);
+  await sweep.measure(page, "cu-row-uses", group);
+  // In lair waits for the server while the page is offline, busy, and takes the lair's counts once it is back.
+  const lair = tracker.getByRole("switch", { name: /^In lair/ });
+  consoles.dm.expectSocketFailures = true;
+  await dmContext.setOffline(true);
+  await lair.click();
+  await waitFor("In lair busy", async () => ((await lair.getAttribute("aria-busy")) === "true" ? true : null), 5_000);
+  await sweep.measure(page, "cu-in-lair-busy", lair);
+  await dmContext.setOffline(false);
+  await waitFor("the dragon in its lair", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === run.fight.dragon)?.inLair ? true : null), 20_000);
+  await waitFor("In lair answered", async () => ((await lair.getAttribute("aria-busy")) === null ? true : null), 20_000);
+  consoles.dm.expectSocketFailures = false;
+  await closeSheets(page);
+
+  const dragon = await barUses(page, RED_DRAGON, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+  if (dragon) {
+    await sweep.measure(page, "cu-bar-drawer", dragon.drawer);
+    await closeBar(dragon.bar);
+  } else await sweep.missing(page, "cu-bar-drawer", "a tap on the dragon opened no window");
+
+  await turnTo(run.fight.dragon);
+  const recharge = await alertCard(page, `Fire Breath can recharge (5–6). ${RED_DRAGON}`);
+  if (recharge) await sweep.measure(page, "cu-recharge", recharge);
+  else await sweep.missing(page, "cu-recharge", "the dragon's turn showed no recharge card");
+  await escapeAll(page);
+  let turn = await alertCard(page, `${RED_DRAGON}'s turn`);
+  if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
+    await sweep.measure(page, "cu-turn-folded", turn);
+    await turn.getByRole("button", { name: `Show ${RED_DRAGON}'s turn` }).click();
+    turn = await alertCard(page, `${RED_DRAGON}'s turn`);
+  }
+  if (turn) await sweep.measure(page, "cu-turn", turn);
+  else await sweep.missing(page, "cu-turn", "the dragon's turn showed no turn card");
+  await escapeAll(page);
+
+  await turnTo(run.fight.troll);
+  const regeneration = await alertCard(page, "Regeneration for Troll");
+  if (regeneration) {
+    await regeneration.getByText("Troll is at 0 HP and regenerates 15 HP.", { exact: true }).waitFor();
+    await sweep.measure(page, "cu-regeneration", regeneration);
+  } else await sweep.missing(page, "cu-regeneration", "the troll's turn at 0 HP showed no Regeneration card");
+  await escapeAll(page);
+  const waits = await alertCard(page, "Death save for Troll");
+  if (waits) {
+    await waits.getByRole("status").getByText("Waiting for Regeneration", { exact: true }).waitFor();
+    await sweep.measure(page, "cu-death-save-waits", waits);
+  } else await sweep.missing(page, "cu-death-save-waits", "the troll's turn at 0 HP showed no death save card");
+  await escapeAll(page);
+}
+
+/** The combat screens at one size: Pat's on his page opened again, then the DM's, in their own fight, which ends with them. */
+async function combatScreens(sweep: Sweep, page: Page, size: Size, scale: number): Promise<void> {
+  try {
+    await combatStart();
+    pat.setDefaultTimeout(10_000);
+    await openAt(pat, size, scale);
+    await patCombatScreens(sweep, pat);
+    await pat.goto("about:blank");
+    await openAt(page, size, scale);
+    await dmCombatScreens(sweep, page);
+  } finally {
+    await combatEnd();
+  }
+}
+
 /** Request a roll as the needle trap's Ask to disarm opens it over its pane, closed again by Cancel. */
 async function requestScreen(sweep: Sweep, page: Page, pane: Locator): Promise<void> {
   const ask = pane.getByRole("button", { name: "Ask to disarm", exact: true });
@@ -1306,6 +1704,7 @@ const CASES = `
 
 describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
   before(async () => {
+    srd = await loadMonsters();
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -1658,6 +2057,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
+          if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);
           console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
         } finally {
           sweep.tally();
