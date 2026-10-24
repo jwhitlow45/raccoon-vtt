@@ -1,5 +1,5 @@
 import { keys } from "../keys.ts";
-import type { Effect, Encounter, EncounterSnapshot, InitEntry, RoomState, Token, TurnStart, Viewer } from "../model.ts";
+import type { Effect, Encounter, EncounterSnapshot, InitEntry, RoomState, Token, TurnStart, TurnUses, Viewer } from "../model.ts";
 import type { EntryInput, OpOf } from "../protocol.ts";
 import {
   anchorsForEntry,
@@ -17,7 +17,7 @@ import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners } from "../pro
 import { effectEvent } from "../rules/hp.ts";
 import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
-import { restoreTurnUses, startTurnUses, withoutTurnScoped } from "./uses.ts";
+import { restoreTurnUses, savedHolder, startTurnUses, withoutTurnScoped } from "./uses.ts";
 
 /** How many `next` steps `prev` can walk back. */
 export const MAX_HISTORY = 20;
@@ -545,7 +545,7 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
   for (const [id, effects] of Object.entries(snapshot.effects).sort(([a], [b]) => (a < b ? -1 : 1))) {
     restoreEffects(tx, id, effects);
   }
-  if (snapshot.legendary) restoreLegendary(tx, snapshot.legendary);
+  if (snapshot.legendary) restoreLegendary(tx, snapshot.legendary, snapshot.turnUses);
   if (snapshot.turnUses) restoreTurnUses(tx, snapshot.turnUses);
   for (const revealed of snapshot.revealed) {
     const token = tx.state.tokens[revealed.tokenId];
@@ -572,11 +572,19 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
   }
 }
 
-/** Puts back the legendary actions a creature had used, if it still has legendary actions to count. */
-function restoreLegendary(tx: Tx, saved: NonNullable<EncounterSnapshot["legendary"]>): void {
-  const resolved = tx.state.characters[saved.holderId]
-    ? tx.tryResolveActor({ characterId: saved.holderId })
-    : tx.tryResolveActor({ tokenId: saved.holderId });
+/**
+ * Puts back the legendary actions a creature had used, if it still has legendary actions to count. From op version 20
+ * a Next saves the landing creature's turn with its block link (uses.ts startTurnUses), so a creature relinked or
+ * converted since gets no pips back, as its marks do not (docs/design-v1-combat-controls.md 3.3). A step saved before
+ * holds no turns, and its pips go back as they always did.
+ */
+function restoreLegendary(tx: Tx, saved: NonNullable<EncounterSnapshot["legendary"]>, turns: readonly TurnUses[] | undefined): void {
+  const turn = turns?.find((t) => t.holderId === saved.holderId);
+  const resolved = turns
+    ? turn && savedHolder(tx, turn)
+    : tx.state.characters[saved.holderId]
+      ? tx.tryResolveActor({ characterId: saved.holderId })
+      : tx.tryResolveActor({ tokenId: saved.holderId });
   const legendary = resolved?.actor.legendary;
   if (!resolved || !legendary) return;
   // In lair may have lowered the count since (docs/design-v1-combat-controls.md 2.4). Older ops put the pips back as they were.

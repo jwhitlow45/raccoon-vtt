@@ -190,6 +190,11 @@ describe("turn records (docs/design-v1-combat-controls.md 2.3)", () => {
     assert.equal(f.of("horse").legendary!.actionsUsed, 0);
     assert.equal(f.of("horse").turnRecord, undefined);
     assert.equal(f.state.encounterHistory.at(-1)!.turnUses, undefined);
+    // Previous after the deploy reads a step saved with no turns, and puts the pips back as before.
+    const back = applyOp(f.state, { t: "encounter.prev" }, DM, env(f.seq + 1));
+    assert.ok(back.ok);
+    const horse = back.state.tokens.horse!.actor as { inline: Actor };
+    assert.equal(horse.inline.legendary!.actionsUsed, 2);
   });
 
   test("a removal that passes the turn on starts it with records, ticks no duration and keeps Reactions", () => {
@@ -234,10 +239,12 @@ describe("turn records (docs/design-v1-combat-controls.md 2.3)", () => {
     f.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1, key: "legendaryActions:fiery-rays", name: "Fiery Rays", once: true } });
     f.next().next().next().next();
     assert.equal(f.active(), "dragon");
-    // Relinked to another block: its keys named the old one.
+    assert.equal(f.of("dragon").legendary!.actionsUsed, 0, "its start refilled the pip Fiery Rays spent");
+    // Relinked to another block: its keys named the old one, and its pips counted the old block's actions.
     f.run({ t: "token.update", tokenId: "dragon", patch: { actor: { srdId: "young-red-dragon" } } });
     f.prev();
     assert.equal(f.of("dragon").uses, undefined, "a relinked dragon gets no marks back");
+    assert.equal(f.of("dragon").legendary!.actionsUsed, 0, "and no pips");
     const g = fight().next().next();
     g.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1, key: "legendaryActions:fiery-rays", name: "Fiery Rays", once: true } });
     g.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1, key: "legendaryActions:tail-swipe", name: "Tail Swipe", once: true } });
@@ -249,6 +256,17 @@ describe("turn records (docs/design-v1-combat-controls.md 2.3)", () => {
     const back = Object.keys(g.of("dragon").uses!);
     assert.equal(back.length, 16, "one of the two marks fits under the bound and comes back");
     assert.equal(back.filter((key) => key.startsWith("legendaryActions:")).length, 1, "the other is left off");
+  });
+
+  test("Previous gives a creature converted since no pips back", () => {
+    const f = fight().next().next();
+    f.run({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 2 } });
+    f.next().next().next().next();
+    assert.equal(f.active(), "dragon");
+    f.state = { ...f.state, characters: { ...f.state.characters, thorn: { ...f.state.characters.thorn!, actor: { ...f.state.characters.thorn!.actor, legendary } } } };
+    f.state.tokens = { ...f.state.tokens, dragon: { ...f.state.tokens.dragon!, actor: { ref: "thorn" } } };
+    f.prev();
+    assert.equal(f.state.characters.thorn!.actor.legendary!.actionsUsed, 0);
   });
 
   test("Previous skips a creature deleted since", () => {

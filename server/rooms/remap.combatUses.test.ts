@@ -139,12 +139,48 @@ describe("marks through an import that changes a link (docs/design-v1-combat-con
     assert.equal(inline(out, lurker).uses, undefined);
     assert.ok(!out.encounterHistory.some((s) => s.turnUses?.some((u) => u.holderId === lurker && u.marks)), "no saved mark keyed by the old block");
     assert.equal(inline(back, lurker).uses, undefined);
+    assert.equal(inline(back, lurker).legendary!.actionsUsed, 1, "its pips come back, since it keeps its legendary actions");
   });
 
   test("a room monster under its new id keeps its marks, and Previous brings back the ones its start took", () => {
     const { out, lurker, back } = imported(file());
     assert.deepEqual(Object.keys(inline(out, lurker).uses ?? {}), ["actions:acid-spit"]);
     assert.deepEqual(Object.keys(inline(back, lurker).uses ?? {}).sort(), ["actions:acid-spit", "legendaryActions:lunge"]);
+    assert.equal(inline(back, lurker).legendary!.actionsUsed, 1);
+  });
+
+  test("a landing creature's saved link comes through, so one relinked after the import gets no pips back from Previous", () => {
+    let state = room({
+      tokens: {
+        dragon: token("dragon", { name: "Adult Red Dragon", actor: { inline: actor({ srdId: "adult-red-dragon", legendary: { actionsMax: 3, actionsUsed: 0, resistMax: 3, resistUsed: 0 } }) } }),
+        gob: token("gob", { name: "Goblin" }),
+      },
+    });
+    const ops: Op[] = [
+      { t: "encounter.start", entries: [{ id: "eg", tokenId: "gob", value: 20 }, { id: "ed", tokenId: "dragon", value: 10 }] },
+      { t: "encounter.next" },
+      { t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 2 } },
+      { t: "encounter.next" },
+    ];
+    ops.forEach((op, i) => {
+      const r = applyOp(state, op, DM, env(i + 1));
+      assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
+      state = r.state;
+    });
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok);
+    let n = 0;
+    const out = remapState(parsed.state, { assets: new Map(), newId: () => `n${n++}` });
+    const dragon = Object.values(out.tokens).find((t) => t.name === "Adult Red Dragon")!.id;
+    assert.equal(inline(out, dragon).legendary!.actionsUsed, 0);
+    const kept = applyOp(out, { t: "encounter.prev" }, DM, env(1));
+    assert.ok(kept.ok);
+    assert.equal(inline(kept.state, dragon).legendary!.actionsUsed, 2, "the same block gets its pips back");
+    const relinked = applyOp(out, { t: "token.update", tokenId: dragon, patch: { actor: { srdId: "ancient-red-dragon" } } }, DM, env(1));
+    assert.ok(relinked.ok);
+    const back = applyOp(relinked.state, { t: "encounter.prev" }, DM, env(2));
+    assert.ok(back.ok);
+    assert.equal(inline(back.state, dragon).legendary!.actionsUsed, 0, "a new block does not");
   });
 
   test("the companion rules dropping a block link take its marks, and an SRD link keeps them", () => {

@@ -422,6 +422,12 @@ function holderNamed(tx: Tx, holderId: string): ResolvedActor | undefined {
   return token && "inline" in token.actor ? tx.tryResolveActor({ tokenId: holderId }) : undefined;
 }
 
+/** The creature a saved turn gives back to: the one it named, unless deleted, converted or relinked since. */
+export function savedHolder(tx: Tx, entry: TurnUses): ResolvedActor | undefined {
+  const resolved = holderNamed(tx, entry.holderId);
+  return resolved && linkOf(resolved.actor) === entry.link ? resolved : undefined;
+}
+
 /**
  * Previous puts back what the turn's start replaced (3.3, 3.4): the record
  * it replaced, or none for `null`, `hurt` as the union of the removed
@@ -432,8 +438,8 @@ function holderNamed(tx: Tx, holderId: string): ResolvedActor | undefined {
  */
 export function restoreTurnUses(tx: Tx, saved: readonly TurnUses[]): void {
   for (const entry of saved) {
-    const resolved = holderNamed(tx, entry.holderId);
-    if (!resolved || linkOf(resolved.actor) !== entry.link) continue;
+    const resolved = savedHolder(tx, entry);
+    if (!resolved) continue;
     const actor = resolved.actor;
     let next: Actor = { ...actor };
     if (entry.record !== undefined) {

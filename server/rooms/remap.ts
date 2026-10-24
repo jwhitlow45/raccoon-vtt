@@ -430,7 +430,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       const mappedLink = savedLink(link);
       // Marks keyed by a block that did not come through stay off, as the actor's own go.
       const keptMarks = link !== undefined && mappedLink === undefined ? undefined : marks;
-      if (holderId === null || (keptMarks === undefined && kept.actionsUsed === undefined)) return [];
+      // The landing creature's entry stays for its link alone, which Previous reads before it gives back its pips.
+      const landing = saved.holderId === snap.legendary?.holderId;
+      if (holderId === null || (keptMarks === undefined && kept.actionsUsed === undefined && !landing)) return [];
       return [{ ...kept, holderId, ...(keptMarks ? { marks: keptMarks } : {}), ...(mappedLink !== undefined ? { link: mappedLink } : {}) }];
     });
     if (turnUses.length > 0) next.turnUses = turnUses;
