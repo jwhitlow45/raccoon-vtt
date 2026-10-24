@@ -2337,6 +2337,8 @@ export type HandoutDocInput = z.infer<typeof handoutDocInput>;
 export const actorTargetSchema = actorTarget;
 export const fogOpSchema = fogOp;
 export const effectInputSchema = effectInput;
+/** A save-ends occurrence as an effect holds it, for a saved step's record of the ones a Next opened (server/rooms/stateSchema.ts). */
+export const effectDueSchema = effectDue;
 /**
  * A file's actor also holds `unshaped`, which only the reducer writes, so no
  * op's actor carries it (W7B-P-9).

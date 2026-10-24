@@ -18,10 +18,10 @@ import { SAVE_ASKED, SAVE_SETTLED } from "./rolls.ts";
 
 type Ran = { state: RoomState; log: LogEntry[] };
 let seq = 500;
-function send(state: RoomState, op: Op, who: Viewer = DM): Ran | { code: string; message: string } {
+function send(state: RoomState, op: Op, who: Viewer = DM, opVersion?: number): Ran | { code: string; message: string } {
   const decision = canApply(op, who, state, { canUseAsset: () => true });
   if (!decision.ok) return decision;
-  const r = applyOp(state, op, who, env(++seq));
+  const r = applyOp(state, op, who, { ...env(++seq), ...(opVersion === undefined ? {} : { opVersion }) });
   return r.ok ? { state: r.state, log: r.log } : r;
 }
 function ok(r: Ran | { code: string; message: string }): Ran {
@@ -118,6 +118,47 @@ describe("a turn end asks the saves that end its creature's effects", () => {
     s = ok(send(s, { t: "encounter.prev" })).state;
     assert.equal(effectOf(s, "bree", "bfx")!.due, undefined);
     assert.equal(s.rolls.r1, undefined);
+  });
+});
+
+describe("Previous of a turn end whose save was settled during the turn (design 9.4, review FU26-OPUS-1)", () => {
+  let tags = 0;
+  const answer = (total: number): Op => ({ t: "roll.answer", rollId: "r1", target: { characterId: "bree" }, total, tag: `prev-${++tags}` });
+
+  test("a save that passed during the turn keeps its effect ended, and an occurrence nobody answered goes back", () => {
+    let s = ok(send(fight("e-bree"), { t: "encounter.next" })).state;
+    s = ok(send(s, askFor(s, effectOf(s, "bree", "bfx")!.due!.id))).state;
+    s = ok(send(s, answer(18))).state;
+    assert.equal(effectOf(s, "bree", "bfx"), undefined, "the pass ended it");
+    assert.equal(effectOf(s, "owl", "ofx")!.due?.state, "pending");
+    s = ok(send(s, { t: "encounter.prev" })).state;
+    assert.equal(effectOf(s, "bree", "bfx"), undefined, "the save happened in the turn, so its effect stays ended");
+    assert.equal(effectOf(s, "owl", "ofx")!.due, undefined, "the turn end that asked the owl is taken back");
+  });
+
+  test("a failed answer, whose request stays open, goes back with the turn end and the request closes, and Accept failure stays", () => {
+    let s = ok(send(fight("e-bree"), { t: "encounter.next" })).state;
+    s = ok(send(s, askFor(s, effectOf(s, "bree", "bfx")!.due!.id))).state;
+    s = ok(send(s, answer(5))).state;
+    assert.equal(effectOf(s, "bree", "bfx")!.due?.state, "pending", "a fail leaves its request open");
+    s = ok(send(s, { t: "encounter.prev" })).state;
+    assert.equal(effectOf(s, "bree", "bfx")!.due, undefined);
+    assert.equal(s.rolls.r1, undefined);
+
+    let g = ok(send(fight(), { t: "encounter.next" })).state;
+    const due = effectOf(g, "gob", "fx")!.due!.id;
+    g = ok(send(g, { t: "actor.saveDue", target: { tokenId: "gob" }, effectId: "fx", due, state: "resolved" })).state;
+    g = ok(send(g, { t: "encounter.prev" })).state;
+    assert.deepEqual(effectOf(g, "gob", "fx")!.due, { id: due, state: "resolved" }, "settled during the turn, it stays settled");
+  });
+
+  test("at op version 20 Previous put the effects back whole, a passed save's effect included", () => {
+    let s = ok(send(fight("e-bree"), { t: "encounter.next" }, DM, 20)).state;
+    s = ok(send(s, askFor(s, effectOf(s, "bree", "bfx")!.due!.id), DM, 20)).state;
+    s = ok(send(s, answer(18), DM, 20)).state;
+    s = ok(send(s, { t: "encounter.prev" }, DM, 20)).state;
+    assert.ok(effectOf(s, "bree", "bfx"), "the old rule brings it back");
+    assert.equal(effectOf(s, "bree", "bfx")!.due, undefined);
   });
 });
 

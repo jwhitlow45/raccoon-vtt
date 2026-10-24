@@ -68,8 +68,8 @@ function fight(state: RoomState, active: string | null = "e-bree", spiritRow = t
   return state;
 }
 
-function run(state: RoomState, op: Op, who: Viewer = DM, seq = 1) {
-  const r = applyOp(state, op, who, env(seq));
+function run(state: RoomState, op: Op, who: Viewer = DM, seq = 1, opVersion?: number) {
+  const r = applyOp(state, op, who, { ...env(seq), ...(opVersion === undefined ? {} : { opVersion }) });
   assert.ok(r.ok, `${op.t}: ${r.ok ? "" : r.message}`);
   return r;
 }
@@ -145,16 +145,21 @@ describe("a companion's turn and its rows", () => {
     assert.equal(back.encounter!.activeEntryId, "e-bree");
   });
 
-  test("a saved active row of the companion passes to the next row, and its spot goes", () => {
-    let state = fight(withSpirit("own"), "e-ws");
-    state.encounter!.turnStart = { entryId: "e-ws", tokenId: "ws", sceneId: "s1", x: 6, y: 5, elevation: 0, seq: 1 };
-    state = run(state, { t: "encounter.next" }).state;
-    state = run(state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "none" } } }, DM, 2).state;
-    const saved = state.encounterHistory[0]!.encounter;
-    assert.equal(saved.activeEntryId, "e-gob");
-    assert.equal(saved.turnStart, undefined);
-    const back = run(state, { t: "encounter.prev" }, DM, 3).state;
-    assert.equal(back.encounter!.activeEntryId, "e-gob");
+  test("a saved active row of the companion passes to the next row, and its spot goes, and from op version 21 Previous walks past that turn", () => {
+    for (const opVersion of [20, undefined]) {
+      let state = fight(withSpirit("own"), "e-ws");
+      state.encounter!.turnStart = { entryId: "e-ws", tokenId: "ws", sceneId: "s1", x: 6, y: 5, elevation: 0, seq: 1 };
+      state = run(state, { t: "encounter.next" }, DM, 1, opVersion).state;
+      state = run(state, { t: "token.update", tokenId: "ws", patch: { companion: { of: "bree", turn: "none" } } }, DM, 2, opVersion).state;
+      // The saved encounter passes the turn on either way, as a build from before op version 21 puts it back whole.
+      const saved = state.encounterHistory[0]!;
+      assert.equal(saved.encounter.activeEntryId, "e-gob");
+      assert.equal(saved.encounter.turnStart, undefined);
+      assert.equal(saved.resumesGone, opVersion === 20 ? undefined : true);
+      const back = run(state, { t: "encounter.prev" }, DM, 3, opVersion).state;
+      // With no step before it, no row acts, as when the history's first turn leaves the fight (design 9.4).
+      assert.equal(back.encounter!.activeEntryId, opVersion === 20 ? "e-gob" : null);
+    }
   });
 
   test("Dismiss and the character's deletion take its rows out of the fight and the history too", () => {

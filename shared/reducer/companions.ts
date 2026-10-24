@@ -1,5 +1,6 @@
 import { keys } from "../keys.ts";
 import type { Actor, Effect, Encounter, EncounterSnapshot, InitEntry, RoomState, Token } from "../model.ts";
+import { takesBackTurnOnly } from "../migrate.ts";
 import { pausedAnchorForEntry } from "../rules/durations.ts";
 import { renumber, rowCharacter, sortEntries } from "../rules/initiative.ts";
 import { bindDurations, removeEntries } from "./encounter.ts";
@@ -151,8 +152,15 @@ function characterRow(state: Pick<RoomState, "tokens">, entries: readonly InitEn
  * (docs/design-v1-combat-flow.md 3.6.8), its saved effects that counted
  * them rebound to the character's row of that step when the companion now
  * acts on its character's turn (`rebind`), else paused on the companion.
+ *
+ * With `walks` (op version 21, and every import) the step also says when
+ * the turn it resumes was a companion row's (`resumesGone`), so Previous
+ * walks past that turn as past any row that has left the fight, while its
+ * encounter passes the turn on as a build from before op version 21 puts it
+ * back. The effects its tick ended are rebound the same way. Without it,
+ * the step is rewritten as it was before op version 21.
  */
-function stepWithout(state: Pick<RoomState, "tokens">, step: EncounterSnapshot, tokenId: string, characterId: string | undefined, rebind: boolean): EncounterSnapshot {
+function stepWithout(state: Pick<RoomState, "tokens">, step: EncounterSnapshot, tokenId: string, characterId: string | undefined, rebind: boolean, walks: boolean): EncounterSnapshot {
   const rows = step.encounter.entries.filter((e) => e.tokenId === tokenId);
   if (rows.length === 0) return step;
   const removing = new Set(rows.map((e) => e.id));
@@ -160,7 +168,21 @@ function stepWithout(state: Pick<RoomState, "tokens">, step: EncounterSnapshot, 
   const target = rebind && characterId !== undefined ? characterRow(state, step.encounter.entries, characterId, removing) : undefined;
   const effects: Record<string, Effect[]> = {};
   for (const [holder, list] of Object.entries(step.effects)) effects[holder] = reanchored(list, removed, target?.id);
-  return { ...step, encounter: encounterWithout(step.encounter, removing), effects };
+  const next: EncounterSnapshot = { ...step, encounter: encounterWithout(step.encounter, removing), effects };
+  if (!walks) return next;
+  if (step.encounter.activeEntryId !== null && removing.has(step.encounter.activeEntryId)) next.resumesGone = true;
+  if (step.effectChanges) {
+    next.effectChanges = step.effectChanges.map((change) => {
+      if (!change.ended) return change;
+      const effects = reanchored(
+        change.ended.map((e) => e.effect),
+        removed,
+        target?.id,
+      );
+      return { ...change, ended: change.ended.map((e, i) => ({ at: e.at, effect: effects[i]! })) };
+    });
+  }
+  return next;
 }
 
 /**
@@ -177,6 +199,7 @@ function stepWithout(state: Pick<RoomState, "tokens">, step: EncounterSnapshot, 
  * finds its new turn.
  */
 export function dropRows(tx: Tx, token: Token, rebind: boolean): void {
+  const walks = takesBackTurnOnly(tx.env.opVersion);
   const encounter = tx.state.encounter;
   if (!encounter) return;
   const ids = encounter.entries.filter((e) => e.tokenId === token.id).map((e) => e.id);
@@ -188,7 +211,7 @@ export function dropRows(tx: Tx, token: Token, rebind: boolean): void {
     if (row) bindDurations(tx, row);
   }
   const history = tx.state.encounterHistory;
-  const rewritten = history.map((step) => stepWithout(tx.state, step, token.id, characterId, rebind));
+  const rewritten = history.map((step) => stepWithout(tx.state, step, token.id, characterId, rebind, walks));
   if (rewritten.some((step, i) => step !== history[i])) tx.write(keys.encounterHistory, rewritten);
 }
 
@@ -285,6 +308,6 @@ function withoutCompanionRows(state: RoomState, token: Token): RoomState {
     );
     out = { ...out, encounter: encounterWithout(encounter, removing), characters, tokens };
   }
-  const history = out.encounterHistory.map((step) => stepWithout(out, step, token.id, characterId, true));
+  const history = out.encounterHistory.map((step) => stepWithout(out, step, token.id, characterId, true, true));
   return { ...out, encounterHistory: history };
 }

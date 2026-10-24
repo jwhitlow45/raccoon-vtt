@@ -188,7 +188,6 @@ function step(r: () => number, state: RoomState, n: number): { op: Op; who: View
     }
     case 16:
       return { op: { t: "token.update", tokenId: pick(r, ["dragon", "horse"]), patch: { actor: { srdId: pick(r, ["adult-red-dragon", "young-red-dragon", null]) } } }, who: DM };
-
     default:
       return { op: { t: "actor.hp", target: { characterId: "thorn" }, change: { kind: "set", cur: 0 } }, who: DM };
   }

@@ -1674,7 +1674,39 @@ export type EncounterSnapshot = {
    * `prev` puts back `encounter` whole.
    */
   turnFlags?: { entryId: EntryId; flags: TurnFlag[] }[];
+  /**
+   * What this `next` changed in each creature's effects (design 9.4), from
+   * op version 21, so `prev` takes back those changes alone and keeps the
+   * effects added, removed or edited during the turn. `effects` still holds
+   * the whole lists, for a build from before op version 21. Absent when it
+   * changed none, and in steps saved before op version 21.
+   */
+  effectChanges?: EffectChange[];
+  /**
+   * The row whose turn this step resumes has left the fight, though
+   * `encounter` passes that turn on to the next row (from op version 21): a
+   * companion's rows that left (shared/reducer/companions.ts) or a row an
+   * import did not bring. `encounter` stays as a build from before op
+   * version 21 puts it back whole, and a version 21 Previous walks past this
+   * step's turn instead.
+   */
+  resumesGone?: true;
   at: string;
+};
+
+/**
+ * One creature's effects as a `next` changed them (EncounterSnapshot.effectChanges):
+ * the effects its tick ended, whole, each at its place in the list before;
+ * the counts its tick lowered, from and to; and the save-ends occurrences
+ * its turn-end saves opened, with the one each effect held before (null:
+ * none). Previous puts back an ended effect still missing, and a count or
+ * an occurrence only while it still holds what this `next` wrote.
+ */
+export type EffectChange = {
+  holderId: TokenId | CharacterId;
+  ended?: { at: number; effect: Effect }[];
+  counted?: { id: EffectId; from: number; to: number }[];
+  asked?: { id: EffectId; from: NonNullable<Effect["due"]> | null; to: NonNullable<Effect["due"]> }[];
 };
 
 /**
@@ -1688,7 +1720,8 @@ export type TurnFlag = (typeof TURN_FLAGS)[number];
  * The marks of whose turn has come, which only the turns themselves set: a
  * turn's start by Next or by a removal, and a controlled ride taken during
  * one. Previous takes back every turn since its step, so it puts these back
- * as the step held them on every row the step holds.
+ * as the step held them on every row the step holds, and takes them off a
+ * row added since.
  */
 export const TURN_MARKS = ["hadTurn", "markRound"] as const;
 

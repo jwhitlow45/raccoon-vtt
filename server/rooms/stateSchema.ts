@@ -22,6 +22,7 @@ import {
   MAX_TURN_TIMER_SEC,
   actorSchemaForImport,
   combatUseSchemas,
+  effectDueSchema,
   areaSlows,
   areaTriggersSchema,
   moveAnyTokenSchema,
@@ -432,6 +433,19 @@ const encounterSnapshot = z.strictObject({
     .array(z.strictObject({ entryId: id, flags: z.array(z.enum(TURN_FLAGS)).min(1).max(TURN_FLAGS.length) }))
     .max(600)
     .optional(),
+  // What a Next changed in each creature's effects, and a turn whose row has left the fight (design 9.4, op version 21).
+  effectChanges: z
+    .array(
+      z.strictObject({
+        holderId: id,
+        ended: z.array(z.strictObject({ at: z.number().int().min(0).max(MAX_EFFECTS), effect: effectStored })).max(MAX_EFFECTS).optional(),
+        counted: z.array(z.strictObject({ id, from: z.number().int(), to: z.number().int() })).max(MAX_EFFECTS).optional(),
+        asked: z.array(z.strictObject({ id, from: effectDueSchema.nullable(), to: effectDueSchema })).max(MAX_EFFECTS).optional(),
+      }),
+    )
+    .max(600)
+    .optional(),
+  resumesGone: z.literal(true).optional(),
   at: iso,
 });
 
