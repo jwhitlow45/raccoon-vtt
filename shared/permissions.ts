@@ -269,7 +269,7 @@ function promptFits(op: Op, c: Check): Decision {
  * A character as `expect` reads it: the server's, or a player's own copy,
  * whose actor holds every part `expect` names.
  */
-export type ExpectSubject = Pick<Character, "stats" | "level" | "name" | "ddbSync"> & {
+export type ExpectSubject = Pick<Character, "stats" | "level" | "name" | "ddbSync" | "resources"> & {
   actor: Pick<Actor, "ac" | "speeds" | "senses" | "sheetUrl" | "srdId" | "wildShape"> & { hp?: Pick<Actor["hp"], "cur" | "max"> };
 };
 
@@ -307,6 +307,9 @@ function expectValue(character: ExpectSubject, part: ExpectPart): unknown {
       return actor.hp ? { cur: actor.hp.cur, max: actor.hp.max } : undefined;
     case "actor.shape":
       return { srdId: actor.srdId, wildShape: actor.wildShape };
+    case "resources":
+      // The list whole, each count spent included, so a use spent since the review refuses the write (docs/design-v1-ddb-resources.md 5).
+      return character.resources ?? null;
   }
 }
 

@@ -1098,7 +1098,18 @@ export type DdbSync = {
    * never the block's. At most 40.
    */
   rolls: Record<string, { k: string; h: string }>;
-  /** The `k` of each roll the player removed that D&D Beyond still had, oldest first, at most 40. */
+  /**
+   * One entry per synced class resource (docs/design-v1-ddb-resources.md
+   * 4.1), keyed by the hash of the resource's id, as `rolls` is. `k` is
+   * `r:` and the hash of the resource's key, its class first for a class
+   * feature, and `h` the hash of D&D Beyond's name, count, rest and pool
+   * as that sync read them. At most 12. Absent is none.
+   */
+  res?: Record<string, { k: string; h: string }>;
+  /**
+   * The `k` of each roll or class resource the player removed that D&D
+   * Beyond still had, oldest first, at most 40 of both kinds together.
+   */
   gone?: string[];
 };
 

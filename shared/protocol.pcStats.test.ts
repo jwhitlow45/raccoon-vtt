@@ -235,6 +235,79 @@ describe("a re-sync's schema", () => {
   });
 });
 
+/** The record's class resources and a character update's counts spent (docs/design-v1-ddb-resources.md 4.1 and 5). */
+describe("class resources in a sync's schema", () => {
+  const hex12 = (n: number) => n.toString(16).padStart(12, "0");
+  const RECORD: DdbSyncPatch = { base: {}, rolls: {}, res: { [hex12(1)]: { k: "r:0123456789ab", h: "abcdef012345" } }, gone: ["r:00000000000a", "w:00000000000b"] };
+  const sync = (ddbSync: unknown) => ({ t: "character.update", characterId: "bree", patch: { ddbSync } });
+  const resources = (list: unknown[]) => ({ t: "character.update", characterId: "bree", patch: { resources: list } });
+  const rage = { id: "rage", name: "Rage", max: 3, reset: "shortOne" };
+
+  test("a resource entry's k is r: and 12 hex, never a roll's letter, and a roll's k is never r:", () => {
+    assert.ok(ok(sync(RECORD)));
+    for (const k of ["w:0123456789ab", "r:0123456789AB", "r:0123456789a", "r:rage", "x:0123456789ab"]) assert.equal(ok(sync({ ...RECORD, res: { [hex12(1)]: { k, h: "abcdef012345" } } })), false, `res k ${k}`);
+    assert.equal(ok(sync({ ...RECORD, rolls: { [hex12(1)]: { k: "r:0123456789ab", h: "abcdef012345" } } })), false, "a roll keyed as a resource");
+    assert.equal(ok(sync({ ...RECORD, res: { RAGE: { k: "r:0123456789ab", h: "abcdef012345" } } })), false, "an id in clear");
+    assert.equal(ok(sync({ ...RECORD, res: { [hex12(1)]: { k: "r:0123456789ab", h: "abcdef012345", used: 1 } } })), false, "an entry holds k and h alone");
+  });
+
+  test("gone takes an r: marker beside the rolls' letters, 40 of both together at most", () => {
+    assert.ok(ok(sync({ ...RECORD, gone: Array.from({ length: MAX_PC_ROLLS }, (_, i) => `${i % 2 ? "r" : "o"}:${hex12(i)}`) })));
+    assert.equal(ok(sync({ ...RECORD, gone: Array.from({ length: MAX_PC_ROLLS + 1 }, (_, i) => `r:${hex12(i)}`) })), false);
+    assert.equal(ok(sync({ ...RECORD, gone: ["q:0123456789ab"] })), false);
+  });
+
+  test("at most 12 resource entries, and the stored record takes them", () => {
+    const res = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [hex12(i), { k: `r:${hex12(i)}`, h: hex12(i) }]));
+    assert.ok(ok(sync({ ...RECORD, res: res(LIMITS.resourcesPerCharacter) })));
+    assert.equal(ok(sync({ ...RECORD, res: res(LIMITS.resourcesPerCharacter + 1) })), false);
+    assert.ok(ddbSyncForImport.safeParse({ ...RECORD, at: AT }).success);
+    assert.equal(ddbSyncForImport.safeParse({ ...RECORD, at: AT, res: res(13) }).success, false);
+  });
+
+  test("a record at every bound with its 12 resources stays under 6 KiB (4.1)", () => {
+    const every: DdbSyncPatch = {
+      at: AT,
+      from: "123456789012",
+      base: {
+        abilities: BLOCK.abilities,
+        saves: ["str", "dex", "con", "int", "wis", "cha"],
+        skills: Object.fromEntries(SKILL_KEYS.map((s) => [s, "expert"])),
+        adjust: { saves: Object.fromEntries(ABILITY_KEYS.map((a) => [a, -20])), skills: Object.fromEntries(SKILL_KEYS.map((s) => [s, -20])), allSaves: -20, allChecks: -20, init: -20, passive: -20, spellDc: -20, spellAttack: -20 },
+        defenses: Object.fromEntries(DAMAGE_TYPES.map((t) => [t, "vulnerable"])),
+        spellAbility: null,
+        jack: false,
+        alert: false,
+        evasion: false,
+        critOn: 18,
+        level: 20,
+        ac: 100,
+        hpMax: 100_000,
+        speeds: { walk: 1000, fly: 1000, swim: 1000, climb: 1000, burrow: 1000, hover: false },
+        senses: "暗".repeat(80),
+      },
+      rolls: Object.fromEntries(Array.from({ length: MAX_PC_ROLLS }, (_, i) => [hex12(i), { k: `o:${hex12(i)}`, h: hex12(i) }])),
+      res: Object.fromEntries(Array.from({ length: LIMITS.resourcesPerCharacter }, (_, i) => [hex12(100 + i), { k: `r:${hex12(i)}`, h: hex12(i) }])),
+      gone: Array.from({ length: MAX_PC_ROLLS }, (_, i) => `r:${hex12(i)}`),
+    };
+    assert.ok(ok(sync(every)));
+    assert.ok(serializedBytes(every) < LIMITS.ddbSyncBytes, `${serializedBytes(every)} bytes`);
+  });
+
+  test("an update's resource may carry used, 0 to its count, whole", () => {
+    assert.ok(ok(resources([rage])));
+    assert.ok(ok(resources([{ ...rage, used: 0 }])));
+    assert.ok(ok(resources([{ ...rage, used: 3 }])));
+    for (const used of [4, -1, 1.5, "1", null]) assert.equal(ok(resources([{ ...rage, used }])), false, `used ${JSON.stringify(used)}`);
+    assert.ok(ok(resources([{ id: "loh", name: "Lay on Hands", max: 200, reset: "long", pool: true, used: 200 }])));
+  });
+
+  test("expect names the class resources", () => {
+    assert.ok(EXPECT_PARTS.includes("resources"));
+    assert.ok(ok({ t: "character.update", characterId: "bree", patch: { resources: [rage] }, expect: { resources: hex12(1) } }));
+  });
+});
+
 /** A fill's class resources (docs/design-v1-ddb-resources.md 3.1). */
 describe("class resources in a fill's schema", () => {
   test("a fill's class resources: each field bounded, a class of the twelve, at most 12, and read.resource", () => {

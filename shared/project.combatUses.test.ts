@@ -160,6 +160,21 @@ describe("combat uses on the actor reach only its owners (docs/design-v1-combat-
     assert.deepEqual(p1.characters.bree!.resources, state.characters.bree!.resources);
     assert.deepEqual((p1.characters.bree!.actor as Record<string, unknown>).turnRecord, state.characters.bree!.actor.turnRecord);
   });
+
+  test("a resource a D&D Beyond sync brought, and the record's entry for it, reach the character's players and no one else (docs/design-v1-ddb-resources.md 7)", () => {
+    const state = held();
+    const synced = { id: "wild", name: "Wild Shape", max: 3, used: 1, reset: "shortOne" as const, preset: "druid-wild-shape", level: 6, atLevel: 6 };
+    state.characters.bree = { ...state.characters.bree!, resources: [...(state.characters.bree!.resources ?? []), synced], ddbSync: { at: "2026-10-24T10:00:00.000Z", base: {}, rolls: {}, res: { "0123456789ab": { k: "r:00000000000c", h: "abcdef012345" } } } };
+    const display: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
+    for (const who of [P2, display]) {
+      const seen = projectState(state, who, { sceneId: "s1" }).characters.bree as Record<string, unknown> | undefined;
+      assert.equal(seen?.resources, undefined, who.memberId);
+      assert.equal(seen?.ddbSync, undefined, who.memberId);
+    }
+    const p1 = projectState(state, P1, { sceneId: "s1" }).characters.bree!;
+    assert.deepEqual(p1.resources?.at(-1), synced);
+    assert.deepEqual(p1.ddbSync?.res, state.characters.bree!.ddbSync!.res);
+  });
 });
 
 describe("no log numbering reaches an owner's actor (docs/design-v1-combat-controls.md 8)", () => {

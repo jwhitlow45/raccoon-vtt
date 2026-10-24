@@ -170,6 +170,16 @@ describe("actor.use (docs/design-v1-combat-controls.md 3.1)", () => {
     assert.equal(refused(table(), use({ kind: "resource", id: "ki" }, { target: { characterId: "thorn" } })).code, "invalid");
   });
 
+  test("a pool of units from a fixed cost of 2 (docs/design-v1-ddb-resources.md 1.1, ASTRA-7): Use spends 2 of 8, four spends empty it, a fifth is refused", () => {
+    let state = table();
+    state.characters = { thorn: { ...state.characters.thorn!, resources: [{ id: "grit", name: "Grit Points", max: 8, used: 0, reset: "short", pool: true }] } };
+    for (let i = 1; i <= 4; i++) {
+      state = apply(state, use({ kind: "resource", id: "grit", amount: 2 }, { target: { characterId: "thorn" } }), P1, i);
+      assert.equal(state.characters.thorn!.resources![0]!.used, 2 * i);
+    }
+    assert.equal(refused(state, use({ kind: "resource", id: "grit", amount: 2 }, { target: { characterId: "thorn" } }), P1, 5).message, noResourceRefusal("Grit Points", 0));
+  });
+
   test("a use after a secret roll writes a hidden line", () => {
     assert.deepEqual(useLines(table(), use({ ...breath, ifReady: true }, { quiet: true })), [{ type: "use", what: "ability", name: "Fire Breath", hidden: true }]);
     assert.deepEqual(useLines(table(), use({ kind: "resist" }, { quiet: true })), [{ type: "use", what: "resist", left: 2, max: 3, hidden: true }]);

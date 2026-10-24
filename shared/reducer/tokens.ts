@@ -759,13 +759,15 @@ export function characterUpdate(tx: Tx, op: OpOf<"character.update">): void {
 
 /**
  * A character's class resources as an update sends them, whole and in order
- * (docs/design-v1-combat-controls.md 3.1): the update carries no counts
- * spent, so each keeps its own by id, at most its new count, and a new one
- * starts with none spent.
+ * (docs/design-v1-combat-controls.md 3.1): one sent with no count spent
+ * keeps its own by id, at most its new count, and a new one starts with
+ * none spent. A sync's Apply, its Undo and the editor's Save send the count
+ * of a resource whose count they set (docs/design-v1-ddb-resources.md 5),
+ * which it takes. Older ops never send one, so they replay as before.
  */
 function keptResources(before: readonly ClassResource[] | undefined, sent: NonNullable<CharacterPatch["resources"]>): ClassResource[] {
   const spent = new Map((before ?? []).map((r) => [r.id, r.used]));
-  return sent.map((r) => ({ ...stripUndefined(r), used: Math.min(spent.get(r.id) ?? 0, r.max) }));
+  return sent.map((r) => ({ ...stripUndefined(r), used: Math.min(r.used ?? spent.get(r.id) ?? 0, r.max) }));
 }
 
 function stripUndefined<T extends object>(value: T): T {

@@ -48,6 +48,25 @@ describe("class resources (docs/design-v1-combat-controls.md 3.1)", () => {
   });
 });
 
+describe("a count spent sent with the list (docs/design-v1-ddb-resources.md 5)", () => {
+  type Sent = Omit<ClassResource, "used"> & { used?: number };
+  const send = (resources: Sent[]): Op => ({ t: "character.update", characterId: "thorn", patch: { resources } });
+
+  test("a resource sent with used takes it, one without keeps its own by id, and a new id may come with one", () => {
+    const state = apply(table(), send([{ ...sent(rage), used: 0 }, sent(focus), { id: "wild", name: "Wild Shape", max: 3, reset: "shortOne", used: 2 }]));
+    assert.deepEqual(state.characters.thorn!.resources, [
+      { ...rage, used: 0 },
+      { ...focus, used: 4 },
+      { id: "wild", name: "Wild Shape", max: 3, used: 2, reset: "shortOne" },
+    ]);
+  });
+
+  test("used past the count is cut to it, as a kept count is", () => {
+    const state = apply(table(), send([{ ...sent(rage), max: 1, used: 3 }]));
+    assert.equal(state.characters.thorn!.resources![0]!.used, 1);
+  });
+});
+
 describe("what a rest brings back (docs/design-v1-combat-controls.md 2.4)", () => {
   const marks: Record<string, UseMark> = {
     "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 },

@@ -757,10 +757,14 @@ const pcFill = z.strictObject({
  * A character's record of its last D&D Beyond sync (docs/design-v1-resync.md
  * 2.1 and 4). The base takes the fill's part bounds. Every string beside
  * the senses is hex, digits or a time, so a record at every bound is about
- * 4.8 KB, under the 6 KiB the whole may take.
+ * 5.5 KB with its 12 class resources (docs/design-v1-ddb-resources.md 4.1),
+ * under the 6 KiB the whole may take.
  */
 const syncHash = z.string().regex(/^[0-9a-f]{12}$/);
 const syncKey = z.string().regex(/^[wso]:[0-9a-f]{12}$/);
+/** A synced class resource's key (docs/design-v1-ddb-resources.md 4.1), and a removed marker of either kind. */
+const resourceSyncKey = z.string().regex(/^r:[0-9a-f]{12}$/);
+const goneKey = z.string().regex(/^[wsor]:[0-9a-f]{12}$/);
 const withinDdbSyncBytes = { message: `a sync record is at most ${LIMITS.ddbSyncBytes / 1024} KiB` };
 const ddbBase = z.strictObject({
   abilities: pcParts.abilities.optional(),
@@ -785,7 +789,11 @@ const ddbSyncFields = {
   from: z.string().regex(/^[0-9]{1,12}$/).optional(),
   base: ddbBase,
   rolls: z.record(syncHash, z.strictObject({ k: syncKey, h: syncHash })).refine((rolls) => Object.keys(rolls).length <= MAX_PC_ROLLS, { message: `a sync record names at most ${MAX_PC_ROLLS} rolls` }),
-  gone: z.array(syncKey).max(MAX_PC_ROLLS).optional(),
+  res: z
+    .record(syncHash, z.strictObject({ k: resourceSyncKey, h: syncHash }))
+    .refine((res) => Object.keys(res).length <= LIMITS.resourcesPerCharacter, { message: `a sync record names at most ${LIMITS.resourcesPerCharacter} class resources` })
+    .optional(),
+  gone: z.array(goneKey).max(MAX_PC_ROLLS).optional(),
 };
 const ddbSync = z.strictObject(ddbSyncFields).refine((s) => serializedBytes(s) <= LIMITS.ddbSyncBytes, withinDdbSyncBytes);
 
@@ -832,9 +840,10 @@ const ddbSyncPatch = z.strictObject({ ...ddbSyncFields, at: ddbSyncFields.at.opt
 /**
  * The parts of a character a `character.update` may expect
  * (docs/design-v1-resync.md 4): each stats part, the level, the name, the
- * actor's AC, speeds, senses, sheet link, HP and shape, and the sync
- * record. Each is a part the character's players receive whole, so no
- * hash covers what a player's copy lacks.
+ * actor's AC, speeds, senses, sheet link, HP and shape, the sync record,
+ * and the class resources with their counts spent
+ * (docs/design-v1-ddb-resources.md 5). Each is a part the character's
+ * players receive whole, so no hash covers what a player's copy lacks.
  */
 export const EXPECT_PARTS = [
   "stats.abilities",
@@ -857,6 +866,7 @@ export const EXPECT_PARTS = [
   "actor.hp",
   "actor.shape",
   "ddbSync",
+  "resources",
 ] as const;
 export type ExpectPart = (typeof EXPECT_PARTS)[number];
 const characterExpect = z.strictObject(Object.fromEntries(EXPECT_PARTS.map((part) => [part, syncHash.optional()])) as { [P in ExpectPart]: z.ZodOptional<typeof syncHash> });
@@ -890,8 +900,15 @@ const resourceFields = {
   atLevel: characterLevel.optional(),
   edited: z.literal(true).optional(),
 };
-/** A class resource as an update sends it: no `used`, which the reducer keeps by id (character.update). */
-const resourceInput = z.strictObject(resourceFields).refine(countFits, countFitsText);
+/**
+ * A class resource as an update sends it (character.update): `used` only
+ * when a sync's Apply, its Undo or the editor's Save sets the count spent
+ * (docs/design-v1-ddb-resources.md 5), else the reducer keeps it by id.
+ */
+const resourceInput = z
+  .strictObject({ ...resourceFields, used: z.number().int().min(0).max(LIMITS.resourcePoolMax).optional() })
+  .refine(countFits, countFitsText)
+  .refine((r) => r.used === undefined || r.used <= r.max, { message: "a resource uses at most its count" });
 const resourceStored = z
   .strictObject({ ...resourceFields, used: z.number().int().min(0).max(LIMITS.resourcePoolMax) })
   .refine(countFits, countFitsText)
@@ -956,9 +973,11 @@ const characterPatch = z.strictObject({
   /** The record of a D&D Beyond sync, whole (docs/design-v1-resync.md 2.1). Null removes it. */
   ddbSync: ddbSyncPatch.nullable().optional(),
   /**
-   * The class resources, whole and in order (docs/design-v1-combat-controls.md 3.1),
-   * each with no `used`: the reducer keeps it by id, clamped to the new
-   * count, and a new id starts at 0. An empty list removes them.
+   * The class resources, whole and in order (docs/design-v1-combat-controls.md 3.1).
+   * One sent with no `used` keeps its own by id, clamped to the new count,
+   * and a new id starts at 0. A sync sends `used` for a resource whose
+   * count it sets (docs/design-v1-ddb-resources.md 5). An empty list
+   * removes them.
    */
   resources: resources.optional(),
 });

@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 22;
-export const OP_VERSION = 21;
+export const SNAPSHOT_VERSION = 23;
+export const OP_VERSION = 22;
 
 export type MigrationStep = {
   from: number;
@@ -157,6 +157,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // room is a v22 room as it is. The number moves so that an older build, whose strict state schema refuses the fields
   // and whose reducer would drop them on the next turn, refuses a v22 snapshot instead of loading it.
   { from: 21, to: 22, apply: (state) => state },
+  // Class resources from D&D Beyond (docs/design-v1-ddb-resources.md 5): a sync record's `res` and its `r:` markers in
+  // `gone` are new, and absent reads as before, so a v22 room is a v23 room as it is. The number moves so that an older
+  // build, whose strict state schema refuses `res` and an `r:` marker, refuses a v23 snapshot instead of loading it.
+  { from: 22, to: 23, apply: (state) => state },
 ];
 
 /**
@@ -620,6 +624,23 @@ export const opMigrations: MigrationStep[] = [
     // before the deploy.
     from: 20,
     to: 21,
+    apply: (op) => op,
+  },
+  {
+    // Class resources from D&D Beyond (docs/design-v1-ddb-resources.md 5):
+    // a `character.update`'s resources may carry `used`, its record `res`
+    // and `r:` markers, and its `expect` the part `resources`, all new
+    // optional fields, so no stored op changes shape and the step is the
+    // identity. An older op never sends `used`, so the reducer keeps each
+    // count spent by id as it did when the op was written.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 22, and the shutdown writes version 23 snapshots
+    // (snapshotMigrations). Rollback: restore the backup taken before the
+    // deploy, as for any snapshot version bump. An older build refuses a
+    // version 23 snapshot and a version 22 op (runMigrations).
+    from: 21,
+    to: 22,
     apply: (op) => op,
   },
 ];

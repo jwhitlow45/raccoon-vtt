@@ -173,6 +173,21 @@ describe("roomStateSchema", () => {
     assert.deepEqual(Object.values(remapped.characters).map((c) => c.ddbSync?.at).filter(Boolean), ["2026-10-22T12:00:00.000Z"]);
   });
 
+  test("a sync record with class resource entries and an r: marker imports as it is (docs/design-v1-ddb-resources.md 5)", () => {
+    const s = JSON.parse(JSON.stringify(randomState(rng(3))));
+    const first = Object.keys(s.characters)[0]!;
+    s.characters[first].stats = { abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, saves: [], skills: {}, adjust: {}, defenses: {}, rolls: [] };
+    s.characters[first].resources = [{ id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne", preset: "barbarian-rage", level: 3, atLevel: 3 }];
+    const record = { at: "2026-10-20T19:00:00.000Z", base: { level: 5 }, rolls: {}, res: { "0123456789ab": { k: "r:00000000000c", h: "abcdef012345" } }, gone: ["r:00000000000d", "w:00000000000e"] };
+    s.characters[first].ddbSync = record;
+    const parsed = parseRoomState(s, Date.parse("2026-10-22T12:00:00.000Z"));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.deepEqual(parsed.state.characters[first]!.ddbSync, record);
+    assert.deepEqual(parsed.state.characters[first]!.resources?.map((r) => r.id), ["rage"], "the resources keep their ids, so the record still names them");
+    s.characters[first].ddbSync = { ...record, res: { "0123456789ab": { k: "w:00000000000c", h: "abcdef012345" } } };
+    assert.equal(parseRoomState(s, Date.parse("2026-10-22T12:00:00.000Z")).ok, false, "a resource entry keyed as a roll");
+  });
+
   test("an Exhaustion level from before the 1 to 6 rule is brought within it, and any other effect keeps its 0 to 99", () => {
     const state = JSON.parse(JSON.stringify(randomState(rng(3))));
     const first = Object.keys(state.characters)[0]!;

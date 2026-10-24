@@ -1132,8 +1132,8 @@ describe("follow-up batch 23: op version 19, snapshot version 21 (design 7.3, Lo
 });
 
 describe("combat uses: op version 20, snapshot version 22 (docs/design-v1-combat-controls.md 3.6)", () => {
-  test("is the snapshot version now", () => {
-    assert.equal(SNAPSHOT_VERSION, 22);
+  test("came before class resources from D&D Beyond", () => {
+    assert.ok(SNAPSHOT_VERSION >= 22);
   });
 
   test("the snapshot step is the identity, a room holding every new field included", () => {
@@ -1173,9 +1173,9 @@ describe("combat uses: op version 20, snapshot version 22 (docs/design-v1-combat
 });
 
 describe("Previous takes back only the turn: op version 21 (design 9.4)", () => {
-  test("is the version now, and the snapshot version stays", () => {
-    assert.equal(OP_VERSION, 21);
-    assert.equal(SNAPSHOT_VERSION, 22);
+  test("came before class resources from D&D Beyond, and kept the snapshot version", () => {
+    assert.ok(OP_VERSION >= 21);
+    assert.ok(SNAPSHOT_VERSION >= 22);
   });
 
   test("the op step is the identity", () => {
@@ -1191,5 +1191,33 @@ describe("Previous takes back only the turn: op version 21 (design 9.4)", () => 
 
   test("a version 21 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 21, 20, opMigrations), /down/);
+  });
+});
+
+describe("class resources from D&D Beyond: op version 22, snapshot version 23 (docs/design-v1-ddb-resources.md 5)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 22);
+    assert.equal(SNAPSHOT_VERSION, 23);
+  });
+
+  test("the snapshot step is the identity, a room with a record's resource part and an r: marker included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 22, 23, snapshotMigrations), plain);
+    const record = { at: "2026-10-24T10:00:00.000Z", base: {}, rolls: {}, res: { "0123456789ab": { k: "r:0123456789ab", h: "ba9876543210" } }, gone: ["w:aaaaaaaaaaaa", "r:bbbbbbbbbbbb"] };
+    const held = room({ characters: { bree: character("bree", { ddbSync: record, resources: [{ id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne" }] }) } });
+    assert.equal(runMigrations(held, 22, 23, snapshotMigrations), held);
+    assert.throws(() => runMigrations(held, 23, 22, snapshotMigrations), /down/);
+  });
+
+  test("the op step is the identity, an update with a count spent and the resources expect included", () => {
+    const ops: unknown[] = [
+      { t: "character.update", characterId: "bree", patch: { resources: [{ id: "rage", name: "Rage", max: 3, used: 2, reset: "shortOne" }] }, expect: { resources: "0123456789ab" } },
+      { t: "character.update", characterId: "bree", patch: { resources: [{ id: "rage", name: "Rage", max: 3, reset: "shortOne" }] } },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 21, 22, opMigrations), op);
+  });
+
+  test("a version 22 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 22, 21, opMigrations), /down/);
   });
 });

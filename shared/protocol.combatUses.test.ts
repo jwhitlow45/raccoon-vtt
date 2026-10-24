@@ -109,12 +109,13 @@ describe("combat uses: ops (docs/design-v1-combat-controls.md 3.1)", () => {
     bad(clientOpSchema, { t: "dice.roll", tag: "t1", to: "all", rolls: [{ formula: "2d6", type: "healing" }] });
   });
 
-  test("class resources go whole, with no count used, each id once", () => {
+  test("class resources go whole, each id once, a count used only within the count (docs/design-v1-ddb-resources.md 5)", () => {
     const rage = { id: "rage", name: "Rage", max: 3, reset: "shortOne", preset: "rage", level: 3, atLevel: 3 };
     const update = (resources: unknown) => ({ t: "character.update", characterId: "thorn", patch: { resources } });
     ok(clientOpSchema, update([rage, { id: "loh", name: "Lay on Hands", max: 200, reset: "long", pool: true }]));
     ok(clientOpSchema, update([]));
-    bad(clientOpSchema, update([{ ...rage, used: 1 }]));
+    ok(clientOpSchema, update([{ ...rage, used: 1 }]));
+    bad(clientOpSchema, update([{ ...rage, used: 4 }]));
     bad(clientOpSchema, update([rage, rage]));
     bad(clientOpSchema, update([{ ...rage, max: 100 }]), "a count is at most 99");
     bad(clientOpSchema, update([{ ...rage, max: 201, pool: true }]));

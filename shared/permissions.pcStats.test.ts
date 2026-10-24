@@ -220,3 +220,29 @@ describe("a re-sync's permissions (docs/design-v1-resync.md 4)", () => {
     assert.equal(unchecked.state.characters.bree!.stats?.spellAbility, "wis");
   });
 });
+
+describe("the class resources part of expect (docs/design-v1-ddb-resources.md 5)", () => {
+  const withRage = (used: number): RoomState => {
+    const state = synced();
+    state.characters.bree = { ...state.characters.bree!, resources: [{ id: "rage", name: "Rage", max: 3, used, reset: "shortOne", preset: "barbarian-rage", level: 3, atLevel: 5 }] };
+    return state;
+  };
+  const apply = (expect?: CharacterExpect) => sync({ resources: [{ id: "rage", name: "Rage", max: 3, used: 0, reset: "shortOne" }], ddbSync: { ...RECORD, res: { "0123456789ab": { k: "r:00000000000c", h: "abcdef012345" } } } }, expect);
+
+  test("matched, it is taken. A use spent since the review misses it, for a player and the DM. Absent, it is not checked", () => {
+    const seen = expectOf(asSeen(withRage(1), P1), ["resources", "ddbSync"]);
+    assert.equal(decide(apply(seen), P1, withRage(1)), "ok");
+    assert.equal(decide(apply(seen), P1, withRage(2)), `invalid: ${CHARACTER_CHANGED}`, "the count spent is in the hash");
+    assert.equal(decide(apply(seen), DM, withRage(2)), `invalid: ${CHARACTER_CHANGED}`);
+    assert.equal(decide(apply(), P1, withRage(2)), "ok");
+    const { resources: _r, ...ddbOnly } = seen;
+    assert.equal(decide(apply(ddbOnly), P1, withRage(2)), "ok", "a part left out is not checked");
+  });
+
+  test("none hashes as null, so a list added meanwhile refuses, and a player's copy hashes as the server's", () => {
+    const none = expectOf(asSeen(synced(), P1), ["resources"]);
+    assert.equal(expectHash(synced().characters.bree!, "resources"), none.resources);
+    assert.equal(decide(apply(none), P1, withRage(0)), `invalid: ${CHARACTER_CHANGED}`);
+    assert.equal(expectHash(asSeen(withRage(1), P1), "resources"), expectHash(withRage(1).characters.bree!, "resources"));
+  });
+});
