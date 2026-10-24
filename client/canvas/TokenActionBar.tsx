@@ -1321,9 +1321,15 @@ function BarFrame(props: {
    * request. A request for another token is not this frame's.
    */
   const spanToast = useScoped(spanToastSlot);
+  const [waited, setWaited] = useState<typeof clearRequest>(null);
   useLayoutEffect(() => {
     const request = clearRequest;
     if (request === null && !shiftOnExpand.current) return;
+    const wait = request !== null && request !== waited ? clearWaitMs() : 0;
+    if (wait > 0) {
+      const timer = setTimeout(() => setWaited(request), wait);
+      return () => clearTimeout(timer);
+    }
     const mine = request !== null && (props.opening === "group" || request.tokenId === props.opening);
     const usable = mode === "span" && !folded;
     if (usable && restState === "expanded" && expandedHeight === null) return;
@@ -1335,7 +1341,7 @@ function BarFrame(props: {
     const dy = clearShift({ anchor: props.anchor, tokenHeight: props.tokenHeight, free: stripFree, barTop: top, toastFoot: spanToast.foot });
     if (dy !== 0) props.onShift?.(dy);
     // Read as the request comes, from the frame as it stands then.
-  }, [clearRequest, restState, expandedHeight, mode, folded]);
+  }, [clearRequest, restState, expandedHeight, mode, folded, waited]);
 
   /*
    * Where the expanded bar's header stands, for the toasts (barDock.ts
@@ -2149,6 +2155,18 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
 
 /** How many renders a focus moved to a strip's or an expanded bar's button waits for it to show. */
 const FOCUS_TRIES = 3;
+
+/**
+ * How long the frame holds a clear request before it uses it: none, or
+ * the page's `rvttClearWaitMs` where a run sets it. A test hook, so
+ * e2e/barrest.e2e.ts can put a finger down on the map before the clearing
+ * move, which Stage then cancels (3.6, review BB-OPUS-5). Nothing in the
+ * app sets it.
+ */
+function clearWaitMs(): number {
+  const hook = (globalThis as { rvttClearWaitMs?: unknown }).rvttClearWaitMs;
+  return typeof hook === "number" && hook > 0 ? hook : 0;
+}
 
 /** Before the first measure: every text fits, so nothing is cut that may not need it. */
 const FITS_ALL: RestFit = { line: () => true, title: () => true, note: () => true };

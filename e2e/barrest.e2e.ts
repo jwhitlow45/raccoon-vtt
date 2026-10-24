@@ -1132,7 +1132,7 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       assert.deepEqual(missed, []);
     });
 
-    test("br-f-11. where the band is under 96, a toast is one 44 px row over the top bar's row clear of End turn and the band; a tap shows it whole with its time held, Close or Escape shrinks it with what it had left, and one waiting meanwhile gets its whole time once drawn", async () => {
+    test("br-f-11. where the band is under 96, a toast is one 44 px row over the top bar's row clear of End turn and the band; a tap shows it whole with its time held, Close or Escape shrinks it with what it had left, one waiting meanwhile gets its whole time once drawn, and a blackout leaves none stopped. The DM's trap toast takes the row with an error waiting behind it, and both forms, the note and the summary line up within 1 px", async () => {
       await homeTokens();
       const z = 1.3;
       await ops.send({
@@ -1200,6 +1200,76 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await pat.getByText("The DM has paused the game.").waitFor({ state: "detached" });
         await pat.locator("[data-toast]").filter({ hasText: / since\./ }).waitFor({ state: "detached", timeout: 8_000 });
 
+        // The DM at the same size on Thorn's turn: an error waits behind a trap's toast, which takes the row with Save and damage, and each form, the strip's note and the alerts' summary line up within 1 px (review BB-OPUS-5).
+        await setUp(dm, { width: 320, height: 440, scale: z });
+        await openOn(dm, run.thorn);
+        const dmRow = (text: string | RegExp) => dm.locator('[data-toast-form="row"]').filter({ hasText: text });
+        const lined = async (root: Locator, what: string) => assert.deepEqual(alignmentLines(await measureAlignment(root), `${what} at 320 x 440 at 130%`), []);
+        // The error: the DM's undo of a nudge to Thorn, whom Pat has moved since, is refused, and the log never sees it.
+        await dm.keyboard.press("ArrowRight");
+        await waitFor("Thorn a square right", () => (dmSocket.state?.tokens[run.thorn.id]?.x === run.thorn.x + 1 ? true : null));
+        const pats = await patOps();
+        try {
+          await pats.send({ t: "token.move", tokenId: run.thorn.id, x: run.thorn.x, y: run.thorn.y });
+        } finally {
+          pats.close();
+        }
+        await waitFor("Thorn back on his square", () => (dmSocket.state?.tokens[run.thorn.id]?.x === run.thorn.x ? true : null));
+        await dm.keyboard.press("Control+z");
+        const error = dmRow(/ since\./);
+        await error.waitFor({ timeout: 4_000 });
+        const trapId = randomUUID();
+        const walker = randomUUID();
+        const rig = { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", save: { ability: "dex", dc: 12, onPass: "half" }, damage: [{ formula: "1d4", type: "piercing" }], actions: [], find: [], notice: false };
+        await ops.send({ t: "token.create", token: { id: walker, sceneId: run.sceneId, kind: "monster", name: "Scout", x: 1, y: 4, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: actor(7, 15) } } });
+        await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Needle Plate", zone: { cells: [{ x: 1, y: 1, w: 1, h: 1 }] }, rig } });
+        try {
+          await waitFor("the scout and the trap in the DM's view", () => (dmSocket.state?.tokens[walker] && dmSocket.state.traps[trapId] ? true : null));
+          await ops.send({ t: "token.move", tokenId: walker, x: 1, y: 1 });
+          const trap = dmRow("Needle Plate went off: Scout.");
+          await trap.waitFor();
+          assert.equal(await dm.locator("[data-toast]").filter({ hasText: / since\./ }).count(), 0, "the error showed beside the trap's toast");
+          assert.ok(await wholeInReach(trap.getByRole("button", { name: "Save and damage", exact: true })), "the row's Save and damage is out of reach");
+          await lined(trap, "the trap's toast as the row");
+          await shots.take(dm, "br-f-11-dm-trap-row");
+          await trap.getByRole("button").first().click();
+          const whole = dm.locator('[data-toast-form="whole"]').filter({ hasText: "Needle Plate went off: Scout." });
+          await whole.waitFor();
+          await lined(whole, "the trap's toast whole");
+          await shots.take(dm, "br-f-11-dm-trap-whole");
+          // Its words dismiss it, and the error that waited takes the row.
+          await whole.getByRole("button", { name: "Needle Plate went off: Scout.", exact: true }).click();
+          await whole.waitFor({ state: "detached" });
+          await error.waitFor({ timeout: 2_000 });
+          await lined(error, "the error as the row");
+          await shots.take(dm, "br-f-11-dm-error-row");
+          // The trap's card stands as the alerts' summary, risen or in the strip's header.
+          const header = frame(dm).locator("[data-rest-summary]");
+          if ((await header.count()) > 0) await lined(header, "the header's summary button");
+          else await lined(dm.getByRole("button", { name: /^Needle Plate/ }).first(), "the risen summary row");
+          // The strip's note: a dead goblin's heal line, too long for the title here (3.3).
+          await ops.send({ t: "actor.life", target: { tokenId: run.goblin2.id }, life: "dead" });
+          await ops.send({ t: "room.update", settings: { healRevives: false } });
+          try {
+            await bar(dm, "Thorn").getByRole("button", { name: "Close", exact: true }).first().click();
+            await panTo(dm, dmCdp, { x: run.goblin2.x + 0.5, y: run.goblin2.y + 0.5 }, { x: 160, y: (await freeTop(dm, z)) + 70 });
+            await openOn(dm, run.goblin2);
+            const goblin = bar(dm, "Goblin 2");
+            await goblin.locator("[data-rest-row] [data-rest-mode]").click();
+            const note = goblin.locator("[data-rest-note]");
+            await note.waitFor();
+            await lined(note, "the strip's note");
+            await shots.take(dm, "br-f-11-dm-note");
+          } finally {
+            await ops.send({ t: "room.update", settings: { healRevives: true } });
+            await ops.send({ t: "actor.life", target: { tokenId: run.goblin2.id }, life: "alive" });
+          }
+        } finally {
+          for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+          await ops.send({ t: "trap.delete", trapId });
+          await ops.send({ t: "token.delete", tokenId: walker });
+          await waitFor("the scout and the trap gone", () => (dmSocket.state && !dmSocket.state.traps[trapId] && !dmSocket.state.tokens[walker] ? true : null));
+        }
       } finally {
         await ops.send({ t: "encounter.end" });
       }
@@ -1466,6 +1536,57 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await shots.take(pat, "br-f-17-drawer-closed-rests");
       } finally {
         if (asked.length > 0) await ops.send({ t: "roll.close", rollIds: asked });
+      }
+    });
+
+    test("br-f-18. an arrow-key nudge under the strip moves no map, and a finger down on the map before the bar clears its token cancels the clearing move (3.6, review BB-OPUS-5)", async () => {
+      await homeTokens();
+      await setUp(pat, { ...PHONE, scale: 1 });
+      const strip = await openOn(pat, run.thorn);
+      const cam = (await view(pat)).cam;
+      // Each press moves Thorn a square down as a drop does, until his label meets the strip, and the map stays.
+      const home = await tokenRect(pat, run.thorn);
+      const squares = Math.ceil((strip.top - (home.bottom + 34)) / cam.scale) + 1;
+      for (let i = 1; i <= squares; i++) {
+        await pat.keyboard.press("ArrowDown");
+        await waitFor(`Thorn ${i} squares down`, () => (patSocket.state?.tokens[run.thorn.id]?.y === run.thorn.y + i ? true : null));
+      }
+      await sleep(800);
+      assert.deepEqual((await view(pat)).cam, cam, "a nudge moved the map");
+      const nudged = await tokenRect(pat, { ...run.thorn, y: run.thorn.y + squares });
+      assert.ok(nudged.bottom + 34 > strip.top, `the nudges left Thorn's label clear of the strip: ${JSON.stringify({ nudged, strip })}`);
+      await shots.take(pat, "br-f-18-nudged-under");
+      await bar(pat, "Thorn").getByRole("button", { name: "Close", exact: true }).first().click();
+      await bar(pat, "Thorn").waitFor({ state: "detached" });
+      await homeTokens();
+
+      // The frame holds the opening's request 2.5 s by the run's hook, and a pan's first touch, sideways above the strip, cancels it there.
+      await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 }, { x: PHONE.width / 2, y: strip.top + 30 });
+      await pat.evaluate(() => {
+        (globalThis as { rvttClearWaitMs?: number }).rvttClearWaitMs = 2_500;
+      });
+      try {
+        const m = await middle(pat, run.thorn);
+        assert.equal(await hitAt(pat, m), "CANVAS", "Thorn is under something");
+        const v = await view(pat);
+        const starts: { x: number; y: number }[] = [];
+        for (let y = 200; y <= strip.top - 120; y += 24) for (let x = 24; x <= 140; x += 24) starts.push({ x, y });
+        const start = await firstEmpty(pat, v, starts);
+        assert.ok(start, "no empty cell to start the pan on");
+        await pat.touchscreen.tap(m.x, m.y);
+        await bar(pat, "Thorn").waitFor();
+        const opened = await readCamera(pat);
+        await touchSwipe(patCdp, start, { x: start.x + 80, y: start.y }, { steps: 10, everyMs: 16 });
+        const panned = (await view(pat)).cam;
+        assert.notDeepEqual(panned, opened, "the pan moved nothing");
+        await sleep(3_000);
+        assert.deepEqual((await view(pat)).cam, panned, "the clearing move ran after the viewer's own pan");
+        assert.equal(await frame(pat).getAttribute("data-bar-state"), "rest");
+        await shots.take(pat, "br-f-18-pan-cancels");
+      } finally {
+        await pat.evaluate(() => {
+          delete (globalThis as { rvttClearWaitMs?: number }).rvttClearWaitMs;
+        });
       }
     });
   });

@@ -437,6 +437,30 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         ["legendary", "Pounce"],
       ],
     );
+
+    // At 440 x 956 the strip holds Uses: from there the bar expands with the drawer, and the drawer's own close, Escape in it, rests the bar again with focus back on the strip's Uses (docs/design-v1-bar-compact.md 5.3, review BB-OPUS-5).
+    await setUp(phone, phoneCdp, { width: 440, height: 956, scale: 1 });
+    try {
+      await closeSheets(phone);
+      await tapCell(phone, run.bounds, DRAGON_AT);
+      const bar = phone.getByRole("dialog", { name: `${DRAGON} actions` });
+      await bar.waitFor();
+      assert.equal(await bar.getAttribute("data-bar-state"), "rest", "the bar did not open resting");
+      const fromRest = bar.locator("[data-rest-row]").getByRole("button", { name: "Uses", exact: true });
+      await waitFor("the strip's Uses ready", async () => ((await fromRest.isEnabled()) ? true : null));
+      await fromRest.click();
+      const drawer = bar.locator("[data-uses-drawer]");
+      await drawer.waitFor();
+      await waitFor("the bar to expand", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null), 3_000);
+      await drawer.getByRole("button").first().focus();
+      await phone.keyboard.press("Escape");
+      await drawer.waitFor({ state: "detached" });
+      await waitFor("the bar to rest", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null), 3_000);
+      await waitFor("focus back on the strip's Uses", async () => ((await fromRest.evaluate((el) => el.ownerDocument.activeElement === el)) ? true : null), 2_000);
+      await shots.take(phone, "cu-b-uses-from-rest-440");
+    } finally {
+      await setUp(phone, phoneCdp, PHONE);
+    }
   });
 
   test("cu-b-4. the desk marks Fire Breath used from its bar, and the phone's row and chips show it", async () => {
