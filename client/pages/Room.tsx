@@ -1803,7 +1803,7 @@ function Toasts(props: {
       {drawn.map((t) => createPortal(<ToastNote toast={t} onDismiss={() => ui.dismissToast(t.id)} />, hostOf(t.id), `toast-${t.id}`))}
       {props.layer && rowToast
         ? createPortal(
-            // Over the top bar's row, 4 px from the safe top, as wide as the layer less its sides; whole, from the safe top down.
+            // Over the top bar's row, 4 px from the safe top, as wide as the layer less its sides. Whole, it stands from the safe top down.
             <div data-toast-over-bars="" style={{ position: "absolute", top: props.safeTop + (wholeToast ? 0 : theme.space(1)), left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", justifyContent: "center" }}>
               <ToastNote
                 key={rowToast.id}
