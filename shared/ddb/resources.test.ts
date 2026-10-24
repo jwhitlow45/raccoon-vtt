@@ -616,3 +616,48 @@ describe("an action list cut or not a list (DDBBUILD-ASTRA-01)", () => {
     assert.deepEqual(sync(linked, bree({ class: [] })).resources, undefined, "a whole read without it removes it");
   });
 });
+
+describe("a source the counts need, cut at its bound or not a list (DDBBUILD-ASTRA-06)", () => {
+  const charisma = (componentId?: number): J => ({ type: "bonus", subType: "charisma-score", fixedValue: 10, value: 10, statId: null, componentId: componentId ?? 0, requiresAttunement: false });
+  const filler = (count: number) => Array.from({ length: count }, () => ({ type: "bonus", subType: "nothing-read", fixedValue: 1, value: 1, statId: null, componentId: 0, requiresAttunement: false }));
+  const bardic = () => act("Bardic Inspiration", lu({ maxUses: 0, statModifierUsesId: 6, resetType: 1 }), { componentId: 91 });
+  const bard = (over: J) => bree({ class: [bardic()] }, [cls("Bard", 5, [feature(91, "Bardic Inspiration", 1)])], over);
+  const mods = (over: J = {}): J => ({ race: [], class: [charisma()], background: [], feat: [], item: [], condition: [], ...over });
+  const circlet = { equipped: true, isAttuned: false, definition: { id: 777, name: "Circlet", filterType: "Wondrous item" } };
+  const junk = (count: number) => Array.from({ length: count }, (_, i) => ({ equipped: false, definition: { id: 3000 + i, name: `Pebble ${i}`, filterType: "Other Gear" } }));
+
+  test("Charisma 18 from a bonus counts Bardic Inspiration 4. A cut modifier list, or the item giving it past 400, leaves the count unread, and the read not whole", () => {
+    assert.equal(read(bard({ modifiers: mods() })).resources?.[0]?.max, 4);
+    assert.equal(read(bard({ modifiers: mods({ class: [], item: [charisma(777)] }), inventory: [circlet] })).resources?.[0]?.max, 4);
+    const cuts = [bard({ modifiers: mods({ class: [...filler(600), charisma()] }) }), bard({ modifiers: mods({ class: [], item: [charisma(777)] }), inventory: [...junk(400), circlet] })];
+    for (const json of cuts) {
+      const fill = read(json);
+      assert.deepEqual(fill.resources, []);
+      assert.equal(fill.read?.resource, false);
+      assert.ok(fill.warnings.includes("Bardic Inspiration's count comes from an ability score, which was not read, so it stays as it is."));
+    }
+  });
+
+  test("reader to merge: Bardic Inspiration stays at 4 through both", () => {
+    const sync = (c: SyncCharacter, json: J): SyncCharacter => {
+      const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: read(json) });
+      const sent = syncPatch(c, syncResult(p, defaultTicks(p)));
+      return sent ? afterSync(c, sent.patch, "2026-10-24T10:00:00.000Z") : c;
+    };
+    const before: SyncCharacter = { name: "Bree Holloway", level: 5, stats: structuredClone(EMPTY_PC_STATS) as PcStats, actor: actor({ sheetUrl: "https://www.dndbeyond.com/characters/87654321" }) };
+    const linked = sync(before, bard({ modifiers: mods() }));
+    assert.equal(linked.resources?.[0]?.max, 4);
+    for (const json of [bard({ modifiers: mods({ class: [...filler(600), charisma()] }) }), bard({ modifiers: mods({ class: [], item: [charisma(777)] }), inventory: [...junk(400), circlet] })]) {
+      assert.deepEqual(sync(linked, json).resources, linked.resources);
+    }
+  });
+
+  test("classes past 20, or a class's features past 300 or not a list, leave the class resources not read whole", () => {
+    const extra = Array.from({ length: 20 }, () => cls("Commoner", 0));
+    for (const classes of [[cls("Druid", 6), ...extra], [cls("Druid", 6, Array.from({ length: 301 }, (_, i) => feature(9000 + i, `Feature ${i}`, 1)))], [{ ...cls("Druid", 6), classFeatures: "Wild Shape" }]]) {
+      const fill = read(bree({ class: [act("Wild Shape", lu({ maxUses: 3, resetType: 1 }))] }, classes));
+      assert.equal(fill.read?.resource, false);
+    }
+    assert.equal(read(bree({ class: [act("Wild Shape", lu({ maxUses: 3, resetType: 1 }))] }, [cls("Druid", 6), ...extra.slice(1)])).read?.resource, true, "20 classes are whole");
+  });
+});

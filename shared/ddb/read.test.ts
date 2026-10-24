@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import type { PcStats } from "../model.ts";
 import { checkedFill, type PcFill } from "../rules/pcFill.ts";
+import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncCharacter } from "../rules/pcSync.ts";
+import { actor } from "../testutil.ts";
 import { readDdbCharacter } from "./read.ts";
 
 /**
@@ -265,14 +268,18 @@ describe("readDdbCharacter: what does not read", () => {
     assert.ok(fill.warnings.some((w) => /add up to 24, past 20/.test(w)));
     assert.equal(fill.actor.hpMax, undefined);
     assert.equal(fill.actor.speeds, undefined);
-    assert.equal(fill.stats.abilities?.dex, 16);
+    // A modifier list that is not a list leaves every modifier unread (DDBBUILD-ASTRA-06). Bad entries in a list are skipped.
+    assert.equal(fill.stats.abilities, undefined);
+    assert.ok(fill.warnings.some((w) => w.startsWith("Part of the character's bonuses and proficiencies")));
     assert.equal(fill.stats.rolls.length, 0);
     assert.ok(checkedFill(fill));
+    const entries = readDdbCharacter(wren({ modifiers: { ...(wren().modifiers as J), race: [null, 5, { type: "bonus" }, mod("bonus", "dexterity-score", Number.NaN)] } }), ids)!;
+    assert.equal(entries.stats.abilities?.dex, 16);
   });
 
   test("a spell or equipment list cut at its bound or not a list leaves its rolls read not whole, with its line (DDBBUILD-ASTRA-01)", () => {
     const SPELLS_CUT = "Some of D&D Beyond's spells were not read, since a list of them was too long or did not read. Spells here that they would change stay as they are.";
-    const GEAR_CUT = "Some of D&D Beyond's equipment was not read, since the list was too long. Weapons here that it would change stay as they are.";
+    const gearLine = (w: string) => w.startsWith("Part of the equipment in D&D Beyond could not be read");
     const bolt = spell("Fire Bolt", 0, { requiresAttackRoll: true, modifiers: [damage("fire", "1d10")] });
     const sleeps = (count: number) => Array.from({ length: count }, (_, i) => spell(`Sleep ${i}`, 1, { modifiers: [] }));
     const spellCuts = [
@@ -297,17 +304,18 @@ describe("readDdbCharacter: what does not read", () => {
     const rapier = { equipped: true, definition: { id: 903, name: "Rapier", filterType: "Weapon", damage: { diceString: "1d8" }, damageType: "Piercing", attackType: 1, properties: [{ name: "Finesse" }] } };
     const gearCut = readDdbCharacter(wren({ inventory: [...knives(400), rapier] }), ids)!;
     assert.equal(gearCut.read?.weapon, false);
-    assert.ok(gearCut.warnings.includes(GEAR_CUT));
+    assert.ok(gearCut.warnings.some(gearLine));
     const gearWhole = readDdbCharacter(wren({ inventory: [...knives(399), rapier] }), ids)!;
     assert.equal(gearWhole.read?.weapon, true, "400 is read whole");
-    assert.ok(!gearWhole.warnings.includes(GEAR_CUT));
+    assert.ok(!gearWhole.warnings.some(gearLine));
   });
 
   test("a list past its bound is read only to it", () => {
     const flood = wren({ inventory: Array.from({ length: 100_000 }, (_, i) => ({ equipped: true, definition: { id: i, name: `Knife ${i}`, filterType: "Weapon", damage: { diceString: "1d4" }, damageType: "Piercing", attackType: 1, properties: [] } })) });
     const started = Date.now();
     const fill = readDdbCharacter(flood, ids)!;
-    assert.equal(fill.stats.rolls.length, 40);
+    // Equipment past its bound is not read at all, so no weapon comes from it (DDBBUILD-ASTRA-06).
+    assert.equal(fill.stats.rolls.length, 0);
     assert.equal(fill.read?.weapon, false);
     assert.ok(Date.now() - started < 2000);
   });
@@ -457,5 +465,101 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     // A character with no name read is named in the words all the same.
     assert.ok(readDdbCharacter(without(rich({ classSpells: [{ spells: bolts(36) }] }), "name"), ids)!.warnings.some((w) => w.startsWith("D&D Beyond has 1 more roll for the character than the 40")));
     assert.ok(!spellCut.warnings.some((w) => /left out\. At most/.test(w)));
+  });
+
+  describe("a source cut at its bound or not a list is not read (DDBBUILD-ASTRA-06)", () => {
+    const CUT = {
+      classes: "Part of the character's classes in D&D Beyond could not be read, so the level, spellcasting, class features, max HP, weapons and spells were not read. They stay as they are.",
+      modifiers: "Part of the character's bonuses and proficiencies in D&D Beyond could not be read, so the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are.",
+      equipment: "Part of the equipment in D&D Beyond could not be read, so AC and weapons were not read. They stay as they are.",
+      equipmentWithItems: "Part of the equipment in D&D Beyond could not be read, so its magic items' bonuses could not be counted, and the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are.",
+      scores: "Part of the ability scores and their bonuses and overrides in D&D Beyond could not be read, so the scores, bonuses, AC, max HP and weapons were not read. They stay as they are.",
+    };
+    /** As leavesOut, with the source's line among those for sources not read. */
+    function cutLeavesOut(whole: J, partial: J, leftOut: readonly string[], warning: string): PcFill {
+      const full = readDdbCharacter(whole, ids)!;
+      const fill = readDdbCharacter(partial, ids)!;
+      const unread = (f: PcFill) => f.warnings.filter((w) => w.startsWith("D&D Beyond did not send ") || w.startsWith("Part of "));
+      assert.deepEqual(unread(full), []);
+      for (const part of leftOut) assert.ok(partsOf(full).includes(part), `the whole read has ${part}`);
+      assert.deepEqual(partsOf(fill), partsOf(full).filter((p) => !leftOut.includes(p)));
+      for (const part of partsOf(fill)) assert.deepEqual(partOf(fill, part), partOf(full, part), part);
+      assert.deepEqual(unread(fill), [warning]);
+      assert.ok(checkedFill(fill));
+      return fill;
+    }
+    const filler = (count: number) => Array.from({ length: count }, () => mod("bonus", "nothing-read", 1));
+    const knives = (count: number) => Array.from({ length: count }, (_, i) => ({ equipped: false, definition: { id: 2000 + i, name: `Knife ${i}`, filterType: "Weapon" } }));
+    const features = (count: number) => Array.from({ length: count }, (_, i) => feature(`Feature ${i}`, 1));
+    const wrenClasses = wren().classes as J[];
+
+    test("classes past 20, or a class's features past 300 or not a list: nothing the classes give is read", () => {
+      const leftOut = ["level", "spellAbility", "evasion", "critOn", "actor.hpMax"];
+      const extra = Array.from({ length: 19 }, () => ({ level: 0, definition: { name: "Commoner", spellCastingAbilityId: null }, subclassDefinition: null, classFeatures: [] }));
+      const cuts = [rich({ classes: [...wrenClasses, ...extra] }), rich({ classes: [{ ...wrenClasses[0]!, classFeatures: [...(wrenClasses[0]!.classFeatures as J[]), ...features(298)] }, wrenClasses[1]] }), rich({ classes: [{ ...wrenClasses[0]!, classFeatures: { 0: "Evasion" } }, wrenClasses[1]] })];
+      for (const partial of cuts) {
+        const fill = cutLeavesOut(rich(), partial, leftOut, CUT.classes);
+        assert.deepEqual(names(fill), ["Second Wind"]);
+        assert.deepEqual(fill.read, { weapon: false, spell: false, other: true, resource: false });
+      }
+      const at = readDdbCharacter(rich({ classes: [...wrenClasses, ...extra.slice(1)] }), ids)!;
+      assert.ok(!at.warnings.includes(CUT.classes), "20 classes are read whole");
+      assert.equal(readDdbCharacter(rich({ classes: [{ ...wrenClasses[0]!, classFeatures: [...(wrenClasses[0]!.classFeatures as J[]), ...features(297)] }, wrenClasses[1]] }), ids)!.level, 10, "300 features are read whole");
+    });
+
+    test("a modifier list past 600 or not a list, or more than 10 lists: nothing the modifiers give is read. A null list is empty", () => {
+      const cuts = [rich({ modifiers: { ...wrenMods, class: [...filler(600), ...(wrenMods.class as J[])] } }), rich({ modifiers: { ...wrenMods, race: "dex" } }), rich({ modifiers: { ...wrenMods, a: [], b: [], c: [], d: [], e: [] } })];
+      for (const partial of cuts) {
+        const fill = cutLeavesOut(rich(), partial, MODIFIER_PARTS, CUT.modifiers);
+        assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"]);
+        assert.deepEqual(fill.read, { weapon: false, spell: true, other: true, resource: true });
+      }
+      const whole = readDdbCharacter(rich({ modifiers: { ...wrenMods, condition: null, a: [], b: [], c: [], d: [] } }), ids)!;
+      assert.deepEqual(whole.stats.saves, ["dex", "int"], "10 lists, one null, are read whole");
+      assert.ok(!whole.warnings.some((w) => w.startsWith("Part of ")));
+    });
+
+    test("equipment past 400: AC and the weapons are not read, and the modifiers too when an item's modifier names an item past it", () => {
+      const own = wren().inventory as J[];
+      // An item modifier naming no item is never counted, so it never makes the modifiers unread.
+      const loose = { ...wrenMods, item: [...(wrenMods.item as J[]), mod("bonus", "saving-throws", 1, { componentId: null })] };
+      const near = cutLeavesOut(rich({ modifiers: loose }), rich({ modifiers: loose, inventory: [...own, ...knives(400)] }), ["actor.ac"], CUT.equipment);
+      assert.deepEqual(names(near), ["Fire Bolt", "Second Wind"]);
+      assert.deepEqual(near.read, { weapon: false, spell: true, other: true, resource: true });
+      const far = cutLeavesOut(rich(), rich({ inventory: [...knives(400), ...own] }), MODIFIER_PARTS, CUT.equipmentWithItems);
+      assert.deepEqual(names(far), ["Fire Bolt", "Second Wind"]);
+      assert.ok(!readDdbCharacter(rich({ inventory: [...own, ...knives(393)] }), ids)!.warnings.some((w) => w.startsWith("Part of ")), "400 items are read whole");
+    });
+
+    test("the scores, their bonuses or their overrides past 12: the scores are not read", () => {
+      const aura = rich({ modifiers: { ...wrenMods, class: [mod("bonus", "saving-throws", null, { statId: 6, fixedValue: null, value: null })], item: [] } });
+      const more = (list: unknown) => [...(list as J[]), ...stats([1, 1, 1, 1, 1, 1]), { id: 6, name: null, value: 5 }];
+      const twelve = { ...aura, bonusStats: [...(aura.bonusStats as J[]), ...nulls()] };
+      assert.ok(!readDdbCharacter(twelve, ids)!.warnings.some((w) => w.startsWith("Part of ")), "12 are read whole");
+      for (const key of ["stats", "bonusStats", "overrideStats"]) {
+        const partial = { ...aura, [key]: more(aura[key]) };
+        const fill = cutLeavesOut(aura, partial, ["abilities", "adjust", "actor.ac", "actor.hpMax"], CUT.scores);
+        assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"], key);
+      }
+    });
+
+    test("reader to merge: a cut modifier list or an equipped item past 400 leaves the saves, defenses and scores as synced", () => {
+      const sync = (c: SyncCharacter, json: J): SyncCharacter => {
+        const p = planSync({ mode: "resync", stats: c.stats, level: c.level, character: c, fill: readDdbCharacter(json, ids)! });
+        const sent = syncPatch(c, syncResult(p, defaultTicks(p)));
+        return sent ? afterSync(c, sent.patch, "2026-10-24T10:00:00.000Z") : c;
+      };
+      const bare: SyncCharacter = { name: "Wren Ashdown", level: 10, stats: undefined, actor: actor({ sheetUrl: "https://www.dndbeyond.com/characters/12345678" }) };
+      const synced = sync(bare, rich());
+      assert.deepEqual(synced.stats!.saves, ["dex", "int"]);
+      assert.deepEqual(synced.stats!.defenses, { poison: "resistant" });
+      for (const json of [rich({ modifiers: { ...wrenMods, class: [...filler(600), ...(wrenMods.class as J[])], race: [...filler(600), ...(wrenMods.race as J[])] } }), rich({ inventory: [...knives(400), ...(wren().inventory as J[])] })]) {
+        const after = sync(synced, json);
+        assert.deepEqual(after.stats!.saves, synced.stats!.saves);
+        assert.deepEqual(after.stats!.defenses, synced.stats!.defenses);
+        assert.deepEqual(after.stats!.abilities, synced.stats!.abilities);
+        assert.deepEqual(after.stats!.adjust, synced.stats!.adjust);
+      }
+    });
   });
 });

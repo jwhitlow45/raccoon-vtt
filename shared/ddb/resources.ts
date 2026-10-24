@@ -121,8 +121,13 @@ export function actionsWhole(data: Obj): boolean {
 type ClassInfo = { classId: ClassId | undefined; level: number };
 type Feature = { cls: number; requiredLevel: number; name: string | null };
 
-/** Each class's level and SRD class, and each class feature's class and level by its id. */
-function classesOf(data: Obj): { classes: ClassInfo[]; features: Map<number, Feature> } {
+/**
+ * Each class's level and SRD class, and each class feature's class and
+ * level by its id. `whole` is false when the classes or a class's features
+ * were cut at their bound or are not a list, since a feature past the cut
+ * could not be placed (DDBBUILD-ASTRA-06).
+ */
+function classesOf(data: Obj): { classes: ClassInfo[]; features: Map<number, Feature>; whole: boolean } {
   const classes: ClassInfo[] = [];
   const features = new Map<number, Feature>();
   for (const raw of arr(data.classes, MAX.classes)) {
@@ -142,7 +147,10 @@ function classesOf(data: Obj): { classes: ClassInfo[]; features: Map<number, Fea
       features.set(id, { cls, requiredLevel, name: resourceNameOf(fdef?.name) });
     }
   }
-  return { classes, features };
+  // Classes not sent as a list are a source not sent, which read.ts says, and their features' lists are read to their end or not at all.
+  const listed = (v: unknown, max: number) => v === null || v === undefined || (Array.isArray(v) && v.length <= max);
+  const whole = !(Array.isArray(data.classes) && data.classes.length > MAX.classes) && arr(data.classes, MAX.classes).every((c) => listed(obj(c)?.classFeatures, MAX.features));
+  return { classes, features, whole };
 }
 
 /** One limited use as read, before the merges of 2.1. */
@@ -288,7 +296,7 @@ export type ResourcesRead = {
  */
 export function readResources(data: Obj, src: Sources & { who: string }): ResourcesRead {
   const groups = obj(data.actions) ?? {};
-  const { classes, features } = classesOf(data);
+  const { classes, features, whole: classesWhole } = classesOf(data);
   const skips: Skip[] = [];
   let entries: Entry[] = [];
   let order = 0;
@@ -443,7 +451,7 @@ export function readResources(data: Obj, src: Sources & { who: string }): Resour
 
   return {
     resources: out.map((r) => r.resource),
-    whole: over === 0 && unread === 0 && ability.length === 0 && prof.length === 0 && actionsWhole(data),
+    whole: over === 0 && unread === 0 && ability.length === 0 && prof.length === 0 && actionsWhole(data) && classesWhole,
     warnings: lines,
   };
 }

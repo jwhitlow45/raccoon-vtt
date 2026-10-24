@@ -36,7 +36,7 @@ import { actionsWhole, readResources } from "./resources.ts";
 type Obj = Record<string, unknown>;
 
 /** Bounds on every list the reader loops over, well past any real character. */
-const MAX = { modifiers: 600, classes: 20, features: 300, inventory: 400, properties: 20, spells: 400, actions: 200, defs: 20 };
+const MAX = { modifiers: 600, modifierLists: 10, scores: 12, classes: 20, features: 300, inventory: 400, properties: 20, spells: 400, actions: 200, defs: 20 };
 
 function obj(v: unknown): Obj | null {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : null;
@@ -112,7 +112,7 @@ function modifiersOf(data: Obj): Modifier[] {
     if (item && id !== null && item.equipped === true) equipped.set(id, { attuned: item.isAttuned === true });
   }
   const out: Modifier[] = [];
-  for (const [group, list] of Object.entries(groups).slice(0, 10)) {
+  for (const [group, list] of Object.entries(groups).slice(0, MAX.modifierLists)) {
     for (const raw of arr(list, MAX.modifiers)) {
       const m = obj(raw);
       if (!m || typeof m.type !== "string" || typeof m.subType !== "string") continue;
@@ -144,7 +144,7 @@ function has(mods: readonly Modifier[], type: string, subType: string): boolean 
 /** Each ability's value in a list of `{ id, value }`, the shape of the sheet's scores, their bonuses and their overrides. */
 function byAbility(list: unknown): Partial<Record<AbilityKey, number>> {
   const out: Partial<Record<AbilityKey, number>> = {};
-  for (const raw of arr(list, 12)) {
+  for (const raw of arr(list, MAX.scores)) {
     const s = obj(raw);
     const a = abilityOf(s?.id);
     const v = num(s?.value);
@@ -500,6 +500,50 @@ function sentOf(data: Obj, classes: readonly ClassRead[]): Sent {
   };
 }
 
+/**
+ * The sources the JSON holds but the reader reads only in part: a list cut
+ * at its bound, or one that is not a list where a list should be
+ * (DDBBUILD-ASTRA-06). Read in part, a source would read a proficiency,
+ * a bonus or a score as gone, so everything it feeds is left out, as for a
+ * source not sent. `itemsPast`: the equipment is cut and an item's modifier
+ * names an item past the cut, so whether it is equipped cannot be told.
+ */
+type ReadInPart = { classes: boolean; modifiers: boolean; inventory: boolean; itemsPast: boolean; scoreChanges: boolean };
+
+function partialOf(data: Obj, sent: Sent): ReadInPart {
+  const groups = obj(data.modifiers);
+  const modifiers = groups !== null && (Object.keys(groups).length > MAX.modifierLists || Object.values(groups).some((list) => !wholeList(list, MAX.modifiers)));
+  const inventory = sent.inventory && !wholeList(data.inventory, MAX.inventory);
+  let itemsPast = false;
+  if (inventory && groups) {
+    const held = new Set(arr(data.inventory, MAX.inventory).map((raw) => num(obj(obj(raw)?.definition)?.id)));
+    itemsPast = arr(groups.item, MAX.modifiers).some((raw) => {
+      const id = num(obj(raw)?.componentId);
+      return id !== null && !held.has(id);
+    });
+  }
+  // A list of scores not sent as a list is a source not sent, or a body that does not read at all.
+  const scoreChanges = [data.stats, data.bonusStats, data.overrideStats].some((list) => Array.isArray(list) && list.length > MAX.scores);
+  const classes = sent.classes && (!wholeList(data.classes, MAX.classes) || arr(data.classes, MAX.classes).some((c) => !wholeList(obj(c)?.classFeatures, MAX.features)));
+  return { classes, modifiers, inventory, itemsPast, scoreChanges };
+}
+
+/** One line per source read only in part, in the words of the source not sent. */
+function partialWarnings(partial: ReadInPart): string[] {
+  const out: string[] = [];
+  if (partial.classes) out.push("Part of the character's classes in D&D Beyond could not be read, so the level, spellcasting, class features, max HP, weapons and spells were not read. They stay as they are.");
+  if (partial.modifiers) out.push("Part of the character's bonuses and proficiencies in D&D Beyond could not be read, so the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are.");
+  if (partial.inventory) {
+    out.push(
+      partial.itemsPast
+        ? "Part of the equipment in D&D Beyond could not be read, so its magic items' bonuses could not be counted, and the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are."
+        : "Part of the equipment in D&D Beyond could not be read, so AC and weapons were not read. They stay as they are.",
+    );
+  }
+  if (partial.scoreChanges) out.push("Part of the ability scores and their bonuses and overrides in D&D Beyond could not be read, so the scores, bonuses, AC, max HP and weapons were not read. They stay as they are.");
+  return out;
+}
+
 /** One warning per source the JSON lacks, naming everything left out because of it. */
 function missingWarnings(sent: Sent): string[] {
   const out: string[] = [];
@@ -567,16 +611,19 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const cname = name(data.name, 80);
   const classes = classesOf(data);
   const sent = sentOf(data, classes);
-  const warnings = missingWarnings(sent);
+  const partial = partialOf(data, sent);
+  const warnings = [...missingWarnings(sent), ...partialWarnings(partial)];
+  // A source read only in part is not read (DDBBUILD-ASTRA-06).
+  const inventory = sent.inventory && !partial.inventory;
   // The class resources' lines go right after these, before the scores' and spells', so the 40-line cut never drops them (OP-13).
   const resourceLinesAt = warnings.length;
 
   // The modifiers' needs, then the scores' needs (2.5): every output below that reads a modifier or a score is read only when these are.
-  const mods = sent.modifiers && (sent.inventory || !sent.itemModifiers) ? modifiersOf(data) : null;
-  const scores = mods && sent.scoreChanges ? scoresOf(base, data, mods, warnings) : null;
+  const mods = sent.modifiers && !partial.modifiers && (sent.inventory ? !partial.itemsPast : !sent.itemModifiers) ? modifiersOf(data) : null;
+  const scores = mods && sent.scoreChanges && !partial.scoreChanges ? scoresOf(base, data, mods, warnings) : null;
   const scoreMods = scores ? (Object.fromEntries(ABILITY_KEYS.map((a) => [a, abilityMod(scores[a])])) as Record<AbilityKey, number>) : null;
   // The level is null exactly when the classes were not read, so each output that needs the classes tests it.
-  const level = sent.classes ? levelOf(classes, warnings) : null;
+  const level = sent.classes && !partial.classes ? levelOf(classes, warnings) : null;
   const hasFeature = (feature: string) => classes.find((c) => c.features.has(feature.toLowerCase()));
 
   const stats: PcFillStats = { rolls: [] };
@@ -598,7 +645,7 @@ function read(json: unknown, newId: () => string): PcFill | null {
 
   const ctx: Ctx = { warnings, newId };
   const rogue = hasFeature("Sneak Attack");
-  const weapons = sent.inventory && level !== null && scores ? weaponRolls(data, ctx, scores, rogue ? `${Math.ceil(rogue.level / 2)}d6` : null) : null;
+  const weapons = inventory && level !== null && scores ? weaponRolls(data, ctx, scores, rogue ? `${Math.ceil(rogue.level / 2)}d6` : null) : null;
   const spells = sent.spellLists && level !== null ? spellRolls(data, ctx, level, spellAbility) : null;
   const actions = sent.actions ? actionRolls(data, ctx) : null;
   const cut = cutRolls(weapons, spells?.rolls ?? null, actions);
@@ -606,10 +653,6 @@ function read(json: unknown, newId: () => string): PcFill | null {
   if (spells && !spells.whole) {
     cut.read.spell = false;
     warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's spells were not read, since a list of them was too long or did not read. Spells here that they would change stay as they are.");
-  }
-  if (weapons && !wholeList(data.inventory, MAX.inventory)) {
-    cut.read.weapon = false;
-    warnings.splice(resourceLinesAt, 0, "Some of D&D Beyond's equipment was not read, since the list was too long. Weapons here that it would change stay as they are.");
   }
   if (sent.actions && !actionsWhole(data)) {
     cut.read.other = false;
@@ -626,7 +669,7 @@ function read(json: unknown, newId: () => string): PcFill | null {
   if (cut.over > 0) warnings.push(cutWarning(cut.over, cname ?? "the character"));
 
   const actor: PcFill["actor"] = {};
-  if (mods && scoreMods && sent.inventory) actor.ac = acOf(data, mods, scoreMods.dex);
+  if (mods && scoreMods && inventory) actor.ac = acOf(data, mods, scoreMods.dex);
   const override = num(data.overrideHitPoints);
   const baseHp = num(data.baseHitPoints);
   // An override is the whole maximum. Otherwise it reads the Constitution modifier and every per-level bonus once per level.
