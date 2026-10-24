@@ -145,6 +145,24 @@ describe("the review's class resources (docs/design-v1-ddb-resources.md 6.1 and 
     assert.match(html, />Adds Luck Points: 3 uses, back on a Long Rest, 2 of 3 left</);
   });
 
+  test("after a refused Save, Overwrite all and Keep all of yours cover only the class resources shown (DDBBUILD-ASTRA-03)", () => {
+    const base = synced();
+    // Spellcasting ability and Rage both changed here, and in D&D Beyond.
+    const mine = { ...base, stats: { ...base.stats!, spellAbility: "cha" as const }, resources: base.resources!.map((r) => ({ ...r, max: 5 })) };
+    const fill = withResources(fillOf({ spellAbility: "int" }), [{ ...rage, max: 4 }]);
+    const { plan } = render(mine, fill);
+    const rageRow = plan.items.find((i) => i.type === "resource" && i.section === "kept")!;
+    const ticks = new Set([...defaultTicks(plan), rageRow.id]);
+    assert.match(render(mine, fill, ticks).html, /aria-pressed="false"[^>]*>Overwrite all/, "the hidden field is not ticked");
+    assert.match(render(mine, fill, ticks, "resync", "resources").html, /aria-pressed="true"[^>]*>Overwrite all/);
+    const typed = { ...bree({ ...empty(), spellAbility: "cha" }), resources: [{ id: "t1", name: "Rage", max: 2, used: 0, reset: "long" as const }] };
+    const editor = render(typed, fill, undefined, "editor").plan;
+    const keep = editor.items.find((i) => i.type === "resource" && i.section === "replaces")!;
+    const keepTicks = new Set([...defaultTicks(editor), keep.id]);
+    assert.match(render(typed, fill, keepTicks, "editor").html, /aria-pressed="false"[^>]*>Keep all of yours/);
+    assert.match(render(typed, fill, keepTicks, "editor", "resources").html, /aria-pressed="true"[^>]*>Keep all of yours/);
+  });
+
   test("after a refused Save, the class resources alone: no other group, Check these or name line", () => {
     const base = synced();
     const spent = { ...base, resources: base.resources!.map((r) => ({ ...r, used: 2 })) };

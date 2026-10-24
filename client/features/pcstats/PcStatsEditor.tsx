@@ -41,7 +41,7 @@ import {
   type TotalKey,
 } from "./draft.ts";
 import { alsoAny, alsoLines, alsoPatch, readLine, type AlsoKey, type AlsoSet } from "./fill.ts";
-import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
+import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState, type Review } from "./flow.ts";
 import { DDB_LINK_ERROR, ddbCharacterId, ddbCharacterUrl } from "#shared/ddb/link.ts";
 import { getDdbFill, importErrorText, readPastedJson } from "./ddb.ts";
 import { pcPasteWarnings, statsFromBlock } from "./fromBlock.ts";
@@ -114,7 +114,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
   const problems = useMemo(() => draftProblems(draft), [draft]);
   const size = useMemo(() => sizeOf(draft.stats), [draft.stats]);
   // Class resources a D&D Beyond read set are unsaved too, even with the block and its record as saved (docs/design-v1-ddb-resources.md 6.2 e).
-  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || flow.record !== null || flow.resources !== null || pasted.trim() !== "" || ddbJson.trim() !== "";
+  const dirty = draftDirty(opened.draft, draft) || alsoAny(flow.also) || flow.record !== null || resourcesUnsaved(flow.resources) || pasted.trim() !== "" || ddbJson.trim() !== "";
   const held = flow.saving;
   // An answer that comes after the editor closed may only say what became of the save.
   const open = useRef(true);
@@ -189,12 +189,13 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     const live = store.getState().view?.characters[props.characterId];
     const held = state.resources;
     // A D&D Beyond fill's record goes with the block it describes (docs/design-v1-resync.md 1.1), and its class resources with both, expecting the list they were planned from (docs/design-v1-ddb-resources.md 6.2 d).
-    const patch: CharacterPatch = {
+    const rest: CharacterPatch = {
       ...(savePatch(opened.draft, opened.had, state.draft) ?? {}),
       ...(live ? alsoPatch(state.also, live) : {}),
       ...(state.record ? { ddbSync: state.record } : {}),
-      ...(held?.list ? { resources: held.list } : {}),
     };
+    const { expect, ...resources } = resourcesSave(held, rest);
+    const patch: CharacterPatch = { ...rest, ...resources };
     if (Object.keys(patch).length === 0) {
       send({ t: "saved", answer: "taken" });
       return;
@@ -207,7 +208,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
         return;
       }
       // Only the class resources are expected, so this refusal means they changed elsewhere: the review shows them again, with its own notice (6.2 c).
-      if (held && answer === "refused" && refused?.message.trim() === CHARACTER_CHANGED) {
+      if (expect && answer === "refused" && refused?.message.trim() === CHARACTER_CHANGED) {
         setRefusal(null);
         setResourcesStale(true);
         send({ t: "saved", answer, stale: true });
@@ -222,7 +223,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     };
     setRefusal(null);
     // In "view as a player" nothing is sent: the preview says so, and the draft stays.
-    const op = { t: "character.update" as const, characterId: props.characterId, patch, ...(held ? { expect: { resources: held.expect } } : {}) };
+    const op = { t: "character.update" as const, characterId: props.characterId, patch, ...(expect ? { expect } : {}) };
     if (actions.dispatch(op, { onAnswer, quiet: true }) === null) send({ t: "saved", answer: "refused" });
   };
 
@@ -376,7 +377,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
       }
       if (recordBig) return;
       setResourcesStale(false);
-      send({ t: "use", sync: editorSyncUse(result, saved, { fill: review.fill, ticks: ticks ?? new Set() }) });
+      send({ t: "use", sync: editorSyncUse(result, saved, { fill: review.fill, ticks: ticks ?? new Set() }, review.only ? { pending: flow.record } : undefined) });
     };
     return (
       <Dialog

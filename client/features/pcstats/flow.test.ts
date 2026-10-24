@@ -7,7 +7,7 @@ import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor } from "#shared/testutil.ts";
 import { openDraft } from "./draft.ts";
 import { alsoPatch } from "./fill.ts";
-import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
+import { editorHelpCharacter, editorSyncPlan, editorSyncUse, openFlow, resourcesSave, resourcesUnsaved, stepFlow, type FlowEvent, type FlowState } from "./flow.ts";
 import { expectHash } from "#shared/permissions.ts";
 import { hash12 } from "#shared/rules/pcSync.ts";
 import { goneDroppedLine } from "./resync.ts";
@@ -380,6 +380,65 @@ describe("the editor's class resources", () => {
     const pending = run(start, { t: "read", fill: withRage, lines: [], ticks: first.ticks }, { t: "use", sync: first.use }, { t: "open", step: "ddb" }).state;
     const rage = review(saved, withRage, pending).plan.items.find((i) => i.type === "resource" && (i.mine ?? i.theirs!.resource).name === "Rage");
     assert.deepEqual([rage?.type === "resource" && rage.case, rage?.section], ["sameName", "replaces"]);
+  });
+
+  describe("after a Save refused for the class resources (DDBBUILD-ASTRA-03)", () => {
+    const sling = { id: "sling1", name: "Sling", kind: "weapon" as const, attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d4", mod: true as const }], ddb: true as const };
+    const withSling = (resources: NonNullable<PcFill["resources"]>): PcFill => ({ ...read(resources), stats: { rolls: [sling] } });
+    /** Bree synced with a Sling and Rage, Rage then raised to 5 here, the Sling deleted in the editor, and a read where D&D Beyond raised Rage to 4. */
+    function refused() {
+      const bare: SyncCharacter = { name: "Bree", level: 5, actor: actor({ sheetUrl: SHEET }) };
+      const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: bare, fill: withSling([rageRead()]) });
+      const synced = afterSync(bare, syncPatch(bare, syncResult(p0, defaultTicks(p0)))!.patch, AT);
+      const saved: SyncCharacter = { ...synced, resources: synced.resources!.map((r) => ({ ...r, max: 5 })) };
+      const f = withSling([rageRead(0, 4)]);
+      const opened = openDraft(saved);
+      const start = run(openFlow(opened.draft), { t: "edit", update: (d) => ({ ...d, stats: { ...d.stats, rolls: [] } }) }, { t: "open", step: "ddb" }).state;
+      const one = review(saved, f, start);
+      const slingMarker = one.use.record!.gone!.find((k) => k.startsWith("w:"));
+      assert.ok(slingMarker, "the deleted Sling is marked");
+      const state = run(start, { t: "read", fill: f, lines: [], ticks: one.ticks }, { t: "use", sync: one.use }, { t: "save" }, { t: "saved", answer: "refused", stale: true }).state;
+      assert.equal(state.review?.only, "resources");
+      return { saved, f, state, slingMarker };
+    }
+
+    test("Use it keeps the pending record's roll markers, though a hidden Add it back was ticked, and takes the r: markers from the review", () => {
+      const { saved, f, state, slingMarker } = refused();
+      const plan = editorSyncPlan(f, state, openDraft(saved), saved);
+      const slingBack = plan.items.find((i) => i.type === "roll" && i.case === "deleted")!;
+      const ticks = new Set([...state.review!.ticks!, slingBack.id]);
+      const result = syncResult(plan, ticks);
+      assert.ok(!result.record.gone?.includes(slingMarker), "the review's own record lets the Sling back");
+      const use = editorSyncUse(result, saved, { fill: f, ticks }, { pending: state.record });
+      const after = run(state, { t: "use", sync: use }).state;
+      assert.ok(after.record!.gone!.includes(slingMarker), "the Sling stays deleted, as the draft without it says");
+      assert.deepEqual(after.draft.stats.rolls, [], "the draft stays");
+      assert.equal(resourcesSave(after.resources, { ddbSync: after.record! }).expect?.resources, expectHash(saved as never, "resources"));
+    });
+
+    test("a review whose record is the saved one replaces the pending record's resource part, never keeps it", () => {
+      const saved = savedBree();
+      const { res: _res, ...rest } = saved.ddbSync!;
+      const pending = { ...rest, res: {} };
+      const f = read([rageRead(1)]);
+      const state: FlowState = { ...run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state, record: pending };
+      const plan = editorSyncPlan(f, state, openDraft(saved), saved);
+      const ticks = defaultTicks(plan);
+      const use = editorSyncUse(syncResult(plan, ticks), saved, { fill: f, ticks }, { pending });
+      assert.equal(use.record, null, "as saved");
+      assert.equal(use.resources, null);
+    });
+  });
+
+  test("a read with no class resources still marks a removed linked one: held with no list, so Save expects the resources (DDBBUILD-ASTRA-04)", () => {
+    const saved: SyncCharacter = { ...savedBree(), resources: [] };
+    const f: PcFill = { source: "ddb", stats: { rolls: [] }, level: 5, name: "Bree", actor: { sheetUrl: SHEET }, warnings: [], read: { weapon: true, spell: true, other: false, resource: false } };
+    const { use } = review(saved, f, run(openFlow(openDraft(saved).draft), { t: "open", step: "ddb" }).state);
+    assert.deepEqual(use.record?.gone, [`r:${hash12("barbarian:rage")}`]);
+    assert.ok(use.resources, "held");
+    assert.equal(use.resources.list, undefined);
+    assert.ok(resourcesUnsaved(use.resources));
+    assert.deepEqual(resourcesSave(use.resources, { ddbSync: use.record! }), { expect: { resources: expectHash(saved as never, "resources") } });
   });
 
   test("an editor splice past 40 markers drops the oldest, and the line names what dropped (OP-21)", () => {

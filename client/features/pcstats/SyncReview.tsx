@@ -90,7 +90,9 @@ export function SyncReview(props: {
   const also = only ? [] : plan.also.filter((a) => a.key !== "name");
   const nameLine = only ? undefined : plan.also.find((a) => a.key === "name");
   const spent = result.spent;
-  const overwrite = [...bulkIds(plan, "kept"), ...bulkIds(plan, "different")];
+  // After a refusal only the class resources show, so the bulk buttons cover only them (DDBBUILD-ASTRA-03).
+  const shown = only ? ("Class resources" as const) : undefined;
+  const overwrite = [...bulkIds(plan, "kept", shown), ...bulkIds(plan, "different", shown)];
   const overwriteAll = overwrite.length > 0 ? <BulkButton ids={overwrite} ticks={ticks} onBulk={props.onBulk} disabled={props.disabled} words="Overwrite all" /> : null;
   const section = (key: ReviewSection, label: string, body: ReactNode, action?: ReactNode) => (
     <section style={SECTION} onFocusCapture={() => props.onFocusSection?.(key)}>
@@ -199,7 +201,7 @@ export function SyncReview(props: {
             ) : (
               replaces.map((item) => <ReplacesRow key={item.id} item={item} blocks={blocks} ticked={ticks.has(item.id)} onTick={props.onTick} disabled={props.disabled} />)
             ),
-            <BulkButton ids={bulkIds(plan, "replaces")} ticks={ticks} onBulk={props.onBulk} disabled={props.disabled} words="Keep all of yours" />,
+            <BulkButton ids={bulkIds(plan, "replaces", shown)} ticks={ticks} onBulk={props.onBulk} disabled={props.disabled} words="Keep all of yours" />,
           )
         : null}
       {plan.ownRolls > 0 && !only ? <p style={{ ...LINE, color: theme.color.textMuted }}>{ownRollsLine(plan.ownRolls)}</p> : null}

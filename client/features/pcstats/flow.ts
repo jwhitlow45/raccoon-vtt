@@ -1,6 +1,6 @@
 import type { Character, PcStats } from "#shared/model.ts";
 import { expectHash, type ExpectSubject } from "#shared/permissions.ts";
-import type { DdbSyncPatch } from "#shared/protocol.ts";
+import { MAX_PC_ROLLS, type CharacterPatch, type DdbSyncPatch } from "#shared/protocol.ts";
 import { resourcesAfter, type ResourceSent } from "#shared/rules/classResources.ts";
 import type { FillMerge, PcFill } from "#shared/rules/pcFill.ts";
 import { mergeFill } from "#shared/rules/pcFill.ts";
@@ -31,7 +31,12 @@ import { alsoSet, pendingCharacter, type AlsoKey, type AlsoLine, type AlsoSet } 
  * The class resources live beside the block, so a D&D Beyond read's Use it
  * holds their part of the result apart (`HeldResources`), planned against
  * the live list and the saved record (docs/design-v1-ddb-resources.md
- * 6.2). Save expects that list, and a refusal reviews the resources again.
+ * 6.2). Where the held part and the pending record meet, each part comes
+ * from its own source: the rolls' markers and the rest of the record from
+ * the pending one, the resources' entries and `r:` markers, and the source
+ * they are compared as, from the saved one. Save expects the list whenever
+ * it writes it or the record's resource part, and a refusal reviews the
+ * resources again.
  *
  * `step` returns the next state and the effects the editor runs: send the
  * Save's op, fetch or abort a D&D Beyond request, or close.
@@ -56,13 +61,14 @@ export type Review = {
 
 /**
  * A D&D Beyond read's class resources as its Use it left them (6.2 a): the
- * read and its ticks, for a review again after a refusal, the list Save
- * sends when it changes, and the hash of the live list it was planned
- * from, which Save expects. Held only when it changes the list or the
- * record's resource part (6.2 d), and until Save lands, a read's Use it
- * replaces it, or the editor closes.
+ * read and its ticks, for a review again after a refusal, and the hash of
+ * the live list it was planned from, which Save expects. `list` is the
+ * list Save sends when it changes the live one, and `part` marks a change
+ * to the record's resource part. Held only when one of these holds (6.2
+ * d), and until Save lands, a read's Use it replaces it, or the editor
+ * closes.
  */
-export type HeldResources = { fill: PcFill; ticks: ReadonlySet<string>; list?: ResourceSent[]; expect: string };
+export type HeldResources = { fill: PcFill; ticks: ReadonlySet<string>; list?: ResourceSent[]; part?: true; expect: string };
 
 /**
  * What a D&D Beyond review's Use it sets: the merged block and level, the
@@ -110,27 +116,65 @@ export function editorHelpCharacter(plan: SyncPlan, saved: Pick<Character, "acto
  * class resources held when they change the live list or the record's
  * resource part (`SyncUse`, 6.2). The result's record is already the
  * pending one with its resource part planned against the saved record's,
- * spliced and cut to 40 markers (pcSync.ts syncResult).
+ * spliced and cut to 40 markers (pcSync.ts syncResult). After a refusal
+ * (`only`), the draft and its rolls stay, so the record Save sends is the
+ * pending one with only this review's resource part in it (6.2 c).
  */
-export function editorSyncUse(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }): SyncUse {
-  const record = saved && sameRecord(result.record, saved.ddbSync) ? null : result.record;
-  return { stats: result.stats, level: result.level, also: result.also, record, resources: heldResources(result, saved, read) };
+export function editorSyncUse(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }, only?: { pending: DdbSyncPatch | null }): SyncUse {
+  const made = only ? spliceResources(only.pending, result.record) : result.record;
+  const record = saved && sameRecord(made, saved.ddbSync) ? null : made;
+  return { stats: result.stats, level: result.level, also: result.also, record, resources: heldResources(result, made, saved, read) };
 }
 
-function heldResources(result: SyncResult, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }): HeldResources | null {
-  if (result.resources === undefined || !saved) return null;
-  // A preset's level alone is not a change, so a spend meanwhile never refuses a Save over it (OP-19).
-  const list = !sameButLevels(resourcesAfter(saved.resources, result.resources), saved.resources);
-  const part = resourcePart(result.record) !== resourcePart(saved.ddbSync);
+function heldResources(result: SyncResult, record: DdbSyncPatch, saved: ExpectSubject | undefined, read: { fill: PcFill; ticks: ReadonlySet<string> }): HeldResources | null {
+  if (!saved) return null;
+  const after = result.resources !== undefined ? resourcesAfter(saved.resources, result.resources) : undefined;
+  // A preset's level alone is not a change, so a spend meanwhile never refuses a Save over it alone (OP-19).
+  const list = after !== undefined && !sameButLevels(after, saved.resources);
+  // The record's resource part can change with no list read, as when a removed resource's entry becomes its marker (DDBBUILD-ASTRA-04).
+  const part = resourcePart(record) !== resourcePart(saved.ddbSync);
   if (!list && !part) return null;
-  return { fill: read.fill, ticks: read.ticks, ...(list ? { list: result.resources } : {}), expect: expectHash(saved, "resources") };
+  return { fill: read.fill, ticks: read.ticks, ...(list ? { list: result.resources! } : {}), ...(part ? { part: true as const } : {}), expect: expectHash(saved, "resources") };
 }
 
-/** The pending record with a resources-only review's part in place of its own (6.2 c), or the review's record when there was none pending. */
-function spliceResources(pending: DdbSyncPatch | null, from: DdbSyncPatch | null): DdbSyncPatch | null {
-  if (!pending || !from) return from ?? pending;
+/**
+ * The pending record with a resources-only review's part in place of its
+ * own (6.2 c): its entries and `r:` markers from the review, every other
+ * marker from the pending record, whose draft the review leaves as it is,
+ * oldest first in the review's order with a pending marker the review
+ * dropped kept after the one before it, and 40 of either kind together.
+ */
+function spliceResources(pending: DdbSyncPatch | null, from: DdbSyncPatch): DdbSyncPatch {
+  if (!pending) return from;
   const { res: _res, gone: _gone, ...rest } = pending;
-  return { ...rest, ...(from.res ? { res: from.res } : {}), ...(from.gone ? { gone: from.gone } : {}) };
+  const rolls = (pending.gone ?? []).filter((k) => !k.startsWith("r:"));
+  const keep = new Set(rolls);
+  const merged = (from.gone ?? []).filter((k) => k.startsWith("r:") || keep.has(k));
+  for (const [i, k] of rolls.entries()) {
+    if (merged.includes(k)) continue;
+    const before = rolls.slice(0, i).findLast((b) => merged.includes(b));
+    merged.splice(before === undefined ? 0 : merged.indexOf(before) + 1, 0, k);
+  }
+  const gone = merged.slice(Math.max(0, merged.length - MAX_PC_ROLLS));
+  return { ...rest, ...(from.res ? { res: from.res } : {}), ...(gone.length > 0 ? { gone } : {}) };
+}
+
+/** Whether held class resources leave the editor unsaved: a list or a record part that changes (6.2 e). */
+export function resourcesUnsaved(held: HeldResources | null): boolean {
+  return held !== null && (held.list !== undefined || held.part === true);
+}
+
+/**
+ * What Save adds for held class resources (6.2 d): the list when it
+ * changes the live one, and `expect` whenever it writes the list or the
+ * record's resource part.
+ */
+export function resourcesSave(held: HeldResources | null, rest: CharacterPatch): { resources?: ResourceSent[]; expect?: { resources: string } } {
+  if (!held) return {};
+  const resources = held.list;
+  const writesPart = held.part === true && rest.ddbSync !== undefined;
+  if (resources === undefined && !writesPart) return {};
+  return { ...(resources ? { resources } : {}), expect: { resources: held.expect } };
 }
 
 export type FlowState = {
@@ -248,7 +292,7 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
         const sync = event.sync;
         if (!sync) return { state, effects: NONE };
         // After a refusal the review was of the class resources alone: the draft, its rolls and Also set stay (6.2 c).
-        if (review.only === "resources") return { state: { ...state, step: "block", review: null, record: spliceResources(state.record, sync.record), resources: sync.resources }, effects: NONE };
+        if (review.only === "resources") return { state: { ...state, step: "block", review: null, record: sync.record, resources: sync.resources }, effects: NONE };
         const draft: PcDraft = { stats: sync.stats, level: sync.level };
         return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record, resources: sync.resources }, effects: NONE };
       }
