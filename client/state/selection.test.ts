@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { appleKeys } from "../lib/device.ts";
 import { addsToSelection, addToSelection, barDismiss, dismissal, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
-import { INITIAL_LOCAL } from "./types.ts";
+import { INITIAL_LOCAL, type LocalUi } from "./types.ts";
+import { keepsOpening, type BarSubject } from "../canvas/barDock.ts";
 
 describe("taps, the selection and the action bar", () => {
   test("a tap on a token, on the map or its initiative row, selects it and opens its action bar", () => {
@@ -152,5 +153,98 @@ describe("the keys that add to a selection", () => {
     assert.equal(appleKeys({ platform: "Win32", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }), false);
     assert.equal(appleKeys({ platform: "Linux x86_64", userAgent: "Mozilla/5.0 (X11; Linux x86_64)" }), false);
     assert.equal(appleKeys({ platform: "Linux armv81", userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)" }), false);
+  });
+});
+
+describe("the viewer's opening of the bar (docs/design-v1-bar-compact.md 3.6, reviews BAR-ASTRA-09 and BC-OPUS-37)", () => {
+  test("a tap, Actions and a select that asks for it each set a new opening naming the token shown", () => {
+    const tapped = tapToken(INITIAL_LOCAL, "a");
+    assert.deepEqual(tapped.opening, { tokenId: "a", gather: false });
+    const other = tapToken(tapped, "b");
+    assert.deepEqual(other.opening, { tokenId: "b", gather: false });
+    assert.notEqual(other.opening, tapped.opening);
+    const hidden = showActions(other, false);
+    assert.equal(hidden.opening, null, "a hidden bar holds none");
+    const actions = showActions(hidden, true);
+    assert.deepEqual(actions.opening, { tokenId: "b", gather: false });
+    assert.equal(showActions(actions, true), actions, "Actions with the bar showing asks nothing new");
+    const placed = selectToken(actions, "c", true);
+    assert.deepEqual(placed.opening, { tokenId: "c", gather: false });
+  });
+
+  test("a select with no ask, or with the bar off, sets none, and a let-go clears it", () => {
+    const tapped = tapToken(INITIAL_LOCAL, "a");
+    assert.equal(selectToken(tapped, "b").opening, tapped.opening, "a select keeps the opening it found, which was judged already");
+    assert.equal(selectToken(INITIAL_LOCAL, "b", true).opening, null, "the bar is off");
+    assert.equal(selectToken(tapped, null, true).opening, null);
+    assert.equal(tapToken(tapped, null).opening, null, "a tap on empty map lets go");
+    assert.equal(doneSelecting(tapped).opening, null);
+  });
+
+  test("taps that gather or take out a token in Multi-select are gathering openings, and a tap on empty map there clears it", () => {
+    const multi = setMultiSelect(tapToken(INITIAL_LOCAL, "a"), true);
+    const two = tapToken(multi, "b");
+    assert.deepEqual(two.opening, { tokenId: "b", gather: true });
+    const one = tapToken(two, "b");
+    assert.deepEqual(one.opening, { tokenId: "a", gather: true }, "taking one out shows the other");
+    assert.equal(tapToken(one, null).opening, null, "hidden, the group kept");
+    assert.deepEqual(tapToken(INITIAL_LOCAL, "a", true).opening, { tokenId: "a", gather: true }, "Shift with a click");
+  });
+
+  test("a group's anchor deleted by someone else with Multi-select off keeps the old opening, so nothing new is judged", () => {
+    const group = addToSelection(tapToken(INITIAL_LOCAL, "a"), ["b", "c"]);
+    const kept = keepSelected(group, (id) => id !== "c");
+    assert.equal(kept.selectedId, "b");
+    assert.equal(kept.opening, group.opening);
+    assert.equal(keepSelected(group, () => false).opening, null, "all gone, the bar goes");
+  });
+
+  test("many orders of taps, gathers, hides, shows, selects and remote deletions: a clear request comes only from the viewer's own opening that shows a new token, once (randomized)", () => {
+    const ids = ["a", "b", "c", "d"];
+    const subject = (local: LocalUi): BarSubject => (local.actionBar && local.selectedId !== null ? (local.selectedIds.length > 1 ? "group" : local.selectedId) : null);
+    for (let seed = 1; seed <= 300; seed++) {
+      let state = seed;
+      const rand = (n: number) => {
+        state = (state * 1103515245 + 12345) % 2147483648;
+        return state % n;
+      };
+      let local: LocalUi = INITIAL_LOCAL;
+      let judged = local.opening;
+      for (let step = 0; step < 40; step++) {
+        const before = subject(local);
+        const id = ids[rand(ids.length)]!;
+        const kind = rand(9);
+        const intent = kind <= 2 || kind === 5 || (kind === 6 && rand(2) === 0);
+        if (kind === 0) local = tapToken(local, id);
+        else if (kind === 1) local = tapToken(local, id, true);
+        else if (kind === 2) local = tapToken(local, null);
+        else if (kind === 3) local = setMultiSelect(local, !local.multi);
+        else if (kind === 4) local = showActions(local, false);
+        else if (kind === 5) local = showActions(local, true);
+        else if (kind === 6) local = selectToken(local, id, intent);
+        else if (kind === 7) local = keepSelected(local, (t) => t !== id);
+        else local = addToSelection(local, [id]);
+        const now = subject(local);
+        // Stage judges each new opening once, at the commit after it.
+        const fresh = local.opening !== null && local.opening !== judged;
+        const request = fresh && keepsOpening(before, now, local.opening!.gather);
+        judged = local.opening;
+        // Invariant: a bar that is off holds no opening.
+        if (!local.actionBar) assert.equal(local.opening, null, `seed ${seed} step ${step}: an opening with the bar off`);
+        if (request) {
+          // Invariant: only the viewer's own gesture asks: a tap, Actions or a select with its ask, never a deletion, a mode switch, a hide or a box.
+          assert.ok(intent, `seed ${seed} step ${step}: kind ${kind} asked`);
+          // Invariant: it names the token the bar shows, and the bar shows something new.
+          assert.ok(local.actionBar && local.opening!.tokenId === local.selectedId, `seed ${seed} step ${step}: the request names no token shown`);
+          assert.notEqual(before, now, `seed ${seed} step ${step}: the same subject asked again`);
+          // Invariant: a gathering tap on an open bar and a group to a group ask nothing.
+          assert.ok(now !== "group" || before === null, `seed ${seed} step ${step}: ${before} to a group asked`);
+          // Invariant: a removal in Multi-select that leaves one token asks nothing (BC-OPUS-37).
+          assert.ok(!(before === "group" && local.opening!.gather), `seed ${seed} step ${step}: a removal asked`);
+        }
+        // Invariant: judged again with nothing new, it asks nothing.
+        assert.equal(local.opening !== null && local.opening !== judged, false);
+      }
+    }
   });
 });

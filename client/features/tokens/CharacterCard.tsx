@@ -309,7 +309,7 @@ function PlaceMine(props: { character: Character; close(): void }) {
         onClick={() => {
           const token = myToken(scope, { view, scene, character, memberId: you.memberId, id: actions.newId() });
           if (!token || actions.dispatch({ t: "token.create", token }) === null) return;
-          ui.select(token.id);
+          ui.select(token.id, { opens: true });
           props.close();
         }}
       >

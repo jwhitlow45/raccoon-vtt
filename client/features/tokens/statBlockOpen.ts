@@ -61,7 +61,7 @@ export function statBlockHidesBar(input: { width: number; height: number; safeLe
  * is the window in the chrome's px, read when left out.
  */
 export function openStatBlock(scope: RoomScope, ui: Pick<RoomUi, "select" | "showActions" | "openPanel">, tokenId: string, options: { from?: string | null; layout?: Size } = {}): void {
-  ui.select(tokenId);
+  ui.select(tokenId, { opens: true });
   requestStatBlock(scope, tokenId);
   // Open whatever the folds say, without writing them (panelFolds.ts).
   scope.get(statBlockOpenedSlot).setState({ tokenId });

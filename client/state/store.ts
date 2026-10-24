@@ -53,14 +53,45 @@ export const TOAST_MS = 5_000;
 export const ACTION_TOAST_MS = 12_000;
 
 /**
- * How long each toast showing has left, counted from when it first showed
+ * How long each toast has left, counted from when it was first drawn
  * (`shownAt`), so a toast that comes or goes never gives the others more
  * time: TOAST_MS, or ACTION_TOAST_MS for one with a button. Counted from
  * each change instead, a stack that keeps changing, as whispers and
  * refusals arriving in turn, kept every toast up long past its time.
+ *
+ * A toast not drawn yet has its whole time left, and one shown whole has
+ * what it had left as it stopped (`pausedAt`). Neither `runs`, so neither
+ * gets a timer, and neither runs out unseen (docs/design-v1-bar-compact.md
+ * 3.5, review BC-OPUS-35).
  */
-export function toastsLeft(toasts: readonly Toast[], now: number): { id: number; ms: number }[] {
-  return toasts.map((t) => ({ id: t.id, ms: Math.max(0, t.shownAt + (t.action ? ACTION_TOAST_MS : TOAST_MS) - now) }));
+export function toastsLeft(toasts: readonly Toast[], now: number): { id: number; ms: number; runs: boolean }[] {
+  return toasts.map((t) => {
+    const whole = t.action ? ACTION_TOAST_MS : TOAST_MS;
+    if (t.shownAt === undefined) return { id: t.id, ms: whole, runs: false };
+    const at = t.pausedAt ?? now;
+    return { id: t.id, ms: Math.max(0, t.shownAt + whole - at), runs: t.pausedAt === undefined };
+  });
+}
+
+/** The toasts with each of `ids` drawn for the first time stamped `now`, starting its time. The same array when none is new. */
+export function drawnToasts(toasts: readonly Toast[], ids: readonly number[], now: number): readonly Toast[] {
+  if (!toasts.some((t) => t.shownAt === undefined && ids.includes(t.id))) return toasts;
+  return toasts.map((t) => (t.shownAt === undefined && ids.includes(t.id) ? { ...t, shownAt: now } : t));
+}
+
+/**
+ * The toasts with one held while it shows whole, its time stopped at
+ * `now`, or let go, its start moved on by the time it was held so it runs
+ * on from what it had left. A toast not drawn yet, or already in that
+ * state, stays as it is. The same array when nothing changes.
+ */
+export function heldToasts(toasts: readonly Toast[], id: number, held: boolean, now: number): readonly Toast[] {
+  const at = toasts.findIndex((t) => t.id === id);
+  const toast = toasts[at];
+  if (!toast || toast.shownAt === undefined || (toast.pausedAt !== undefined) === held) return toasts;
+  const { pausedAt, ...rest } = toast;
+  const next: Toast = held ? { ...toast, pausedAt: now } : { ...rest, shownAt: toast.shownAt + (now - (pausedAt ?? now)) };
+  return toasts.map((t, i) => (i === at ? next : t));
 }
 
 /**
@@ -171,6 +202,10 @@ export type RoomUi = {
    */
   notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction, logged?: boolean): void;
   dismissToast(id: number): void;
+  /** The toast layer drew these toasts: each drawn for the first time starts its time (toastsLeft). */
+  toastsDrawn(ids: readonly number[]): void;
+  /** A toast shown whole stops its time, and runs on from what it had left once it shrinks back (heldToasts, docs/design-v1-bar-compact.md 3.5). */
+  holdToast(id: number, held: boolean): void;
   /** Hides the X-card with this id on this device (features/xcard). */
   dismissXcard(id: number): void;
 };
@@ -469,7 +504,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction, logged = false): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), shownAt: Date.now(), ...(logged ? { logged: true as const } : {}) }) });
+    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), ...(logged ? { logged: true as const } : {}) }) });
   }
 
   // ------------------------------------------------------------ sending
@@ -519,8 +554,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const local = get().local;
       if (local.tool !== id) store.setState({ local: { ...local, tool: id } });
     },
-    select(tokenId) {
-      setLocal(selectToken(get().local, tokenId));
+    select(tokenId, opts) {
+      setLocal(selectToken(get().local, tokenId, opts?.opens === true));
     },
     tap(tokenId, add) {
       setLocal(tapToken(get().local, tokenId, add));
@@ -580,6 +615,14 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     dismissToast(id) {
       const toasts = get().toasts;
       if (toasts.some((t) => t.id === id)) store.setState({ toasts: toasts.filter((t) => t.id !== id) });
+    },
+    toastsDrawn(ids) {
+      const toasts = drawnToasts(get().toasts, ids, Date.now());
+      if (toasts !== get().toasts) store.setState({ toasts: [...toasts] });
+    },
+    holdToast(id, held) {
+      const toasts = heldToasts(get().toasts, id, held, Date.now());
+      if (toasts !== get().toasts) store.setState({ toasts: [...toasts] });
     },
     dismissXcard(id) {
       if ((get().xcardDismissed ?? 0) < id) store.setState({ xcardDismissed: id });
@@ -685,12 +728,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       let trapped = s.trapped;
       let toasts = s.toasts;
       const toast = (text: string, tone: Toast["tone"]) => {
-        if (!toasts.some((t) => t.text === text)) toasts = withToast(toasts, { id: ++toastSeq, text, tone, shownAt: Date.now() });
+        if (!toasts.some((t) => t.text === text)) toasts = withToast(toasts, { id: ++toastSeq, text, tone });
       };
       // Two undos of one kind of change read the same. The answer to the
       // second replaces the first as a new toast, so each press visibly lands.
       const renew = (text: string, tone: Toast["tone"]) => {
-        toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone, shownAt: Date.now() });
+        toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
       };
       if (settled.size > 0) {
         const restored = new Map((msg.restored ?? []).map((r) => [r.n, r.what]));

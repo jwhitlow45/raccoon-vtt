@@ -417,7 +417,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
       // The view already holds the new character, as the op is applied at once on this device.
       const latest = view && scene ? { ...view, characters: { ...view.characters, [id]: { ...character, rev: 0 } } } : null;
       const token = latest && scene ? myToken(scope, { view: latest, scene, character, memberId: props.owner, id: actions.newId() }) : null;
-      if (token && actions.dispatch({ t: "token.create", token }) !== null) ui.select(token.id);
+      if (token && actions.dispatch({ t: "token.create", token }) !== null) ui.select(token.id, { opens: true });
       props.close();
     } else if (placeAfter) {
       setPending(scope, { kind: "character", characterId: id, name: character.name });

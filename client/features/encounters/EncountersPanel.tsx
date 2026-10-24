@@ -329,7 +329,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
       : { x: scene.bounds.w / 2, y: scene.bounds.h / 2 };
     const placed = place(s.view, scene, center);
     if (!placed) return;
-    ui.select(placed);
+    ui.select(placed, { opens: true });
     props.close();
   };
 

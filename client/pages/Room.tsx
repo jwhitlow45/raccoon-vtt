@@ -1602,7 +1602,8 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   const mapFoot = useRef<number | null>(null);
   // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
   const cardMs = cardWaitMs();
-  const recent = new Set(showing.filter((t) => Date.now() - t.shownAt < cardMs).map((t) => t.id));
+  // A toast not drawn yet is new, however long it waited (store.ts toastsLeft).
+  const recent = new Set(showing.filter((t) => t.shownAt === undefined || Date.now() - t.shownAt < cardMs).map((t) => t.id));
   // The toasts to place under a spanning token bar's header, read from the boxes as last drawn, the place under it, and the bar's opening then, which owns the stack once it is placed (barDock.ts toastsUnderHead and barStack).
   const spanToast = useScoped(spanToastSlot);
   const [overBar, setOverBar] = useState<OverBar>(NOT_OVER_BAR);
@@ -1620,9 +1621,9 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
     if (slot) return;
     for (const [id, place] of placed.current.places) if (place === "sheet") ui.dismissToast(id);
   }, [slot, ui]);
-  // Each toast's time counts from when it first showed (store.ts toastsLeft), so one that comes or goes, or a blackout that takes them all off screen, never restarts it.
+  // Each toast's time counts from when it was first drawn (store.ts toastsLeft), so one that comes or goes, or a blackout that takes them all off screen, never restarts it. One not drawn yet, or shown whole, has no timer.
   useEffect(() => {
-    const timers = toastsLeft(toasts, Date.now()).map(({ id, ms }) => setTimeout(() => ui.dismissToast(id), ms));
+    const timers = toastsLeft(toasts, Date.now()).flatMap(({ id, ms, runs }) => (runs ? [setTimeout(() => ui.dismissToast(id), ms)] : []));
     return () => timers.forEach(clearTimeout);
   }, [toasts, ui]);
   const hosts = useRef(new Map<number, HTMLElement>());
@@ -1641,6 +1642,11 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   const low = showing.filter((t) => inToastLayer(places.get(t.id)));
   const lowAt = toastLayerPlace(placed.current, ids, props.edges);
   const drawn = showing.filter((t) => places.get(t.id) === "map" || inToastLayer(places.get(t.id)));
+  // The toasts drawn now, in the very short sheet too, start their time as they first draw (review BC-OPUS-35).
+  const drawnKey = [...drawn, ...inSheet].map((t) => t.id).join(",");
+  useLayoutEffect(() => {
+    if (drawnKey !== "") ui.toastsDrawn(drawnKey.split(",").map(Number));
+  }, [drawnKey, ui]);
   useLayoutEffect(() => {
     // The hosts of toasts that went come out first, so the ones after them are already in order and stay put: moving a host that holds focus would blur it (review FU22B-ASTRA-01).
     const kept = new Set(drawn.map((t) => t.id));

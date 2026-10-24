@@ -116,7 +116,7 @@ export function GroupLine(props: { token: Token }) {
   return (
     <div role="group" aria-label="Attached tokens" style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "baseline", gap: theme.space(1) }}>
       {line.holder ? (
-        <Button size="sm" onClick={() => ui.select(line.holder!.id)} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
+        <Button size="sm" onClick={() => ui.select(line.holder!.id, { opens: true })} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
           {line.holder.text}
         </Button>
       ) : null}
@@ -130,7 +130,7 @@ export function GroupLine(props: { token: Token }) {
               const action = holderAction(c.token);
               return (
                 <Fragment key={c.id}>
-                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => ui.select(c.id)} style={IN_CELL}>
+                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => ui.select(c.id, { opens: true })} style={IN_CELL}>
                     {c.name}
                   </Button>
                   {action && detachAllowed(view, viewer, c.token) ? (

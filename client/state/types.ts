@@ -85,14 +85,18 @@ export const EMPTY_EPHEMERAL: Ephemeral = Object.freeze({
 
 /**
  * A refusal or notice on screen for a few seconds (store.ts toastsLeft).
- * `shownAt` is when it first showed, by `Date.now()`, kept on the toast
+ * `shownAt` is when it was first drawn, by `Date.now()`, kept on the toast
  * rather than by whatever draws it, so a blackout that takes the toasts
- * off screen and back never restarts its time (review LP16-R1-1).
+ * off screen and back never restarts its time (review LP16-R1-1). A toast
+ * not drawn yet, as one waiting behind the one row over a short band, has
+ * none, and its time has not started (docs/design-v1-bar-compact.md 3.5,
+ * review BC-OPUS-35). `pausedAt` is when its time stopped while it shows
+ * whole.
  * `logged` marks one whose words the log keeps, as a whisper's or a roll's,
  * the only kind a stack too tall for its room may drop (review
  * FU22B-OP-4): a refusal or an error that the log never sees stays.
  */
-export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction; shownAt: number; logged?: true };
+export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction; shownAt?: number; pausedAt?: number; logged?: true };
 
 /**
  * A toast's one button, beside its words, such as the falling off
@@ -182,6 +186,15 @@ export type LocalUi = {
   multi: boolean;
   /** Whether the selected token's action bar shows (design 14.3). It opens on a tap and steps aside for the token's panel. */
   actionBar: boolean;
+  /**
+   * The viewer's latest opening of the action bar, a new object for each:
+   * a tap, Actions or another show, or a select that asks for it, naming
+   * the token it opened for. `gather` marks a tap that gathers or takes
+   * out a token in Multi-select. An upright phone's strip may move the map
+   * once for it to clear the token (state/selection.ts,
+   * docs/design-v1-bar-compact.md 3.6). Null once the bar is off.
+   */
+  opening: Opening | null;
   /** The panel open as a sheet on phones, or null. */
   panel: string | null;
   /** A phone's Panels sheet, the list of every panel, is open (pages/Room.tsx). Read with `sheetOpen`. */
@@ -237,12 +250,16 @@ export type PendingOpen = { id: string; how?: PanelHow };
 
 export const DEFAULT_TOOL = "select";
 
+/** One opening of the action bar by the viewer (LocalUi `opening`). */
+export type Opening = { tokenId: string; gather: boolean };
+
 export const INITIAL_LOCAL: LocalUi = Object.freeze({
   tool: DEFAULT_TOOL,
   selectedId: null,
   selectedIds: Object.freeze([]) as readonly string[],
   multi: false,
   actionBar: false,
+  opening: null,
   panel: null,
   panelList: false,
   tab: "tracker",

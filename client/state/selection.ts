@@ -1,4 +1,4 @@
-import type { LocalUi } from "./types.ts";
+import type { LocalUi, Opening } from "./types.ts";
 
 /**
  * How taps change the selection and the token action bar (design 14.3), as
@@ -27,13 +27,17 @@ import type { LocalUi } from "./types.ts";
  * group never covers the next one. Taking out the last lets go. Null is a
  * tap on empty map, which lets go, except while selecting several, where
  * it hides the bar and keeps the group.
+ *
+ * Every tap that leaves the bar showing is the viewer's opening (LocalUi
+ * `opening`), a gathering one when it adds or takes out a token.
  */
 export function tapToken(local: LocalUi, tokenId: string | null, add = false): LocalUi {
   if (tokenId === null) return local.multi ? showActions(local, false) : withIds(local, [], false);
-  if (!local.multi && !add) return withIds(local, [tokenId], true);
+  if (!local.multi && !add) return withIds(local, [tokenId], true, { tokenId, gather: false });
   const leaving = local.selectedIds.includes(tokenId);
   const ids = leaving ? local.selectedIds.filter((id) => id !== tokenId) : [...local.selectedIds, tokenId];
-  return withIds(local, ids, ids.length > 0 && (leaving ? local.actionBar : true));
+  const shown = ids[ids.length - 1];
+  return withIds(local, ids, ids.length > 0 && (leaving ? local.actionBar : true), shown === undefined ? undefined : { tokenId: shown, gather: true });
 }
 
 /**
@@ -48,9 +52,14 @@ export function addsToSelection(keys: { shiftKey: boolean; ctrlKey: boolean; met
   return keys.shiftKey || keys.metaKey || (!apple && keys.ctrlKey);
 }
 
-/** Selects one token without opening or closing its action bar, as placing or duplicating one does. Null lets go. */
-export function selectToken(local: LocalUi, tokenId: string | null): LocalUi {
-  return withIds(local, tokenId === null ? [] : [tokenId], tokenId === null ? false : local.actionBar);
+/**
+ * Selects one token without opening or closing its action bar, as placing
+ * or duplicating one does. Null lets go. `opens` marks the viewer's own
+ * opening (LocalUi `opening`), which counts only while the bar shows.
+ */
+export function selectToken(local: LocalUi, tokenId: string | null, opens = false): LocalUi {
+  if (tokenId === null) return withIds(local, [], false);
+  return withIds(local, [tokenId], local.actionBar, opens ? { tokenId, gather: false } : undefined);
 }
 
 /** Adds every token in a dragged box to the selection, the last one becoming the one shown. */
@@ -117,16 +126,33 @@ export function barDismiss(local: LocalUi, tokenPanelShown: boolean): "hide" | "
   return tokenPanelShown && local.selectedIds.length === 1 ? "hide" : "letGo";
 }
 
-/** Opens or closes the selection's action bar, which steps aside once the token's panel is open. */
+/**
+ * Opens or closes the selection's action bar, which steps aside once the
+ * token's panel is open. An open that shows it is the viewer's opening
+ * (LocalUi `opening`): every caller is a gesture, such as Actions, a
+ * tracker row or the party bar.
+ */
 export function showActions(local: LocalUi, open: boolean): LocalUi {
   const actionBar = open && local.selectedIds.length > 0;
-  return local.actionBar === actionBar ? local : { ...local, actionBar };
+  return withIds(local, local.selectedIds, actionBar, actionBar && local.selectedId !== null ? { tokenId: local.selectedId, gather: false } : undefined);
 }
 
-function withIds(local: LocalUi, ids: readonly string[], actionBar: boolean): LocalUi {
+/**
+ * The selection and the bar after a change. `opening` is a new opening,
+ * or undefined to keep the last one. A bar left off holds none. A change
+ * that shows what already showed, as a second tap on the token whose bar
+ * is open, keeps the object, since it asks for nothing new.
+ */
+function withIds(local: LocalUi, ids: readonly string[], actionBar: boolean, opening?: Opening): LocalUi {
   const selectedId = ids[ids.length - 1] ?? null;
-  const same = local.selectedId === selectedId && local.actionBar === actionBar && sameIds(local.selectedIds, ids);
-  return same ? local : { ...local, selectedId, selectedIds: ids, actionBar };
+  const nextOpening = !actionBar ? null : (opening ?? local.opening);
+  const same = local.selectedId === selectedId && local.actionBar === actionBar && sameIds(local.selectedIds, ids) && sameOpening(local.opening, nextOpening);
+  return same ? local : { ...local, selectedId, selectedIds: ids, actionBar, opening: nextOpening };
+}
+
+// An opening for the token already shown is judged by what it shows alone, so how it was tapped no longer matters (barDock.ts keepsOpening).
+function sameOpening(a: Opening | null, b: Opening | null): boolean {
+  return a === b || (a !== null && b !== null && a.tokenId === b.tokenId);
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {

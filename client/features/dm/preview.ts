@@ -3,7 +3,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { shareState } from "../../state/share.ts";
-import type { RoomUi } from "../../state/store.ts";
+import { drawnToasts, heldToasts, type RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
 import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
 import { panelById } from "../panels.ts";
@@ -83,7 +83,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     if (options.onRefuse) return options.onRefuse();
     const toasts = store.getState().toasts;
     if (toasts.some((t) => t.text === notice)) return;
-    store.setState({ toasts: [...toasts, { id: ++toastSeq, text: notice, tone: "info" as const, shownAt: Date.now() }].slice(-3) });
+    store.setState({ toasts: [...toasts, { id: ++toastSeq, text: notice, tone: "info" as const }].slice(-3) });
   };
 
   const setLocal = (patch: Partial<RoomView["local"]>) => {
@@ -93,7 +93,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
 
   const ui: RoomUi = {
     setTool: (id) => setLocal({ tool: id }),
-    select: (tokenId) => store.setState({ local: selectToken(store.getState().local, tokenId) }),
+    select: (tokenId, opts) => store.setState({ local: selectToken(store.getState().local, tokenId, opts?.opens === true) }),
     tap: (tokenId, add) => store.setState({ local: tapToken(store.getState().local, tokenId, add) }),
     selectMany: (tokenIds) => store.setState({ local: addToSelection(store.getState().local, tokenIds) }),
     keepSelected: (present) => store.setState({ local: keepSelected(store.getState().local, present) }),
@@ -114,9 +114,18 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     crossWide: (wide) => store.setState({ local: crossWide(store.getState().local, wide) }),
     notify: (text, tone = "info") => {
       const toasts = store.getState().toasts;
-      if (!toasts.some((t) => t.text === text)) store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone, shownAt: Date.now() }].slice(-3) });
+      if (!toasts.some((t) => t.text === text)) store.setState({ toasts: [...toasts, { id: ++toastSeq, text, tone }].slice(-3) });
     },
     dismissToast: (id) => store.setState({ toasts: store.getState().toasts.filter((t) => t.id !== id) }),
+    // The preview's toasts keep the room's times (store.ts toastsLeft).
+    toastsDrawn: (ids) => {
+      const toasts = drawnToasts(store.getState().toasts, ids, Date.now());
+      if (toasts !== store.getState().toasts) store.setState({ toasts: [...toasts] });
+    },
+    holdToast: (id, held) => {
+      const toasts = heldToasts(store.getState().toasts, id, held, Date.now());
+      if (toasts !== store.getState().toasts) store.setState({ toasts: [...toasts] });
+    },
     // The preview has no socket, so no X-card ever reaches it.
     dismissXcard: () => {},
   };

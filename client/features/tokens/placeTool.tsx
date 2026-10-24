@@ -26,7 +26,7 @@ function place(world: Point, ctx: ToolContext): void {
   const pending = ctx.scope.get(placementSlot).store.getState().pending;
   if (pending.kind === "batch") {
     const placed = pending.place(world, ctx);
-    if (placed) ctx.ui.select(placed);
+    if (placed) ctx.ui.select(placed, { opens: true });
     ctx.ui.setTool("select");
     return;
   }
@@ -35,7 +35,7 @@ function place(world: Point, ctx: ToolContext): void {
 
   let last: string | null = null;
   for (const token of inputs) if (ctx.actions.dispatch({ t: "token.create", token: placeOnGround(view.buildChunks, token) }) !== null) last = token.id;
-  if (last) ctx.ui.select(last);
+  if (last) ctx.ui.select(last, { opens: true });
   ctx.ui.setTool("select");
 }
 
