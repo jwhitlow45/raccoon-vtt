@@ -1,7 +1,8 @@
 # Every check on a push to main or to a ci/ branch, on Linux: the typecheck
 # with the integration tests, the unit tests, and the e2e files in 13 shards.
-# That is 16 jobs with the build, so two runs overlapping stay inside the 20
-# Linux jobs of a public repository.
+# That is 16 jobs with the build. One run peaks at 15 Linux jobs of the
+# account's 20, so a run that overlaps it queues part of its shards: a single
+# run's speed was chosen over two runs at full speed at once.
 #
 # The e2e shards run on Ubuntu, since macOS runners are far slower and a
 # public repository runs up to 20 Linux jobs at a time. The app draws its
@@ -71,8 +72,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  # The typecheck and the integration tests share a job: together they take
-  # about as long as one e2e shard, and only the integration tests need the
+  # The typecheck and the integration tests share a job: together they end
+  # well inside one e2e shard, and only the integration tests need the
   # database. The unit tests have a job of their own, which needs none.
   typecheck-int:
     runs-on: ubuntu-24.04
@@ -116,8 +117,8 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm -s test:int
 
-  # About 5 minutes alone, which ends before the e2e shards do, so they are
-  # not split further.
+  # About 5 minutes alone, which ends before the e2e shards do, so the unit
+  # tests are not split with --test-shard.
   unit:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -139,8 +140,8 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     # 13 shards of about 6 minutes each, balanced by scripts/e2e-shard.ts
-    # from e2e/durations.json, which holds the seconds a file took in CI. The shard's deadline
-    # keeps it inside this limit even when a file hangs.
+    # from e2e/durations.json, which holds the seconds a file took in CI.
+    # The shard's deadline keeps it inside this limit even when a file hangs.
     timeout-minutes: 45
     strategy:
       fail-fast: false

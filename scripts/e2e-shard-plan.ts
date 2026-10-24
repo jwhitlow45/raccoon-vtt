@@ -39,9 +39,9 @@ export function plan(files: readonly string[], durations: Durations, count: numb
 }
 
 /**
- * The recorded times are a laptop's, and CI's runners take up to about 1.3
- * times as long on some files. The time left is shared out as if each file
- * takes 1.5 times its record.
+ * The recorded times are the largest of a few CI runs, and a run can still
+ * be slower. The time left is shared out as if each file takes 1.5 times its
+ * record.
  */
 export const SLOW = 1.5;
 

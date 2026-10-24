@@ -157,8 +157,9 @@ least time so far. A file missing there counts as `defaultSeconds`. Each
 shard prints the time every file took, so after a file grows or a new one
 lands, copy its time into the list. The list holds CI seconds, the largest
 of several green runs, and the shard count is chosen so the longest shard
-plans about 6 minutes. The whole run stays at 16 jobs, so two runs can
-overlap inside a public repository's 20 Linux jobs.
+plans about 6 minutes. A run is 16 jobs and peaks at 15 at once, of the
+account's 20 Linux jobs, so a second run that overlaps it queues part of its
+shards.
 
 A shard runs on a laptop too, against the dev postgres. Build first, then
 give the shard's number and the shard count. `--list` prints what every
