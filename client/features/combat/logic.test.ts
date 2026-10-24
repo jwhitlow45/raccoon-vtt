@@ -295,7 +295,24 @@ describe("the list", () => {
       "a:d": { kind: "turn", name: "Fiery Rays", used: 1, max: 1 },
       "a:e": { kind: "day", name: "Scare", used: 1, max: 1 },
     };
-    assert.deepEqual(markChips(marks), { chips: ["Fire Breath used", "Dominate Mind 1/2", "Phantasms used"], more: 2 });
+    assert.deepEqual(markChips(marks), {
+      chips: [
+        { key: "a:a", text: "Fire Breath used" },
+        { key: "a:b", text: "Dominate Mind 1/2" },
+        { key: "a:c", text: "Phantasms used" },
+      ],
+      more: 2,
+    });
+  });
+
+  test("two sections' abilities of one name make two chips, each under its own key (CCB-OPUS-10)", () => {
+    const marks: Record<string, UseMark> = { "actions:fire-breath": breathMark, "bonusActions:fire-breath": breathMark };
+    const { chips } = markChips(marks);
+    assert.deepEqual(
+      chips.map((c) => c.text),
+      ["Fire Breath used", "Fire Breath used"],
+    );
+    assert.equal(new Set(chips.map((c) => c.key)).size, 2);
   });
 
   test("a creature shows Uses at once with counts, marks or resources, holds it while its block loads, and drops it with none", () => {

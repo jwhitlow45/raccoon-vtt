@@ -1018,10 +1018,10 @@ function UsesGroup(props: { target: ActorTarget; name: string; children?: ReactN
 function spentChips(marks: Parameters<typeof markChips>[0]): ReactNode[] {
   const { chips, more } = markChips(marks);
   return [
-    ...chips.map((text) => (
+    ...chips.map((chip) => (
       // A name of any length: cut, so the row's other tags keep their room.
-      <Tag key={text} tone="turn" dense cut={160}>
-        {text}
+      <Tag key={chip.key} tone="turn" dense cut={160}>
+        {chip.text}
       </Tag>
     )),
     ...(more > 0

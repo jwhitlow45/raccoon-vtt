@@ -519,14 +519,15 @@ export function regenerateOp(target: ActorTarget, use: RegenerationUse, record: 
  * The DM's chips on a tracker row for its spent uses (5), after LA and LR,
  * from the marks' names: "Fire Breath used", and "Dominate Mind 1/2" (left
  * over the most, as LA's) for a spent X/Day. At most 3, then "+2 more",
- * since rows already wrap on phones (13.15).
+ * since rows already wrap on phones (13.15). Each keeps its mark's key,
+ * since two sections may print abilities of one name.
  */
-export function markChips(marks: Readonly<Record<string, UseMark>> | undefined): { chips: string[]; more: number } {
+export function markChips(marks: Readonly<Record<string, UseMark>> | undefined): { chips: { key: UseKey; text: string }[]; more: number } {
   const all = Object.keys(marks ?? {})
     .sort()
     .map((key) => {
       const mark = marks![key]!;
-      return mark.kind === "day" && mark.max > 1 ? `${mark.name} ${mark.max - mark.used}/${mark.max}` : `${mark.name} used`;
+      return { key, text: mark.kind === "day" && mark.max > 1 ? `${mark.name} ${mark.max - mark.used}/${mark.max}` : `${mark.name} used` };
     });
   return { chips: all.slice(0, 3), more: Math.max(0, all.length - 3) };
 }
