@@ -98,13 +98,19 @@ describe("a pool's amount field once its counts change under it (CCAC-OPUS-6)", 
   const giveBack = { verb: "Give back" as const, text: "", error: null };
 
   test("it stays open while there is something to spend or give back", () => {
-    assert.deepEqual(amountFor(null, hands), { amount: null, gone: null });
-    assert.deepEqual(amountFor(spend, { ...hands, used: 24 }), { amount: spend, gone: null });
-    assert.deepEqual(amountFor(giveBack, { ...hands, used: 1 }), { amount: giveBack, gone: null });
+    assert.deepEqual(amountFor(null, hands, false), { amount: null, gone: null });
+    assert.deepEqual(amountFor(spend, { ...hands, used: 24 }, false), { amount: spend, gone: null });
+    assert.deepEqual(amountFor(giveBack, { ...hands, used: 1 }, false), { amount: giveBack, gone: null });
+    assert.deepEqual(amountFor(spend, { ...hands, used: 24 }, true), { amount: spend, gone: null }, "a part spent here leaves the field open until the answer");
   });
 
   test("it closes with the row's own words once another device spent the last or gave back the rest, never reading 1 to 0", () => {
-    assert.deepEqual(amountFor(spend, { ...hands, used: 25 }), { amount: null, gone: "No Lay on Hands is left." });
-    assert.deepEqual(amountFor(giveBack, hands), { amount: null, gone: "Lay on Hands is full." });
+    assert.deepEqual(amountFor(spend, { ...hands, used: 25 }, false), { amount: null, gone: "No Lay on Hands is left." });
+    assert.deepEqual(amountFor(giveBack, hands, false), { amount: null, gone: "Lay on Hands is full." });
+  });
+
+  test("it closes with no words while this row's own use of the whole pool waits for its answer, which is no refusal (CCAC-OPUS-11)", () => {
+    assert.deepEqual(amountFor(spend, { ...hands, used: 25 }, true), { amount: null, gone: null });
+    assert.deepEqual(amountFor(giveBack, hands, true), { amount: null, gone: null });
   });
 });

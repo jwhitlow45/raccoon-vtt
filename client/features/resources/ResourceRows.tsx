@@ -62,12 +62,17 @@ export type Amount = { verb: "Spend" | "Give back"; text: string; error: string 
  * the same field while there is something to spend or give back, else
  * closed, with the row's own words for why, once another device spent the
  * last or gave back the rest. It never asks for 1 to 0.
+ *
+ * `sending` is this row's own use waiting for its answer. The page shows a
+ * use before the server answers, so spending the whole pool here empties it
+ * at once: the field closes with no words then, as nothing went wrong, and
+ * a refusal still says why when it comes.
  */
-export function amountFor(opened: Amount | null, r: Pick<ClassResource, "name" | "max" | "used" | "pool">): { amount: Amount | null; gone: string | null } {
+export function amountFor(opened: Amount | null, r: Pick<ClassResource, "name" | "max" | "used" | "pool">, sending: boolean): { amount: Amount | null; gone: string | null } {
   if (!opened) return { amount: null, gone: null };
-  if (opened.verb === "Spend" && left(r) === 0) return { amount: null, gone: emptyText(r) };
-  if (opened.verb === "Give back" && r.used === 0) return { amount: null, gone: fullText(r) };
-  return { amount: opened, gone: null };
+  const most = opened.verb === "Spend" ? left(r) : r.used;
+  if (most > 0) return { amount: opened, gone: null };
+  return { amount: null, gone: sending ? null : opened.verb === "Spend" ? emptyText(r) : fullText(r) };
 }
 
 /**
@@ -84,7 +89,8 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
   const [sent, setSent] = useState<{ n: number; back: boolean } | null>(null);
   const busy = useAnyPending(sent === null ? [] : [sent.n]);
   const [opened, setAmount] = useState<Amount | null>(null);
-  const { amount, gone } = amountFor(opened, r);
+  const { amount, gone } = amountFor(opened, r, busy);
+  const shut = opened !== null && amount === null;
   const amountField = useRef<HTMLInputElement>(null);
   const fieldFocused = useRef(false);
   const useButton = useRef<HTMLButtonElement>(null);
@@ -98,14 +104,14 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
     if (verb) amountField.current?.focus();
   }, [verb]);
 
-  // The field closed under the player, as its pool emptied or filled elsewhere: the list's status line says why, and focus it held goes to Use….
+  // The field closed under the player, its pool emptied or filled: the list's status line says why when another device did it, and focus the field held goes to Use….
   useEffect(() => {
-    if (gone === null) return;
+    if (!shut) return;
     setAmount(null);
-    props.onStatus(gone);
+    if (gone !== null) props.onStatus(gone);
     if (fieldFocused.current) useButton.current?.focus();
     fieldFocused.current = false;
-  }, [gone]);
+  }, [shut]);
 
   const closeAmount = () => {
     setAmount(null);
@@ -129,7 +135,11 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
     if (!outcome.ok) setAmount({ ...amount, error: outcome.error });
     else use(amount.verb === "Give back", outcome.amount);
   };
-  const toggle = (next: Amount["verb"]) => setAmount(verb === next ? null : { verb: next, text: "", error: null });
+  // A field opened anew takes away the last reason, such as a pool another device emptied, which no longer holds.
+  const toggle = (next: Amount["verb"]) => {
+    props.onStatus(null);
+    setAmount(verb === next ? null : { verb: next, text: "", error: null });
+  };
 
   return (
     <li style={{ display: "grid", gap: theme.space(1) }}>

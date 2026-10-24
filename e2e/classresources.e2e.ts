@@ -627,6 +627,38 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await countReads(page, "Lay on Hands", "15 of 15");
   });
 
+  test("cr-c-12c. Pat spends the whole pool from the field and gives it all back: each closes the field with no status line, offline and once answered", async () => {
+    const page = await thornsPage(pat);
+    const hands = row(page, "Lay on Hands");
+    const status = section(page).getByRole("status");
+    // Offline, the page shows the use at once and the answer waits: the window in which an emptied pool used to read as refused.
+    patConsole.expectSocketFailures = true;
+    await patContext.setOffline(true);
+    assert.equal((await status.textContent())?.trim(), "No Lay on Hands is left.", "the last step's reason, still standing");
+    await hands.getByRole("button", { name: "Use Lay on Hands, 15 of 15 left" }).tap();
+    assert.equal(await status.count(), 0, "a new tap takes the old reason away");
+    await hands.getByRole("textbox", { name: "Lay on Hands to spend, up to 15" }).fill("15");
+    await hands.getByRole("button", { name: "Spend", exact: true }).tap();
+    await countReads(page, "Lay on Hands", "0 of 15");
+    await hands.getByRole("textbox").waitFor({ state: "detached" });
+    await pat.waitForTimeout(500);
+    assert.equal(await status.count(), 0, "no status line while the use waits for its answer");
+    await waitFor("focus on Use…", () => pat.evaluate(() => (globalThis as unknown as Doc).document.activeElement?.getAttribute("aria-label") ?? "").then((n) => (n === "Use Lay on Hands, 0 of 15 left" ? true : null)), 5_000);
+    await patContext.setOffline(false);
+    await usedIs("Lay on Hands", 15);
+    patConsole.expectSocketFailures = false;
+    assert.equal(await status.count(), 0, "no status line once the server took it");
+
+    await hands.getByRole("button", { name: "Give back Lay on Hands" }).tap();
+    await hands.getByRole("textbox", { name: "Lay on Hands to give back, up to 15" }).fill("15");
+    await hands.getByRole("button", { name: "Give back", exact: true }).tap();
+    await countReads(page, "Lay on Hands", "15 of 15");
+    await hands.getByRole("textbox").waitFor({ state: "detached" });
+    await usedIs("Lay on Hands", 0);
+    await pat.waitForTimeout(300);
+    assert.equal(await status.count(), 0, "a whole give-back reads as no refusal either");
+  });
+
   test("cr-c-13. no console errors on any page", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
