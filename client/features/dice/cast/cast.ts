@@ -381,6 +381,34 @@ export function forgetSend(env: CastEnv, id: string): void {
   persist(env);
 }
 
+/**
+ * The open block follows its send when the send changes outside it, as in
+ * the list above the card while its group is folded or another creature
+ * is picked (3.2): `to` is the retry's id, or null for a Close, which lets
+ * the block go. A block on another send stays as it is.
+ */
+export function followSend(options: Pick<StoreApi<Pick<OptionState, "cast">>, "setState">, from: string, to: string | null): void {
+  options.setState((s) => (s.cast?.sent !== from ? {} : to === null ? { cast: null } : { cast: { ...s.cast, sent: to } }));
+}
+
+/** Ask again in the list above the card, the open block moved to the retry, so unfolding shows it rather than offering a second ask. */
+export function retryFromList(env: CastEnv, options: Pick<StoreApi<Pick<OptionState, "cast">>, "setState">, id: string): string | null {
+  const next = askAgain(env, id);
+  if (next !== null) followSend(options, id, next);
+  return next;
+}
+
+/**
+ * Whether the open block is done (3.2): its ask waits in the view, or
+ * settled and went, or its send is gone from this page's sends, closed or
+ * asked again where the block could not follow, so it never offers a
+ * second ask for the same spell.
+ */
+export function blockDone(cast: CastBlock | null, sends: Readonly<Record<string, CastSend>>, phase: CastPhase | null): boolean {
+  if (!cast || cast.sent === undefined) return false;
+  return phase === "asked" || phase === "closed" || sends[cast.sent] === undefined;
+}
+
 /** A player's Withdraw (3.2): closes the ask, busy until it leaves the view or is refused. */
 export function withdrawAsk(env: CastEnv, askId: string): number | null {
   if (env.store.getState().withdrawing[askId] || !env.connected()) return null;

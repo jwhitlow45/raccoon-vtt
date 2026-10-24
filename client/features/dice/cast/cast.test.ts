@@ -9,6 +9,7 @@ import { clientOpSchema, type ClientOp } from "#shared/protocol.ts";
 import { monsterView, statBlockOf } from "#shared/statBlock.ts";
 import { P1, castAsk, castTable, customMonster, diceLine, damageRoll, token } from "#shared/testutil.ts";
 import type { OnAnswer } from "../../../state/types.ts";
+import type { CastBlock } from "../optionState.ts";
 import { ReceiptTracker } from "../useReceipt.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import {
@@ -18,17 +19,21 @@ import {
   askAgain,
   askFor,
   askInput,
+  blockDone,
   blockLevel,
   busySend,
   casterToken,
   closedText,
   fillLine,
   fillRolls,
+  followSend,
   forgetSend,
   openedBlock,
   pendingSend,
+  phaseOf,
   readCastDraft,
   restoreSends,
+  retryFromList,
   rolledText,
   rollWords,
   selectionTargets,
@@ -377,5 +382,51 @@ describe("the send", () => {
     store.set("rvtt.castAsk.R1", "{not json");
     assert.deepEqual(readCastDraft("R1", storage), []);
     assert.deepEqual(readCastDraft("R1", { getItem: () => { throw new Error("blocked"); } }), []);
+  });
+});
+
+describe("a send the list above the card changes while its block is folded or another creature is picked (3.2)", () => {
+  const BLOCK: CastBlock = { key: "c:thorn-c", creature: { characterId: "thorn-c" }, spell: "Fireball", area: "a1", opened: 1, sent: "ask-1" };
+  /** Thorn's Fireball block, its send refused, with the option store it lives in. */
+  function refused() {
+    const p = page();
+    askFor(p.env, input());
+    p.sent[1]!.onAnswer("refused", { code: "quota", message: ASKS_WAITING, text: ASKS_WAITING });
+    const options = createStore<{ cast: CastBlock | null }>(() => ({ cast: BLOCK }));
+    const done = () => {
+      const cast = options.getState().cast;
+      const sent = cast?.sent;
+      return blockDone(cast, p.env.store.getState().sends, sent === undefined ? null : phaseOf(p.env.tracker.state(sent), p.holder.view.casts[sent] !== undefined));
+    };
+    return { p, options, done };
+  }
+
+  test("Ask again there moves the block to the retry, which closes once the DM has it, and so once it settles", () => {
+    const { p, options, done } = refused();
+    assert.equal(done(), false, "refused, the block stays to offer Ask again");
+    const next = retryFromList(p.env, options, "ask-1");
+    assert.equal(next, "ask-2");
+    assert.equal(options.getState().cast?.sent, "ask-2", "the block follows the retry, so unfolding shows it, never a second ask");
+    assert.equal(done(), false, "still on its way");
+    p.holder.view = castTable({ casts: { "ask-2": castAsk("ask-2") } });
+    p.sent.at(-1)!.onAnswer("taken");
+    assert.equal(done(), true, "the DM has it: the block becomes the row's waiting line");
+    p.holder.view = castTable();
+    assert.equal(done(), true, "settled and gone from the view");
+  });
+
+  test("Close there lets the block go, and a block whose send went any other way closes too", () => {
+    const { p, options, done } = refused();
+    forgetSend(p.env, "ask-1");
+    assert.equal(done(), true, "a block left on a forgotten send is done");
+    followSend(options, "ask-1", null);
+    assert.equal(options.getState().cast, null, "Close lets the block go");
+  });
+
+  test("another block's send leaves the open block as it is", () => {
+    const { options } = refused();
+    followSend(options, "ask-9", "ask-10");
+    followSend(options, "ask-9", null);
+    assert.equal(options.getState().cast, BLOCK);
   });
 });

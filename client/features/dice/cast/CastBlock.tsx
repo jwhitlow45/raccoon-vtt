@@ -27,15 +27,18 @@ import {
   askAgain,
   askFor,
   askInput,
+  blockDone,
   blockLevel,
   casterToken,
   castSendsSlot,
   fillLine,
   fillRolls,
+  followSend,
   forgetSend,
   openedBlock,
   pendingSend,
   phaseOf,
+  retryFromList,
   rolledText,
   sameSpell,
   SELECT_TARGETS,
@@ -99,21 +102,23 @@ function useSends(): Record<string, CastSend> {
 const OPTION_OUTLINE = `${theme.line.border}px solid ${theme.color.controlBorder}`;
 
 /**
- * Closes the open block once its ask waits in the view, or settled and
- * went, when the block becomes the row's waiting line (3.2). Run above the
- * options, never in the block, so a block its folded group or another
- * creature's tab keeps from drawing still closes, and the folded line
- * stops naming it (docs/design-v1-dice-pass.md 6.6).
+ * Closes the open block once it is done (cast.ts blockDone): its ask
+ * waits in the view, when the block becomes the row's waiting line, or
+ * settled and went, or its send went from this page's sends (3.2). Run
+ * above the options, never in the block, so a block its folded group or
+ * another creature's tab keeps from drawing still closes, and the folded
+ * line stops naming it (docs/design-v1-dice-pass.md 6.6).
  */
 export function useCloseSettledBlock(view: Pick<RoomState, "casts"> | null): void {
   const store = useOptionStore();
   const tracker = useCastTracker();
+  const sends = useSends();
   const cast = useOption((s) => s.cast);
   const sent = cast?.sent;
-  const phase = sent !== undefined && view ? phaseOf(tracker.state(sent), view.casts[sent] !== undefined) : null;
+  const done = view !== null && blockDone(cast, sends, sent !== undefined ? phaseOf(tracker.state(sent), view.casts[sent] !== undefined) : null);
   useEffect(() => {
-    if (cast && (phase === "asked" || phase === "closed")) store.setState((s) => (s.cast === cast ? { cast: null } : {}));
-  }, [cast, phase, store]);
+    if (cast && done) store.setState((s) => (s.cast === cast ? { cast: null } : {}));
+  }, [cast, done, store]);
 }
 
 /** The row's own Ask for saves (3.1), where the DM's Group save stands. */
@@ -410,6 +415,7 @@ function OwnLevel(props: { spell: string; min: number; value: number; onChange(n
 export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; blockDraws: boolean }) {
   const env = useCastEnv();
   const sends = useSends();
+  const options = useOptionStore();
   // An open block shows its own send in place, but only while it draws: for the picked creature once its options draw, never with none to pick.
   const held = useOption((s) => (props.blockDraws && s.cast !== null && s.cast.key === props.pickedKey ? (s.cast.sent ?? null) : null));
   const lines = waitingLines(props.view, sends, (id) => env.tracker.state(id), held);
@@ -428,7 +434,16 @@ export function WaitingAsks(props: { view: RoomState; pickedKey: string | null; 
         if (line.phase === "asked") return <WaitingLine key={line.id} ask={{ id: line.id, spell: line.spell }} {...(caster ? { caster } : {})} />;
         if (line.phase !== "sending" && send) {
           const what = caster ? `${caster}'s ${line.spell}` : line.spell;
-          return <SendStatus key={line.id} send={send} lead={line.phase === "refused" ? `${what}: not asked.` : `${what}: the ask may have gone.`} />;
+          // The open block whose send this is follows a retry and goes with a Close, so it never offers a second ask once its group opens again.
+          return (
+            <SendStatus
+              key={line.id}
+              send={send}
+              lead={line.phase === "refused" ? `${what}: not asked.` : `${what}: the ask may have gone.`}
+              again={() => retryFromList(env, options, line.id)}
+              onClosed={() => followSend(options, line.id, null)}
+            />
+          );
         }
         return (
           <div key={line.id} style={LINE}>
