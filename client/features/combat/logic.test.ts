@@ -288,6 +288,20 @@ describe("the list", () => {
     assert.equal(usesPresence({ actor: {}, resources: undefined, uses: [breath], loading: false }), "yes");
     assert.equal(usesPresence({ actor: {}, resources: undefined, uses: null, loading: false }), "no", "failed");
   });
+
+  test("a creature shows Uses only where its list has a row: legendary actions the block prints need counts to stand (CCB-OPUS-5)", () => {
+    const drake: LimitedUse[] = [pounce, wing];
+    const none = { actionsMax: 0, actionsUsed: 0, resistMax: 0, resistUsed: 0 };
+    assert.equal(usesRows({ form: "list", uses: drake, actor: {}, ownTurn: false, record: null }).length, 0);
+    assert.equal(usesPresence({ actor: {}, resources: undefined, uses: drake, loading: false }), "no");
+    assert.equal(usesPresence({ actor: { legendary: none }, resources: undefined, uses: drake, loading: false }), "no", "counts of 0 draw no pips");
+    assert.equal(usesPresence({ actor: { legendary: none }, resources: undefined, uses: null, loading: true }), "loading");
+    assert.equal(usesPresence({ actor: { legendary: { ...none, actionsMax: 2 } }, resources: undefined, uses: drake, loading: false }), "yes");
+    // What stays: class resources, a mark the block no longer lists, and a mark waiting for its block in the loading line.
+    assert.equal(usesPresence({ actor: {}, resources: [{}], uses: drake, loading: false }), "yes");
+    assert.equal(usesPresence({ actor: { uses: { "actions:frost-breath": breathMark } }, resources: undefined, uses: drake, loading: false }), "yes");
+    assert.equal(usesPresence({ actor: { uses: { "actions:frost-breath": breathMark } }, resources: undefined, uses: null, loading: false }), "yes", "a failed block keeps its marks' place for the failure line");
+  });
 });
 
 describe("the ops each button sends, as the protocol takes them", () => {

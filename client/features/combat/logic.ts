@@ -498,13 +498,16 @@ export function markChips(marks: Readonly<Record<string, UseMark>> | undefined):
 }
 
 /**
- * Whether a creature shows a Uses button or group (6): at once for an actor
- * with legendary counts, spent uses or class resources, held while its
- * block loads, and otherwise only where its block lists a use.
+ * Whether a creature shows a Uses button or group (6): only where its list
+ * (`usesRows`, the `list` form) has a row or it has class resources, so
+ * neither ever opens empty. Before its block is read, spent uses show at
+ * once, with the list's loading line where their rows will stand, and a
+ * creature with nothing yet is held while its block loads.
  */
 export function usesPresence(input: { actor: Pick<ProjectedActor, "legendary" | "uses"> | undefined; resources: readonly unknown[] | undefined; uses: readonly LimitedUse[] | null; loading: boolean }): "yes" | "loading" | "no" {
-  const { actor } = input;
-  if (actor?.legendary || Object.keys(actor?.uses ?? {}).length > 0 || (input.resources?.length ?? 0) > 0) return "yes";
-  if (input.uses === null) return input.loading ? "loading" : "no";
-  return input.uses.length > 0 ? "yes" : "no";
+  if ((input.resources?.length ?? 0) > 0) return "yes";
+  if (usesRows({ form: "list", uses: input.uses, actor: input.actor, ownTurn: false, record: null }).length > 0) return "yes";
+  if (input.uses !== null) return "no";
+  if (Object.keys(input.actor?.uses ?? {}).length > 0) return "yes";
+  return input.loading ? "loading" : "no";
 }

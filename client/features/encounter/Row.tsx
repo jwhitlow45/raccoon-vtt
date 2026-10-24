@@ -997,12 +997,13 @@ function RowMenu(props: {
  * counts by hand. Nothing for a creature with no use.
  */
 function UsesGroup(props: { target: ActorTarget; ownTurn: boolean; name: string; children?: ReactNode }) {
+  // The pips come only with legendary counts, which make a row of the list, so presence alone decides.
   const presence = useUsesPresence(props.target);
-  if (presence === "no" && !props.children) return null;
+  if (presence === "no") return null;
   return (
     <div role="group" aria-label={`${props.name}'s uses`} data-uses-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Uses</span>
-      {presence !== "no" ? <CreatureUses target={props.target} form="list" ownTurn={props.ownTurn} name={props.name} /> : null}
+      <CreatureUses target={props.target} form="list" ownTurn={props.ownTurn} name={props.name} />
       {props.children}
     </div>
   );
