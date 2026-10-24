@@ -1,6 +1,6 @@
 # raccoon-vtt v1: what each token section holds
 
-Status: designed, not built. Revised for design review round 1 (findings SEC-1 to SEC-13 and SEC-ASTRA-01 to 04, decided as D-261024-39 and D-261024-40). Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing), the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built) and the D&D Beyond class resources stack (docs/design-v1-ddb-resources.md, built and landing). Measured in the browser against short local prototypes that were not kept (section 5).
+Status: designed, not built. Revised for design review rounds 1 and 2 (findings SEC-1 to SEC-15 and SEC-ASTRA-01 to 07, decided as D-261024-39 and D-261024-40). Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing), the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built) and the D&D Beyond class resources stack (docs/design-v1-ddb-resources.md, built and landing). Measured in the browser against short local prototypes that were not kept (section 5).
 
 The project owner, 2026-10-24: "It feels a little weird that the token pop up has uses but the combat section doesn't. Up to ideas of what all should be included in the various sections"
 
@@ -12,9 +12,9 @@ Decided under guess mode as D-261024-38: the Token panel and a character's page 
 - **Uses** is the bar's Uses drawer and the tracker row's Uses group: one list, `CombatUses` in its `list` form. For a character it is also where class resources are edited and added, so the Class resources section goes. For the DM it holds the legendary pips, which wrap with 44 px targets and leave Stats. Its presence counts the turn's skipped prompts, so Reopen is always reachable.
 - **Reaction** is new, shown while the creature has a row in the fight: the row's Reaction used switch alone, for the DM or the row's owner. Ready keeps its one editor, Conditions' Readied.
 - **Range rings** stay in Combat, where the owner grouped them (D-261024-39).
-- The panel gains what only the bar offered: **Duplicate** (the DM), **Dismiss** (a companion's player), **Attach** with Get off, Put down and Let go (whoever the bar offers them), and **Size** for a player lent a character's token.
+- The panel gains what only the bar offered: **Duplicate** (the DM), **Dismiss** (a companion's player), **Attach** with Get off, Put down and Let go (whoever the bar offers them, on its play row or its group line), and **Size** for a player lent a character's token.
 - **The tracker row's options** list the creature's things first, in Combat's order, then the row's own setup.
-- **Exempt from the rule**, by name: map gestures (Undo move, Doesn't count, a door, Multi-select), links that open another panel (Roll, Details), the bar's frame (Expand, Collapse, Close, Scroll for more, the window's grip and resize), the alert cards' own buttons, and the surfaces for many creatures (the group bar, the party bar).
+- **Exempt from the rule**, by name: map gestures (Undo move, Doesn't count, a door, Multi-select), links that open another panel (Roll, Details), the bar's frame (Expand, Collapse, Close, Scroll for more, the window's grip and resize), the alert cards' own buttons, the group line's names (each selects the token it names, which the header's link tags name too), and the surfaces for many creatures (the group bar, the party bar).
 
 ## 2. The audit
 
@@ -39,7 +39,7 @@ Every control and section on each surface, for the DM and a player, on a monster
 | The stat block's own: Add, Attach, Detach, Edit, Take a shape, End the shape, Re-sync | | | | Stat block group | Stat block | ok: the panel's alone |
 | Elevation, facing, "Stand on it" | / −5 and +5, the ground notice | | | Position | | ok |
 | Light | / Light | | | Position › Sight, "Light it carries" | | **name differs** |
-| Attach, Get off, Put down, Let go | / play row and group line, by `barSlots`: the DM, a player who may move the token or its holder, or the carried token's owner | link tags on the line | | header tags and Steer, no controls. Position for the DM and owners only | | **gap**, for owners and non-owners both |
+| Attach, Get off, Put down, Let go | / the play row by `barSlots`, and the group line's Let go or Put down beside each carried token by `holderAction` and `detachAllowed`: the DM, a player who may move the carried token or its holder, or the carried token's owner | link tags on the line | | header tags and Steer, no controls. Position for the DM and owners only | | **gap**, for owners and non-owners both |
 | Other images | / its row | | | Image | Image | ok |
 | Size | / − and +, the DM or an owner of an unlocked token | | | Stats › Size, where Stats shows (not to a player lent only a character's token) | Stats › Size, the DM | **gap** for a lent token |
 | Hidden from players | Hidden on a no-HP token / the eye, the DM | | | Token settings, the header's tag | | ok: "Hidden" with the eye where short |
@@ -50,7 +50,7 @@ Every control and section on each surface, for the DM and a player, on a monster
 | Alert cards: death save, Regeneration, recharge, save-ends, with Roll, Apply, Skip, Dismiss | | | | | | prompts, homed in Hit points, Uses and Conditions |
 
 What each viewer and kind changes:
-- **The DM** sees every row above. **A player on their own character or companion** sees the same less the DM's: no pips, Revive, Hidden, Locked, Duplicate, Delete or row setup. **A player lent a character's token** owns the token but not the page: no Stats, no class resources, Size from the bar. **A player on another creature** gets the header, HP as the DM allows (the entry too with "players apply damage"), Conditions, rings and Notes for everyone. Uses never reach them (projection drops `uses`, `resources` and `turnRecord`). Their bar adds Multi-select, Details and any attach slot.
+- **The DM** sees every row above. **A player on their own character or companion** sees the same less the DM's: no pips, Revive, Hidden, Locked, Duplicate, Delete or row setup. **A player lent a character's token** owns the token but not the page: no Stats, no class resources, Size from the bar. **A player on another creature** gets the header, HP as the DM allows (the entry too with "players apply damage"), Conditions, rings and Notes for everyone. Uses never reach them (projection drops `uses`, `resources` and `turnRecord`). Their bar adds Multi-select, Details and any attach control: Attach where they may move it, Let go or Put down where they may move or own a token it holds or that holds it.
 - **A monster's** Uses come from its block. **A character's** are its class resources, plus a shape's block uses while in a shape. **A companion's** come from its block, and a companion sharing its character's turn keeps a Reaction of its own (`companionReaction`). **An object's** Combat holds Hit points, Conditions and Range rings, with no Rest.
 - **Three switches read "Hidden from players"**: the token's (Token settings), the row's (the tracker, "Players do not see this row") and a condition's (Conditions). The row's tag reads "Hidden", and the token's header tag will too after the second icon pass.
 - At 320 x 568 at 130% today, Range rings' "Custom ft" field wraps alone under the presets (`measureAlignment` wrap-orphan, 62 px).
@@ -63,14 +63,14 @@ The panel's order stays header, stat block, groups by use, setup (docs/design-v1
 |---|---|---|---|---|
 | Header, Stat block, Notes, Image, Companion, Owners | as today | as today | as today | as today |
 | **Combat** | Hit points, Conditions, **Uses**, **Reaction**, Range rings, Rest | everyone, each section by its own rule | "HP 52/60 · 1 condition · Reaction used · rings 30 ft". "Reaction used" for every viewer while spent, as the row's tag shows it | open everywhere, as today |
-| **Position** | Elevation and facing, **Attach**, Sight | the DM and owners, and any viewer the bar offers an attach slot, who sees Attach alone | "On the ground, facing 90°", as today | folded, as today |
-| **Stats** | Size, the card's fields, the legendary maxima only, Sheet link. **Size alone** for a player lent a character's token | as today, and that player | | folded |
+| **Position** | Elevation and facing, **Attach**, Sight | the DM and owners, and any viewer the bar offers an attach control, who sees those controls alone | "On the ground, facing 90°", as today | folded, as today |
+| **Stats** | Size, the card's fields, the legendary maxima only, Sheet link. **Size alone** for a player lent a character's token, on the bar's condition: unlocked, and a Custom size read only in the bar's words (`customWords`) | as today, and that player | | folded |
 | **Token settings** | as today, then **Duplicate** (the DM) | as today | | folded |
 | **Remove** | Delete this token (the DM), or **Dismiss** (a companion's player) | the DM, and now a companion's player (`access.dismiss`) | | |
 
 **A character's page**: header, Place a token, Stat block, Combat (Hit points, Conditions, Uses, Reaction, Rest: no rings, as today), Companions, Notes, Image, Stats, Played by, Remove. Nothing of a token on a map, as today.
 
-`panelSections` changes: `uses` and `reaction` join COMBAT before `rangeRings`, `resources` goes, `remove` shows for the DM or `dismiss`, Stats shows Size alone where the viewer has `resize` and no stat card, and Position's group draws for an attach slot (`barSlots` non-empty) as well as for the DM and owners.
+`panelSections` changes: `uses` and `reaction` join COMBAT before `rangeRings`, `resources` goes, `remove` shows for the DM or `dismiss`, Stats shows Size alone where the viewer owns the token, has no stat card and the token is unlocked (the bar's SizeRow condition, not `resize`, so a Custom size shows its read-only line), and Position's group draws for the DM and owners and for any attach control. That is a new `attachControls(view, viewer, token)` in attach/detach.ts: `barSlots` non-empty, or a token the group line lists as held whose `holderAction` the viewer may take by `detachAllowed`, the group line's own test.
 
 ### 3.1 Uses
 
@@ -87,13 +87,13 @@ The panel's order stays header, stat block, groups by use, setup (docs/design-v1
 - **When**: the creature has a row in the current fight, by `reactionTarget(view, self)` (encounter/ready.ts): its own row, or for a companion sharing its character's turn, its character's row with its own Reaction. A companion with no turn, or no fight, draws nothing.
 - **Who**: the DM, or the row's owner by `ownsEntry`, as the server's `encounter.update` allows. A player lent a character's token whose row is the character's sees none. A shared companion's own switch goes to the DM and its owners (`companionReaction`), as its sub-row offers it. For everyone else, a spent Reaction is the row's "Reaction used" tag and Combat's summary.
 - **Holds**: the row's switch alone, in the row's words: "Reaction used" with "Clears at the start of its turn" (the DM), "Clears at the start of your turn" (a player), or "Its own, which clears when its character's turn starts" (a shared companion). A player's switch is busy until the server answers, as the row's is.
-- **Ready stays in Conditions** (D-261024-40): its Readied holds the trigger, Show the trigger to players and It fired: Reaction used, in or out of a fight. The tracker's `ReadyControls` stays the row's quick form in the same words.
+- **Ready stays in Conditions** (D-261024-40): its Readied editor, with the trigger and Show the trigger to players, stays there in or out of a fight. Its It fired: Reaction used keeps today's rule, shown only where the creature has a Reaction to spend (`reactionTarget`), so only in a fight. The tracker's `ReadyControls` stays the row's quick form in the same words.
 - On a character's page it is the character's row, by `reactionTarget(view, { characterId })`, with the same owner rule.
 
 ### 3.3 Position
 
-- **Who**: the DM and owners see all of it. Any other viewer the bar offers an attach slot (`barSlots`: Attach for whoever may move the token, Let go or Put down for whoever may move its holder) sees Position with the attach controls alone (D-261024-40). Its summary for them is the same.
-- **Attach**: the bar's `AttachButton` (a popover from 900 px up, a sheet on a phone, as the class resource sheet opens over the panel's sheet today), the bar's group line with its names and Let go or Put down, and Get off with its note, each as `barSlots` and `holderAction` offer it. Steer stays under the header's tags, where it is read with "Riding Warhorse".
+- **Who**: the DM and owners see all of it. Any other viewer the bar offers an attach control sees Position with those controls alone (D-261024-40), by `attachControls`: a direct slot (`barSlots`: Attach for whoever may move the token, Get off, Let go or Put down on a carried token for whoever may move it or its holder, or owns it), or the group line's Let go or Put down beside a token it holds (`holderAction` with `detachAllowed`). So a player whose Thorn a goblin drags gets Position on the goblin's panel with Let go for Thorn. Its summary for them is the same.
+- **Attach**: the bar's `AttachButton` (a popover from 900 px up, a sheet on a phone, as the class resource sheet opens over the panel's sheet today), the bar's group line with its names and Let go or Put down, and Get off with its note, each as the bar offers it: `barSlots` for the token's own, `holderAction` with `detachAllowed` for each token it holds. Steer stays under the header's tags, where it is read with "Riding Warhorse".
 - **Sight** keeps its parts. Its light row reads **Light**, the bar's word.
 
 ### 3.4 One name, one control
@@ -153,7 +153,7 @@ Seeded room: Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity. 
 | 390 x 844 at 130%, tracker (249), 5 a row | 1 to 5 | 6 to 10 | |
 
   - **Heights**: a pip block is 80, 137 and 194 px for one, two and three rows of pips, with its words on one line. It is 20 px more where the words take two lines. That happens for "Legendary Resistances used today" at 320 and in the tracker at 390, and for "Legendary Actions used" at a maximum of 10 in the tracker at 320.
-  - **Overflow**: no pip runs past its row at any maximum. Today's unwrapped row runs past the tracker's room by 5 pips at 320 and 6 at 390, before its words beside them are counted.
+  - **Overflow**: no pip runs past its row at any maximum. At a maximum of 10, today's unwrapped row runs 6 pips past the tracker's room at 320 and 5 at 390, before its words beside them are counted.
 - **Folded**: Combat's row is unchanged in height. Its summary keeps "rings" last and gains "Reaction used" before it while spent. At 390 and 320 at 130% it was cut before and is after ("HP 200/256 · 1 condition · rings 60 ft").
 - **What scrolls**: one scroller per panel, the side panel's body at 1280 and the sheet's body on a phone. Nothing in it is sticky.
   - On a phone Combat starts 150 to 310 px down. At 320 x 568 at 130% that is below the first view, as today.
@@ -175,9 +175,9 @@ Seeded room: Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity. 
 9. **The row's options lead with the creature's things in Combat's order.** Rejected: today's order. Rejected: a label between the parts, a line more on a phone.
 10. **Exempt by name**: map gestures, links to other panels, the bar's frame, the alert cards' buttons, and the surfaces for many creatures. A drag never starts in the panel, the top bar holds Undo, the Dice panel is a tab away, and a card's Skip answers one prompt. Rejected: copies in the panel.
 11. **The panel gains Duplicate, Dismiss and Attach, and Size for a lent token** (D-261024-40). Rejected: leaving them in the bar, against the rule. Rejected: exempting Size.
-12. **Position draws for any viewer with an attach slot**, the attach controls alone for one who is neither the DM nor an owner (D-261024-40). Rejected: a separate place for Attach, and leaving non-owners' slots in the bar alone.
+12. **Position draws for any viewer the bar offers an attach control**, a direct slot or the group line's Let go or Put down, with those controls alone for one who is neither the DM nor an owner (D-261024-40). Rejected: a separate place for Attach. Rejected: leaving non-owners' controls in the bar alone. Rejected: gating on `barSlots` alone, which hides a holder's Let go from the held token's player.
 13. **"Light" and "Row hidden from players".** Rejected: "Light it carries" on the bar's shared line. Rejected: one name for the token's switch and the row's.
-14. **Skipped prompts' Reopen stays in Uses, and Uses' presence counts them** (D-261024-40). Rejected: on the card alone, where a local Dismiss leaves no way back until Next. Rejected: a death save's Reopen beside the death saves in Hit points, a second home while save-ends and recharge prompts stay in Uses.
+14. **Skipped prompts' Reopen stays in Uses, and Uses' presence counts them** (D-261024-40). Rejected: on the card alone, where a local Dismiss leaves no way back until Next. Rejected: a death save's Reopen beside the death saves in Hit points, a second home while Regeneration and recharge prompts stay in Uses. Save-ends cards settle their effect, not a prompt, so they stay with Conditions.
 
 ## 7. UI checklist
 
@@ -206,13 +206,14 @@ Seeded room: Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity. 
 | A goblin with no uses, in the fight | No Uses section. Reaction shows for the DM | tokenpanel |
 | That goblin's death save skipped, its turn card dismissed | Uses with "Death save skipped" and Reopen on the panel, the bar and the row, all gone after Next | combatuses, logic.test |
 | No fight | No Reaction section | panelOrder.test |
-| A player lent Thorn's token, Thorn's row keyed by the character | No Reaction switch, Stats with Size alone, Size changes it | tokenpanel |
+| A player lent Thorn's token, Thorn's row keyed by the character | No Reaction switch, Stats with Size alone, Size changes it. On a Custom size, the bar's read-only words. Locked, no Stats | tokenpanel |
 | Skitter sharing Thorn's turn | Reaction is its own switch with its help line, for the DM and Pat | tokenpanel |
 | Reaction used toggled in the panel | The row's "Reaction used" tag and switch follow. Combat's summary shows it to every viewer | combat |
 | Pat readies an action from Conditions in a fight | Readied with its trigger, and It fired spends the row's Reaction | tokenpanel |
 | Pat on the dragon | HP as allowed, Conditions and the rings' line. No Uses, no Reaction, no Position | tokenpanel |
 | Pat may move any token, on a goblin | Position with Attach alone | attach |
 | Pat's Thorn drags a goblin, Pat on the goblin | Position with Let go alone | attach |
+| A goblin drags Pat's Thorn, Pat on the goblin | Position with the group line's Let go for Thorn alone | attach |
 | A monster whose block loads | Uses holds the list's loading line, then its rows | combatuses |
 | The DM's row options | Uses before Row hidden from players | combat |
 | Duplicate from Token settings | A copy beside it, selected, the panel showing it, focus on its name | tokenpanel |
@@ -226,8 +227,8 @@ Seeded room: Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity. 
   - Combat's order for the DM, an owner, another player, a lent player, a character, a companion and an object.
   - Uses shows only with presence, or with a character's resources for the DM and its players.
   - Reaction shows only with a row and the DM or `ownsEntry`.
-  - Remove shows for the DM or `dismiss`. Stats with Size alone for a lent player.
-  - Position for an attach slot alone, and for a holder's Let go.
+  - Remove shows for the DM or `dismiss`. Stats with Size alone for a lent player on an unlocked token, Custom size included.
+  - Position for a direct slot alone, and for a group line's Let go alone (`attachControls`).
   - Every section once.
 - `logic.test.ts`: `usesRows` lists skipped rows in the list form while the record is current, and none after Next. `usesPresence` is `yes` for a creature whose only rows are skipped prompts.
 - `UsesSection.test.ts`, moved from the D&D Beyond stack's `ClassResourcesSection.test.ts`: the help line, rows with Restore and Edit, Add or the limit, and the level-up line.
@@ -239,7 +240,7 @@ Seeded room: Thorn level 7 with Rage 2 of 3, Lay on Hands and Channel Divinity. 
   - The pips without wrapping fail the alignment step at a maximum of 10.
   - The old menu order fails combat's order step.
   - Stats' used steppers back fail tokenpanel.
-  - Position gated on owners again fails attach.
+  - Position gated on owners again fails attach. Position on `barSlots` alone fails panelOrder.test for the goblin dragging Thorn.
 
 ## 10. Lane plan
 
@@ -251,7 +252,7 @@ It builds after three stacks land:
 | Lane | Owns | e2e |
 |---|---|---|
 | **S1, the list and the tracker**, beside the icon pass once the bar and D&D Beyond stacks land | combat/CombatUses.tsx (Edit and pips slots, presence with the record), combat/logic.ts (skipped rows, `usesPresence`), resources/ResourceRows.tsx (Edit on its line), combat/UsesSection.tsx (new, from ClassResourcesSection's parts and its test), encounter/ReactionSection.tsx (new), encounter/Pips.tsx (moved out of Row.tsx, wrapping), encounter/Row.tsx (order, rename), combat/usesSurfaces.test.ts, their tests | combatuses, classresources, combat |
-| **S2, the groups**, in the icon pass's lane right after its Token panel part | tokens/panelOrder.ts, panels/TokenPanel.tsx, tokens/CharacterCard.tsx, tokens/StatsSection.tsx (maxima only, with the pips in place), vision/TokenSight.tsx, a `useDuplicate` hook out of canvas/TokenActionBar.tsx, resources/ClassResourcesSection.tsx and its test deleted, panelOrder.test.ts | tokenpanel, characters, companions, attach, alignment |
+| **S2, the groups**, in the icon pass's lane right after its Token panel part | tokens/panelOrder.ts, attach/detach.ts (`attachControls`), panels/TokenPanel.tsx, tokens/CharacterCard.tsx, tokens/StatsSection.tsx (maxima only, with the pips in place), vision/TokenSight.tsx, a `useDuplicate` hook out of canvas/TokenActionBar.tsx, resources/ClassResourcesSection.tsx and its test deleted, panelOrder.test.ts | tokenpanel, characters, companions, attach, alignment |
 
 - **S1's first commit** exports `UsesSection({ target, name, character? })` and `ReactionSection({ self, name })`, so S2 starts from it.
 - **Stats' used steppers** go in S2, in the same commit that puts the pips in the panel's Uses, so no build between the lanes leaves the DM without a way to set the counts outside a fight.
