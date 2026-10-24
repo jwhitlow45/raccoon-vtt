@@ -749,9 +749,11 @@ export function columnRoom(input: { lane: Lane; columnTop: number; bar: Box }): 
  * that leaves the largest clear rectangle. Measured from the viewport's
  * edges, like `bars`, in the same pixels as everything passed in.
  */
-export function barCover(viewport: Size, bars: Sides, bar: { box: Box; laneLeft: number; freeRight: number } | null): Sides {
+export function barCover(viewport: Size, bars: Sides, bar: { box: Box; laneLeft: number; freeRight: number; mode?: BarMode } | null): Sides {
   if (!bar) return NO_SIDES;
   const { box } = bar;
+  // An upright phone's strip, or its expanded bar, crosses the free area at its foot, so it covers the bottom from its top whatever its height (docs/design-v1-bar-compact.md 4).
+  if (bar.mode === "span") return { ...NO_SIDES, bottom: Math.max(0, viewport.height - box.top) };
   const inLane = box.left >= bar.laneLeft - 0.5;
   const againstRight = box.left + box.width >= bar.freeRight - 0.5;
   // A lane that does not fit the free area (a narrow phone) leaves the bar to cover a side like any other.
@@ -934,10 +936,12 @@ export function placeBar(input: {
 }
 
 /**
- * Where a docked or compact bar rests before it exists, for a pan that
- * opens it: its spot and the height it last had, shared with the column
- * as the drawn bar will be (placeBar). Null where the bar spans, since a
- * spanning bar is placed by its token.
+ * Where a bar rests before it exists, for a pan that opens it: a docked or
+ * compact bar at its spot with the height it last had, shared with the
+ * column as the drawn bar will be (placeBar), and an upright phone's
+ * strip, or its expanded bar while the bar stays expanded, at the free
+ * area's foot (docs/design-v1-bar-compact.md 4). `mode` tells barCover
+ * which side it covers.
  */
 export function restingBar(input: {
   layout: Size;
@@ -950,10 +954,23 @@ export function restingBar(input: {
   width?: number;
   size?: BarSize;
   resizable?: boolean;
-}): { box: Box; laneLeft: number; freeRight: number } | null {
-  const placed = placeBar({ ...input, foot: input.foot ?? 0, anchor: null });
-  if (!placed || placed.mode === "span") return null;
-  return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free), freeRight: placed.free.left + placed.free.width };
+  heldMode?: HeldMode;
+  cardAt?: CardAt;
+  /** The strip's foot: `foot`, or 0 while a roll card yields to it (stripSqueezed). */
+  restFoot?: number;
+  state?: RestState;
+  expandedHeight?: number | null;
+}): { box: Box; laneLeft: number; freeRight: number; mode: BarMode } | null {
+  const foot = input.foot ?? 0;
+  const mode = heldOrOpenMode({ layout: input.layout, free: freeArea(input.viewport, input.chrome, foot), foot, cardAt: input.cardAt ?? null, heldMode: input.heldMode ?? null });
+  if (mode === "span") {
+    const free = freeArea(input.viewport, input.chrome, input.restFoot ?? foot);
+    const hang = restHang(free, input.state ?? "rest", input.expandedHeight ?? null);
+    return { box: hangBox(hang, hang.room), laneLeft: laneLeft(free), freeRight: free.left + free.width, mode };
+  }
+  const placed = placeBar({ ...input, foot, anchor: null });
+  if (!placed) return null;
+  return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free), freeRight: placed.free.left + placed.free.width, mode: placed.mode };
 }
 
 // ------------------------------------------------------------ an upright phone's resting bar
@@ -974,6 +991,8 @@ export const REST_TIGHT = 94;
 export const BAND_MIN = 44;
 /** What Expand must add to the strip to be offered: a header's height (5.1). */
 export const EXPAND_GAIN = 52;
+/** How far in from each side of the frame the strip's note stands, over its top edge (3.3): its width is the frame's less twice this. */
+export const NOTE_INSET = 12;
 
 /**
  * The strip's height for a free area `free` px tall: 114, or less where
@@ -1043,6 +1062,157 @@ export function restOrder(ids: readonly string[]): string[] {
     return at < 0 ? REST_DISPLAY.length : at;
   };
   return ids.map((id, i) => ({ id, i })).sort((a, b) => rank(a.id) - rank(b.id) || a.i - b.i).map((e) => e.id);
+}
+
+/** What a strip or an expanded bar leaves of the free area above it, for its token and label (5.1). */
+const EXPAND_LEAVES = 120;
+/** The share of the layout's height an expanded bar may take (5.1). */
+const EXPAND_SHARE = 2 / 3;
+
+/**
+ * Whether the bar rests as the strip or is expanded, while it spans an
+ * upright phone (5.3). Expanded lasts while the bar stays open.
+ */
+export type RestState = "rest" | "expanded";
+
+/**
+ * The strip's place: the free area's width at its foot, `restHeight` tall,
+ * or an expanded bar's place on the same foot, `expandedHeight` tall.
+ * `free` is the free area the strip stands in, a roll card that yields to
+ * it left out (restFoot).
+ */
+export function restHang(free: Box, state: RestState, expandedHeight: number | null): Hang {
+  const bottom = free.top + free.height;
+  const room = state === "expanded" && expandedHeight !== null ? expandedHeight : restHeight(free.height);
+  return { left: free.left, width: Math.max(0, free.width), anchor: "bottom", at: bottom, room: Math.max(0, room) };
+}
+
+/**
+ * The alerts column beside a resting strip (3.5): its cards stack above
+ * the strip where at least 44 px of map are left between the first card,
+ * with its 8 px gap, and the strip's top, less its own 8 px gap, so a
+ * token can still be panned in under the card. Otherwise the column shows
+ * its summary row. "none" with no card.
+ */
+export function restLane(column: ColumnFacts | null, restTop: number): Lane {
+  if (!column || column.first <= 0) return "none";
+  return restTop - EDGE - (column.top + column.first + EDGE) >= BAND_MIN ? "stacked" : "summary";
+}
+
+/**
+ * The alerts column beside an expanded bar (5.1): its first card stacks
+ * above it only where it leaves the bar a header's height more than the
+ * strip, else the column shows its summary row, so the column never caps
+ * an expanded bar under that. "none" with no card.
+ */
+export function expandedLane(column: ColumnFacts | null, free: Box): Lane {
+  if (!column || column.first <= 0) return "none";
+  return underCard(column, free) >= REST_HEIGHT + EXPAND_GAIN ? "stacked" : "summary";
+}
+
+/** The free area left under the column's first card and its 8 px gap. */
+function underCard(column: ColumnFacts, free: Box): number {
+  return free.top + free.height - (column.top + column.first + EDGE);
+}
+
+/**
+ * How tall an expanded bar may grow (5.1): two thirds of the layout's
+ * height, but never so tall that it leaves its token under 120 px of the
+ * free area and the 8 px gap above it. Expand is offered only where this
+ * is at least a header's height over the strip (expandOffered).
+ */
+export function expandReach(input: { layout: Size; free: Box }): number {
+  return Math.max(0, Math.min(Math.round(input.layout.height * EXPAND_SHARE), input.free.height - EXPAND_LEAVES - EDGE));
+}
+
+/** Whether Expand is offered: it must add at least a header's height to the strip (5.1, review BC-OPUS-22). */
+export function expandOffered(input: { layout: Size; free: Box }): boolean {
+  return expandReach(input) >= REST_HEIGHT + EXPAND_GAIN;
+}
+
+/**
+ * An expanded bar's height (5.1): as tall as its content, up to its reach
+ * and the room under a first card that stacks above it, and never under
+ * the strip's 114 px. The frame works it out at Expand, for each new
+ * token and on a change of the map's frame only, so a stat block that
+ * loads late or a pinch never changes it.
+ */
+export function expandedRoom(input: { layout: Size; free: Box; column: ColumnFacts | null; content: number }): number {
+  const { column, free } = input;
+  const cap = column && expandedLane(column, free) === "stacked" ? underCard(column, free) : Number.POSITIVE_INFINITY;
+  return Math.max(REST_HEIGHT, Math.min(input.content, expandReach(input), cap));
+}
+
+/**
+ * How far the map moves so the bar clears its own token, in the chrome's
+ * px, up being negative (3.6, 5.2). The token's label clearance, its
+ * anchor and the 34 px under it, must end at or above the bar's top
+ * (`barTop`). It moves no further than keeps the token's top, at its drawn
+ * height, inside the free area and below the toasts over the map as they
+ * stand (`toastFoot`, review LP19-BS-3). Toasts that already reach down
+ * past the token's top limit nothing, so a stack in the middle of the
+ * screen never stops the move (review LP19-OPUS-1). A token taller than
+ * the room above the bar clears as far as its top allows. Zero where the
+ * label already clears. Stage bounds the move by the camera's limits
+ * (lib/camera.ts barShift).
+ */
+export function clearShift(input: { anchor: Point; tokenHeight: number; free: Box; barTop: number; toastFoot: number | null }): number {
+  const need = input.anchor.y + OFFSET_Y - input.barTop;
+  if (need <= 0) return 0;
+  const top = input.anchor.y - Math.max(0, input.tokenHeight);
+  const toasts = input.toastFoot !== null && input.toastFoot + EDGE <= top ? input.toastFoot + EDGE : Number.NEGATIVE_INFINITY;
+  const most = Math.max(0, top - Math.max(input.free.top, toasts));
+  const dy = Math.min(need, most);
+  return dy > 0 ? -dy : 0;
+}
+
+/**
+ * Whether a roll card at a narrow screen's foot folds for the strip
+ * (3.2): while an upright phone's bar is open in its held strip mode,
+ * shown or hidden for a drag (`held`), and the card would take the free
+ * area under the 148 px a bar needs. With no bar held the card stands.
+ */
+export function stripSqueezed(input: { viewport: Size; chrome: Chrome; foot: number; held: boolean }): boolean {
+  return input.held && input.foot > 0 && freeArea(input.viewport, input.chrome, input.foot).height < MIN_BAR_HEIGHT;
+}
+
+/**
+ * What an upright phone's bar showed at a commit and shows at the next:
+ * nothing, one token's bar by its id, or a group's bar.
+ */
+export type BarSubject = string | "group" | null;
+
+/**
+ * Whether an opening's intent asks the map to clear the token (3.6,
+ * review BAR-ASTRA-09): the bar shows now and showed nothing at the commit
+ * before, or showed one token and now another, or showed a group and now
+ * one token by a plain tap (review BC-OPUS-37). A tap that gathers or
+ * takes out a token in Multi-select (`gather`), a gathering tap that turns
+ * one token's bar into a group's, a group to a group, and the same token
+ * again ask nothing.
+ */
+export function keepsOpening(before: BarSubject, now: BarSubject, gather: boolean): boolean {
+  if (now === null) return false;
+  if (before === null) return true;
+  if (now === "group") return false;
+  if (before === "group") return !gather;
+  return before !== now;
+}
+
+/**
+ * Whether the newest toast shows as one 44 px row over the top bar's row
+ * (3.5, review BC-OPUS-31): while the strip rests, the toasts' room runs
+ * from their top (`top`) down to the strip's top less 60 (`restFloor`),
+ * and under 44 px of it leaves no room for a toast there. Null while no
+ * strip rests.
+ */
+export function toastsOverBars(input: { restFloor: number | null; top: number }): boolean {
+  return input.restFloor !== null && input.restFloor - input.top < TOAST_MIN;
+}
+
+/** The foot of the room a resting strip leaves the toasts and the summary row: 8 px above the band's last 44 px over the strip (3.5). */
+export function restFloor(stripTop: number): number {
+  return stripTop - EDGE - BAND_MIN - EDGE;
 }
 
 // ------------------------------------------------------------ an upright phone's larger bar

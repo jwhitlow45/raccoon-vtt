@@ -105,6 +105,16 @@ import {
   REST_TIGHT,
   restHeight,
   restOrder,
+  restLane,
+  expandedLane,
+  expandReach,
+  expandOffered,
+  expandedRoom,
+  clearShift,
+  stripSqueezed,
+  keepsOpening,
+  toastsOverBars,
+  restFloor,
   type Box,
   type Chrome,
   type Hang,
@@ -817,11 +827,18 @@ describe("fit and find keep clear of the bar", () => {
     assert.deepEqual(clearAnchor({ x: 460, y: 400 }, viewport, bars, NONE), { x: 460, y: 400 });
   });
 
-  test("a bar about to open rests at its spot with the height it last had, and a spanning one has no place yet", () => {
+  test("a bar about to open rests at its spot with the height it last had, and an upright phone's at the foot as the strip or its expanded bar (docs/design-v1-bar-compact.md 4)", () => {
     const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
     const rest = restingBar({ layout: { width: 1280, height: 800 }, viewport, chrome, spot: DEFAULT_SPOT, height: 250, column: null });
-    assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane, freeRight: 912 });
-    assert.equal(restingBar({ layout: { width: 390, height: 844 }, viewport: { width: 390, height: 844 }, chrome, spot: DEFAULT_SPOT, height: 250, column: null }), null);
+    assert.deepEqual(rest, { box: { left: 920 - 8 - 304, top: 800 - 60 - 8 - 250, width: 304, height: 250 }, laneLeft: lane, freeRight: 912, mode: "dock" });
+    // 390 x 844: the free area runs from 60 to 776, so the strip stands from 662, whatever the height the bar last had.
+    const phoneView = { width: 390, height: 844 };
+    const upright = { layout: phoneView, viewport: phoneView, chrome, spot: DEFAULT_SPOT, height: 250, column: null };
+    assert.deepEqual(restingBar(upright), { box: { left: 8, top: 662, width: 374, height: 114 }, laneLeft: 382 - 312, freeRight: 382, mode: "span" });
+    assert.deepEqual(restingBar({ ...upright, state: "expanded", expandedHeight: 400 })?.box, { left: 8, top: 376, width: 374, height: 400 }, "expanded, as it stays while the bar is open");
+    // A roll card standing at the foot lifts it, and one that yields to it leaves it on the toolbar.
+    assert.equal(restingBar({ ...upright, foot: 120 })?.box.top, 662 - 120);
+    assert.equal(restingBar({ ...upright, foot: 120, restFoot: 0 })?.box.top, 662);
   });
 
   test("a bar about to open shares the lane with the column as the drawn bar will, so a pan never lands a token under it", () => {
@@ -1896,4 +1913,119 @@ describe("an upright phone's resting strip (docs/design-v1-bar-compact.md 2 and 
     assert.deepEqual(restOrder(["light", "mode", "attach", "conditions"]), ["mode", "conditions", "light", "attach"]);
     assert.deepEqual(restOrder([]), []);
   });
+});
+
+describe("the strip's lane, its expanded bar, the clearing move and a card it folds (docs/design-v1-bar-compact.md 3 and 5)", () => {
+  const chrome: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NONE, sheet: 0 };
+  /** 390 x 843: a free area from 60 to 775, 715 tall, as the design measured 390 x 844. */
+  const tall = { width: 390, height: 843 };
+  const tallFree = freeArea(tall, chrome);
+  /** An upright layout whose free area is `free` px tall. */
+  const upright = (free: number) => ({ width: 246, height: free + 128 });
+
+  test("the column stacks over the strip where 44 px of map are left under its first card, else shows its summary row (3.5)", () => {
+    // The strip's top at 662: 662 - 8 - (60 + first + 8) px of map are left.
+    assert.equal(restLane({ top: 60, content: 541, first: 541 }, 662), "stacked", "45 px left");
+    assert.equal(restLane({ top: 60, content: 542, first: 542 }, 662), "stacked", "44 px left");
+    assert.equal(restLane({ top: 60, content: 543, first: 543 }, 662), "summary", "43 px left");
+    assert.equal(restLane(null, 662), "none");
+    assert.equal(restLane({ top: 60, content: 44, first: 0, cover: 44 }, 662), "none", "a lone turn card is no card for the bar");
+  });
+
+  test("Expand is offered where it adds a header's height: a reach of 166 at F = 294, not 165 at F = 293 (5.1, BC-OPUS-22)", () => {
+    for (const [free, reach, offered] of [
+      [293, 165, false],
+      [294, 166, true],
+      [209, 81, false],
+    ] as const) {
+      const layout = upright(free);
+      const box = freeArea(layout, DEFAULT_CHROME);
+      assert.equal(box.height, free);
+      assert.equal(expandReach({ layout, free: box }), reach, `F = ${free}`);
+      assert.equal(expandOffered({ layout, free: box }), offered, `F = ${free}`);
+    }
+    // On a tall screen two thirds of its height caps it first: 562 at 390 x 843, where F - 128 is 587.
+    assert.equal(expandReach({ layout: tall, free: tallFree }), 562);
+  });
+
+  test("the expanded bar is as tall as its content, up to its reach and the room under a stacked first card, never under the strip (5.1)", () => {
+    const at = (content: number, column: { top: number; content: number; first: number } | null = null) => expandedRoom({ layout: tall, free: tallFree, column, content });
+    assert.equal(at(502), 502, "the DM's Thorn bar shows whole");
+    assert.equal(at(900), 562, "capped at the reach");
+    assert.equal(at(80), 114, "never under the strip");
+    const small = upright(294);
+    assert.equal(expandedRoom({ layout: small, free: freeArea(small, DEFAULT_CHROME), column: null, content: 500 }), 166, "F = 294");
+    // A first card that leaves 407 px under it caps the bar there, one that leaves 147 gives way to the summary row instead.
+    assert.equal(at(900, { top: 60, content: 300, first: 300 }), 775 - (60 + 300 + 8));
+    assert.equal(expandedLane({ top: 60, content: 300, first: 300 }, tallFree), "stacked");
+    assert.equal(at(900, { top: 60, content: 609, first: 609 }), 562, "98 px under the card: the column gives way, and the bar takes its reach");
+    assert.equal(expandedLane({ top: 60, content: 609, first: 609 }, tallFree), "summary");
+    // 166 under the card still stacks, 165 gives way.
+    assert.equal(expandedLane({ top: 60, content: 541, first: 541 }, tallFree), "stacked");
+    assert.equal(expandedLane({ top: 60, content: 542, first: 542 }, tallFree), "summary");
+    assert.equal(at(900, { top: 60, content: 541, first: 541 }), 166);
+  });
+
+  test("the clearing move: just enough for the label to clear the strip, none above it, and no further than the token's top allows (3.6, 5.2)", () => {
+    const move = (y: number, tokenHeight = 40, toastFoot: number | null = null) => clearShift({ anchor: { x: 200, y }, tokenHeight, free: tallFree, barTop: 662, toastFoot });
+    assert.equal(move(600), 0, "the label already clears the strip");
+    assert.equal(move(628), 0, "the label ends at the strip's top");
+    assert.equal(move(629), -1);
+    assert.equal(move(700), -72, "under the strip, moved up just enough");
+    // A token taller than the room above the strip clears only as far as its top stays in the free area.
+    assert.equal(move(700, 620), -20);
+    assert.equal(move(700, 680), 0);
+    // Toasts above the token keep it below them, and toasts already past its top never stop the move (LP19-BS-3, LP19-OPUS-1).
+    assert.equal(move(700, 40, 300), -72);
+    assert.equal(move(700, 40, 600), -52);
+    assert.equal(move(700, 40, 700), -72);
+    // A group's bar clears its anchor token, by that token's own height.
+    assert.equal(move(760, 128), -(760 + 34 - 662));
+    // The same rule clears an expanded bar's top.
+    assert.equal(clearShift({ anchor: { x: 200, y: 500 }, tokenHeight: 40, free: tallFree, barTop: 213, toastFoot: null }), -(500 + 34 - 213));
+  });
+
+  test("a roll card folds for the strip only while a strip is held and the card would take the free area under 148 (3.2, BC-OPUS-21)", () => {
+    const phoneView = { width: 390, height: 844 };
+    // The free area is 716 with no card, so a card of 569 leaves 147 and one of 568 leaves 148.
+    assert.equal(stripSqueezed({ viewport: phoneView, chrome, foot: 569, held: true }), true);
+    assert.equal(stripSqueezed({ viewport: phoneView, chrome, foot: 568, held: true }), false);
+    assert.equal(stripSqueezed({ viewport: phoneView, chrome, foot: 569, held: false }), false, "no bar open: the card stands");
+    assert.equal(stripSqueezed({ viewport: upright(140), chrome: DEFAULT_CHROME, foot: 0, held: true }), false, "no card to fold");
+  });
+
+  test("a strip covers the map from its top down, for Fit, Find and the pans that open the bar (4)", () => {
+    const phoneView = { width: 390, height: 844 };
+    const box = { left: 8, top: 662, width: 374, height: 114 };
+    assert.deepEqual(barCover(phoneView, { ...NONE, top: 52, bottom: 60 }, { box, laneLeft: 70, freeRight: 382, mode: "span" }), { ...NONE, bottom: 844 - 662 });
+    assert.deepEqual(barCover(phoneView, { ...NONE, top: 52, bottom: 60 }, { box: { ...box, top: 376, height: 400 }, laneLeft: 70, freeRight: 382, mode: "span" }), { ...NONE, bottom: 844 - 376 });
+  });
+
+  test("an opening counts where the bar shows a new token: from nothing, from another token, or from a group by a plain tap (3.6, BAR-ASTRA-09, BC-OPUS-37)", () => {
+    const subjects = [null, "a", "b", "group"] as const;
+    for (const before of subjects) {
+      for (const now of subjects) {
+        for (const gather of [false, true]) {
+          const expected = now !== null && (before === null || (now !== "group" && before !== "group" && before !== now) || (before === "group" && now !== "group" && !gather));
+          assert.equal(keepsOpening(before, now, gather), expected, `${before} to ${now}${gather ? ", gathering" : ""}`);
+        }
+      }
+    }
+    assert.equal(keepsOpening(null, "a", false), true, "the bar opens");
+    assert.equal(keepsOpening("a", "b", false), true, "another token");
+    assert.equal(keepsOpening("a", "a", false), false, "the same token");
+    assert.equal(keepsOpening("a", "group", true), false, "a gathering tap");
+    assert.equal(keepsOpening("group", "group", true), false, "group to group");
+    assert.equal(keepsOpening("group", "a", false), true, "a plain tap from a group's bar");
+    assert.equal(keepsOpening("group", "a", true), false, "a removal in Multi-select");
+    assert.equal(keepsOpening("a", null, false), false, "the bar hides");
+  });
+
+  test("the newest toast takes one row over the top bar's row where the strip leaves it under 44 px (3.5)", () => {
+    assert.equal(restFloor(662), 602);
+    assert.equal(toastsOverBars({ restFloor: 100, top: 57 }), true, "43 px of room");
+    assert.equal(toastsOverBars({ restFloor: 100, top: 56 }), false, "44 px of room");
+    assert.equal(toastsOverBars({ restFloor: null, top: 90 }), false, "no strip rests");
+  });
+
 });
