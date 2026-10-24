@@ -1228,7 +1228,7 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       replaceChildren(...nodes: PageEl[]): void;
       remove(): void;
     };
-    type PageGlobals = { document: { createElement(tag: string): PageEl; activeElement: PageEl | null }; getComputedStyle(el: PageEl): { columnGap: string; visibility: string } };
+    type PageGlobals = { document: { createElement(tag: string): PageEl; activeElement: PageEl | null }; getComputedStyle(el: PageEl): { columnGap: string; visibility: string; paddingLeft: string; paddingRight: string } };
 
     /** A token's bar, by its frame's name. */
     const barOf = (page: Page, name: string) => page.getByRole("dialog", { name: `${name} actions` });
@@ -1265,15 +1265,21 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
     const expandButton = (bar: Locator) => bar.getByRole("button", { name: /^(Expand|Larger)$/ });
     const collapseButton = (bar: Locator) => bar.getByRole("button", { name: /^(Collapse|Smaller)$/ });
 
-    /** Presses a control, in the quick row where it shows there, and else behind Expand (the design's barControl). */
+    /**
+     * Presses a control, in the quick row where it shows there, and else
+     * behind Expand (the design's barControl), resting the bar again after,
+     * so the map the expanded bar covered takes the next tap.
+     */
     async function press(bar: Locator, name: string): Promise<void> {
       const inRow = bar.locator("[data-rest-row]").getByRole("button", { name, exact: true });
       if ((await inRow.count()) > 0 && (await inRow.first().isVisible())) {
         await inRow.first().tap();
         return;
       }
-      if ((await expandButton(bar).count()) > 0) await expandButton(bar).tap();
+      const expanded = (await expandButton(bar).count()) > 0;
+      if (expanded) await expandButton(bar).tap();
       await bar.getByRole("button", { name, exact: true }).first().tap();
+      if (expanded && (await collapseButton(bar).count()) > 0) await collapseButton(bar).tap();
     }
 
     /**
@@ -1312,14 +1318,17 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         probe.remove();
         // The field's least width is 56 layout px, so it gives the chrome's zoom for the gap, which CSS states unzoomed.
         const zoom = fieldMin > 0 ? fieldMin / 56 : box.width / Math.max(1, row.offsetWidth);
-        const gap = (Number.parseFloat(getComputedStyle(row).columnGap) || 0) * zoom;
+        const style = getComputedStyle(row);
+        const gap = (Number.parseFloat(style.columnGap) || 0) * zoom;
+        // The row reaches past its edges by a focus ring's width, as padding, which is no room for a control.
+        const padding = ((Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0)) * zoom;
         const shown = items
           .filter((item) => {
             const r = item.getBoundingClientRect();
             return r.width > 0.5 && getComputedStyle(item).visibility !== "hidden" && r.left >= box.left - 0.5 && r.right <= box.right + 0.5;
           })
           .map((item) => item.dataset.restItem!);
-        return { ids: items.map((item) => item.dataset.restItem!), shown, widths, room: box.width, gap, fieldMin: fieldMin || 56 * zoom };
+        return { ids: items.map((item) => item.dataset.restItem!), shown, widths, room: box.width - padding, gap, fieldMin: fieldMin || 56 * zoom };
       });
     }
 
@@ -1334,8 +1343,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
 
     /** What the status line says, wherever it says it: the sentence that needs more room, else the line. */
     async function said(bar: Locator): Promise<string> {
-      const line = bar.locator("[data-rest-status]").first();
-      return (await line.getAttribute("data-rest-sentence")) ?? ((await line.textContent()) ?? "").trim();
+      const status = bar.locator("[data-rest-status]").first();
+      return (await status.getAttribute("data-rest-sentence")) ?? (await status.getAttribute("data-rest-line")) ?? "";
     }
 
     async function alignmentOf(page: Page, root: Locator, screen: string): Promise<string[]> {
