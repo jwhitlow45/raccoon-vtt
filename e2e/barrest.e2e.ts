@@ -1316,6 +1316,52 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       await shots.take(dm, "br-f-14-group-stays");
       await group.getByRole("button", { name: "Deselect all", exact: true }).first().click();
     });
+
+    test("br-f-15. with the bar expanded over its token, Ruler then Select, a blackout's end and a fold's return move no map (D-261024-22)", async () => {
+      await homeTokens();
+      await setUp(pat, { ...PHONE, scale: 1 });
+      await openOn(pat, run.thorn);
+      const thorn = bar(pat, "Thorn");
+      // Expanded, with Thorn panned under its cover, so a clearing move would show.
+      const underCover = async (): Promise<{ x: number; y: number; scale: number }> => {
+        await expandBar(thorn);
+        const big = await steady(pat);
+        await panTo(pat, patCdp, { x: run.thorn.x + 0.5, y: run.thorn.y + 0.5 }, { x: 195, y: big.top + 40 });
+        assert.equal(await thorn.getAttribute("data-bar-state"), "expanded", "the bar is not expanded");
+        return (await view(pat)).cam;
+      };
+
+      // Ruler, then Select: the bar closes and comes back resting, with no map move.
+      const ruled = await underCover();
+      await pickTool(pat, "Ruler");
+      await pickTool(pat, "Select");
+      await thorn.waitFor();
+      await sleep(600);
+      assert.deepEqual((await view(pat)).cam, ruled, "Ruler then Select moved the map");
+
+      // A blackout's end: the map comes back at the scene's view, as always, and nothing moves it after.
+      await underCover();
+      await ops.send({ t: "view.blackout", blackout: true });
+      await pat.getByText("The DM has paused the game.").waitFor();
+      await ops.send({ t: "view.blackout", blackout: false });
+      await thorn.waitFor();
+      const back = (await view(pat)).cam;
+      await sleep(1_000);
+      assert.deepEqual((await view(pat)).cam, back, "the map moved after the blackout's end");
+
+      // A fold's return: Panels folds the bar onto its sheet's top edge, and as the sheet closes the bar comes back expanded, the map where it stood.
+      const folded = await underCover();
+      await pat.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
+      await pat.getByRole("region", { name: "Panels" }).waitFor();
+      await pat.keyboard.press("Escape");
+      await pat.getByRole("region", { name: "Panels" }).waitFor({ state: "detached" });
+      await thorn.waitFor();
+      await sleep(600);
+      assert.equal(await thorn.getAttribute("data-bar-state"), "expanded", "the fold's return rested the bar");
+      assert.deepEqual((await view(pat)).cam, folded, "the fold's return moved the map");
+      await shots.take(pat, "br-f-15-fold-return");
+      await thorn.getByRole("button", { name: /^Close/ }).first().click();
+    });
   });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)

@@ -1314,10 +1314,10 @@ function BarFrame(props: {
    * drops a token, and once at the Expand press, after the expanded bar's
    * height is known and before paint. The move clears the token's label
    * of the bar's top and goes through Stage, which bounds it by the
-   * camera's limits (lib/camera.ts barShift). A docked, compact or folded
-   * bar drops a request, and so does an expanded one for a drop, which
-   * comes back with no map move (5.3). A request for another token is
-   * not this frame's.
+   * camera's limits (lib/camera.ts barShift). An expanded bar clears the
+   * token of its own top, its frozen height, and stays expanded, a drop
+   * included (5.3, D-261024-22). A docked, compact or folded bar drops a
+   * request. A request for another token is not this frame's.
    */
   const spanToast = useScoped(spanToastSlot);
   useLayoutEffect(() => {
@@ -1326,7 +1326,7 @@ function BarFrame(props: {
     const mine = request !== null && (props.opening === "group" || request.tokenId === props.opening);
     const usable = mode === "span" && !folded;
     if (usable && restState === "expanded" && expandedHeight === null) return;
-    const asked = usable && (shiftOnExpand.current || (mine && !(request.drop === true && restState === "expanded")));
+    const asked = usable && (shiftOnExpand.current || mine);
     shiftOnExpand.current = false;
     if (request !== null) dockStore.setState({ clearRequest: null });
     if (!asked) return;

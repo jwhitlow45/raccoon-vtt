@@ -1210,7 +1210,7 @@ export function MapStage(props: {
       const sent = dragStopsRef.current.send(plan, watch?.answer);
       // The bar comes back after a drop and clears its token once, as it does when it opens (docs/design-v1-bar-compact.md 3.6).
       const after = facts.store.getState().local;
-      if (after.actionBar && after.selectedId !== null && group.some((t) => t.id === after.selectedId || after.selectedIds.includes(t.id))) scope.get(barDockSlot).setState({ clearRequest: { tokenId: after.selectedId, drop: true } });
+      if (after.actionBar && after.selectedId !== null && group.some((t) => t.id === after.selectedId || after.selectedIds.includes(t.id))) scope.get(barDockSlot).setState({ clearRequest: { tokenId: after.selectedId } });
       watch?.sent(sent.length);
       const note = intoFogText(swallowed.map((t) => displayName(t)));
       if (note) uiRef.current.notify(note);

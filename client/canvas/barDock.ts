@@ -1808,10 +1808,10 @@ type BarDockState = {
   /**
    * A request that the bar clear its token once, by moving the map
    * (clearShift, 3.6): set by Stage for an opening that counts
-   * (keepsOpening) and for a drop (`drop`), a new object each time, and
-   * cleared as the frame consumes it or a cancel drops it.
+   * (keepsOpening) and for a drop, a new object each time, and cleared as
+   * the frame consumes it or a cancel drops it.
    */
-  clearRequest: { tokenId: string; drop?: true } | null;
+  clearRequest: { tokenId: string } | null;
   /**
    * The height of a roll card standing on a narrow screen's toolbar and options bar
    * (features/rolls/PlayerRolls.tsx), or 0: a docked or spanning bar keeps

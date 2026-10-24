@@ -1328,7 +1328,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
-  test("bs-2. at 390 x 844 with the bar expanded, a drag of Thorn one cell down hides his bar and shows it again expanded where it stood, at the height it had, and the map does not move (review BS-O2, docs/design-v1-bar-compact.md 5.3)", async () => {
+  test("bs-2. at 390 x 844 with the bar expanded, a drag of Thorn two cells down, under the bar's cover, hides his bar and shows it again expanded where it stood, at the height it had, and the map moves once to clear him (review BS-O2, D-261024-22, docs/design-v1-bar-compact.md 5.3)", async () => {
     const view = { width: 390, height: 844 };
     const target = { characterId: run.thorn.characterId };
     const effects = MANY.map((key) => ({ id: randomUUID(), key }));
@@ -1341,16 +1341,19 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const before = await barFacts(bar);
       const cam = await readCamera(player);
 
-      await touch(along(await cellPoint({ x: 8, y: 6 }), await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 7.5 }), 10));
-      await waitFor("Thorn one cell down", () => playerSocket.state?.tokens[run.thorn.id]?.y === 7 || null);
+      await touch(along(await cellPoint({ x: 8, y: 6 }), await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 8.5 }), 12));
+      await waitFor("Thorn two cells down", () => playerSocket.state?.tokens[run.thorn.id]?.y === 8 || null);
       await bar.waitFor();
       await player.waitForTimeout(700);
       const settled = await readCamera(player);
       const dropped = await barFacts(bar);
       assert.equal(await bar.getAttribute("data-bar-state"), "expanded", "the drop rested the bar");
-      // The height worked out at Expand holds, what the drop adds to the content scrolling, and an expanded bar's drop moves no map.
+      // The height worked out at Expand holds, what the drop adds to the content scrolling.
       assert.ok(Math.abs(dropped.top - before.top) <= 0.5 && Math.abs(dropped.height - before.height) <= 0.5, `the bar moved from ${before.top} + ${before.height} to ${dropped.top} + ${dropped.height}`);
-      assert.ok(cam && settled && settled.x === cam.x && settled.y === cam.y && settled.scale === cam.scale, `the drop moved the map: ${JSON.stringify({ cam, settled })}`);
+      // Dropped under the bar's cover, Thorn is cleared of the expanded bar's top by one move of the map.
+      assert.ok(cam && settled && settled.y !== cam.y, `the drop under the bar moved no map: ${JSON.stringify({ cam, settled })}`);
+      const foot = await pagePoint(player, playerSocket.state!.scenes[run.sceneId]!.bounds, { x: 8.5, y: 9 });
+      assert.ok(foot.y + 30 <= dropped.top + 0.5, `Thorn's label meets the bar after the drop: ${foot.y} against ${dropped.top}`);
       await player.waitForTimeout(500);
       const later = await readCamera(player);
       assert.ok(settled && later && later.y === settled.y && Math.abs((await barFacts(bar)).top - dropped.top) <= 0.5, "the map or the bar moved after the drop settled");
