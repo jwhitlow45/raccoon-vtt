@@ -4,8 +4,8 @@
 # account's 20, so a run that overlaps it queues part of its shards: a single
 # run's speed was chosen over two runs at full speed at once.
 #
-# The e2e shards run on Ubuntu, since macOS runners are far slower and a
-# public repository runs up to 20 Linux jobs at a time. The app draws its
+# The e2e shards run on Ubuntu, since macOS runners are far slower and the
+# account runs up to 20 Linux jobs at a time. The app draws its
 # text in Inter, which it serves itself, so a page lays out on Linux as on
 # any device. Each shard still installs Roboto, and e2e/fonts.conf makes it
 # Chrome's system font: the fallback font, as on Android, for the moment
