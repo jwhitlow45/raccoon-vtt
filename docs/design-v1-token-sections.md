@@ -1,6 +1,6 @@
 # raccoon-vtt v1: what each token section holds
 
-Status: designed, not built. Revised for design review rounds 1 and 2 (findings SEC-1 to SEC-15 and SEC-ASTRA-01 to 07, decided as D-261024-39 and D-261024-40). Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing), the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built) and the D&D Beyond class resources stack (docs/design-v1-ddb-resources.md, built and landing). Measured in the browser against short local prototypes that were not kept (section 5).
+Status: S1 built (the list and the tracker). S2 not built. Revised for design review rounds 1 and 2 (findings SEC-1 to SEC-15 and SEC-ASTRA-01 to 07, decided as D-261024-39 and D-261024-40). Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing), the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built) and the D&D Beyond class resources stack (docs/design-v1-ddb-resources.md, built and landing). Measured in the browser against short local prototypes that were not kept (section 5).
 
 The project owner, 2026-10-24: "It feels a little weird that the token pop up has uses but the combat section doesn't. Up to ideas of what all should be included in the various sections"
 
