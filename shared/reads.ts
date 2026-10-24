@@ -74,8 +74,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "roll.dice":
     case "actor.deathRoll":
     case "actor.rechargeRoll":
-    // Combat uses wait for the server until their rules land (docs/design-v1-combat-controls.md 3.1).
-    case "actor.use":
+    // A turn's prompts wait for the server until their rules land (docs/design-v1-combat-controls.md 2.3).
     case "actor.prompt":
     // An ask reads its damage roll's lines from the log, which only the server holds whole (docs/design-v1-player-save-spell.md 5.6).
     case "cast.ask":
@@ -169,6 +168,9 @@ export function reads(op: Op, state: RoomState): Reads {
     }
     case "actor.deathSave":
       return of([holderRead(state, op.target, ["deathSaves", "life"])]);
+    // A use reads only its creature's counts, which its owners' views hold whole (docs/design-v1-combat-controls.md 2.2).
+    case "actor.use":
+      return of([holderRead(state, op.target, ["life"])]);
     case "actor.life":
     case "actor.rest":
       return of([holderRead(state, op.target, ["hp", "life", "effects"])]);

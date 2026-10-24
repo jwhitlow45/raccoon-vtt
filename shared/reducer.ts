@@ -59,6 +59,7 @@ import { capRestoredDues, trapAct, trapCreate, trapDelete, trapSettle, trapUpdat
 import { noticeStep } from "./reducer/trapNotice.ts";
 import { planBefore, trapSpring, trapStep, type TrapWrites } from "./reducer/trapStep.ts";
 import { sysDice } from "./reducer/dice.ts";
+import { actorUse } from "./reducer/uses.ts";
 import { handoutClose, handoutDocCreate, handoutDocDelete, handoutShow, logChat, logWhisper, restore } from "./reducer/misc.ts";
 import { sceneSetPhase } from "./reducer/phases.ts";
 import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from "./reducer/monsters.ts";
@@ -437,8 +438,9 @@ function dispatch(tx: Tx, op: Op): void {
       return castClose(tx, op);
     case "sys.dice":
       return sysDice(tx, op);
-    // Combat uses (docs/design-v1-combat-controls.md 3.1) apply once their rules land.
     case "actor.use":
+      return actorUse(tx, op);
+    // A turn's prompts (docs/design-v1-combat-controls.md 2.3) apply once their rules land.
     case "actor.prompt":
       throw invalid(`${op.t} is not available yet`);
     case "undo":

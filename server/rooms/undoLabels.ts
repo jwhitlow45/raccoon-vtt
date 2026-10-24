@@ -133,7 +133,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "actor.saveDue":
       return op.state === "resolved" ? `accepting a failed save for ${target(op.target)}` : `dismissing a save for ${target(op.target)}`;
     case "actor.use":
-      return `using an ability for ${target(op.target)}`;
+      return usePhrase(op, before, target(op.target));
     case "actor.prompt":
       return `answering a prompt for ${target(op.target)}`;
     case "character.create":
@@ -582,6 +582,32 @@ export function describeHpEvent(event: Extract<LogEvent, { type: "hp" }>, state:
         ? tokenName(state.tokens[event.tokenId])
         : "a creature";
   return hpChangePhrase(event.change, name);
+}
+
+/**
+ * A use as its step names it (docs/design-v1-combat-controls.md 3.5): "using
+ * Fiery Rays for Adult Red Dragon", "giving back Fire Breath for Young Red
+ * Dragon", "Regeneration for Troll", "using Rage for Thorn".
+ */
+function usePhrase(op: OpOf<"actor.use">, before: RoomState, who: string): string {
+  const use = op.use;
+  if (use.kind === "regenerate") return `Regeneration for ${who}`;
+  const name =
+    use.kind === "legendary"
+      ? quoted(use.name, "a legendary action")
+      : use.kind === "resist"
+        ? "Legendary Resistance"
+        : use.kind === "ability"
+          ? quoted(use.name, "an ability")
+          : quoted(resourceOf(before, op.target, use.id)?.name, "a class resource");
+  return op.back ? `giving back ${name} for ${who}` : `using ${name} for ${who}`;
+}
+
+/** A character's class resource by id, its target a character or a token that plays one. */
+function resourceOf(state: RoomState, target: ActorTarget, id: string) {
+  const token = "tokenId" in target ? state.tokens[target.tokenId] : undefined;
+  const characterId = "characterId" in target ? target.characterId : token && "ref" in token.actor ? token.actor.ref : undefined;
+  return characterId === undefined ? undefined : state.characters[characterId]?.resources?.find((r) => r.id === id);
 }
 
 function hpPhrase(op: OpOf<"actor.hp">, name: string): string {
