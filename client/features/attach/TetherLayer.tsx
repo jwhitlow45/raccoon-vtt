@@ -4,6 +4,7 @@ import { useStore } from "zustand";
 import type { Token } from "#shared/model.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { theme } from "../../lib/theme.ts";
+import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -12,8 +13,6 @@ import { tethers } from "./groups.ts";
 import { useFallReminders } from "./useFallReminders.ts";
 
 const EMPTY: Record<string, Token> = {};
-
-const RING: Record<Token["disposition"], string> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
 
 /**
  * Who holds whom at the table (docs/design-v1-attach.md 4.4): a thin
@@ -41,7 +40,7 @@ export const TetherLayer = memo(function TetherLayer(props: LayerProps) {
           <Line
             key={l.id}
             points={[l.from.x, l.from.y, l.to.x, l.to.y]}
-            stroke={holder ? RING[holder.disposition] : theme.color.neutral}
+            stroke={holder ? DISPOSITION_RING[holder.disposition] : theme.color.neutral}
             opacity={0.5}
             strokeWidth={px}
             strokeScaleEnabled={false}

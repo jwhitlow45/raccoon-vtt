@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import { Group, Shape } from "react-konva";
 import type { Token } from "#shared/model.ts";
 import { theme } from "../../lib/theme.ts";
+import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { useRoomView } from "../../state/view.ts";
 import { useLiveTokens } from "../areas/useLiveTokens.ts";
 import type { LayerProps } from "../layers.ts";
@@ -19,7 +20,6 @@ import type { DistanceRules } from "./ruler.ts";
  * another device, as an aura does.
  */
 
-const DISPOSITION: Record<Token["disposition"], string> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
 const LINE_PX = 2;
 const HALO_PX = 4;
 
@@ -49,7 +49,7 @@ function TokenRings(props: { token: Token; rules: DistanceRules; bounds: { w: nu
     // The ring list is compared by its contents, so a token update that keeps it costs nothing.
     [key, x, y, elevation, size, w, h, height, rules, bounds.w, bounds.h],
   );
-  const color = DISPOSITION[token.disposition] ?? theme.color.neutral;
+  const color = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
   return (
     <>
       {shapes.map(({ ft, shape }) => (

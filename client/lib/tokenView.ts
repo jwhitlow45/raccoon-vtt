@@ -1,4 +1,5 @@
-import type { Actor, Effect, HpVisibility } from "#shared/model.ts";
+import type { Actor, Effect, HpVisibility, Token } from "#shared/model.ts";
+import { theme } from "./theme.ts";
 
 /**
  * Pure pieces of how a token looks: its HP readout, its condition chips, the
@@ -267,6 +268,15 @@ export function elevationBadge(elevation: number): string | null {
   if (!Number.isFinite(elevation) || elevation === 0) return null;
   return elevation > 0 ? `↑${elevation}` : `↓${-elevation}`;
 }
+
+// ---------------------------------------------------------------- ring
+
+/**
+ * A creature's ring color by its disposition, one map wherever the app
+ * draws one: its token, its picture in the token panel and the Dice panel,
+ * the tether to its holder and its range rings, so they never drift apart.
+ */
+export const DISPOSITION_RING: Readonly<Record<Token["disposition"], string>> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
 
 // ---------------------------------------------------------------- name labels
 

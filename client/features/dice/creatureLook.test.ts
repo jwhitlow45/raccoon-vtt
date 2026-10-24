@@ -3,8 +3,9 @@ import { describe, test } from "node:test";
 import type { IconImage, RoomState } from "#shared/model.ts";
 import { actor, character, imageRef, room, token } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
+import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { kindLineText } from "../tokens/creatureKind.ts";
-import { characterLook, creatureLook, DISPOSITION_RING, tokenLook } from "./creatureLook.ts";
+import { characterLook, creatureLook, tokenLook } from "./creatureLook.ts";
 
 /*
  * The creature card's picture, badge and kind line (docs/design-v1-dice-pass.md 5),

@@ -43,7 +43,7 @@ import { TokenSight } from "../features/vision/TokenSight.tsx";
 import { ConfirmButton, FieldRow, Note, NumberField, Section, Select, Stepper, TextField } from "../features/tokens/ui.tsx";
 import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { elevationBadge, initials } from "../lib/tokenView.ts";
+import { DISPOSITION_RING, elevationBadge, initials } from "../lib/tokenView.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
@@ -71,8 +71,6 @@ const HP_VISIBILITY_OPTIONS: { value: HpVisibility; label: string }[] = [
   { value: "bar", label: "A bar" },
   { value: "exact", label: "Exact numbers" },
 ];
-
-const RING: Record<Token["disposition"], string> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
 
 /**
  * The selected token's panel (features sections 5, 7, 8 and 15), grouped
@@ -273,7 +271,7 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
   const kind = tokenKind({ token, companionOf: keeper?.name, character: props.character, cr: props.actor?.cr });
   return (
     <CreatureHeader
-      picture={{ image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: RING[token.disposition] ?? theme.color.neutral, initials: initials(props.name) }}
+      picture={{ image: token.image, shape: token.kind === "object" ? "square" : "circle", aspect: fp.w / fp.h, ring: DISPOSITION_RING[token.disposition] ?? theme.color.neutral, initials: initials(props.name) }}
       badge={keeper ? { image: keeper.defaultImage, initials: initials(keeper.name) } : null}
       name={props.name}
       line={kindLine(kind, sizeText(token.size, fp, props.feetPerCell))}
@@ -291,7 +289,7 @@ function ImageRow(props: { token: Token; name: string; access: TokenAccess; upda
   const { token, access, update } = props;
   const fp = footprint(token);
   const shape = token.kind === "object" ? "square" : "circle";
-  const ring = RING[token.disposition] ?? theme.color.neutral;
+  const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
   const alts = useAltImages({ token, shape, aspect: fp.w / fp.h, ring, onPatch: update });
   // No padding of its own: the Image group's body pads it, as a section in a group has none.
   return (

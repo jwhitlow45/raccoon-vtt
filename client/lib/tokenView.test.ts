@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { projectState } from "#shared/project.ts";
 import type { Actor } from "#shared/model.ts";
 import { P1, actor, character, room, token } from "#shared/testutil.ts";
-import { badgeLeft, chipRow, effectChip, effectCount, healthState, hpDisplay, hpText, initials } from "./tokenView.ts";
+import { theme } from "./theme.ts";
+import { badgeLeft, chipRow, DISPOSITION_RING, effectChip, effectCount, healthState, hpDisplay, hpText, initials } from "./tokenView.ts";
 
 /**
  * A player's projection sends `hpLabel` or `hpBar` in place of numbers
@@ -150,5 +154,18 @@ describe("counters on status icons", () => {
     assert.equal(effectChip({ key: "custom", label: "Charges", glyph: "Ch", level: 0 }).label, "Charges (0)");
     assert.equal(effectChip({ key: "concentrating", spell: "Bless", level: 9 }).label, "Concentrating: Bless (9)");
     assert.equal(effectChip({ key: "hasted" }).label, "Hasted");
+  });
+});
+
+describe("the disposition ring", () => {
+  test("one map colors a creature's ring, and no other client file spells out its own", () => {
+    assert.deepEqual(DISPOSITION_RING, { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile });
+    const client = fileURLToPath(new URL("..", import.meta.url));
+    // The tracker's row pictures still hold a copy of their own, left for a later change to that file.
+    const waiting = new Set([path.join("features", "encounter", "parts.tsx")]);
+    const copies = readdirSync(client, { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.includes("node_modules") && file !== path.join("lib", "tokenView.ts") && !waiting.has(file))
+      .filter((file) => /\bhostile:\s*theme\.color\.hostile\b/.test(readFileSync(path.join(client, file), "utf8")));
+    assert.deepEqual(copies, [], "read DISPOSITION_RING from lib/tokenView.ts");
   });
 });

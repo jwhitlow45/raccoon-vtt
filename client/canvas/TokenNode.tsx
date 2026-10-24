@@ -8,7 +8,7 @@ import { isAppleDevice } from "../lib/device.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
-import { cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
+import { cropSourceRect, DECOR_MIN_PX, DISPOSITION_RING, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
 import { useAccent } from "../state/accent.ts";
 import { addsToSelection } from "../state/selection.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
@@ -39,12 +39,6 @@ export type TokenInteraction = {
 export const TokenInteractionContext = createContext<TokenInteraction | null>(null);
 
 const APPLE = isAppleDevice();
-
-const RING: Record<ViewToken["disposition"], string> = {
-  ally: theme.color.ally,
-  neutral: theme.color.neutral,
-  hostile: theme.color.hostile,
-};
 
 type DecorProps = {
   /** The token's marks, label and plate, laid out with every other token's (useBoardText.ts). */
@@ -358,7 +352,7 @@ function TokenBody(props: {
   // No HP rule kills an object, so the map draws no dead or dying mark on one, and an HP-less creature shows no life it
   // stores underneath (docs/design-v1-combat-flow.md 3.6.6).
   const life = token.kind === "object" ? undefined : shownLife(actor, token);
-  const ring = RING[token.disposition] ?? theme.color.neutral;
+  const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
   const ringPx = boardSizes(scale).ringPx;
   return (
     <Group x={w / 2} y={h / 2} rotation={Number.isFinite(token.rotation) ? token.rotation : 0}>

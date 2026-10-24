@@ -3,7 +3,7 @@ import { SIZE_CELLS } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
-import { initials } from "../../lib/tokenView.ts";
+import { DISPOSITION_RING, initials } from "../../lib/tokenView.ts";
 import type { CreaturePicture } from "../tokens/CreatureHeader.tsx";
 import { characterKind, kindLine, sizeText, tokenKind, type KindLine } from "../tokens/creatureKind.ts";
 
@@ -19,9 +19,6 @@ import { characterKind, kindLine, sizeText, tokenKind, type KindLine } from "../
 export type CreatureBadge = Omit<CreaturePicture, "shape" | "aspect" | "ring">;
 
 export type CreatureLook = { picture: CreaturePicture; badge: CreatureBadge | null; line: KindLine };
-
-/** A picture's ring by its token's disposition, as the token panel rings it. */
-export const DISPOSITION_RING: Readonly<Record<Token["disposition"], string>> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
 
 /**
  * A token's look: its own image in its footprint's shape, an object's
