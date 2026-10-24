@@ -1887,6 +1887,15 @@ export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[],
 }
 
 /**
+ * One log line as `viewer` reads it, by the same rules as the live log and
+ * the archive. The client uses it on the lines a predicted op wrote, so a
+ * prediction never shows a line part the server's projection would cut.
+ */
+export function projectLogEntry(state: RoomState, line: LogEntry, viewer: Viewer, opts: ProjectOpts): LogEntry | null {
+  return projectLogEntryCtx(ctxOf(state, viewer, opts), line);
+}
+
+/**
  * A log line as a viewer reads it, by its audience (shared/logRings.ts): a
  * whisper by its parties, a DM line, a party line's own included, by the DM
  * alone, and a party line's copy by its one reader. A player then reads an

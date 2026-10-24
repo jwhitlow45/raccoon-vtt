@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
@@ -9,7 +9,7 @@ import { actor, character, companionBlock, DM, entry, P1, P2, room, template, to
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
-import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
+import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, predictedLines, refusalText, replayPending, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
@@ -76,6 +76,26 @@ describe("a predicted op's log lines are the viewer's own (design 7.4)", () => {
     };
     assert.deepEqual(lines(P1), [["2:116000", "hp", ["p1"], undefined]]);
     assert.deepEqual(lines(DM), [["2:900000", "hp", undefined, undefined]]);
+  });
+});
+
+describe("a predicted shared line keeps only the parts the viewer could read", () => {
+  test("a player's line without the HP numbers shows no numbers ahead, the DM's keeps them", () => {
+    const state = room({ tokens: { wolf: token("wolf", { name: "Wolf", hpVisibility: "label" }) } });
+    const line: LogEntry = {
+      id: "2:0",
+      at: "1970-01-01T00:00:00.000Z",
+      kind: "event",
+      data: { type: "hp", change: "damage", amount: 3, label: "Healthy", left: { cur: 17, max: 20, temp: 0 }, tokenId: "wolf", seen: true },
+      parts: { exact: [] },
+    };
+    const withLine = { ...state, log: [line] };
+    const hp = (viewer: Viewer) => {
+      const data = predictedLines(withLine, viewer, 2, "s1").log[0]?.data;
+      return data?.type === "hp" ? [data.amount, data.left, data.label] : null;
+    };
+    assert.deepEqual(hp(P1), [undefined, undefined, "Healthy"]);
+    assert.deepEqual(hp(DM), [3, { cur: 17, max: 20, temp: 0 }, "Healthy"]);
   });
 });
 
