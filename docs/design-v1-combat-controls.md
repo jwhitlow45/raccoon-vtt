@@ -79,7 +79,8 @@ type TurnUses = {
   holderId: TokenId | CharacterId,
   record?: TurnRecord | null,             // the record it replaced. null: it had none, so Previous removes the new one
   marks?: Record<UseKey, UseMark>,        // the turn marks it removed, whole, names included
-  actionsUsed?: number }                  // pips of a participant other than the landing row's, whose stay in `legendary`
+  actionsUsed?: number,                   // pips of a participant other than the landing row's, whose stay in `legendary`
+  link?: string }                         // its block link then (linkOf), so Previous skips a creature relinked since
 ```
 
 - **Owners**: `uses`, `hurt` and `turnRecord` are on the actor (a token's inline actor, or a PC's character actor, which in a shape uses the shape's block). `resources` are on the character. The initiative entry gains nothing.
