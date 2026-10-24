@@ -931,10 +931,13 @@ function BarHeader(props: { title: string; status?: ReactNode; sentence?: RestSe
   const frame = useContext(FrameContext);
   const { place, rest, strip } = frame;
   const resting = rest?.resting === true;
-  // An error or a refusal brings the scrolling strip's header and quick row back into view (5.4).
-  const error = resting && props.sentence?.error === true;
+  // An error or a refusal brings the scrolling strip's header and quick row back into view as it comes, and leaves the strip to the viewer after (5.4, review BB-OPUS-1).
+  const error = resting && props.sentence?.error === true ? props.sentence.text : null;
+  const errorWas = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (error && rest?.scrolls) strip?.toTop();
+    const came = error !== null && error !== errorWas.current;
+    errorWas.current = error;
+    if (came && rest?.scrolls) strip?.toTop();
   }, [error, rest?.scrolls, strip]);
   const sizeButton = !rest ? null : rest.scrolls ? (
     <IconButton icon="scrollMore" label="Scroll for more" onClick={() => strip?.scrollMore()} />

@@ -1378,6 +1378,40 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       await shots.take(pat, "br-f-15-fold-return");
       await thorn.getByRole("button", { name: /^Close/ }).first().click();
     });
+
+    test("br-f-16. a refusal in the scrolling strip brings its header and quick row into view as it comes, and a scroll down after it holds (5.4, review BB-OPUS-1)", async () => {
+      await homeTokens();
+      const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+      const id = randomUUID();
+      const refusal = "You can only deal damage to or heal this creature.";
+      await ops.send({ t: "room.update", settings: { playersApplyDamage: true } });
+      try {
+        await setUp(pat, { width: 375, height: 667, scale: 1 });
+        await openOn(pat, run.goblin1);
+        const goblin = bar(pat, "Goblin 1");
+        await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+        await card.waitFor();
+        await waitFor("the strip to scroll", async () => ((await goblin.getAttribute("data-bar-state")) === "scrolls" ? true : null));
+        const scroller = goblin.locator("[data-bar-scroll]");
+        const field = goblin.locator("[data-rest-row]").getByRole("textbox", { name: "HP change" });
+        await field.fill("=20");
+        await waitFor("the refusal", async () => ((await goblin.locator("[data-rest-status]").first().getAttribute("data-rest-sentence")) === refusal ? true : null));
+        assert.equal(await scroller.evaluate((el) => el.scrollTop), 0, "the strip is not at its top as the refusal shows");
+        // The viewer scrolls down with the refusal still showing, and the strip stays where they put it through the renders that follow.
+        const down = await scroller.evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+          return el.scrollTop;
+        });
+        assert.ok(down > 0, "the strip has nothing to scroll");
+        await sleep(800);
+        assert.equal(await scroller.evaluate((el) => el.scrollTop), down, "the strip went back to its top while the refusal showed");
+        await shots.take(pat, "br-f-16-refusal-scrolled");
+        await field.fill("");
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        await ops.send({ t: "room.update", settings: { playersApplyDamage: false } });
+      }
+    });
   });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)
