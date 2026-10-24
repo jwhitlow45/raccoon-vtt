@@ -1516,6 +1516,39 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
+  test("fu24r1-pan. at 390 x 844 a whisper under Thorn's bar's header goes down with it when a one-finger pan moves the header down past the whisper's top, long after the bar opened and the whisper came (review FU24-OPUS-3)", async () => {
+    const view = { width: 390, height: 844 };
+    await player.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
+    await setUp({ ...view, scale: 1 });
+    const bar = player.getByRole("dialog", { name: "Thorn actions" });
+    try {
+      // Thorn's bar under him, then the map up until its header stands where the notices' toasts start.
+      const thorn = await cellPoint({ x: 8, y: 6 });
+      await panBy(thorn.y - 40, view.height / 2 - thorn.y);
+      await touch([await cellPoint({ x: 8, y: 6 })]);
+      await bar.waitFor();
+      await player.waitForTimeout(400);
+      const opened = await rectOf(bar.locator("[data-sticky-header]"));
+      await panBy(700, 85 - opened.top);
+      const head = await rectOf(bar.locator("[data-sticky-header]"));
+      assert.ok(head.top > 70 && head.top < 100, `Thorn's header went to ${head.top}, not under the notices' top`);
+      const toast = await whisperToPat("Watch the stairs.");
+      const placed = await rectOf(toast);
+      assert.ok(Math.abs(placed.top - (head.bottom + 8)) < 1.5, `the whisper starts at ${placed.top}, not 8 px under the header at ${head.bottom}`);
+      // Past the bar's opening and the whisper's first moments, so only the header going down can move it.
+      await player.waitForTimeout(900);
+      await panBy(head.bottom + 120, 40);
+      const down = await rectOf(bar.locator("[data-sticky-header]"));
+      assert.ok(down.bottom > placed.top + 8.5, `the pan took the header only to ${JSON.stringify(down)}, never past the whisper's top at ${placed.top}`);
+      const now = await rectOf(toast);
+      assert.ok(!intersects(now, down), `the whisper ${JSON.stringify(now)} covers the header ${JSON.stringify(down)}`);
+      assert.ok(now.top - down.bottom >= -0.5 && now.top - down.bottom <= 8.5, `the whisper stands at ${now.top}, not just under the header's foot at ${down.bottom}`);
+      await shots.take(player, "playerphone-fu24r1-pan");
+    } finally {
+      if (await bar.isVisible()) await bar.getByRole("button", { name: "Close", exact: true }).tap();
+    }
+  });
+
   test("bc-a1. a reload whose sheet mark sits on the room's own history entry, with Home behind it, keeps the room and shows Connected, and the mark is gone (lib/backClose.ts)", async () => {
     // The race on purpose: a sheet's Back entry written over the room's own entry as a reload begins.
     const room = `${server.origin}/r/${run.roomId}`;
