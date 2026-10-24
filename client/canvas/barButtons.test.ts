@@ -349,6 +349,17 @@ describe("an upright phone's capacity follows the mode its frame draws in (docs/
     assert.equal(barCapacity(upright), spanRoomAtWorst(uprightFree, phone));
   });
 
+  test("a held strip whose roll card folds for it reads the free area the strip places by, without the card (review BB-OPUS-3)", () => {
+    // The card yields (stripSqueezed), so the strip stands on the toolbar: restFoot 0, as expandOffered and expandedRoom read it.
+    const folded: BarRoom = { ...room, heldMode: "span", restFoot: 0 };
+    const stripFree = freeArea(layout, room.chrome, 0);
+    assert.equal(stripFree.height, 309);
+    assert.equal(barCapacity(folded), spanRoomAtWorst(stripFree, layout));
+    assert.equal(barCapacity(folded), 181);
+    // Without a fold, the card's foot counts.
+    assert.equal(barCapacity({ ...room, heldMode: "span" }), spanRoomAtWorst(free, layout));
+  });
+
   test("a held strip keeps the strip's layout as its free area falls under 148, and lets go of it on its side (review BC-OPUS-32)", () => {
     const held: BarRoom = { ...room, heldMode: "span" };
     assert.equal(barCapacity(held), spanRoomAtWorst(free, layout));

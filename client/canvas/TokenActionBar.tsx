@@ -1570,7 +1570,7 @@ function BarFrame(props: {
         }
       : null;
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
-  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer, heldMode, cardAt });
+  const short = barShort({ layout, viewport: props.viewport, chrome, foot, restFoot, anchor: props.anchor, spot, column, width, size, resizable: finePointer, heldMode, cardAt });
   const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
   const rest: FrameControls["rest"] = mode === "span" ? { resting: restState === "rest", scrolls, expand, collapse } : null;
   /*

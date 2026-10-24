@@ -135,7 +135,8 @@ export type BarRoom = Omit<Parameters<typeof placeBar>[0], "height">;
  */
 export function barCapacity(room: BarRoom): number | null {
   const free = freeArea(room.viewport, room.chrome, room.foot);
-  if (roomMode(room, free) === "span") return spanRoomAtWorst(free, room.layout);
+  // A held strip may have folded the roll card for itself (restFoot 0), and then it places by the room without the card, as the frame does.
+  if (roomMode(room, free) === "span") return spanRoomAtWorst(freeArea(room.viewport, room.chrome, room.restFoot ?? room.foot), room.layout);
   const placed = placeBar({ ...room, height: Number.POSITIVE_INFINITY });
   if (!placed) return null;
   if (placed.mode === "compact") return compactHang(room.layout, room.viewport, room.chrome, room.width).room;
