@@ -2082,8 +2082,8 @@ function vitalsWords(items: readonly VitalItem[]): string[] {
   });
 }
 
-/** The widths a status text is measured against: the line's, drawn and in the chrome's own px, and the note's text. */
-type StatusBox = { lineDrawn: number; line: number; note: number | null };
+/** The widths a status text is measured against: the title's, drawn and in the chrome's own px, and the note's text. */
+type StatusBox = { lineDrawn: number; line: number; note: number };
 
 /** The status line's and the header's sentences' lines (TokenActionBar.tsx BarHeader's SENTENCE_LINES). */
 const STATUS_LINE_PX = 18;
@@ -2095,31 +2095,35 @@ const STATUS_LINE_PX = 18;
  * inside the chrome's zoom. `node` is what the header draws under the
  * name, `probe` the hidden measure the bar draws once in its content,
  * and `status.sentence` what the header draws over its title or in its
- * note. The line's width is kept while a sentence stands in the title in
- * its place, so the choice never flips back and forth.
+ * note. All three are measured against the header's title, which stands
+ * whatever fills it (the name and the line, or a sentence), so a width
+ * that changes while a sentence holds the title is still read, and the
+ * choice never flips back and forth.
  */
 function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; critInRow: boolean; active: boolean }): { status: RestStatus; node: ReactNode; probe: ReactNode } {
-  // State, not a ref, so a line the header draws afresh is measured and watched again.
-  const [line, setLine] = useState<HTMLSpanElement | null>(null);
+  // State, not a ref, so a probe drawn afresh as the strip rests again finds its frame and title again.
+  const [host, setHost] = useState<HTMLSpanElement | null>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
   const [box, setBox] = useState<StatusBox | null>(null);
   const key = JSON.stringify([input.entry, input.idle, input.critInRow]);
   const [status, setStatus] = useState<RestStatus>(() => restStatus({ ...input.entry, idle: input.idle, critInRow: input.critInRow, fit: FITS_ALL }));
-  // Read again as the frame or the line changes width: a turn, a new interface size, a header button.
+  // Read again as the frame or the title changes width: a turn, a new interface size, a header button.
   useLayoutEffect(() => {
-    const frameEl = line?.closest<HTMLElement>('[role="dialog"]');
-    if (!input.active || !line) return;
+    const frameEl = host?.closest<HTMLElement>('[role="dialog"]');
+    // The header's title (SheetHeader.tsx PaneHeader's), the frame's first strong, ahead of everything the content draws.
+    const title = frameEl?.querySelector<HTMLElement>("strong");
+    if (!input.active || !frameEl || !title) return;
     const read = () => {
       // The note's words stand NOTE_INSET in from its edges, and the note is as wide as the frame (BarHeader's NOTE_BOX).
-      const next = { lineDrawn: line.getBoundingClientRect().width, line: line.offsetWidth, note: frameEl ? frameEl.offsetWidth - 2 * theme.line.border - 2 * NOTE_INSET : null };
+      const next = { lineDrawn: title.getBoundingClientRect().width, line: title.clientWidth, note: frameEl.offsetWidth - 2 * theme.line.border - 2 * NOTE_INSET };
       setBox((now) => (now && now.lineDrawn === next.lineDrawn && now.line === next.line && now.note === next.note ? now : next));
     };
     read();
     const watch = new ResizeObserver(read);
-    watch.observe(line);
-    if (frameEl) watch.observe(frameEl);
+    watch.observe(title);
+    watch.observe(frameEl);
     return () => watch.disconnect();
-  }, [input.active, line]);
+  }, [input.active, host]);
   useLayoutEffect(() => {
     const [entry, idle, critInRow] = JSON.parse(key) as [EntryStatus, string[], boolean];
     const probe = probeRef.current;
@@ -2128,7 +2132,7 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
     setStatus((now) => (JSON.stringify(now) === JSON.stringify(next) ? now : next));
   }, [key, input.active, box]);
   const node = (
-    <span ref={setLine} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}>
+    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(status.line.error ? { color: theme.color.dangerText } : null) }}>
       {status.line.text}
     </span>
   );
@@ -2136,10 +2140,12 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
    * A box of no size that clips what it holds, so a long text measured in
    * it never widens what scrolls. It is drawn whenever the strip rests,
    * so it also carries what the status says, wherever the header draws
-   * it, for tests to read.
+   * it, for tests to read. Its text wraps as the title's and the note's
+   * sentences do (SENTENCE_LINES), unclamped so its lines can be counted.
    */
   const probe = (
     <span
+      ref={setHost}
       aria-hidden
       data-rest-status=""
       data-rest-line={status.line.text}
@@ -2147,7 +2153,7 @@ function useRestStatus(input: { entry: EntryStatus; idle: readonly string[]; cri
       data-rest-place={status.sentence?.place}
       style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none" }}
     >
-      <span ref={probeRef} style={{ position: "absolute", left: 0, top: 0, fontSize: theme.font.small, fontWeight: theme.weight.regular, lineHeight: `${STATUS_LINE_PX}px` }} />
+      <span ref={probeRef} style={{ ...SENTENCE_LINES, display: "block", WebkitLineClamp: "none", position: "absolute", left: 0, top: 0, fontSize: theme.font.small, fontWeight: theme.weight.regular }} />
     </span>
   );
   return { status, node, probe };
@@ -2175,7 +2181,9 @@ const FITS_ALL: RestFit = { line: () => true, title: () => true, note: () => tru
  * Fits by the probe: one line against the line's drawn width, so a text
  * the browser would end in an ellipsis for under a pixel does not fit,
  * and the title's and the note's two lines by the probe's height at
- * their widths in the chrome's own px.
+ * their widths in the chrome's own px. A text wider than those widths
+ * does not fit either, whatever its height, since the sentence would cut
+ * what overflows.
  */
 function measuredFit(probe: HTMLElement, box: StatusBox): RestFit {
   const measure = (text: string, width: number | null) => {
@@ -2184,13 +2192,18 @@ function measuredFit(probe: HTMLElement, box: StatusBox): RestFit {
     probe.style.width = width === null ? "auto" : `${width}px`;
     const drawn = probe.getBoundingClientRect().width;
     const lines = Math.round(probe.offsetHeight / STATUS_LINE_PX);
+    const overflows = probe.scrollWidth > probe.clientWidth;
     probe.textContent = "";
-    return { drawn, lines };
+    return { drawn, lines, overflows };
+  };
+  const twoLines = (text: string, width: number) => {
+    const drawn = measure(text, width);
+    return drawn.lines <= 2 && !drawn.overflows;
   };
   return {
     line: (text) => measure(text, null).drawn <= box.lineDrawn + 0.01,
-    title: (text) => measure(text, box.line).lines <= 2,
-    note: (text) => measure(text, box.note ?? box.line).lines <= 2,
+    title: (text) => twoLines(text, box.line),
+    note: (text) => twoLines(text, box.note),
   };
 }
 

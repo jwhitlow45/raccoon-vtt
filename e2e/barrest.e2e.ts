@@ -1699,7 +1699,12 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       firstElementChild: PageEl | null;
       style: { flex: string; cssText: string };
       offsetWidth: number;
+      scrollWidth: number;
+      clientWidth: number;
+      scrollHeight: number;
+      clientHeight: number;
       textContent: string | null;
+      blur(): void;
       cloneNode(deep: boolean): PageEl;
       querySelector(selector: string): PageEl | null;
       querySelectorAll(selector: string): Iterable<PageEl>;
@@ -1827,6 +1832,35 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
     async function said(bar: Locator): Promise<string> {
       const status = bar.locator("[data-rest-status]").first();
       return (await status.getAttribute("data-rest-sentence")) ?? (await status.getAttribute("data-rest-line")) ?? "";
+    }
+
+    /**
+     * The sentence as the strip draws it: where (the title's two lines or
+     * the note), its words, and whether those two lines cut any of it, down
+     * or across. Null where neither draws one.
+     */
+    async function drawnSentence(bar: Locator): Promise<{ place: "title" | "note"; text: string; cut: boolean } | null> {
+      return bar.evaluate((el) => {
+        const frame = el as unknown as PageEl;
+        const note = frame.querySelector("[data-rest-note] > span");
+        // The title's sentence takes the name's place, alone in the header's title, the frame's first strong.
+        const title = frame.querySelector("strong")?.querySelector(":scope > span:only-child") ?? null;
+        const drawn = note ?? title;
+        if (!drawn) return null;
+        const cut = drawn.scrollHeight > drawn.clientHeight + 1 || drawn.scrollWidth > drawn.clientWidth + 1;
+        return { place: note ? ("note" as const) : ("title" as const), text: drawn.textContent ?? "", cut };
+      });
+    }
+
+    /** Waits for what `read` gives to pass `ok`, naming the last value it read on a timeout. */
+    async function until<T>(what: string, read: () => Promise<T>, ok: (value: T) => boolean): Promise<T> {
+      let last: T | undefined;
+      try {
+        await waitFor(what, async () => ok((last = await read())));
+      } catch {
+        assert.fail(`${what}: the last read was ${JSON.stringify(last)}`);
+      }
+      return last as T;
     }
 
     async function alignmentOf(page: Page, root: Locator, screen: string): Promise<string[]> {
@@ -2229,6 +2263,169 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       }
       await shots.take(dm, "br-c-3-alerts-back-up");
       await closeBars(dm);
+    });
+
+    /** The DM's strip on a dead Thorn, healing the dead off, his HP entry in Heal. */
+    async function deadThornInHeal(): Promise<{ bar: Locator; field: Locator; apply: Locator }> {
+      const bar = await openBar(dm, run.thorn);
+      const row = bar.locator("[data-rest-row]");
+      const toggle = row.locator("[data-rest-mode]");
+      if ((await toggle.getAttribute("aria-label")) !== "Heal") await toggle.tap();
+      assert.equal(await toggle.getAttribute("aria-label"), "Heal");
+      return { bar, field: row.getByRole("textbox", { name: "HP change" }), apply: row.getByRole("button", { name: "Apply", exact: true }) };
+    }
+
+    async function thornDead(): Promise<void> {
+      await ops.send({ t: "room.update", settings: { healRevives: false } });
+      await thornAt(0);
+      await ops.send({ t: "actor.life", target: { tokenId: run.thorn.id }, life: "dead" });
+      await waitFor("Thorn dead", () => thornHp()?.life === "dead");
+    }
+
+    async function thornAlive(): Promise<void> {
+      await ops.send({ t: "room.update", settings: { healRevives: true } });
+      await thornAt(24);
+    }
+
+    const DEAD_LINE = "Healing does nothing while Thorn is dead. Revive first.";
+
+    /** Picks an interface size live, from Menu's This device, as a viewer does, and closes the menu again. */
+    async function interfaceSize(page: Page, label: "100%" | "130%"): Promise<void> {
+      await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
+      await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).tap();
+      await page.getByRole("button", { name: /^This device/ }).tap();
+      await page.getByRole("radiogroup", { name: "Interface size" }).getByRole("radio", { name: label }).check({ force: true });
+      await page.getByRole("region", { name: "Menu" }).getByRole("button", { name: "Close Menu" }).tap();
+      await waitFor(`the menu closed at ${label}`, async () => (await page.getByRole("radiogroup", { name: "Interface size" }).count()) === 0);
+    }
+
+    /**
+     * Whether the header's title would cut a sentence drawn in the note: a
+     * copy of the note's words, in its look, laid out in the title where
+     * the sentence would stand there.
+     */
+    async function titleWouldCut(bar: Locator): Promise<boolean> {
+      return bar.evaluate((el) => {
+        const frame = el as unknown as PageEl;
+        const { getComputedStyle } = globalThis as unknown as { getComputedStyle(el: PageEl): { fontSize: string; fontWeight: string } };
+        const note = frame.querySelector("[data-rest-note] > span")!;
+        const title = frame.querySelector("strong")!;
+        const copy = note.cloneNode(true);
+        copy.style.cssText += `;font-size:${getComputedStyle(note).fontSize};font-weight:${getComputedStyle(note).fontWeight}`;
+        title.append(copy);
+        const cut = copy.scrollHeight > copy.clientHeight + 1;
+        copy.remove();
+        return cut;
+      });
+    }
+
+    test("br-c-5. a sentence in the title follows the title's width as the screen narrows and widens, a header badge comes and goes and the interface size changes, never cut and in the note only where the title would cut it", async () => {
+      await thornDead();
+      const badge = async (elevation: number) => {
+        await ops.send({ t: "token.update", tokenId: run.thorn.id, patch: { elevation } });
+        await waitFor(`elevation ${elevation}`, () => dmSocket.state?.tokens[run.thorn.id]?.elevation === elevation);
+      };
+      try {
+        await setUp(dm, PHONES[0]);
+        const { bar, field } = await deadThornInHeal();
+        await field.fill("5");
+        const seen = new Set<string>();
+        // Each change is made on the standing strip, which settles with its sentence whole, in the note only where the title would cut it.
+        const step = async (label: string, change: () => Promise<void>) => {
+          await change();
+          await field.focus();
+          await until(`${label}: the sentence whole`, () => drawnSentence(bar), (d) => d !== null && !d.cut);
+          await dm.waitForTimeout(150);
+          const drawn = (await drawnSentence(bar))!;
+          assert.deepEqual({ text: drawn.text, cut: drawn.cut }, { text: DEAD_LINE, cut: false }, label);
+          if (drawn.place === "note") assert.equal(await titleWouldCut(bar), true, `${label}: the note stands where the title holds the sentence`);
+          else assert.deepEqual(await alignmentOf(dm, bar, `the title's sentence, ${label}`), []);
+          seen.add(drawn.place);
+          await shots.take(dm, `br-c-5-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${drawn.place}`);
+        };
+        await step("390 x 844", async () => {});
+        await step("390 x 844 with a 30 ft badge", () => badge(30));
+        await step("320 x 568 with the badge", () => dm.setViewportSize({ width: 320, height: 568 }));
+        await step("320 x 568 without it", () => badge(0));
+        await step("320 x 568 with it again", () => badge(30));
+        await step("320 x 568 without it again", () => badge(0));
+        await step("390 x 844 again", () => dm.setViewportSize({ width: 390, height: 844 }));
+        await step("390 x 844 at 130%", async () => {
+          await interfaceSize(dm, "130%");
+          await bar.locator("[data-rest-status]").waitFor({ state: "attached" });
+        });
+        await step("390 x 844 at 100% again", async () => {
+          await interfaceSize(dm, "100%");
+          await bar.locator("[data-rest-status]").waitFor({ state: "attached" });
+        });
+        // The screen, the badge and the interface size each moved it between the title and the note at least once.
+        assert.deepEqual([...seen].sort(), ["note", "title"]);
+        await closeBars(dm);
+      } finally {
+        await badge(0);
+        await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+        await thornAlive();
+      }
+    });
+
+    test("br-c-6. an unbroken 80-letter name: the dead line and the Set line keep their warning and recovery whole, and a preview ending in the name keeps its two lines, in the title or the note", async () => {
+      // No space in it, so only the sentence's own wrapping, anywhere, breaks it (B.4).
+      const long = "Kethryllia".repeat(8);
+      const rename = async (who: Placed, name: string) => {
+        if (who === run.thorn) await ops.send({ t: "character.update", characterId: run.thorn.characterId, patch: { name } });
+        await ops.send({ t: "token.update", tokenId: who.id, patch: { name } });
+        await waitFor(`${who.name} named ${name.length} letters`, () => dmSocket.state?.tokens[who.id]?.name === name);
+      };
+      await thornDead();
+      await rename(run.thorn, long);
+      try {
+        for (const view of [PHONES[3], PHONES[0]]) {
+          const label = `${view.width} x ${view.height} at ${view.scale * 100}%`;
+          await setUp(dm, view);
+          await closeBars(dm);
+          const bar = await tapToken(dm, run.thorn, `${long} actions`);
+          const row = bar.locator("[data-rest-row]");
+          const toggle = row.locator("[data-rest-mode]");
+          if ((await toggle.getAttribute("aria-label")) !== "Heal") await toggle.tap();
+          const field = row.getByRole("textbox", { name: "HP change" });
+          for (const typed of [{ text: "5", warning: "Healing does nothing while ", recovery: " is dead. Revive first." }, { text: "=5", warning: "", recovery: " stays dead at the new HP. Only Revive brings them back." }]) {
+            await field.fill(typed.text);
+            const drawn = (await until(`${label}, ${typed.text}: a sentence`, () => drawnSentence(bar), (d) => d !== null))!;
+            assert.equal(drawn.cut, false, `${label}, ${typed.text}: the ${drawn.place} cuts "${drawn.text}"`);
+            assert.ok(drawn.text.startsWith(typed.warning) && drawn.text.endsWith(typed.recovery), `${label}, ${typed.text}: "${drawn.text}"`);
+            assert.deepEqual(await alignmentOf(dm, bar, `the ${drawn.place} with an 80-letter name at ${label}, ${typed.text}`), []);
+            await shots.take(dm, `br-c-6-${typed.text === "5" ? "heal" : "set"}-${view.width}${view.scale > 1 ? "-130" : ""}`);
+          }
+          await field.fill("");
+          await closeBars(dm);
+        }
+        await rename(run.thorn, "Thorn");
+        await thornAlive();
+
+        // Pat's Thorn and a goblin named so, 7 typed: "7 damage, not" and the name, which ends the sentence, so nothing after it shows a cut.
+        await rename(run.goblin1, long);
+        for (const view of [PHONES[3], PHONES[0]]) {
+          const label = `${view.width} x ${view.height} at ${view.scale * 100}%`;
+          await setUp(pat, view);
+          await press(await openBar(pat, run.thorn), "Multi-select");
+          const group = await tapToken(pat, run.goblin1, "2 selected tokens");
+          if ((await collapseButton(group).count()) > 0) await collapseButton(group).tap();
+          await group.locator("[data-rest-row]").getByRole("textbox", { name: "HP change" }).fill("7");
+          const drawn = (await until(`${label}: a sentence`, () => drawnSentence(group), (d) => d !== null))!;
+          assert.equal(drawn.cut, false, `${label}: the ${drawn.place} cuts "${drawn.text}"`);
+          assert.ok(drawn.text.startsWith("7 damage, not Kethryllia"), `${label}: "${drawn.text}"`);
+          assert.deepEqual(await alignmentOf(pat, group, `the group's ${drawn.place} with an 80-letter name at ${label}`), []);
+          await shots.take(pat, `br-c-6-group-${view.width}${view.scale > 1 ? "-130" : ""}`);
+          await group.locator("[data-rest-row]").getByRole("textbox", { name: "HP change" }).fill("");
+          await closeBars(pat);
+          await press(await openBar(pat, run.thorn), "Multi-select");
+          await closeBars(pat);
+        }
+      } finally {
+        await rename(run.thorn, "Thorn");
+        await rename(run.goblin1, "Goblin 1");
+        await thornAlive();
+      }
     });
   });
 });
