@@ -1147,8 +1147,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       try {
         await setUp(pat, { width: 320, height: 440, scale: z });
         const strip = await openOn(pat, run.thorn);
-        const rowOf = (text: string) => pat.locator('[data-toast-form="row"]').filter({ hasText: text });
-        const wholeOf = (text: string) => pat.locator('[data-toast-form="whole"]').filter({ hasText: text });
+        const rowOf = (text: string | RegExp) => pat.locator('[data-toast-form="row"]').filter({ hasText: text });
+        const wholeOf = (text: string | RegExp) => pat.locator('[data-toast-form="whole"]').filter({ hasText: text });
         await ops.send({ t: "log.whisper", to: [run.patId], text: "First whisper." });
         const first = rowOf("First whisper.");
         try {
@@ -1184,6 +1184,22 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await wholeOf("Second whisper.").getByRole("button", { name: "Close", exact: true }).click();
         await second.waitFor();
         await second.waitFor({ state: "detached", timeout: 6_000 });
+        // A blackout while one shows whole leaves nothing stopped after it (review BARBUILD-ASTRA-04): an error, which no fit drops, Pat's undo of a nudge to Thorn, whom the DM has moved since.
+        await pat.keyboard.press("ArrowRight");
+        await waitFor("Thorn a square right", () => (patSocket.state?.tokens[run.thorn.id]?.x === run.thorn.x + 1 ? true : null));
+        await ops.send({ t: "token.move", tokenId: run.thorn.id, x: run.thorn.x, y: run.thorn.y });
+        await waitFor("Thorn back on his square", () => (patSocket.state?.tokens[run.thorn.id]?.x === run.thorn.x ? true : null));
+        await pat.keyboard.press("Control+z");
+        const refused = rowOf(/ since\./);
+        await refused.waitFor({ timeout: 4_000 });
+        await refused.getByRole("button").first().click();
+        await wholeOf(/ since\./).waitFor();
+        await ops.send({ t: "view.blackout", blackout: true });
+        await pat.getByText("The DM has paused the game.").waitFor();
+        await ops.send({ t: "view.blackout", blackout: false });
+        await pat.getByText("The DM has paused the game.").waitFor({ state: "detached" });
+        await pat.locator("[data-toast]").filter({ hasText: / since\./ }).waitFor({ state: "detached", timeout: 8_000 });
+
       } finally {
         await ops.send({ t: "encounter.end" });
       }

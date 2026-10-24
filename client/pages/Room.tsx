@@ -1658,6 +1658,15 @@ function Toasts(props: {
   useEffect(() => {
     if (whole !== null && wholeToast === undefined) shrink();
   }, [whole, wholeToast, shrink]);
+  // A toast held whole is let go as the toasts unmount, so none is left stopped. Only a player's blackout unmounts them today, and PauseScreen drops every toast then (review BARBUILD-ASTRA-04).
+  const wholeNow = useRef(whole);
+  wholeNow.current = whole;
+  useEffect(
+    () => () => {
+      if (wholeNow.current !== null) ui.holdToast(wholeNow.current, false);
+    },
+    [ui],
+  );
   useEffect(() => {
     if (wholeToast === undefined) return;
     // Escape shrinks the whole toast first, and its preventDefault leaves the room's own Escape alone (RoomChrome.tsx useEscape).
