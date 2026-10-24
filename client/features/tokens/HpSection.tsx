@@ -211,11 +211,11 @@ export function HpEntry(props: {
   );
   // The strip's own sentences show in its header, so the field is described by the entry's whole ones (3.3).
   const describedBy = [resting ? descriptionId : null, props.describedBy ?? null].filter((id) => id !== null).join(" ") || undefined;
-  const lead = (
-    <div style={{ display: "flex", gap: theme.space(1), flex: "1 1 auto", minWidth: 0 }}>
-      {resting ? <ModeToggle key="toggle" mode={mode} onPick={() => pickMode(nextRestMode(mode))} /> : null}
+  // The toggle's slot stays in place while it is empty, so the field after it is never mounted afresh.
+  const leadParts = (
+    <>
+      {resting ? <ModeToggle mode={mode} onPick={() => pickMode(nextRestMode(mode))} /> : null}
       <input
-        key="input"
         aria-label="HP change"
         aria-describedby={describedBy}
         data-rest-field=""
@@ -232,11 +232,12 @@ export function HpEntry(props: {
         }}
         style={{ ...fieldStyle(), flex: 1, width: 0, minWidth: resting ? REST_FIELD_MIN : undefined }}
       />
-      <SmallButton key="apply" type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
+      <SmallButton type="submit" tone="primary" disabled={!text.trim() || refusal !== null}>
         Apply
       </SmallButton>
-    </div>
+    </>
   );
+  const lead = <div style={{ display: "flex", gap: theme.space(1), flex: "1 1 auto", minWidth: 0 }}>{leadParts}</div>;
   // The newest rolled amount for the mode, the one the strip offers (3.3).
   const newest = useNewestChip(chips);
   const shown = (id: string) => rest?.shown == null || rest.shown.includes(id);
@@ -277,7 +278,7 @@ export function HpEntry(props: {
     </div>
   ) : (
     <div key="field" style={{ display: "flex", gap: theme.space(1), order: fieldFirst ? 0 : 1 }}>
-      {lead}
+      {leadParts}
     </div>
   );
   // The strip's quick row stands in the modes' place, and the scrolling strip holds what the row leaves out under it (5.4).
