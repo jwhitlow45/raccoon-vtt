@@ -49,8 +49,8 @@ const COMPANION_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...
  */
 const CHARACTER_OWNER_ACTOR_FIELDS: ReadonlySet<keyof ActorPatch> = new Set([...OWNER_ACTOR_FIELDS, "srdId", "wildShape"]);
 
-/** Character fields an owner may patch, the stat block, known forms and sync record among them (docs/design-v1-pc-stats.md 4.1, docs/design-v1-known-forms.md 3.2, docs/design-v1-resync.md 4). `actor` is limited further by OWNER_ACTOR_FIELDS. */
-export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms", "ddbSync"]);
+/** Character fields an owner may patch, the stat block, known forms, sync record and class resources among them (docs/design-v1-pc-stats.md 4.1, docs/design-v1-known-forms.md 3.2, docs/design-v1-resync.md 4, docs/design-v1-combat-controls.md 3.1). `actor` is limited further by OWNER_ACTOR_FIELDS. */
+export const OWNER_CHARACTER_FIELDS: ReadonlySet<string> = new Set(["name", "defaultImage", "actor", "level", "stats", "knownForms", "ddbSync", "resources"]);
 
 type View = Pick<RoomState, "characters"> | null | undefined;
 
@@ -175,7 +175,7 @@ export type CharacterAccess = {
   dm: boolean;
   owner: boolean;
   full: boolean;
-  canEdit(field: "name" | "size" | "ownerIds" | "defaultImage" | "level" | "stats" | "knownForms"): boolean;
+  canEdit(field: "name" | "size" | "ownerIds" | "defaultImage" | "level" | "stats" | "knownForms" | "resources"): boolean;
   canEditActor(field: keyof ActorPatch): boolean;
 };
 

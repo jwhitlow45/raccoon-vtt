@@ -204,8 +204,8 @@ describe("character access", () => {
     const hero = state.characters.hero!;
     for (const viewer of [DM, P1, P2]) {
       const access = characterAccess({ role: viewer.role, memberId: viewer.memberId, character: hero });
-      for (const field of ["name", "size", "ownerIds", "defaultImage", "level", "knownForms"] as const) {
-        const sample = { name: "New", size: "small", ownerIds: ["p2"], defaultImage: TOKEN_SAMPLES.image, level: 5, knownForms: ["wolf"] }[field];
+      for (const field of ["name", "size", "ownerIds", "defaultImage", "level", "knownForms", "resources"] as const) {
+        const sample = { name: "New", size: "small", ownerIds: ["p2"], defaultImage: TOKEN_SAMPLES.image, level: 5, knownForms: ["wolf"], resources: [{ id: "rage", name: "Rage", max: 3, reset: "shortOne" }] }[field];
         const allowed = canApply({ t: "character.update", characterId: "hero", patch: { [field]: sample } }, viewer, state, deps).ok;
         assert.equal(access.canEdit(field), allowed, `${viewer.memberId} ${field}`);
       }
