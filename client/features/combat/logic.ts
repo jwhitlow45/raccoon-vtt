@@ -424,11 +424,25 @@ export function dayLeft(use: DayUse, mark: UseMark | undefined): number {
   return Math.max(0, use.max - (mark?.used ?? 0));
 }
 
-/** An ability's state words on its line: "Ready", "Used", or a recharge roll's "Rolled 5: ready". Null for an X/Day ability, whose line counts. */
-export function abilityState(row: Extract<UseRow, { kind: "ability" }>): string | null {
-  if (row.use.kind === "day") return null;
-  if (row.rolled?.total !== undefined) return row.rolled.outcome === "ready" ? `Rolled ${row.rolled.total}: ready` : `Rolled ${row.rolled.total}: used`;
-  return row.mark ? "Used" : "Ready";
+/**
+ * An ability's state words on its line: "Ready", "Used", or a recharge
+ * roll's "Rolled 5: ready". Null for an X/Day ability, whose line counts.
+ * A roll speaks only while the mark still says what it left: a spend after
+ * a ready roll, or Mark ready after a used one, changed it, and the line
+ * then says what the mark says now, as its buttons do. The turn's prompt
+ * roll is tried first, then `ownRoll`, the list's own Roll recharge.
+ */
+export function abilityState(row: Extract<UseRow, { kind: "ability" }>, ownRoll?: number): string | null {
+  const { use } = row;
+  if (use.kind === "day") return null;
+  const marked = row.mark !== undefined;
+  const rolls = [
+    row.rolled?.total !== undefined ? { total: row.rolled.total, ready: row.rolled.outcome === "ready" } : null,
+    ownRoll !== undefined && use.kind === "recharge" ? { total: ownRoll, ready: ownRoll >= use.min } : null,
+  ];
+  const standing = rolls.find((r) => r !== null && r.ready !== marked);
+  if (standing) return `Rolled ${standing.total}: ${standing.ready ? "ready" : "used"}`;
+  return marked ? "Used" : "Ready";
 }
 
 /** An other mark's line, by its stored name: "Frost Breath, used", "Dominate Mind, 1 of 2 used". */

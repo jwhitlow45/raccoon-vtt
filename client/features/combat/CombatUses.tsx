@@ -199,7 +199,7 @@ function UseLine(props: LineProps) {
       break;
     case "ability": {
       head = abilityHead(row);
-      state = abilityState(row);
+      state = abilityState(row, recharge.total);
       const { use, mark } = row;
       if (use.kind === "day") {
         const left = dayLeft(use, mark);
@@ -213,7 +213,6 @@ function UseLine(props: LineProps) {
         break;
       }
       if (form === "card") break;
-      if (use.kind === "recharge" && recharge.total !== undefined && row.rolled === undefined) state = `Rolled ${recharge.total}: ${recharge.total >= use.min ? "ready" : "used"}`;
       if (use.kind === "recharge") {
         buttons.push(
           <UseButton

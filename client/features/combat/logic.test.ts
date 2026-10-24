@@ -236,6 +236,25 @@ describe("the list", () => {
     );
   });
 
+  test("a recharge roll's words give way to the mark it no longer matches, in the list and on the card (CCB-ASTRA-01)", () => {
+    const settled = (total: number, outcome: "ready" | "used") => record({ settled: { [`recharge:${breath.key}`]: { state: "done", total, outcome } as Settled } });
+    const breathRow = (form: "card" | "list", uses: Record<string, UseMark>, r: TurnRecord | null) => rowsOf(form, { uses, record: r }).find((x): x is Extract<UseRow, { kind: "ability" }> => x.kind === "ability")!;
+    for (const form of ["card", "list"] as const) {
+      assert.equal(abilityState(breathRow(form, {}, settled(6, "ready"))), "Rolled 6: ready", form);
+      assert.equal(abilityState(breathRow(form, { [breath.key]: breathMark }, settled(6, "ready"))), "Used", `${form}: spent again after a ready roll`);
+      assert.equal(abilityState(breathRow(form, { [breath.key]: breathMark }, settled(2, "used"))), "Rolled 2: used", form);
+      assert.equal(abilityState(breathRow(form, {}, settled(2, "used"))), "Ready", `${form}: Mark ready after a used roll`);
+    }
+    // The list's own Roll recharge, which no prompt holds.
+    assert.equal(abilityState(breathRow("list", {}, null), 6), "Rolled 6: ready");
+    assert.equal(abilityState(breathRow("list", { [breath.key]: breathMark }, null), 6), "Used", "a ready roll, then spent again");
+    assert.equal(abilityState(breathRow("list", { [breath.key]: breathMark }, null), 4), "Rolled 4: used", "below Recharge 5");
+    assert.equal(abilityState(breathRow("list", {}, null), 4), "Ready", "a used roll, then Mark ready");
+    // A roll of its own after the prompt's: whichever still matches the mark speaks.
+    assert.equal(abilityState(breathRow("list", {}, settled(2, "used")), 6), "Rolled 6: ready");
+    assert.equal(abilityState(breathRow("list", { [breath.key]: breathMark }, settled(2, "used")), 6), "Rolled 2: used");
+  });
+
   test("marks the block no longer lists show under their stored name in the list, never while it loads", () => {
     const uses = { "actions:frost-breath": { kind: "recharge", name: "Frost Breath", used: 1, max: 1, min: 5 } as UseMark, [breath.key]: breathMark };
     const other = rowsOf("list", { uses }).filter((r) => r.kind === "other");
@@ -424,6 +443,29 @@ describe("the cards of a turn, from what the reducer wrote at its start", () => 
     assert.deepEqual(after.recharges[0]!.prompt.settled, { state: "done", total: 6, outcome: "ready" });
     assert.equal(rechargeResult("Fire Breath", after.recharges[0]!.prompt.settled!), "Rolled 6: Fire Breath is ready.");
     assert.equal(openRecord(f.state.encounter, f.of("dragon"), `recharge:${breath.key}`), undefined, "settled, the Dice panel's roll is manual again");
+  });
+
+  test("after the prompt's roll, a spend or Mark ready changes the line's words, and the card keeps the roll's answer (CCB-ASTRA-01)", () => {
+    const breathLine = (f: ReturnType<typeof fight>, form: "card" | "list") => {
+      const rows = usesRows({ form, uses: dragonUses, actor: f.of("dragon"), ownTurn: form === "card", record: currentRecord(f.state.encounter, f.of("dragon")) });
+      const row = rows.find((r): r is Extract<UseRow, { kind: "ability" }> => r.kind === "ability")!;
+      return abilityState(row);
+    };
+    const promptRoll = (face: number) => {
+      const f = fight();
+      while (f.active() !== "ed" || !f.of("dragon").turnRecord?.due) f.run({ t: "encounter.next" });
+      return f.roll(rechargeRollOp("r1", { tokenId: "dragon" }, breath, openRecord(f.state.encounter, f.of("dragon"), `recharge:${breath.key}`)), face);
+    };
+    const ready = promptRoll(6);
+    assert.deepEqual([breathLine(ready, "card"), breathLine(ready, "list")], ["Rolled 6: ready", "Rolled 6: ready"]);
+    ready.run(abilityOp({ tokenId: "dragon" }, breath));
+    assert.deepEqual([breathLine(ready, "card"), breathLine(ready, "list")], ["Used", "Used"]);
+    const card = cards(ready.state, dmYou, (h) => (h === "t:dragon" ? dragonUses : []));
+    assert.equal(rechargeResult("Fire Breath", card.recharges[0]!.prompt.settled!), "Rolled 6: Fire Breath is ready.", "the prompt's card keeps its answer");
+    const used = promptRoll(2);
+    assert.deepEqual([breathLine(used, "card"), breathLine(used, "list")], ["Rolled 2: used", "Rolled 2: used"]);
+    used.run(abilityOp({ tokenId: "dragon" }, breath, { back: true }));
+    assert.deepEqual([breathLine(used, "card"), breathLine(used, "list")], ["Ready", "Ready"]);
   });
 
   test("Thorn's turn: his death save card for Pat and for the DM, settled by the first roll, Skip to the turn card", () => {
