@@ -2,6 +2,7 @@ import { keys } from "../keys.ts";
 import {
   TURN_FLAGS,
   TURN_MARKS,
+  type DurationAnchor,
   type Effect,
   type EffectChange,
   type Encounter,
@@ -24,6 +25,7 @@ import {
   sameAnchor,
   tickEffects,
   unbindFromEntry,
+  type StoredDuration,
 } from "../rules/durations.ts";
 import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
@@ -721,7 +723,8 @@ function restoreEffectLists(tx: Tx, snapshot: EncounterSnapshot): void {
 /**
  * Takes back what one `next` changed in a creature's effects (op version
  * 21): an occurrence a turn-end save opened and a count its tick lowered,
- * each only while the effect still holds what that `next` wrote, and an
+ * each only while the effect still holds what that `next` wrote (a count,
+ * only while its duration is the one the tick counted), and an
  * effect its tick ended, unless one of its id is there or the list is
  * full. An effect added, removed or edited during the turn stays as it is,
  * a save settled during it included: a passed save's effect stays ended and
@@ -744,11 +747,16 @@ function undoEffects(tx: Tx, change: EffectChange, before: readonly Effect[], kn
       out = asked.from ? { ...rest, due: asked.from } : rest;
     }
     const counted = change.counted?.find((c) => c.id === effect.id);
-    if (counted && out.duration && out.duration.remaining === counted.to) out = { ...out, duration: { ...out.duration, remaining: counted.from } };
+    const saved = before.find((e) => e.id === effect.id)?.duration;
+    if (counted && out.duration && saved && out.duration.remaining === counted.to && sameDuration(tx.state, saved, out.duration, known)) {
+      out = { ...out, duration: { ...out.duration, remaining: counted.from } };
+    }
     return out;
   });
-  for (const { at, effect } of [...(change.ended ?? [])].sort((a, b) => a.at - b.at)) {
-    if (next.length >= MAX_EFFECTS || next.some((e) => e.id === effect.id)) continue;
+  for (const { at, effect: ended } of [...(change.ended ?? [])].sort((a, b) => a.at - b.at)) {
+    if (next.length >= MAX_EFFECTS || next.some((e) => e.id === ended.id)) continue;
+    // The step's own copy, which every rewrite of the history keeps counting a row of the step (companions.ts stepWithout, the import).
+    const effect = before.find((e) => e.id === ended.id) ?? ended;
     const was = before.findIndex((e) => e.id === effect.id);
     let place = was < 0 ? Math.min(at, next.length) : 0;
     for (let j = was - 1; j >= 0; j--) {
@@ -764,23 +772,50 @@ function undoEffects(tx: Tx, change: EffectChange, before: readonly Effect[], kn
 }
 
 /**
+ * Whether a duration is still the one a tick counted (`saved`, the step's
+ * copy): the same boundary, counting the same creature. A removal, an add,
+ * a companion's conversion and an import move a duration between a row of
+ * its creature and the creature itself, and it stays the same. Rows that
+ * have left the fight are read from the steps walked (`known`).
+ */
+function sameDuration(state: RoomState, saved: StoredDuration, now: StoredDuration, known: ReadonlyMap<string, InitEntry>): boolean {
+  if (saved.boundary !== now.boundary) return false;
+  const theirs = creatureAnchors(state, now.anchor, known);
+  return creatureAnchors(state, saved.anchor, known).some((a) => theirs.some((b) => sameAnchor(a, b)));
+}
+
+/** The anchor with every other anchor that names its creature (anchorsForEntry). */
+function creatureAnchors(state: RoomState, anchor: DurationAnchor, known: ReadonlyMap<string, InitEntry>): DurationAnchor[] {
+  if (!("entryId" in anchor)) return [anchor, ...anchorsForEntry(state, anchor)];
+  const row = state.encounter?.entries.find((e) => e.id === anchor.entryId) ?? known.get(anchor.entryId);
+  return row ? [anchor, ...anchorsForEntry(state, row)] : [anchor];
+}
+
+/**
  * An ended effect put back, counting a row that is in the fight (design
- * 9.5): one whose row has left pauses on that row's creature, as a removal
- * pauses it, and binds to a row of that creature added since, as an add
- * binds it. Every row an ended effect counts is one its step holds, since
- * a tick counts only rows in the fight.
+ * 9.5) when its creature has one: one counting a row that has left pauses
+ * on that row's creature, as a removal pauses it, and one paused on a
+ * creature binds to that creature's first row in the fight, by the rule an
+ * add binds by (bindDurations). A row neither the fight nor a step walked
+ * holds is named only by an effect a step's copy lacks, which a hand-made
+ * file alone can give, so that effect stays as saved.
  */
 function countingRowInFight(state: RoomState, effect: Effect, known: ReadonlyMap<string, InitEntry>): Effect {
   const d = effect.duration;
-  if (!d || !("entryId" in d.anchor)) return effect;
+  if (!d) return effect;
   const rows = state.encounter?.entries ?? [];
-  const entryId = d.anchor.entryId;
-  if (rows.some((e) => e.id === entryId)) return effect;
-  const row = known.get(entryId);
-  if (!row) return effect;
-  const paused = pausedAnchorForEntry(row);
-  const to = sortEntries(rows).find((e) => anchorsForEntry(state, e).some((a) => sameAnchor(a, paused)));
-  return { ...effect, duration: { ...d, anchor: to ? { entryId: to.id } : paused } };
+  let paused = d.anchor;
+  if ("entryId" in paused) {
+    const entryId = paused.entryId;
+    if (rows.some((e) => e.id === entryId)) return effect;
+    const row = known.get(entryId);
+    if (!row) return effect;
+    paused = pausedAnchorForEntry(row);
+  }
+  const creature = paused;
+  const to = sortEntries(rows).find((e) => anchorsForEntry(state, e).some((a) => sameAnchor(a, creature)));
+  const anchor = to ? { entryId: to.id } : creature;
+  return sameAnchor(anchor, d.anchor) ? effect : { ...effect, duration: { ...d, anchor } };
 }
 
 /** What one step changed outside the encounter and the effects: the pips it refilled, the records, the reveals and the companion Reactions. */

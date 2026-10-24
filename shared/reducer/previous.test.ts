@@ -332,6 +332,105 @@ describe("Previous takes back only the turn (design 9.4, op version 21)", () => 
     assert.deepEqual(inline(back, "thorn").effects.map((e) => e.id), inline(without, "thorn").effects.map((e) => e.id), "as the DM's changes leave it without Thorn's turn");
   });
 
+  test("a duration the DM replaced during the turn keeps the DM's count, its boundary or its creature changed alone (review FU26-ASTRA-3)", () => {
+    const hexed = (): RoomState => {
+      const state = fight();
+      // Counted at the end of the dragon's turns.
+      state.tokens.troll = { ...state.tokens.troll!, actor: { inline: actor({ effects: [effect("hex", { key: "custom", label: "Hexed", duration: { remaining: 2, boundary: "turnEnd", anchor: { entryId: "ed" } } })] }) } };
+      return state;
+    };
+    const hex = (s: RoomState) => inline(s, "troll").effects.map((e) => e.duration);
+    const onThorn = play(hexed(), [NEXT, NEXT]);
+    assert.deepEqual(hex(onThorn), [{ remaining: 1, boundary: "turnEnd", anchor: { entryId: "ed" } }]);
+    const replaced = (duration: unknown) => play(onThorn, [{ t: "actor.effect.update", target: { tokenId: "troll" }, effectId: "hex", patch: { duration } } as Op]);
+    // Until the start of the dragon's next turn: the same creature and count, another boundary.
+    const boundary = replaced({ mode: "turnStart", of: { entryId: "ed" } });
+    assert.deepEqual(hex(boundary), [{ remaining: 1, boundary: "turnStart", anchor: { entryId: "ed" } }]);
+    assert.deepEqual(hex(play(boundary, [PREV])), [{ remaining: 1, boundary: "turnStart", anchor: { entryId: "ed" } }]);
+    // Until the end of the troll's next turn: the same boundary and count, another creature.
+    const creature = replaced({ mode: "turnEnd", of: { entryId: "er" } });
+    assert.deepEqual(hex(creature), [{ remaining: 1, boundary: "turnEnd", anchor: { entryId: "er" } }]);
+    assert.deepEqual(hex(play(creature, [PREV])), [{ remaining: 1, boundary: "turnEnd", anchor: { entryId: "er" } }]);
+    // Next's own count goes back, and so does a replacement no different from it (design 9.4).
+    assert.deepEqual(hex(play(onThorn, [PREV])), [{ remaining: 2, boundary: "turnEnd", anchor: { entryId: "ed" } }]);
+    assert.deepEqual(hex(play(replaced({ mode: "turnEnd", of: { entryId: "ed" } }), [PREV])), [{ remaining: 2, boundary: "turnEnd", anchor: { entryId: "ed" } }]);
+  });
+
+  test("a count Next lowered goes back through every automatic move of its duration: a removal's pause, a rejoin's bind (review FU26-ASTRA-3)", () => {
+    const blessed = (): RoomState => {
+      const state = fight();
+      state.tokens.thorn = { ...state.tokens.thorn!, actor: { inline: actor({ effects: [effect("bless", { duration: { remaining: 5, boundary: "turnStart", anchor: { entryId: "et" } } })] }) } };
+      return state;
+    };
+    const onThorn = play(blessed(), [NEXT, NEXT]);
+    assert.deepEqual(anchors(inline(onThorn, "thorn").effects), [["bless", 4, { entryId: "et" }]]);
+    // The DM removes Thorn's acting row, which pauses Bless on him, then Previous.
+    const paused = play(onThorn, [{ t: "encounter.remove", entryIds: ["et"] }, PREV]);
+    assert.deepEqual(anchors(inline(paused, "thorn").effects), [["bless", 5, { tokenId: "thorn" }]]);
+    // And Thorn joins again, which binds Bless to his new row, then Previous.
+    const bound = play(onThorn, [{ t: "encounter.remove", entryIds: ["et"] }, { t: "encounter.add", entries: [{ id: "et2", tokenId: "thorn", value: 15 }] }, PREV]);
+    assert.deepEqual(anchors(inline(bound, "thorn").effects), [["bless", 5, { entryId: "et2" }]]);
+  });
+
+  test("a count Next lowered on a companion's row goes back after it comes to act on its character's turn, at op version 21 or 20, bound to the character's row or paused on the companion (reviews FU26-ASTRA-3 and FU26-OPUS-9)", () => {
+    const withCompanion = (pcInFight: boolean): RoomState => {
+      const s = room({
+        characters: { hero: character("hero", { name: "Hero" }) },
+        tokens: {
+          o: token("o", { kind: "pc", name: "O", actor: { ref: "hero" } }),
+          b: token("b", { kind: "npc", name: "B", companion: { of: "hero", turn: "own" } }),
+          c: token("c", { name: "C", actor: { inline: actor({ effects: [effect("mk", { key: "custom", label: "Marked", duration: { remaining: 3, boundary: "turnStart", anchor: { entryId: "eb" } } })] }) } }),
+          d: token("d", { name: "D" }),
+        },
+      });
+      const entries = [entry(pcInFight ? "eo" : "ed", { tokenId: pcInFight ? "o" : "d", value: 20 }), entry("eb", { tokenId: "b", value: 15, tieOrder: 1 }), entry("ec", { tokenId: "c", value: 10, tieOrder: 2 })];
+      s.encounter = { rev: 0, round: 1, activeEntryId: null, entries };
+      return s;
+    };
+    const toShared: Op = { t: "token.update", tokenId: "b", patch: { companion: { of: "hero", turn: "shared" } } };
+    const mk = (s: RoomState) => anchors(inline(s, "c").effects);
+    for (const opVersion of [undefined, 20]) {
+      const at = `converted at ${opVersion ?? "live"}`;
+      const bound = play(play(withCompanion(true), [NEXT, NEXT]), [toShared], opVersion);
+      assert.deepEqual(mk(bound), [["mk", 2, { entryId: "eo" }]], at);
+      assert.deepEqual(mk(play(bound, [PREV])), [["mk", 3, { entryId: "eo" }]], at);
+      const paused = play(play(withCompanion(false), [NEXT, NEXT]), [toShared], opVersion);
+      assert.deepEqual(mk(paused), [["mk", 2, { tokenId: "b" }]], at);
+      assert.deepEqual(mk(play(paused, [PREV])), [["mk", 3, { tokenId: "b" }]], at);
+    }
+  });
+
+  test("an ended effect put back paused on a companion binds to its character's row in the fight, and one a version 20 op rebound comes back as the step now holds it (reviews FU26-ASTRA-4 and FU26-OPUS-9)", () => {
+    const withCompanion = (pcInFight: boolean): RoomState => {
+      const s = room({
+        characters: { hero: character("hero", { name: "Hero" }) },
+        tokens: {
+          o: token("o", { kind: "pc", name: "O", actor: { ref: "hero" } }),
+          b: token("b", { kind: "npc", name: "B", companion: { of: "hero", turn: "own" } }),
+          c: token("c", { name: "C", actor: { inline: actor({ effects: [effect("x", { key: "custom", label: "Until B's turn", duration: { remaining: 1, boundary: "turnStart", anchor: { entryId: "eb" } } })] }) } }),
+          d: token("d", { name: "D" }),
+        },
+      });
+      const entries = [entry(pcInFight ? "eo" : "ed", { tokenId: pcInFight ? "o" : "d", value: 20 }), entry("eb", { tokenId: "b", value: 15, tieOrder: 1 }), entry("ec", { tokenId: "c", value: 10, tieOrder: 2 })];
+      s.encounter = { rev: 0, round: 1, activeEntryId: null, entries };
+      return s;
+    };
+    const toShared: Op = { t: "token.update", tokenId: "b", patch: { companion: { of: "hero", turn: "shared" } } };
+    const xOf = (s: RoomState) => anchors(inline(s, "c").effects);
+    // B's turn ends C's effect, B comes to act on O's turn, and O, not yet in the fight, joins it.
+    const onC = play(withCompanion(false), [NEXT, NEXT, NEXT]);
+    assert.deepEqual(xOf(onC), []);
+    const joined = play(onC, [toShared, { t: "encounter.add", entries: [{ id: "eo", tokenId: "o", value: 12 }] }, PREV]);
+    assert.deepEqual(turn(joined), ["ed", 1]);
+    assert.deepEqual(xOf(joined), [["x", 1, { entryId: "eo" }]], "bound to O's row, whose turn is B's now");
+    // O in the fight from the start, and the conversion stored by a build from before op version 21.
+    for (const opVersion of [undefined, 20]) {
+      const onB = play(withCompanion(true), [NEXT, NEXT]);
+      const back = play(play(onB, [toShared], opVersion), [PREV]);
+      assert.deepEqual(xOf(back), [["x", 1, { entryId: "eo" }]], `converted at ${opVersion ?? "live"}`);
+    }
+  });
+
   test("an ended effect the list has no room for stays off, and the effect the DM added in its slot stays (review FU26-ASTRA, the effect bound)", () => {
     const state = fight();
     const many = Array.from({ length: MAX_EFFECTS - 1 }, (_, i) => effect(`c${i}`, { key: "custom", label: `Mark ${i}` }));

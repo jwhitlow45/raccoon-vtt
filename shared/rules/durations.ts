@@ -169,7 +169,7 @@ export function sameAnchor(a: DurationAnchor, b: DurationAnchor): boolean {
  * companions that act on that character's turn, so durations paused on a
  * companion bind when its character joins the fight.
  */
-export function anchorsForEntry(state: RoomState, entry: InitEntry): DurationAnchor[] {
+export function anchorsForEntry(state: RoomState, entry: Pick<InitEntry, "tokenId" | "characterId">): DurationAnchor[] {
   const anchors: DurationAnchor[] = [];
   let characterId = entry.characterId;
   if (entry.tokenId !== undefined) {
