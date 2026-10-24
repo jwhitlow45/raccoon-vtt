@@ -1625,6 +1625,60 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await patCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
       }
     });
+
+    test("br-f-20. at 320 x 360 at 130% the DM's summary row, risen into the top bar's row, gives way to a toast over the bars: it stands in the strip's header while the toast shows, and rises again as it goes (D-261024-23)", async () => {
+      await homeTokens();
+      const z = 1.3;
+      await setUp(dm, { width: 320, height: 360, scale: z });
+      await checks([run.goblinLeft]);
+      const card = dm.locator('[data-alert="concentration"]').first();
+      await card.waitFor({ state: "attached" });
+      // The check's card stands over the map's top here, Thorn under it, so he is panned below it first, as br-c-3 does.
+      const c = (await card.boundingBox())!;
+      const at = await middle(dm, run.thorn);
+      const below = c.y + c.height + 16;
+      if (at.y < below) await touchSwipe(dmCdp, { x: 12, y: below }, { x: 12, y: below + (below - at.y) }, { steps: 12, everyMs: 20 });
+      await openOn(dm, run.thorn);
+      const risen = dm.locator('button[aria-label^="Concentration save"]:not([data-rest-summary])').first();
+      const header = frame(dm).locator("[data-rest-summary]");
+      /** Whether the risen row takes a tap at its middle, or what does. */
+      const rowHit = async () => {
+        const r = await rectOf(risen);
+        return risen.evaluate(
+          (el, p) => {
+            const top = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): unknown } }).document.elementFromPoint(p.x, p.y);
+            const node = el as unknown as { contains(n: unknown): boolean };
+            return top === el || node.contains(top) ? "row" : String((top as { outerHTML?: string } | null)?.outerHTML?.slice(0, 80));
+          },
+          { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 },
+        );
+      };
+      // Before the toast, the row stands risen over the top bar's row, left of Undo, and takes its own tap.
+      await risen.waitFor();
+      assert.equal(await header.count(), 0, "the summary stands in the header with no toast");
+      assert.equal(await rowHit(), "row", "the risen row takes no tap");
+      const pats = await patOps();
+      try {
+        await pats.send({ t: "log.whisper", to: [dmSocket.you!.memberId], text: "Behind the altar." });
+        const toast = dm.locator('[data-toast-form="row"]').filter({ hasText: "Behind the altar." });
+        await toast.waitFor({ timeout: 8_000 });
+        // The toast's box is taken: the summary goes to the strip's header, in reach, and the toast takes its own taps.
+        await header.waitFor({ timeout: 2_000 });
+        assert.equal(await risen.isVisible(), false, "the risen row still shows under the toast");
+        assert.ok(await wholeInReach(header), "the header's summary is out of reach");
+        assert.ok(await wholeInReach(toast.getByRole("button").first()), "the toast's words are out of reach");
+        assert.deepEqual(alignmentLines(await measureAlignment(header), "the header's summary button at 320 x 360 at 130%"), []);
+        await shots.take(dm, "br-f-20-summary-in-header");
+        // As the toast runs out, the row rises into the top bar's row again.
+        await toast.waitFor({ state: "detached", timeout: 8_000 });
+        await risen.waitFor({ timeout: 2_000 });
+        await header.waitFor({ state: "detached", timeout: 2_000 });
+        assert.equal(await rowHit(), "row", "the risen row takes no tap after the toast");
+        await shots.take(dm, "br-f-20-summary-back");
+      } finally {
+        pats.close();
+      }
+    });
   });
 
   // ------------------------------------------------------------ br-c: the content (the content lane)

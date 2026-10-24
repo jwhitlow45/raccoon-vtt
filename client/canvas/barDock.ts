@@ -1845,13 +1845,20 @@ type BarDockState = {
   headerSummary: HeaderSummary | null;
   /** The bar is open, shown or hidden for a drag: a token selected, its bar not put away, the Select tool (Stage.tsx). A roll card folds for a held strip only then (stripSqueezed). */
   barOpen: boolean;
+  /**
+   * The toast over the bars, its top and foot in screen px as drawn, while
+   * it shows as the one row over the top bar's row or whole (3.5), or null.
+   * The alerts' summary row counts it as taken, so the two never cover each
+   * other (D-261024-23).
+   */
+  toastRow: { top: number; bottom: number } | null;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
   createStore<BarDockState>(() => {
     forgetLarger();
-    return { chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false };
+    return { chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
   }),
 );
 

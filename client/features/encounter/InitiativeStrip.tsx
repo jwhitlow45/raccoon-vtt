@@ -582,6 +582,7 @@ function FightAlerts() {
   const dock = useScoped(barDockSlot);
   const chrome = useStore(dock, (s) => s.chrome);
   const lasting = useStore(dock, (s) => s.notices);
+  const toastRow = useStore(dock, (s) => s.toastRow);
   const bar = useStore(dock, (s) => s.bar);
   const footYields = useStore(dock, (s) => s.footYields);
   const rollAsked = useStore(dock, (s) => s.columnRollAsked);
@@ -646,7 +647,9 @@ function FightAlerts() {
    * the top bars and any lasting notice. Where that would put it over the
    * tool's option buttons, as in a fight at 480 x 320 at 130%, it rises, over
    * the turn band and then the top bar's row if it must. It never meets a
-   * lasting notice, which paints above the column and would hide it. Over a
+   * lasting notice, which paints above the column and would hide it, nor
+   * the toast over the top bar's row, as the one row or whole, which would
+   * take its tap (D-261024-23). Over a
    * button in the top bars it moves left into a gap between them, 8 px
    * clear of each, End turn above all, since a player who chose Later must
    * still be able to end their turn. `rowPlace` is how far it rose and
@@ -702,7 +705,8 @@ function FightAlerts() {
       minLeft: (chrome.safe.left + SHADOW_ROOM) * zoom,
       ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
       floor: (height - chrome.controls - theme.space(1)) * zoom,
-      taken: lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }],
+      // A lasting notice, and the toast over the top bar's row with a gap either side (D-261024-23).
+      taken: [...(lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }]), ...(toastRow === null ? [] : [{ top: toastRow.top - EDGE * zoom, bottom: toastRow.bottom + EDGE * zoom }])],
       controls,
       gap: EDGE * zoom,
       minWidth: theme.touch * zoom,

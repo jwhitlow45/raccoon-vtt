@@ -1667,6 +1667,16 @@ function Toasts(props: {
     },
     [ui],
   );
+  // The box of the toast over the bars, as the row or whole, so the alerts' summary row stands clear of it, or in the strip's header (D-261024-23).
+  const dockStore = useScoped(barDockSlot);
+  const rowBox = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const r = rowToast !== undefined ? rowBox.current?.getBoundingClientRect() : undefined;
+    const next = r ? { top: r.top, bottom: r.bottom } : null;
+    const was = dockStore.getState().toastRow;
+    if (next === null ? was !== null : was === null || Math.abs(was.top - next.top) > 0.5 || Math.abs(was.bottom - next.bottom) > 0.5) dockStore.setState({ toastRow: next });
+  });
+  useLayoutEffect(() => () => dockStore.setState({ toastRow: null }), [dockStore]);
   useEffect(() => {
     if (wholeToast === undefined) return;
     // Escape shrinks the whole toast first, and its preventDefault leaves the room's own Escape alone (RoomChrome.tsx useEscape).
@@ -1822,7 +1832,7 @@ function Toasts(props: {
       {props.layer && rowToast
         ? createPortal(
             // Over the top bar's row, 4 px from the safe top, as wide as the layer less its sides. Whole, it stands from the safe top down.
-            <div data-toast-over-bars="" style={{ position: "absolute", top: props.safeTop + (wholeToast ? 0 : theme.space(1)), left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", justifyContent: "center" }}>
+            <div ref={rowBox} data-toast-over-bars="" style={{ position: "absolute", top: props.safeTop + (wholeToast ? 0 : theme.space(1)), left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", justifyContent: "center" }}>
               <ToastNote
                 key={rowToast.id}
                 toast={rowToast}
