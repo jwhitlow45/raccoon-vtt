@@ -729,15 +729,21 @@ function CountLegButton(props: { token: ViewToken }) {
  * What a bar's frame hands its header and its rows: the header's handle,
  * with its grip, and stickiness, Reset while the window docks away from
  * its default (docs/design-v1-token-window.md 4.4), an upright phone's
- * Larger or Smaller (docs/design-v1-bar-dock.md 1.5), the narrow header's
- * grip and badge (7.1), and whether the bar is short.
+ * resting strip and its Expand and Collapse (docs/design-v1-bar-compact.md
+ * 9.2), the narrow header's grip and badge (7.1), and whether the bar is
+ * short.
  */
 type FrameControls = {
   handle: PaneHandle | null;
   sticky: boolean;
   place: { moved: boolean; reset(): void; closeRef: RefObject<HTMLButtonElement | null>; onResetFocus(focused: boolean): void } | null;
-  /** The bar spans an upright phone, where its button left of Close picks its size. */
-  size: { larger: boolean; toggle(): void } | null;
+  /**
+   * The bar spans an upright phone: it rests as the strip or is expanded,
+   * and the button left of Close switches. `scrolls` is the strip where
+   * Expand is not offered, which holds the whole bar under its quick row
+   * and scrolls (5.4). Null where the bar docks or opens compact.
+   */
+  rest: { resting: boolean; scrolls: boolean; expand(): void; collapse(): void } | null;
   /** The grip a button or its dots, and where an elevation badge goes, by the docked window's width (barDock.ts headerLayout). */
   header: { grip: "button" | "dots"; badgeInHeader: boolean };
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
@@ -751,7 +757,7 @@ const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: t
 
 const NO_RAISE = () => {};
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, size: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE });
 
 /** Reset's name and tooltip, on every device. */
 const RESET_LABEL = "Reset window position and size";
@@ -759,22 +765,34 @@ const RESET_LABEL = "Reset window position and size";
 /**
  * The bar's header: the grip while it docks, its name on at most two
  * lines, the elevation badge, Reset while the window is away from its
- * default, Larger or Smaller while it spans an upright phone, and Close.
- * Sticky while it docks or spans.
+ * default, the size button while it spans an upright phone, and Close.
+ * Sticky while it docks or spans. While the strip rests the name takes
+ * one line and `status`, which the content passes, the line under it
+ * (docs/design-v1-bar-compact.md 3.3).
  */
-function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
+function BarHeader(props: { title: string; status?: ReactNode; actions?: ReactNode; onClose(): void; closeLabel?: string }) {
   const frame = useContext(FrameContext);
-  const { place, size } = frame;
+  const { place, rest } = frame;
   // Reset shows only while the window docks, and the size only while the bar spans, so the two never stand together.
   const beforeClose = place?.moved ? (
     <IconButton icon="windowHome" label={RESET_LABEL} onClick={place.reset} onFocus={() => place.onResetFocus(true)} onBlur={() => place.onResetFocus(false)} />
-  ) : size ? (
-    <IconButton icon={size.larger ? "chevronDown" : "chevronUp"} label={size.larger ? "Smaller" : "Larger"} onClick={size.toggle} />
+  ) : rest ? (
+    <IconButton icon={rest.resting ? "chevronUp" : "chevronDown"} label={rest.resting ? "Larger" : "Smaller"} onClick={rest.resting ? rest.expand : rest.collapse} />
   ) : null;
   const handle = frame.handle && frame.header.grip === "dots" ? { ...frame.handle, grip: { ...frame.handle.grip, dots: true } } : frame.handle;
+  const status = rest?.resting && props.status !== undefined ? props.status : null;
   return (
     <PaneHeader
-      title={props.title}
+      title={
+        status === null ? (
+          props.title
+        ) : (
+          <>
+            <span style={RESTING_LINE}>{props.title}</span>
+            <span style={{ ...RESTING_LINE, color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>{status}</span>
+          </>
+        )
+      }
       actions={props.actions}
       beforeClose={beforeClose}
       onClose={props.onClose}
@@ -782,10 +800,13 @@ function BarHeader(props: { title: string; actions?: ReactNode; onClose(): void;
       closeRef={place?.closeRef}
       handle={handle ?? undefined}
       sticky={frame.sticky}
-      lines={2}
+      lines={status === null ? 2 : undefined}
     />
   );
 }
+
+/** A line of the resting header's title, cut with an ellipsis. */
+const RESTING_LINE: CSSProperties = { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 
 /** How long the window's keys rest before its status speaks. */
 const KEYS_REST_MS = 500;
@@ -857,6 +878,8 @@ function BarFrame(props: {
   const width = useStore(dockStore, (s) => s.defaultWidth);
   const column = useStore(dockStore, (s) => s.column);
   const foot = useStore(dockStore, (s) => s.foot);
+  const heldMode = useStore(dockStore, (s) => s.heldMode);
+  const cardAt = useStore(dockStore, (s) => s.cardAt);
   const barRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -941,7 +964,7 @@ function BarFrame(props: {
   useLayoutEffect(measure, [clipped]);
 
   // The anchor is always given here, so a placement always comes back.
-  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, tokenHeight: props.tokenHeight, spot, height: barHeight, column, width, size, resizable: finePointer })!;
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, tokenHeight: props.tokenHeight, spot, height: barHeight, column, width, size, resizable: finePointer, heldMode, cardAt })!;
   const { free, mode, resizable } = placed;
 
   // Actions in the Multi-select bar shows the bar and focuses its frame, once it is drawn.
@@ -1250,10 +1273,22 @@ function BarFrame(props: {
         }
       : null;
   // Read from where the bar stands at rest, never from its content or a drag under way, so the short layout, an opened "More stats" and a resize never flip it mid-gesture.
-  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer });
+  const short = barShort({ layout, viewport: props.viewport, chrome, foot, anchor: props.anchor, spot, column, width, size, resizable: finePointer, heldMode, cardAt });
   const header = mode === "dock" ? headerLayout(placed.hang.width, finePointer) : WHOLE_HEADER;
-  const sizeControl = mode === "span" ? { larger, toggle: toggleSize } : null;
-  const controls: FrameControls = { handle, sticky: mode !== "compact", place, size: sizeControl, header, short, raise: setRaised };
+  const rest: FrameControls["rest"] =
+    mode === "span"
+      ? {
+          resting: !larger,
+          scrolls: false,
+          expand: () => {
+            if (!larger) toggleSize();
+          },
+          collapse: () => {
+            if (larger) toggleSize();
+          },
+        }
+      : null;
+  const controls: FrameControls = { handle, sticky: mode !== "compact", place, rest, header, short, raise: setRaised };
 
   const { hang } = placed;
   const where = dragBox

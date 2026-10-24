@@ -141,7 +141,7 @@ export function freeArea(viewport: Size, chrome: Chrome, foot = 0): Box {
  */
 export function barMode(layout: Size, freeHeight: number): BarMode {
   if (freeHeight < MIN_BAR_HEIGHT) return "compact";
-  return layout.width < DOCK_MIN_WIDTH && layout.width <= layout.height ? "span" : "dock";
+  return uprightLayout(layout) ? "span" : "dock";
 }
 
 /**
@@ -886,10 +886,14 @@ export function placeBar(input: {
   size?: BarSize;
   /** The window resizes here: on a computer, where it docks (5.1). Elsewhere the size is ignored and stays stored. */
   resizable?: boolean;
+  /** The strip held since it showed (the dock store's `heldMode`), which no change of the free area turns compact. */
+  heldMode?: HeldMode;
+  /** Where a player's roll card stands (the dock store's `cardAt`), which the opening rule reads (openMode). */
+  cardAt?: CardAt;
 }): { mode: BarMode; free: Box; hang: Hang; lane: Lane; resizable: boolean; room: Box } | null {
   const barWidth = input.width ?? BAR_WIDTH;
   const free = freeArea(input.viewport, input.chrome, input.foot);
-  const mode = barMode(input.layout, free.height);
+  const mode = heldOrOpenMode({ layout: input.layout, free, foot: input.foot, cardAt: input.cardAt ?? null, heldMode: input.heldMode ?? null });
   if (mode === "span") {
     if (!input.anchor) return null;
     const { lane, floor } = spanLane(free, input.column);
@@ -950,6 +954,95 @@ export function restingBar(input: {
   const placed = placeBar({ ...input, foot: input.foot ?? 0, anchor: null });
   if (!placed || placed.mode === "span") return null;
   return { box: hangBox(placed.hang, input.height), laneLeft: laneLeft(placed.free), freeRight: placed.free.left + placed.free.width };
+}
+
+// ------------------------------------------------------------ an upright phone's resting bar
+
+/*
+ * On a phone held upright the bar rests as a strip at the foot of the
+ * map's free area, across its width, and never follows its token
+ * (docs/design-v1-bar-compact.md 3). Expand grows it up from the same
+ * foot. The strip is held from the moment it shows, so a free area that
+ * shrinks after the opening never turns it into the compact overlay.
+ */
+
+/** The strip's height: its border, the 52 px header, an 8 px gap, the 44 px quick row and an 8 px bottom padding (3.1). */
+export const REST_HEIGHT = 114;
+/** The least the strip gives up to, its header and quick row still whole, on the shortest free areas (3.1). */
+export const REST_TIGHT = 94;
+/** The map the strip keeps above it where it can: a touch target's height, which takes any token's middle for a tap. */
+export const BAND_MIN = 44;
+/** What Expand must add to the strip to be offered: a header's height (5.1). */
+export const EXPAND_GAIN = 52;
+
+/**
+ * The strip's height for a free area `free` px tall: 114, or less where
+ * that would leave under 44 px of map and the 8 px gap above it, never
+ * under 94 (3.1).
+ */
+export function restHeight(free: number): number {
+  return clamp(free - BAND_MIN - EDGE, REST_TIGHT, REST_HEIGHT);
+}
+
+/**
+ * Where a player's roll card stands on a narrow screen
+ * (features/rolls/PlayerRolls.tsx): at the foot over the toolbar, standing
+ * or folded, summoned onto the toolbar or onto the screen, or nowhere
+ * there.
+ */
+export type CardAt = "foot" | "toolbar" | "screen" | null;
+
+/** The one mode a bar keeps once it shows: the strip, or nothing held (2). */
+export type HeldMode = "span" | null;
+
+/** A layout an upright phone's bar spans, by its shape alone. */
+function uprightLayout(layout: Size): boolean {
+  return layout.width < DOCK_MIN_WIDTH && layout.width <= layout.height;
+}
+
+/**
+ * The bar's mode as it opens (2, review BC-OPUS-25). On an upright phone
+ * the free area counts a roll card standing at the foot as map, since the
+ * card folds into the alerts where both would not fit, so the strip opens
+ * where the card alone would have made the bar compact. A card summoned
+ * onto the toolbar or the screen counts as today. `free` is the free area
+ * with `foot` taken out (freeArea).
+ */
+export function openMode(input: { layout: Size; free: Box; foot: number; cardAt: CardAt }): BarMode {
+  const back = input.cardAt === "foot" && uprightLayout(input.layout) ? Math.max(0, input.foot) : 0;
+  return barMode(input.layout, input.free.height + back);
+}
+
+/**
+ * The mode a bar draws in: the held strip while the layout is still an
+ * upright phone's, whatever its free area does now, and else the opening
+ * rule. The layout check covers the render between a turn of the screen
+ * and the store letting go of the held mode.
+ */
+export function heldOrOpenMode(input: { layout: Size; free: Box; foot: number; cardAt: CardAt; heldMode: HeldMode }): BarMode {
+  if (input.heldMode === "span" && uprightLayout(input.layout)) return "span";
+  return openMode(input);
+}
+
+/*
+ * The quick row's order on screen (3.3). "mode" is the HP entry's lead,
+ * a token's or a group's: the mode toggle, the field and Apply. Roll's
+ * place holds a passing action or Roll, so they share one spot, and only
+ * one of them is drawn (restFit).
+ */
+const REST_DISPLAY: readonly string[] = ["mode", "crit", "useRoll", "conditions", "undoMove", "countLeg", "door", "roll", "multiSelect", "uses", "hidden", "details"];
+
+/**
+ * The quick row's candidates in the order they show, left to right (3.3).
+ * An id the strip does not know keeps its place after the known ones, in
+ * the order given.
+ */
+export function restOrder(ids: readonly string[]): string[] {
+  const rank = (id: string) => {
+    const at = REST_DISPLAY.indexOf(id);
+    return at < 0 ? REST_DISPLAY.length : at;
+  };
+  return ids.map((id, i) => ({ id, i })).sort((a, b) => rank(a.id) - rank(b.id) || a.i - b.i).map((e) => e.id);
 }
 
 // ------------------------------------------------------------ an upright phone's larger bar
@@ -1702,11 +1795,20 @@ type BarDockState = {
   alertsClosePanel: string | null;
   /** A popover of the tool's options is open (pages/Room.tsx ToolOptions). It rises under a roll card at a narrow screen's foot, which folds while it is open. */
   toolPopover: boolean;
+  /**
+   * "span" once an upright phone's strip shows, kept through a drag, a
+   * tap on another token and a fold until the selection is let go, the
+   * screen turns or the interface size changes, so the strip never turns
+   * compact by itself (docs/design-v1-bar-compact.md 2).
+   */
+  heldMode: HeldMode;
+  /** Where a player's roll card stands on a narrow screen (CardAt), for the opening rule (openMode). */
+  cardAt: CardAt;
 };
 
 /** Per Room page (state/scope.ts): a preview draws a second room with a bar and a column of its own. */
 export const barDockSlot = scopeSlot(() =>
-  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, larger: readLarger(), largerFor: null, largerMoved: 0, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false })),
+  createStore<BarDockState>(() => ({ chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, larger: readLarger(), largerFor: null, largerMoved: 0, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null })),
 );
 
 /**

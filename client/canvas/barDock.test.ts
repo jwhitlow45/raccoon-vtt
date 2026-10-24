@@ -99,6 +99,12 @@ import {
   spotText,
   writeLarger,
   writeSpot,
+  heldOrOpenMode,
+  openMode,
+  REST_HEIGHT,
+  REST_TIGHT,
+  restHeight,
+  restOrder,
   type Box,
   type Chrome,
   type Hang,
@@ -1823,5 +1829,71 @@ describe("an upright phone's Larger and Smaller (docs/design-v1-bar-dock.md 1.5)
     // A token too tall to leave the bar any more room leaves it as it is.
     assert.equal(largerRoom(view, free, free.top, 640), 0);
     assert.equal(largerShift(room(391, 586, null, 640)), 0);
+  });
+});
+
+describe("an upright phone's resting strip (docs/design-v1-bar-compact.md 2 and 3)", () => {
+  /** An upright layout whose free area is `free` px tall under the default chrome's 52 px top bar and 60 px toolbar. */
+  const upright = (free: number) => ({ width: 246, height: free + 128 });
+
+  test("the strip is 114 px, and shorter only where that would leave under 44 px of map and the gap, never under 94 (3.1)", () => {
+    assert.equal(REST_HEIGHT, 114);
+    assert.equal(REST_TIGHT, 94);
+    const cases: [number, number][] = [
+      [140, 94],
+      [146, 94],
+      [148, 96],
+      [165, 113],
+      [166, 114],
+      [715, 114],
+    ];
+    for (const [free, height] of cases) assert.equal(restHeight(free), height, `a free area of ${free}`);
+  });
+
+  test("the opening rule reads the free area without a roll card standing at the foot, but with one summoned onto the toolbar or the screen (BC-OPUS-25, BAR-ASTRA-10)", () => {
+    // 320 x 568 at 130%: a 309 px free area, which a 170 px card at the foot takes to 139, under the 148 a bar needs.
+    const layout = { width: 320 / 1.3, height: 568 / 1.3 };
+    const foot = 170;
+    const free = freeArea(layout, DEFAULT_CHROME, foot);
+    assert.ok(free.height < 148 && free.height + foot >= 148, JSON.stringify(free));
+    assert.equal(openMode({ layout, free, foot, cardAt: "foot" }), "span", "a standing card folds instead, so the strip opens");
+    assert.equal(openMode({ layout, free, foot, cardAt: "toolbar" }), "compact", "summoned onto the toolbar");
+    assert.equal(openMode({ layout, free, foot, cardAt: "screen" }), "compact", "summoned onto the screen");
+    assert.equal(openMode({ layout, free, foot, cardAt: null }), "compact", "no card placement known");
+    // With no card the rule is today's.
+    const open = freeArea(layout, DEFAULT_CHROME);
+    assert.equal(openMode({ layout, free: open, foot: 0, cardAt: null }), "span");
+    assert.equal(openMode({ layout: upright(147), free: freeArea(upright(147), DEFAULT_CHROME), foot: 0, cardAt: "foot" }), "compact", "a free area short without a card");
+  });
+
+  test("a card at the foot of a layout on its side still counts, so only an upright phone's opening changes", () => {
+    const layout = { width: 844, height: 390 };
+    const foot = 200;
+    const free = freeArea(layout, DEFAULT_CHROME, foot);
+    assert.ok(free.height < 148);
+    assert.equal(openMode({ layout, free, foot, cardAt: "foot" }), "compact");
+  });
+
+  test("only the strip is held: it stays a strip as the free area falls under 148, a compact bar turns into the strip at 148, and a layout on its side docks (2, BC-OPUS-33)", () => {
+    const mode = (free: number, heldMode: "span" | null, layout = upright(free)) => heldOrOpenMode({ layout, free: freeArea(layout, DEFAULT_CHROME), foot: 0, cardAt: null, heldMode });
+    assert.equal(mode(140, "span"), "span", "held at F = 140");
+    assert.equal(mode(141, null), "compact", "none held at F = 141");
+    assert.equal(mode(148, null), "span", "none held at F = 148");
+    assert.equal(mode(400, "span", { width: 844, height: 390 }), "dock", "held, then the screen turned");
+    // placeBar keeps the held mode for the bar drawn and for the room a pan expects.
+    const view = upright(140);
+    const placed = (heldMode: "span" | null) => placeBar({ layout: view, viewport: view, chrome: DEFAULT_CHROME, foot: 0, anchor: { x: 120, y: 120 }, spot: DEFAULT_SPOT, height: 200, column: null, heldMode })?.mode;
+    assert.equal(placed("span"), "span");
+    assert.equal(placed(null), "compact");
+  });
+
+  test("the quick row's display order: the lead, Crit, Use 9, Conditions, Roll's place, Multi-select, Uses, Hidden, Details (3.3)", () => {
+    assert.deepEqual(restOrder(["details", "hidden", "uses", "multiSelect", "roll", "conditions", "useRoll", "crit", "mode"]), ["mode", "crit", "useRoll", "conditions", "roll", "multiSelect", "uses", "hidden", "details"]);
+    // A passing action shares Roll's place, so it stands where Roll would.
+    assert.deepEqual(restOrder(["multiSelect", "roll", "undoMove", "conditions"]), ["conditions", "undoMove", "roll", "multiSelect"]);
+    assert.deepEqual(restOrder(["roll", "door", "countLeg", "undoMove"]), ["undoMove", "countLeg", "door", "roll"]);
+    // An id the strip does not know keeps its place after the known ones.
+    assert.deepEqual(restOrder(["light", "mode", "attach", "conditions"]), ["mode", "conditions", "light", "attach"]);
+    assert.deepEqual(restOrder([]), []);
   });
 });

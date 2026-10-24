@@ -120,8 +120,13 @@ export type Outbox = { send(msg: ClientMessage): boolean };
 /** UI state setters for `local` (design section 14.1). They never touch the room. */
 export type RoomUi = {
   setTool(id: string): void;
-  /** Selects a token, leaving its action bar as it is. Null lets go. */
-  select(tokenId: string | null): void;
+  /**
+   * Selects a token, leaving its action bar as it is. Null lets go. `opens`
+   * marks the viewer's own opening, such as a token just placed or
+   * duplicated, which may move the map once so an upright phone's strip
+   * clears the token (docs/design-v1-bar-compact.md 3.6).
+   */
+  select(tokenId: string | null, opts?: { opens?: boolean }): void;
   /** A tap on a token, on the map or its initiative row: select it and open its action bar (selection.ts). `add` adds it to the selection. */
   tap(tokenId: string | null, add?: boolean): void;
   /** Adds tokens to the selection, from a box dragged over them. */
