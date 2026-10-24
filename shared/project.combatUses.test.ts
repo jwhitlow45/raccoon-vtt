@@ -157,3 +157,30 @@ describe("combat uses on the actor reach only its owners (docs/design-v1-combat-
     assert.deepEqual((p1.characters.bree!.actor as Record<string, unknown>).turnRecord, state.characters.bree!.actor.turnRecord);
   });
 });
+
+describe("no log numbering reaches an owner's actor (docs/design-v1-combat-controls.md 8)", () => {
+  /** Thorn's wolf, P1's, shares his turn. With `hidden`, a creature only the DM sees loses an effect at the same Next. */
+  function turn(hidden: boolean): RoomState {
+    const state = room({
+      tokens: {
+        thorn: token("thorn", { kind: "pc", name: "Thorn", actor: { ref: "thorn" } }),
+        wolf: token("wolf", { kind: "npc", name: "Wolf", ownerIds: ["p1"], companion: { of: "thorn", turn: "shared" }, actor: { inline: actor({ hp: { cur: 5, max: 11, temp: 0 }, hurt: ["fire"], uses: { "actions:howl": { kind: "rest", name: "Howl", used: 1, max: 1 } } }) } }),
+        ghost: token("ghost", { name: "Ghost", visibility: "dm", actor: { inline: actor({ effects: hidden ? [{ id: "fx", key: "invisible", duration: { remaining: 1, boundary: "turnStart", anchor: { entryId: "et" } } }] : [] }) } }),
+      },
+      characters: { thorn: character("thorn", { name: "Thorn", ownerIds: ["p1"] }) },
+    });
+    state.encounter = { rev: 0, round: 1, activeEntryId: null, entries: [{ id: "et", tokenId: "thorn", value: 15, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false }] };
+    return run(state, { t: "encounter.next" }, DM, 7).state;
+  }
+
+  test("an owner's view of a creature's record, marks and damage types is the same with and without hidden lines in the same op", () => {
+    const plain = turn(false);
+    const busy = turn(true);
+    assert.ok(busy.log.length > plain.log.length, "the busy turn wrote more lines");
+    const wolf = (s: RoomState) => (projectState(s, P1, { sceneId: "s1" }).tokens.wolf!.actor as { inline: Record<string, unknown> }).inline;
+    const fields = (a: Record<string, unknown>) => ({ uses: a.uses, hurt: a.hurt, turnRecord: a.turnRecord });
+    assert.deepEqual(fields(wolf(busy)), fields(wolf(plain)));
+    assert.deepEqual(wolf(plain).turnRecord, { id: 7, entryId: "et", round: 1, hp: 5, life: "alive", took: ["fire"] });
+    assert.doesNotMatch(JSON.stringify(fields(wolf(busy))), /"\d+:\d+"/, "no log line id among them");
+  });
+});
