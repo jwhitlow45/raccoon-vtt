@@ -549,6 +549,8 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await turn.getByRole("button", { name: "Show Thorn's turn" }).click();
     await alerts(pat, "turn").getByRole("button", { name: /^Use Rage, 3 of 3 left/ }).click();
     await waitFor("Rage used", () => (deskSocket.state?.characters[run.thorn]?.resources?.find((r) => r.id === "rage")?.used === 1 ? true : null));
+    // Rage's words take a second line where Lay on Hands' fit beside a button, so its rows keep one height only with their buttons on a line of their own (lp20-cc-1).
+    await measure(pat, alerts(pat, "turn"), "Thorn's turn card with his class resources at 390 x 844 at 100%");
     await alerts(pat, "turn").getByRole("button", { name: /^Use Lay on Hands/ }).click();
     await alerts(pat, "turn").getByRole("textbox", { name: /^Lay on Hands to spend/ }).waitFor();
     await measure(pat, alerts(pat, "turn"), "Thorn's turn card with a pool's amount field at 390 x 844 at 100%");
@@ -594,6 +596,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     }
     assert.deepEqual([...measured].sort(), [
       "Thorn's turn card with a pool's amount field",
+      "Thorn's turn card with his class resources",
       "the bar's Uses drawer",
       "the folded turn card",
       "the recharge card",
