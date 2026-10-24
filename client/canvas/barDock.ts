@@ -1392,7 +1392,7 @@ export type Band = { top: number; bottom: number };
  * Where a toast that showed over an upright phone's spanning token bar's
  * header moves (docs/design-v1-bar-dock.md 1.3, review LP19-BS-2): 8 px
  * under the header, `head` being its box, so the toast never covers the
- * bar's Close or its Larger and Smaller. Null where no bar spans, or where
+ * bar's Close or Collapse. Null where no bar spans, or where
  * under 44 px would be left above the tool's options (`optionsTop`), and
  * the toast keeps its place. In the chrome's own px from the page's top.
  */
@@ -1459,8 +1459,8 @@ export function toastsUnderHead(boxes: readonly ({ id: number } & Band)[], head:
 
 /**
  * How long a spanning bar opens for, for the toasts, from when its header
- * shows: in that time it measures its content and Larger moves the map,
- * each of which can move its header. As long as a turn lasts for them
+ * shows: in that time it measures its content and Expand's clearing move
+ * moves the map, each of which can move its header. As long as a turn lasts for them
  * (Room.tsx TURN_MS).
  */
 export const BAR_OPEN_MS = 600;

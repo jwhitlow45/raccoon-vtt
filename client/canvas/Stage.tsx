@@ -1467,10 +1467,10 @@ export function MapStage(props: {
 }
 
 /**
- * A phone's spanning action bar hangs OFFSET_Y (34 px) under the token
- * (barDock.ts), room for a label of two lines. A taller label
- * under the token, or its plate, pushes it further down, so the bar never
- * hides it.
+ * The point under a token's label that the bar's clearing move keeps
+ * clear: OFFSET_Y (34 px) under the token (barDock.ts clearShift), room
+ * for a label of two lines. A taller label under the token, or its plate,
+ * pushes it further down, so the bar never hides it.
  */
 function belowLabel(anchor: Point, text: TokenText | undefined): Point {
   const block = text?.plate ?? text?.label;
@@ -1484,7 +1484,7 @@ function worldAnchor(cam: Camera, token: ViewToken): Point {
   return worldToScreen(cam, { x: token.x + fp.w / 2, y: token.y + fp.h });
 }
 
-/** How far a token's top stands above the screen point its bar hangs from, in the chrome's pixels (barDock.ts SpanRoom). */
+/** How far a token's top stands above the point under its label, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`). */
 function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number): number {
   return (anchor.y - worldToScreen(cam, { x: token.x, y: token.y }).y) / zoom;
 }

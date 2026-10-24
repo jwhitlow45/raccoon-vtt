@@ -97,7 +97,6 @@ import {
   laneLeft,
   limitMet,
   NO_SIZE,
-  NOTE_INSET as STRIP_NOTE_INSET,
   placeBar,
   releaseSize,
   releaseSpot,
@@ -191,9 +190,9 @@ export function TokenActionBar(props: {
   fullAccess: boolean;
   onDetails(): void;
   onClose(): void;
-  /** How far the token's top stands above `anchor` as drawn, in the chrome's pixels (barDock.ts SpanRoom). */
+  /** How far the token's top stands above `anchor` as drawn, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`). */
   tokenHeight: number;
-  /** Moves the map down by this many of the chrome's pixels, or up when negative, for an upright phone's larger bar (barDock.ts largerShift). */
+  /** Moves the map down by this many of the chrome's pixels, or up when negative, for an upright phone's clearing move (barDock.ts clearShift). */
   onShift?(dy: number): void;
 }) {
   const { token } = props;
@@ -996,8 +995,7 @@ const SENTENCE_LINES: CSSProperties = { display: "-webkit-box", WebkitLineClamp:
 
 /**
  * The strip's note (3.3): on its top edge across the frame, its words
- * barDock.ts NOTE_INSET in from each side (imported as STRIP_NOTE_INSET,
- * beside the content's own copy) and 8 px from its top and foot, so two
+ * barDock.ts NOTE_INSET in from each side and 8 px from its top and foot, so two
  * lines take the 52 px the band and the gap hold above the strip. Its
  * containing block is the frame, so the scroller never clips it.
  */
@@ -1007,7 +1005,7 @@ const NOTE_BOX: CSSProperties = {
   right: -theme.line.border,
   bottom: "100%",
   boxSizing: "border-box",
-  padding: `${theme.space(2)}px ${STRIP_NOTE_INSET}px`,
+  padding: `${theme.space(2)}px ${NOTE_INSET}px`,
   background: theme.color.surface,
   border: `${theme.line.border}px solid ${theme.color.border}`,
   borderRadius: theme.radius.lg,
@@ -1101,7 +1099,7 @@ type Drag = { kind: "move" | ResizePart; pointerId: number; el: HTMLElement; x: 
 function BarFrame(props: {
   anchor: Point;
   viewport: Size;
-  /** How far the token's top stands above `anchor` as drawn (barDock.ts SpanRoom). */
+  /** How far the token's top stands above `anchor` as drawn (barDock.ts clearShift's `tokenHeight`). */
   tokenHeight: number;
   /** What the bar opened for: the token's id, or "group". */
   opening: string;

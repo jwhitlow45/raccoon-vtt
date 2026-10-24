@@ -1570,10 +1570,10 @@ function Banner() {
  * Once the pane goes away, the stack stays where the header last stood,
  * until another pane stands (barDock.ts nextToastPlaces).
  *
- * On an upright phone, a toast that shows over the header of the spanning
- * token bar, which reaches the top of its room when it hangs over its
- * token, is placed again as if it came now, under that header, so Close
- * and Larger or Smaller stay in reach (review LP19-BS-2). Its box is read
+ * On an upright phone, a toast that shows over the header of the expanded
+ * token bar, which can reach the top of the toasts' room, is placed again
+ * as if it came now, under that header, so Close and Collapse stay in
+ * reach (review LP19-BS-2). Its box is read
  * once it is drawn, since only then is its height known, and the move
  * happens before the browser paints. So is a toast already showing there
  * as the bar opens (review LP19-Q1), and the stack under the header once
@@ -1770,7 +1770,7 @@ function Toasts(props: {
     }
     const notices = stacks.notices.box.current;
     mapFoot.current = overMap.length > 0 && notices ? notices.getBoundingClientRect().bottom / zoom : null;
-    // The foot of the toasts over the map, at the top of the notices or in the layer, which Larger leaves its token below (barDock.ts largerHang, review LP19-BS-3).
+    // The foot of the toasts over the map, at the top of the notices or in the layer, which the clearing move leaves its token below (barDock.ts clearShift, review LP19-BS-3).
     const layerBox = lowAt !== null ? stacks.layer.box.current : null;
     layerFoot.current = layerBox && low.length > 0 ? layerBox.getBoundingClientRect().bottom / zoom : null;
     const feet = [mapFoot.current, layerFoot.current].filter((f): f is number => f !== null);
