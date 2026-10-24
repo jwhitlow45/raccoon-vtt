@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Swipe a phone's bottom sheet down to close it, and the panel sheet up to
@@ -896,7 +896,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     // The roll card standing on Multi-select's bar, a total typed.
     await setUp(player, { width: 375, height: 667, scale: 1 });
     await touchTap(playerCdp, player, await cellPoint(player, run.thorn));
-    await player.getByRole("dialog", { name: "Thorn actions" }).getByRole("button", { name: "Multi-select", exact: true }).tap();
+    // Thorn's strip has no room for Multi-select after his HP entry, so it is behind Expand.
+    await (await barControl(player.getByRole("dialog", { name: "Thorn actions" }), "Multi-select")).tap();
     const request = randomUUID();
     await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "con" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
     const card = player.getByRole("dialog", { name: "The DM asks for a roll" });

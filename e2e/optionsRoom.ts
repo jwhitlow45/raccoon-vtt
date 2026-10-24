@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The room, the browsers and the reach sweep of tool options in one row
@@ -571,9 +571,9 @@ export const STATES: State[] = [
       const mine = p === player ? run.thorn.id : run.goblins[0]!;
       const token = socket.state!.tokens[mine]!;
       await tapCellAt(p, { x: token.x, y: token.y });
-      // Whichever token the tap took: the sweep's own states add tokens, which may stand on that cell by now.
+      // Whichever token the tap took: the sweep's own states add tokens, which may stand on that cell by now. On a phone held upright the strip has no room for Multi-select after an HP entry, so it may be behind Expand.
       const bar = p.getByRole("dialog", { name: / actions$/ }).first();
-      await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
+      await (await barControl(bar, "Multi-select")).click();
       await options(p).getByText("1 selected.").first().waitFor();
       // A tap off hides the group's bar, which on a short screen covers the row, and Actions shows: on a cell no token stands on or beside, where the map, not the bar, takes the tap.
       const tokens = Object.values(socket.state!.tokens);
