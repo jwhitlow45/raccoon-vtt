@@ -1449,6 +1449,73 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     }
   });
 
+  /** Pans the map with one finger by `dy`, from a point at height `y` on the window's left edge, past the scene's and left of an upright bar, which is empty map. */
+  async function panBy(y: number, dy: number): Promise<void> {
+    const from = { x: 4, y };
+    assert.equal(await hit(from), "CANVAS", `the map does not take the pan at ${from.x},${from.y}`);
+    await touch(along(from, { x: from.x, y: from.y + dy }, 12));
+    await player.waitForTimeout(400);
+  }
+
+  /** The DM's whisper to Pat, and its toast once it shows. */
+  async function whisperToPat(text: string): Promise<Locator> {
+    await ops.send({ t: "log.whisper", to: [run.patId], text });
+    const toast = player.locator("[data-toast]").filter({ hasText: text }).first();
+    await toast.waitFor();
+    await player.waitForTimeout(300);
+    return toast;
+  }
+
+  test("fu24r1-own. at 390 x 844 a whisper under Thorn's bar's header stays where it is when another token's bar opens lower, with Thorn's bar open or closed first: the toasts belong to the bar whose header placed them (review FU24-OPUS-1)", async () => {
+    const view = { width: 390, height: 844 };
+    const target = { characterId: run.thorn.characterId };
+    const effects = MANY.map((key) => ({ id: randomUUID(), key }));
+    // A scout on Thorn's row, whose bar for Pat is short, so it hangs over the scout well below the top.
+    const scout = randomUUID();
+    for (const effect of effects) await ops.send({ t: "actor.effect.add", target, effect });
+    await ops.send({ t: "token.create", token: { id: scout, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Scout", x: 11, y: 6, disposition: "hostile", actor: { inline: actor(7) } } });
+    await waitFor("the scout on the player's map", () => playerSocket.state?.tokens[scout]);
+    await player.evaluate(() => localStorage.removeItem("rvtt.tokenBarLarger"));
+    await setUp({ ...view, scale: 1 });
+    const bar = player.getByRole("dialog", { name: "Thorn actions" });
+    const scoutBar = player.getByRole("dialog", { name: "Scout actions" });
+    try {
+      // Thorn low on the screen, so his tall bar hangs over him up to the top of its room.
+      const thorn = await cellPoint({ x: 8, y: 6 });
+      await panBy(300, view.height - 220 - thorn.y);
+      for (const way of ["tap", "close"] as const) {
+        await touch([await cellPoint({ x: 8, y: 6 })]);
+        await bar.waitFor();
+        await player.waitForTimeout(900);
+        const head = await rectOf(bar.locator("[data-sticky-header]"));
+        assert.ok(head.top < 140, `${way}: Thorn's header stands at ${head.top}, not at the top of its room`);
+        const toast = await whisperToPat(`Under Thorn's header, then ${way}.`);
+        const placed = await rectOf(toast);
+        assert.ok(Math.abs(placed.top - (head.bottom + 8)) < 1.5, `${way}: the whisper starts at ${placed.top}, not 8 px under Thorn's header at ${head.bottom}`);
+        if (way === "close") {
+          await bar.getByRole("button", { name: "Close", exact: true }).tap();
+          await bar.waitFor({ state: "detached" });
+        }
+        await touch([await cellPoint({ x: 11, y: 6 })]);
+        await scoutBar.waitFor();
+        await player.waitForTimeout(700);
+        const other = await rectOf(scoutBar.locator("[data-sticky-header]"));
+        assert.ok(other.bottom > placed.top + 8.5 && !intersects(placed, other), `${way}: the scout's header ${JSON.stringify(other)} is not below the whisper ${JSON.stringify(placed)}, so nothing could pull it down`);
+        const now = await rectOf(toast);
+        assert.ok(Math.abs(now.top - placed.top) < 0.5, `${way}: the whisper went from ${placed.top} to ${now.top} as the scout's bar opened`);
+        await shots.take(player, `playerphone-fu24r1-own-${way}`);
+        await toast.tap();
+        await toast.waitFor({ state: "detached" });
+        await scoutBar.getByRole("button", { name: "Close", exact: true }).tap();
+        await scoutBar.waitFor({ state: "detached" });
+      }
+    } finally {
+      for (const b of [bar, scoutBar]) if (await b.isVisible()) await b.getByRole("button", { name: "Close", exact: true }).tap();
+      await ops.send({ t: "token.delete", tokenId: scout });
+      for (const effect of effects) await ops.send({ t: "actor.effect.remove", target, effectId: effect.id });
+    }
+  });
+
   test("bc-a1. a reload whose sheet mark sits on the room's own history entry, with Home behind it, keeps the room and shows Connected, and the mark is gone (lib/backClose.ts)", async () => {
     // The race on purpose: a sheet's Back entry written over the room's own entry as a reload begins.
     const room = `${server.origin}/r/${run.roomId}`;

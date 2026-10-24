@@ -1009,7 +1009,10 @@ function BarFrame(props: {
    * LP19-BS-2). Read after each render, as the bar moves with its token,
    * without drawing anything again, except that while the bar opens, and
    * once the header goes down into the toasts placed under it, the toasts
-   * look again (headAsksToasts, reviews LP19-Q1 and LP19-OPUS-3).
+   * look again (headAsksToasts, reviews LP19-Q1 and LP19-OPUS-3). Each
+   * time the header shows it starts a new opening, the key that owns a
+   * stack of toasts placed under it (barStack, review FU24-OPUS-1). A count,
+   * since two openings can fall in the same millisecond.
    */
   useLayoutEffect(() => {
     const header = mode === "span" && !folded ? barRef.current?.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`) : null;
@@ -1019,10 +1022,14 @@ function BarFrame(props: {
     spanToast.head = head;
     if (head === null) {
       spanToast.shownAt = null;
+      spanToast.opening = null;
       return;
     }
     const now = Date.now();
-    if (was === null) spanToast.shownAt = now;
+    if (was === null) {
+      spanToast.shownAt = now;
+      spanToast.opening = ++spanToast.openings;
+    }
     const moved = was === null || was.top !== head.top || was.bottom !== head.bottom;
     if (moved && headAsksToasts(spanToast, head, now)) spanToast.recheck?.();
   });
@@ -1030,6 +1037,7 @@ function BarFrame(props: {
     () => () => {
       spanToast.head = null;
       spanToast.shownAt = null;
+      spanToast.opening = null;
     },
     [spanToast],
   );

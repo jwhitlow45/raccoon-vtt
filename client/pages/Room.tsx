@@ -1549,9 +1549,12 @@ function Banner() {
  * happens before the browser paints. So is a toast already showing there
  * as the bar opens (review LP19-Q1), and the stack under the header once
  * the header goes down into it, as an alert card that moves the bar down
- * makes it (review LP19-OPUS-3). The bar asks for that look through
- * `recheck` (barDock.ts headAsksToasts). Any other move of the bar leaves
- * the toasts where they are.
+ * makes it, or a pan (review LP19-OPUS-3). Only the bar's opening whose
+ * header placed the stack moves it so: a stack a closed bar, or another
+ * token's, left behind stays where it is (barDock.ts barStack, review
+ * FU24-OPUS-1). The bar asks for that look through `recheck` (barDock.ts
+ * headAsksToasts). Any other move of the bar leaves the toasts where they
+ * are.
  *
  * When the screen turns, a toast at the top of the notices that now
  * meets the column's first card is placed again as if it came now, under
@@ -1600,9 +1603,9 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
   const cardMs = cardWaitMs();
   const recent = new Set(showing.filter((t) => Date.now() - t.shownAt < cardMs).map((t) => t.id));
-  // The toasts to place under a spanning token bar's header, read from the boxes as last drawn, and the place under it (barDock.ts toastsUnderHead).
+  // The toasts to place under a spanning token bar's header, read from the boxes as last drawn, the place under it, and the bar's opening then, which owns the stack once it is placed (barDock.ts toastsUnderHead and barStack).
   const spanToast = useScoped(spanToastSlot);
-  const [overBar, setOverBar] = useState<{ ids: ReadonlySet<number>; at: number | null }>(NOT_OVER_BAR);
+  const [overBar, setOverBar] = useState<OverBar>(NOT_OVER_BAR);
   // The bar asks for a look again as it opens, or as its header goes down into the stack under it, which draws nothing else here.
   const [, setRecheck] = useState(0);
   useLayoutEffect(() => {
@@ -1678,18 +1681,20 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
       const r = opening || recent.has(t.id) ? hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect() : undefined;
       return r && r.height > 0 ? [{ id: t.id, top: r.top / zoom, bottom: r.bottom / zoom }] : [];
     });
-    // A stack already under the header goes again once the header goes down into it (review LP19-OPUS-3).
-    const stack = barStack(placed.current, ids);
-    spanToast.stackTop = stack?.top ?? null;
+    // A stack this opening's header placed goes again once the header goes down into it (reviews LP19-OPUS-3 and FU24-OPUS-1).
+    const opened = spanToast.opening;
+    const stack = barStack(placed.current, ids, opened);
+    spanToast.stack = stack !== null && opened !== null ? { top: stack.top, opening: opened } : null;
     const over = toastsUnderHead(boxes, spanToast.head, stack);
     const at = over.size > 0 && props.optionsTop !== null ? barToastTop({ head: spanToast.head, optionsTop: props.optionsTop }) : null;
-    const next = at === null ? NOT_OVER_BAR : { ids: over, at };
-    if (next.at !== overBar.at || next.ids.size !== overBar.ids.size || [...next.ids].some((id) => !overBar.ids.has(id))) setOverBar(next);
+    // The opening is read here, as the toasts are placed, so a bar that closes before the next render never hands its stack to the next one.
+    const next = at === null || opened === null ? NOT_OVER_BAR : { ids: over, at, opening: opened };
+    if (next.at !== overBar.at || next.opening !== overBar.opening || next.ids.size !== overBar.ids.size || [...next.ids].some((id) => !overBar.ids.has(id))) setOverBar(next);
   });
   useEffect(
     () => () => {
       spanToast.foot = null;
-      spanToast.stackTop = null;
+      spanToast.stack = null;
     },
     [spanToast],
   );
@@ -1715,7 +1720,9 @@ function Toasts(props: { low: number | null; edges: ToastEdges; pane: number | n
   );
 }
 
-const NOT_OVER_BAR: { ids: ReadonlySet<number>; at: number | null } = { ids: new Set(), at: null };
+type OverBar = { ids: ReadonlySet<number>; at: number | null; opening: number | null };
+
+const NOT_OVER_BAR: OverBar = { ids: new Set(), at: null, opening: null };
 
 /** How long after the screen turns a toast at the top of the notices may still be placed again under the column's card. */
 const TURN_MS = 600;

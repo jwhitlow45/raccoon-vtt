@@ -1310,14 +1310,23 @@ export function toastsOverHead(boxes: readonly ({ id: number } & Band)[], head: 
 /** The toasts' layer stack while it stands under a spanning bar's header (barToastTop): the top it was placed at, and its toasts. */
 export type BarStack = { top: number; ids: readonly number[] };
 
-/** The layer's stack, of the toasts showing (`ids`), if a spanning bar's header placed it. Null for a stack placed anywhere else, or none. */
-export function barStack(state: ToastPlaces, ids: readonly number[]): BarStack | null {
+/**
+ * The layer's stack, of the toasts showing (`ids`), if the header of the
+ * bar's opening that stands now (`opening`, spanToastSlot) placed it. A
+ * stack belongs to the opening whose header placed it there last, so one
+ * left by a bar that closed, or by another token's bar, stays where it is
+ * when the next bar opens, rather than jump under a header that never
+ * covered it, over that bar's body (review FU24-OPUS-1). The next bar's
+ * header takes it over only by covering it as it opens. Null for a stack
+ * placed anywhere else, by another opening, or none.
+ */
+export function barStack(state: ToastPlaces, ids: readonly number[], opening: number | null): BarStack | null {
   let top: number | null = null;
   const under: number[] = [];
   for (const id of ids) {
     const place = state.places.get(id);
     if (typeof place !== "object") continue;
-    if (!place.bar) return null;
+    if (place.bar !== opening) return null;
     top ??= place.low;
     under.push(id);
   }
@@ -1358,21 +1367,25 @@ export function barOpening(shownAt: number | null, now: number): boolean {
  * again for those to place under it (spanToastSlot's `recheck`): while
  * the bar opens, so toasts already showing that cover the header move
  * under it, as new ones do (review LP19-Q1), and once the header's bottom
- * goes below the top of the stack placed under it (toastsUnderHead, review
- * LP19-OPUS-3). Any other move draws no toast.
+ * goes below the top of the stack this opening placed under it
+ * (toastsUnderHead, reviews LP19-OPUS-3 and FU24-OPUS-1). Any other move
+ * draws no toast. The stack is the one the toasts last published, read
+ * against the opening now, since the toasts publish it only as they draw.
  */
-export function headAsksToasts(slot: { shownAt: number | null; stackTop: number | null }, head: Band, now: number): boolean {
-  return barOpening(slot.shownAt, now) || (slot.stackTop !== null && head.bottom - 0.5 > slot.stackTop);
+export function headAsksToasts(slot: { shownAt: number | null; opening: number | null; stack: { top: number; opening: number } | null }, head: Band, now: number): boolean {
+  if (barOpening(slot.shownAt, now)) return true;
+  return slot.stack !== null && slot.stack.opening === slot.opening && head.bottom - 0.5 > slot.stack.top;
 }
 
 /**
  * Where a toast stands: at the top of the map's notices, in the toasts' own
  * layer under the column's first card (`low`, in the chrome's px, and
- * `column`), under a spanning token bar's header (`bar`, across the map) or
+ * `column`), under a spanning token bar's header (across the map, `bar`
+ * being the opening of the bar whose header placed it, spanToastSlot) or
  * where a map pane's header last stood (across the map), or under that
  * header while the pane stands ("pane"), or in the very short sheet.
  */
-export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean; bar?: true };
+export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean; bar?: number };
 
 /**
  * The toasts' places by id, the pane header's last place, whether a pane
@@ -1463,8 +1476,8 @@ export function nextToastPlaces(
     turned?: boolean;
     mapFoot?: number | null;
     recent?: ReadonlySet<number>;
-    /** The toasts to place under a spanning bar's header (toastsUnderHead), and barToastTop's place under it (reviews LP19-BS-2, LP19-Q1 and LP19-OPUS-3). */
-    overBar?: { ids: ReadonlySet<number>; at: number | null };
+    /** The toasts to place under a spanning bar's header (toastsUnderHead), barToastTop's place under it, and the bar's opening, which then owns the stack (reviews LP19-BS-2, LP19-Q1, LP19-OPUS-3 and FU24-OPUS-1). */
+    overBar?: { ids: ReadonlySet<number>; at: number | null; opening: number | null };
   },
 ): ToastPlaces {
   const freeze = was.paneStood && !now.paneStands;
@@ -1477,19 +1490,19 @@ export function nextToastPlaces(
   const cardRoom = now.layer && !now.slot && !now.paneStands;
   const recent = now.recent ?? new Set<number>();
   const awaitCard = new Set(now.ids.filter((id) => was.awaitCard.has(id) && recent.has(id)));
-  // A toast over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since a new toast would join it over the header again.
-  const barAt = cardRoom ? (now.overBar?.at ?? null) : null;
-  const overBar = barAt !== null ? (now.overBar?.ids ?? new Set<number>()) : new Set<number>();
+  // A toast over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since a new toast would join it over the header again, and that bar's opening owns the stack from then on.
+  const bar = cardRoom && now.overBar && now.overBar.at !== null && now.overBar.opening !== null ? { low: now.overBar.at, column: false, bar: now.overBar.opening } : null;
+  const overBar = bar !== null ? (now.overBar?.ids ?? new Set<number>()) : new Set<number>();
   for (const id of now.ids) {
     const place = was.places.get(id);
     if (place === undefined) continue;
     if (overBar.has(id) && place !== "sheet" && place !== "pane") continue;
-    if (barAt !== null && overBar.size > 0 && typeof place === "object") {
-      places.set(id, { low: barAt, column: false, bar: true });
+    if (bar !== null && overBar.size > 0 && typeof place === "object") {
+      places.set(id, bar);
       continue;
     }
     // Its header's place was read on the screen before the turn, where the bar spanned: it takes its place anew, as a pane's toasts do (review LP18-TO-3).
-    if (turned && typeof place === "object" && place.bar) continue;
+    if (turned && typeof place === "object" && place.bar !== undefined) continue;
     // Left without a place, so the loop below places it as a new toast.
     if (underCard && (place === "map" || turning.has(id))) {
       turning.add(id);
@@ -1512,8 +1525,8 @@ export function nextToastPlaces(
         ? "map"
         : now.pane !== null
           ? "pane"
-          : barAt !== null && overBar.has(id)
-            ? { low: barAt, column: false, bar: true }
+          : bar !== null && overBar.has(id)
+            ? bar
             : now.low !== null && !mapReaches
               ? { low: now.low, column: true }
               : "map";
@@ -1580,23 +1593,28 @@ export function columnTop(laneTop: number, lastingBottom: number | null): number
 
 /*
  * What an upright phone's spanning token bar and the toasts read of each
- * other as they act, never as they draw, so a pan that moves the bar draws
- * no toast and a toast that comes moves no bar: the box of the bar's
- * header while it spans (`head`), which a toast that shows over it moves
- * under (barToastTop, review LP19-BS-2), when that header last showed
- * (`shownAt`, for barOpening), the foot of the toasts over the map
+ * other: the box of the bar's header while it spans (`head`), which a
+ * toast that shows over it moves under (barToastTop, review LP19-BS-2),
+ * when that header last showed (`shownAt`, for barOpening) and which of
+ * the bar's openings it is (`opening`, from a count, `openings`, that goes
+ * up each time a header shows), the foot of the toasts over the map
  * (`foot`), which Larger leaves its token below (largerHang, review
- * LP19-BS-3), and the top of the stack placed under the header
- * (`stackTop`, barStack). In the chrome's px from the page's top, null
- * while there is none. The one way back is `recheck`, which the toasts
- * set and the bar calls only as headAsksToasts says. Per Room page, as
- * the dock store is.
+ * LP19-BS-3), and the stack the toasts placed under that opening's header
+ * (`stack`, its top and its opening, barStack). In the chrome's px from
+ * the page's top, null while there is none. Each side reads the other as
+ * it acts, not as it draws, so a toast that comes moves no bar. A pan that
+ * moves the bar draws no toast but in two cases: while the bar opens, and
+ * once its header goes down into the stack under it. Then the bar calls
+ * `recheck`, which the toasts set, as headAsksToasts says (reviews LP19-Q1,
+ * LP19-OPUS-3 and FU24-ASTRA-02). Per Room page, as the dock store is.
  */
 export const spanToastSlot = scopeSlot(() => ({
   head: null as Band | null,
   shownAt: null as number | null,
+  opening: null as number | null,
+  openings: 0,
   foot: null as number | null,
-  stackTop: null as number | null,
+  stack: null as { top: number; opening: number } | null,
   recheck: null as (() => void) | null,
 }));
 
