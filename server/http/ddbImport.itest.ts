@@ -96,8 +96,8 @@ describe("POST /api/rooms/:id/ddb-import", () => {
     assert.equal(fill.level, 5);
     assert.deepEqual(fill.stats.saves, ["dex"]);
     assert.equal(fill.actor.sheetUrl, "https://www.dndbeyond.com/characters/12345678");
-    // The read marks reach the device, since a re-sync removes a linked roll only of a kind read whole. This character sends no spell lists or actions.
-    assert.deepEqual(fill.read, { weapon: true, spell: false, other: false });
+    // The read marks reach the device, since a re-sync removes a linked roll or class resource only of a kind read whole. This character sends no spell lists or actions.
+    assert.deepEqual(fill.read, { weapon: true, spell: false, other: false, resource: false });
     assert.equal(res.headers["cache-control"], "no-store");
   });
 

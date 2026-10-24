@@ -176,7 +176,7 @@ describe("readDdbCharacter: the character", () => {
   });
 
   test("every kind of roll is read whole, and no source is missing", () => {
-    assert.deepEqual(fill.read, { weapon: true, spell: true, other: true });
+    assert.deepEqual(fill.read, { weapon: true, spell: true, other: true, resource: true });
     assert.ok(!fill.warnings.some((w) => /did not send|No class was read/.test(w)));
   });
 });
@@ -217,6 +217,14 @@ describe("readDdbCharacter: spells", () => {
     assert.ok(checkedFill(fill));
   });
 
+  test("eight unhalved spells with long names: the line names fewer and stays within 400 characters, so the fill still passes", () => {
+    const long = Array.from({ length: 9 }, (_, i) => spell(`${"An invented spell of a very long name".padEnd(57, "x")} ${i}`, 1, { requiresSavingThrow: true, saveDcAbilityId: 2, modifiers: [damage("fire", "2d6")] }));
+    const fill = readDdbCharacter(ione(long), ids)!;
+    const line = fill.warnings.find((w) => /halves the damage/.test(w));
+    assert.ok(line && line.length <= 400 && / and others\./.test(line));
+    assert.ok(checkedFill(fill));
+  });
+
   test("granted spells, actions with dice or a save, and 40 rolls at most", () => {
     const many = Array.from({ length: 50 }, (_, i) => spell(`Bolt ${i}`, 1, { requiresAttackRoll: true }));
     const fill = readDdbCharacter(
@@ -228,7 +236,7 @@ describe("readDdbCharacter: spells", () => {
     )!;
     assert.equal(fill.stats.rolls.length, 40);
     assert.ok(fill.warnings.includes("D&D Beyond has 13 more rolls for Ione Marrow than the 40 that are read, so those were not read. Rolls here that they would change stay as they are."));
-    assert.deepEqual(fill.read, { weapon: true, spell: false, other: false }, "the cut took spells and both actions");
+    assert.deepEqual(fill.read, { weapon: true, spell: false, other: false, resource: true }, "the cut took spells and both actions");
     const all = readDdbCharacter(ione([], { actions: { race: [{ name: "Breath Weapon", dice: { diceString: "2d6" }, saveStatId: 2, abilityModifierStatId: 3 }], class: [{ name: "Second Wind", dice: { diceString: "1d10" } }] } }), ids)!;
     assert.deepEqual(all.stats.rolls.find((r) => r.name === "Breath Weapon"), { id: all.stats.rolls[0]!.id, name: "Breath Weapon", kind: "other", dice: [{ formula: "2d6" }], ddb: true, ability: "con", save: { ability: "dex" } });
     assert.deepEqual(all.stats.rolls.find((r) => r.name === "Second Wind")?.dice, [{ formula: "1d10" }]);
@@ -280,7 +288,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     equipmentWithItems: "D&D Beyond did not send the equipment, so its magic items' bonuses could not be counted, and the scores, proficiencies, bonuses, defenses, senses, AC, max HP and weapons were not read. They stay as they are.",
     scores: "D&D Beyond did not send the bonuses and overrides to the ability scores, so the scores, bonuses, AC, max HP and weapons were not read. They stay as they are.",
     spellLists: "D&D Beyond did not send the character's spell lists, so spells were not read. They stay as they are.",
-    actions: "D&D Beyond did not send the character's actions, so other rolls were not read. They stay as they are.",
+    actions: "D&D Beyond did not send the character's actions, so other rolls and class resources were not read. They stay as they are.",
   };
   /** What the modifiers' needs hold up: every part that reads a modifier or a score. */
   const MODIFIER_PARTS = ["abilities", "saves", "skills", "adjust", "defenses", "jack", "alert", "actor.ac", "actor.hpMax", "actor.senses"];
@@ -333,7 +341,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     for (const partial of [without(rich(), "classes"), rich({ classes: { level: 7 } }), rich({ classes: [{ level: "7", definition: { name: "Rogue" } }, { level: 3, definition: "Fighter" }, null] })]) {
       const fill = leavesOut(rich(), partial, leftOut, WARN.classes);
       assert.deepEqual(names(fill), ["Second Wind"]);
-      assert.deepEqual(fill.read, { weapon: false, spell: false, other: true });
+      assert.deepEqual(fill.read, { weapon: false, spell: false, other: true, resource: true });
       assert.ok(!fill.warnings.some((w) => /No class was read/.test(w)), "the level is left out, never read as 1");
     }
     // An override is the whole maximum, so it reads without the classes.
@@ -345,7 +353,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     for (const partial of [without(rich(), "modifiers"), rich({ modifiers: [] }), rich({ modifiers: "none" })]) {
       const fill = leavesOut(rich(), partial, MODIFIER_PARTS, WARN.modifiers);
       assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"]);
-      assert.deepEqual(fill.read, { weapon: false, spell: true, other: true });
+      assert.deepEqual(fill.read, { weapon: false, spell: true, other: true, resource: true });
     }
   });
 
@@ -354,7 +362,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     for (const partial of [without(body, "inventory"), { ...body, inventory: { 0: "Rapier" } }]) {
       const fill = leavesOut(body, partial, ["actor.ac"], WARN.equipment);
       assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"]);
-      assert.deepEqual(fill.read, { weapon: false, spell: true, other: true });
+      assert.deepEqual(fill.read, { weapon: false, spell: true, other: true, resource: true });
     }
   });
 
@@ -362,7 +370,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     const body = rich({ modifiers: { ...wrenMods, item: [cloak] } });
     const fill = leavesOut(body, without(body, "inventory"), MODIFIER_PARTS, WARN.equipmentWithItems);
     assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"]);
-    assert.deepEqual(fill.read, { weapon: false, spell: true, other: true });
+    assert.deepEqual(fill.read, { weapon: false, spell: true, other: true, resource: true });
   });
 
   test("no inventory beside an item's 120 ft Darkvision: the senses are not read as the race's 60 ft", () => {
@@ -379,7 +387,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     for (const partial of [without(aura, "bonusStats"), without(aura, "overrideStats"), without(aura, "bonusStats", "overrideStats"), { ...aura, overrideStats: {} }]) {
       const fill = leavesOut(aura, partial, ["abilities", "adjust", "actor.ac", "actor.hpMax"], WARN.scores);
       assert.deepEqual(names(fill), ["Fire Bolt", "Second Wind"]);
-      assert.deepEqual(fill.read, { weapon: false, spell: true, other: true });
+      assert.deepEqual(fill.read, { weapon: false, spell: true, other: true, resource: true });
     }
   });
 
@@ -390,7 +398,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
       const fill = leavesOut(body, partial, [], WARN.spellLists);
       assert.deepEqual(names(fill), []);
       assert.equal(fill.stats.spellAbility, "int");
-      assert.deepEqual(fill.read, { weapon: true, spell: false, other: true });
+      assert.deepEqual(fill.read, { weapon: true, spell: false, other: true, resource: true });
     }
   });
 
@@ -398,7 +406,7 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     for (const partial of [without(rich(), "actions"), rich({ actions: [] })]) {
       const fill = leavesOut(rich(), partial, [], WARN.actions);
       assert.deepEqual(names(fill), [...WEAPONS, "Fire Bolt"]);
-      assert.deepEqual(fill.read, { weapon: true, spell: true, other: false });
+      assert.deepEqual(fill.read, { weapon: true, spell: true, other: false, resource: false });
     }
   });
 
@@ -407,12 +415,12 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design-v1-res
     const spellCut = readDdbCharacter(wren({ classSpells: [{ spells: bolts(37) }] }), ids)!;
     assert.equal(spellCut.stats.rolls.length, 40);
     assert.equal(spellCut.stats.rolls.at(-1)?.name, "Bolt 35");
-    assert.deepEqual(spellCut.read, { weapon: true, spell: false, other: true });
+    assert.deepEqual(spellCut.read, { weapon: true, spell: false, other: true, resource: true });
     assert.ok(spellCut.warnings.includes("D&D Beyond has 1 more roll for Wren Ashdown than the 40 that are read, so it was not read. Rolls here that it would change stay as they are."));
     const otherCut = readDdbCharacter(rich({ classSpells: [{ spells: bolts(36) }] }), ids)!;
     assert.deepEqual(names(otherCut).slice(0, 4), WEAPONS);
     assert.equal(otherCut.stats.rolls.some((r) => r.name === "Second Wind"), false);
-    assert.deepEqual(otherCut.read, { weapon: true, spell: true, other: false });
+    assert.deepEqual(otherCut.read, { weapon: true, spell: true, other: false, resource: true });
     // A character with no name read is named in the words all the same.
     assert.ok(readDdbCharacter(without(rich({ classSpells: [{ spells: bolts(36) }] }), "name"), ids)!.warnings.some((w) => w.startsWith("D&D Beyond has 1 more roll for the character than the 40")));
     assert.ok(!spellCut.warnings.some((w) => /left out\. At most/.test(w)));

@@ -4,6 +4,7 @@ import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
+import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import {
   ABILITY_KEYS,
@@ -678,6 +679,39 @@ const pcStatsPatch = z
   })
   .refine((s) => serializedBytes(s) <= LIMITS.pcStatsBytes, withinPcStatsBytes);
 
+const resourceName = z
+  .string()
+  .min(1)
+  .max(LIMITS.resourceNameChars)
+  .regex(NAME_CHARS, "names cannot hold control or text direction characters")
+  .refine(whole, wholeText);
+const countFits = (r: { max: number; pool?: true | undefined }) => r.pool === true || r.max <= LIMITS.resourceMax;
+const countFitsText = { message: `a count is at most ${LIMITS.resourceMax}, a pool's ${LIMITS.resourcePoolMax}` };
+const presetId = z.string().max(40).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "not a preset");
+
+/** The most class resources a fill reads, a character's cap (docs/design-v1-ddb-resources.md 2.1). */
+export const MAX_FILL_RESOURCES = LIMITS.resourcesPerCharacter;
+
+/**
+ * A class resource a D&D Beyond fill read (docs/design-v1-ddb-resources.md
+ * 3.1): no id, which the merge gives, `classId` the class its feature
+ * resolved to, for pairing, and `used` absent when D&D Beyond's count was
+ * not read.
+ */
+const fillResource = z
+  .strictObject({
+    name: resourceName,
+    max: z.number().int().min(1).max(LIMITS.resourcePoolMax),
+    reset: z.enum(["long", "short", "shortOne"]),
+    pool: z.literal(true).optional(),
+    preset: presetId.optional(),
+    level: characterLevel.optional(),
+    classId: z.enum(CLASS_IDS).optional(),
+    used: z.number().int().min(0).max(LIMITS.resourcePoolMax).optional(),
+  })
+  .refine(countFits, countFitsText)
+  .refine((r) => r.used === undefined || r.used <= r.max, { message: "a resource uses at most its count" });
+
 /**
  * What a fill read (docs/design-v1-pc-stats.md 6.1, shared/rules/pcFill.ts),
  * as the D&D Beyond route answers it and the editor takes it: the block's
@@ -710,8 +744,13 @@ const pcFill = z.strictObject({
     sheetUrl: sheetUrl.optional(),
   }),
   warnings: z.array(line(400)).max(50),
-  /** Whether each kind of roll was read whole (docs/design-v1-resync.md 2.5). Absent reads as all three, as a pasted-text fill is. */
-  read: z.strictObject({ weapon: z.boolean(), spell: z.boolean(), other: z.boolean() }).optional(),
+  /**
+   * Whether each kind of roll was read whole (docs/design-v1-resync.md 2.5). Absent reads as all three, as a pasted-text
+   * fill is. `resource` is whether the class resources were (docs/design-v1-ddb-resources.md 3.2), absent as false.
+   */
+  read: z.strictObject({ weapon: z.boolean(), spell: z.boolean(), other: z.boolean(), resource: z.boolean().optional() }).optional(),
+  /** The class resources read (docs/design-v1-ddb-resources.md 3.1). Absent: not read. */
+  resources: z.array(fillResource).max(MAX_FILL_RESOURCES).optional(),
 });
 
 /*
@@ -840,25 +879,17 @@ const PROMPT_KEY = new RegExp(`^(?:regeneration|deathSave|recharge:${USE_KEY.sou
 const promptKey = z.string().max("recharge:".length + LIMITS.useKeyChars).regex(PROMPT_KEY, "not a prompt");
 /** The damage types a hit dealt, each once (3.4). */
 const damageTypes = z.array(z.enum(DAMAGE_TYPES)).min(1).max(DAMAGE_TYPES.length).refine(unique, { message: "a damage type is listed twice" });
-const resourceName = z
-  .string()
-  .min(1)
-  .max(LIMITS.resourceNameChars)
-  .regex(NAME_CHARS, "names cannot hold control or text direction characters")
-  .refine(whole, wholeText);
 const resourceFields = {
   id: plainId,
   name: resourceName,
   max: z.number().int().min(1).max(LIMITS.resourcePoolMax),
   reset: z.enum(["long", "short", "shortOne"]),
   pool: z.literal(true).optional(),
-  preset: z.string().max(40).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "not a preset").optional(),
+  preset: presetId.optional(),
   level: characterLevel.optional(),
   atLevel: characterLevel.optional(),
   edited: z.literal(true).optional(),
 };
-const countFits = (r: { max: number; pool?: true | undefined }) => r.pool === true || r.max <= LIMITS.resourceMax;
-const countFitsText = { message: `a count is at most ${LIMITS.resourceMax}, a pool's ${LIMITS.resourcePoolMax}` };
 /** A class resource as an update sends it: no `used`, which the reducer keeps by id (character.update). */
 const resourceInput = z.strictObject(resourceFields).refine(countFits, countFitsText);
 const resourceStored = z
@@ -2378,6 +2409,8 @@ export const knownFormsSchema = knownForms;
 export const pcStatsPatchSchema = pcStatsPatch;
 /** A fill as the D&D Beyond route answers it (docs/design-v1-pc-stats.md 6.3). */
 export const pcFillSchema = pcFill;
+/** One class resource of a fill, so the reader leaves out one that fails instead of the whole fill failing (docs/design-v1-ddb-resources.md 3.1). */
+export const fillResourceSchema = fillResource;
 /** A character's sync record as stored, so the stored-state schema checks imported ones by the same bounds. */
 export const ddbSyncForImport = ddbSync;
 /** A sync record as a patch sends it, for the re-sync to check what it would send. */

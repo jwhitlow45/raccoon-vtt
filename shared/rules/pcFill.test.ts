@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PcRoll, PcStats } from "../model.ts";
-import { fillSummary, mergeFill, type PcFill } from "./pcFill.ts";
+import { checkedFill, fillSummary, mergeFill, type PcFill } from "./pcFill.ts";
 import { EMPTY_PC_STATS } from "./pcStats.ts";
 
 /** What a fill does to a block (docs/design-v1-pc-stats.md 6.1). */
@@ -47,5 +47,17 @@ describe("mergeFill", () => {
     const m = mergeFill(BASE, fill("paste", {}));
     assert.deepEqual(m.stats, BASE);
     assert.equal(fillSummary(fill("paste", {}), m), "Changes nothing in the stat block.");
+  });
+});
+
+describe("checkedFill with class resources (docs/design-v1-ddb-resources.md 3.1)", () => {
+  test("a resolved Cleric 6/Paladin 3 fill passes with both classes, and an unknown class fails it (ASTRA-4)", () => {
+    const resources = [
+      { name: "Channel Divinity", max: 3, reset: "shortOne" as const, preset: "cleric-channel-divinity", level: 6, classId: "cleric" as const, used: 1 },
+      { name: "Channel Divinity", max: 2, reset: "shortOne" as const, preset: "paladin-channel-divinity", level: 3, classId: "paladin" as const },
+    ];
+    const read = { weapon: true, spell: true, other: true, resource: true };
+    assert.deepEqual(checkedFill({ ...fill("ddb", {}), resources, read })?.resources, resources);
+    assert.equal(checkedFill({ ...fill("ddb", {}), resources: [{ ...resources[0], classId: "artificer" }], read }), null);
   });
 });

@@ -234,3 +234,24 @@ describe("a re-sync's schema", () => {
     assert.equal(pcFillSchema.safeParse({ ...fill, read: { weapon: "yes", spell: false, other: true } }).success, false);
   });
 });
+
+/** A fill's class resources (docs/design-v1-ddb-resources.md 3.1). */
+describe("class resources in a fill's schema", () => {
+  test("a fill's class resources: each field bounded, a class of the twelve, at most 12, and read.resource", () => {
+    const fill = { source: "ddb", stats: { rolls: [] }, actor: {}, warnings: [], read: { weapon: true, spell: true, other: true, resource: true } };
+    const wild = { name: "Wild Shape", max: 3, reset: "shortOne", preset: "druid-wild-shape", level: 6, classId: "druid", used: 1 };
+    const parse = (resources: unknown[], over: Record<string, unknown> = {}) => pcFillSchema.safeParse({ ...fill, resources, ...over }).success;
+    assert.ok(parse([wild]));
+    assert.ok(parse([{ name: "Breath Weapon", max: 3, reset: "long" }]));
+    assert.ok(parse([wild], { read: { weapon: true, spell: true, other: true } }), "read.resource may be absent");
+    assert.equal(parse([{ ...wild, classId: "artificer" }]), false, "an unknown class (OP-4)");
+    assert.equal(parse([{ ...wild, used: 4 }]), false, "used past the count");
+    assert.equal(parse([{ ...wild, id: "w1" }]), false, "no id, which the merge gives");
+    assert.equal(parse([{ ...wild, max: 100 }]), false, "a count past 99");
+    assert.ok(parse([{ ...wild, max: 100, pool: true }]), "a pool to 200");
+    assert.equal(parse([{ ...wild, name: "\uD83D" }]), false, "half a character");
+    assert.equal(parse([{ ...wild, edited: true }]), false, "a strict object");
+    assert.equal(parse(Array.from({ length: 13 }, () => wild)), false);
+    assert.equal(parse([wild], { read: { weapon: true, spell: true, other: true, resource: "yes" } }), false);
+  });
+});

@@ -1,5 +1,6 @@
-import type { AbilityKey, Actor, PcRoll, PcStats } from "../model.ts";
+import type { AbilityKey, Actor, ClassResource, PcRoll, PcStats } from "../model.ts";
 import { MAX_PC_ROLLS, pcFillSchema, pcStatsForImport } from "../protocol.ts";
+import type { ClassId } from "./classResources.ts";
 import { EMPTY_PC_STATS } from "./pcStats.ts";
 
 /**
@@ -37,9 +38,30 @@ export type PcFill = {
    * Whether each kind of roll was read whole (docs/design-v1-resync.md
    * 2.5): its sources were all there and the 40-roll cut took none of it.
    * A re-sync removes a synced roll only of a kind read whole. Absent reads
-   * as all three, as a pasted-text fill is.
+   * as all three, as a pasted-text fill is. `resource` says the same of the
+   * class resources (docs/design-v1-ddb-resources.md 3.2), and absent while
+   * `resources` is there reads as false, so such a fill never removes one.
    */
-  read?: { weapon: boolean; spell: boolean; other: boolean };
+  read?: { weapon: boolean; spell: boolean; other: boolean; resource?: boolean };
+  /** The class resources a D&D Beyond fill read, at most 12. Absent: not read, as for pasted text or no actions. */
+  resources?: FillResource[];
+};
+
+/**
+ * A class resource as a D&D Beyond fill reads it (docs/design-v1-ddb-resources.md
+ * 3.1): `preset` and `level` a preset match and its class's level, `classId`
+ * the class its feature resolved to, and `used` D&D Beyond's spent count,
+ * absent when it was not read.
+ */
+export type FillResource = {
+  name: string;
+  max: number;
+  reset: ClassResource["reset"];
+  pool?: true;
+  preset?: string;
+  level?: number;
+  classId?: ClassId;
+  used?: number;
 };
 
 /** What a fill does to the block, for the review's line: the parts it replaces and what becomes of the rolls. */

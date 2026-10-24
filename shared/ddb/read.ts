@@ -7,6 +7,7 @@ import type { PcFill, PcFillStats } from "../rules/pcFill.ts";
 import { cantripTier, srdOnPass } from "../rules/pcStats.ts";
 import { abilityMod } from "../statBlock.ts";
 import { ddbSheetUrl } from "./link.ts";
+import { readResources } from "./resources.ts";
 
 /**
  * A D&D Beyond character's JSON read into a fill (docs/design-v1-pc-stats.md
@@ -27,6 +28,9 @@ import { ddbSheetUrl } from "./link.ts";
  * The paths were checked against a live public character's JSON during the
  * build. D&D Beyond's format is a third party's and can change, so every
  * read is tolerant: a missing or mistyped value is skipped, never assumed.
+ *
+ * The class resources, read from the limited uses of the same actions,
+ * are read by ./resources.ts (docs/design-v1-ddb-resources.md).
  */
 
 type Obj = Record<string, unknown>;
@@ -492,7 +496,7 @@ function missingWarnings(sent: Sent): string[] {
   }
   if (!sent.scoreChanges) out.push("D&D Beyond did not send the bonuses and overrides to the ability scores, so the scores, bonuses, AC, max HP and weapons were not read. They stay as they are.");
   if (!sent.spellLists) out.push("D&D Beyond did not send the character's spell lists, so spells were not read. They stay as they are.");
-  if (!sent.actions) out.push("D&D Beyond did not send the character's actions, so other rolls were not read. They stay as they are.");
+  if (!sent.actions) out.push("D&D Beyond did not send the character's actions, so other rolls and class resources were not read. They stay as they are.");
   return out;
 }
 
@@ -546,6 +550,8 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const classes = classesOf(data);
   const sent = sentOf(data, classes);
   const warnings = missingWarnings(sent);
+  // The class resources' lines go right after these, before the scores' and spells', so the 40-line cut never drops them (OP-13).
+  const resourceLinesAt = warnings.length;
 
   // The modifiers' needs, then the scores' needs (2.5): every output below that reads a modifier or a score is read only when these are.
   const mods = sent.modifiers && (sent.inventory || !sent.itemModifiers) ? modifiersOf(data) : null;
@@ -580,7 +586,12 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const cut = cutRolls(weapons, spells?.rolls ?? null, actions);
   stats.rolls = cut.rolls;
   if (spells && spells.unhalved.length > 0) {
-    warnings.push(`Whether a pass halves the damage is not known for ${spells.unhalved.slice(0, 8).join(", ")}${spells.unhalved.length > 8 ? " and others" : ""}. A cantrip's pass takes none and another spell's half until you set On a pass.`);
+    // Up to 8 names, fewer when long ones would pass a warning's 400 characters, which would refuse the whole fill.
+    const unhalved = (n: number) =>
+      `Whether a pass halves the damage is not known for ${spells.unhalved.slice(0, n).join(", ")}${spells.unhalved.length > n ? " and others" : ""}. A cantrip's pass takes none and another spell's half until you set On a pass.`;
+    let shown = Math.min(8, spells.unhalved.length);
+    while (shown > 1 && unhalved(shown).length > 400) shown--;
+    warnings.push(unhalved(shown));
   }
   if (cut.over > 0) warnings.push(cutWarning(cut.over, cname ?? "the character"));
 
@@ -604,7 +615,11 @@ function read(json: unknown, newId: () => string): PcFill | null {
   const id = num(data.id);
   if (id !== null && Number.isInteger(id) && id > 0 && id < 1e12) actor.sheetUrl = ddbSheetUrl(String(id));
 
-  const fill: PcFill = { source: "ddb", stats, actor, warnings: warnings.slice(0, 40), read: cut.read };
+  const resources = sent.actions ? readResources(data, { scoreMods, level, who: cname ?? "the character" }) : null;
+  if (resources) warnings.splice(resourceLinesAt, 0, ...resources.warnings);
+
+  const fill: PcFill = { source: "ddb", stats, actor, warnings: warnings.slice(0, 40), read: { ...cut.read, resource: resources?.whole ?? false } };
+  if (resources) fill.resources = resources.resources;
   if (level !== null) fill.level = level;
   if (cname) fill.name = cname;
   return fill;
