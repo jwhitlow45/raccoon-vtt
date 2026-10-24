@@ -462,7 +462,7 @@ function CompanionMenu(props: { token: Token; entryId: string; name: string; dm:
   const reviveNoteId = useId();
   const target = { tokenId: token.id };
   return (
-    <div style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${theme.touch * 2}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+    <div data-row-options="" style={{ padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${theme.touch * 2}px`, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       {dm && props.dead && offersRevive("dead", token.kind) ? (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
           <ReviveButton target={target} describedBy={reviveNoteId} focusTo={REVIVE_FOCUS_IN_SUB_ROW} />
@@ -842,6 +842,7 @@ function RowMenu(props: {
   };
   return (
     <div
+      data-row-options=""
       style={{
         // Lined up with the row's name, after the handle's slot where the row has one.
         padding: `0 ${theme.space(2)}px ${theme.space(3)}px ${handleSlot(dm, drag) ? theme.touch + theme.space(1) : theme.space(2)}px`,
@@ -889,14 +890,15 @@ function RowMenu(props: {
           {lair.state === "failed" ? <SrdLoadFailed what="Its stat block" inline /> : null}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative roll reminder. Auto follows its conditions.</span>
+            {/* Each grows to fill its line, so where the three do not fit on one, as in the side panel, Disadvantage never stands alone under the other two. */}
             <div role="group" aria-label="Initiative roll reminder" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-              <Button size="sm" pressed={entry.advantage === undefined} onClick={() => update({ advantage: null })} aria-label="From its conditions">
+              <Button size="sm" pressed={entry.advantage === undefined} onClick={() => update({ advantage: null })} aria-label="From its conditions" style={GROW}>
                 Auto
               </Button>
-              <Button size="sm" pressed={entry.advantage === "adv"} onClick={() => update({ advantage: "adv" })}>
+              <Button size="sm" pressed={entry.advantage === "adv"} onClick={() => update({ advantage: "adv" })} style={GROW}>
                 Advantage
               </Button>
-              <Button size="sm" pressed={entry.advantage === "dis"} onClick={() => update({ advantage: "dis" })}>
+              <Button size="sm" pressed={entry.advantage === "dis"} onClick={() => update({ advantage: "dis" })} style={GROW}>
                 Disadvantage
               </Button>
             </div>
@@ -931,6 +933,8 @@ function RowMenu(props: {
     </div>
   );
 }
+
+const GROW: CSSProperties = { flex: "1 1 auto" };
 
 /**
  * The row's Uses group (docs/design-v1-combat-controls.md 5), where the
