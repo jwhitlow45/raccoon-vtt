@@ -161,10 +161,8 @@ describe("the disposition ring", () => {
   test("one map colors a creature's ring, and no other client file spells out its own", () => {
     assert.deepEqual(DISPOSITION_RING, { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile });
     const client = fileURLToPath(new URL("..", import.meta.url));
-    // The tracker's row pictures still hold a copy of their own, left for a later change to that file.
-    const waiting = new Set([path.join("features", "encounter", "parts.tsx")]);
     const copies = readdirSync(client, { recursive: true, encoding: "utf8" })
-      .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.includes("node_modules") && file !== path.join("lib", "tokenView.ts") && !waiting.has(file))
+      .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.includes("node_modules") && file !== path.join("lib", "tokenView.ts"))
       .filter((file) => /\bhostile:\s*theme\.color\.hostile\b/.test(readFileSync(path.join(client, file), "utf8")));
     assert.deepEqual(copies, [], "read DISPOSITION_RING from lib/tokenView.ts");
   });

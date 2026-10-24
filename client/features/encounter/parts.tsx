@@ -4,7 +4,7 @@ import { Spinner as SharedSpinner } from "../../components/Loading.tsx";
 import { Tag as SharedTag, type TagTone } from "../../components/Tag.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
-import { effectChip, effectCount, initials } from "../../lib/tokenView.ts";
+import { DISPOSITION_RING, effectChip, effectCount, initials } from "../../lib/tokenView.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
 import { entryName, onAnotherScene, portraitDisposition, type HpView } from "./logic.ts";
 import { clockText, type TimerState } from "./timer.ts";
@@ -12,12 +12,6 @@ import { isAssetImage } from "#shared/imageRef.ts";
 import { IconDisk } from "../images/IconDisk.tsx";
 
 /** Small pieces the tracker panel and the top strip share. */
-
-const DISPOSITION: Record<string, string> = {
-  ally: theme.color.ally,
-  neutral: theme.color.neutral,
-  hostile: theme.color.hostile,
-};
 
 /**
  * A row's picture: the token image, else the character's, else initials on
@@ -34,7 +28,7 @@ export function Portrait(props: { entry: Pick<InitEntry, "tokenId" | "characterI
   const elsewhere = useRoomView((s) => (s.view ? onAnotherScene(s.view, entry) : false));
   const shown = token?.image ?? character?.defaultImage;
   const image = shown && isAssetImage(shown) ? shown : undefined;
-  const color = DISPOSITION[portraitDisposition(token, elsewhere)] ?? theme.color.neutral;
+  const color = DISPOSITION_RING[portraitDisposition(token, elsewhere)] ?? theme.color.neutral;
   // The disposition ring sits just outside the disk, as an outline, which follows the round corners and takes no room in the row.
   const frame: CSSProperties = { outline: `${theme.line.strong}px solid ${props.ring ?? color}`, outlineOffset: 0, opacity: props.dim ? 0.45 : 1 };
   const box: CSSProperties = {
