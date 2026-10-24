@@ -160,8 +160,8 @@ export function CardButtons<A extends string>(props: {
   onTap(action: A): void;
 }) {
   return (
-    // The row is a size container, so a narrow one can shorten Roll d20's words (globals.css, rvtt-roll-word).
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), containerType: "inline-size" }}>
+    // The row is a size container, so a narrow one can shorten Roll d20's words and every button's side padding with them (globals.css, rvtt-roll-word).
+    <div className={props.rollOpens ? "rvtt-roll-row" : undefined} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), containerType: "inline-size" }}>
       {props.buttons.map((b, i): ReactNode => {
         const roll = b.action === "roll";
         const variant: ButtonVariant = i === 0 && PRIMARY.has(b.action) ? "primary" : DANGER.has(b.action) ? "danger" : "secondary";
@@ -176,7 +176,6 @@ export function CardButtons<A extends string>(props: {
             disabled={roll && props.blocked !== null}
             title={roll && props.blocked !== null ? props.blocked : undefined}
             aria-label={opens ? b.text : undefined}
-            className={opens ? "rvtt-roll-opens" : undefined}
             onClick={() => props.onTap(b.action)}
             style={{ flex: "1 1 auto" }}
           >

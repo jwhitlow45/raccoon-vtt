@@ -580,6 +580,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await setUp(dm, { width: 320, height: 568, scale: z });
         await checks([run.goblin1]);
         await dm.locator('[data-alert="concentration"]').first().waitFor();
+        // The card's short "d20" and its Passed and Failed share one side padding, so its words sit as far in as theirs do (FU24-A1).
+        assert.deepEqual(alignmentLines(await measureAlignment(dm.locator('[data-alert="concentration"]').first()), "the concentration card at 320 x 568 at 130%"), []);
         await pats.send({ t: "log.whisper", to: [dmSocket.you!.memberId], text: "Behind the altar." });
         const low = dm.locator("[data-toast]").filter({ hasText: "Behind the altar." }).first();
         await low.waitFor();

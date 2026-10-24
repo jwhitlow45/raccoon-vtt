@@ -433,12 +433,15 @@ summary::-webkit-details-marker {
    which need about 230 px with both its words. Narrower, as on a 320 px
    phone at 130%, it shows "d20" alone with 8 px each side, so the card
    keeps the height it has without it and a short phone still shows three
-   checks. Its name stays "Roll d20". */
+   checks. Its name stays "Roll d20". Every button in its row takes the
+   same 8 px, so the short one's words do not sit closer to its edges than
+   its neighbors' do (FU24-A1). The buttons grow to fill the row, so
+   their widths stay as they were wherever the row has room. */
 @container (width < 240px) {
   .rvtt-roll-word {
     display: none;
   }
-  .rvtt-roll-opens {
+  .rvtt-roll-row > button {
     padding-inline: 8px !important;
   }
 }
