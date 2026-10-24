@@ -79,13 +79,13 @@ describe("a row with no uses draws no Uses group (CCB-ASTRA-05, CCB-OPUS-1)", ()
 
   test("a goblin's options, as the DM opens them", () => {
     const markup = rowMenu(state, "eg");
-    assert.match(markup, /Hidden from players/, "the options are open");
+    assert.match(markup, /Row hidden from players/, "the options are open");
     assert.doesNotMatch(markup, /data-uses-group/);
   });
 
   test("a PC's options with no class resources", () => {
     const markup = rowMenu(state, "eb");
-    assert.match(markup, /Hidden from players/, "the options are open");
+    assert.match(markup, /Row hidden from players/, "the options are open");
     assert.doesNotMatch(markup, /data-uses-group/);
   });
 
@@ -124,6 +124,44 @@ describe("a goblin whose only row is its skipped death save shows Uses in its ro
     run({ t: "encounter.next" });
     assert.doesNotMatch(rowMenu(state, "eg"), /data-uses-group/);
     assert.doesNotMatch(goblinDrawer(), /Death save skipped/);
+  });
+});
+
+/** A player's options for their own row, open. */
+function ownRowMenu(state: RoomState, entryId: string, viewer: Viewer): string {
+  const view = projectState(state, viewer, { sceneId: "s1" });
+  const row = view.encounter!.entries.find((e) => e.id === entryId)!;
+  const el = createElement(EntryRow, { entry: row, active: false, role: "player", mine: true, expanded: true, picking: false, selected: false, onExpand() {}, onShow() {}, onShowToken() {}, drag: null, rowRef: () => {} });
+  return provide(state, viewer, createElement("ol", null, el));
+}
+
+/** Where each of `marks` first stands in `markup`, failing for one it lacks. */
+function at(markup: string, marks: readonly (string | RegExp)[]): number[] {
+  return marks.map((m) => {
+    const i = typeof m === "string" ? markup.indexOf(m) : (m.exec(markup)?.index ?? -1);
+    assert.ok(i >= 0, `no ${String(m)}`);
+    return i;
+  });
+}
+
+describe("the row's options lead with the creature's things in its Combat section's order, then the row's own (docs/design-v1-token-sections.md 4)", () => {
+  const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"], resources: [{ id: "rage", name: "Rage", max: 2, used: 0, reset: "long" }] }) } });
+  state.tokens.dragon = token("dragon", { name: "Dragon", x: 6, y: 2, actor: { inline: actor({ legendary }) } });
+  state.tokens.bt = token("bt", { kind: "pc", name: "Bree", x: 4, y: 2, actor: { ref: "bree" } });
+  state.encounter = { rev: 0, round: 1, activeEntryId: "eb", entries: [entry("eb", { tokenId: "bt", value: 12 }), entry("ed", { tokenId: "dragon", value: 10 })] };
+  const reaction = /role="switch"[^>]*aria-labelledby="[^"]*"[^>]*>(?:(?!<\/button>).)*Reaction used/;
+
+  test("the DM's: Uses with the pips, Reaction used, Ready, then Roll again, Row hidden from players, In lair, the reminder, and Remove last", () => {
+    const markup = rowMenu(state, "ed");
+    const order = at(markup, ["data-uses-group", "Legendary Actions used: 0 of 3", reaction, 'aria-label="Trigger for the Ready action"', "Roll again, replaces 10", "Row hidden from players", "In lair", "Initiative roll reminder", 'aria-label="Remove from the fight"']);
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), JSON.stringify(order));
+  });
+
+  test("a player's own: Uses, Reaction used, Ready, then Roll again, and Remove last", () => {
+    const markup = ownRowMenu(state, "eb", { memberId: "p1", role: "player" });
+    const order = at(markup, ["data-uses-group", "Use Rage", reaction, 'aria-label="Trigger for the Ready action"', "Roll again, replaces 12", 'aria-label="Remove from the fight"']);
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), JSON.stringify(order));
+    assert.doesNotMatch(markup, /Row hidden from players|Legendary Actions used/, "none of the DM's");
   });
 });
 

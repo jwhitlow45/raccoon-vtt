@@ -60,9 +60,11 @@ export type RowDrag = {
 
 /**
  * One initiative row: picture, name, AC and HP as the viewer may see them,
- * condition chips, roll reminders and the typed value. The DM's
- * controls (hidden, reaction, lair, legendary pips, reminders, tie order,
- * removal) open under the row, at full touch size, instead of crowding it.
+ * condition chips, roll reminders and the typed value. Its options open
+ * under it, at full touch size, instead of crowding it: the creature's
+ * things first (uses with the DM's legendary pips, reaction, ready, stat
+ * block), then the DM's setup of the row (hidden, lair, reminders, tie
+ * order), then removal.
  */
 export function EntryRow(props: {
   entry: InitEntry;
@@ -337,8 +339,8 @@ const NO_HP: HpView = { kind: "none" };
  * AC, HP, conditions and its own Reaction and Ready, struck through when
  * dead. A tap does what a row tap does. It has no value box and no drag
  * handle, since it takes its character's place in the order. For the DM
- * and its owners, a ⋯ opens its Reaction, Ready, its stat block, and for
- * the DM Revive.
+ * and its owners, a ⋯ opens, for the DM, Revive, then its uses, Reaction,
+ * Ready and its stat block.
  */
 function CompanionRow(props: { token: Token; characterName: string; entryId: string; role: "dm" | "player"; onShow(): void }) {
   const { token, role } = props;
@@ -448,9 +450,9 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
 }
 
 /**
- * A listed companion's options: its own Reaction, its Ready on its
- * character's turn, its stat block, for the DM as on any monster or NPC
- * and for its players while it has one, and for the DM Revive.
+ * A listed companion's options: for the DM Revive, then its uses, its own
+ * Reaction, its Ready on its character's turn, and its stat block, for the
+ * DM as on any monster or NPC and for its players while it has one.
  */
 function CompanionMenu(props: { token: Token; entryId: string; name: string; dm: boolean; readied: Effect | undefined; playerOwned: boolean; dead: boolean; statBlock: boolean }) {
   const { token, dm } = props;
@@ -469,10 +471,11 @@ function CompanionMenu(props: { token: Token; entryId: string; name: string; dm:
           </span>
         </div>
       ) : null}
+      {/* Its things in its Combat section's order, as its character's row lists theirs (docs/design-v1-token-sections.md 4). */}
+      <UsesGroup target={target} name={props.name} />
       {/* Its own patch, which a device that holds the token predicts at once (shared/reads.ts). */}
       <ReactionSwitch answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} dm={dm} />
       <ReadyControls answer={{ kind: "companion", tokenId: token.id, entryId: props.entryId }} target={target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} />
-      <UsesGroup target={target} name={props.name} />
       {props.statBlock ? (
         <div style={{ display: "flex" }}>
           <Button size="sm" onClick={() => openStatBlock(scope, ui, token.id, { from: here })}>
@@ -847,12 +850,23 @@ function RowMenu(props: {
         gap: theme.space(1),
       }}
     >
+      {/* The creature's things first, in its Combat section's order, then the row's own setup, then Remove (docs/design-v1-token-sections.md 4). */}
       {dm && props.revive && props.target ? (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
           <ReviveButton target={props.target} describedBy={reviveNoteId} focusTo={REVIVE_FOCUS_IN_ROW} />
           <span id={reviveNoteId} style={{ flex: 1, minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>
             {REVIVE_NOTE}
           </span>
+        </div>
+      ) : null}
+      {props.target ? <UsesGroup target={props.target} name={props.name} pips={dm ? <LegendaryPips target={props.target} /> : undefined} /> : null}
+      <ReactionSwitch answer={rowAnswer(entry)} dm={dm} />
+      {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} /> : null}
+      {props.statBlockTokenId !== null ? (
+        <div style={{ display: "flex" }}>
+          <Button size="sm" onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!, { from: here })}>
+            Stat block
+          </Button>
         </div>
       ) : null}
       {props.roll ? (
@@ -863,8 +877,7 @@ function RowMenu(props: {
       ) : null}
       {dm ? (
         <>
-          <Switch label="Hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />
-          <ReactionSwitch answer={rowAnswer(entry)} dm />
+          <Switch label="Row hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />
           <Switch
             label="In lair"
             help={lair.counts(true) ? "Its lair's legendary counts and XP" : undefined}
@@ -874,7 +887,6 @@ function RowMenu(props: {
             onChange={setLair}
           />
           {lair.state === "failed" ? <SrdLoadFailed what="Its stat block" inline /> : null}
-          {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm playerOwned={props.playerOwned} /> : null}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative roll reminder. Auto follows its conditions.</span>
             <div role="group" aria-label="Initiative roll reminder" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
@@ -890,17 +902,6 @@ function RowMenu(props: {
             </div>
           </div>
           <RowRollTools entry={entry} />
-          {props.statBlockTokenId !== null ? (
-            <div style={{ display: "flex" }}>
-              <Button
-                size="sm"
-                onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!, { from: here })}
-              >
-                Stat block
-              </Button>
-            </div>
-          ) : null}
-          {props.target ? <UsesGroup target={props.target} name={props.name} pips={<LegendaryPips target={props.target} />} /> : null}
           {props.moveAfter ? (
             <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>For after its turn: its rider's initiative, right after its rider</span>
@@ -921,20 +922,7 @@ function RowMenu(props: {
             </div>
           ) : null}
         </>
-      ) : (
-        <>
-          <ReactionSwitch answer={rowAnswer(entry)} dm={false} />
-          {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={false} playerOwned={props.playerOwned} /> : null}
-          {props.target ? <UsesGroup target={props.target} name={props.name} /> : null}
-          {props.statBlockTokenId !== null ? (
-            <div style={{ display: "flex" }}>
-              <Button size="sm" onClick={() => openStatBlock(scope, ui, props.statBlockTokenId!, { from: here })}>
-                Stat block
-              </Button>
-            </div>
-          ) : null}
-        </>
-      )}
+      ) : null}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button size="sm" variant="danger" icon="removeFromFight" aria-label="Remove from the fight" busy={remove.waiting} onClick={() => remove.send({ t: "encounter.remove", entryIds: [entry.id] })}>
           Remove
