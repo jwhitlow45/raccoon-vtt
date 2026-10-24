@@ -211,6 +211,8 @@ The "Paste text" step runs `parseStatBlockText` on the text, then `statsFromBloc
 
 **Terms.** docs/features.md:662 ruled this out for D&D Beyond's terms. The project owner chose it best effort. So the server fetches only on a member's tap, once per tap, only a character its owner made public and linked, keeps no copy, reads no text, and caps how often any server asks. An operator who wants none of it removes the host from `docker/squid.conf`, and the link import then answers `fetch_failed` while pasted JSON still works.
 
+Changed by docs/design-v1-ddb-resources.md (3): the fill also carries `resources`, the character's limited uses read as class resources by `shared/ddb/resources.ts`, and `read.resource`. They live beside the block, not in it, so the editor holds them beside the draft until Save (6.2 of that note), and the missing actions warning names them.
+
 ## 7. Surfaces
 
 ### 7.1 The character's card
@@ -439,6 +441,8 @@ The reader starts from these paths of `data`, each confirmed against a live publ
 | Weapons | equipped `inventory[]` with `filterType` "Weapon": `damage.diceString`, `damageType`, `attackType`, `properties[].name`, `grantedModifiers` "magic" |
 | Spells | `classSpells[].spells[]` and `spells.{race,class,item,feat}[]`: `definition.level`, `requiresAttackRoll`, `requiresSavingThrow`, `saveDcAbilityId`, `modifiers[]` "damage" with `die.diceString`, `atHigherLevels`. The JSON does not say whether a pass halves the damage, so `onPass` stays unset, and the warning names only the spells the SRD's table does not know |
 | Actions | `actions.{race,class,feat}[]` with `dice.diceString`, `saveStatId`, `abilityModifierStatId` |
+
+Changed by docs/design-v1-ddb-resources.md (1.1): the class resources read `actions.{class,race,feat}[]` again for `limitedUse` (`maxUses`, `statModifierUsesId`, `operator`, `useProficiencyBonus`, `proficiencyBonusOperator`, `resetType`, `numberUsed`, `minNumberConsumed`, `maxNumberConsumed`), `componentTypeId` and `componentId`, and `classes[].classFeatures[].definition.id`, `requiredLevel` and `name`. Their table and fixtures are in `shared/ddb/resources.ts` and its test, checked against public sample characters rather than a live one.
 
 ## Appendix C. Worked examples
 

@@ -1,6 +1,6 @@
 # raccoon-vtt v1: class resources from D&D Beyond
 
-Status: draft 3, 2026-10-24, revised for design review round 1 (findings DDBRES-OP-1 to 16 and DDBRES-ASTRA-1 to 6, cited here as OP-1, ASTRA-1 and so on) and D-261024-30. Code is cited from main at `3579f37d8`, FU26's tip (op version 21, snapshot version 22), which changed the class resource rows. It builds on docs/design-v1-combat-controls.md ("the combat note", section 7 and Appendix A), docs/design-v1-pc-stats.md ("the stat block note", 6.3 and Appendix B) and docs/design-v1-resync.md ("the re-sync note", 2 to 4). It stacks after follow-up batch 28, which renames Give one back to Restore.
+Status: built, with the differences under As built (12). Draft 3, 2026-10-24, revised for design review round 1 (findings DDBRES-OP-1 to 16 and DDBRES-ASTRA-1 to 6, cited here as OP-1, ASTRA-1 and so on) and D-261024-30. Code is cited from main at `3579f37d8`, FU26's tip (op version 21, snapshot version 22), which changed the class resource rows. It builds on docs/design-v1-combat-controls.md ("the combat note", section 7 and Appendix A), docs/design-v1-pc-stats.md ("the stat block note", 6.3 and Appendix B) and docs/design-v1-resync.md ("the re-sync note", 2 to 4). It stacks after follow-up batch 28, which renames Give one back to Restore.
 
 The project owner, 2026-10-24: "Is there any way for the class resources and their uses to be imported from beyond?"
 
@@ -100,7 +100,7 @@ So Bardic Inspiration with Charisma 8 counts 1, D&D Beyond's floor of once, and 
 D&D Beyond lists some features on several actions. Bardic Inspiration comes once for each feature that changes it, and an action can share its feature with others that have no limited use. So, in this order:
 1. **Above the level**: an action whose class feature resolves (1.1) with a `requiredLevel` past its class's level is dropped, since `classFeatures` lists features the class has not reached.
 2. **One feature**: actions with a limited use and the same `componentTypeId` and `componentId` are one resource. It keeps the one named as the feature, else the first, and the highest `numberUsed` among them.
-3. **One name in one class**: of resources with the same cleaned name in the same class (or with no class), the one whose feature has the highest `requiredLevel` stays, else the first. Two class-unknown actions of different `componentId`s are not merged when two of the character's classes hold that name's preset, so 3.4's fallback can give each its class (OP-22). This is ddb-importer's rule for Bardic Inspiration, Channel Divinity and the like.
+3. **One name in one class**: of resources with the same cleaned name in the same class (or with no class), the one whose feature has the highest `requiredLevel` stays, else the first. Two class-unknown actions of different `componentId`s are not merged when two of the character's classes hold that name's preset, so 3.4's fallback can give each its class (OP-22). When more such actions come than there are classes holding the preset, each one past them meets this rule against the resource of that name in the fallback's first class, which stays, so it never comes in class-unknown beside the others (OP-25). This is ddb-importer's rule for Bardic Inspiration, Channel Divinity and the like.
 4. **One name in two classes**, such as a Cleric 6/Paladin 3's two Channel Divinities: two resources, each keyed by its class (4.1).
 
 **Order and the cap.** Read in `actions.class`, then `actions.race`, then `actions.feat`, at most 200 entries a list as today (`MAX.actions`), then 2.1. Then class features sort by class in `CLASS_IDS` order, each class's in D&D Beyond's order, with unresolved actions after them, then species traits, then feats, and at most 12 are kept, the character's cap. A 13th is cut, warned, and resources are not read whole (3.2).
@@ -149,7 +149,7 @@ Under Check these, one line each, at most 40 in all as today. They go right afte
 
 ### 3.4 A preset match
 
-A read resource takes a preset when its cleaned name, in lower case with curly apostrophes made straight, is the preset's name or one of D&D Beyond's own names for it below, and its class holds the preset at its level. Its class is the one its feature resolves to (1.1). An action that does not resolve takes the first class, in `CLASS_IDS` order, whose name (`CLASS_NAMES`) the character's D&D Beyond classes hold, which has the preset at that class's level, and not taken by another read of that name, resolved or by an earlier fallback (OP-22), so an unresolved Paladin Channel Divinity beside a resolved Cleric one is the Paladin's, and two unresolved ones are the Cleric's and the Paladin's in `CLASS_IDS` order. Species traits and feats match no preset.
+A read resource takes a preset when its cleaned name, in lower case with curly apostrophes made straight, is the preset's name or one of D&D Beyond's own names for it below, and its class holds the preset at its level. Its class is the one its feature resolves to (1.1). An action that does not resolve takes the first class, in `CLASS_IDS` order, whose name (`CLASS_NAMES`) the character's D&D Beyond classes hold, which has the preset at that class's level, and not taken by another read of that name, resolved or by an earlier fallback (OP-22), so an unresolved Paladin Channel Divinity beside a resolved Cleric one is the Paladin's, and two unresolved ones are the Cleric's and the Paladin's in `CLASS_IDS` order. A third, with every such class taken, goes by 2.1's rule 3 against the first class's (OP-25). Species traits and feats match no preset.
 
 **D&D Beyond's names**, the action names ddb-importer looks up, a fixed table in the reader:
 
@@ -188,7 +188,7 @@ res?: Record<string, { k: string, h: string }>   // one entry per synced resourc
 2. **A class that moved** (OP-18, OP-23). A held entry whose `k` no read holds meets an unclaimed read by the class comparison and takes that read's `k`. When several reads fit, it takes, in order: the read in its own preset's class, an exact class match, a read whose class no unpaired own preset of that name names (so pass 3 still finds its read, ASTRA-10), a class-unknown read, then `CLASS_IDS` order. So a feature whose class stops or starts resolving, a preset's included, keeps its id and spent count, a response without `classes` still finds "fighter:superiority dice", and only after this pass can an entry be "Removed there".
 3. **By class** (ASTRA-10). Every own resource (no entry) with a preset meets the unclaimed read of its normalized name in its preset's class, in the list's order. So with only a Paladin Channel Divinity held and Cleric 2/Paladin 3 read, it keeps the Paladin read, its id and its spent count, and the Cleric's is added.
 4. **By name** (OP-17). Every own resource left meets an unclaimed read by name alone, both names normalized and run through 3.4's table, so a typed "Superiority Dice" with no preset meets the read "fighter:superiority dice" and no second copy comes in. An own resource with a preset meets here only a read whose class is unknown, never another class's, so a second Paladin Channel Divinity typed by mistake is never tied to the Cleric's feature. Own resources go in the list's order, and reads of one name in `CLASS_IDS` order.
-5. **Removed here** (ASTRA-12). A removed entry or a marker meets an unclaimed read by its exact key first, then by the class comparison, so a class that stops or starts resolving never brings back a resource the player removed. A matched entry becomes a marker of the read's key, and a matched marker takes the read's key in its own place in `gone`, its age unchanged. A marker leaves `gone` only when a whole read of its kind meets it by neither.
+5. **Removed here** (ASTRA-12, OP-24). A removed entry or a marker meets an unclaimed read by its exact key first, then by the class comparison in pass 2's order past its first rule, which needs a preset: a class-unknown read, then `CLASS_IDS` order, then the read's own order. So a class that stops or starts resolving never brings back a resource the player removed. A matched entry becomes a marker of the read's key, and a matched marker takes the read's key in its own place in `gone`, its age unchanged. A marker leaves `gone` only when a whole read of its kind meets it by neither.
 
 An own resource linked in pass 3 or 4 has its entry take the read's `k`, class and all. When that `k` meets a removed entry's or a marker's, by key or by the class comparison, it links in its place and the entry or marker goes (OP-7), so a Rage removed and added again by hand is the Rage, never "you removed it".
 
@@ -326,6 +326,8 @@ The class resources are not in the stat block's draft, so the editor holds them 
 | A removed Superiority Dice, as an entry and as a marker, read resolved, then unresolved, then resolved | stays removed each time unless Add it back is ticked, the marker's age kept (ASTRA-12) | merge |
 | A linked typed Rage keyed "rage" and an unlinked Rage preset, the read now "barbarian:rage" | the linked one keeps the read, its id and spent count, the preset stays the player's own (OP-23) | merge |
 | A linked Paladin Channel Divinity whose action stops resolving, Cleric 2/Paladin 3 read | stays on the Paladin read, its id and spent count kept, the Cleric's added (pass 2) | merge |
+| A removed Superiority Dice keyed by name alone, read as the Rogue's, the Barbarian's and the Fighter's | stays removed on the Barbarian's, first in `CLASS_IDS`, and the other two are added (OP-24) | merge |
+| Cleric 2/Paladin 3, three Channel Divinity actions unresolved, different `componentId`s | two resources, the Cleric's and the Paladin's, the third gone by rule 3 against the Cleric's (OP-25) | reader |
 | A linked Superiority Dice, its action resolved, then not, then again | the same id and spent count each time, its `k` following the read (OP-18) | merge |
 | A typed "Superiority Dice" with no preset, the read's class resolved to Fighter | linked, its entry takes `fighter:superiority dice`, no second copy (OP-17) | merge |
 | A relinked sheet with `res` and `r:` markers | both ignored, linked by name, Different (OP-11) | merge |
@@ -396,4 +398,34 @@ Step 1 touches shared/model.ts, protocol.ts and migrate.ts, so no other lane may
 
 ## 12. As built
 
-The builder fills this in the lane's docs commit with every place the build went its own way.
+The build follows the note, with these differences and choices where it left one open.
+
+**The public-character check** (1.1). The paths were checked against public sample characters published in open-source repositories (Construct's, dndbeyond-characters', DNDBeyond-DM-Screen's and BeyondDnD's fixtures, among seven), against ddb-importer's fallback rules and source, and against no private character. Confirmed: every path of 1.1's table, the three `componentTypeId`s, `resetType` 1 to 4 as numbers on actions, both operators, the class feature pairing by `componentId`, `numberUsed`, Bardic Inspiration's ability count, and older bodies without the proficiency keys. What differed:
+- No pool signal: every action in the samples has `minNumberConsumed` and `maxNumberConsumed` of 1, pools included. The fixed-cost shape appears only on items' spells. So 3.4's name table and the presets' pool flag are what make a pool, as the note expected, and the fixtures use 1 and 1 by default.
+- Two more `componentTypeId`s appear, 258900837 and 306912077. They match no feature, so such an action stands alone (2.1), as an unresolved one does.
+- About one class action in six resolves to no listed feature, mostly optional class features, so the fallback (3.4) and the class comparison (4.2) are needed in practice.
+- A 2014 Breath Weapon reads `maxUses` 1 on a Short Rest with no proficiency bonus. It comes in as read.
+- The 2024 pool names ("Lay On Hands: Healing Pool", "Font of Magic: Sorcery Points") are found only in ddb-importer's source, and no public sample is a Paladin, so Lay on Hands' `maxUses` is unconfirmed. The preset floor (3.4) covers both.
+- ddb-importer reads `resetType` 3 as a day. The reader keeps 1.3's Long Rest with the dawn line.
+
+**The lane's order.** The reader came first and then the schema and op, as the build brief ordered, so the reader's commit carries the fill's schema in protocol.ts and the second commit the rest of 5. The re-sync review's words (client/features/pcstats/resync.ts, Resync.tsx) went in the merge's commit, since the merge's result changed their types. draft.ts is unchanged: the held result (6.2) lives in flow.ts. The reducer's rule for `used` moved into shared/rules/classResources.ts (`resourcesAfter`), so `keptResources` and `afterSync` share it.
+
+**Not in alignment.e2e.ts.** That file belonged to another lane during this build, so the review's root was not added there. resync.e2e.ts measures the review at all six sizes in ddbres-2 and ddbres-6, nothing over 1 px. Adding the root to alignment.e2e.ts is a follow-up.
+
+**Choices where the note was open:**
+- **One raised-count line.** Every count raised to a preset's reads "… fewer than a Paladin 5's 25 by SRD 5.2.1, so it reads 25 here. Check it.", with "by SRD 5.2.1" in all, not only for a 2014 count.
+- **An operator is read only beside what it applies to.** An unknown `operator` with no ability, or an unknown `proficiencyBonusOperator` without the bonus, changes nothing and is not a read failure.
+- **2.1's rule 3 keeps kinds apart.** A class feature, a species trait and a feat of one name stay three.
+- **Pass 2's "exact class match"** is pass 1's exact key, so OP-24's order for pass 5 is the exact key, then a class-unknown read, then `CLASS_IDS` order.
+- **No second copy holds by construction.** Passes 3 and 4 give every own resource any read of its name and class first, so the guard 4.2 names was never reached and was left out. Invariant 14 checks it.
+- **A removed resource's entry becomes a marker even when nothing was read**, so entries never outnumber resources (4.1) on any sync.
+- **The editor holds no write of levels alone.** A held result that changes only `level` and `atLevel` is not unsaved, by OP-19's rule.
+- **The dropped-marker line always ends "Only 40 deleted rolls and class resources are remembered."**, whichever kinds dropped.
+- **The resources-only review** after `CHARACTER_CHANGED` (6.2 (c)) keeps the review's usual first line, what was read, and focus moves to it.
+- **A ticked Add it back with no room** keeps its marker, so it is offered again once there is room.
+- **Plural warnings.** Each reader line with several names has a plural form: "The counts of Bardic Inspiration and Superiority Dice come from an ability score, …".
+- **The e2e steps' spends and edits** (ddbres-2 to 4) are ops sent from the DM's connection in the test, so each step tests the review. classresources.e2e.ts covers the panels' Use and Edit.
+
+**Beside the note.** The spells' "Whether a pass halves the damage" warning lists fewer than 8 names when long ones would pass a warning's 400 characters, which refused the whole fill. The resource lines go before it, and a long spell list could have refused them too.
+
+**Tests.** The reader has 54 tests and the merge 44, each written failing first, with the edge rows of 8, OP-24 and OP-25 among them. The random test adds invariants 1r and 9 to 15 and checks that every case of 4.2 is reached. A mutation pass over the reader, the merge and the editor flow left two survivors, both equivalent: an ability id check the fill schema repeats, and one ordering of a random test's markers, which a fixed joint-order test pins.

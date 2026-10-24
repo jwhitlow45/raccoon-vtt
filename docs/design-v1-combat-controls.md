@@ -388,7 +388,7 @@ Recommendations inferred from past decisions, apart from the recorded picks abov
 6. **Only an explicit Use spends X/Day. The Dice panel marks a recharge only when it shows ready.** Rejected: spending on each roll, or once per turn. Why: a reroll is not a second use, and a legendary action can use an X/Day ability on another creature's turn.
 7. **The old per-tab Used marks are dropped.** Rejected: a one-time import. Why: they were one tab's guesses.
 8. **Players correct a use with Give one back and Reopen, with no Undo.** Rejected: a field-level player restore. Why: Give one back covers every kind with no new restore rule, and no refusal can hint at the DM's hidden edits.
-9. **Class resources are picked by class and class level, or typed**, with no D&D Beyond fill. Rejected: a sync part. Why: the re-sync merge (docs/design-v1-resync.md) would need a new part.
+9. **Class resources are picked by class and class level, or typed**, with no D&D Beyond fill. Rejected: a sync part. Why: the re-sync merge (docs/design-v1-resync.md) would need a new part. Changed by docs/design-v1-ddb-resources.md (D-261024-25): the D&D Beyond step and Re-sync now read the character's limited uses as class resources, merged by name with those it has, so this pick holds for characters not from D&D Beyond.
 10. **Superiority Dice, species traits and feats are typed.** Rejected: presets. Why: only SRD 5.2.1 content ships as presets.
 11. **Features that only cast one named spell (Favored Enemy's Hunter's Mark, Paladin's Smite, Faithful Steed) are not presets.** Rejected: presets. Why: spells stay out.
 12. **Rage's Use does not turn on Raging.** Rejected: one tap for both. Why: the picks were counters, and Raging has its own toggle.

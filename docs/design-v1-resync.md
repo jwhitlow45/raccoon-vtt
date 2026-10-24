@@ -68,6 +68,8 @@ type DdbBase = Omit<PcFillStats, 'rolls'> & { level?: number, ac?: number, hpMax
 - **`gone` holds at most 40** (decided by the coordinator, round 2). When a new deletion would make a 41st, the oldest marker goes, and the review says so before Apply (3.3). That roll may then come back as an addition on a later re-sync.
 - **Size**, counted in UTF-8 as `serializedBytes` counts (Appendix A): 367 bytes for a typical base, 56 per roll, 2,720 for 40 rolls. Every string in the record is hex, digits, the time or a fixed ASCII word, except senses (80 units, at most 240 bytes). So 4,790 bytes is the most a valid record holds, under `LIMITS.ddbSyncBytes`, 6 KiB. The review still checks the finished record against its schema and 6 KiB, its `at` included, before it enables Apply or the editor's Use it (3.3).
 
+Changed by docs/design-v1-ddb-resources.md (4.1): the record also holds `res`, one entry per synced class resource keyed by `hash12` of its id, at most 12, each `k` being `r:` and the hash of the resource's key, and `gone` holds `r:` markers beside the rolls', 40 of either kind together. The bound grows by 692 bytes, to 5,482, still under 6 KiB.
+
 ### 2.2 The three-way rule for a field
 
 `b` is the record's base for the field, `c` the character now, `n` D&D Beyond now. An absent value ("none", 0 for a bonus, 20 for critical hits, off for a flag) is a value. A part the fill left out is not read.
