@@ -1,5 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { ClassResource, PcStats } from "#shared/model.ts";
+import { combatUseSchemas } from "#shared/protocol.ts";
 import { abilityMod } from "#shared/statBlock.ts";
 import {
   asInputs,
@@ -317,15 +318,12 @@ export function editDraft(r: ClassResource): OwnDraft {
   return { name: r.name, count: String(r.max), reset: r.reset, pool: r.pool === true };
 }
 
-const NAME_CHARS = /^[^\p{Cc}\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]*$/u;
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-
 /** A draft's name and count as the schema takes them, or what is wrong with them. */
 function ownFields(draft: OwnDraft): { name: string; max: number } | string {
   const name = draft.name.trim();
   if (name === "") return "Give it a name.";
   if (name.length > LIMITS.resourceNameChars) return `A name is at most ${LIMITS.resourceNameChars} characters.`;
-  if (!NAME_CHARS.test(name) || LONE_SURROGATE.test(name)) return "A name holds letters, numbers and punctuation only.";
+  if (!combatUseSchemas.resourceName.safeParse(name).success) return "A name holds letters, numbers and punctuation only.";
   const most = draft.pool ? LIMITS.resourcePoolMax : LIMITS.resourceMax;
   const n = wholeNumber(draft.count);
   if (n === null || n < 1 || n > most) return draft.pool ? `An amount is 1 to ${most}.` : `A count is 1 to ${most}.`;

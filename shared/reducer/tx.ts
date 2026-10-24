@@ -493,13 +493,18 @@ export class Tx {
   }
 
   /**
-   * Stamps rule events with the actor that produced them and logs each one.
-   * An event about a token also records whether players who do not own it
-   * could see it now, after this op's own changes (design 7.3).
+   * The creature a line is about, as every line about one names it: a token
+   * with whether players who do not own it could see it now, after this op's
+   * own changes (design 7.3), or a character.
    */
-  addActorEvents(resolved: ResolvedActor, events: ActorEvent[]): void {
+  about(resolved: ResolvedActor): { tokenId: string; seen?: true } | { characterId: string } {
     const token = resolved.holder === "token" ? this.state.tokens[resolved.id] : undefined;
-    const target = token ? { tokenId: resolved.id, ...(seenByNonOwners(this.state, token, this.env) ? { seen: true as const } : {}) } : { characterId: resolved.id };
+    return token ? { tokenId: resolved.id, ...(seenByNonOwners(this.state, token, this.env) ? { seen: true as const } : {}) } : { characterId: resolved.id };
+  }
+
+  /** Stamps rule events with the actor that produced them (about) and logs each one. */
+  addActorEvents(resolved: ResolvedActor, events: ActorEvent[]): void {
+    const target = this.about(resolved);
     for (const event of events) this.addEvent({ ...event, ...target } as LogEvent);
   }
 

@@ -3,7 +3,7 @@ import { LIMITS } from "../limits.ts";
 import { healRevivesDead } from "../migrate.ts";
 import type { Actor, ClassResource, Encounter, EncounterSnapshot, InitEntry, LogEvent, PromptKey, Settled, TurnRecord, TurnUses, UseKey, UseMark } from "../model.ts";
 import { promptRefusal } from "../permissions.ts";
-import { seenByNonOwners, stableStringify } from "../project.ts";
+import { stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
 import { applyHeal } from "../rules/hp.ts";
@@ -70,9 +70,7 @@ function withMark(actor: Actor, key: UseKey, mark: UseMark | null): Actor {
 
 /** Writes a use line about the creature, stamped as addActorEvents stamps its events. */
 export function addUseLine(tx: Tx, resolved: ResolvedActor, line: Omit<UseLine, "tokenId" | "characterId" | "seen">): void {
-  const token = resolved.holder === "token" ? tx.state.tokens[resolved.id] : undefined;
-  const about = token ? { tokenId: resolved.id, ...(seenByNonOwners(tx.state, token, tx.env) ? { seen: true as const } : {}) } : { characterId: resolved.id };
-  tx.addEvent({ ...line, ...about });
+  tx.addEvent({ ...line, ...tx.about(resolved) });
 }
 
 /**
