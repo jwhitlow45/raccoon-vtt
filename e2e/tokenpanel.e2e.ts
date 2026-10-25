@@ -2307,6 +2307,24 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
+  test("fu31-d. by keyboard on a desk, Back to Medium in Stats hands focus to the Size field that stays (LP22-SECT-3)", async () => {
+    const wolf = { id: randomUUID(), at: cell(6, 4) };
+    await setUp(dm, dmCdp, DESK, null);
+    // Small here, and Medium by its block.
+    await ops.send({ t: "token.create", token: { id: wolf.id, sceneId: run.sceneId, size: "small", visibility: "all", x: wolf.at.x, y: wolf.at.y, disposition: "hostile", kind: "monster", name: "Small Wolf", actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
+    await waitFor("the small wolf", () => dmSocket.state?.tokens[wolf.id]);
+    try {
+      const panel = await panelOf(dm, wolf.at, "Small Wolf");
+      await openGroup(panel, "Stats");
+      await groupIn(panel, "Stats").getByRole("button", { name: "Back to Medium", exact: true }).focus();
+      await dm.keyboard.press("Enter");
+      await waitFor("the wolf back to Medium", () => (dmSocket.state?.tokens[wolf.id]?.size === "medium" ? true : null));
+      await waitFor("focus on the Size field", async () => ((await focusedText(dm)).startsWith('select "Size"') ? true : null), 5_000).catch(async () => assert.fail(`after Back to Medium focus is on ${await focusedText(dm)}`));
+    } finally {
+      await ops.send({ t: "token.delete", tokenId: wolf.id });
+    }
+  });
+
   test("10. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

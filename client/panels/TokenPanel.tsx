@@ -54,7 +54,7 @@ import { theme } from "../lib/theme.ts";
 import { DISPOSITION_RING, elevationBadge, initials } from "../lib/tokenView.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope } from "../state/scope.ts";
-import { handFocusWhenFound } from "../lib/handFocus.ts";
+import { handFocusOn, handFocusWhenFound } from "../lib/handFocus.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
@@ -123,6 +123,9 @@ const TO_NAME: AttachFocus & DuplicateFocus = { scope: PANEL_BOX, to: [CREATURE_
 
 /** The empty panel's line, which takes focus from script when what had it went with its token. */
 const EMPTY_LINE = "[data-token-empty]";
+
+/** Stats' Size field, which stays when Back to Medium goes. */
+const SIZE_FIELD = 'select[aria-label="Size"]';
 
 function TokenDetails(props: PanelProps) {
   const tokenId = props.selectedTokenId;
@@ -652,7 +655,14 @@ function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAc
       ) : null}
       {base ? (
         <div>
-          <Button size="sm" onClick={() => send({ size: base })}>
+          <Button
+            size="sm"
+            onClick={(e) => {
+              // It goes with its own press, so focus moves to the Size field, which reads the size now (LP22-SECT-3).
+              handFocusOn(e.currentTarget.closest<HTMLElement>(PANEL_BOX), [SIZE_FIELD]);
+              send({ size: base });
+            }}
+          >
             Back to {SIZE_WORDS[base]}
           </Button>
         </div>
