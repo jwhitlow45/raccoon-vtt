@@ -118,11 +118,13 @@ function Unit(props: { unit: VitalUnit }) {
  * life tag, where the DM's Revive goes, and `end` the last item, where a
  * narrow token window's elevation badge goes.
  *
- * So no number stands alone on a line, AC and HP make one part of the
- * line and Speed and Passive Perception another (D-261024-42). Each part
- * wraps as a whole, so where the line does not hold them all, Speed and
- * Passive Perception stand together on a line of their own. A part wraps
- * inside itself only where it alone is wider than the box.
+ * So no unit stands alone on a line, AC and HP make one part of the line
+ * and everything after them another: Speed, Passive Perception, the sheet
+ * link and the elevation badge (D-261024-42, FU30-OPUS-3). Each part
+ * wraps as a whole, so where the line does not hold them all, the second
+ * stands together on a line of its own. A part wraps inside itself only
+ * where it alone is wider than the box. The second part takes every item
+ * that is not AC or HP, so an item of a new kind still shows.
  */
 export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
   if (props.items.length === 0 && props.end == null) return null;
@@ -141,22 +143,25 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
     });
   };
   const indexed = props.items.map((item, i) => ({ item, i }));
-  const part = (name: "numbers" | "quick", of: typeof indexed) =>
-    of.length > 0 ? (
+  const numbers = indexed.filter(({ item }) => item.key === "ac" || item.key === "hp");
+  const quick: ReactNode[] = indexed.filter(({ item }) => item.key !== "ac" && item.key !== "hp").flatMap(({ item, i }) => drawn(item, i));
+  if (props.end != null) {
+    quick.push(
+      <span key="elevation" data-unit="elevation" style={{ display: "inline-flex", flex: "none", ...OVER_REACH }}>
+        {props.end}
+      </span>,
+    );
+  }
+  const part = (name: "numbers" | "quick", units: ReactNode[]) =>
+    units.length > 0 ? (
       <span key={name} data-vitals-part={name} style={VITALS_PART}>
-        {of.flatMap(({ item, i }) => drawn(item, i))}
+        {units}
       </span>
     ) : null;
   return (
     <div data-vitals="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14, minWidth: 0, fontVariantNumeric: "tabular-nums" }}>
-      {part("numbers", indexed.filter(({ item }) => item.key === "ac" || item.key === "hp"))}
-      {part("quick", indexed.filter(({ item }) => item.key === "speed" || item.key === "passivePerception"))}
-      {indexed.filter(({ item }) => item.key === "sheet").flatMap(({ item, i }) => drawn(item, i))}
-      {props.end != null ? (
-        <span data-unit="elevation" style={{ display: "inline-flex", flex: "none", ...OVER_REACH }}>
-          {props.end}
-        </span>
-      ) : null}
+      {part("numbers", numbers.flatMap(({ item, i }) => drawn(item, i)))}
+      {part("quick", quick)}
     </div>
   );
 }

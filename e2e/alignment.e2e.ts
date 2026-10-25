@@ -2860,52 +2860,66 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     assert.deepEqual(lines, [], "the round header out of line");
   });
 
-  test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, Speed and Passive Perception together, for an adult red dragon, a mage and a panther, expanded on phones and in More stats where the bar is short, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42)`, async () => {
+  test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, and Speed, Passive Perception and the sheet link together, for an adult red dragon, a mage, a panther and Thorn as Pat sees him, expanded on phones and in More stats where the bar is short, and beside a sideways phone's sheet with the elevation badge, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42, FU30-OPUS-3)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    const made = { dragon: randomUUID(), mage: randomUUID(), panther: randomUUID() };
+    const made = { dragon: randomUUID(), mage: randomUUID(), panther: randomUUID(), scout: randomUUID() };
     const creatures = [
       { id: made.dragon, name: "Summary Dragon", size: "huge", at: { x: 16, y: 8 }, tap: { x: 17, y: 9 }, actor: srdActor("adult-red-dragon"), saves: true },
       { id: made.mage, name: "Summary Mage", size: "medium", at: { x: 1, y: 9 }, tap: { x: 1, y: 9 }, actor: srdActor("mage"), saves: true },
       // Live play 21's panther: temporary HP and a long speed beside the HP, and no block to give saves.
       { id: made.panther, name: "Panther", size: "medium", at: { x: 11, y: 10 }, tap: { x: 11, y: 10 }, actor: actor({ ac: 13, hp: { cur: 40, max: 40, temp: 6 }, speeds: { walk: 50, climb: 40 }, passivePerception: 15 }), saves: false },
     ];
+    // Numbers short enough to leave the sheet link room beside them, but not the elevation badge after it.
+    const scout = { name: "Summary Scout", at: { x: 13, y: 10 } };
+    const sheetUrl = ddbSheetUrl(DDB_THORN);
     const lines: string[] = [];
     try {
       for (const c of creatures) await ops.send({ t: "token.create", token: { id: c.id, sceneId: run.sceneId, kind: "monster", name: c.name, size: c.size, ...c.at, visibility: "all", disposition: "hostile", actor: { inline: c.actor } } });
-      await waitFor("the summary's creatures", () => (creatures.every((c) => dmSocket.state?.tokens[c.id]) ? true : null));
+      await ops.send({ t: "token.create", token: { id: made.scout, sceneId: run.sceneId, kind: "monster", name: scout.name, size: "medium", ...scout.at, elevation: 10, visibility: "all", disposition: "hostile", actor: { inline: actor({ ac: 9, hp: { cur: 7, max: 7, temp: 0 }, sheetUrl }) } } });
+      await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { sheetUrl } } });
+      await waitFor("the summary's creatures", () => ([...creatures.map((c) => c.id), made.scout].every((id) => dmSocket.state?.tokens[id]) ? true : null));
       for (const at of SUMMARY_AT) {
         const sweep = new Sweep(atName(at));
         const page = await dmPageFor(at.size);
         page.setDefaultTimeout(10_000);
         await openAt(page, at.size, at.scale);
         await waitFor("the DM's snapshot", () => dmSocket.state);
-        for (const c of creatures) {
-          const screen = `window-summary-${c.name.toLowerCase().replace(/ /g, "-")}`;
-          await closeSheets(page);
-          await escapeAll(page);
-          if (!(await canvasAt(page, c.tap))) {
-            await sweep.missing(page, screen, `${c.name}'s cell is covered`);
-            continue;
-          }
-          const bar = await selectToken(page, c.name, c.tap);
-          if (!bar) {
-            await sweep.missing(page, screen, `a tap on ${c.name} opened no window`);
-            continue;
-          }
-          await expandBar(bar);
-          // A short bar keeps speed, Passive Perception and the saves in More stats (docs/design-v1-token-panel.md 3.3).
-          const more = bar.getByRole("button", { name: "More stats", exact: true });
-          if ((await visible(more)) && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
-          if (c.saves && !(await showsWithin(bar.locator("[data-saves]").first(), 10_000))) await sweep.missing(page, screen, `${c.name}'s saves never showed`);
-          await sweep.measure(page, screen, bar.locator("[data-vitals], [data-saves]"));
-          if (c.saves || at.size.touch) await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
-          await bar.getByRole("button", { name: "Close", exact: true }).first().click();
-          await bar.waitFor({ state: "detached" });
-        }
+        for (const c of creatures) await summaryScreen(sweep, page, c, c.saves || at.size.touch);
         lines.push(...sweep.lines);
       }
+      // Thorn's sheet link as his player sees it, after his Speed and Passive Perception.
+      for (const at of SUMMARY_AT) {
+        const sweep = new Sweep(atName(at));
+        pat.setDefaultTimeout(10_000);
+        await openAt(pat, at.size, at.scale);
+        await summaryScreen(sweep, pat, { name: "Thorn", tap: { x: 5, y: 5 }, saves: false }, at.size.touch);
+        lines.push(...sweep.lines);
+      }
+      // Docked beside a sideways phone's sheet, the window is too narrow for the elevation badge in its header, so the badge ends the vitals line (barDock.ts headerLayout).
+      const narrow = { size: { name: "667x375", width: 667, height: 375, touch: true }, scale: 1.3 };
+      const sweep = new Sweep(atName(narrow));
+      const screen = "window-summary-beside-sheet";
+      const page = await dmPageFor(narrow.size);
+      await openAt(page, narrow.size, narrow.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await closeSheets(page);
+      await escapeAll(page);
+      const bar = (await canvasAt(page, scout.at)) ? await selectToken(page, scout.name, scout.at) : null;
+      if (!bar) await sweep.missing(page, screen, `${scout.name}'s cell is covered, or a tap on it opened no window`);
+      else {
+        await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+        await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Outliner", exact: true }).click();
+        await page.locator('section[aria-label="Outliner"]').waitFor();
+        if (!(await showsWithin(bar.locator("[data-vitals]").getByText("↑10 ft", { exact: true }), 5_000))) await sweep.missing(page, screen, "the elevation badge never left the window's header for the vitals line");
+        await sweep.measure(page, screen, bar.locator("[data-vitals]"));
+        await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
+        await closeSheets(page);
+        await escapeAll(page);
+      }
+      lines.push(...sweep.lines);
     } finally {
-      for (const c of creatures) await ops.send({ t: "token.delete", tokenId: c.id }).catch(() => {});
+      for (const id of Object.values(made)) await ops.send({ t: "token.delete", tokenId: id }).catch(() => {});
+      await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { sheetUrl: null } } }).catch(() => {});
     }
     assert.deepEqual(lines, [], "the summary lines out of line");
   });
@@ -2985,6 +2999,28 @@ async function roundLines(header: Locator, at: string): Promise<string[]> {
     },
     at,
   );
+}
+
+/**
+ * A token window's summary lines in fu30-b: its vitals and its saves,
+ * expanded, and with More stats open where the bar is short.
+ */
+async function summaryScreen(sweep: Sweep, page: Page, c: { name: string; tap: { x: number; y: number }; saves: boolean }, shot: boolean): Promise<void> {
+  const screen = `window-summary-${c.name.toLowerCase().replace(/ /g, "-")}`;
+  await closeSheets(page);
+  await escapeAll(page);
+  if (!(await canvasAt(page, c.tap))) return sweep.missing(page, screen, `${c.name}'s cell is covered`);
+  const bar = await selectToken(page, c.name, c.tap);
+  if (!bar) return sweep.missing(page, screen, `a tap on ${c.name} opened no window`);
+  await expandBar(bar);
+  // A short bar keeps speed, Passive Perception and the saves in More stats (docs/design-v1-token-panel.md 3.3).
+  const more = bar.getByRole("button", { name: "More stats", exact: true });
+  if ((await visible(more)) && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
+  if (c.saves && !(await showsWithin(bar.locator("[data-saves]").first(), 10_000))) await sweep.missing(page, screen, `${c.name}'s saves never showed`);
+  await sweep.measure(page, screen, bar.locator("[data-vitals], [data-saves]"));
+  if (shot) await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
+  await bar.getByRole("button", { name: "Close", exact: true }).first().click();
+  await bar.waitFor({ state: "detached" });
 }
 
 /** Thorn's D&D Beyond number in fu30-c. */

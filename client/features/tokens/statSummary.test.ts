@@ -271,19 +271,31 @@ function partOf(markup: string, needle: string): string | null {
 }
 
 describe("the summary lines' parts, so no unit stands alone on a line (D-261024-42)", () => {
-  test("the vitals hold AC and HP as one part and Speed and Passive Perception as another, the sheet link and the elevation after them", () => {
+  test("the vitals hold AC and HP as one part, and Speed, Passive Perception, the sheet link and the elevation as another (FU30-OPUS-3)", () => {
     const a = actor({ ac: 13, hp: { cur: 40, max: 40, temp: 6 }, speeds: { walk: 50, climb: 40 }, passivePerception: 15, sheetUrl: "https://www.dndbeyond.com/characters/1" });
-    const line = renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: a, token: { kind: "pc", hpVisibility: "exact" }, fullAccess: true, place: "bar" }), end: "10 ft" }));
+    const items = vitals({ actor: a, token: { kind: "pc", hpVisibility: "exact" }, fullAccess: true, place: "bar" });
+    const line = renderToStaticMarkup(createElement(VitalsLine, { items, end: "10 ft" }));
     assert.equal(partOf(line, 'aria-label="Armor Class'), "numbers 1");
     assert.equal(partOf(line, ">40/40<"), "numbers 1");
     assert.equal(partOf(line, ">+6<"), "numbers 1", "temporary HP with its HP");
     assert.equal(partOf(line, 'aria-label="Speed 50 ft, Climb 40 ft"'), "quick 2");
     assert.equal(partOf(line, 'aria-label="Passive Perception 15"'), "quick 2");
-    assert.equal(partOf(line, ">Sheet"), null, "the sheet link after the parts");
-    assert.equal(partOf(line, ">10 ft<"), null, "the elevation after them");
-    // A short bar's More stats holds Speed and Passive Perception alone, still as one part.
-    const more = renderToStaticMarkup(createElement(VitalsLine, { items: shortSplit(vitals({ actor: a, token: { kind: "pc", hpVisibility: "exact" }, fullAccess: true, place: "bar" })).more }));
+    assert.equal(partOf(line, ">Sheet"), "quick 2", "the sheet link with them");
+    assert.equal(partOf(line, ">10 ft<"), "quick 2", "and the elevation last");
+    // A short bar's line keeps the sheet link, which the elevation still follows in one part.
+    const split = shortSplit(items);
+    const short = renderToStaticMarkup(createElement(VitalsLine, { items: split.line, end: "10 ft" }));
+    assert.equal(partOf(short, ">Sheet"), "quick 2");
+    assert.equal(partOf(short, ">10 ft<"), "quick 2");
+    // Its More stats holds Speed and Passive Perception alone, still as one part.
+    const more = renderToStaticMarkup(createElement(VitalsLine, { items: split.more }));
     assert.equal(partOf(more, 'aria-label="Passive Perception 15"'), "quick 1");
+  });
+
+  test("an item of a key the parts do not name still shows, after the numbers (FU30-OPUS-4)", () => {
+    const later = { key: "later" as VitalItem["key"], units: [{ kind: "text" as const, value: "Later" }] };
+    const line = renderToStaticMarkup(createElement(VitalsLine, { items: [...vitals({ actor: actor({ ac: 13 }), token: { kind: "monster" }, fullAccess: true, place: "bar" }), later] }));
+    assert.equal(partOf(line, ">Later<"), "quick 2");
   });
 
   test("the saves wrap three and three: Saves with the first three as one part, the other three as another", () => {
