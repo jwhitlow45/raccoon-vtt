@@ -2407,6 +2407,26 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
+  test("fu31-h. dying Thorn's Revive, Stabilize and Mark dead leave no button alone under the others, in line within 1 px at live play 22's sizes (LP22-ALIGN-4)", async () => {
+    const hp = dmSocket.state!.characters[run.thorn.characterId]!.actor.hp;
+    // Down to 0 exactly: damage past the maximum would kill outright.
+    await ops.send({ t: "actor.hp", target: { characterId: run.thorn.characterId }, change: { kind: "damage", amount: hp.cur + hp.temp } });
+    await waitFor("Thorn dying", () => (dmSocket.state?.characters[run.thorn.characterId]?.actor.life === "dying" ? true : null));
+    try {
+      const off = await atLp22Sizes(async (at) => {
+        const thorn = await panelOf(dm, run.thorn.at, "Thorn");
+        const life = thorn.locator("[data-life-controls]");
+        await life.getByRole("button", { name: "Mark dead" }).waitFor();
+        await shots.take(dm, `fu31-dying-${at.replace(/ /g, "")}`);
+        return measureIn(life.locator("xpath=.."), `dying Thorn's Hit Points at ${at}`);
+      });
+      assert.deepEqual(off, [], "out of line by more than 1 px");
+    } finally {
+      await ops.send({ t: "actor.life", target: { characterId: run.thorn.characterId }, life: "alive" });
+      await ops.send({ t: "actor.hp", target: { characterId: run.thorn.characterId }, change: { kind: "set", cur: hp.cur, temp: hp.temp } });
+    }
+  });
+
   test("10. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

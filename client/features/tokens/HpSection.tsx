@@ -696,12 +696,22 @@ function LifeControls(props: { life: LifeState; onLife(life: LifeState): void })
     props.onLife(next);
     handFocusOn(root.current?.closest("section") ?? root.current?.parentElement, ["[data-hp-vitals]"]);
   };
+  // Two or three grow to fill their line, so where they do not fit on one, Mark dead never stands alone under the others (LP22-ALIGN-4). Mark dead alone keeps its own width.
+  const several = life !== "alive" && life !== "dead";
   return (
     <div ref={root} data-life-controls="" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-      {life !== "alive" ? <SmallButton onClick={() => press("alive")}>Revive</SmallButton> : null}
-      {life === "dying" ? <SmallButton onClick={() => press("stable")}>Stabilize</SmallButton> : null}
+      {life !== "alive" ? (
+        <SmallButton grow={several} onClick={() => press("alive")}>
+          Revive
+        </SmallButton>
+      ) : null}
+      {life === "dying" ? (
+        <SmallButton grow={several} onClick={() => press("stable")}>
+          Stabilize
+        </SmallButton>
+      ) : null}
       {life !== "dead" ? (
-        <SmallButton tone="danger" onClick={() => press("dead")}>
+        <SmallButton grow={several} tone="danger" onClick={() => press("dead")}>
           Mark dead
         </SmallButton>
       ) : null}
