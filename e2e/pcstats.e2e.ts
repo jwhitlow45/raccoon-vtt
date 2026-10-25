@@ -213,6 +213,16 @@ async function focusLands(page: Page, want: RegExp, after: string): Promise<void
   await waitFor(`focus after ${after}`, () => focusedOn(page).then((f) => (want.test(f) ? true : null)), 5_000).catch(async () => assert.fail(`after ${after} focus is on "${await focusedOn(page)}"`));
 }
 
+/** Bree's Conditions in her token panel with Combat open, on the room loaded again so no form an earlier step left open stays. */
+async function breeConditions(page: Page): Promise<Locator> {
+  await reopenRoom(page);
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  const panel = await showBree(page);
+  const combat = panel.getByRole("button", { name: "Combat", exact: true });
+  if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+  return conditionsIn(panel);
+}
+
 describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -846,6 +856,18 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await pressKey(ana, panel.getByRole("button", { name: "End the shape" }));
     await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
     await focusLands(ana, /^fold Stat block/, "End the shape");
+  });
+
+  test("lp22-r1-a. a condition whose id holds a quote: Back from its form hands focus to its row, found by the id escaped (LP22-ASTRA-01)", async () => {
+    // An op may name an effect with any id of 1 to 64 characters.
+    const effectId = 'lp22 "r1" a';
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.bree.characterId }, effect: { id: effectId, key: "blinded" } });
+    const conditions = await breeConditions(ana);
+    await pressKey(ana, conditions.locator("[data-effect-row]").filter({ hasText: "Blinded" }));
+    await focusLands(ana, /^Back$/, "the row opened its form");
+    await pressKey(ana, conditions.getByRole("button", { name: "Back", exact: true }));
+    await focusLands(ana, /^Blinded/, "Back");
+    await ops.send({ t: "actor.effect.remove", target: { characterId: run.bree.characterId }, effectId });
   });
 
   test("6. no page logged an error", () => {

@@ -85,7 +85,8 @@ export function EffectsSection(props: {
     const at = box.current;
     const active = document.activeElement;
     if (!at || (active !== null && active !== document.body)) return;
-    const row = detail === null && was?.mode === "edit" ? at.querySelector<HTMLElement>(`[data-effect-row="${was.effectId}"]`) : null;
+    // An effect's id may hold any character, a quote among them, so it goes into the selector escaped.
+    const row = detail === null && was?.mode === "edit" ? at.querySelector<HTMLElement>(`[data-effect-row="${CSS.escape(was.effectId)}"]`) : null;
     (row ?? at.querySelector<HTMLElement>("button"))?.focus();
   }, [detail]);
 
