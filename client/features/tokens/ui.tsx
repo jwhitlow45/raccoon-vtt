@@ -32,10 +32,10 @@ export function Section(props: { title?: string; children: ReactNode; aside?: Re
   );
 }
 
-/** A label on the left and its control on the right, wrapping on narrow sheets. `fill` for a control that stretches (components/Field.tsx). */
-export function FieldRow(props: { label: string; children: ReactNode; htmlFor?: string; hint?: ReactNode; fill?: boolean }) {
+/** A label on the left and its control on the right, wrapping on narrow sheets. `fill` for a control that stretches, `fixed` for one such as a Stepper (components/Field.tsx). */
+export function FieldRow(props: { label: string; children: ReactNode; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean }) {
   return (
-    <PanelFieldRow label={props.label} htmlFor={props.htmlFor} hint={props.hint} fill={props.fill}>
+    <PanelFieldRow label={props.label} htmlFor={props.htmlFor} hint={props.hint} fill={props.fill} fixed={props.fixed}>
       {props.children}
     </PanelFieldRow>
   );

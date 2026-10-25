@@ -146,8 +146,14 @@ export function Field(
  * `width: 100%`): a text field or a select. Its cell always asks for
  * 160 px, so every stretching control in a column starts at one left edge
  * whatever its own width. Without it the controls ask for their own width.
+ *
+ * `fixed` is for a control of one width that neither stretches nor wraps,
+ * such as a Stepper, which is wider than the 160 px a row's controls ask
+ * for. The label asks for no more than its words, and the control for its
+ * whole width, so a short label stays beside it wherever both fit and the
+ * row wraps wherever they do not (S2-POS-1).
  */
-export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; children: ReactNode }) {
+export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean; children: ReactNode }) {
   const hintId = useId();
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
@@ -166,11 +172,19 @@ export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactN
        * room: "DC" and its field share a 214 px line, as "On a pass" and its
        * 119 px choice do.
        */}
-      <label htmlFor={props.htmlFor} style={{ flex: `1 1 min(${LABEL_BASIS}px, 40%)`, minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}>
+      <label
+        htmlFor={props.htmlFor}
+        style={{ flex: `1 1 min(${LABEL_BASIS}px, 40%)`, ...(props.fixed ? { maxWidth: "max-content" } : null), minWidth: 0, fontSize: theme.font.body14, color: theme.color.text }}
+      >
         {props.label}
       </label>
-      <div style={{ flex: props.fill ? `1 1 ${CONTROLS_BASIS}px` : "1 1 auto", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
-        <div style={{ minWidth: "100%", maxWidth: CONTROLS_BASIS, display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
+      {/*
+       * A fixed control's cell asks for the whole control, past the cap, and
+       * the label stops growing at its words: the auto margin then keeps the
+       * control at the row's end, on the label's line or on its own.
+       */}
+      <div style={{ ...(props.fixed ? { flex: "none", marginInlineStart: "auto" } : { flex: props.fill ? `1 1 ${CONTROLS_BASIS}px` : "1 1 auto" }), minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ ...(props.fixed ? null : { minWidth: "100%", maxWidth: CONTROLS_BASIS }), display: "flex", gap: theme.space(2), alignItems: "center", justifyContent: "flex-end" }}>
           <RowHint.Provider value={props.hint ? hintId : undefined}>{props.children}</RowHint.Provider>
         </div>
       </div>

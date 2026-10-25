@@ -256,6 +256,46 @@ function sectionIn(scope: Locator, heading: string): Locator {
   return scope.locator(`xpath=.//section[*[self::h3 or self::h4][normalize-space()="${heading}"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="${heading}"]]`);
 }
 
+/**
+ * A FieldRow's label and its stepper (components/Field.tsx, `fixed`), by
+ * the label's words: the words' width, the row's gap, the stepper's width
+ * and the row's, in the page's pixels, whether the three fit in the row,
+ * and whether the stepper stands on the label's line, at its right, or
+ * under it.
+ */
+function stepperRows(scope: Locator, labels: readonly string[]): Promise<{ label: string; words: number; gap: number; controls: number; width: number; fits: boolean; beside: boolean; under: boolean }[]> {
+  return scope.evaluate((el, labels) => {
+    type R = { left: number; right: number; top: number; bottom: number; width: number };
+    type E = { textContent: string | null; offsetWidth: number; parentElement: E | null; nextElementSibling: E | null; firstElementChild: E | null; getBoundingClientRect(): R };
+    const root = el as unknown as E & { querySelectorAll(s: string): ArrayLike<E>; ownerDocument: { createRange(): { selectNodeContents(n: E): void; getBoundingClientRect(): R }; defaultView: { getComputedStyle(e: E): { columnGap: string } } } };
+    const doc = root.ownerDocument;
+    return labels.map((label) => {
+      const name = Array.from(root.querySelectorAll("label")).find((l) => l.textContent?.trim() === label);
+      const row = name?.parentElement;
+      const stepper = name?.nextElementSibling?.firstElementChild?.firstElementChild;
+      if (!name || !row || !stepper) throw new Error(`no ${label} row with a stepper`);
+      const range = doc.createRange();
+      range.selectNodeContents(name);
+      const words = range.getBoundingClientRect();
+      const box = row.getBoundingClientRect();
+      const s = stepper.getBoundingClientRect();
+      // The page's pixels per CSS pixel, so the row's gap compares with the boxes at 130% too.
+      const gap = parseFloat(doc.defaultView.getComputedStyle(row).columnGap) * (box.width / row.offsetWidth);
+      const mid = (r: R) => (r.top + r.bottom) / 2;
+      return {
+        label,
+        words: words.width,
+        gap,
+        controls: s.width,
+        width: box.width,
+        fits: words.width + gap + s.width <= box.width + 0.5,
+        beside: Math.abs(mid(s) - mid(words)) <= 1 && s.left >= words.right + gap - 0.5,
+        under: s.top >= words.bottom - 0.5,
+      };
+    });
+  }, labels);
+}
+
 /** A panel's group by the name on its fold (components/Panel.tsx Group). */
 function groupIn(scope: Locator, name: string): Locator {
   return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
@@ -2174,8 +2214,8 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         // The row's label, not the preset of the same word under it.
         await groupIn(panel, "Position").locator('xpath=.//span[normalize-space()="Light"][not(ancestor::button)]').waitFor();
         assert.equal(await groupIn(panel, "Position").getByText("Light it carries").count(), 0, `${at}: Sight's light row in its old words`);
-        // Position's attach controls, the part this lane added. Its Elevation and Facing rows wrap by FieldRow's own basis (docs/design-v1-polish.md R2), as before it.
-        await check(dm, groupIn(panel, "Position").locator("[data-attach-controls]"), `the goblin's attach controls at ${at}`);
+        // Position whole, its attach controls with it: Elevation and Facing keep their labels beside their steppers wherever both fit (S2-POS-1).
+        await check(dm, groupIn(panel, "Position"), `the goblin's Position at ${at}`);
         await openGroup(panel, "Token settings");
         await groupIn(panel, "Token settings").getByRole("button", { name: "Duplicate", exact: true }).waitFor();
         await check(dm, groupIn(panel, "Token settings"), `the goblin's Token settings at ${at}`);
@@ -2204,6 +2244,33 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
     console.log(`s2-tp sizes:\n${notes.join("\n")}`);
     assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("fu31-a. the goblin's Position at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: Elevation and Facing beside their steppers wherever both fit, under them only where they do not, and in line within 1 px (S2-POS-1)", async () => {
+    const off: string[] = [];
+    const notes: string[] = [];
+    try {
+      for (const view of [1440, 390, 320].flatMap((width) => [1, 1.3].map((scale) => ({ width, height: { 1440: 900, 390: 844, 320: 568 }[width]!, scale })))) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(dm, dmCdp, view, null);
+        const panel = await panelOf(dm, run.goblin.at, "Goblin 4");
+        await openGroup(panel, "Position");
+        const position = groupIn(panel, "Position");
+        await position.getByText("Facing", { exact: true }).waitFor();
+        await position.scrollIntoViewIfNeeded();
+        off.push(...alignmentLines(await measureAlignment(position), `the goblin's Position at ${at}`));
+        for (const row of await stepperRows(position, ["Elevation", "Facing"])) {
+          notes.push(`${at}: ${row.label} ${row.words.toFixed(1)} + ${row.gap.toFixed(1)} + ${row.controls.toFixed(1)} px in ${row.width.toFixed(1)}, ${row.beside ? "beside" : row.under ? "under" : "neither"}`);
+          if (row.fits && !row.beside) off.push(`${at}: ${row.label} and its stepper fit side by side, yet stand apart`);
+          if (!row.fits && !row.under) off.push(`${at}: ${row.label} and its stepper do not fit side by side, yet the stepper is not under it`);
+        }
+        await shots.take(dm, `fu31-position-${view.width}-${Math.round(view.scale * 100)}`);
+      }
+    } finally {
+      await setUp(dm, dmCdp, DESK, null);
+    }
+    console.log(`fu31-a rows:\n${notes.join("\n")}`);
+    assert.deepEqual(off, [], "Position's rows out of line");
   });
 
   test("s2-tp-z. the fight ends", async () => {

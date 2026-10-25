@@ -102,6 +102,29 @@ describe("FieldRow", () => {
     assert.match(markup, /<label[^>]*flex:1 1 min\(110px, 40%\)/, "the label's basis is the same with fill");
   });
 
+  /*
+   * A Stepper is wider than the 160 px cap, and "Elevation" narrower than
+   * the label's 110 px or 40%, so both bases wrapped Position's rows at
+   * 390 x 844 at 130% where the words and the stepper fit (S2-POS-1).
+   */
+  test("a fixed row's label asks for no more than its words, and its cell for the whole control, kept at the row's end", () => {
+    const markup = html(createElement(FieldRow, { label: "Elevation", fixed: true, children: createElement(Input, { "aria-label": "Elevation", style: { width: 172 } }) }));
+    assert.match(markup, /<label[^>]*flex:1 1 min\(110px, 40%\);max-width:max-content/);
+    const cell = /<\/label><div style="([^"]*)"><div style="([^"]*)"><input/.exec(markup);
+    assert.ok(cell, "the controls are not a cell holding one inner box");
+    assert.match(cell[1]!, /(^|;)flex:none(;|$)/);
+    assert.match(cell[1]!, /margin-inline-start:auto/);
+    assert.doesNotMatch(cell[2]!, /max-width/, "the cap still holds the control's basis");
+    assert.doesNotMatch(cell[2]!, /min-width/);
+  });
+
+  test("a row that is not fixed keeps its label's basis free of its words", () => {
+    for (const fill of [false, true]) {
+      const markup = html(createElement(FieldRow, { label: "DC", fill, children: createElement(Input, { "aria-label": "Save DC", type: "number" }) }));
+      assert.doesNotMatch(/<label[^>]*>/.exec(markup)![0], /max-width/, `fill ${fill}`);
+    }
+  });
+
   test("a dialog's scope ends the hint, so a picker a row opens is not described by it", () => {
     const markup = html(createElement(FieldRow, { label: "Image", hint: "They differ.", children: createElement(RowHintScope, { children: createElement(Input, { "aria-label": "Image address" }) }) }));
     assert.equal(describedBy(inputs(markup)[0]), undefined);

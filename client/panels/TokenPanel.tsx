@@ -405,13 +405,13 @@ function PositionSection(props: { token: Token; access: TokenAccess; update(patc
   return (
     <Section>
       {canElevate ? (
-        <FieldRow label="Elevation" hint="Feet. Negative is below ground.">
+        <FieldRow label="Elevation" hint="Feet. Negative is below ground." fixed>
           <Stepper label="Elevation" value={token.elevation ?? 0} step={5} min={-100_000} max={100_000} onChange={(elevation) => update({ elevation })} />
         </FieldRow>
       ) : null}
       <GroundNotice token={token} />
       {canRotate ? (
-        <FieldRow label="Facing" hint="Degrees clockwise">
+        <FieldRow label="Facing" hint="Degrees clockwise" fixed>
           <Stepper label="Facing" value={rotation} step={45} min={-360} max={360} onChange={(r) => update({ rotation: ((r % 360) + 360) % 360 })} />
         </FieldRow>
       ) : null}
