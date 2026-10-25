@@ -339,6 +339,42 @@ async function atLp22Sizes(step: (at: string) => Promise<string[]>, withPlayer =
   return off;
 }
 
+/**
+ * In each line of quick numbers or summary units: the item after Passive
+ * Perception (Init, the elevation, the Sheet link) stands on Passive
+ * Perception's line wherever it fits there, 12 px after it, as the units
+ * stand apart (FU31 review F1). The item is the next element after
+ * Passive Perception's box or the first of its boxes that has one.
+ */
+function afterPpLines(lines: Locator, at: string): Promise<string[]> {
+  return lines.evaluateAll(
+    (els, at) => {
+      type R = { left: number; right: number; top: number; bottom: number; width: number };
+      type E = { offsetWidth: number; textContent: string | null; parentElement: E | null; nextElementSibling: E | null; firstElementChild: E | null; getBoundingClientRect(): R; querySelector(s: string): E | null };
+      const out: string[] = [];
+      for (const line of els as unknown as E[]) {
+        const pp = line.querySelector('[role="img"][aria-label^="Passive Perception"]');
+        if (!pp) continue;
+        let next: E | null = null;
+        for (let x: E | null = pp; x && x !== line && !next; x = x.parentElement) next = x.nextElementSibling;
+        // A box drawn as its contents has no box of its own: its first item stands for it.
+        while (next && next.getBoundingClientRect().width === 0 && next.firstElementChild) next = next.firstElementChild;
+        if (!next) continue;
+        const box = line.getBoundingClientRect();
+        const zoom = box.width / line.offsetWidth;
+        const p = pp.getBoundingClientRect();
+        const n = next.getBoundingClientRect();
+        const mid = (r: R) => (r.top + r.bottom) / 2;
+        const beside = Math.abs(mid(p) - mid(n)) < 2;
+        const fits = p.right + 12 * zoom + n.width <= box.right + 0.5;
+        if (!beside && fits) out.push(`${at}: "${(next.textContent ?? "").trim()}" stands on a line of its own after PP, where it fits beside PP (${(box.right - p.right).toFixed(1)} px left for ${n.width.toFixed(1)})`);
+      }
+      return out;
+    },
+    at,
+  );
+}
+
 /** A panel's group by the name on its fold (components/Panel.tsx Group). */
 function groupIn(scope: Locator, name: string): Locator {
   return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
@@ -2465,6 +2501,48 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await setUp(dm, dmCdp, DESK, null);
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("fu31-m. the item after Passive Perception sits beside it wherever it fits: the panel's header for the dragon and Swift, and the window's summary for a five-speed scout with its Sheet link, at 1280 x 800, 390 x 844 and 480 x 320 at 130%, and the scout at 390 x 844 at 130% and 320 x 568 (FU31 review F1)", async () => {
+    const scout = { id: randomUUID(), at: cell(6, 4) };
+    await ops.send({ t: "token.create", token: { id: scout.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: scout.at.x, y: scout.at.y, disposition: "hostile", kind: "monster", name: "Climbing Scout", actor: { inline: actor({ ac: 14, speeds: { walk: 40, burrow: 20, climb: 40, fly: 80, swim: 30 }, passivePerception: 23, sheetUrl: SHEET }) } } });
+    await waitFor("the scout", () => dmSocket.state?.tokens[scout.id]);
+    const off: string[] = [];
+    try {
+      for (const size of [
+        { ...DESK, label: "1280 x 800" },
+        { width: 390, height: 844, scale: 1, label: "390 x 844" },
+        { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 }, label: "480 x 320 at 130%" },
+        // Narrower summaries, for the scout alone, where its five speeds, PP and Sheet take two lines or three.
+        { width: 390, height: 844, scale: 1.3, label: "390 x 844 at 130%", scoutOnly: true },
+        { width: 320, height: 568, scale: 1, label: "320 x 568", scoutOnly: true },
+      ]) {
+        await setUp(dm, dmCdp, size, null);
+        for (const [at, name] of "scoutOnly" in size ? [] : ([
+          [run.dragon.at, "Adult White Dragon"],
+          [run.swift.at, "Swift"],
+        ] as const)) {
+          const panel = await panelOf(dm, at, name);
+          off.push(...(await afterPpLines(panel.locator("[data-quick-numbers]"), `${size.label}, ${name}'s panel header`)));
+          await shots.take(dm, `fu31-after-pp-${size.width}-${name.split(" ")[0]!.toLowerCase()}`);
+          for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText("Tap a token to see it here.").count()) === 0; i++) await dm.keyboard.press("Escape");
+        }
+        await dm.keyboard.press("Escape");
+        await tapToken(dm, scout.at);
+        const b = bar(dm, "Climbing Scout");
+        await b.waitFor();
+        await expandBar(b);
+        const more = b.getByRole("button", { name: "More stats", exact: true });
+        if ((await more.count()) > 0 && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
+        off.push(...(await afterPpLines(b.locator("[data-vitals]"), `${size.label}, the scout's summary`)));
+        await shots.take(dm, `fu31-after-pp-${size.width}-${Math.round(size.scale * 100)}-scout`);
+        await dm.keyboard.press("Escape");
+      }
+    } finally {
+      await ops.send({ t: "token.delete", tokenId: scout.id });
+      await setUp(dm, dmCdp, DESK, null);
+    }
+    assert.deepEqual(off, [], "an item alone after Passive Perception");
   });
 
   test("10. no page errors along the way", () => {

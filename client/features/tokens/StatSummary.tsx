@@ -155,7 +155,7 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
     const next = rest[n + 1];
     const pp = next ? quickUnit(next.item) : null;
     if (next && speed?.key === "speed" && speed.modes.length > 1 && pp?.key === "passivePerception") {
-      quick.push(<SpeedThenPerception key="speed" speed={speed} pp={pp} style={betweenAfter(next.i)} />);
+      quick.push(<SpeedThenPerception key="speed" speed={speed} pp={pp} lineGap={VITALS_PART.columnGap} style={betweenAfter(next.i)} />);
       n++;
     } else quick.push(...drawn(item, i));
   }

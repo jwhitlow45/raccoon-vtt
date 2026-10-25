@@ -34,7 +34,8 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
       const next = props.items[n + 1];
       const pp = next ? quickUnit(next) : null;
       if (unit?.key === "speed" && unit.modes.length > 1 && pp?.key === "passivePerception") {
-        units.push(<SpeedThenPerception key="speed" speed={unit} pp={pp} />);
+        // The line's own gap, its columnGap below.
+        units.push(<SpeedThenPerception key="speed" speed={unit} pp={pp} lineGap={theme.space(3)} />);
         n++;
       } else if (unit) units.push(<QuickNumberUnit key={unit.key} unit={unit} />);
     }
@@ -110,14 +111,21 @@ type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
  * "Climb 40 ft" did in More stats on the narrowest phone (FU30-NOTED).
  * The speed keeps its whole name, so a screen reader hears it once, and
  * the last mode drawn beside Passive Perception is hidden from it.
+ *
+ * The two parts are the line's own items, not one box around them: a box
+ * whose contents wrap takes its whole line, and the item after Passive
+ * Perception then stood alone under it where it fit beside it, as
+ * "Init +0" did under "Burrow 30 ft PP 21" (FU31 review F1). `lineGap` is
+ * the gap of the line they stand in. The speed's end margin takes it back
+ * to the modes' own gap, and a speed that ends its line loses nothing by
+ * it. `style` goes on the part with Passive Perception, which ends this.
  */
-export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; style?: CSSProperties }) {
+export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; lineGap: number; style?: CSSProperties }) {
   const { speed } = props;
   const last = speed.modes.length - 1;
-  // The modes' own gap between the speed and its last mode, and the summary line's between that mode and Passive Perception.
   return (
-    <span data-speed-pp="" style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0, maxWidth: "100%", ...props.style }}>
-      <Unit name={speed.name} wraps>
+    <span data-speed-pp="" style={{ display: "contents" }}>
+      <Unit name={speed.name} wraps style={{ marginInlineEnd: theme.space(1) - props.lineGap }}>
         <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
         {speed.modes.slice(0, last).map((mode, i) => (
           <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>
@@ -125,7 +133,7 @@ export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUni
           </strong>
         ))}
       </Unit>
-      <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(3), minWidth: 0, maxWidth: "100%" }}>
+      <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(3), minWidth: 0, maxWidth: "100%", ...props.style }}>
         <strong data-unit="speed" aria-hidden="true" style={{ whiteSpace: "nowrap" }}>
           {speed.modes[last]}
         </strong>
