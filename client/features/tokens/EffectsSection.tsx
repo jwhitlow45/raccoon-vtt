@@ -11,6 +11,7 @@ import { buttonLook } from "../../components/looks.ts";
 import { Markdown } from "../../components/Markdown.tsx";
 import { dispatchGesture } from "../../state/actions.ts";
 import { fireOps, MAX_TRIGGER, reactionTarget } from "../encounter/ready.ts";
+import { pressedControl } from "../../lib/handFocus.ts";
 import { effectChip, effectCount } from "../../lib/tokenView.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -76,15 +77,23 @@ export function EffectsSection(props: {
    * page. It moves to the form's first control, Back, as the form opens,
    * and as it closes to the row it was opened from, else Add, the
    * section's first control. Only when focus fell to the page, never on
-   * the first draw.
+   * the first draw, and only after a press on a control that had focus,
+   * as lib/handFocus.ts's hand-offs do: a tap on a phone focuses nothing,
+   * and the hand-off moves nothing then.
    */
+  const pressFocused = useRef(false);
+  const notePress = () => {
+    pressFocused.current = pressedControl() !== null;
+  };
   useEffect(() => {
     if (before.current === detail) return;
     const was = before.current;
     before.current = detail;
+    const pressed = pressFocused.current;
+    pressFocused.current = false;
     const at = box.current;
     const active = document.activeElement;
-    if (!at || (active !== null && active !== document.body)) return;
+    if (!at || !pressed || (active !== null && active !== document.body)) return;
     // An effect's id may hold any character, a quote among them, so it goes into the selector escaped.
     const row = detail === null && was?.mode === "edit" ? at.querySelector<HTMLElement>(`[data-effect-row="${CSS.escape(was.effectId)}"]`) : null;
     (row ?? at.querySelector<HTMLElement>("button"))?.focus();
@@ -92,8 +101,8 @@ export function EffectsSection(props: {
 
   if (detail && (detail.mode === "add" || editing)) {
     return (
-      // No box of its own: a hold for the focus hand-off above, around the section in both of its looks.
-      <div ref={box} style={{ display: "contents" }}>
+      // No box of its own: a hold for the focus hand-off above and the presses it follows, around the section in both of its looks.
+      <div ref={box} onClickCapture={notePress} style={{ display: "contents" }}>
         <Section title={props.title ?? "Conditions"}>
           <EffectDetail
             key={detail.mode === "add" ? `add:${detail.key}` : `edit:${detail.effectId}`}
@@ -114,7 +123,7 @@ export function EffectsSection(props: {
   }
 
   return (
-    <div ref={box} style={{ display: "contents" }}>
+    <div ref={box} onClickCapture={notePress} style={{ display: "contents" }}>
       <Section
         title={props.title ?? "Conditions"}
         aside={

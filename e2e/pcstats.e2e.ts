@@ -870,6 +870,26 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await ops.send({ t: "actor.effect.remove", target: { characterId: run.bree.characterId }, effectId });
   });
 
+  test("lp22-r1-b. a press that focuses nothing, as a tap on a phone, opens a condition's form and closes it with focus left where it was (LP22-OPUS-1)", async () => {
+    const conditions = await breeConditions(ana);
+    // A click sent to the button alone takes no focus, as a tap on a phone that does not focus buttons.
+    const tap = async (target: Locator) => {
+      await ana.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+      await target.dispatchEvent("click");
+    };
+    const stays = async (after: string) => {
+      await ana.waitForTimeout(300);
+      assert.equal(await focusedOn(ana), "the page", `after ${after} focus moved`);
+    };
+    await tap(conditions.getByRole("button", { name: "Add", exact: true }));
+    await tap(conditions.locator("button[aria-pressed]").filter({ hasText: "Poisoned" }));
+    await conditions.getByRole("button", { name: "Back", exact: true }).waitFor();
+    await stays("Poisoned's tile opened its form");
+    await tap(conditions.getByRole("button", { name: "Back", exact: true }));
+    await conditions.getByRole("button", { name: "Add", exact: true }).waitFor();
+    await stays("Back");
+  });
+
   test("6. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");
