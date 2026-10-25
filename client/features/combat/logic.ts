@@ -284,7 +284,7 @@ export function regenerationNote(took: readonly DamageType[] | undefined, stops:
 }
 
 /** The note's help (4.3), so a DM does not take its absence for a rule. */
-export const REGENERATION_NOTE_HELP = "Damage typed by hand is not counted.";
+export const REGENERATION_NOTE_HELP = "A plain number typed into the HP entry has no damage type, so it is not counted.";
 
 /** "Regenerated 15 HP." once Apply settled it. */
 export function regeneratedWords(settled: Settled): string {

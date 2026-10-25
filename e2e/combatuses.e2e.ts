@@ -700,7 +700,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const card = desk.getByRole("group", { name: "Regeneration for Troll" });
     await card.getByText("Troll regenerates 15 HP.", { exact: true }).waitFor();
     await card.getByText("Recorded Fire damage may stop Regeneration.", { exact: true }).waitFor();
-    await card.getByText("Damage typed by hand is not counted.", { exact: true }).waitFor();
+    await card.getByText("A plain number typed into the HP entry has no damage type, so it is not counted.", { exact: true }).waitFor();
     await shots.take(desk, "cu-b-regeneration");
     const before = troll()!.hp.cur;
     await card.getByRole("button", { name: "Apply", exact: true }).click();
