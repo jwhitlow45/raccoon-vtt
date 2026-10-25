@@ -1,8 +1,8 @@
-import type { RoomState, SceneId, SightTile, Token } from "./model.ts";
+import type { MemberId, RoomState, SceneId, SightTile, Token } from "./model.ts";
 import type { DoorRef } from "./protocol.ts";
 import { legBlocker, lineClear, squeezeFits, type WalkEnd, type Walker } from "./rules/movement.ts";
 import type { Point } from "./rules/geom.ts";
-import { partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
+import { NO_PARTY_SIGHT, partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
 import { sceneWalls } from "./rules/walls.ts";
 
 /**
@@ -69,8 +69,26 @@ export type PartySight = {
 };
 
 export type VisionRules = {
-  /** On the server: the party's sight on a scene whose vision is on, from 4C's cache. */
+  /**
+   * On the server: the party's sight on a scene whose vision is on, from
+   * 4C's cache. On a per-player scene this is the union of every source,
+   * the DM's (docs/design-v1-per-player-vision.md 6.1), bit for bit what
+   * the same scene sees as a whole-party one.
+   */
   partySight(state: RoomState, sceneId: SceneId): PartySight;
+  /**
+   * On the server, for a per-player scene whose vision is on
+   * (docs/design-v1-per-player-vision.md 6.1): with a member, what that
+   * sight holder sees, the sources marked to share sight with the party and
+   * the sources they own, among the union's sources; with null, the shared
+   * sight alone, which every other viewer has. The union's own source cap
+   * and order choose the sources, so each answer lies within `partySight`.
+   * Viewers with the same sources may share one answer, and its tiles may
+   * be worked out only when first read: a sweep's moment asks `seesToken`
+   * alone. A scene whose vision is off, or one the state lacks, sees
+   * nothing.
+   */
+  holderSight(state: RoomState, sceneId: SceneId, memberId: MemberId | null): PartySight;
   /**
    * On a client: the party's sight as the server sent it, from the sight
    * tiles a projected state holds (keyed `"<sceneId>:<tx>,<ty>"`). A scene
@@ -88,5 +106,12 @@ const VISION_WORLD: VisionWorld = { walls: sceneWalls };
 
 export const visionRules: VisionRules = {
   partySight: (state, sceneId) => partySight(state, sceneId, VISION_WORLD),
+  /*
+   * Until each holder's sight is worked out (docs/design-v1-per-player-vision.md
+   * section 12, lane PV2), a per-player scene's holders and its shared
+   * sight see nothing, so no player is shown what another player's
+   * creatures see. Nothing in the app makes a scene per player before then.
+   */
+  holderSight: () => NO_PARTY_SIGHT,
   sightFromTiles,
 };

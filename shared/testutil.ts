@@ -329,6 +329,8 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     stamps: {},
     lights: {},
     exploredTiles: {},
+    holders: {},
+    exploredBy: {},
     journal: {},
     pins: {},
     rolls: {},

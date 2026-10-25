@@ -51,6 +51,8 @@ export function createInitialState(input: { roomName: string; dm: Member; now?: 
     stamps: {},
     lights: {},
     exploredTiles: {},
+    holders: {},
+    exploredBy: {},
     journal: {},
     pins: {},
     rolls: {},

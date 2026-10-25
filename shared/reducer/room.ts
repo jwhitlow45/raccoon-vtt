@@ -1,9 +1,9 @@
 import { keys } from "../keys.ts";
-import type { Scene } from "../model.ts";
+import type { Encounter, MemberId, PathStop, Scene, SceneVision, TurnStart } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { setGridWithPhases, setMapWithPhases, withPhases } from "./phases.ts";
-import { forgetExplored } from "./map.ts";
+import { forgetExplored, forgetHolder } from "./map.ts";
 import { invalid, gone, type Tx } from "./tx.ts";
 import { deleteToken, sortedById } from "./tokens.ts";
 
@@ -99,6 +99,7 @@ export function sysMemberRemove(tx: Tx, op: OpOf<"sys.memberRemove">): void {
     else tx.write(keys.handout(handout.id), { ...handout, to });
   }
   privatePagesToDm(tx, op.memberId);
+  scrubSight(tx, op.memberId);
   const moveAny = tx.state.meta.settings.playersMoveAny;
   if (Array.isArray(moveAny) && moveAny.includes(op.memberId)) {
     const meta = tx.state.meta;
@@ -111,6 +112,45 @@ export function sysMemberRemove(tx: Tx, op: OpOf<"sys.memberRemove">): void {
   }
   tx.remove(keys.member(op.memberId));
   tx.addEvent({ type: "member", memberId: op.memberId, action: "remove" });
+}
+
+/**
+ * Takes a member off per-player vision's lists (docs/design-v1-per-player-vision.md
+ * 6.8): every holder list's entry, every holder layer, and every list of
+ * who saw a stop or a turn's start, the encounter's and each saved step's,
+ * so the lists stay within the roster. Log lines hold no list once their
+ * op is done (Tx.settleLog).
+ */
+function scrubSight(tx: Tx, memberId: MemberId): void {
+  for (const sceneId of Object.keys(tx.state.holders ?? {}).sort()) {
+    const list = tx.state.holders[sceneId]!;
+    if (!list.entries.some((e) => e.memberId === memberId)) continue;
+    forgetHolder(tx, sceneId, memberId);
+    const entries = list.entries.filter((e) => e.memberId !== memberId);
+    if (entries.length === 0) tx.remove(keys.holders(sceneId));
+    else tx.write(keys.holders(sceneId), { ...list, entries });
+  }
+  const without = <T extends { seenBy?: MemberId[] }>(mark: T): T => (mark.seenBy?.includes(memberId) ? { ...mark, seenBy: mark.seenBy.filter((m) => m !== memberId) } : mark);
+  for (const token of Object.values(tx.state.tokens).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const stops = token.path?.stops;
+    if (!stops?.some((stop) => stop.seenBy?.includes(memberId))) continue;
+    tx.write(keys.token(token.id), { ...token, path: { ...token.path!, stops: stops.map((stop: PathStop) => without(stop)) } });
+  }
+  const scrubbed = (encounter: Encounter): Encounter => (encounter.turnStart?.seenBy?.includes(memberId) ? { ...encounter, turnStart: without<TurnStart>(encounter.turnStart) } : encounter);
+  const encounter = tx.state.encounter;
+  if (encounter && scrubbed(encounter) !== encounter) tx.write(keys.encounter, scrubbed(encounter));
+  const history = tx.state.encounterHistory;
+  if (history.some((step) => scrubbed(step.encounter) !== step.encounter)) tx.write(keys.encounterHistory, history.map((step) => ({ ...step, encounter: scrubbed(step.encounter) })));
+}
+
+/**
+ * A scene's vision after a patch (docs/design-v1-per-player-vision.md 6.7):
+ * the patch's, keeping the scene's `perPlayer` when the patch names none,
+ * and stored only while true. A whole-party scene's is the patch's as sent.
+ */
+export function patchedVision(was: SceneVision | undefined, patch: { on: boolean; light: SceneVision["light"]; perPlayer?: boolean }): SceneVision {
+  const { perPlayer, ...rest } = patch;
+  return (perPlayer ?? was?.perPlayer === true) ? { ...rest, perPlayer: true } : rest;
 }
 
 const DEFAULT_GRID: Scene["grid"] = { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 };
@@ -169,7 +209,7 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   }
   if (p.blockMovement !== undefined) next.blockMovement = p.blockMovement;
   if (p.vision !== undefined) {
-    next.vision = p.vision;
+    next.vision = patchedVision(scene.vision, p.vision);
     // Turning vision on turns fog on, since only fog remembers what the party explored (section 4.3.1). The DM can turn it
     // off again, and a patch that names fog itself decides.
     if (p.vision.on && scene.vision?.on !== true && p.fogEnabled === undefined) next.fogEnabled = true;

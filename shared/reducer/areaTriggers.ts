@@ -1,6 +1,6 @@
 import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
-import { inSightOfNonOwners, seenByNonOwners } from "../project.ts";
+import { areaSeenMark, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
@@ -114,8 +114,6 @@ function areaName(t: AreaTemplate): string {
 function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigger, areaMoved: boolean, at: RoomState = tx.state): void {
   const recorded = logsByAudience(tx.env.opVersion);
   if (!recorded && remindedInLog(tx.state.log, template, token.id, trigger)) return;
-  const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
-  const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env));
   const there = at.tokens[token.id] ?? token;
   const line: Extract<LogEvent, { type: "area" }> = {
     type: "area",
@@ -124,11 +122,29 @@ function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigg
     trigger,
     area: areaName(template),
     ...(areaMoved ? { moved: true as const } : {}),
-    ...(seenByNonOwners(at, there, tx.env) ? { seen: true as const } : {}),
-    ...(hidden ? { hidden: true as const } : {}),
+    ...marksOf(tx, template, there, at),
   };
   if (recorded) tx.addReminder(line, template.oncePerTurn === true);
   else tx.addEvent(line);
+}
+
+/**
+ * Who a reminder reaches by what players saw then (`at`): on a whole-party
+ * scene the creature's `seen` mark, the area's own sight checked when the
+ * line is read, and `hidden` for an area the DM hid or one on a token
+ * players cannot see. On a per-player scene the players who saw both the
+ * creature and the area (project.ts areaSeenMark,
+ * docs/design-v1-per-player-vision.md 6.5).
+ */
+function marksOf(tx: Tx, template: AreaTemplate, there: Token, at: RoomState): { seen?: true; seenBy?: string[]; hidden?: true } {
+  const perPlayer = areaSeenMark(at, template, there, tx.env);
+  if (perPlayer) {
+    const { hidden, ...seen } = perPlayer;
+    return { ...seen, ...(hidden ? { hidden } : {}) };
+  }
+  const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
+  const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env));
+  return { ...(seenByNonOwners(at, there, tx.env) ? { seen: true as const } : {}), ...(hidden ? { hidden: true as const } : {}) };
 }
 
 /** The token whose turn is the encounter's active one, if it is a creature an area can hit. */

@@ -598,6 +598,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "scene.setMap":
     case "scene.setGrid":
     case "scene.setPhase":
+    case "vision.holders":
     case "scene.duplicate":
     case "actor.life":
     case "actor.damageMany":

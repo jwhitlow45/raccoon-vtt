@@ -217,6 +217,13 @@ export const LIMITS = {
   sightPiecesPerScene: 6_000,
   /** Cells one `build.height` or `build.stairs` op paints (section 2.4). */
   heightCellsPerOp: 2_000,
+  /**
+   * Players who see and remember for themselves on one per-player scene
+   * (docs/design-v1-per-player-vision.md 6.1): the entries of its holder
+   * list that are on. The rest have the shared sight. 6 if the server box
+   * passes the design's timing rows at the worst legal ownership, else 5.
+   */
+  sightHoldersPerScene: 6,
 
   // Wave 5 (docs/design-v1-dm-tools.md 2.4).
 
@@ -863,11 +870,19 @@ export const NO_ROOM_TO_EXPLORE = "The room is too full for the party to explore
 const WIDEST_REV = Number.MAX_SAFE_INTEGER;
 const FULL_BITS = "A".repeat(HEIGHTS_CHARS);
 
-/** The scene whose explored layer can grow: the player scene, while it has vision and fog on. */
+/**
+ * The scene whose explored layer can grow: the player scene, while it has
+ * vision and fog on. A per-player scene explores by each holder's sight
+ * and the shared sight (docs/design-v1-per-player-vision.md 6.3), which the
+ * explore step does not work out yet, so until it does such a scene
+ * explores nothing: the party's sight would write ground only some players
+ * saw into the layer every player reads, and reserve nothing for the
+ * holders' layers.
+ */
 export function exploringSceneId(state: Pick<RoomState, "meta" | "scenes">): string | null {
   const id = state.meta.playerSceneId;
   const scene = id === null ? undefined : state.scenes[id];
-  return scene && scene.vision?.on === true && scene.fogEnabled ? scene.id : null;
+  return scene && scene.vision?.on === true && scene.vision.perPlayer !== true && scene.fogEnabled ? scene.id : null;
 }
 
 /**

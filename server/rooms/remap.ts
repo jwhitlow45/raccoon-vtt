@@ -237,6 +237,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     stamps: {},
     lights: {},
     exploredTiles: {},
+    holders: {},
+    exploredBy: {},
     journal: {},
     pins: {},
     // Open roll requests belong to a moment of play, and their targets' players have new member ids anyway (section 2.5).

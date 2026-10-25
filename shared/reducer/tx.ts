@@ -1,4 +1,4 @@
-import { collectionOf, compareLogIds, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
+import { collectionOf, compareLogIds, holderTileKey, parseKey, readEntity, revOf, keys, type EntityKey } from "../keys.ts";
 import { cutLine, DM_LINE_BASE, dmNumbered, droppedLines, MAX_LOG, neverRead, PARTY_LINE_BASE, PARTY_SLOT, partyIndex, rosterRanks } from "../logRings.ts";
 import { logsByAudience } from "../migrate.ts";
 import type {
@@ -14,7 +14,7 @@ import type {
   TokenKind,
   Viewer,
 } from "../model.ts";
-import { hashValue, lineReader, seenByNonOwners, type LineReach } from "../project.ts";
+import { hashValue, lineReader, listsStripped, seenMark, type LineReach } from "../project.ts";
 import type { ActorTarget, RefusalCode, RestoreEntry } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { decodeTile } from "../rules/fog.ts";
@@ -329,7 +329,8 @@ export class Tx {
           reminded?.book.record(reminded.reminder, "shared");
           return;
         }
-        const dmLine = write(entry, u.dmIndex, cutLine);
+        // The copies name who read it, so the DM's line keeps no list of who saw it (docs/design-v1-per-player-vision.md 6.5).
+        const dmLine = write(entry.data ? { ...entry, data: listsStripped(entry.data) } : entry, u.dmIndex, cutLine);
         const lines = [dmLine];
         const readers: string[] = [];
         if (reach.audience === "party") {
@@ -495,11 +496,12 @@ export class Tx {
   /**
    * The creature a line is about, as every line about one names it: a token
    * with whether players who do not own it could see it now, after this op's
-   * own changes (design 7.3), or a character.
+   * own changes (design 7.3), and on a per-player scene which sight holders
+   * could (project.ts seenMark), or a character.
    */
-  about(resolved: ResolvedActor): { tokenId: string; seen?: true } | { characterId: string } {
+  about(resolved: ResolvedActor): { tokenId: string; seen?: true; seenBy?: string[] } | { characterId: string } {
     const token = resolved.holder === "token" ? this.state.tokens[resolved.id] : undefined;
-    return token ? { tokenId: resolved.id, ...(seenByNonOwners(this.state, token, this.env) ? { seen: true as const } : {}) } : { characterId: resolved.id };
+    return token ? { tokenId: resolved.id, ...seenMark(this.state, token, this.env, "here") } : { characterId: resolved.id };
   }
 
   /** Stamps rule events with the actor that produced them (about) and logs each one. */
@@ -691,8 +693,14 @@ function mapIdOf(parsed: NonNullable<ReturnType<typeof parseKey>>): string {
     case "fog":
     case "explored":
     case "sight":
+    case "sightAll":
+    case "fogAll":
+    case "exploredAny":
       return `${parsed.sceneId}:${parsed.tx},${parsed.ty}`;
+    case "exploredBy":
+      return holderTileKey(parsed.sceneId, parsed.memberId, parsed.tx, parsed.ty);
     case "fogDraft":
+    case "holders":
       return parsed.sceneId;
     case "encounter":
     case "encounterHistory":
@@ -727,13 +735,20 @@ function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
  * explored layer and is not: the actor finds what it reveals. Clearing
  * explored bits, by a hide or a reset, can withhold anything there again,
  * so it is.
+ *
+ * Per-player vision (docs/design-v1-per-player-vision.md 6.7): a scene
+ * switching between whole party and per player, and any change of a holder
+ * list, change whose sight and fog every player has, so they are global
+ * too. A holder's layer is as the party's: only clearing it is.
  */
 function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
   switch (kind) {
     case "member":
     case "fog":
+    case "holders":
       return true;
     case "explored":
+    case "exploredBy":
       return prev !== null && (next === null || clearsBits(prev as FogTile, next as FogTile));
     case "meta": {
       const a = prev as RoomMeta | null;
@@ -756,7 +771,8 @@ function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
         a.fogEnabled !== b.fogEnabled ||
         autoWallsOf(a) !== autoWallsOf(b) ||
         (a.vision?.on ?? false) !== (b.vision?.on ?? false) ||
-        a.vision?.light !== b.vision?.light
+        a.vision?.light !== b.vision?.light ||
+        (a.vision?.perPlayer === true) !== (b.vision?.perPlayer === true)
       );
     }
     case "token": {

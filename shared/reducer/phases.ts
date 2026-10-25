@@ -75,7 +75,9 @@ function activePhase(scene: Scene): MapPhase | undefined {
  * phase's image did not come through.
  */
 export function withPhaseLight(scene: Scene, phase: Pick<MapPhase, "light">): Scene {
-  return phase.light === undefined ? scene : { ...scene, vision: { on: scene.vision?.on ?? false, light: phase.light } };
+  if (phase.light === undefined) return scene;
+  // A per-player scene stays one, whatever the phase does to its light (docs/design-v1-per-player-vision.md 6.7).
+  return { ...scene, vision: { on: scene.vision?.on ?? false, light: phase.light, ...(scene.vision?.perPlayer === true ? { perPlayer: true as const } : {}) } };
 }
 
 /**

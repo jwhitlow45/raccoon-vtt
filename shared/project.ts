@@ -1,4 +1,4 @@
-import { chunkKey, compareLogIds, doorChunk, keys, parseKey, readEntity, sightOf, tileKey, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
+import { chunkKey, compareLogIds, doorChunk, holderTileKey, keys, parseKey, readEntity, sightOf, tileKey, viewMapsOf, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
 import {
   FOG_SUBCELLS,
   type Actor,
@@ -13,6 +13,7 @@ import {
   type Effect,
   type Encounter,
   type EncounterSnapshot,
+  type ExploredTile,
   type FogDraft,
   type FogTile,
   type FreeWall,
@@ -34,9 +35,11 @@ import {
   type RoomState,
   type SavedEncounter,
   type Scene,
+  type SightHolders,
   type SightTile,
   type SrdImage,
   type Stamp,
+  type PathStop,
   type Token,
   type TokenPath,
   type Trap,
@@ -57,7 +60,7 @@ import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCe
 import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
-import { pathThisTurn, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
+import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneRanges } from "./rules/traps.ts";
 import { sightRect } from "./rules/vision.ts";
 
@@ -120,18 +123,33 @@ export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: Project
  */
 export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "state" | "found">> & { disarmed?: true };
 
-export type ProjectedState = Omit<RoomState, "tokens" | "characters" | "templates" | "encounter" | "traps"> & {
+export type ProjectedState = Omit<RoomState, "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy"> & {
   tokens: Record<string, ProjectedToken>;
   traps: Record<string, ProjectedTrap>;
   characters: Record<string, ProjectedCharacter>;
   templates: Record<string, ProjectedTemplate>;
   encounter: ProjectedEncounter | null;
   /**
-   * The party's sight on the viewer's scene when its vision is on, keyed
-   * `"<sceneId>:<tx>,<ty>"` (docs/design-v1-maps-vision.md 4.3.4). Derived
-   * on the server and never stored, so only a projection holds it.
+   * The viewer's sight on their scene when its vision is on, keyed
+   * `"<sceneId>:<tx>,<ty>"` (docs/design-v1-maps-vision.md 4.3.4): the
+   * party's, or on a per-player scene the viewer's own, the DM's the union
+   * (docs/design-v1-per-player-vision.md 6.2). Derived on the server and
+   * never stored, so only a projection holds it.
    */
   sight: SightMap;
+  /**
+   * Only on a per-player scene (docs/design-v1-per-player-vision.md 6.2):
+   * the shared sight with vision on, the same for every viewer, the shared
+   * fog as players get it, every player's, and every holder's layer
+   * joined, the DM's.
+   */
+  sightAll?: SightMap;
+  fogAll?: Record<string, FogTile>;
+  exploredAny?: Record<string, FogTile>;
+  /** The DM's scene's sight holder list, while it has one. No other projection holds any. */
+  holders?: Record<string, SightHolders>;
+  /** Never in a projection: a holder's layer reaches them only merged into their fog. Here so a projection still reads as a room. */
+  exploredBy?: Record<string, ExploredTile>;
 };
 
 export type HpAccess = "exact" | "bar" | "label" | "none";
@@ -195,18 +213,69 @@ export function isPartyMember(state: RoomState, token: Token): boolean {
 }
 
 /**
- * What the party sees on a scene: computed on the server, and read from
- * the tiles the server sent where a projected state holds them, so a
- * client never computes sight (section 4.3.4).
+ * What every viewer sees on a scene, "seen by all"
+ * (docs/design-v1-per-player-vision.md decision 10): the party's sight on a
+ * whole-party scene, and on a per-player scene the shared sight alone,
+ * which every public rule reads. Computed on the server, and read from the
+ * tiles the server sent where a projected state holds them, so a client
+ * never computes sight (docs/design-v1-maps-vision.md 4.3.4). A projection
+ * of a per-player scene holds the shared sight as `sightAll`, and one that
+ * lacks a tile there sees nothing on it.
  */
 export function partySightOf(state: RoomState, sceneId: string): PartySight {
   const tiles = sightOf(state);
+  const perPlayer = perPlayerScene(state.scenes[sceneId]);
+  if (tiles !== undefined) return visionRules.sightFromTiles(perPlayer ? (viewMapsOf(state).sightAll ?? {}) : tiles, sceneId);
+  return perPlayer ? visionRules.holderSight(state, sceneId, null) : visionRules.partySight(state, sceneId);
+}
+
+/**
+ * The union of every source's sight on a scene, which the DM's tools read
+ * (docs/design-v1-per-player-vision.md decision 14): the party's sight, on
+ * a per-player scene too. A DM's device holds it as its `sight`.
+ */
+export function unionSightOf(state: RoomState, sceneId: string): PartySight {
+  const tiles = sightOf(state);
   return tiles !== undefined ? visionRules.sightFromTiles(tiles, sceneId) : visionRules.partySight(state, sceneId);
+}
+
+/**
+ * What one viewer sees on a scene: the party's sight on a whole-party
+ * scene, and on a per-player scene a sight holder's own sight or, for any
+ * other player and a table display, the shared sight. A DM sees the union.
+ * A projected state holds its own viewer's (`sight`).
+ */
+function viewerSightOf(state: RoomState, viewer: Viewer, sceneId: string): PartySight {
+  const tiles = sightOf(state);
+  if (tiles !== undefined) return visionRules.sightFromTiles(tiles, sceneId);
+  if (viewer.role === "dm" || !perPlayerScene(state.scenes[sceneId])) return visionRules.partySight(state, sceneId);
+  return visionRules.holderSight(state, sceneId, holdsSight(state, sceneId, viewer.memberId) ? viewer.memberId : null);
 }
 
 /** Whether a scene has party vision on. */
 function visionOn(scene: Pick<Scene, "vision"> | undefined): boolean {
   return scene?.vision?.on === true;
+}
+
+/** Whether a scene is a per-player one (docs/design-v1-per-player-vision.md 6.1), whatever its vision's `on` says. */
+export function perPlayerScene(scene: Pick<Scene, "vision"> | undefined): boolean {
+  return scene?.vision?.perPlayer === true;
+}
+
+/**
+ * The sight holders of a per-player scene (docs/design-v1-per-player-vision.md
+ * 6.1): the players whose entry on its list is on, in the list's order. A
+ * member who is no player holds no sight. A projected state holds no list,
+ * so on a device this is always empty.
+ */
+export function sightHolders(state: RoomState, sceneId: string): string[] {
+  const entries = state.holders?.[sceneId]?.entries ?? [];
+  return entries.flatMap((e) => (e.on && state.members[e.memberId]?.kind === "player" ? [e.memberId] : []));
+}
+
+function holdsSight(state: RoomState, sceneId: string, memberId: string): boolean {
+  if (state.members[memberId]?.kind !== "player") return false;
+  return state.holders?.[sceneId]?.entries.some((e) => e.on && e.memberId === memberId) === true;
 }
 
 /**
@@ -216,19 +285,57 @@ function visionOn(scene: Pick<Scene, "vision"> | undefined): boolean {
  * It reads the fog players get: the DM's layer and the party's explored
  * layer merged, a sub-cell revealed where either reveals it
  * (docs/design-v1-maps-vision.md 4.3.3), on every scene, one whose vision
- * was turned off since it was explored included.
+ * was turned off since it was explored included. With a `memberId` it
+ * reads that player's own fog: on a per-player scene where they hold
+ * sight, their own explored layer is merged in too
+ * (docs/design-v1-per-player-vision.md 6.3). On a projected state it reads
+ * the fog the projection holds, its viewer's own.
  */
 type FogReader = (sceneId: string, cx: number, cy: number) => boolean;
 
-function fogReader(state: RoomState): FogReader {
+function fogReader(state: RoomState, memberId: string | null = null): FogReader {
   const cache = new Map<string, Uint8Array | null>();
+  const holder = new Map<string, boolean>();
+  const own = (sceneId: string): string | null => {
+    if (memberId === null) return null;
+    let held = holder.get(sceneId);
+    if (held === undefined) holder.set(sceneId, (held = perPlayerScene(state.scenes[sceneId]) && holdsSight(state, sceneId, memberId)));
+    return held ? memberId : null;
+  };
+  return cellReader(cache, (sceneId, tx, ty) => {
+    const by = own(sceneId);
+    return mergedBits(state, tileKey(sceneId, tx, ty), by === null ? undefined : state.exploredBy?.[holderTileKey(sceneId, by, tx, ty)]);
+  });
+}
+
+/**
+ * The fog every player shares (docs/design-v1-per-player-vision.md 6.3):
+ * the DM's layer and the party's merged. A projection of a per-player
+ * scene, a DM's too, holds it as `fogAll`, where a missing tile, or a
+ * missing map, is fully fogged. Elsewhere it is the fog the state holds,
+ * as `fogReader` reads it.
+ */
+function sharedFogReader(state: RoomState): FogReader {
+  const plain = fogReader(state);
+  if (sightOf(state) === undefined) return plain;
+  const fogAll = viewMapsOf(state).fogAll ?? {};
+  const cache = new Map<string, Uint8Array | null>();
+  const shared = cellReader(cache, (sceneId, tx, ty) => {
+    const tile = fogAll[tileKey(sceneId, tx, ty)];
+    return tile ? bitsOf(tile) : null;
+  });
+  return (sceneId, cx, cy) => (perPlayerScene(state.scenes[sceneId]) ? shared(sceneId, cx, cy) : plain(sceneId, cx, cy));
+}
+
+/** A fog reader over the revealed bits `bitsAt` gives each tile, null where no layer holds it, decoded once a tile. */
+function cellReader(cache: Map<string, Uint8Array | null>, bitsAt: (sceneId: string, tx: number, ty: number) => Uint8Array | null): FogReader {
   return (sceneId, cx, cy) => {
     const tx = Math.floor(cx / TILE_CELLS);
     const ty = Math.floor(cy / TILE_CELLS);
     const key = tileKey(sceneId, tx, ty);
     let bits = cache.get(key);
     if (bits === undefined) {
-      bits = mergedBits(state, key);
+      bits = bitsAt(sceneId, tx, ty);
       cache.set(key, bits);
     }
     if (!bits) return true;
@@ -247,17 +354,38 @@ function fogReader(state: RoomState): FogReader {
  * layer and the party's explored one joined. It reads the DM's whole state
  * and a player's copy alike, since that copy holds the joined fog already,
  * so a route searched on either device keeps to the same ground
- * (docs/design-v1-movement.md 5.5).
+ * (docs/design-v1-movement.md 5.5). On a per-player scene a player's copy
+ * holds their own fog, so it is the ground that player remembers
+ * (docs/design-v1-per-player-vision.md 6.3).
  */
 export function playersSeeGround(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
   const fogged = fogReader(state);
   return (x, y) => !fogged(sceneId, x, y);
 }
 
-/** The revealed bits of a fog tile as players get it, the two layers joined, or null where neither holds the tile. */
-function mergedBits(state: RoomState, key: string): Uint8Array | null {
+/**
+ * The ground every player shares on a scene (docs/design-v1-per-player-vision.md
+ * 6.3): `playersSeeGround` on a whole-party scene, and on a per-player one
+ * the DM's and party's layers alone, on every device, for shared and kept
+ * walking rulers and anything else every device must read alike.
+ */
+export function sharedGround(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
+  const fogged = sharedFogReader(state);
+  return (x, y) => !fogged(sceneId, x, y);
+}
+
+/**
+ * The revealed bits of a fog tile as players get it, the layers joined, or
+ * null where none holds the tile: the DM's and the party's, and a sight
+ * holder's own (`own`) where one reads it.
+ */
+function mergedBits(state: RoomState, key: string, own?: FogTile): Uint8Array | null {
   const dm = state.fogTiles[key];
   const explored = state.exploredTiles?.[key];
+  if (own) {
+    const layers = [dm, explored, own].filter((t): t is FogTile => t !== undefined);
+    return layers.length === 1 ? bitsOf(own) : mergedChain(layers).bits;
+  }
   if (!dm || !explored) return dm ? bitsOf(dm) : explored ? bitsOf(explored) : null;
   return mergedOf(dm, explored).bits;
 }
@@ -291,6 +419,37 @@ function mergedOf(dm: FogTile, explored: FogTile): { bits: Uint8Array; text?: st
   return hit;
 }
 
+/*
+ * Tiles of any number of layers merged, kept per sequence of tile objects
+ * (docs/design-v1-per-player-vision.md 6.9): a holder's fog tile, three
+ * layers, and the DM's view of every holder's layer joined. An unchanged
+ * sequence returns the same entry, and so the same projected tile.
+ */
+type Chain = { next: WeakMap<FogTile, Chain>; hit?: { bits: Uint8Array; text?: string; tile?: FogTile } };
+const chains = new WeakMap<FogTile, Chain>();
+
+function mergedChain(tiles: readonly FogTile[]): { bits: Uint8Array; text?: string; tile?: FogTile } {
+  let node: Chain | undefined;
+  for (const tile of tiles) {
+    const level = node ? node.next : chains;
+    let next = level.get(tile);
+    if (!next) level.set(tile, (next = { next: new WeakMap() }));
+    node = next;
+  }
+  if (!node) throw new Error("no tiles to merge");
+  if (!node.hit) {
+    let bits: Uint8Array | null = null;
+    for (const tile of tiles) {
+      const b = bitsOf(tile);
+      if (!b) continue;
+      if (!bits) bits = new Uint8Array(b);
+      else for (let i = 0; i < bits.length; i++) bits[i] = bits[i]! | b[i]!;
+    }
+    node.hit = { bits: bits ?? new Uint8Array(0) };
+  }
+  return node.hit;
+}
+
 /**
  * Every fog tile key either layer holds, as a map that only says which
  * exist: what `isRangeFullyFogged` looks at before it reads a cell. Kept
@@ -311,27 +470,93 @@ function anyFogTiles(state: RoomState): Record<string, FogTile> {
 }
 
 /**
+ * The presence map of one viewer's fog on a scene (anyFogTiles): on a
+ * per-player scene a sight holder's holds their own layer's tiles too, so
+ * a label on ground only their layer holds reaches them, and a player's
+ * copy of the shared fog holds `fogAll`'s.
+ */
+function presenceOf(state: RoomState, memberId: string | null, sceneId: string): Record<string, FogTile> {
+  const shared = anyFogTiles(state);
+  if (memberId === null || !perPlayerScene(state.scenes[sceneId]) || !holdsSight(state, sceneId, memberId)) return shared;
+  const own = holderLayer(state, sceneId, memberId);
+  if (Object.keys(own).length === 0) return shared;
+  return { ...own, ...shared };
+}
+
+/**
+ * One holder's explored layer on a scene, keyed as fog tiles are
+ * (`"<sceneId>:<tx>,<ty>"`), kept per layer collection, which is replaced
+ * and never changed, unless an op is still writing into it.
+ */
+const holderLayers = new WeakMap<object, Map<string, Record<string, ExploredTile>>>();
+
+function holderLayer(state: RoomState, sceneId: string, memberId: string): Record<string, ExploredTile> {
+  const all = state.exploredBy ?? {};
+  const writing = isWritable(all);
+  let byHolder = writing ? undefined : holderLayers.get(all);
+  const at = `${sceneId}:${memberId}`;
+  const hit = byHolder?.get(at);
+  if (hit) return hit;
+  const out: Record<string, ExploredTile> = {};
+  for (const tile of Object.values(all)) if (tile.sceneId === sceneId && tile.memberId === memberId) out[tileKey(sceneId, tile.tx, tile.ty)] = tile;
+  if (!writing) {
+    if (!byHolder) holderLayers.set(all, (byHolder = new Map()));
+    byHolder.set(at, out);
+  }
+  return out;
+}
+
+/**
  * One projection's inputs. `paused` is a player behind a blackout, whose
  * `sceneId` is null as well (viewerSceneId), so every scene's contents
  * project to nothing. The room-level parts of the table go with them: the
  * initiative tracker, which can name what is coming in a row of its own,
  * and handouts. `member` is a viewer on the roster, which a table display
- * is not. `sight` is the party's sight of a vision scene, worked out once
- * per projection.
+ * is not. `sight`, `fogged` and `presence` are the viewer's own: on a
+ * per-player scene a sight holder's sight and fog, the shared ones for
+ * every other player and a display, and the union for a DM
+ * (docs/design-v1-per-player-vision.md 6.2). Sight is worked out once per
+ * projection.
  */
-type Ctx = { state: RoomState; viewer: Viewer; sceneId: string | null; paused: boolean; member: boolean; fogged: FogReader; sight: (sceneId: string) => PartySight };
+type Ctx = {
+  state: RoomState;
+  viewer: Viewer;
+  sceneId: string | null;
+  paused: boolean;
+  member: boolean;
+  fogged: FogReader;
+  presence: (sceneId: string) => Record<string, FogTile>;
+  sight: (sceneId: string) => PartySight;
+};
 
 function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts): Ctx {
-  return { state, viewer, sceneId: viewerSceneId(state, viewer, opts), paused: paused(state, viewer), member: Object.hasOwn(state.members, viewer.memberId), fogged: fogReader(state), sight: sightReader(state) };
+  const own = viewer.role === "player" ? viewer.memberId : null;
+  return {
+    state,
+    viewer,
+    sceneId: viewerSceneId(state, viewer, opts),
+    paused: paused(state, viewer),
+    member: Object.hasOwn(state.members, viewer.memberId),
+    fogged: fogReader(state, own),
+    presence: (sceneId) => presenceOf(state, own, sceneId),
+    sight: sightReader((sceneId) => viewerSightOf(state, viewer, sceneId)),
+  };
 }
 
-function sightReader(state: RoomState): (sceneId: string) => PartySight {
+function sightReader(read: (sceneId: string) => PartySight): (sceneId: string) => PartySight {
   const cache = new Map<string, PartySight>();
   return (sceneId) => {
     let sight = cache.get(sceneId);
-    if (!sight) cache.set(sceneId, (sight = partySightOf(state, sceneId)));
+    if (!sight) cache.set(sceneId, (sight = read(sceneId)));
     return sight;
   };
+}
+
+/** The readers of what every viewer shares (decision 10): the shared fog and "seen by all"'s sight. */
+type Shared = { fogged: FogReader; sight: (sceneId: string) => PartySight };
+
+function sharedOf(state: RoomState): Shared {
+  return { fogged: sharedFogReader(state), sight: sightReader((sceneId) => partySightOf(state, sceneId)) };
 }
 
 /**
@@ -353,7 +578,10 @@ function tokenVisibleTo(ctx: Ctx, token: Token, revealedSeen = false): boolean {
  * is in the party's sight (docs/design-v1-maps-vision.md 4.3.3): with fog
  * on, sight is always inside the revealed ground, since explore runs in the
  * same batch, so the fog rule is implied. Elsewhere it is withheld only when
- * every cell it stands on is fully fogged, the two fog layers merged.
+ * every cell it stands on is fully fogged, the two fog layers merged. The
+ * sight and fog are whichever viewer's the caller passes: one player's own
+ * on a per-player scene, or what every viewer shares
+ * (docs/design-v1-per-player-vision.md 6.2).
  *
  * A creature revealed on its turn follows that rule too (rules/fog.ts
  * isAboveFog). `revealedSeen` brings back the rule that ops stored before
@@ -380,9 +608,23 @@ function withheldFromPlayers(state: RoomState, fogged: FogReader, sight: (sceneI
  * exempt. Its visibility and a blackout are the caller's to check. The
  * ephemeral channel asks it of a drag preview's spot, with the footprint its
  * own preview rule decides (docs/design-v1-maps-vision.md 4.1 and 4.3.5).
+ * On a per-player scene it is the rule of what every viewer shares, the
+ * shared sight and fog (docs/design-v1-per-player-vision.md decision 10).
  */
 export function withheldWhereItStands(state: RoomState, token: Token): boolean {
-  return withheldFromPlayers(state, fogReader(state), sightReader(state), token);
+  const shared = sharedOf(state);
+  return withheldFromPlayers(state, shared.fogged, shared.sight, token);
+}
+
+/**
+ * Whether where a token stands keeps it from one viewer, by their own
+ * sight and fog (docs/design-v1-per-player-vision.md 6.2): the rule their
+ * projection judges creatures by, which on a device is the copy's own, and
+ * for a DM the union. Its visibility and a blackout are the caller's.
+ */
+export function withheldFromViewer(state: RoomState, viewer: Viewer, token: Token): boolean {
+  const own = viewer.role === "player" ? viewer.memberId : null;
+  return withheldFromPlayers(state, fogReader(state, own), sightReader((sceneId) => viewerSightOf(state, viewer, sceneId)), token);
 }
 
 /*
@@ -398,7 +640,9 @@ function behindBlackout(state: RoomState): boolean {
 /**
  * Whether a player who does not own the token can see it now: the same rule
  * for every non-owner, so one answer covers them all. The reducer records it
- * on log events about the token (`seen` in the model).
+ * on log events about the token (`seen` in the model). On a per-player scene
+ * it is "seen by all", the shared sight and fog (docs/design-v1-per-player-vision.md
+ * decision 10), and `seenMark` records which sight holders saw it besides.
  *
  * The marks are stored, so each of these questions takes the op's envelope:
  * an op stored before op version 4 marks by the rule it was applied under
@@ -406,33 +650,42 @@ function behindBlackout(state: RoomState): boolean {
  */
 export function seenByNonOwners(state: RoomState, token: Token, env: Pick<Env, "opVersion">): boolean {
   if (behindBlackout(state) || token.sceneId !== state.meta.playerSceneId || token.visibility === "dm") return false;
-  return !withheldFromPlayers(state, fogReader(state), sightReader(state), token, revealSeenAnywhere(env.opVersion));
+  const shared = sharedOf(state);
+  return !withheldFromPlayers(state, shared.fogged, shared.sight, token, revealSeenAnywhere(env.opVersion));
 }
 
 /**
  * Whether players who do not own the token could see it where it stands,
  * whichever scene they are on. The reducer records it on a turn's starting
  * spot (`TurnStart.seen`) and on the stops of a path, which players get
- * only while they see the token on their own scene anyway.
+ * only while they see the token on their own scene anyway. On a per-player
+ * scene, "seen by all" as `seenByNonOwners` reads it.
  */
 export function inSightOfNonOwners(state: RoomState, token: Token, env: Pick<Env, "opVersion">): boolean {
   if (behindBlackout(state) || token.visibility === "dm") return false;
-  return !withheldFromPlayers(state, fogReader(state), sightReader(state), token, revealSeenAnywhere(env.opVersion));
+  const shared = sharedOf(state);
+  return !withheldFromPlayers(state, shared.fogged, shared.sight, token, revealSeenAnywhere(env.opVersion));
 }
 
 /**
  * Whether players who do not own the token would see it at every one of
  * these spots, each asked of the token placed there against the state as it
  * is (docs/design-v1-movement.md 7.2): the stops' rule, `inSightOfNonOwners`,
- * with the fog and sight read once for the whole walk.
+ * with the fog and sight read once for the whole walk. On a per-player
+ * scene every spot must also lie on the ground every player shares
+ * (docs/design-v1-per-player-vision.md 6.5), so a route's corners never
+ * draw ground only some players remember for anyone else.
  */
 export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x: number; y: number; elevation: number; squeezed?: boolean }[], env: Pick<Env, "opVersion">): boolean {
   if (behindBlackout(state) || token.visibility === "dm") return false;
-  const fogged = fogReader(state);
-  const sight = sightReader(state);
+  const shared = sharedOf(state);
   const revealed = revealSeenAnywhere(env.opVersion);
   const { squeeze: _squeeze, ...rest } = token;
-  return spots.every((p) => !withheldFromPlayers(state, fogged, sight, { ...rest, x: p.x, y: p.y, elevation: p.elevation, ...(p.squeezed ? { squeeze: true as const } : {}) }, revealed));
+  const placed = (p: (typeof spots)[number]): Token => ({ ...rest, x: p.x, y: p.y, elevation: p.elevation, ...(p.squeezed ? { squeeze: true as const } : {}) });
+  if (!spots.every((p) => !withheldFromPlayers(state, shared.fogged, shared.sight, placed(p), revealed))) return false;
+  const scene = state.scenes[token.sceneId];
+  if (!perPlayerScene(scene) || !scene?.fogEnabled) return true;
+  return spots.every((p) => occupiedCells(placed(p)).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y)));
 }
 
 /** The same question for an initiative row, by the encounter projection's rule: not hidden, in the order players see, and its creature in sight. */
@@ -443,6 +696,76 @@ export function rowSeenByNonOwners(state: RoomState, entry: InitEntry, env: Pick
     if (!token || !seenByNonOwners(state, token, env)) return false;
   }
   return entry.characterId === undefined || state.characters[entry.characterId] !== undefined;
+}
+
+/**
+ * What a mark records of who saw a token (docs/design-v1-per-player-vision.md
+ * 6.5): `seen` when every viewer did, by `seenByNonOwners` (scope "here",
+ * for log lines) or `inSightOfNonOwners` ("anywhere", for stops and a
+ * turn's start). On a per-player scene otherwise, `seenBy`: the sight
+ * holders who do not own the token and whose projection shows it, sorted,
+ * present even when empty. Behind a blackout, for a token the DM hid, and
+ * under "here" off the player scene there is no mark, and a list under
+ * "anywhere" off the player scene is empty, since a player's projection
+ * covers only the player scene. A device's marks are predictions and hold
+ * no list: only the server writes lists.
+ */
+export type SeenMark = { seen?: true; seenBy?: string[] };
+
+export function seenMark(state: RoomState, token: Token, env: Pick<Env, "opVersion">, scope: "here" | "anywhere"): SeenMark {
+  if (behindBlackout(state) || token.visibility === "dm") return {};
+  const here = token.sceneId === state.meta.playerSceneId;
+  if (scope === "here" && !here) return {};
+  const revealed = revealSeenAnywhere(env.opVersion);
+  const shared = sharedOf(state);
+  if (!withheldFromPlayers(state, shared.fogged, shared.sight, token, revealed)) return { seen: true };
+  if (!perPlayerScene(state.scenes[token.sceneId]) || sightOf(state) !== undefined) return {};
+  if (!here) return { seenBy: [] };
+  return { seenBy: holdersWho(state, token.sceneId, (id) => !ownsToken(state, { memberId: id, role: "player" }, token) && !withheldFromViewer(state, { memberId: id, role: "player" }, token)) };
+}
+
+/** The sight holders of a scene that pass `test`, sorted. */
+function holdersWho(state: RoomState, sceneId: string, test: (memberId: string) => boolean): string[] {
+  return sightHolders(state, sceneId).filter(test).sort();
+}
+
+/**
+ * A turn line's mark for its row (docs/design-v1-per-player-vision.md 6.5):
+ * `seen` when every viewer's tracker shows it (rowSeenByNonOwners), and on
+ * a per-player player scene otherwise the sight holders who do not own the
+ * row's creature and whose tracker shows it.
+ */
+export function rowSeenMark(state: RoomState, entry: InitEntry, env: Pick<Env, "opVersion">): SeenMark {
+  if (rowSeenByNonOwners(state, entry, env)) return { seen: true };
+  const token = entry.tokenId !== undefined ? state.tokens[entry.tokenId] : undefined;
+  const sceneId = state.meta.playerSceneId;
+  if (entry.hidden || behindBlackout(state) || !token || sceneId === null || token.sceneId !== sceneId || !perPlayerScene(state.scenes[sceneId]) || sightOf(state) !== undefined) return {};
+  const owners = new Set([...ownersOf(state, token), ...(entry.characterId !== undefined ? (state.characters[entry.characterId]?.ownerIds ?? []) : [])]);
+  const revealed = revealSeenAnywhere(env.opVersion);
+  return { seenBy: holdersWho(state, sceneId, (id) => !owners.has(id) && entryShown(ctxOf(state, { memberId: id, role: "player" }, { sceneId }), entry, revealed)) };
+}
+
+/**
+ * An area's reminder's mark on a per-player scene (docs/design-v1-per-player-vision.md
+ * 6.5), judged in the room as it stood then (`at`): the players who saw
+ * both the creature and the area, its owners among them. `seen` when every
+ * viewer did, else `seenBy`, perhaps empty. `hidden` only for an area the
+ * DM hid or one on a token no player sees. Null on a whole-party scene,
+ * whose reminders keep their rule.
+ */
+export function areaSeenMark(at: RoomState, template: AreaTemplate, token: Token, env: Pick<Env, "opVersion">): (SeenMark & { hidden?: true }) | null {
+  const scene = at.scenes[token.sceneId];
+  if (!perPlayerScene(scene) || sightOf(at) !== undefined) return null;
+  const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
+  const seesAttached = attached === undefined || seenByNonOwners(at, attached, env) || (seenMark(at, attached, env, "here").seenBy ?? []).length > 0;
+  const hidden = template.visibility === "dm" || !seesAttached;
+  const out: SeenMark & { hidden?: true } = hidden ? { hidden: true } : {};
+  if (behindBlackout(at) || token.sceneId !== at.meta.playerSceneId) return out;
+  const witnessed = (ctx: Ctx) => tokenVisibleTo(ctx, token, revealSeenAnywhere(env.opVersion)) && projectTemplateCtx(ctx, template) !== null;
+  const sceneId = token.sceneId;
+  if (witnessed(ctxOf(at, ANY_PLAYER, { sceneId }))) return { ...out, seen: true };
+  const players = new Set([...sightHolders(at, sceneId), ...ownersOf(at, token).filter((id) => at.members[id]?.kind === "player")]);
+  return { ...out, seenBy: [...players].filter((id) => witnessed(ctxOf(at, { memberId: id, role: "player" }, { sceneId }))).sort() };
 }
 
 function tokenVisibleById(ctx: Ctx, tokenId: string, revealedSeen = false): boolean {
@@ -676,8 +999,29 @@ function projectPathCtx(ctx: Ctx, token: Token, owner: boolean): TokenPath | nul
   const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
   const ownTurn = owner && encounter.turnStart?.tokenId === token.id;
   if (!ownTurn && (!entry || !entryShown(ctx, entry))) return null;
-  const stops = owner ? stopsForOwners(path.stops) : stopsForNonOwners(path.stops);
+  const stops = owner ? ownersStopsCtx(ctx, token, path.stops) : stopsForNonOwners(path.stops, ctx.viewer.memberId);
   return stops.length > 0 ? { turn: path.turn, stops } : null;
+}
+
+/**
+ * An owner's stops (rules/path.ts stopsForOwners). On a per-player scene
+ * with fog, a leg not every player saw whole keeps its corners for an owner
+ * only where every spot of it lies on ground that owner's own fog reveals
+ * now (docs/design-v1-per-player-vision.md 6.5), so a co-owner's private
+ * route never draws ground this one never saw. A leg every player saw
+ * whole keeps them, so a later hide never takes corners every device
+ * already counts from (publicCounters). What each leg took stays.
+ */
+function ownersStopsCtx(ctx: Ctx, token: Token, stops: readonly PathStop[]): PathStop[] {
+  const out = stopsForOwners(stops);
+  const scene = ctx.state.scenes[token.sceneId];
+  if (!perPlayerScene(scene) || !scene?.fogEnabled) return out;
+  const ground = (x: number, y: number) => !ctx.fogged(token.sceneId, x, y);
+  for (const [i, stop] of out.entries()) {
+    if (i === 0 || stop.via === undefined || seenWhole(stops, i, true)) continue;
+    if (!legOnGround(token, stops[i - 1]!, stops[i]!, ground)) delete stop.via;
+  }
+  return out;
 }
 
 export function projectCharacter(state: RoomState, viewer: Viewer, character: Character): ProjectedCharacter {
@@ -836,17 +1180,34 @@ function playerChunkOf(all: Readonly<Record<string, BuildChunk>>, chunk: BuildCh
  * player's tile has rev 0, as a player's chunk does: neither layer's count
  * of edits reaches players, so a DM reveal of ground the party already
  * explored, or an explore of ground the DM revealed, sends them nothing.
+ * On a per-player scene a sight holder's tile merges their own layer too
+ * (docs/design-v1-per-player-vision.md 6.3).
  */
 function projectFogCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): FogTile | null {
   if (sceneId !== ctx.sceneId) return null;
+  if (ctx.viewer.role === "dm") return ctx.state.fogTiles[tileKey(sceneId, tx, ty)] ?? null;
+  const own = perPlayerScene(ctx.state.scenes[sceneId]) && holdsSight(ctx.state, sceneId, ctx.viewer.memberId) ? ctx.state.exploredBy?.[holderTileKey(sceneId, ctx.viewer.memberId, tx, ty)] : undefined;
+  return own ? holderFogTile(ctx.state, sceneId, tx, ty, own) : sharedFogTile(ctx.state, sceneId, tx, ty);
+}
+
+/** A fog tile as every player shares it: the DM's and the party's layers merged (projectFogCtx). */
+function sharedFogTile(state: RoomState, sceneId: string, tx: number, ty: number): FogTile | null {
   const key = tileKey(sceneId, tx, ty);
-  const dm = ctx.state.fogTiles[key] ?? null;
-  if (ctx.viewer.role === "dm") return dm;
-  const explored = ctx.state.exploredTiles?.[key];
+  const dm = state.fogTiles[key] ?? null;
+  const explored = state.exploredTiles?.[key];
   if (!explored) return dm && playerTile(dm, () => ({ ...dm, rev: 0 }));
   if (!dm) return playerTile(explored, () => ({ sceneId, tx, ty, rev: 0, bits: explored.bits }));
   const both = mergedOf(dm, explored);
   return (both.tile ??= { sceneId, tx, ty, rev: 0, bits: (both.text ??= encodeTile(both.bits)) });
+}
+
+/** A sight holder's fog tile where their own layer holds one: it merged with the DM's and the party's, kept per tile objects. */
+function holderFogTile(state: RoomState, sceneId: string, tx: number, ty: number, own: ExploredTile): FogTile {
+  const key = tileKey(sceneId, tx, ty);
+  const layers = [state.fogTiles[key], state.exploredTiles?.[key], own].filter((t): t is FogTile => t !== undefined);
+  if (layers.length === 1) return playerTile(own, () => ({ sceneId, tx, ty, rev: 0, bits: own.bits }));
+  const all = mergedChain(layers);
+  return (all.tile ??= { sceneId, tx, ty, rev: 0, bits: (all.text ??= encodeTile(all.bits)) });
 }
 
 /*
@@ -865,6 +1226,57 @@ function playerTile(tile: FogTile, make: () => FogTile): FogTile {
 /** The party's explored layer is the DM's to see beside the fog. Players get it only merged into theirs. */
 function projectExploredCtx(ctx: Ctx, tile: FogTile): FogTile | null {
   return ctx.viewer.role === "dm" && tile.sceneId === ctx.sceneId ? tile : null;
+}
+
+/**
+ * Per-player vision's derived tiles (docs/design-v1-per-player-vision.md
+ * 6.2), only on the viewer's per-player scene. The shared sight, with
+ * vision on, the same for every viewer, the DM's too. The shared fog, the
+ * same for every player, which their devices read every public rule by.
+ * And for the DM every sight holder's layer joined, beside the party's.
+ */
+function viewersPerPlayerScene(ctx: Ctx, sceneId: string): boolean {
+  return sceneId === ctx.sceneId && perPlayerScene(ctx.state.scenes[sceneId]);
+}
+
+function projectSightAllCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): SightTile | null {
+  if (!viewersPerPlayerScene(ctx, sceneId) || !visionOn(ctx.state.scenes[sceneId])) return null;
+  return visionRules.holderSight(ctx.state, sceneId, null).tiles.get(`${tx},${ty}`) ?? null;
+}
+
+function projectFogAllCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): FogTile | null {
+  if (!viewersPerPlayerScene(ctx, sceneId)) return null;
+  return sharedFogTile(ctx.state, sceneId, tx, ty);
+}
+
+function projectExploredAnyCtx(ctx: Ctx, sceneId: string, tx: number, ty: number): FogTile | null {
+  if (ctx.viewer.role !== "dm" || !viewersPerPlayerScene(ctx, sceneId)) return null;
+  return exploredAnyTile(ctx.state, sceneId, tx, ty);
+}
+
+/** Every holder layer's tile at a place joined, kept per tile objects, or null where no layer holds one. */
+function exploredAnyTile(state: RoomState, sceneId: string, tx: number, ty: number): FogTile | null {
+  const layers = holderTiles(state, sceneId, tx, ty);
+  const first = layers[0];
+  if (!first) return null;
+  if (layers.length === 1) return playerTile(first, () => ({ sceneId, tx, ty, rev: 0, bits: first.bits }));
+  const all = mergedChain(layers);
+  return (all.tile ??= { sceneId, tx, ty, rev: 0, bits: (all.text ??= encodeTile(all.bits)) });
+}
+
+/** The tiles every entry of a scene's holder list holds at a place, in the list's order. */
+function holderTiles(state: RoomState, sceneId: string, tx: number, ty: number): ExploredTile[] {
+  const out: ExploredTile[] = [];
+  for (const e of state.holders?.[sceneId]?.entries ?? []) {
+    const tile = state.exploredBy?.[holderTileKey(sceneId, e.memberId, tx, ty)];
+    if (tile) out.push(tile);
+  }
+  return out;
+}
+
+/** A scene's sight holder list is the DM's, on the scene the DM views (docs/design-v1-per-player-vision.md 6.1). */
+function projectHoldersCtx(ctx: Ctx, list: SightHolders): SightHolders | null {
+  return ctx.viewer.role === "dm" && list.sceneId === ctx.sceneId ? list : null;
 }
 
 /**
@@ -897,7 +1309,7 @@ function projectLabelCtx(ctx: Ctx, label: Label): Label | null {
   if (ctx.viewer.role === "dm") return label;
   const scene = ctx.state.scenes[label.sceneId];
   if (!scene || !scene.fogEnabled) return label;
-  const fogged = isRangeFullyFogged(anyFogTiles(ctx.state), label.sceneId, labelCells(label), (x, y) => ctx.fogged(label.sceneId, x, y));
+  const fogged = isRangeFullyFogged(ctx.presence(label.sceneId), label.sceneId, labelCells(label), (x, y) => ctx.fogged(label.sceneId, x, y));
   return fogged ? null : label;
 }
 
@@ -928,7 +1340,7 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
   if (stamp.visibility === "dm") return null;
   const scene = ctx.state.scenes[stamp.sceneId];
   if (!scene || !scene.fogEnabled) return stamp;
-  const fogged = isRangeFullyFogged(anyFogTiles(ctx.state), stamp.sceneId, stampCells(stamp), (x, y) => ctx.fogged(stamp.sceneId, x, y));
+  const fogged = isRangeFullyFogged(ctx.presence(stamp.sceneId), stamp.sceneId, stampCells(stamp), (x, y) => ctx.fogged(stamp.sceneId, x, y));
   return fogged ? null : stamp;
 }
 
@@ -954,7 +1366,7 @@ function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
   }
   const scene = ctx.state.scenes[trap.sceneId];
   if (scene?.fogEnabled) {
-    const fogs = anyFogTiles(ctx.state);
+    const fogs = ctx.presence(trap.sceneId);
     const fogged = (r: CellRange) => isRangeFullyFogged(fogs, trap.sceneId, r, (x, y) => ctx.fogged(trap.sceneId, x, y));
     if (zoneRanges(ctx.state, trap.sceneId, zone).every(fogged)) return null;
   }
@@ -1151,7 +1563,7 @@ function projectPinCtx(ctx: Ctx, pin: Pin): Pin | null {
   }
   const scene = ctx.state.scenes[pin.sceneId];
   if (!scene || !scene.fogEnabled) return pin;
-  const fogged = isRangeFullyFogged(anyFogTiles(ctx.state), pin.sceneId, pinCells(pin), (x, y) => ctx.fogged(pin.sceneId, x, y));
+  const fogged = isRangeFullyFogged(ctx.presence(pin.sceneId), pin.sceneId, pinCells(pin), (x, y) => ctx.fogged(pin.sceneId, x, y));
   return fogged ? null : pin;
 }
 
@@ -1341,7 +1753,7 @@ function projectTurnStart(ctx: Ctx, start: TurnStart | undefined, activeEntryId:
   if (!start || activeEntryId === null || start.entryId !== activeEntryId) return null;
   const token = ctx.state.tokens[start.tokenId];
   if (!token || token.sceneId !== start.sceneId || !tokenVisibleTo(ctx, token)) return null;
-  if (!start.seen && !ownsToken(ctx.state, ctx.viewer, token)) return null;
+  if (!start.seen && !start.seenBy?.includes(ctx.viewer.memberId) && !ownsToken(ctx.state, ctx.viewer, token)) return null;
   const out: TurnStart = { entryId: start.entryId, tokenId: start.tokenId, sceneId: start.sceneId, x: start.x, y: start.y, elevation: start.elevation };
   if (start.seq !== undefined) out.seq = start.seq;
   // The mounts sharing the turn that the player's copy holds (docs/design-v1-attach.md 8.5).
@@ -1401,11 +1813,14 @@ function both(a: Reach, b: Reach): Reach {
 export function eventReach(state: RoomState, data: LogEvent): Reach {
   if (neverRead(data)) return [];
   switch (data.type) {
+    case "area":
+      // On a per-player scene a reminder reaches exactly its witnesses, its creature's owners among them only as they saw the area (6.5).
+      if (data.seenBy !== undefined && !data.seen) return state.tokens[data.tokenId] ? data.seenBy : [];
+      return creatureReach(state, data, false);
     case "hp":
     case "rest":
     case "concentration":
     case "effect":
-    case "area":
     case "use":
       return creatureReach(state, data, false);
     case "deathSave":
@@ -1417,7 +1832,7 @@ export function eventReach(state: RoomState, data: LogEvent): Reach {
       if (data.seen) return "all";
       const token = row.tokenId !== undefined ? state.tokens[row.tokenId] : undefined;
       const character = row.characterId !== undefined ? state.characters[row.characterId] : undefined;
-      return [...(token ? ownersOf(state, token) : []), ...(character?.ownerIds ?? [])];
+      return [...(token ? ownersOf(state, token) : []), ...(character?.ownerIds ?? []), ...(data.seenBy ?? [])];
     }
     case "encounter":
     case "member":
@@ -1463,15 +1878,19 @@ function creaturePlayers(state: RoomState, ref: { tokenId?: string; characterId?
 /**
  * Who may have an event about a creature: everyone when it names only a
  * character, or a token that players who do not own it could see when it
- * happened, else the token's players. An effect companion's life
- * (`lifeOnly`) reaches only its players however it was seen.
+ * happened, else the token's players and, on a per-player scene, the sight
+ * holders its list names (docs/design-v1-per-player-vision.md 6.5). An
+ * effect companion's life (`lifeOnly`) reaches only its players however it
+ * was seen.
  */
-function creatureReach(state: RoomState, data: { tokenId?: string; characterId?: string; seen?: true }, lifeOnly: boolean): Reach {
+function creatureReach(state: RoomState, data: { tokenId?: string; characterId?: string; seen?: true; seenBy?: string[] }, lifeOnly: boolean): Reach {
   if (data.characterId !== undefined && !state.characters[data.characterId]) return [];
   if (data.tokenId === undefined) return "all";
   const token = state.tokens[data.tokenId];
   if (!token) return [];
-  return data.seen && !(lifeOnly && effectCompanion(token)) ? "all" : ownersOf(state, token);
+  const companionLife = lifeOnly && effectCompanion(token);
+  if (data.seen && !companionLife) return "all";
+  return companionLife || data.seenBy === undefined ? ownersOf(state, token) : [...ownersOf(state, token), ...data.seenBy];
 }
 
 /**
@@ -1521,10 +1940,10 @@ export function lineReach(state: RoomState, entry: Pick<LogEntry, "kind" | "data
  * them all against the same room for about the cost of reading each.
  */
 export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "data">) => LineReach {
-  const fogged = fogReader(state);
-  const sight = sightReader(state);
-  // Any player stands for a member who owns nothing, so it reads a dice line as members do.
-  const ctxOfReader = (viewer: Viewer): Ctx => ({ state, viewer, sceneId: viewerSceneId(state, viewer, { sceneId: null }), paused: paused(state, viewer), member: true, fogged, sight });
+  // Each reader with their own sight and fog, which on a per-player scene are theirs alone, and any player the shared
+  // ones (docs/design-v1-per-player-vision.md 6.5). Any player stands for a member who owns nothing, so it reads a dice
+  // line as members do.
+  const ctxOfReader = (viewer: Viewer): Ctx => ({ ...ctxOf(state, viewer, { sceneId: null }), member: true });
   const players = Object.values(state.members)
     .filter((m) => m.kind === "player")
     .map((m) => m.id)
@@ -1538,7 +1957,8 @@ export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "d
     const reads = players.map(read);
     const readers = reads.filter((r) => r.view !== null);
     const anyone = read(anyPlayer);
-    if (anyone.view === null || readers.length < players.length) {
+    // A line holding a list of who saw it is a party line, whose copies each hold their reader's view (6.5).
+    if (anyone.view === null || readers.length < players.length || holdsLists(data)) {
       return readers.length === 0 ? { audience: "dm" } : { audience: "party", views: readers.map((r) => [r.id, r.view!]) };
     }
     const parts = partsOf(data, anyone, reads);
@@ -1664,6 +2084,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
   // A copy of a secret roll of someone else's, read as the bare line then, names no roll or creature to check again.
   if (copy && data.type === "dice" && data.to === "dm" && data.rolls.length === 0) return ctx.member && data.by !== ctx.viewer.memberId ? data : null;
   if (!reaches(eventReach(ctx.state, data), ctx.viewer.memberId)) return null;
+  data = withoutLists(data, ctx.viewer.memberId);
   switch (data.type) {
     case "hp": {
       const holder = holderInSight(ctx, data);
@@ -1797,6 +2218,35 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
   }
 }
 
+/**
+ * An event without the lists of who saw it (docs/design-v1-per-player-vision.md
+ * 6.5), which are the DM's: a reader they name reads it as seen, so their
+ * read follows the rules of a line every player saw. A dice line's rolls
+ * lose theirs in projectDiceCtx. An event that holds none is the same object.
+ */
+function withoutLists(data: LogEvent, reader: string): LogEvent {
+  if (data.type === "dice" || (!("seenBy" in data) && !("toSeenBy" in data))) return data;
+  const { seenBy, toSeenBy, ...rest } = data as LogEvent & { seenBy?: string[]; toSeenBy?: string[] };
+  const out = rest as Record<string, unknown>;
+  if (seenBy?.includes(reader)) out.seen = true;
+  if (toSeenBy?.includes(reader)) out.toSeen = true;
+  return out as LogEvent;
+}
+
+/** Whether an event holds a list of who saw it (6.5), which makes its line a party line (lineReader). */
+export function holdsLists(data: LogEvent): boolean {
+  if (data.type === "dice") return data.rolls.some((r) => r.seenBy !== undefined);
+  return "seenBy" in data || "toSeenBy" in data;
+}
+
+/** An event as the DM's line keeps it once its readers are fixed (Tx.settleLog): with no list, the copies naming who read it. */
+export function listsStripped(data: LogEvent): LogEvent {
+  if (!holdsLists(data)) return data;
+  if (data.type === "dice") return { ...data, rolls: data.rolls.map(({ seenBy: _seenBy, ...roll }) => roll) };
+  const { seenBy: _seenBy, toSeenBy: _toSeenBy, ...rest } = data as LogEvent & { seenBy?: string[]; toSeenBy?: string[] };
+  return rest as LogEvent;
+}
+
 /** Whether the viewer owns the creature on an initiative row, so its turns are part of the viewer's own history. */
 function ownsRow(ctx: Ctx, row: ProjectedEntry): boolean {
   const token = row.tokenId !== undefined ? ctx.state.tokens[row.tokenId] : undefined;
@@ -1819,12 +2269,12 @@ function ownsRow(ctx: Ctx, row: ProjectedEntry): boolean {
  */
 function projectDiceCtx(ctx: Ctx, data: Extract<LogEvent, { type: "dice" }>): LogEvent | null {
   if (!ctx.member) return null;
-  const rolls = keptRolls(ctx, data).map((i) => {
+  const rolls = keptRolls(ctx, data).map((i): DiceRoll => {
     const roll = data.rolls[i]!;
-    // The mark is the DM's, so the DM's log alone says the roll was kept from players.
-    if (!roll.hidden) return roll;
-    const { hidden: _hidden, ...rest } = roll;
-    return rest;
+    // The mark is the DM's, so the DM's log alone says the roll was kept from players, and so is a roll's list of who saw it (6.5).
+    if (!roll.hidden && roll.seenBy === undefined) return roll;
+    const { hidden: _hidden, seenBy, ...rest } = roll;
+    return seenBy?.includes(ctx.viewer.memberId) ? { ...rest, seen: true } : rest;
   });
   if (rolls.length === 0) return null;
   const mine = data.by === ctx.viewer.memberId;
@@ -1958,6 +2408,17 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectExploredCtx(ctx, value as FogTile) : null;
     case "sight":
       return projectSightCtx(ctx, parsed.sceneId, parsed.tx, parsed.ty);
+    case "sightAll":
+      return projectSightAllCtx(ctx, parsed.sceneId, parsed.tx, parsed.ty);
+    case "fogAll":
+      return projectFogAllCtx(ctx, parsed.sceneId, parsed.tx, parsed.ty);
+    case "exploredAny":
+      return projectExploredAnyCtx(ctx, parsed.sceneId, parsed.tx, parsed.ty);
+    // A holder's layer reaches them only merged into their fog (projectFogCtx), and the DM only joined (exploredAny).
+    case "exploredBy":
+      return null;
+    case "holders":
+      return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":
       return value ? projectFogDraftCtx(ctx, value as FogDraft) : null;
     case "label":
@@ -2051,13 +2512,57 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     trapLog: viewer.role === "dm" ? (state.trapLog ?? []) : [],
     trapSeen: (state.trapSeen ?? []).map((e) => projectTrapSeenCtx(ctx, e)).filter((e): e is LogEntry => e !== null),
     sight: sightTilesCtx(ctx),
+    ...perPlayerMapsCtx(ctx),
   };
 }
 
-/** The viewer's scene's fog tiles, each key either layer holds (projectFogCtx). */
+/**
+ * The maps only a projection of a per-player scene holds
+ * (docs/design-v1-per-player-vision.md 6.2), each only while it holds
+ * anything, so a whole-party scene projects as it always did and a change
+ * that empties one takes it away (keys.ts writeEntity): `sightAll` with
+ * vision on, `fogAll`, and the DM's `exploredAny` and holder list. Every
+ * viewer gets `fogAll`, the DM too, so a device reads what every viewer
+ * shares from it alone, and one that holds no tile there finds it fully
+ * fogged.
+ */
+function perPlayerMapsCtx(ctx: Ctx): Pick<ProjectedState, "sightAll" | "fogAll" | "exploredAny" | "holders"> {
+  const sceneId = ctx.sceneId;
+  const scene = sceneId === null ? undefined : ctx.state.scenes[sceneId];
+  if (sceneId === null || !scene || !perPlayerScene(scene)) return {};
+  const out: Pick<ProjectedState, "sightAll" | "fogAll" | "exploredAny" | "holders"> = {};
+  if (visionOn(scene)) {
+    const sightAll: SightMap = {};
+    for (const [at, tile] of visionRules.holderSight(ctx.state, sceneId, null).tiles) sightAll[`${sceneId}:${at}`] = tile;
+    if (Object.keys(sightAll).length > 0) out.sightAll = sightAll;
+  }
+  const tiles = (each: (tx: number, ty: number) => FogTile | null, keyed: Iterable<{ sceneId: string; tx: number; ty: number }>) => {
+    const map: Record<string, FogTile> = {};
+    for (const t of keyed) {
+      if (t.sceneId !== sceneId) continue;
+      const key = tileKey(sceneId, t.tx, t.ty);
+      if (key in map) continue;
+      const tile = each(t.tx, t.ty);
+      if (tile) map[key] = tile;
+    }
+    return map;
+  };
+  const fogAll = tiles((tx, ty) => projectFogAllCtx(ctx, sceneId, tx, ty), [...Object.values(ctx.state.fogTiles), ...Object.values(ctx.state.exploredTiles ?? {})]);
+  if (Object.keys(fogAll).length > 0) out.fogAll = fogAll;
+  if (ctx.viewer.role === "dm") {
+    const exploredAny = tiles((tx, ty) => projectExploredAnyCtx(ctx, sceneId, tx, ty), Object.values(ctx.state.exploredBy ?? {}));
+    if (Object.keys(exploredAny).length > 0) out.exploredAny = exploredAny;
+    const list = ctx.state.holders?.[sceneId];
+    if (list) out.holders = { [sceneId]: list };
+  }
+  return out;
+}
+
+/** The viewer's scene's fog tiles, each key any layer they read holds (projectFogCtx): a holder's own layer too. */
 function projectFogTilesCtx(ctx: Ctx): Record<string, FogTile> {
   const out: Record<string, FogTile> = {};
-  for (const layer of [ctx.state.fogTiles, ctx.state.exploredTiles ?? {}]) {
+  const own = ctx.viewer.role === "player" && ctx.sceneId !== null ? holderLayer(ctx.state, ctx.sceneId, ctx.viewer.memberId) : {};
+  for (const layer of [ctx.state.fogTiles, ctx.state.exploredTiles ?? {}, own]) {
     for (const [key, tile] of Object.entries(layer)) {
       if (key in out) continue;
       const projected = projectFogCtx(ctx, tile.sceneId, tile.tx, tile.ty);
@@ -2081,6 +2586,7 @@ export function allKeys(state: RoomState): EntityKey[] {
     if (!state.fogTiles[key]) out.push(keys.fog(t.sceneId, t.tx, t.ty));
   }
   out.push(...sightKeys(state));
+  out.push(...perPlayerKeys(state));
   for (const id of Object.keys(state.fogDrafts)) out.push(keys.fogDraft(id));
   for (const id of Object.keys(state.tokens)) out.push(keys.token(id));
   for (const id of Object.keys(state.characters)) out.push(keys.character(id));
@@ -2126,6 +2632,48 @@ function sightKeys(state: RoomState): EntityKey[] {
 }
 
 /**
+ * The keys per-player vision adds a projection may hold
+ * (docs/design-v1-per-player-vision.md 7.5): each holder list, a fog tile
+ * only a holder's layer holds, and on each per-player scene the shared
+ * sight's tiles (every tile inside its bounds on the server's state, as for
+ * sight), the shared fog's and the holders' layers joined. A projection
+ * holds its own maps. None on a room with no per-player scene.
+ */
+function perPlayerKeys(state: RoomState): EntityKey[] {
+  const out: EntityKey[] = [];
+  for (const id of Object.keys(state.holders ?? {})) out.push(keys.holders(id));
+  if (sightOf(state) !== undefined) {
+    const maps = viewMapsOf(state);
+    for (const key of Object.keys(maps.sightAll ?? {})) out.push(`sightAll:${key}`);
+    for (const key of Object.keys(maps.fogAll ?? {})) out.push(`fogAll:${key}`);
+    for (const key of Object.keys(maps.exploredAny ?? {})) out.push(`exploredAny:${key}`);
+    return out;
+  }
+  const own = new Set<string>();
+  for (const t of Object.values(state.exploredBy ?? {})) {
+    const key = tileKey(t.sceneId, t.tx, t.ty);
+    if (own.has(key)) continue;
+    own.add(key);
+    if (!state.fogTiles[key] && !state.exploredTiles?.[key]) out.push(keys.fog(t.sceneId, t.tx, t.ty));
+    if (perPlayerScene(state.scenes[t.sceneId])) out.push(keys.exploredAny(t.sceneId, t.tx, t.ty));
+  }
+  for (const scene of Object.values(state.scenes)) {
+    if (!perPlayerScene(scene)) continue;
+    if (visionOn(scene)) {
+      for (let ty = 0; ty < tilesAcross(scene.bounds.h); ty++) for (let tx = 0; tx < tilesAcross(scene.bounds.w); tx++) out.push(keys.sightAll(scene.id, tx, ty));
+    }
+    const shared = new Set<string>();
+    for (const t of [...Object.values(state.fogTiles), ...Object.values(state.exploredTiles ?? {})]) {
+      const key = tileKey(t.sceneId, t.tx, t.ty);
+      if (t.sceneId !== scene.id || shared.has(key)) continue;
+      shared.add(key);
+      out.push(keys.fogAll(t.sceneId, t.tx, t.ty));
+    }
+  }
+  return out;
+}
+
+/**
  * Entities whose projection can change when the touched ones do (design
  * 7.3, fan-out): templates on a touched token, kept rulers on one, tokens
  * of a touched character, the encounter when a row's creature changed,
@@ -2156,6 +2704,18 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     if (!held) tiles.set(sceneId, (held = new Set()));
     held.add(`${tx},${ty}`);
   };
+  // An owner's route corners on a per-player scene read their own fog (projectPathCtx), so a layer they read re-projects
+  // their tokens with a path there: every owned one for the party's layer, a holder's own for theirs.
+  const cornered = new Set<string>();
+  const cornersOn = (sceneId: string, memberId: string | null) => {
+    const at = `${sceneId}:${memberId ?? ""}`;
+    if (cornered.has(at)) return;
+    cornered.add(at);
+    for (const token of Object.values(state.tokens)) {
+      if (token.sceneId !== sceneId || !token.path) continue;
+      if (memberId === null ? playerOwned(state, token) : ownsToken(state, { memberId, role: "player" }, token)) add(keys.token(token.id));
+    }
+  };
   // A player gets a token's path only while it is the path of the turn under way and of a row they see (projectPathCtx).
   if (touched.includes(keys.encounter)) {
     for (const token of Object.values(state.tokens)) if (token.path) add(keys.token(token.id));
@@ -2174,7 +2734,19 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     } else if (parsed.kind === "explored") {
       add(keys.fog(parsed.sceneId, parsed.tx, parsed.ty));
       onTile(parsed.sceneId, parsed.tx, parsed.ty);
-    } else if (parsed.kind === "sight") onTile(parsed.sceneId, parsed.tx, parsed.ty);
+      // Every player's fog reads the party's layer, and on a per-player scene so do the shared fog and every owner's
+      // route corners (docs/design-v1-per-player-vision.md 7.5).
+      if (perPlayerScene(state.scenes[parsed.sceneId])) {
+        add(keys.fogAll(parsed.sceneId, parsed.tx, parsed.ty));
+        cornersOn(parsed.sceneId, null);
+      }
+    } else if (parsed.kind === "exploredBy") {
+      // A holder's layer reaches them merged into their fog, and the DM joined with the others' (7.5).
+      add(keys.fog(parsed.sceneId, parsed.tx, parsed.ty));
+      add(keys.exploredAny(parsed.sceneId, parsed.tx, parsed.ty));
+      onTile(parsed.sceneId, parsed.tx, parsed.ty);
+      cornersOn(parsed.sceneId, parsed.memberId);
+    } else if (parsed.kind === "sight" || parsed.kind === "sightAll") onTile(parsed.sceneId, parsed.tx, parsed.ty);
     else if (parsed.kind === "token") tokenIds.add(parsed.id);
     else if (parsed.kind === "character") characterIds.add(parsed.id);
     else if (parsed.kind === "handout") handoutIds.add(parsed.id);
@@ -2327,20 +2899,42 @@ export function changedSightKeys(before: RoomState, after: RoomState, sceneIds: 
   const out: EntityKey[] = [];
   for (const sceneId of new Set(sceneIds)) {
     if (!visionOn(before.scenes[sceneId]) && !visionOn(after.scenes[sceneId])) continue;
-    const was = partySightOf(before, sceneId).tiles;
-    const now = partySightOf(after, sceneId).tiles;
-    if (was === now) continue;
-    const changed = (at: string) => {
-      const a = was.get(at);
-      const b = now.get(at);
-      if (a === b || (a && b && sameSightTile(a, b))) return;
+    const sight = new Set<string>();
+    diffSight(unionSightOf(before, sceneId).tiles, unionSightOf(after, sceneId).tiles, sight);
+    // On a per-player scene each viewer's `sight` is one raster of several (docs/design-v1-per-player-vision.md 7.5): a
+    // tile any of them changed on is a candidate for every viewer, and the shared sight's are `sightAll` too. A switch
+    // of mode or of the holder list re-projects everything anyway (Tx global).
+    if (perPlayerScene(before.scenes[sceneId]) && perPlayerScene(after.scenes[sceneId])) {
+      const shared = new Set<string>();
+      diffSight(visionRules.holderSight(before, sceneId, null).tiles, visionRules.holderSight(after, sceneId, null).tiles, shared);
+      for (const at of shared) {
+        sight.add(at);
+        const [tx, ty] = at.split(",").map(Number) as [number, number];
+        out.push(keys.sightAll(sceneId, tx, ty));
+      }
+      for (const id of new Set([...sightHolders(before, sceneId), ...sightHolders(after, sceneId)])) {
+        diffSight(visionRules.holderSight(before, sceneId, id).tiles, visionRules.holderSight(after, sceneId, id).tiles, sight);
+      }
+    }
+    for (const at of sight) {
       const [tx, ty] = at.split(",").map(Number) as [number, number];
       out.push(keys.sight(sceneId, tx, ty));
-    };
-    for (const at of now.keys()) changed(at);
-    for (const at of was.keys()) if (!now.has(at)) changed(at);
+    }
   }
   return out;
+}
+
+/** Adds to `into` the places whose tile differs between two sights. A tile the vision cache kept is the same object in both. */
+function diffSight(was: ReadonlyMap<string, SightTile>, now: ReadonlyMap<string, SightTile>, into: Set<string>): void {
+  if (was === now) return;
+  const changed = (at: string) => {
+    const a = was.get(at);
+    const b = now.get(at);
+    if (a === b || (a && b && sameSightTile(a, b))) return;
+    into.add(at);
+  };
+  for (const at of now.keys()) changed(at);
+  for (const at of was.keys()) if (!now.has(at)) changed(at);
 }
 
 function sameSightTile(a: SightTile, b: SightTile): boolean {

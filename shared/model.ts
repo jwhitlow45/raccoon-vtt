@@ -93,6 +93,22 @@ export type RoomState = {
    */
   exploredTiles: Record<TileKey, FogTile>;
   /**
+   * DM only. Each per-player scene's sight holder list, keyed by scene
+   * (docs/design-v1-per-player-vision.md 6.1). Empty in rooms from before
+   * it, and on every scene that is not per player.
+   */
+  holders: Record<SceneId, SightHolders>;
+  /**
+   * DM only, and never projected under its own key. Each sight holder's own
+   * explored layer, keyed `"<sceneId>:<memberId>:<tx>,<ty>"`
+   * (docs/design-v1-per-player-vision.md 6.3). A holder's fog merges the
+   * DM's layer, the party's and theirs. Only the server writes it, by
+   * `sys.explore`, and hides, resets, the fold, unticking the holder and
+   * removing the member clear it, none with an undo. Empty in rooms from
+   * before it.
+   */
+  exploredBy: Record<string, ExploredTile>;
+  /**
    * The DM's journal pages (wave 5, docs/design-v1-dm-tools.md 3.7), room
    * level like the monsters. Players get the pages shared with them, without
    * the secret blocks the DM has not revealed. Empty in rooms from before it.
@@ -365,8 +381,40 @@ export type LightLevel = "bright" | "dim" | "dark";
  * Party vision (section 4.3): with `on`, players see only what the party's
  * creatures see, and remember what they explored. Turning it on turns the
  * scene's fog on too, since only fog remembers.
+ *
+ * `perPlayer` makes the scene a per-player one
+ * (docs/design-v1-per-player-vision.md 6.1), whatever `on` says: each
+ * player on the sight holder list (RoomState.holders) sees what the
+ * creatures they own see and the shared sight, and remembers what they
+ * explored in a layer of their own. Stored only while true, so a scene
+ * from before it, and every whole-party scene, is as it was.
  */
-export type SceneVision = { on: boolean; light: LightLevel };
+export type SceneVision = { on: boolean; light: LightLevel; perPlayer?: true };
+
+/**
+ * One entry of a per-player scene's sight holder list
+ * (docs/design-v1-per-player-vision.md 6.1): a player who owned a seeing
+ * creature there, `on` while they see and remember for themselves.
+ */
+export type SightHolder = { memberId: MemberId; on: boolean };
+
+/**
+ * DM only. A per-player scene's sight holder list, in the order players
+ * joined it. At most LIMITS.sightHoldersPerScene entries are on. Only the
+ * server's explore step adds entries, the DM's `vision.holders` turns them
+ * on and off, and the fold back to Whole party, the scene's removal and a
+ * member's removal take them away. Nothing a player explored changes it.
+ */
+export type SightHolders = { sceneId: SceneId; rev: number; entries: SightHolder[] };
+
+/**
+ * One tile of a sight holder's own explored layer
+ * (docs/design-v1-per-player-vision.md 6.3), in the fog tile's shape, keyed
+ * `"<sceneId>:<memberId>:<tx>,<ty>"` in RoomState.exploredBy. It holds
+ * what that player's own creatures saw that neither the party's layer nor
+ * the DM's fog revealed then. Only the server writes it, by `sys.explore`.
+ */
+export type ExploredTile = FogTile & { memberId: MemberId };
 
 /**
  * Which painted cells make an automatic wall toward an unpainted neighbor
@@ -807,6 +855,13 @@ export type PathStop = {
    * (design 7.3).
    */
   seen?: true;
+  /**
+   * DM only. On a per-player scene, the sight holders who do not own the
+   * token and could see it here then, sorted, perhaps none
+   * (docs/design-v1-per-player-vision.md 6.5). A stop with `seen` holds no
+   * list, since every player saw it.
+   */
+  seenBy?: MemberId[];
   /**
    * The leg that ends here is two or more legs joined when the path was
    * full, through a stop those players could not see. Its `uncounted` mark
@@ -1604,6 +1659,8 @@ export type TurnStart = {
   /** Feet. */
   elevation: number;
   seen?: true;
+  /** DM only: the sight holders who saw the spot on a per-player scene, as on a path's stop (PathStop.seenBy). */
+  seenBy?: MemberId[];
   /**
    * The seq of the op that started the turn, which names this turn and no
    * other: Previous puts it back with the turn, and the next turn gets a
@@ -2158,11 +2215,15 @@ export type HandoutDoc = {
  *   scene stays hidden after a reveal. An event from before the mark existed
  *   counts as unseen. Events about a character need no mark, since every
  *   player knows every character.
+ * - `seenBy`, on a per-player scene (docs/design-v1-per-player-vision.md
+ *   6.5): the sight holders who do not own the token and could see it
+ *   then, when not every player could, sorted, perhaps none. DM only: a
+ *   line holding one settles as a party line, whose copies hold none.
  * - `hidden`, on effect and concentration events: the effect is hidden from
  *   players. Only the DM gets the event, the creature's owner included, as
  *   the actor projection hides the effect itself.
  */
-type AboutCreature = { tokenId?: TokenId; characterId?: CharacterId; seen?: true };
+type AboutCreature = { tokenId?: TokenId; characterId?: CharacterId; seen?: true; seenBy?: MemberId[] };
 
 /** The parts of an actor an HP change can move. */
 export type Vitals = { hp: { cur: number; max: number; temp: number }; life: LifeState; deathSaves: { ok: number; fail: number } };
@@ -2245,9 +2306,11 @@ export type LogEvent =
    * resumed (`to`), so a turn clock knows which turn began again then, and
    * `toSeen` marks that players who do not own that row could see it then.
    * Players get `to` only with that mark or as the row's owners, and never
-   * the mark itself.
+   * the mark itself. On a per-player scene `seenBy` and `toSeenBy` name the
+   * sight holders whose tracker showed each row then, when not every
+   * player's did (docs/design-v1-per-player-vision.md 6.5), DM only.
    */
-  | { type: "turn"; entryId: EntryId; round: number; seen?: true; back?: true; to?: EntryId; toSeen?: true }
+  | { type: "turn"; entryId: EntryId; round: number; seen?: true; seenBy?: MemberId[]; back?: true; to?: EntryId; toSeen?: true; toSeenBy?: MemberId[] }
   /**
    * A reminder that an area hits a creature again (AreaTemplate.triggers):
    * it entered the area during a turn, or started or ended its turn there.
@@ -2257,9 +2320,11 @@ export type LogEvent =
    * since their projection keeps it only while they see the area (design
    * 7.3). `seen` is the token's mark as above, and
    * `hidden` says the area itself was hidden from players then, so only the
-   * DM gets the line.
+   * DM gets the line. On a per-player scene `seenBy` names the players who
+   * saw both the creature and the area then, its owners among them, when
+   * not every player did (docs/design-v1-per-player-vision.md 6.5).
    */
-  | { type: "area"; templateId: TemplateId; tokenId: TokenId; trigger: AreaTrigger; area: string; moved?: true; seen?: true; hidden?: true }
+  | { type: "area"; templateId: TemplateId; tokenId: TokenId; trigger: AreaTrigger; area: string; moved?: true; seen?: true; seenBy?: MemberId[]; hidden?: true }
   | { type: "encounter"; action: "start" | "end" }
   | { type: "handout"; handoutId: HandoutId }
   /** `remove` is the DM taking the member off the roster. Its earlier lines stay, read without its name. */
@@ -2378,9 +2443,10 @@ export type LogEvent =
  * then (docs/design-v1-combat-flow.md 11.3): only the DM and the creature's
  * own players get that roll. `type` is a damage roll's damage type as the
  * roller asked it (docs/design-v1-combat-controls.md 3.4), since a label is
- * cut to fit or typed by hand and so names no type for certain.
+ * cut to fit or typed by hand and so names no type for certain. `seenBy`
+ * is the token's list on a per-player scene, as other token events carry it.
  */
-export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true; type?: DamageType };
+export type DiceRoll = DiceResult & { label?: string; tokenId?: TokenId; characterId?: CharacterId; seen?: true; seenBy?: MemberId[]; critOn?: 18 | 19 | 20; initiative?: true; save?: AbilityKey; hidden?: true; type?: DamageType };
 
 export type LogEntry = {
   /** `"<seq>:<index>"`, so a replay can never insert the same entry twice. */

@@ -1,4 +1,4 @@
-import { keys, tileKey } from "../keys.ts";
+import { holderTileKey, keys, tileKey } from "../keys.ts";
 import type { AreaTemplate, Drawing, Effect, Label, Light, Pin, RoomState, Scene, Stamp, Token, Trap, TrapAction } from "../model.ts";
 import { hash128, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
@@ -117,6 +117,18 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
       if (tile.sceneId !== original.id) continue;
       if (s.exploredTiles[tileKey(to, tile.tx, tile.ty)]) throw invalid("a copied id is taken");
       tx.writeBookkeeping(keys.explored(to, tile.tx, tile.ty), { ...tile, sceneId: to });
+    }
+    // And so do the sight holder list and each holder's own layer (docs/design-v1-per-player-vision.md 6.3), the same way.
+    const list = s.holders?.[original.id];
+    if (list) {
+      if (s.holders[to]) throw invalid("a copied id is taken");
+      tx.writeBookkeeping(keys.holders(to), { ...list, sceneId: to, rev: 0 });
+    }
+    for (const key of Object.keys(s.exploredBy ?? {}).sort()) {
+      const tile = s.exploredBy[key]!;
+      if (tile.sceneId !== original.id) continue;
+      if (s.exploredBy[holderTileKey(to, tile.memberId, tile.tx, tile.ty)]) throw invalid("a copied id is taken");
+      tx.writeBookkeeping(keys.exploredBy(to, tile.memberId, tile.tx, tile.ty), { ...tile, sceneId: to });
     }
   }
 

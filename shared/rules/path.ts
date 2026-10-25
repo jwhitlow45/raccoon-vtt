@@ -2,7 +2,7 @@ import type { Encounter, PathStop, Token, TokenPath, TurnStart } from "../model.
 import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import type { PlacedToken } from "./footprint.ts";
-import { straightCost, type LegCost, type SizedSpot } from "./route.ts";
+import { legSteps, routeLattice, spotRect, straightCost, type LegCost, type SizedSpot } from "./route.ts";
 
 /**
  * A creature's path on its turn (features section 4, design 6): the rules
@@ -191,18 +191,29 @@ export function seenWhole(stops: readonly PathStop[], i: number, stored: boolean
 }
 
 /**
+ * Whether a player who does not own the creature saw it at a stop: every
+ * such player did (`seen`), or on a per-player scene the stop's list names
+ * them (docs/design-v1-per-player-vision.md 6.5).
+ */
+function sawStop(stop: PathStop, reader: string | undefined): boolean {
+  return stop.seen === true || (reader !== undefined && stop.seenBy?.includes(reader) === true);
+}
+
+/**
  * The stops players who do not own the token get: those they could see,
- * without the mark that says so. A leg reaches them as uncounted only when
+ * without the marks that say so. A leg reaches them as uncounted only when
  * they saw both its ends. Otherwise their line joins two stops with unseen
  * ones between, and the mark would tell them how the creature moved where
  * they could not see it. So all they read, the trail and the distance
- * alike, comes from what they saw.
+ * alike, comes from what they saw. `reader` is the player reading, whom a
+ * stop's list may name on a per-player scene. A leg's corners still reach
+ * them only where every player saw it whole (seenWhole).
  */
-export function stopsForNonOwners(stops: readonly PathStop[]): PathStop[] {
+export function stopsForNonOwners(stops: readonly PathStop[], reader?: string): PathStop[] {
   const out: PathStop[] = [];
   for (const [i, stop] of stops.entries()) {
-    if (!stop.seen) continue;
-    const wholeLegSeen = i > 0 && stops[i - 1]!.seen === true && stop.joinedUnseen !== true;
+    if (!sawStop(stop, reader)) continue;
+    const wholeLegSeen = i > 0 && sawStop(stops[i - 1]!, reader) && stop.joinedUnseen !== true;
     const plain = plainStop(stop, wholeLegSeen && stop.uncounted === true);
     // A leg's bends reach them only when they saw it whole, and never what it took: they read its length from what they received (7.3).
     if (seenWhole(stops, i, true)) {
@@ -243,6 +254,30 @@ function plainStop(stop: PathStop, uncounted: boolean): PathStop {
   if (uncounted) out.uncounted = true;
   if (stop.footprint) out.footprint = { w: stop.footprint.w, h: stop.footprint.h, ...(stop.footprint.squeeze ? { squeeze: true as const } : {}) };
   return out;
+}
+
+/**
+ * Whether every spot of the leg ending at `to` lies on ground that `ground`
+ * reveals (docs/design-v1-per-player-vision.md 6.5): each cell under the
+ * creature's footprint, at the size the stop was made at, at every step of
+ * the route's lattice along each straight part its corners draw. On a
+ * per-player scene an owner gets a private leg's corners only where this
+ * holds for ground their own fog reveals, so one co-owner's memory never
+ * draws for another.
+ */
+export function legOnGround(token: PlacedToken, from: PathStop, to: PathStop, ground: (x: number, y: number) => boolean): boolean {
+  const lattice = routeLattice(token);
+  const covered = (p: SizedSpot) => {
+    const r = spotRect(token, p);
+    for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground(x, y)) return false;
+    return true;
+  };
+  if (!covered(from)) return false;
+  for (const [a, b] of legParts(from, to)) {
+    const steps = legSteps(a, b, lattice);
+    for (let k = 1; k <= steps.n; k++) if (!covered({ ...b, ...steps.at(k) })) return false;
+  }
+  return true;
 }
 
 /**

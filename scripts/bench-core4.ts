@@ -77,6 +77,8 @@ function room(): RoomState {
     stamps: {},
     lights: {},
     exploredTiles: {},
+    holders: {},
+    exploredBy: {},
     journal: {},
     pins: {},
     rolls: {},

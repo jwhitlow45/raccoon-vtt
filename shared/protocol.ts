@@ -432,7 +432,13 @@ const lightFeet = z.number().min(0).max(MAX_LIGHT_FT);
 /** A creature's carried light (Token.light): each radius at most the SRD's largest, as for a free light. */
 const tokenLight = z.strictObject({ bright: lightFeet, dim: lightFeet });
 const lightLevel = z.enum(["bright", "dim", "dark"]);
-const sceneVision = z.strictObject({ on: z.boolean(), light: lightLevel });
+/** A scene's vision as it is stored and created: `perPlayer` only while true (docs/design-v1-per-player-vision.md 6.7). */
+const sceneVision = z.strictObject({ on: z.boolean(), light: lightLevel, perPlayer: z.literal(true).optional() });
+/**
+ * A scene's vision as a patch names it (6.7): without `perPlayer` the
+ * scene keeps what it has, and false makes it a whole-party scene again.
+ */
+const sceneVisionPatch = z.strictObject({ on: z.boolean(), light: lightLevel, perPlayer: z.boolean().optional() });
 const lightFields = {
   id,
   x: latticeCoord,
@@ -1243,6 +1249,8 @@ const stairDirection = z.enum(["a", "n", "e", "s", "w"]);
 
 /** A fog tile's bits: 512 bytes as base64 (shared/rules/fog.ts encodeTile). */
 const tileBits = z.string().regex(/^[A-Za-z0-9+/]{683}=$/, "not a tile of bits");
+/** An explored layer's new tiles in `sys.explore`: at most every tile of the largest scene. */
+const exploredTiles = z.array(z.strictObject({ tx: chunkIndex, ty: chunkIndex, bits: tileBits })).max((Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2);
 
 /** A page's size bound: the map cap, so a later change to the handout pipeline needs no schema change. */
 export const MAX_HANDOUT_PAGE_PX = 8_192;
@@ -1791,8 +1799,22 @@ export const clientOps = [
       phases: mapPhases.optional(),
       blockMovement: z.boolean().optional(),
       /** Turning vision on turns the scene's fog on too, unless the same patch says otherwise (section 4.3.1). */
-      vision: sceneVision.optional(),
+      vision: sceneVisionPatch.optional(),
     }),
+  }),
+  /**
+   * Which players on a per-player scene's holder list see and remember for
+   * themselves (docs/design-v1-per-player-vision.md 6.1): exactly the
+   * players named, at most the scene's cap, each a player on the roster.
+   * One with no entry gets one, at the end. Every other entry is off, and
+   * the layer of one turned off goes, outside the undo step.
+   */
+  op("vision.holders", {
+    sceneId: id,
+    on: z
+      .array(id)
+      .max(LIMITS.sightHoldersPerScene)
+      .refine((ids) => new Set(ids).size === ids.length, { message: "a player is listed twice" }),
   }),
   op("scene.delete", { sceneId: id }),
   op("scene.reorder", { order: z.array(id).min(1).max(50) }),
@@ -2271,14 +2293,29 @@ export const serverOnlyOps = [
    * (section 4.3.3): each changed tile's new bits, which only ever add. The
    * actor appends it to the batch on the player scene. Replay applies the
    * stored bits and never computes sight.
+   *
+   * On a per-player scene (docs/design-v1-per-player-vision.md 6.3) `tiles`
+   * is what the shared sight saw, `members` each holder's own layer's new
+   * tiles, and `join` the players the holder list gains, in order, each on
+   * or off as the step found the list (6.1). An op holds at least one of
+   * them.
    */
   op("sys.explore", {
     sceneId: id,
-    tiles: z
-      .array(z.strictObject({ tx: chunkIndex, ty: chunkIndex, bits: tileBits }))
+    tiles: exploredTiles,
+    members: z
+      .array(z.strictObject({ memberId: id, tiles: exploredTiles.min(1) }))
       .min(1)
-      .max((Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2),
-  }),
+      .max(LIMITS.sightHoldersPerScene)
+      .refine((m) => new Set(m.map((e) => e.memberId)).size === m.length, { message: "a holder is listed twice" })
+      .optional(),
+    join: z
+      .array(z.strictObject({ memberId: id, on: z.boolean() }))
+      .min(1)
+      .max(LIMITS.membersPerRoom)
+      .refine((j) => new Set(j.map((e) => e.memberId)).size === j.length, { message: "a player joins twice" })
+      .optional(),
+  }).refine((o) => o.tiles.length > 0 || o.members !== undefined || o.join !== undefined, { message: "nothing explored" }),
   /**
    * A dice op as the server resolved it (docs/design-v1-dice.md 4.1): the
    * client op as it arrived, its `batch` (16 characters of the SHA-256 of

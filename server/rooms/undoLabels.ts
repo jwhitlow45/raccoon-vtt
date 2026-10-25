@@ -44,13 +44,18 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
         return op.patch.blockMovement ? `making walls and ledges block players' moves on ${scene(op.sceneId)}` : `letting players' moves pass walls and ledges on ${scene(op.sceneId)}`;
       }
       if (op.patch.vision !== undefined && Object.keys(op.patch).every((k) => k === "vision" || k === "fogEnabled")) {
-        // The Vision settings send one of the two at a time: party vision on or off, or the light level.
+        // The Vision settings send one of the three at a time: party vision on or off, the light level, or the Sight row.
         const was = before.scenes[op.sceneId]?.vision;
-        const { on, light } = op.patch.vision;
+        const { on, light, perPlayer } = op.patch.vision;
+        if (perPlayer !== undefined && (was?.perPlayer === true) !== perPlayer) {
+          return perPlayer ? `making sight per player on ${scene(op.sceneId)}` : `making sight whole party on ${scene(op.sceneId)}`;
+        }
         if ((was?.on === true) !== on) return on ? `turning on party vision on ${scene(op.sceneId)}` : `turning off party vision on ${scene(op.sceneId)}`;
         if ((was?.light ?? "bright") !== light) return `making ${scene(op.sceneId)} ${light}`;
       }
       return `changing ${scene(op.sceneId)}`;
+    case "vision.holders":
+      return `choosing who sees for themselves on ${scene(op.sceneId)}`;
     case "scene.delete":
       return `deleting ${scene(op.sceneId)}`;
     case "scene.reorder":

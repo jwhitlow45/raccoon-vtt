@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 23;
-export const OP_VERSION = 22;
+export const SNAPSHOT_VERSION = 24;
+export const OP_VERSION = 23;
 
 export type MigrationStep = {
   from: number;
@@ -161,6 +161,19 @@ export const snapshotMigrations: MigrationStep[] = [
   // `gone` are new, and absent reads as before, so a v22 room is a v23 room as it is. The number moves so that an older
   // build, whose strict state schema refuses `res` and an `r:` marker, refuses a v23 snapshot instead of loading it.
   { from: 22, to: 23, apply: (state) => state },
+  // Per-player vision (docs/design-v1-per-player-vision.md 6.7): each per-player scene's sight holder list and each
+  // holder's explored layer, two collections a v23 room lacks, start empty, so every scene is a whole-party one as it
+  // was. A scene's `perPlayer` and the marks' `seenBy` and `toSeenBy` are new optional fields. The number moves so that
+  // an older build, which would show every player the party's sight on a per-player scene, refuses a v24 snapshot.
+  {
+    from: 23,
+    to: 24,
+    apply: (state) => {
+      if (state === null || typeof state !== "object" || ("holders" in state && "exploredBy" in state)) return state;
+      const room = state as Record<string, unknown>;
+      return { ...room, holders: room.holders ?? {}, exploredBy: room.exploredBy ?? {} };
+    },
+  },
 ];
 
 /**
@@ -641,6 +654,23 @@ export const opMigrations: MigrationStep[] = [
     // version 23 snapshot and a version 22 op (runMigrations).
     from: 21,
     to: 22,
+    apply: (op) => op,
+  },
+  {
+    // Per-player vision (docs/design-v1-per-player-vision.md 6.7): a
+    // scene's vision may carry `perPlayer`, `sys.explore` its `members` and
+    // `join`, and `vision.holders` is new, so no stored op changes shape and
+    // the step is the identity. From this version a vision patch without
+    // `perPlayer` keeps the scene's, and `perPlayer: false` clears it. No
+    // older op ever met a per-player scene, so every one replays as it was.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 23, and the shutdown writes version 24 snapshots
+    // (snapshotMigrations). Rollback: restore the backup taken before the
+    // deploy, as for any snapshot version bump. An older build refuses a
+    // version 24 snapshot and a version 23 op (runMigrations).
+    from: 22,
+    to: 23,
     apply: (op) => op,
   },
 ];

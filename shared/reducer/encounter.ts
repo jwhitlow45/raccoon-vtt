@@ -30,7 +30,7 @@ import {
 import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
-import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, stableStringify } from "../project.ts";
+import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, rowSeenMark, seenMark, stableStringify } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
 import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
@@ -67,7 +67,10 @@ function withTurn(tx: Tx, encounter: Encounter, activeEntryId: string | null): E
   if (entry && token) {
     // The seq names this turn, so a path recorded during it is told from one of an earlier turn (rules/path.ts).
     const start: TurnStart = { entryId: entry.id, tokenId: token.id, sceneId: token.sceneId, x: token.x, y: token.y, elevation: token.elevation, seq: tx.env.seq };
-    if (inSightOfNonOwners(tx.state, token, tx.env)) start.seen = true;
+    // Who saw the spot (project.ts seenMark): every player, or on a per-player scene the holders listed.
+    const mark = seenMark(tx.state, token, tx.env, "anywhere");
+    if (mark.seen) start.seen = true;
+    if (mark.seenBy) start.seenBy = mark.seenBy;
     next.turnStart = start;
   }
   return next;
@@ -279,7 +282,7 @@ export function removeEntries(tx: Tx, entryIds: string[]): void {
   const landing = activeEntryId !== encounter.activeEntryId ? kept.entries.find((e) => e.id === activeEntryId) : undefined;
   // The turn passed on starts for its creatures as Next starts one, with no saved step: the removal's undo takes it back.
   if (landing && combatUses(tx.env.opVersion)) startTurn(tx, tx.state.encounter ?? kept, landing, null);
-  if (landing) tx.addEvent({ type: "turn", entryId: landing.id, round: encounter.round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
+  if (landing) tx.addEvent({ type: "turn", entryId: landing.id, round: encounter.round, ...rowSeenMark(tx.state, landing, tx.env) });
 }
 
 /**
@@ -484,7 +487,7 @@ export function encounterNext(tx: Tx, op: OpOf<"encounter.next">): void {
   if (combat) startTurn(tx, turned, landing, snapshot);
   if (takesBackTurnOnly(tx.env.opVersion)) snapshot.turnFlags = flagsChanged(encounter.entries, turned.entries);
   tx.write(keys.encounterHistory, [...tx.state.encounterHistory, snapshot].slice(-MAX_HISTORY));
-  tx.addEvent({ type: "turn", entryId: step.landing, round, ...(rowSeenByNonOwners(tx.state, landing, tx.env) ? { seen: true as const } : {}) });
+  tx.addEvent({ type: "turn", entryId: step.landing, round, ...rowSeenMark(tx.state, landing, tx.env) });
 }
 
 /**
@@ -617,7 +620,7 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
   // of the players' log alike. It also names the row whose turn resumes,
   // marked from the state after, which is when that turn begins again.
   const taken = encounter.entries.find((e) => e.id === encounter.activeEntryId);
-  const takenSeen = taken !== undefined && rowSeenByNonOwners(tx.state, taken, tx.env);
+  const takenSeen = taken !== undefined ? rowSeenMark(tx.state, taken, tx.env) : {};
   const back = turnOnly ? takenBack(encounter, steps) : deepest.encounter;
   writeEncounter(tx, back);
   // The turn put back reminds anew, as the turn line it got did before op version 19: no record of it is kept to restore.
@@ -638,10 +641,15 @@ export function encounterPrev(tx: Tx, op: OpOf<"encounter.prev">): void {
       entryId: taken.id,
       round: encounter.round,
       back: true,
-      ...(takenSeen ? { seen: true as const } : {}),
-      ...(resumed ? { to: resumed.id, ...(rowSeenByNonOwners(tx.state, resumed, tx.env) ? { toSeen: true as const } : {}) } : {}),
+      ...takenSeen,
+      ...(resumed ? { to: resumed.id, ...toMark(rowSeenMark(tx.state, resumed, tx.env)) } : {}),
     });
   }
+}
+
+/** A row's mark as a take-back's resumed row carries it: `toSeen`, or on a per-player scene `toSeenBy` (6.5 of docs/design-v1-per-player-vision.md). */
+function toMark(mark: { seen?: true; seenBy?: string[] }): { toSeen?: true; toSeenBy?: string[] } {
+  return mark.seen ? { toSeen: true } : mark.seenBy ? { toSeenBy: mark.seenBy } : {};
 }
 
 /** Whether the turn a step resumes is a row's that has left the fight: one the step says is gone, or one `inFight` lacks. */

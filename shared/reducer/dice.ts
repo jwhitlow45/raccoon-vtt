@@ -3,7 +3,7 @@ import { startsSecret } from "../dice/secret.ts";
 import { healRevivesDead } from "../migrate.ts";
 import type { DiceRoll, LogEvent } from "../model.ts";
 import { ANSWERED_MEANWHILE, SETTLED_MEANWHILE } from "../permissions.ts";
-import { initiativeHidden, seenByNonOwners } from "../project.ts";
+import { initiativeHidden, seenMark } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
 import { applyDeathSaves, applyHeal } from "../rules/hp.ts";
 import { resultOf } from "../rules/rolls.ts";
@@ -37,11 +37,11 @@ export function sysDice(tx: Tx, op: Sys): void {
   }
 }
 
-/** One roll's creature on its line: a token with its `seen` mark, as other token events carry it, or a character. */
-function rollCreature(tx: Tx, creature: ActorTarget): Pick<DiceRoll, "tokenId" | "characterId" | "seen"> {
+/** One roll's creature on its line: a token with its marks of who saw it, as other token events carry them (project.ts seenMark), or a character. */
+function rollCreature(tx: Tx, creature: ActorTarget): Pick<DiceRoll, "tokenId" | "characterId" | "seen" | "seenBy"> {
   if ("characterId" in creature) return { characterId: tx.character(creature.characterId).id };
   const token = tx.token(creature.tokenId);
-  return seenByNonOwners(tx.state, token, tx.env) ? { tokenId: token.id, seen: true } : { tokenId: token.id };
+  return { tokenId: token.id, ...seenMark(tx.state, token, tx.env, "here") };
 }
 
 /**

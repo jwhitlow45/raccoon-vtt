@@ -9,7 +9,7 @@ import { footprintSize } from "../rules/footprint.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
 import { rowLeadsMounts, sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
-import { carriedAlong, dismounted, hiddenTurnOf, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, withPath } from "./tokens.ts";
+import { carriedAlong, dismounted, hiddenTurnOf, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, startStop, withPath } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /**
@@ -183,11 +183,12 @@ function mountingCost(tx: Tx, rider: Token, mountId: string): number | null {
 function mountedInPlace(tx: Tx, seated: Token, cost: number): Token {
   const turn = turnUnderWay(tx.state.encounter) ?? hiddenTurnOf(tx.state.encounter, seated);
   if (!turn) return seated;
-  const start: PathStop = { x: turn.x, y: turn.y, elevation: turn.elevation, ...(turn.seen ? { seen: true as const } : {}) };
+  const start = startStop(turn);
   const path: TokenPath = seated.path?.turn === turn.seq ? seated.path : { turn: turn.seq, stops: turn.sceneId === seated.sceneId ? [start] : [] };
   const last = path.stops[path.stops.length - 1];
   if (!last || !sameSpot(last, seated)) return seated;
-  const stop: PathStop = { x: seated.x, y: seated.y, elevation: seated.elevation, ...(last.seen ? { seen: true as const } : {}), moved: 0, cost };
+  // The stop where it sits, seen by whoever saw it get there (docs/design-v1-per-player-vision.md 6.5).
+  const stop: PathStop = { x: seated.x, y: seated.y, elevation: seated.elevation, ...(last.seen ? { seen: true as const } : {}), ...(last.seenBy ? { seenBy: last.seenBy } : {}), moved: 0, cost };
   return { ...seated, path: withStop(path, stop, footprintSize(seated), { token: seated, rules: tx.state.meta.settings }) };
 }
 

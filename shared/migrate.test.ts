@@ -1195,9 +1195,9 @@ describe("Previous takes back only the turn: op version 21 (design 9.4)", () => 
 });
 
 describe("class resources from D&D Beyond: op version 22, snapshot version 23 (docs/design-v1-ddb-resources.md 5)", () => {
-  test("are the versions now", () => {
-    assert.equal(OP_VERSION, 22);
-    assert.equal(SNAPSHOT_VERSION, 23);
+  test("brought op version 22 and snapshot version 23", () => {
+    assert.ok(opMigrations.some((s) => s.from === 21 && s.to === 22));
+    assert.ok(snapshotMigrations.some((s) => s.from === 22 && s.to === 23));
   });
 
   test("the snapshot step is the identity, a room with a record's resource part and an r: marker included", () => {
@@ -1219,5 +1219,41 @@ describe("class resources from D&D Beyond: op version 22, snapshot version 23 (d
 
   test("a version 22 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 22, 21, opMigrations), /down/);
+  });
+});
+
+describe("per-player vision: op version 23, snapshot version 24 (docs/design-v1-per-player-vision.md 6.7)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 23);
+    assert.equal(SNAPSHOT_VERSION, 24);
+  });
+
+  test("a version 23 room gets an empty holder list and holder layers, and nothing else about it changes", () => {
+    const { holders: _holders, exploredBy: _exploredBy, ...v23 } = room({ scenes: { s1: { ...room().scenes.s1!, vision: { on: true, light: "dark" } } } });
+    const migrated = runMigrations(structuredClone(v23), 23, 24, snapshotMigrations) as RoomState;
+    assert.deepEqual(migrated, { ...v23, holders: {}, exploredBy: {} });
+    assert.deepEqual(migrateSnapshot(structuredClone(v23), 23), migrated);
+    // Every scene stays a whole-party one: no scene of a v23 room is per player.
+    assert.ok(Object.values(migrated.scenes).every((s) => s.vision?.perPlayer === undefined));
+  });
+
+  test("a room that has both already is the very same room", () => {
+    const current = room();
+    assert.equal(runMigrations(current, 23, 24, snapshotMigrations), current);
+    assert.equal(runMigrations(null, 23, 24, snapshotMigrations), null);
+  });
+
+  test("the op step is the identity, a vision patch, an explore and a pick of holders included", () => {
+    const ops: unknown[] = [
+      { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark" } } },
+      { t: "sys.explore", sceneId: "s1", tiles: [] },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 22, 23, opMigrations), op);
+  });
+
+  test("a version 23 op and a version 24 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 23, 22, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 24, 23, snapshotMigrations), /down/);
   });
 });

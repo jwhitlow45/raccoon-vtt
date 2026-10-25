@@ -1,6 +1,7 @@
 import { cellIndex, decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, encodeStairs } from "../heightCodec.ts";
-import { cellOf, chunkKey, doorChunk, keys, tileKey, wallChunk, wallMidpoint } from "../keys.ts";
-import { CHUNK_CELLS, type BuildChunk, type FogDraft, type FogOp, type FreeWall, type Label, type Light, type Scene, type Stamp, type TerrainId, type Token, type WallFeature } from "../model.ts";
+import { cellOf, chunkKey, doorChunk, holderTileKey, keys, tileKey, wallChunk, wallMidpoint } from "../keys.ts";
+import { CHUNK_CELLS, type BuildChunk, type ExploredTile, type FogDraft, type FogOp, type FogTile, type FreeWall, type Label, type Light, type RoomState, type Scene, type SightHolders, type Stamp, type TerrainId, type Token, type WallFeature } from "../model.ts";
+import { LIMITS } from "../limits.ts";
 import { MAX_BUILD_CELLS, MAX_FOG_DRAFT_OPS, type OpOf } from "../protocol.ts";
 import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFixed, rasterizeFogOps, tilesAcross } from "../rules/fog.ts";
 import { occupiedCells } from "../rules/footprint.ts";
@@ -47,7 +48,9 @@ function applyFogOps(tx: Tx, scene: Scene, ops: FogOp[]): void {
  * which the batch's explore records again. Reveals leave the explored layer
  * alone, and so the order of the ops does not matter to it. The clearing is
  * bookkeeping outside any undo step: undoing the hide brings back the DM's
- * fog and not what it cleared.
+ * fog and not what it cleared. Every sight holder's own layer forgets it
+ * too (docs/design-v1-per-player-vision.md 6.3), whatever the scene's mode
+ * now, so no layer kept since keeps ground the DM hid.
  */
 function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
   const hides = ops.filter((o) => o.mode === "hide");
@@ -59,14 +62,45 @@ function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
     const [tx_, ty] = key.slice(scene.id.length + 1).split(",").map(Number) as [number, number];
     tx.writeBookkeeping(keys.explored(scene.id, tx_, ty), tile);
   }
+  for (const memberId of layerOwners(tx.state, scene.id)) {
+    const layer = layerOf(tx.state, scene.id, memberId);
+    const changed = rasterizeFogOps(layer, scene.id, scene.bounds, hides);
+    for (const key of Object.keys(changed).sort()) {
+      const tile = changed[key];
+      if (tile === undefined) continue;
+      const held = layer[key]!;
+      tx.writeBookkeeping(keys.exploredBy(scene.id, memberId, held.tx, held.ty), tile && { ...tile, memberId });
+    }
+  }
 }
 
-/** Takes away every explored tile of the scene, as bookkeeping: a reset to hidden, or the scene going. */
+/** Takes away every explored tile of the scene, the holders' layers too, as bookkeeping: a reset to hidden, or the scene going. */
 export function forgetExplored(tx: Tx, sceneId: string): void {
   for (const key of Object.keys(tx.state.exploredTiles).sort()) {
     const tile = tx.state.exploredTiles[key]!;
     if (tile.sceneId === sceneId) tx.writeBookkeeping(keys.explored(sceneId, tile.tx, tile.ty), null);
   }
+  for (const memberId of layerOwners(tx.state, sceneId)) forgetHolder(tx, sceneId, memberId);
+}
+
+/** Takes away one holder's layer of a scene, as bookkeeping: they no longer see for themselves there, or left the room. */
+export function forgetHolder(tx: Tx, sceneId: string, memberId: string): void {
+  for (const tile of Object.values(layerOf(tx.state, sceneId, memberId))) tx.writeBookkeeping(keys.exploredBy(sceneId, memberId, tile.tx, tile.ty), null);
+}
+
+/** The members with a layer on a scene, in id order. */
+function layerOwners(state: RoomState, sceneId: string): string[] {
+  const out = new Set<string>();
+  for (const tile of Object.values(state.exploredBy ?? {})) if (tile.sceneId === sceneId) out.add(tile.memberId);
+  return [...out].sort();
+}
+
+/** One holder's layer of a scene, keyed as fog tiles are, in tile order, as rasterizeFogOps reads a layer. */
+function layerOf(state: RoomState, sceneId: string, memberId: string): Record<string, ExploredTile> {
+  const out: Record<string, ExploredTile> = {};
+  const tiles = Object.values(state.exploredBy ?? {}).filter((t) => t.sceneId === sceneId && t.memberId === memberId);
+  for (const tile of tiles.sort((a, b) => a.ty - b.ty || a.tx - b.tx)) out[tileKey(sceneId, tile.tx, tile.ty)] = tile;
+  return out;
 }
 
 /**
@@ -77,20 +111,133 @@ export function forgetExplored(tx: Tx, sceneId: string): void {
  */
 export function sysExplore(tx: Tx, op: OpOf<"sys.explore">): void {
   const scene = tx.scene(op.sceneId);
-  const across = tilesAcross(scene.bounds.w);
-  const down = tilesAcross(scene.bounds.h);
+  if ((op.members || op.join) && scene.vision?.perPlayer !== true) throw invalid("the scene's sight is the whole party's");
+  // Joins first, so a player who joins in this op may get their layer's first tiles in it (docs/design-v1-per-player-vision.md 6.1).
+  if (op.join) joinHolders(tx, scene, op.join);
   for (const t of op.tiles) {
-    if (t.tx >= across || t.ty >= down) throw invalid("explored tile outside the scene");
-    const bits = decodeTile(t.bits);
-    if (!bits) throw invalid("explored tile is not a tile of bits");
     const held = tx.state.exploredTiles[tileKey(scene.id, t.tx, t.ty)];
-    const was = held ? decodeTile(held.bits) : null;
-    const next = new Uint8Array(bits);
-    if (was) for (let i = 0; i < next.length; i++) next[i] = next[i]! | was[i]!;
-    if (isEmptyBits(next)) continue;
+    const next = joinedBits(scene, t, held);
+    if (next !== null) tx.write(keys.explored(scene.id, t.tx, t.ty), { sceneId: scene.id, tx: t.tx, ty: t.ty, rev: held?.rev ?? 0, bits: next });
+  }
+  const on = new Set(tx.state.holders?.[scene.id]?.entries.flatMap((e) => (e.on ? [e.memberId] : [])) ?? []);
+  for (const m of op.members ?? []) {
+    // Only a holder whose entry is on has a layer (6.1).
+    if (!on.has(m.memberId)) throw invalid("only a player who sees for themselves explores for themselves");
+    for (const t of m.tiles) {
+      const held = tx.state.exploredBy?.[holderTileKey(scene.id, m.memberId, t.tx, t.ty)];
+      const next = joinedBits(scene, t, held);
+      if (next !== null) tx.write(keys.exploredBy(scene.id, m.memberId, t.tx, t.ty), { sceneId: scene.id, tx: t.tx, ty: t.ty, rev: held?.rev ?? 0, bits: next, memberId: m.memberId });
+    }
+  }
+}
+
+/** A layer's tile with an explore's bits joined, encoded, or null when it would hold nothing or nothing new. A tile is one of the scene's. */
+function joinedBits(scene: Scene, t: { tx: number; ty: number; bits: string }, held: FogTile | undefined): string | null {
+  if (t.tx >= tilesAcross(scene.bounds.w) || t.ty >= tilesAcross(scene.bounds.h)) throw invalid("explored tile outside the scene");
+  const bits = decodeTile(t.bits);
+  if (!bits) throw invalid("explored tile is not a tile of bits");
+  const was = held ? decodeTile(held.bits) : null;
+  const next = new Uint8Array(bits);
+  if (was) for (let i = 0; i < next.length; i++) next[i] = next[i]! | was[i]!;
+  if (isEmptyBits(next)) return null;
+  const encoded = encodeTile(next);
+  return held && held.bits === encoded ? null : encoded;
+}
+
+/**
+ * The players the explore step found owning a seeing creature on the scene
+ * with no entry (docs/design-v1-per-player-vision.md 6.1), each added at
+ * the end as the step decided, on only while fewer than the cap are. A
+ * player already listed, or no longer a player on the roster, is passed
+ * over, so the op replays to the same list.
+ */
+function joinHolders(tx: Tx, scene: Scene, join: readonly { memberId: string; on: boolean }[]): void {
+  const list: SightHolders = tx.state.holders?.[scene.id] ?? { sceneId: scene.id, rev: 0, entries: [] };
+  const entries = [...list.entries];
+  for (const j of join) {
+    if (entries.some((e) => e.memberId === j.memberId) || tx.state.members[j.memberId]?.kind !== "player") continue;
+    entries.push({ memberId: j.memberId, on: j.on && entries.filter((e) => e.on).length < LIMITS.sightHoldersPerScene });
+  }
+  if (entries.length !== list.entries.length) tx.write(keys.holders(scene.id), { ...list, entries });
+}
+
+/** The refusal of a seventh player who would see for themselves (docs/design-v1-per-player-vision.md 7.1). */
+export const HOLDERS_FULL = `At most ${LIMITS.sightHoldersPerScene} players see for themselves here. Untick one first.`;
+
+/**
+ * The DM's pick of who sees for themselves on a per-player scene
+ * (docs/design-v1-per-player-vision.md 6.1): exactly the players named,
+ * each a player on the roster, one with no entry getting one at the end.
+ * A holder turned off forgets their map of the scene, outside the undo
+ * step, so undoing the pick turns them on again from the party's map.
+ */
+export function visionHolders(tx: Tx, op: OpOf<"vision.holders">): void {
+  const scene = tx.scene(op.sceneId);
+  if (scene.vision?.perPlayer !== true) throw invalid("the scene's sight is the whole party's");
+  if (op.on.length > LIMITS.sightHoldersPerScene) throw invalid(HOLDERS_FULL);
+  for (const id of op.on) if (tx.state.members[id]?.kind !== "player") throw invalid("only a player on the roster sees for themselves");
+  const list: SightHolders = tx.state.holders?.[scene.id] ?? { sceneId: scene.id, rev: 0, entries: [] };
+  const named = new Set(op.on);
+  const entries = list.entries.map((e) => ({ memberId: e.memberId, on: named.has(e.memberId) }));
+  for (const id of op.on) if (!entries.some((e) => e.memberId === id)) entries.push({ memberId: id, on: true });
+  for (const e of list.entries) if (e.on && !named.has(e.memberId)) forgetHolder(tx, scene.id, e.memberId);
+  if (entries.some((e, i) => e.memberId !== list.entries[i]?.memberId || e.on !== list.entries[i]?.on) || entries.length !== list.entries.length) tx.write(keys.holders(scene.id), { ...list, entries });
+}
+
+/**
+ * The fold (docs/design-v1-per-player-vision.md 6.3), after every op's
+ * dispatch: a scene that stopped being a per-player one, by any op, an
+ * undo's included, pools every holder's layer into the party's and empties
+ * its holder list, and a scene that is gone loses both. All of it outside
+ * the undo step, so undoing the switch does not split the maps again: each
+ * holder then starts from the pooled map. Only scenes the op wrote can have
+ * stopped.
+ */
+export function foldSight(tx: Tx, before: RoomState): void {
+  for (const sceneId of Object.keys(before.scenes).sort()) {
+    const was = before.scenes[sceneId]!;
+    const now = tx.state.scenes[sceneId];
+    if (now === was || (now?.vision?.perPlayer === true && now !== undefined)) continue;
+    const list = tx.state.holders?.[sceneId];
+    const owners = layerOwners(tx.state, sceneId);
+    if (!list && owners.length === 0) continue;
+    if (now) pool(tx, now, owners);
+    for (const memberId of owners) forgetHolder(tx, sceneId, memberId);
+    if (list) tx.writeBookkeeping(keys.holders(sceneId), null);
+  }
+}
+
+/** ORs each holder's layer into the party's, a tile at a time in tile order, as bookkeeping. */
+function pool(tx: Tx, scene: Scene, owners: readonly string[]): void {
+  const byTile = new Map<string, ExploredTile[]>();
+  for (const memberId of owners) {
+    for (const [key, tile] of Object.entries(layerOf(tx.state, scene.id, memberId))) {
+      let list = byTile.get(key);
+      if (!list) byTile.set(key, (list = []));
+      list.push(tile);
+    }
+  }
+  const keysInOrder = [...byTile.keys()].sort((a, b) => {
+    const [ax, ay] = a.slice(scene.id.length + 1).split(",").map(Number) as [number, number];
+    const [bx, by] = b.slice(scene.id.length + 1).split(",").map(Number) as [number, number];
+    return ay - by || ax - bx;
+  });
+  for (const key of keysInOrder) {
+    const tiles = byTile.get(key)!;
+    const held = tx.state.exploredTiles[key];
+    const bits = held ? (decodeTile(held.bits) ?? new Uint8Array(0)) : null;
+    let next: Uint8Array | null = bits && bits.length > 0 ? new Uint8Array(bits) : null;
+    for (const tile of tiles) {
+      const b = decodeTile(tile.bits);
+      if (!b) continue;
+      if (!next) next = new Uint8Array(b);
+      else for (let i = 0; i < next.length; i++) next[i] = next[i]! | b[i]!;
+    }
+    if (!next || isEmptyBits(next)) continue;
     const encoded = encodeTile(next);
     if (held && held.bits === encoded) continue;
-    tx.write(keys.explored(scene.id, t.tx, t.ty), { sceneId: scene.id, tx: t.tx, ty: t.ty, rev: held?.rev ?? 0, bits: encoded });
+    const { tx: x, ty: y } = tiles[0]!;
+    tx.writeBookkeeping(keys.explored(scene.id, x, y), { sceneId: scene.id, tx: x, ty: y, rev: held?.rev ?? 0, bits: encoded });
   }
 }
 

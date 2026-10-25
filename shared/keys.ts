@@ -3,12 +3,14 @@ import {
   type BuildChunk,
   type Encounter,
   type EncounterSnapshot,
+  type ExploredTile,
   type FogDraft,
   type FogTile,
   type FreeWall,
   type LogEntry,
   type RoomMeta,
   type RoomState,
+  type SightHolders,
   type SightTile,
 } from "./model.ts";
 
@@ -53,6 +55,11 @@ export type ParsedKey =
   | { kind: "fog"; sceneId: string; tx: number; ty: number }
   | { kind: "explored"; sceneId: string; tx: number; ty: number }
   | { kind: "sight"; sceneId: string; tx: number; ty: number }
+  | { kind: "sightAll"; sceneId: string; tx: number; ty: number }
+  | { kind: "fogAll"; sceneId: string; tx: number; ty: number }
+  | { kind: "exploredAny"; sceneId: string; tx: number; ty: number }
+  | { kind: "exploredBy"; sceneId: string; memberId: string; tx: number; ty: number }
+  | { kind: "holders"; sceneId: string }
   | { kind: "fogDraft"; sceneId: string }
   | { kind: "encounter" }
   | { kind: "encounterHistory" }
@@ -97,6 +104,20 @@ export const keys = {
   explored: (sceneId: string, tx: number, ty: number): EntityKey => `explored:${sceneId}:${tx},${ty}`,
   /** A tile of the party's sight, derived and never stored: only projections hold it (SightTile). */
   sight: (sceneId: string, tx: number, ty: number): EntityKey => `sight:${sceneId}:${tx},${ty}`,
+  /**
+   * Per-player vision (docs/design-v1-per-player-vision.md 7.5), each
+   * derived and never stored: a tile of the shared sight, the same for
+   * every viewer of a per-player scene, of the shared fog (the DM's and the
+   * party's layers merged) as players get it there, and of every holder's
+   * layer joined, the DM's.
+   */
+  sightAll: (sceneId: string, tx: number, ty: number): EntityKey => `sightAll:${sceneId}:${tx},${ty}`,
+  fogAll: (sceneId: string, tx: number, ty: number): EntityKey => `fogAll:${sceneId}:${tx},${ty}`,
+  exploredAny: (sceneId: string, tx: number, ty: number): EntityKey => `exploredAny:${sceneId}:${tx},${ty}`,
+  /** A tile of one holder's own explored layer (RoomState.exploredBy). No projection holds it under this key. */
+  exploredBy: (sceneId: string, memberId: string, tx: number, ty: number): EntityKey => `exploredBy:${sceneId}:${memberId}:${tx},${ty}`,
+  /** A per-player scene's sight holder list (RoomState.holders), the DM's. */
+  holders: (sceneId: string): EntityKey => `holders:${sceneId}`,
   fogDraft: (sceneId: string): EntityKey => `fogDraft:${sceneId}`,
   encounter: "encounter" as EntityKey,
   encounterHistory: "encounterHistory" as EntityKey,
@@ -144,6 +165,11 @@ export function tileKey(sceneId: string, tx: number, ty: number): string {
   return `${sceneId}:${tx},${ty}`;
 }
 
+/** The state map key of a tile of a holder's own explored layer (RoomState.exploredBy), `"<sceneId>:<memberId>:<tx>,<ty>"`. */
+export function holderTileKey(sceneId: string, memberId: string, tx: number, ty: number): string {
+  return `${sceneId}:${memberId}:${tx},${ty}`;
+}
+
 /**
  * A projected state's sight tiles, keyed like fog tiles. The server's
  * RoomState never holds them, since sight is derived (docs/design-v1-maps-vision.md
@@ -156,6 +182,18 @@ export type SightMap = Record<string, SightTile>;
 /** The sight tiles a state holds: a projection's, or undefined on the server's own state. */
 export function sightOf(state: RoomState): SightMap | undefined {
   return (state as RoomState & { sight?: SightMap }).sight;
+}
+
+/**
+ * The maps only a projection of a per-player scene holds
+ * (docs/design-v1-per-player-vision.md 6.2), keyed like fog tiles: the
+ * shared sight, the shared fog as players get it, and every holder's layer
+ * joined, the DM's. Each is absent from every other state.
+ */
+export type ViewMaps = { sightAll?: SightMap; fogAll?: Record<string, FogTile>; exploredAny?: Record<string, FogTile> };
+
+export function viewMapsOf(state: RoomState): ViewMaps {
+  return state as RoomState & ViewMaps;
 }
 
 const GRID_RE = /^(-?\d+),(-?\d+)$/;
@@ -195,11 +233,22 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "trapSeen":
       return { kind, id: rest };
     case "fogDraft":
+    case "holders":
       return { kind, sceneId: rest };
+    case "exploredBy": {
+      const sep = rest.lastIndexOf(":");
+      const m = sep > 0 ? GRID_RE.exec(rest.slice(sep + 1)) : null;
+      const owner = sep > 0 ? rest.indexOf(":") : -1;
+      if (!m || owner <= 0 || owner >= sep - 1) return null;
+      return { kind, sceneId: rest.slice(0, owner), memberId: rest.slice(owner + 1, sep), tx: Number(m[1]), ty: Number(m[2]) };
+    }
     case "chunk":
     case "fog":
     case "explored":
-    case "sight": {
+    case "sight":
+    case "sightAll":
+    case "fogAll":
+    case "exploredAny": {
       const sep = rest.lastIndexOf(":");
       if (sep <= 0) return null;
       const m = GRID_RE.exec(rest.slice(sep + 1));
@@ -269,6 +318,10 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "fogTiles";
     case "explored":
       return "exploredTiles";
+    case "exploredBy":
+      return "exploredBy";
+    case "holders":
+      return "holders";
     case "fogDraft":
       return "fogDrafts";
     case "log":
@@ -340,6 +393,14 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.exploredTiles[tileKey(parsed.sceneId, parsed.tx, parsed.ty)] ?? null;
     case "sight":
       return sightOf(state)?.[tileKey(parsed.sceneId, parsed.tx, parsed.ty)] ?? null;
+    case "sightAll":
+    case "fogAll":
+    case "exploredAny":
+      return viewMapsOf(state)[parsed.kind]?.[tileKey(parsed.sceneId, parsed.tx, parsed.ty)] ?? null;
+    case "exploredBy":
+      return state.exploredBy?.[holderTileKey(parsed.sceneId, parsed.memberId, parsed.tx, parsed.ty)] ?? null;
+    case "holders":
+      return state.holders?.[parsed.sceneId] ?? null;
     case "fogDraft":
       return state.fogDrafts[parsed.sceneId] ?? null;
     case "encounter":
@@ -440,6 +501,16 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       const sight = withEntry(sightOf(state) ?? {}, tileKey(parsed.sceneId, parsed.tx, parsed.ty), value as SightTile | null);
       return { ...state, sight } as RoomState;
     }
+    case "sightAll":
+    case "fogAll":
+    case "exploredAny":
+      // As sight: only a projection of a per-player scene holds these maps, and only while they hold a tile (project.ts).
+      return withMap(state, parsed.kind, withEntry<unknown>(viewMapsOf(state)[parsed.kind] ?? {}, tileKey(parsed.sceneId, parsed.tx, parsed.ty), value));
+    case "exploredBy":
+      return { ...state, exploredBy: withEntry(state.exploredBy ?? {}, holderTileKey(parsed.sceneId, parsed.memberId, parsed.tx, parsed.ty), value as ExploredTile | null) };
+    case "holders":
+      // A projection holds the DM's scene's list only while there is one, as the server's own state need not.
+      return withMap(state, "holders", withEntry(state.holders ?? {}, parsed.sceneId, value as SightHolders | null));
     case "fogDraft":
       return { ...state, fogDrafts: withEntry(state.fogDrafts, parsed.sceneId, value as FogDraft | null) };
     case "log":
@@ -452,6 +523,14 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       if (value === null) throw new Error("the room meta cannot be removed");
       return { ...state, meta: value as RoomMeta };
   }
+}
+
+/** A projection with one of per-player vision's maps (ViewMaps, `holders`) replaced, and without it once it is empty. */
+function withMap(state: RoomState, field: "sightAll" | "fogAll" | "exploredAny" | "holders", map: Record<string, unknown>): RoomState {
+  const out = { ...state } as Record<string, unknown>;
+  if (Object.keys(map).length === 0) delete out[field];
+  else out[field] = map;
+  return out as RoomState;
 }
 
 /** A log of lines with one replaced or removed, kept in id order. */

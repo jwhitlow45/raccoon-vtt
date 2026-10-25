@@ -45,7 +45,9 @@ import {
   fogLive,
   fogPublish,
   fogReset,
+  foldSight,
   sysExplore,
+  visionHolders,
 } from "./reducer/map.ts";
 import { buildHeight, buildRough, buildStairs } from "./reducer/heights.ts";
 import { sceneDuplicate } from "./reducer/duplicate.ts";
@@ -151,6 +153,8 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     // Areas that hit a creature again remind the table around the op itself (reducer/areaTriggers.ts).
     if (op.t === "encounter.next" && !pressChangesNothing(state, actor, op, env)) remindTurnEnd(tx);
     dispatch(tx, moved);
+    // A scene that stopped being per player pools its holders' maps (docs/design-v1-per-player-vision.md 6.3).
+    foldSight(tx, state);
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
       linkPass(tx);
@@ -404,6 +408,8 @@ function dispatch(tx: Tx, op: Op): void {
       return restore(tx, op);
     case "sys.explore":
       return sysExplore(tx, op);
+    case "vision.holders":
+      return visionHolders(tx, op);
     case "token.updateMany":
       return tokenUpdateMany(tx, op);
     case "token.deleteMany":

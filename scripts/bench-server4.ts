@@ -94,6 +94,8 @@ function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
     stamps: {},
     lights: cap.lights,
     exploredTiles: {},
+    holders: {},
+    exploredBy: {},
     journal: {},
     pins: {},
     rolls: {},

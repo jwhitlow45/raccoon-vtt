@@ -19,6 +19,8 @@ import { DM, P1, P2, character, env, reveal, room, scene, token } from "./testut
 const seesWest = (t: SightProbe) => t.x < 10;
 const fake: VisionRules = {
   partySight: (): PartySight => ({ seesToken: seesWest, tiles: new Map<string, SightTile>([["0,0", { f: 3 }]]) }),
+  // No scene here is per player, so nothing asks.
+  holderSight: (): PartySight => ({ seesToken: () => false, tiles: new Map() }),
   sightFromTiles: (tiles, sceneId): PartySight => {
     const held = tiles[`${sceneId}:0,0`];
     return held ? { seesToken: seesWest, tiles: new Map([["0,0", held]]) } : { seesToken: () => false, tiles: new Map() };

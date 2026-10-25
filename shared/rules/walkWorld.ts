@@ -1,5 +1,5 @@
 import type { AreaSlows, AreaTemplate, BuildChunk, Effect, PathStop, RoomState, Token } from "../model.ts";
-import { inSightOfNonOwners, isPartyMember, playersSeeGround, projectChunkForPlayer, withheldWhereItStands } from "../project.ts";
+import { inSightOfNonOwners, isPartyMember, perPlayerScene, playersSeeGround, projectChunkForPlayer, sharedGround, withheldWhereItStands } from "../project.ts";
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
 import { carriedGroup, dragExtra, onHolder, publicMembers } from "./attach.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
@@ -57,6 +57,13 @@ export type WorldOptions = {
    */
   seenGround?: boolean;
   /**
+   * Keep to the ground every player shares (docs/design-v1-per-player-vision.md
+   * 6.6): a shared or kept walking ruler reads the same on every device, so
+   * on a per-player scene it never reads one player's own memory, which a
+   * player's copy holds as its fog. Elsewhere it is the ground players see.
+   */
+  sharedGround?: boolean;
+  /**
    * The tokens a walking ruler's earlier legs moved, on the room it
    * simulates them in: players see each where it now stands, by the rule
    * the server judges every player's sight by (project.ts
@@ -76,11 +83,20 @@ export type WorldOptions = {
  * Whether players see a token where it stands, as the projection judges it:
  * not hidden by the DM, and on the DM's state neither behind the DM's
  * blackout nor withheld by fog or sight, as the server's seen marks judge it
- * (project.ts inSightOfNonOwners, review AT-O-24).
+ * (project.ts inSightOfNonOwners, review AT-O-24). A player's copy of a
+ * whole-party scene holds only such tokens. On a per-player scene it holds
+ * creatures only that player sees too, so there every device judges by
+ * what every viewer shares (docs/design-v1-per-player-vision.md decision
+ * 10): the shared sight with vision on, the shared fog with fog alone, and
+ * every token with both off. A copy holds no owners of another's token, so
+ * there a party member reads as one by the projection's `aboveFog`, as in
+ * seenWhereMoved.
  */
 export function publicToken(state: RoomState, token: Token, viewer: WalkViewer): boolean {
   if (token.visibility === "dm") return false;
-  return viewer.role === "player" || (state.meta.view?.blackout !== true && !withheldWhereItStands(state, token));
+  if (viewer.role === "player" && !perPlayerScene(state.scenes[token.sceneId])) return true;
+  const above = viewer.role === "player" && (token as Token & { aboveFog?: boolean }).aboveFog === true;
+  return state.meta.view?.blackout !== true && !withheldWhereItStands(state, above ? { ...token, fogExempt: true } : token);
 }
 
 function actorOf(state: RoomState, token: Token) {
@@ -149,7 +165,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const rigid = rigidWith(state, token, everything ? () => true : shownBy(state, viewer, opts));
   // A player's drag, the DM's of a party member and every shared ruler keep to ground players have seen. The DM's other drags read the DM's own map.
   const publicGround = !everything && (opts.seenGround === true || viewer.role === "player" || isPartyMember(state, token));
-  const ground = publicGround && scene && scene.fogEnabled !== false ? playersSeeGround(state, scene.id) : null;
+  const ground = publicGround && scene && scene.fogEnabled !== false ? (opts.sharedGround === true ? sharedGround : playersSeeGround)(state, scene.id) : null;
   const fpc = rules.feetPerCell;
   const creatures: WalkCreature[] = [];
   const spaces: WalkSpace[] = [];

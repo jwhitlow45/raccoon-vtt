@@ -1,4 +1,4 @@
-import { chunkKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
+import { chunkKey, holderTileKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
 import { CHUNK_CELLS, type LogEntry, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
@@ -621,8 +621,14 @@ function entryKeyBytes(key: EntityKey): number {
     case "fog":
     case "explored":
     case "sight":
+    case "sightAll":
+    case "fogAll":
+    case "exploredAny":
       return jsonKeyBytes(tileKey(parsed.sceneId, parsed.tx, parsed.ty));
+    case "exploredBy":
+      return jsonKeyBytes(holderTileKey(parsed.sceneId, parsed.memberId, parsed.tx, parsed.ty));
     case "fogDraft":
+    case "holders":
       return jsonKeyBytes(parsed.sceneId);
     default:
       return jsonKeyBytes(parsed.id);

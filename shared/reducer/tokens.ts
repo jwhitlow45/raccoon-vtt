@@ -1,7 +1,7 @@
 import { keys } from "../keys.ts";
 import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
-import { inSightOfNonOwners, seenAtEvery } from "../project.ts";
+import { inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
@@ -642,13 +642,14 @@ export function speedsOf(state: RoomState, token: Token): Actor["speeds"] | unde
   return "inline" in token.actor ? token.actor.inline.speeds : state.characters[token.actor.ref]?.actor.speeds;
 }
 
-function startStop(turn: TurnStart): PathStop {
-  return { x: turn.x, y: turn.y, elevation: turn.elevation, ...(turn.seen ? { seen: true as const } : {}) };
+/** A path's first stop, where its turn began, with the turn start's marks of who saw it, its list included (docs/design-v1-per-player-vision.md 6.5). */
+export function startStop(turn: TurnStart): PathStop {
+  return { x: turn.x, y: turn.y, elevation: turn.elevation, ...(turn.seen ? { seen: true as const } : {}), ...(turn.seenBy ? { seenBy: turn.seenBy } : {}) };
 }
 
-/** A stop where the token stands in `state`, marked seen by the turn start's rule (design 7.3). */
+/** A stop where the token stands in `state`, marked seen by the turn start's rule (design 7.3, project.ts seenMark). */
 function stopAt(state: RoomState, token: Token, env: Env): PathStop {
-  return { x: token.x, y: token.y, elevation: token.elevation, ...(inSightOfNonOwners(state, token, env) ? { seen: true as const } : {}) };
+  return { x: token.x, y: token.y, elevation: token.elevation, ...seenMark(state, token, env, "anywhere") };
 }
 
 function withoutPath(token: Token): Token {

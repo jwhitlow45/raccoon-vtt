@@ -600,6 +600,8 @@ describe("projection properties over random rooms with a party that sees", () =>
    */
   const fake: VisionRules = {
     partySight: (): PartySight => ({ seesToken: (t) => t.x < 15, tiles: new Map([["1,0", { f: 1 }]]) }),
+    // No scene here is per player, so nothing asks.
+    holderSight: () => ({ seesToken: () => false, tiles: new Map() }),
     sightFromTiles: () => ({ seesToken: () => false, tiles: new Map() }),
   };
 

@@ -1,7 +1,7 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import type { RoomState, Token, Trap } from "../model.ts";
-import { partySightOf, playersSeeGround, playersToken } from "../project.ts";
+import { playersSeeGround, playersToken, unionSightOf } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { boxDistanceFt, tokenCellBox } from "../rules/distance.ts";
 import { groundAt } from "../rules/heights.ts";
@@ -111,7 +111,8 @@ function zoneSeen(state: RoomState, sceneId: string): (trap: Trap) => boolean {
   const scene = state.scenes[sceneId];
   if (!scene) return () => false;
   if (scene.vision?.on === true) {
-    const sight = partySightOf(state, sceneId);
+    // The DM's own hint, so on a per-player scene it reads what any player's creatures see (docs/design-v1-per-player-vision.md decision 14).
+    const sight = unionSightOf(state, sceneId);
     return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, (x, y) => sight.seesToken({ size: "medium", x, y })));
   }
   if (!scene.fogEnabled) return () => true;
