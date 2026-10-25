@@ -20,6 +20,9 @@ export type { ImageRef };
  */
 export const PAIR_BUTTON: CSSProperties = { paddingLeft: theme.space(2), paddingRight: theme.space(2) };
 
+/** The tallest preview the pair beside it centers on. */
+const FIRST_LINE_MAX = 64;
+
 /**
  * A token's or character's image: a preview in its shape, and buttons to
  * choose a new one (then crop it), re-crop the current one, or remove it.
@@ -80,9 +83,13 @@ export function ImageField(props: {
   /*
    * Beside the button column, the preview and the pair share a first line as
    * tall as the taller of the two, each centered in it: a 48 px picture
-   * stood 2 px below the middle of its 44 px pair (LP22-ALIGN-1).
+   * stood 2 px below the middle of its 44 px pair (LP22-ALIGN-1). A custom
+   * footprint's taller preview would push the pair, and Crop, Remove and
+   * the other images under it, down by half its height, so beyond 64 px the
+   * pair sits at its top (FU31 review F5, D-261025-1).
    */
-  const firstLine = Math.max(theme.touch, width / props.aspect);
+  const tall = width / props.aspect;
+  const firstLine = tall <= FIRST_LINE_MAX ? Math.max(theme.touch, tall) : theme.touch;
 
   return (
     // One column no wider than its box, so the button column, sized to the pair, can still shrink and wrap.
