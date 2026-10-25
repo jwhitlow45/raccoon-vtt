@@ -296,6 +296,14 @@ function stepperRows(scope: Locator, labels: readonly string[]): Promise<{ label
   }, labels);
 }
 
+/** What has focus: its tag, its aria-label in quotes when it has one, and the start of its words. */
+function focusedText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+    return a ? `${a.tagName.toLowerCase()}${a.getAttribute("aria-label") ? ` "${a.getAttribute("aria-label")}"` : ""} ${(a.textContent ?? "").trim().slice(0, 40)}` : "nothing";
+  });
+}
+
 /** A panel's group by the name on its fold (components/Panel.tsx Group). */
 function groupIn(scope: Locator, name: string): Locator {
   return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
@@ -2277,6 +2285,26 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "party" } });
     await ops.send({ t: "encounter.end" });
     await waitFor("no fight", () => (dmSocket.state?.encounter ? null : true));
+  });
+
+  test("fu31-c. by keyboard on a desk, the DM's Delete this token hands focus to the empty panel's line (LP22-SECT-1)", async () => {
+    const doomed = { id: randomUUID(), at: cell(6, 4) };
+    await setUp(dm, dmCdp, DESK, null);
+    await ops.send({ t: "token.create", token: { id: doomed.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: doomed.at.x, y: doomed.at.y, disposition: "hostile", kind: "monster", name: "Doomed Wolf", actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
+    await waitFor("the doomed wolf", () => dmSocket.state?.tokens[doomed.id]);
+    try {
+      const panel = await panelOf(dm, doomed.at, "Doomed Wolf");
+      await openGroup(panel, "Token settings");
+      // Armed by the first press, deleted by the second.
+      await panel.getByRole("button", { name: "Delete this token" }).focus();
+      await dm.keyboard.press("Enter");
+      await dm.keyboard.press("Enter");
+      await waitFor("the wolf deleted", () => (dmSocket.state?.tokens[doomed.id] ? null : true));
+      await panel.getByText("Tap a token to see it here.").waitFor();
+      await waitFor("focus on the empty line", async () => ((await focusedText(dm)).includes("Tap a token to see it here.") ? true : null), 5_000).catch(async () => assert.fail(`after Delete focus is on ${await focusedText(dm)}`));
+    } finally {
+      if (dmSocket.state?.tokens[doomed.id]) await ops.send({ t: "token.delete", tokenId: doomed.id });
+    }
   });
 
   test("10. no page errors along the way", () => {

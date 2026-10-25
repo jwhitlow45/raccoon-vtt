@@ -1,5 +1,5 @@
 import type { IconName } from "../components/Icon.tsx";
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
@@ -454,23 +454,30 @@ function AttachControls(props: { token: Token }) {
 }
 
 /**
- * A companion's player dismisses it in Delete's place, with the bar's own
- * button (docs/design-v1-combat-flow.md 3.6.9). Focus goes to what the
- * panel shows next (D-261024-47): the creature still selected, by its name,
- * or else the empty line. The panel first shows its empty state while the
- * dismissed companion is still selected, until the map lets go of it
- * (Stage's keepSelected), so the target is read from the selection, and the
- * hand-off waits until the panel draws it.
+ * Where focus goes once a press took the panel's token away, Dismiss or
+ * the DM's Delete (D-261024-47): what the panel shows next, the creature
+ * still selected, by its name, or else the empty line. The panel first
+ * shows its empty state while a dismissed companion is still selected,
+ * until the map lets go of it (Stage's keepSelected), so the target is read
+ * from the selection, and the hand-off waits until the panel draws it.
+ * `from` is the pressed control or a box around it, inside the panel. A
+ * panel that closed with the press, as a phone's sheet does, holds nothing
+ * to focus.
  */
-function DismissSection(props: { tokenId: string; name: string }) {
+function useHandOffToNext(): (from: HTMLElement) => void {
   const store = useRoomStore();
-  const handOff = useCallback(
-    (button: HTMLElement) => {
-      const scope = button.closest<HTMLElement>(PANEL_BOX);
-      handFocusWhenFound(() => scope?.querySelector<HTMLElement>(store.getState().local.selectedIds.length > 0 ? CREATURE_HEADING : EMPTY_LINE) ?? null);
+  return useCallback(
+    (from: HTMLElement) => {
+      const scope = from.closest<HTMLElement>(PANEL_BOX);
+      handFocusWhenFound(() => (scope?.isConnected ? scope.querySelector<HTMLElement>(store.getState().local.selectedIds.length > 0 ? CREATURE_HEADING : EMPTY_LINE) : null) ?? null);
     },
     [store],
   );
+}
+
+/** A companion's player dismisses it in Delete's place, with the bar's own button (docs/design-v1-combat-flow.md 3.6.9). */
+function DismissSection(props: { tokenId: string; name: string }) {
+  const handOff = useHandOffToNext();
   return (
     <Section title="Remove">
       <div>
@@ -718,22 +725,33 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
   );
 }
 
+/**
+ * The DM's Delete, which hands focus on as a companion's Dismiss does
+ * (D-261024-47): the panel stays on a wide layout and shows its empty line,
+ * which takes focus. On a phone the sheet closes with it, and nothing is
+ * there to take focus.
+ */
 function DmActions(props: { token: Token; onDeleted(): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const handOff = useHandOffToNext();
+  const ref = useRef<HTMLDivElement>(null);
   return (
     <Section title="Remove">
-      <ConfirmButton
-        icon="delete"
-        confirm="Tap again to delete"
-        onConfirm={() => {
-          actions.dispatch({ t: "token.delete", tokenId: props.token.id });
-          ui.select(null);
-          props.onDeleted();
-        }}
-      >
-        Delete this token
-      </ConfirmButton>
+      <div ref={ref}>
+        <ConfirmButton
+          icon="delete"
+          confirm="Tap again to delete"
+          onConfirm={() => {
+            if (ref.current) handOff(ref.current);
+            actions.dispatch({ t: "token.delete", tokenId: props.token.id });
+            ui.select(null);
+            props.onDeleted();
+          }}
+        >
+          Delete this token
+        </ConfirmButton>
+      </div>
     </Section>
   );
 }
