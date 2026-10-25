@@ -2447,6 +2447,26 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
+  test("fu31-j. with no fight, the side panel's Start a fight with leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
+    const off: string[] = [];
+    try {
+      for (const scale of [0.85, 1, 1.15, 1.3]) {
+        for (const [i, size] of [{ width: 1440, height: 900 }, DESK].entries()) {
+          const at = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
+          if (i === 0) await setUp(dm, dmCdp, { ...size, scale }, null);
+          else await resize(dm, dmCdp, size);
+          await openSideTab(dm, "Initiative");
+          const start = dm.locator("section").filter({ has: dm.getByRole("heading", { name: "Start a fight with", exact: true }) }).last();
+          await start.getByRole("button", { name: "Nobody yet", exact: true }).waitFor();
+          off.push(...(await measureIn(start, `Start a fight with at ${at}`)));
+        }
+      }
+    } finally {
+      await setUp(dm, dmCdp, DESK, null);
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("10. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

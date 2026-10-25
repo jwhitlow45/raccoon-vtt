@@ -109,6 +109,14 @@ function Wrap(props: { children: ReactNode }) {
   return <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>{props.children}</div>;
 }
 
+/**
+ * A wrapping row's buttons, such as the ways to start or add to a fight,
+ * each grow to fill their line, so where they do not fit on one, as in the
+ * side panel, the last never stands alone under the others (LP22-ALIGN-6),
+ * as the row options' roll reminder does (encounter/Row.tsx).
+ */
+const GROW: CSSProperties = { flex: "1 1 auto" };
+
 // ---------------------------------------------------------------- turns
 
 /** A full header's height before it is first measured: the sheet's 56 px. */
@@ -594,7 +602,7 @@ function StartFight(props: { selectedTokenId: string | null }) {
     <Section label="Start a fight with" style={COLUMN}>
       <Wrap>
         <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={start} />
-        <Button size="sm" onClick={() => start([])}>
+        <Button size="sm" onClick={() => start([])} style={GROW}>
           Nobody yet
         </Button>
       </Wrap>
@@ -615,7 +623,7 @@ function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(token
   const button = (tokens: Token[], words: ReactNode) => {
     const state = props.stateOf(tokens);
     return (
-      <Button size="sm" disabled={tokens.length === 0 || state === "failed"} busy={state === "loading"} onClick={() => props.onAdd(tokens)}>
+      <Button size="sm" disabled={tokens.length === 0 || state === "failed"} busy={state === "loading"} onClick={() => props.onAdd(tokens)} style={GROW}>
         {words}
       </Button>
     );

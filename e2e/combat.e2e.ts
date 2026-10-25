@@ -774,6 +774,31 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
+  test("fu31-k. in a fight, the side panel's Add to the fight leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
+    const off: string[] = [];
+    try {
+      for (const scale of [0.85, 1, 1.15, 1.3]) {
+        for (const [i, size] of [{ width: 1440, height: 900 }, DESK].entries()) {
+          const at = `${size.width} x ${size.height} at ${Math.round(scale * 100)}%`;
+          if (i === 0) await setUp(dm, dmCdp, { ...size, scale });
+          else {
+            await dm.setViewportSize(size);
+            await dm.waitForTimeout(400);
+          }
+          await openTracker(dm);
+          const add = dm.locator("section").filter({ has: dm.getByRole("heading", { name: "Add to the fight", exact: true }) }).last();
+          await add.getByRole("button", { name: /^Everyone here/ }).waitFor();
+          await add.scrollIntoViewIfNeeded();
+          off.push(...alignmentLines(await measureAlignment(add), `Add to the fight at ${at}`));
+          await shots.take(dm, `fu31-add-to-fight-${size.width}-${Math.round(scale * 100)}`);
+        }
+      }
+    } finally {
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("4. scrolling to Auto initiative takes the header away, and focus moving through the rows never lands under it", async () => {
     await setUp(dm, dmCdp, { width: 390, height: 844, scale: 1 });
     const section = await openTracker(dm);
