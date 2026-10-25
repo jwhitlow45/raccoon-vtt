@@ -79,7 +79,7 @@ Above the tabs sits the party bar, which shows your players' characters with the
 
 When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back.
 
-**The top bar** holds **Undo** and **Redo**, the two curved arrows (`Ctrl+Z` and `Ctrl+Shift+Z`, or Cmd on a Mac), which take back your own changes one at a time and put them back again. Beside them, **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
+**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own changes one at a time and put them back again. Beside them, **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
 
 **The Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**.
 
@@ -470,7 +470,7 @@ The whole bar, as the window on a wider screen or the expanded bar on a phone, h
 
 - The token's AC, HP, Speed (after the footprints) and **PP** (Passive Perception), as the Token panel shows them, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
 - **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel.
-- **Elevation**, with **−5** and **+5** (or Page Down and Page Up).
+- **Elevation**, with **−5** (or Page Down) and **+5** (or Page Up).
 - **Doesn't count**, on a line of its own once the creature whose turn it is has moved (see [Measuring and movement](#measuring-and-movement)). Players also get **Undo move** there, and **Open door** or **Close door** when their token stands by a door.
 - **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel), **Uses** (after a lightning bolt), **Light** and **Attach** (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)). **Uses** appears only for a creature with something to spend, such as legendary actions, a breath weapon that recharges or a character's Rage (see [Uses and legendary actions](#uses-and-legendary-actions)). **Light** appears on a scene with party vision, or while the token carries a light. Conditions and Uses open their lists inside the bar, just above these buttons, and a second tap closes them.
 - **Size**, whose **−** and **+** step the creature one size smaller or larger, for Enlarge, Wild Shape or a polymorph.
@@ -653,7 +653,7 @@ Every roll in the app happens on the server, so everyone sees the same result an
 - `d%` rolls percentile dice.
 - `1d20+5 Stealth adv` rolls with Advantage.
 
-The line under the field reads back the roll and its range before you roll it ("2d6+3, fire: 5 to 15"), so you can catch a typo. The quick dice add a die to the field, and the Up and Down keys step back through the formulas you have rolled.
+The line under the field reads back the roll and its range before you roll it ("2d6+3, fire: 5 to 15"), so you can catch a typo. The quick dice add a die to the field, and the Up key steps back through the formulas you have rolled, newest first. The Down key steps forward again, to what you were typing.
 
 Under the quick dice sits the **Next roll** row. **Adv** and **Dis** are joined into one control, because a roll takes one or the other, never both, and **Secret** stands on its own beside them, since it decides who sees the roll rather than how it is rolled. On a narrow phone with a larger interface size, Secret moves to a line of its own under the other two. All three apply to the next roll only, then turn themselves off. A secret roll shows in full to the DMs, while the other players read only "Dana rolled in secret." Your rolls for monsters start secret: with a monster selected, even a formula you type starts secret. With nothing selected, or a character selected, it starts in the open.
 
@@ -1459,13 +1459,13 @@ Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) 
 
 These are the keys a DM uses most:
 
-- `V`, `R`, `A`, `F`, `D` and `P` pick Select, Ruler, Area, Fog, Draw and Ping. `T`, `M`, `B` and `G` pick Add token, Pin, Map builder and Line up grid.
+- A tool's key picks it: `V` for Select, `R` for Ruler, `A` for Area, `F` for Fog, `D` for Draw and `P` for Ping. For the setup tools, it is `T` for Add token, `M` for Pin, `B` for Map builder and `G` for Line up grid.
 - `N` moves to the next turn, and starts the fight if it hasn't started yet.
 - `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
-- The arrow keys move the selection a square. Page Up and Page Down raise or lower it 5 ft.
+- The arrow keys move the selection a square. Page Up raises it 5 ft, and Page Down lowers it 5 ft.
 - `/` searches the scene in the Outliner.
-- `Ctrl+Z` and `Ctrl+Shift+Z` are Undo and Redo (Cmd on a Mac).
-- `0` fits the map to the screen, and `+` and `-` zoom. `S` hides or shows the side panel, and `O` switches to the other of two panels.
+- `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo (Cmd in place of Ctrl on a Mac).
+- `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
 
