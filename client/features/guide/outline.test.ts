@@ -49,7 +49,7 @@ describe("the guide's outline (outline.ts)", () => {
       [
         ["where-things-are", null],
         ["quick-start", null],
-        ["what-you-can-ignore-at-first", null],
+        ["use-what-helps-your-table", null],
       ],
     );
   });

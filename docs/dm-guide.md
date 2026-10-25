@@ -10,7 +10,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
 
 - [Where things are](#where-things-are)
 - [Quick start](#quick-start)
-- [What you can ignore at first](#what-you-can-ignore-at-first)
+- [Use what helps your table](#use-what-helps-your-table)
 - Making maps
   - [Scenes](#scenes)
   - [Starter art](#starter-art)
@@ -114,9 +114,11 @@ This section gets you through a first session with only a handful of tools: one 
 
 If you make a mistake along the way, **Undo** takes back any of your changes, even a whole encounter you dropped on the map.
 
-## What you can ignore at first
+## Use what helps your table
 
-None of these is needed to run a good session. Each one is there for when you want it.
+The most important rule at any table is that everyone has fun, you included. The app is there to add to your game, never to get in its way. If a part of it doesn't help your table, or you would rather not use it, leave it out. That holds for good, not only while you learn the basics. A session that uses only a few of the tools is still a good session.
+
+None of the parts below is needed to run a good session. Each one is there for the day you want it, if that day comes.
 
 - **The map builder.** A map image is all you need. Build a map when you want walls, doors and heights that the app knows about, so they can block movement and sight.
 - **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further: the app works out everything the party's creatures can see, by their senses and the light, and shows that shared view to every player. It needs walls to block that sight, so it pairs with a built or imported map.
@@ -124,10 +126,10 @@ None of these is needed to run a good session. Each one is there for when you wa
 - **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
 - **Uses and class resources.** You can count a dragon's Legendary Actions or a barbarian's Rage on paper, as you always have. The cards that come up at the start of a turn only ask: nothing happens unless someone answers them.
 - **Areas.** Areas earn their place the first time someone casts Fireball, but you can leave reminders, height and the group save until you need them.
-- **Traps.** A hidden monster or a line in your notes can stand in for a trap at your first session. The Trap tool earns its place once you want a pressure plate that goes off by itself when a token walks onto it.
+- **Traps.** A hidden monster or a line in your notes can stand in for a trap. The Trap tool earns its place once you want a pressure plate that goes off by itself when a token walks onto it.
 - **Attach.** Until someone rides into battle, you can move a horse and its rider one after the other. Attaching them saves the second drag, and the app then runs the mount's turn by the mounted combat rules.
 - **The walking ruler and difficult ground.** Dragging a token already walks it around walls and counts the rubble you painted. Mark more difficult ground, or measure a walk before anyone moves, when your maps call for it.
-- **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.** Each is worth learning, and each is easy to pick up once the basics feel familiar.
+- **Map phases, Universal VTT imports, the Outliner, the table display, pins, handouts and companions.** Each is easy to pick up once the basics feel familiar, whenever you want it.
 
 # Making maps
 

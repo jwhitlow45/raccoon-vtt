@@ -305,7 +305,7 @@ describe("raccoon-vtt DM guide page", { timeout: 90_000 }, () => {
 
       // guidelook-e: the headings nest as the page reads. The opening sections stand beside the parts, and their subsections sit under them.
       const level = (n: number, name: string) => page.getByRole("heading", { level: n, name, exact: true }).count();
-      for (const name of ["Contents", "Where things are", "Quick start", "What you can ignore at first", "Making maps", "Reference"]) assert.equal(await level(2, name), 1, `${name} is a level 2 heading`);
+      for (const name of ["Contents", "Where things are", "Quick start", "Use what helps your table", "Making maps", "Reference"]) assert.equal(await level(2, name), 1, `${name} is a level 2 heading`);
       assert.equal(await level(3, "Before the session"), 1, "a subsection of the Quick start is level 3");
       assert.equal(await level(3, "Lining up the grid"), 1, "a part's section is level 3");
       assert.equal(await level(4, "Running turns"), 1, "a section's subsection is level 4");
