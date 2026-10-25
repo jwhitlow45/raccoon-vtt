@@ -42,7 +42,7 @@ import type { Locator, Page } from "playwright-core";
  * eye, painted or not, and what it holds is centered in it.
  *
  * What the checks leave out, each for a reason, each with a drawn case
- * in e2e/alignment.e2e.ts (pl3-0):
+ * in e2e/alignmentRoom.ts (pl3-0):
  * - A row set on its baseline means its words to share a baseline, not a
  *   middle (hit points).
  * - A row set at its start means each part to meet the first line beside
@@ -113,7 +113,7 @@ import type { Locator, Page } from "playwright-core";
  * lines before it fails. None passes by reading nothing: a pill check
  * with no stage or no pill, and a lead check with no group or no word,
  * report that. measureAlignment over a root that matches nothing returns
- * nothing, so its caller requires the root (e2e/alignment.e2e.ts Sweep).
+ * nothing, so its caller requires the root (e2e/alignmentRoom.ts Sweep).
  * With E2E_ALIGN_DEBUG=1 a row's line also gives each part's boxes.
  */
 

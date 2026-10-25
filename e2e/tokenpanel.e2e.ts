@@ -324,7 +324,7 @@ async function measureIn(root: Locator, screen: string): Promise<string[]> {
   return alignmentLines(await measureAlignment(root.first()), screen);
 }
 
-/** The alignment sweep's tablet, held upright (alignment.e2e.ts). */
+/** The alignment sweep's tablet, held upright (alignmentRoom.ts SIZES). */
 const TABLET = { width: 820, height: 1180 };
 
 /**

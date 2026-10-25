@@ -161,6 +161,11 @@ plans about 6 minutes. A run is 16 jobs and peaks at 15 at once, of the
 account's 20 Linux jobs, so a second run that overlaps it queues part of its
 shards.
 
+A file that takes much over 5 minutes in CI holds its shard up, so a long
+one is split into files that each build their own room from a module they
+share, as `e2e/alignmentRoom.ts` does for the alignment sweep's three files
+and `e2e/barrestRoom.ts` for the resting bar's four.
+
 A shard runs on a laptop too, against the dev postgres. Build first, then
 give the shard's number and the shard count. `--list` prints what every
 shard would run, without running it. On a Mac a shard includes the files
