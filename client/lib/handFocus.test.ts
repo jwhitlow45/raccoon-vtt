@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HAND_OFF_WAIT_MS, handFocusNow, handFocusOn, handFocusTo, pressedControl } from "./handFocus.ts";
+import { HAND_OFF_WAIT_MS, handFocusNow, handFocusOn, handFocusTo, handFocusWhenFound, pressedControl } from "./handFocus.ts";
 
 /**
  * A page of named elements, one of them focused, where removing the
@@ -174,5 +174,48 @@ describe("the hand-off whose target is found once the control has gone (LP21-COM
     gone.remove("restore");
     gone.frame();
     assert.equal(gone.active(), "body");
+  });
+});
+
+describe("the hand-off that waits for the page to settle once the control has gone (D-261024-47)", () => {
+  test("Dismiss with another token still selected: nothing while the panel settles, then the creature it shows next", () => {
+    const p = page(["dismiss", "empty", "heading"], "dismiss");
+    let settled = false;
+    handFocusWhenFound(() => (settled ? p.scope.querySelector("heading") : null), p.env);
+    p.remove("dismiss");
+    p.frame();
+    p.frame();
+    assert.equal(p.active(), "body", "the panel's passing empty state takes nothing");
+    settled = true;
+    p.frame();
+    assert.equal(p.active(), "heading");
+  });
+
+  test("nothing moves while the control stays, when it never had focus, when focus went elsewhere, or when nothing turns up before the wait runs out", () => {
+    const stays = page(["dismiss", "heading"], "dismiss");
+    handFocusWhenFound(() => stays.scope.querySelector("heading"), stays.env);
+    stays.frame(HAND_OFF_WAIT_MS + 1);
+    stays.remove("dismiss");
+    stays.frame();
+    assert.equal(stays.active(), "body", "the wait ran out while the control stood");
+
+    const tapped = page(["dismiss", "heading"], "missing");
+    handFocusWhenFound(() => tapped.scope.querySelector("heading"), tapped.env);
+    tapped.remove("dismiss");
+    tapped.frame();
+    assert.equal(tapped.active(), "body", "a tap gave the control no focus");
+
+    const elsewhere = page(["dismiss", "heading", "map"], "dismiss");
+    handFocusWhenFound(() => elsewhere.scope.querySelector("heading"), elsewhere.env);
+    elsewhere.remove("dismiss");
+    elsewhere.doc.activeElement = { name: "map", isConnected: true };
+    elsewhere.frame();
+    assert.equal(elsewhere.active(), "map");
+
+    const never = page(["dismiss"], "dismiss");
+    handFocusWhenFound(() => null, never.env);
+    never.remove("dismiss");
+    for (let i = 0; i < 5; i++) never.frame(HAND_OFF_WAIT_MS / 4);
+    assert.equal(never.active(), "body");
   });
 });

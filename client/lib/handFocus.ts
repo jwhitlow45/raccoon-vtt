@@ -68,6 +68,34 @@ export function handFocusTo(find: () => Focusable | null, env: HandOffEnv = brow
   env.schedule(step);
 }
 
+/**
+ * The hand-off for a press whose surroundings settle in more than one step,
+ * such as Dismiss in the Token panel: the companion goes, then the map lets
+ * go of it, and only then does the panel show what it shows next. Once the
+ * control has gone, `find` is asked a frame at a time, until it names the
+ * control to focus or `HAND_OFF_WAIT_MS` runs out. It returns null while
+ * the page is still settling. Nothing moves once focus went somewhere else.
+ */
+export function handFocusWhenFound(find: () => Focusable | null, env: HandOffEnv = browser()): void {
+  const { doc } = env;
+  const pressed = pressedControl(doc);
+  if (pressed === null) return;
+  const until = env.now() + HAND_OFF_WAIT_MS;
+  const step = () => {
+    if (env.now() >= until) return;
+    if (pressed.isConnected) {
+      if (doc.activeElement === pressed) env.schedule(step);
+      return;
+    }
+    const active = doc.activeElement;
+    if (active !== null && active !== doc.body) return;
+    const found = find();
+    if (found) found.focus();
+    else env.schedule(step);
+  };
+  env.schedule(step);
+}
+
 /** What has focus as a control is pressed, or null when nothing does and so nothing can be lost. */
 export function pressedControl(doc: Doc = document as unknown as Doc): Doc["activeElement"] {
   const active = doc.activeElement;

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openSideTab, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Companion stat blocks end to end (docs/design-v1-companion-stat-blocks.md
@@ -1381,10 +1381,11 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
-  test("s2-co-b. Ana dismisses a companion from its Token panel's Remove, the bar's own button: the first tap asks, the second takes it away, and it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800. By keyboard, a refused dismissal leaves focus on Dismiss and a taken one hands it to the panel's empty line (D-261024-47)", async () => {
+  test("s2-co-b. Ana dismisses a companion from its Token panel's Remove, the bar's own button: the first tap asks, the second takes it away, and it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800. By keyboard, a refused dismissal leaves focus on Dismiss, a taken one hands it to the panel's empty line, and one with another token still selected hands it to that creature's name (D-261024-47)", async () => {
     const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
     const off: string[] = [];
     const wisp = randomUUID();
+    const wisp2 = randomUUID();
     const decoy = randomUUID();
     await ops.send({ t: "token.create", token: { id: wisp, sceneId: run.sceneId, kind: "npc", name: "Wisp", size: "small", x: 9, y: 9, visibility: "all", disposition: "ally", ownerIds: [run.anaId], companion: { of: run.bree.characterId, turn: "none" }, actor: { inline: actor() } } });
     // A token of the DM's, which Ana may not take away: the refused dismissal below is sent for it in Wisp's place.
@@ -1443,9 +1444,26 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       await waitFor("Wisp dismissed", () => (dmSocket.state?.tokens[wisp] ? null : true));
       await lands("span Tap a token to see it here.", "a taken dismissal");
       await shots.take(ana, "s2-co-dismissed-focus");
+
+      // Taken with the Decoy selected too, the Wisp last: the map lets go of the Wisp, the panel shows the Decoy, and focus goes to its name.
+      await ops.send({ t: "token.create", token: { id: wisp2, sceneId: run.sceneId, kind: "npc", name: "Wisp", size: "small", x: 15, y: 3, visibility: "all", disposition: "ally", ownerIds: [run.anaId], companion: { of: run.bree.characterId, turn: "none" }, actor: { inline: actor() } } });
+      await waitFor("the second Wisp in Ana's copy", () => anaSocket.state?.tokens[wisp2]);
+      const bounds = { w: 20, h: 14 };
+      await tapCell(ana, bounds, { x: 11, y: 9 });
+      await (await barControl(bar(ana, "Decoy"), "Multi-select")).click();
+      await tapCell(ana, bounds, { x: 15, y: 3 });
+      await ana.getByRole("dialog", { name: "2 selected tokens" }).waitFor();
+      await panel.getByRole("heading", { name: "Wisp", exact: true }).first().waitFor();
+      await remove(panel).getByRole("button", { name: "Dismiss", exact: true }).press("Enter");
+      await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).press("Enter");
+      await waitFor("the second Wisp dismissed", () => (dmSocket.state?.tokens[wisp2] ? null : true));
+      await panel.getByRole("heading", { name: "Decoy", exact: true }).first().waitFor();
+      await lands("h3 Decoy", "a taken dismissal with the Decoy still selected");
+      await shots.take(ana, "s2-co-dismissed-focus-selected");
     } finally {
       await ana.unrouteAll({ behavior: "ignoreErrors" });
-      for (const id of [wisp, decoy]) if (dmSocket.state?.tokens[id]) await ops.send({ t: "token.delete", tokenId: id });
+      await ana.keyboard.press("Escape");
+      for (const id of [wisp, wisp2, decoy]) if (dmSocket.state?.tokens[id]) await ops.send({ t: "token.delete", tokenId: id });
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });

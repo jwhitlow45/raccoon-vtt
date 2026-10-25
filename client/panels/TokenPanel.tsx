@@ -1,11 +1,11 @@
 import type { IconName } from "../components/Icon.tsx";
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
-import { DismissButton, type DismissFocus } from "../canvas/TokenActionBar.tsx";
+import { DismissButton } from "../canvas/TokenActionBar.tsx";
 import { AttachButton } from "../features/attach/AttachButton.tsx";
 import { DetachButton, DetachNote, GroupLine, useAttachSlots, useDetach, type AttachFocus } from "../features/attach/BarParts.tsx";
 import { attachControls } from "../features/attach/detach.ts";
@@ -54,7 +54,8 @@ import { theme } from "../lib/theme.ts";
 import { DISPOSITION_RING, elevationBadge, initials } from "../lib/tokenView.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope } from "../state/scope.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
+import { handFocusWhenFound } from "../lib/handFocus.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
   { value: "tiny", label: "Tiny" },
@@ -123,8 +124,6 @@ const TO_NAME: AttachFocus & DuplicateFocus = { scope: PANEL_BOX, to: [CREATURE_
 /** The empty panel's line, which takes focus from script when what had it went with its token. */
 const EMPTY_LINE = "[data-token-empty]";
 
-/** A companion dismissed here leaves the panel empty, so focus goes to the empty panel's line (D-261024-47). */
-const DISMISS_FOCUS: DismissFocus = { scope: PANEL_BOX, to: [EMPTY_LINE] };
 
 function TokenDetails(props: PanelProps) {
   const tokenId = props.selectedTokenId;
@@ -163,7 +162,7 @@ function TokenDetails(props: PanelProps) {
   if (!token || !access)
     return (
       <Empty action={you?.role === "dm" ? <QuickStartLink /> : undefined}>
-        {/* Focusable from script, not by Tab, for a press that took the panel's token away (DISMISS_FOCUS). */}
+        {/* Focusable from script, not by Tab, for a press that took the panel's token away (DismissSection). */}
         <span tabIndex={-1} data-token-empty="">
           Tap a token to see it here.
         </span>
@@ -283,12 +282,7 @@ function TokenDetails(props: PanelProps) {
         return access.dm ? (
           <DmActions key={id} token={token} onDeleted={props.close} />
         ) : (
-          // A companion's player dismisses it in Delete's place, with the bar's own button (docs/design-v1-combat-flow.md 3.6.9).
-          <Section key={id} title="Remove">
-            <div>
-              <DismissButton tokenId={token.id} name={name} focusTo={DISMISS_FOCUS} />
-            </div>
-          </Section>
+          <DismissSection key={id} tokenId={token.id} name={name} />
         );
     }
   };
@@ -455,6 +449,33 @@ function AttachControls(props: { token: Token }) {
           </div>
         ) : null}
         {slots.includes("detach") ? <DetachNote detach={detach} id={noteId} /> : null}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * A companion's player dismisses it in Delete's place, with the bar's own
+ * button (docs/design-v1-combat-flow.md 3.6.9). Focus goes to what the
+ * panel shows next (D-261024-47): the creature still selected, by its name,
+ * or else the empty line. The panel first shows its empty state while the
+ * dismissed companion is still selected, until the map lets go of it
+ * (Stage's keepSelected), so the target is read from the selection, and the
+ * hand-off waits until the panel draws it.
+ */
+function DismissSection(props: { tokenId: string; name: string }) {
+  const store = useRoomStore();
+  const handOff = useCallback(
+    (button: HTMLElement) => {
+      const scope = button.closest<HTMLElement>(PANEL_BOX);
+      handFocusWhenFound(() => scope?.querySelector<HTMLElement>(store.getState().local.selectedIds.length > 0 ? CREATURE_HEADING : EMPTY_LINE) ?? null);
+    },
+    [store],
+  );
+  return (
+    <Section title="Remove">
+      <div>
+        <DismissButton tokenId={props.tokenId} name={props.name} handOff={handOff} />
       </div>
     </Section>
   );
