@@ -9,7 +9,7 @@ import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -1274,6 +1274,8 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   await sweep.measure(page, "cu-row-uses", group);
   // In lair waits for the server while the page is offline, busy, and takes the lair's counts once it is back.
   const lair = tracker.getByRole("switch", { name: /^In lair/ });
+  // It is busy too while the dragon's block loads, and drops a tap then: the busy state measured would be the load's, and nothing would reach the server.
+  await untilReady(lair, "In lair");
   consoles.dm.expectSocketFailures = true;
   await dmContext.setOffline(true);
   await lair.click();

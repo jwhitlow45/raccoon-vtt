@@ -10,7 +10,7 @@ import type { Actor, LogEvent, RoomState } from "#shared/model.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "#shared/srd/monsters.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment, toastsUnderCards } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, expandBar, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, OpSocket, openPage, Shots, SocketWatch, startServer, tapCell, untilReady, waitFor, type Server } from "./harness.ts";
 
 /**
  * Combat uses (docs/design-v1-combat-controls.md 4 to 6 and 11), on the
@@ -684,13 +684,17 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const tracker = await openTracker(desk);
     const toggle = tracker.getByRole("button", { name: `${DRAGON} options` });
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
-    await tracker.getByRole("switch", { name: /^In lair/ }).click();
+    // In lair drops a tap while the dragon's block loads, and while its last change waits for the server.
+    const lair = tracker.getByRole("switch", { name: /^In lair/ });
+    await untilReady(lair, "In lair");
+    await lair.click();
     await waitFor("the lair's counts", () => (dragon()?.legendary?.actionsMax === 4 && dragon()?.legendary?.resistMax === 4 ? true : null));
     const m = srd.find((x) => x.srdId === "adult-red-dragon")!;
     assert.equal(dragon()?.xp, m.xpInLair);
     assert.equal(dragon()?.legendary?.resistUsed, 1, "what was used stays used");
     await tracker.getByText("Legendary Resistance 3 of 4", { exact: true }).first().waitFor();
-    await tracker.getByRole("switch", { name: /^In lair/ }).click();
+    await untilReady(lair, "In lair");
+    await lair.click();
     await waitFor("back to its counts", () => (dragon()?.legendary?.actionsMax === 3 ? true : null));
     assert.equal(dragon()?.xp, m.xp);
   });

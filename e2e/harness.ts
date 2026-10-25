@@ -181,6 +181,16 @@ export async function waitFor<T>(what: string, check: () => T | Promise<T>, time
 }
 
 /**
+ * Waits until a control takes a tap: enabled and not busy. A control that
+ * is busy while what it needs still loads drops a tap meanwhile, as In
+ * lair does while its creature's block loads (Switch.tsx), so a test that
+ * taps it then waits on an answer that never comes.
+ */
+export async function untilReady(control: Locator, what: string, timeoutMs = 15_000): Promise<void> {
+  await waitFor(`${what} to take a tap`, async () => ((await control.getAttribute("aria-busy")) === null && (await control.isEnabled()) ? true : null), timeoutMs);
+}
+
+/**
  * Opens the page's room again, for a new window or interface size set just
  * before, with a new navigation. A reload keeps the tab's history, with
  * any Back entry a sheet the resize opened had pushed
