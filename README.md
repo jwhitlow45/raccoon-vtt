@@ -176,8 +176,9 @@ second run that overlaps it queues part of its shards.
 
 A file that takes much over 5 minutes in CI holds its shard up, so a long
 one is split into files that each build their own room from a module they
-share, as `e2e/alignmentRoom.ts` does for the alignment sweep's three files
-and `e2e/barrestRoom.ts` for the resting bar's four.
+share, as `e2e/alignmentRoom.ts` does for the alignment sweep's three files,
+`e2e/barrestRoom.ts` for the resting bar's four and `e2e/tokenpanelRoom.ts`
+for the token panel's two.
 
 A shard runs on a laptop too, against the dev postgres. Build first, then
 give the shard's number and the shard count. `--list` prints what every
