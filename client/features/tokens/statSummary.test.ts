@@ -261,6 +261,8 @@ describe("the token window's summary and the panel's header", () => {
         assert.match(img, new RegExp(`>${speed.modes.at(-2)!},?<`), `${label}, ${where}: the mode before it`);
         const part = new RegExp(`<span[^>]*><strong data-unit="speed" aria-hidden="true"[^>]*>${last.replace(/[()]/g, "\\$&")}</strong><span role="img" aria-label="Passive Perception \\d+"`);
         assert.match(markup, part, `${label}, ${where}: the last mode and PP in one part, the mode hidden from a screen reader`);
+        // Hidden from a screen reader, it still names the whole speed under a pointer and paints over the sheet link's reach, as the rest of the speed does (FU31 review F7).
+        assert.match(markup, new RegExp(`<strong data-unit="speed" aria-hidden="true" title="${speed.name.replace(/[()]/g, "\\$&")}" style="[^"]*position:relative`), `${label}, ${where}: the last mode's tooltip and reach`);
       }
     }
     const [, one, t] = creatures[0]!;

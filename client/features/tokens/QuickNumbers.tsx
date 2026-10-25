@@ -110,7 +110,9 @@ type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
  * fit on one line, the last never stands alone under the others, as
  * "Climb 40 ft" did in More stats on the narrowest phone (FU30-NOTED).
  * The speed keeps its whole name, so a screen reader hears it once, and
- * the last mode drawn beside Passive Perception is hidden from it.
+ * the last mode drawn beside Passive Perception is hidden from it. Under a
+ * pointer the last mode names the whole speed and takes the taps over the
+ * sheet link's reach, as the rest of the speed does (FU31 review F7).
  *
  * The two parts are the line's own items, not one box around them: a box
  * whose contents wrap takes its whole line, and the item after Passive
@@ -134,7 +136,7 @@ export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUni
         ))}
       </Unit>
       <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(3), minWidth: 0, maxWidth: "100%", ...props.style }}>
-        <strong data-unit="speed" aria-hidden="true" style={{ whiteSpace: "nowrap" }}>
+        <strong data-unit="speed" aria-hidden="true" title={speed.name} style={{ whiteSpace: "nowrap", ...OVER_REACH }}>
           {speed.modes[last]}
         </strong>
         <QuickNumberUnit unit={props.pp} />
