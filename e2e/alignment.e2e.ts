@@ -2821,4 +2821,75 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
   });
+
+  /*
+   * Follow-up batch 30's roots, here at the file's end: the token
+   * window's summary lines (LP21-BAR-3).
+   */
+  const FU30_AT: { size: Size; scale: number }[] = [390, 320].flatMap((w) => [1, 1.3].map((scale) => ({ size: SIZES.find((s) => s.width === w)!, scale })));
+  FU30_AT.push(...[1, 1.3].map((scale) => ({ size: SIZES.find((s) => s.width === 1440)!, scale })));
+  /** The summary's sizes: FU30_AT's, and live play 21's others, where its lines left a unit alone, touch ones first. */
+  const SUMMARY_AT: { size: Size; scale: number }[] = [
+    ...FU30_AT.filter((at) => at.size.touch),
+    ...[1, 1.3].map((scale) => ({ size: { name: "430x932", width: 430, height: 932, touch: true }, scale })),
+    ...[1, 1.3].map((scale) => ({ size: { name: "1180x820", width: 1180, height: 820, touch: true }, scale })),
+    ...FU30_AT.filter((at) => !at.size.touch),
+    { size: IC2_DESK, scale: 1 },
+  ];
+  const atName = (at: { size: Size; scale: number }) => `${at.size.name}${at.scale === 1 ? "" : `-${Math.round(at.scale * 100)}`}`;
+
+  test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, Speed and Passive Perception together, for an adult red dragon, a mage and a panther, expanded on phones and in More stats where the bar is short, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42)`, async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const made = { dragon: randomUUID(), mage: randomUUID(), panther: randomUUID() };
+    const creatures = [
+      { id: made.dragon, name: "Summary Dragon", size: "huge", at: { x: 16, y: 8 }, tap: { x: 17, y: 9 }, actor: srdActor("adult-red-dragon"), saves: true },
+      { id: made.mage, name: "Summary Mage", size: "medium", at: { x: 1, y: 9 }, tap: { x: 1, y: 9 }, actor: srdActor("mage"), saves: true },
+      // Live play 21's panther: temporary HP and a long speed beside the HP, and no block to give saves.
+      { id: made.panther, name: "Panther", size: "medium", at: { x: 11, y: 10 }, tap: { x: 11, y: 10 }, actor: actor({ ac: 13, hp: { cur: 40, max: 40, temp: 6 }, speeds: { walk: 50, climb: 40 }, passivePerception: 15 }), saves: false },
+    ];
+    const lines: string[] = [];
+    try {
+      for (const c of creatures) await ops.send({ t: "token.create", token: { id: c.id, sceneId: run.sceneId, kind: "monster", name: c.name, size: c.size, ...c.at, visibility: "all", disposition: "hostile", actor: { inline: c.actor } } });
+      await waitFor("the summary's creatures", () => (creatures.every((c) => dmSocket.state?.tokens[c.id]) ? true : null));
+      for (const at of SUMMARY_AT) {
+        const sweep = new Sweep(atName(at));
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        for (const c of creatures) {
+          const screen = `window-summary-${c.name.toLowerCase().replace(/ /g, "-")}`;
+          await closeSheets(page);
+          await escapeAll(page);
+          if (!(await canvasAt(page, c.tap))) {
+            await sweep.missing(page, screen, `${c.name}'s cell is covered`);
+            continue;
+          }
+          const bar = await selectToken(page, c.name, c.tap);
+          if (!bar) {
+            await sweep.missing(page, screen, `a tap on ${c.name} opened no window`);
+            continue;
+          }
+          await expandBar(bar);
+          // A short bar keeps speed, Passive Perception and the saves in More stats (docs/design-v1-token-panel.md 3.3).
+          const more = bar.getByRole("button", { name: "More stats", exact: true });
+          if ((await visible(more)) && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
+          if (c.saves && !(await showsWithin(bar.locator("[data-saves]").first(), 10_000))) await sweep.missing(page, screen, `${c.name}'s saves never showed`);
+          await sweep.measure(page, screen, bar.locator("[data-vitals], [data-saves]"));
+          if (c.saves || at.size.touch) await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
+          await bar.getByRole("button", { name: "Close", exact: true }).first().click();
+          await bar.waitFor({ state: "detached" });
+        }
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      for (const c of creatures) await ops.send({ t: "token.delete", tokenId: c.id }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "the summary lines out of line");
+  });
+
+  test("fu30-d. no page logged an error in follow-up batch 30's steps", () => {
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
+  });
 });

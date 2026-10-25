@@ -117,25 +117,41 @@ function Unit(props: { unit: VitalUnit }) {
  * its words, since it leads the HP entry under it. `afterTag` follows the
  * life tag, where the DM's Revive goes, and `end` the last item, where a
  * narrow token window's elevation badge goes.
+ *
+ * So no number stands alone on a line, AC and HP make one part of the
+ * line and Speed and Passive Perception another (D-261024-42). Each part
+ * wraps as a whole, so where the line does not hold them all, Speed and
+ * Passive Perception stand together on a line of their own. A part wraps
+ * inside itself only where it alone is wider than the box.
  */
 export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
   if (props.items.length === 0 && props.end == null) return null;
+  const drawn = (item: VitalItem, i: number): ReactNode[] => {
+    const between = i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined;
+    const quick = quickUnit(item);
+    if (quick) return [<QuickNumberUnit key={item.key} unit={quick} style={between} />];
+    return item.units.flatMap((unit, j) => {
+      const gap = j === item.units.length - 1 ? between : undefined;
+      const shown = (
+        <span key={`${item.key}:${j}`} data-unit={item.key} style={{ display: "inline-flex", alignItems: "center", minWidth: 0, maxWidth: "100%", ...(unit.kind === "sheet" ? null : OVER_REACH), ...gap }}>
+          <Unit unit={unit} />
+        </span>
+      );
+      return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex", ...OVER_REACH }}>{props.afterTag}</span>] : [shown];
+    });
+  };
+  const indexed = props.items.map((item, i) => ({ item, i }));
+  const part = (name: "numbers" | "quick", of: typeof indexed) =>
+    of.length > 0 ? (
+      <span key={name} data-vitals-part={name} style={VITALS_PART}>
+        {of.flatMap(({ item, i }) => drawn(item, i))}
+      </span>
+    ) : null;
   return (
     <div data-vitals="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14, minWidth: 0, fontVariantNumeric: "tabular-nums" }}>
-      {props.items.flatMap((item, i) => {
-        const between = i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined;
-        const quick = quickUnit(item);
-        if (quick) return [<QuickNumberUnit key={item.key} unit={quick} style={between} />];
-        return item.units.flatMap((unit, j) => {
-          const gap = j === item.units.length - 1 ? between : undefined;
-          const shown = (
-            <span key={`${item.key}:${j}`} data-unit={item.key} style={{ display: "inline-flex", alignItems: "center", minWidth: 0, maxWidth: "100%", ...(unit.kind === "sheet" ? null : OVER_REACH), ...gap }}>
-              <Unit unit={unit} />
-            </span>
-          );
-          return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex", ...OVER_REACH }}>{props.afterTag}</span>] : [shown];
-        });
-      })}
+      {part("numbers", indexed.filter(({ item }) => item.key === "ac" || item.key === "hp"))}
+      {part("quick", indexed.filter(({ item }) => item.key === "speed" || item.key === "passivePerception"))}
+      {indexed.filter(({ item }) => item.key === "sheet").flatMap(({ item, i }) => drawn(item, i))}
       {props.end != null ? (
         <span data-unit="elevation" style={{ display: "inline-flex", flex: "none", ...OVER_REACH }}>
           {props.end}
@@ -145,13 +161,20 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
   );
 }
 
+/** A part of a summary line that wraps as a whole, and inside itself only where it alone is wider than the box. */
+const LINE_PART = { display: "inline-flex", flexWrap: "wrap", rowGap: theme.space(1), columnGap: theme.space(1.5), minWidth: 0, maxWidth: "100%" } as const;
+const VITALS_PART = { ...LINE_PART, alignItems: "center" } as const;
+const SAVES_PART = { ...LINE_PART, alignItems: "baseline" } as const;
+
 /**
  * The six saves, "Saves" then "STR +5" and the rest, each a unit that
  * never breaks. The abbreviation takes the ability grid's small capitals
  * (AbilityGrid.tsx): at the body's size, capitals widen the line past one
- * row on a phone held upright, where "Str" fit. While the SRD chunk loads
- * the line keeps its place and, after the usual 200 ms, says so, and a
- * failed load offers the reload.
+ * row on a phone held upright, where "Str" fit. Where one line does not
+ * hold them, they wrap three and three, "Saves" with the first three, so
+ * no save stands alone (D-261024-42). While the SRD chunk loads the line
+ * keeps its place and, after the usual 200 ms, says so, and a failed load
+ * offers the reload.
  */
 export function SavesLine(props: { block: LinkedBlock }) {
   const { block } = props;
@@ -166,18 +189,24 @@ export function SavesLine(props: { block: LinkedBlock }) {
   if (block.kind === "failed") {
     return <SrdLoadFailed what="Saves" inline />;
   }
+  const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text) => {
+    const [ability, value] = text.split(" ");
+    return (
+      <span key={ability} style={{ whiteSpace: "nowrap" }}>
+        <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>{ability} </span>
+        <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
+      </span>
+    );
+  });
   return (
     <div data-saves="" style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14 }}>
-      <span style={{ color: theme.color.textMuted }}>Saves</span>
-      {(block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text) => {
-        const [ability, value] = text.split(" ");
-        return (
-          <span key={ability} style={{ whiteSpace: "nowrap" }}>
-            <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>{ability} </span>
-            <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
-          </span>
-        );
-      })}
+      <span data-saves-part="" style={SAVES_PART}>
+        <span style={{ color: theme.color.textMuted }}>Saves</span>
+        {saves.slice(0, 3)}
+      </span>
+      <span data-saves-part="" style={SAVES_PART}>
+        {saves.slice(3)}
+      </span>
     </div>
   );
 }

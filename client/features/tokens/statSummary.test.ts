@@ -12,7 +12,7 @@ import { defenseLines, hpUnits, linkedBlockState, moreStatsShown, quickUnit, sav
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { VitalsLine } = await import("./StatSummary.tsx");
+const { SavesLine, VitalsLine } = await import("./StatSummary.tsx");
 const { QuickNumbers } = await import("./QuickNumbers.tsx");
 
 /*
@@ -247,6 +247,51 @@ describe("the token window's summary and the panel's header", () => {
     const { more } = shortSplit(vitals({ actor: a, token: t, fullAccess: true, place: "bar" }));
     const opened = renderToStaticMarkup(createElement(VitalsLine, { items: more }));
     assert.deepEqual([...quickMarkup(opened).keys()], ["Speed 10 ft, Fly 60 ft (hover)", "Passive Perception 15"]);
+  });
+});
+
+/**
+ * The part of a summary line that holds the first `needle` in its markup:
+ * the `data-*-part` span around it, by its name and its place among the
+ * line's parts, or null outside every part.
+ */
+function partOf(markup: string, needle: string): string | null {
+  const at = markup.indexOf(needle);
+  assert.ok(at >= 0, `no ${needle} in ${markup}`);
+  const open: (string | null)[] = [];
+  let seen = 0;
+  for (const tag of markup.slice(0, at).matchAll(/<(\/?)[a-z][a-z0-9]*([^>]*?)(\/?)>/g)) {
+    if (tag[1]) open.pop();
+    else if (!tag[3]) {
+      const part = /data-(vitals|saves)-part="([^"]*)"/.exec(tag[2] ?? "");
+      open.push(part ? `${part[2] || "part"} ${++seen}` : null);
+    }
+  }
+  return open.findLast((p) => p !== null) ?? null;
+}
+
+describe("the summary lines' parts, so no unit stands alone on a line (D-261024-42)", () => {
+  test("the vitals hold AC and HP as one part and Speed and Passive Perception as another, the sheet link and the elevation after them", () => {
+    const a = actor({ ac: 13, hp: { cur: 40, max: 40, temp: 6 }, speeds: { walk: 50, climb: 40 }, passivePerception: 15, sheetUrl: "https://www.dndbeyond.com/characters/1" });
+    const line = renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: a, token: { kind: "pc", hpVisibility: "exact" }, fullAccess: true, place: "bar" }), end: "10 ft" }));
+    assert.equal(partOf(line, 'aria-label="Armor Class'), "numbers 1");
+    assert.equal(partOf(line, ">40/40<"), "numbers 1");
+    assert.equal(partOf(line, ">+6<"), "numbers 1", "temporary HP with its HP");
+    assert.equal(partOf(line, 'aria-label="Speed 50 ft, Climb 40 ft"'), "quick 2");
+    assert.equal(partOf(line, 'aria-label="Passive Perception 15"'), "quick 2");
+    assert.equal(partOf(line, ">Sheet"), null, "the sheet link after the parts");
+    assert.equal(partOf(line, ">10 ft<"), null, "the elevation after them");
+    // A short bar's More stats holds Speed and Passive Perception alone, still as one part.
+    const more = renderToStaticMarkup(createElement(VitalsLine, { items: shortSplit(vitals({ actor: a, token: { kind: "pc", hpVisibility: "exact" }, fullAccess: true, place: "bar" })).more }));
+    assert.equal(partOf(more, 'aria-label="Passive Perception 15"'), "quick 1");
+  });
+
+  test("the saves wrap three and three: Saves with the first three as one part, the other three as another", () => {
+    const saves = { str: 8, dex: 6, con: 7, int: 3, wis: 7, cha: 6 };
+    const line = renderToStaticMarkup(createElement(SavesLine, { block: { kind: "numbers", saves, defenses: [] } }));
+    assert.equal(partOf(line, ">Saves<"), "part 1");
+    for (const ability of ["STR", "DEX", "CON"]) assert.equal(partOf(line, `>${ability} <`), "part 1", ability);
+    for (const ability of ["INT", "WIS", "CHA"]) assert.equal(partOf(line, `>${ability} <`), "part 2", ability);
   });
 });
 
