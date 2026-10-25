@@ -88,6 +88,8 @@ const run = {
   goblin: randomUUID(),
   lair: [randomUUID(), randomUUID(), randomUUID()],
   dretch: randomUUID(),
+  /** The link that signs a device in as the DM, a session of its own (cu-b-1, cu-b-14). */
+  dmLink: "",
 };
 
 const DRAGON = "Adult Red Dragon";
@@ -404,6 +406,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
     assert.ok(match, `DM link looks wrong: ${link}`);
     run.roomId = match[1]!.replace("-", "");
+    run.dmLink = link;
     await desk.getByLabel("I saved my DM link").check();
     await desk.getByRole("button", { name: "Continue to the room" }).click();
     await waitFor("the desk's snapshot", () => deskSocket.state);
@@ -970,10 +973,11 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await waitFor("the third out of the fight", () => (lairRows()[2] === null ? true : null));
     const context = await browser.newContext({ viewport: DESK });
     try {
-      await context.addCookies(await deskContext.cookies(server.origin));
       const page = await context.newPage();
       await page.route(/\/assets\/monsters-[^/]*\.js$/, (route) => route.abort());
-      await openPage(page, `${server.origin}/r/${run.roomId}`);
+      // A third device of the DM's, signed in by the DM link as the phone is (cu-b-1), so its loads count against a session of its own, never the desk's (design 10.4).
+      await page.goto(run.dmLink);
+      await page.getByRole("button", { name: /Dana the DM/ }).click();
       await page.getByRole("status", { name: "Connected" }).first().waitFor();
       await page.locator(".konvajs-content").first().waitFor();
       const before = JSON.stringify(deskSocket.state?.encounter?.entries);
