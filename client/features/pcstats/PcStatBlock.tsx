@@ -1,10 +1,11 @@
-import { useState, type Ref } from "react";
+import { useRef, useState, type Ref } from "react";
 import type { RollNumbers } from "#shared/dice/bonus.ts";
 import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { Group, Help } from "../../components/Panel.tsx";
+import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
+import { handFocusOn } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -115,9 +116,15 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   const monster = list?.find((m) => m.srdId === srdId);
   // The numbers its rolls get, read from the SRD table as the server reads them.
   const { numbers } = useCharacterRollNumbers(character.id);
+  const endBox = useRef<HTMLDivElement>(null);
+  // End the shape goes with the shape, so focus moves to the group's fold, which reads the section as it now stands, as Revive's does to the HP line.
+  const endShape = () => {
+    actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: END_SHAPE } });
+    handFocusOn(endBox.current?.closest<HTMLElement>(GROUP_BOX), [GROUP_FOLD]);
+  };
   const end = props.edits ? (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-      <SmallButton onClick={() => actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: END_SHAPE } })}>End the shape</SmallButton>
+    <div ref={endBox} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+      <SmallButton onClick={endShape}>End the shape</SmallButton>
     </div>
   ) : null;
   if (failed) {

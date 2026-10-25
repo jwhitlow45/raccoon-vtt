@@ -814,6 +814,32 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await focusOn(/^Add$/, "Remove");
   });
 
+  test("lp22-pc-b. by keyboard, End the shape goes with the shape and hands focus to the Stat block's fold, never the page", async () => {
+    await ana.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    const panel = await showBree(ana);
+    const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;
+    await panel.getByRole("button", { name: /shapes?, take a shape$|^Take a shape$/ }).first().click();
+    const picker = ana.getByRole("dialog", { name: "Take a shape" });
+    await picker.getByRole("button", { name: /^Wolf/ }).first().click();
+    // A known form takes Wild Shape at once, any other asks first.
+    const choice = ana.getByRole("dialog", { name: "Take the shape of Wolf" });
+    await waitFor("the shape or its question", async () => (breeActor()?.wildShape || (await choice.count()) > 0 ? true : null));
+    if (!breeActor()?.wildShape) await choice.getByRole("button", { name: "Take the shape", exact: true }).click();
+    await waitFor("Bree's shape", () => (breeActor()?.wildShape ? true : null));
+    const end = panel.getByRole("button", { name: "End the shape" });
+    await end.focus();
+    await ana.keyboard.press("Enter");
+    await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
+    const focused = () =>
+      ana.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null; hasAttribute(n: string): boolean } | null } }).document.activeElement;
+        return !a || a.tagName === "BODY" ? "the page" : `${a.hasAttribute("data-group-fold") ? "fold " : ""}${(a.textContent ?? "").trim()}`;
+      });
+    await waitFor("focus on the Stat block's fold", () => focused().then((f) => (/^fold Stat block/.test(f) ? true : null)), 5_000).catch(async () => assert.fail(`after End the shape focus is on "${await focused()}"`));
+  });
+
   test("6. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");
