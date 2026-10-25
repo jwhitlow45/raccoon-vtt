@@ -259,10 +259,14 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await dm.keyboard.press("ArrowRight");
     assert.ok(await isFocused(more), "Right from the row's last tab reaches More");
     await dm.keyboard.press("Enter");
-    const item = dm.getByRole("menu", { name: "More panels" }).getByRole("menuitemradio", { name: sideTabName("Journal") });
-    // More's list opens on its first item, Log now that Dice holds its place in the row, so Down goes on to Journal.
-    for (let i = 0; i < 12 && !(await isFocused(item)); i++) await dm.keyboard.press("ArrowDown");
-    await waitFor("focus on Journal in More's list", async () => ((await isFocused(item)) ? true : null));
+    const menu = dm.getByRole("menu", { name: "More panels" });
+    const item = menu.getByRole("menuitemradio", { name: sideTabName("Journal") });
+    // More's list opens on its first panel, Journal, the first after the row's. Down moves to the next and Up comes back, so the list's keys are covered.
+    await waitFor("focus on Journal as More's list opens", async () => ((await isFocused(item)) ? true : null));
+    await dm.keyboard.press("ArrowDown");
+    await waitFor("focus on the panel after Journal", async () => ((await isFocused(menu.getByRole("menuitemradio").nth(1))) ? true : null));
+    await dm.keyboard.press("ArrowUp");
+    await waitFor("focus back on Journal", async () => ((await isFocused(item)) ? true : null));
     await dm.keyboard.press("Enter");
     await dm.getByRole("heading", { name: "Lore" }).waitFor();
     assert.ok(await isFocused(more), `choosing Journal left focus on More, not on the page's title: ${JSON.stringify(await focused(dm))}`);
