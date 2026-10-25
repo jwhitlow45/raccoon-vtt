@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CONDITION_KEYS, STATUS_KEYS, type ConditionKey, type Effect, type StatusKey } from "#shared/model.ts";
 import { MAX_EFFECT_LEVEL, type ActorTarget, type ClientOp, type EffectInput } from "#shared/protocol.ts";
 import { CONDITIONS, EXHAUSTION_MAX_LEVEL } from "#shared/srd/conditions.ts";
@@ -68,79 +68,105 @@ export function EffectsSection(props: {
   const [picking, setPicking] = useState(false);
   const view = useRoomView((s) => s.view);
   const editing = detail?.mode === "edit" ? props.effects.find((e) => e.id === detail.effectId) : undefined;
+  const box = useRef<HTMLDivElement>(null);
+  const before = useRef(detail);
+  /*
+   * Opening an effect takes its row away, and Back, Add, Save, Remove and
+   * It fired take the form away, so a keyboard's focus would fall to the
+   * page. It moves to the form's first control, Back, as the form opens,
+   * and as it closes to the row it was opened from, else Add, the
+   * section's first control. Only when focus fell to the page, never on
+   * the first draw.
+   */
+  useEffect(() => {
+    if (before.current === detail) return;
+    const was = before.current;
+    before.current = detail;
+    const at = box.current;
+    const active = document.activeElement;
+    if (!at || (active !== null && active !== document.body)) return;
+    const row = detail === null && was?.mode === "edit" ? at.querySelector<HTMLElement>(`[data-effect-row="${was.effectId}"]`) : null;
+    (row ?? at.querySelector<HTMLElement>("button"))?.focus();
+  }, [detail]);
 
   if (detail && (detail.mode === "add" || editing)) {
     return (
-      <Section title={props.title ?? "Conditions"}>
-        <EffectDetail
-          key={detail.mode === "add" ? `add:${detail.key}` : `edit:${detail.effectId}`}
-          effectKey={detail.mode === "add" ? detail.key : editing!.key}
-          existing={editing}
-          target={props.target}
-          self={props.self}
-          selfLabel={props.selfLabel}
-          canEdit={props.canEdit}
-          onDone={() => {
-            setDetail(null);
-            setPicking(false);
-          }}
-        />
-      </Section>
+      // No box of its own: a hold for the focus hand-off above, around the section in both of its looks.
+      <div ref={box} style={{ display: "contents" }}>
+        <Section title={props.title ?? "Conditions"}>
+          <EffectDetail
+            key={detail.mode === "add" ? `add:${detail.key}` : `edit:${detail.effectId}`}
+            effectKey={detail.mode === "add" ? detail.key : editing!.key}
+            existing={editing}
+            target={props.target}
+            self={props.self}
+            selfLabel={props.selfLabel}
+            canEdit={props.canEdit}
+            onDone={() => {
+              setDetail(null);
+              setPicking(false);
+            }}
+          />
+        </Section>
+      </div>
     );
   }
 
   return (
-    <Section
-      title={props.title ?? "Conditions"}
-      aside={
-        props.canEdit ? (
-          <SmallButton pressed={picking} onClick={() => setPicking((p) => !p)}>
-            {picking ? "Done" : "Add"}
-          </SmallButton>
-        ) : null
-      }
-    >
-      {props.effects.length === 0 && !picking ? <Note>None.</Note> : null}
-      {props.effects.length > 0 ? (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
-          {props.effects.map((effect) => (
-            <li key={effect.id} style={{ display: "flex", gap: theme.space(1) }}>
-              <button
-                type="button"
-                onClick={() => setDetail({ mode: "edit", effectId: effect.id })}
-                style={rowButton}
-              >
-                <EffectIcon effect={effect} />
-                <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-                  <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, fontVariantNumeric: "tabular-nums" }}>{effectChip(effect).label}</span>
-                  {effect.duration ? (
-                    <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.textMuted }}>
-                      {describeDuration(view, effect.duration)}
-                    </span>
-                  ) : null}
-                  {effect.hiddenFromPlayers ? (
-                    <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.warning }}>Hidden from players</span>
-                  ) : null}
-                </span>
-                <span style={{ color: theme.color.textMuted }}>
-                  <Icon name="chevronRight" />
-                </span>
-              </button>
-              {props.canEdit && effectCount(effect) !== null ? <CountSteps effect={effect} target={props.target} /> : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {picking ? (
-        <EffectPicker
-          present={props.effects}
-          onPick={(key) => {
-            const existing = key === "custom" ? undefined : props.effects.find((e) => e.key === key);
-            setDetail(existing ? { mode: "edit", effectId: existing.id } : { mode: "add", key });
-          }}
-        />
-      ) : null}
-    </Section>
+    <div ref={box} style={{ display: "contents" }}>
+      <Section
+        title={props.title ?? "Conditions"}
+        aside={
+          props.canEdit ? (
+            <SmallButton pressed={picking} onClick={() => setPicking((p) => !p)}>
+              {picking ? "Done" : "Add"}
+            </SmallButton>
+          ) : null
+        }
+      >
+        {props.effects.length === 0 && !picking ? <Note>None.</Note> : null}
+        {props.effects.length > 0 ? (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
+            {props.effects.map((effect) => (
+              <li key={effect.id} style={{ display: "flex", gap: theme.space(1) }}>
+                <button
+                  type="button"
+                  data-effect-row={effect.id}
+                  onClick={() => setDetail({ mode: "edit", effectId: effect.id })}
+                  style={rowButton}
+                >
+                  <EffectIcon effect={effect} />
+                  <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                    <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, fontVariantNumeric: "tabular-nums" }}>{effectChip(effect).label}</span>
+                    {effect.duration ? (
+                      <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.textMuted }}>
+                        {describeDuration(view, effect.duration)}
+                      </span>
+                    ) : null}
+                    {effect.hiddenFromPlayers ? (
+                      <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.warning }}>Hidden from players</span>
+                    ) : null}
+                  </span>
+                  <span style={{ color: theme.color.textMuted }}>
+                    <Icon name="chevronRight" />
+                  </span>
+                </button>
+                {props.canEdit && effectCount(effect) !== null ? <CountSteps effect={effect} target={props.target} /> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {picking ? (
+          <EffectPicker
+            present={props.effects}
+            onPick={(key) => {
+              const existing = key === "custom" ? undefined : props.effects.find((e) => e.key === key);
+              setDetail(existing ? { mode: "edit", effectId: existing.id } : { mode: "add", key });
+            }}
+          />
+        ) : null}
+      </Section>
+    </div>
   );
 }
 

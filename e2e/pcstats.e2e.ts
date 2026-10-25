@@ -776,6 +776,44 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     assert.equal("resources" in (cySocket.state?.characters[run.bree.characterId] ?? {}), false, "Cy's device never holds them");
   });
 
+  test("lp22-pc-a. by keyboard in Bree's token panel, a condition's row, its form's Back, Add and Remove each take their button away, and focus goes to Back, the condition's row or Add, never the page", async () => {
+    await ana.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    const panel = await showBree(ana);
+    const combat = panel.getByRole("button", { name: "Combat", exact: true });
+    if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+    const conditions = panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Conditions"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="Conditions"]]');
+    const poisoned = () => (anaSocket.state?.characters[run.bree.characterId]?.actor.effects ?? []).some((e) => e.key === "poisoned");
+    const focused = () =>
+      ana.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null } | null } }).document.activeElement;
+        return !a || a.tagName === "BODY" ? "the page" : (a.textContent ?? "").trim();
+      });
+    const press = async (target: Locator) => {
+      await target.focus();
+      await ana.keyboard.press("Enter");
+    };
+    const focusOn = (want: RegExp, after: string) =>
+      waitFor(`focus after ${after}`, () => focused().then((f) => (want.test(f) ? true : null)), 5_000).catch(async () => assert.fail(`after ${after} focus is on "${await focused()}"`));
+
+    await press(conditions.getByRole("button", { name: "Add", exact: true }));
+    await press(conditions.locator("button[aria-pressed]").filter({ hasText: "Poisoned" }));
+    await focusOn(/^Back$/, "Poisoned's tile opened its form");
+    await press(conditions.getByRole("button", { name: "Add", exact: true }));
+    await waitFor("Poisoned on Bree", () => (poisoned() ? true : null));
+    await focusOn(/^Add$/, "the form's Add");
+    const row = conditions.locator("[data-effect-row]").filter({ hasText: "Poisoned" });
+    await press(row);
+    await focusOn(/^Back$/, "the row opened its form");
+    await press(conditions.getByRole("button", { name: "Back", exact: true }));
+    await focusOn(/^Poisoned/, "Back");
+    await press(row);
+    await press(conditions.getByRole("button", { name: "Remove", exact: true }));
+    await waitFor("Poisoned off Bree", () => (poisoned() ? null : true));
+    await focusOn(/^Add$/, "Remove");
+  });
+
   test("6. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");
