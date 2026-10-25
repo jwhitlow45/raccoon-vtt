@@ -2427,6 +2427,26 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
+  test("fu31-i. a counted condition's row is as tall as a plain one: the goblin's Exhaustion 2 with its − and + beside Poisoned, in line within 1 px at live play 22's sizes (LP22-ALIGN-5)", async () => {
+    const added = [randomUUID(), randomUUID()];
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: added[0]!, key: "exhaustion", level: 2 } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: added[1]!, key: "poisoned" } });
+    try {
+      const off = await atLp22Sizes(async (at) => {
+        const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
+        const conditions = sectionIn(groupIn(goblin, "Combat"), "Conditions");
+        await conditions.getByRole("button", { name: /one more$/ }).waitFor();
+        await shots.take(dm, `fu31-conditions-${at.replace(/ /g, "")}`);
+        const rows = await conditions.locator("li").evaluateAll((items) => items.map((li) => `${((li as unknown as { textContent: string | null }).textContent ?? "").trim().slice(0, 14)} ${(li as unknown as { getBoundingClientRect(): { height: number } }).getBoundingClientRect().height.toFixed(1)}`));
+        console.log(`fu31-i ${at}: ${rows.join(" | ")}`);
+        return measureIn(conditions, `the goblin's Conditions at ${at}`);
+      });
+      assert.deepEqual(off, [], "out of line by more than 1 px");
+    } finally {
+      for (const effectId of added) await ops.send({ t: "actor.effect.remove", target: { tokenId: run.goblin.id }, effectId }).catch((err: unknown) => console.error("fu31-i: a condition stayed", err));
+    }
+  });
+
   test("10. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

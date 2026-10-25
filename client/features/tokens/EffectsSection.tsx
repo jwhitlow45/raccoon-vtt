@@ -138,23 +138,23 @@ export function EffectsSection(props: {
         {props.effects.length > 0 ? (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
             {props.effects.map((effect) => (
-              <li key={effect.id} style={{ display: "flex", gap: theme.space(1) }}>
+              <li key={effect.id} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
                 <button
                   type="button"
                   data-effect-row={effect.id}
                   onClick={() => setDetail({ mode: "edit", effectId: effect.id })}
-                  style={rowButton}
+                  style={props.canEdit && effectCount(effect) !== null ? countedRow : rowButton}
                 >
                   <EffectIcon effect={effect} />
                   <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
                     <span style={{ display: "block", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, fontVariantNumeric: "tabular-nums" }}>{effectChip(effect).label}</span>
                     {effect.duration ? (
-                      <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.textMuted }}>
+                      <span style={{ ...UNDER_NAME, fontSize: theme.font.small, color: theme.color.textMuted }}>
                         {describeDuration(view, effect.duration)}
                       </span>
                     ) : null}
                     {effect.hiddenFromPlayers ? (
-                      <span style={{ display: "block", fontSize: theme.font.small, color: theme.color.warning }}>Hidden from players</span>
+                      <span style={{ ...UNDER_NAME, fontSize: theme.font.small, color: theme.color.warning }}>Hidden from players</span>
                     ) : null}
                   </span>
                   <span style={{ color: theme.color.textMuted }}>
@@ -193,7 +193,7 @@ function CountSteps(props: { effect: Effect; target: ActorTarget }) {
   const set = (level: number) => actions.dispatch({ t: "actor.effect.update", target: props.target, effectId: props.effect.id, patch: { level } });
   const name = effectChip({ ...props.effect, level: undefined }).label;
   return (
-    <span style={{ flex: "none", display: "flex", gap: theme.space(1) }}>
+    <span style={{ flex: "none", marginInlineStart: "auto", display: "flex", gap: theme.space(1) }}>
       <SmallButton icon="minus" label={`${name}: one less`} disabled={count <= min} onClick={() => set(count - 1)} />
       <SmallButton icon="plus" label={`${name}: one more`} disabled={count >= max} onClick={() => set(count + 1)} />
     </span>
@@ -218,6 +218,16 @@ const rowButton = {
   fontFamily: theme.font.body,
   cursor: "pointer",
 } as const;
+
+/**
+ * A counted effect's row beside its − and +: as wide as its name's line
+ * asks, so where the name does not fit beside them, they go under the row
+ * at its end, and the row keeps the touch height of the others rather than
+ * wrapping "Exhaustion" from its "2" (LP22-ALIGN-5). The lines under the
+ * name ask for no width of their own, so they wrap inside the row.
+ */
+const countedRow = { ...rowButton, flex: "1 1 auto", width: "auto" } as const;
+const UNDER_NAME = { display: "block", width: 0, minWidth: "100%" } as const;
 
 /** Every condition and status as an icon tile. A tap opens its rules text and the form to add it. */
 export function EffectPicker(props: { present: Effect[]; onPick(key: EffectKey): void }) {
