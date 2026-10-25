@@ -79,7 +79,8 @@ export function HomeHeader(props: { title?: string; tagline?: string; actions?: 
         <h1 style={{ margin: 0, fontSize: theme.font.display, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>{props.title ?? "RaccoonVTT"}</h1>
         {props.tagline ? <p style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.body14 }}>{props.tagline}</p> : null}
       </div>
-      {props.actions ? <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>{props.actions}</div> : null}
+      {/* As the docs bar's buttons do (features/guide/DocsHeader.tsx): wrapped under the name, they fill that line and keep to its right. */}
+      {props.actions ? <div style={{ display: "flex", flex: "1 0 auto", justifyContent: "flex-end", gap: theme.space(2), flexWrap: "wrap" }}>{props.actions}</div> : null}
     </header>
   );
 }

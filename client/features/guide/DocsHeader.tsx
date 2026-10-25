@@ -24,7 +24,12 @@ export function DocsTopBar(props: { actions: ReactNode }) {
       <p style={{ flex: "1 1 auto", margin: 0, fontSize: theme.font.body14, fontWeight: theme.weight.bold }}>
         RaccoonVTT <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>Docs</span>
       </p>
-      <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>{props.actions}</div>
+      {/*
+       * Wrapped under the name, the buttons fill that line and keep to its
+       * right, where they stand beside the name on a wider screen, rather
+       * than sit alone at its start (the alignment check's lone part).
+       */}
+      <div style={{ display: "flex", flex: "1 0 auto", justifyContent: "flex-end", gap: theme.space(2), flexWrap: "wrap" }}>{props.actions}</div>
     </div>
   );
 }
