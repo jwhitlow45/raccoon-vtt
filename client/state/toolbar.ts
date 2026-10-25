@@ -28,3 +28,16 @@ export function tuckEvent(scope: RoomScope, active: string, e: TuckEvent): void 
   const tucked = tuckAfter(store.getState().tucked, active, e);
   if (tucked !== store.getState().tucked) store.setState({ tucked });
 }
+
+/**
+ * What the tool's key last said (docs/design-v1-tool-cycle.md 4.3): "Area:
+ * Sphere", or why the press held. A slot of its own, so a press re-renders
+ * the status alone and not the Room page, which reads `toolbarSlot`. `key`
+ * is new each time, so words that repeat are said again.
+ */
+export const toolVoiceSlot = scopeSlot<StoreApi<{ key: number; text: string }>>(() => createStore(() => ({ key: 0, text: "" })));
+
+export function sayTool(scope: RoomScope, text: string): void {
+  const voice = scope.get(toolVoiceSlot);
+  voice.setState({ key: voice.getState().key + 1, text });
+}

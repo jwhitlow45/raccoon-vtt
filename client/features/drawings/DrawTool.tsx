@@ -14,6 +14,7 @@ import { ChoiceTiles, ConfirmButton, Labelled, OptButton, OptInput, OptionsStrip
 import { DRAWING_TURNED_OFF } from "./gate.ts";
 import { eraseTarget, estimateEm, fillable, fillFor, simplifyStroke } from "./geometry.ts";
 import { accessOf, DRAW_MODES, drawSlot, pickDrawMode, type DrawMode, type DrawToolState } from "./store.ts";
+import { drawCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -519,6 +520,7 @@ export const drawTool: ToolDef = {
     tool.openedAs = null;
   },
   Options: DrawOptions,
+  cycle: drawCycle,
   // A player the DM has not let draw has no Draw tool, unless drawings of their own are there to erase.
   hidden: (s) => accessOf(s) === "none",
 };

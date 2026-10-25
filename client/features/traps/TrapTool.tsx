@@ -11,6 +11,7 @@ import { doorUnder, sameDoor } from "../doors/doors.ts";
 import { DOOR_SLOP_PX } from "../doors/tap.ts";
 import { ChoiceRows, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
+import { trapCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
 import { BAND_NAMES, newTrapInput, rectBetween, START_ALARM, START_BLANK, startChoices, startKind, tapRect, trapAt, wireBetween, wireEnd, withRect, type ZoneKind } from "./rules.ts";
@@ -309,5 +310,6 @@ export const trapTool: ToolDef = {
     slot.store.setState({ draft: null, picking: null, paneId: null });
   },
   Options: TrapOptions,
+  cycle: trapCycle,
 };
 

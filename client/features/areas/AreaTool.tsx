@@ -45,6 +45,7 @@ import {
   updateTemplate,
   type AreaEnv,
 } from "./store.ts";
+import { areaCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -361,6 +362,7 @@ export const areaTool: ToolDef = {
     resetAreaTool(ctx.scope.get(areaSlot), ctx.actions);
   },
   Options: AreaOptions,
+  cycle: areaCycle,
 };
 
 /**

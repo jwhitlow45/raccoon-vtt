@@ -837,11 +837,15 @@ export function MapStage(props: {
       const node = { x: () => moved.x + dx, y: () => moved.y + dy, position: () => {} };
       dragStopsRef.current.press(node, moved, parts.named);
     };
+    // A tool's key moves nothing of the tool's while it follows a pointer (docs/design-v1-tool-cycle.md 2.7).
+    const busy = () => toolPointerRef.current !== null;
     slot.zoom = zoomBy;
     slot.nudge = nudge;
+    slot.busy = busy;
     return () => {
       if (slot.zoom === zoomBy) slot.zoom = null;
       if (slot.nudge === nudge) slot.nudge = null;
+      if (slot.busy === busy) slot.busy = null;
     };
   }, [scope, store, scheduleCam]);
 

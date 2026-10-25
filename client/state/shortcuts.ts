@@ -3,17 +3,19 @@ import type { Token } from "#shared/model.ts";
 import { drawsAllowed } from "#shared/permissions.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
+import { popoverSlot } from "../components/popoverRules.ts";
 import { keyChanges, useKeyChanges } from "../features/device/settings.ts";
 import { ownsEntry, sortedEntries, turnOp, turnStatus } from "../features/encounter/logic.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
+import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
 import { noteKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { keyLabel, keysInEffect, pressKeys, sameKey, type KeyChanges, type KeyMap } from "./keyBindings.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
-import { tuckEvent } from "./toolbar.ts";
+import { sayTool, tuckEvent } from "./toolbar.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "./view.ts";
@@ -115,11 +117,14 @@ export function undoShortcut(e: KeyPress): "undo" | "redo" | null {
   return e.shiftKey ? "redo" : "undo";
 }
 
+/** A tool as the table needs it: its id, and for the status the name and the main choice its key moves through. */
+export type ShortcutTool = { id: string; label?: string; cycle?: ToolCycle };
+
 /** What a shortcut works with: the Room page's state, actions and its own scope. */
 export type ShortcutEnv = {
   role: "dm" | "player";
-  /** The toolbar's tools for the role (features/tools.ts toolsFor), passed in so this table loads without them. */
-  tools: readonly { id: string }[];
+  /** The toolbar's tools for the role (features/tools.ts toolsFor), passed in so this table loads without them, with each one's main choice. */
+  tools: readonly ShortcutTool[];
   getState(): RoomView;
   actions: RoomActions;
   ui: RoomUi;
@@ -159,6 +164,8 @@ export type Shortcut = {
 export const stageKeysSlot = scopeSlot(() => ({
   nudge: null as ((dx: number, dy: number) => void) | null,
   zoom: null as ((factor: number) => void) | null,
+  /** Whether the active tool follows a pointer on the map now, a drag or a press not yet lifted, which a tool's key leaves alone. */
+  busy: null as (() => boolean) | null,
 }));
 
 /**
@@ -218,12 +225,49 @@ function toolShortcut(id: string, key: string, does: string, roles: Shortcut["ro
       const s = env.getState();
       return drawsAllowed(s.view?.meta.settings ?? {}, s.you?.memberId ?? "");
     },
-    // The key of the tool in use shows its tucked options again, and never tucks them, so a held or repeated key never hides them (docs/design-v1-tool-options.md 5.5).
-    run: (env) => {
-      if (env.getState().local.tool === id) tuckEvent(env.scope, id, { kind: "show", tool: id });
-      else env.ui.setTool(id);
+    run: (env, e) => {
+      if (env.getState().local.tool !== id) {
+        env.ui.setTool(id);
+        return;
+      }
+      // The key of the tool in use shows its tucked options again, and never tucks them, so a held or repeated key never hides them (docs/design-v1-tool-options.md 5.5).
+      tuckEvent(env.scope, id, { kind: "show", tool: id });
+      cycleTool(env, id, e.shiftKey && hasCase(shortcutKeys()[`tool:${id}`] ?? key));
     },
   };
+}
+
+/**
+ * Whether a binding is a letter with case, where Shift goes back. A digit
+ * or a symbol may need Shift just to be typed on this layout (`?`, a French
+ * keyboard's digits), so there every press goes forward
+ * (docs/design-v1-tool-cycle.md 2.3).
+ */
+function hasCase(binding: string): boolean {
+  return binding.toUpperCase() !== binding;
+}
+
+/**
+ * A second press of the tool's key moves to the next option of its main
+ * choice (docs/design-v1-tool-cycle.md 4.1). It moves nothing while the
+ * tool's state shows no choice or a drag on the map is under way, and says
+ * why instead where a move would lose work. A move closes any open
+ * popover first, as a tool change does, and says where it landed.
+ */
+function cycleTool(env: ShortcutEnv, id: string, back: boolean): void {
+  const tool = env.tools.find((t) => t.id === id);
+  const choice = tool?.cycle?.now(env);
+  if (!tool?.cycle || !choice) return;
+  if (env.scope.get(stageKeysSlot).busy?.()) return;
+  if (choice.held) {
+    sayTool(env.scope, choice.held);
+    return;
+  }
+  const next = cycleStep(choice.options, choice.value, back);
+  if (next === null) return;
+  env.scope.get(popoverSlot).closeOpen("state");
+  tool.cycle.pick(env, next);
+  sayTool(env.scope, `${tool.label ?? id}: ${choice.options.find((o) => o.value === next)?.label ?? next}`);
 }
 
 /** Sends ops for several tokens as one undo step. */
@@ -927,7 +971,7 @@ export function shortcutFor(e: KeyPress, env: ShortcutEnv, gates: ShortcutGates,
  * The one window listener, mounted by the Room page. A "view as a player"
  * preview's page passes `preview`, so it answers no key at all.
  */
-export function useShortcuts(input: { role: "dm" | "player"; tools: readonly { id: string }[]; scope: RoomScope; preview: boolean }): void {
+export function useShortcuts(input: { role: "dm" | "player"; tools: readonly ShortcutTool[]; scope: RoomScope; preview: boolean }): void {
   const store = useRoomStore();
   const actions = useRoomActions();
   const ui = useRoomUi();

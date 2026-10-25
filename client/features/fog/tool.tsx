@@ -9,6 +9,7 @@ import { retryableLazy } from "../../lib/retryableLazy.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { fogOps, polyShape, rectShape, roomShapes, snapPoint, strokeShapes, type Point } from "./shapes.ts";
 import { fogSlot, resetFogGesture } from "./store.ts";
+import { fogCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A tap this close to the first corner closes a polygon: half a 44 px target. */
@@ -150,4 +151,5 @@ export const fogTool: ToolDef = {
       <Options />
     </Suspense>
   ),
+  cycle: fogCycle,
 };

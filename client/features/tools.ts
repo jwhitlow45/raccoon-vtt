@@ -5,6 +5,7 @@ import type { Camera, Point } from "../lib/camera.ts";
 import type { RoomScope } from "../state/scope.ts";
 import type { RoomUi } from "../state/store.ts";
 import type { RoomActions, RoomView } from "../state/types.ts";
+import type { ToolCycle } from "./toolChoices.ts";
 import { areaTool } from "./areas/AreaTool.tsx";
 import { drawTool } from "./drawings/DrawTool.tsx";
 import { rulerTool } from "./measure/RulerTool.tsx";
@@ -133,6 +134,12 @@ export type ToolDef = {
    * it must be cheap.
    */
   hidden?(state: RoomView): boolean;
+  /**
+   * The tool's main choice, which a second press of its key moves through
+   * (docs/design-v1-tool-cycle.md, features/toolChoices.ts). Left out, the
+   * key only shows the tool's tucked options.
+   */
+  cycle?: ToolCycle;
 };
 
 /**

@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { ClientOp } from "#shared/protocol.ts";
+import { popoverSlot } from "../components/popoverRules.ts";
+import { setKeyChanges } from "../features/device/settings.ts";
+import { areaSlot } from "../features/areas/store.ts";
+import { newDraft } from "../features/areas/placement.ts";
+import { builderSlot } from "../features/builder/store.ts";
+import { drawSlot } from "../features/drawings/store.ts";
+import { areaCycle, builderCycle, drawCycle, fogCycle, placeCycle, rulerCycle, SPELL_HELD, trapCycle, type ToolCycle } from "../features/toolChoices.ts";
 import { RoomScope } from "./scope.ts";
-import { toolbarSlot } from "./toolbar.ts";
+import { toolbarSlot, toolVoiceSlot } from "./toolbar.ts";
 import { keyLabel, sameKey, type KeyMap } from "./keyBindings.ts";
 import {
   BEHAVIORS,
@@ -784,3 +791,243 @@ function shortcutTables(markdown: string): Map<string, string[][]> {
   }
   return tables;
 }
+
+describe("a second press of the tool's key moves through its main choice (docs/design-v1-tool-cycle.md)", () => {
+  const CYCLES: Record<string, ToolCycle> = { ruler: rulerCycle, area: areaCycle, draw: drawCycle, fog: fogCycle, build: builderCycle, "add-token": placeCycle, trap: trapCycle };
+  const LABELS: Record<string, string> = { select: "Select", ruler: "Ruler", area: "Area", draw: "Draw", ping: "Ping", "add-token": "Add token", pin: "Pin", trap: "Trap", fog: "Fog", build: "Map builder", grid: "Line up grid" };
+
+  function room(input: { role?: "dm" | "player"; tool: string; playersDraw?: "none" | "all"; drawings?: Record<string, unknown> }) {
+    const role = input.role ?? "dm";
+    const calls = { tool: [] as string[] };
+    const state = {
+      you: { memberId: role === "dm" ? "dm1" : "p1", role },
+      sceneId: "s1",
+      local: { selectedIds: [], selectedId: null, tool: input.tool },
+      view: {
+        scenes: { s1: { id: "s1", fogEnabled: true, bounds: { w: 30, h: 20 } } },
+        templates: {},
+        tokens: {},
+        drawings: input.drawings ?? {},
+        members: {},
+        encounter: null,
+        meta: { settings: { feetPerCell: 5, ...(input.playersDraw ? { playersDraw: input.playersDraw } : {}) } },
+      },
+    };
+    const scope = new RoomScope();
+    const ids = role === "dm" ? Object.keys(LABELS) : ["select", "ruler", "area", "draw", "ping"];
+    const e: ShortcutEnv = {
+      role,
+      tools: ids.map((id) => ({ id, label: LABELS[id]!, ...(CYCLES[id] ? { cycle: CYCLES[id] } : {}) })),
+      getState: () => state as unknown as RoomView,
+      actions: { sendEph: () => {}, newId: () => "n1", dispatch: () => 1 } as unknown as RoomActions,
+      ui: { setTool: (id: string) => void calls.tool.push(id) } as unknown as RoomUi,
+      scope,
+    };
+    const said = () => scope.get(toolVoiceSlot).getState();
+    return { env: e, scope, calls, state, said };
+  }
+
+  const open = { dialogOpen: false, preview: false };
+  const hit = (e: ShortcutEnv, p: KeyPress) => {
+    const s = shortcutFor(p, e, open);
+    s?.run(e, p);
+    return s?.id ?? null;
+  };
+  const a = press({ key: "a", code: "KeyA" });
+  const shiftA = press({ key: "A", code: "KeyA", shiftKey: true });
+  const shape = (scope: RoomScope) => scope.get(areaSlot).store.getState().shape;
+
+  test("A with another tool in use picks Area, its shape as it was, and says nothing", () => {
+    const r = room({ tool: "ruler" });
+    r.scope.get(areaSlot).store.setState({ shape: "cube" });
+    assert.equal(hit(r.env, a), "tool:area");
+    assert.deepEqual(r.calls.tool, ["area"]);
+    assert.equal(shape(r.scope), "cube");
+    assert.deepEqual(r.said(), { key: 0, text: "" });
+  });
+
+  test("A, then A: the next shape, said once each time, and Shift+A goes back, past the start to Emanation", () => {
+    const r = room({ tool: "area" });
+    hit(r.env, a);
+    assert.equal(shape(r.scope), "sphere");
+    assert.deepEqual(r.said(), { key: 1, text: "Area: Sphere" });
+    hit(r.env, shiftA);
+    assert.equal(shape(r.scope), "cone");
+    hit(r.env, shiftA);
+    assert.equal(shape(r.scope), "emanation");
+    assert.deepEqual(r.said(), { key: 3, text: "Area: Emanation" });
+    for (let i = 0; i < 6; i++) hit(r.env, a);
+    assert.equal(shape(r.scope), "emanation", "six presses go round the six shapes");
+    assert.equal(r.calls.tool.length, 0, "the tool stays");
+  });
+
+  test("a held key moves once, and Caps Lock never reverses", () => {
+    const r = room({ tool: "area" });
+    hit(r.env, a);
+    for (let i = 0; i < 5; i++) assert.equal(hit(r.env, press({ key: "a", code: "KeyA", repeat: true })), null);
+    assert.equal(shape(r.scope), "sphere");
+    hit(r.env, press({ key: "A", code: "KeyA" }));
+    assert.equal(shape(r.scope), "cylinder", "an A typed with Caps Lock goes forward");
+  });
+
+  test("tucked by a tap, A shows the options and moves in the same press", () => {
+    const r = room({ tool: "area" });
+    r.scope.get(toolbarSlot).setState({ tucked: "area" });
+    hit(r.env, a);
+    assert.equal(r.scope.get(toolbarSlot).getState().tucked, null);
+    assert.equal(shape(r.scope), "sphere");
+  });
+
+  test("tucked while placing Fireball, A shows the options, keeps the spell and says why", () => {
+    const r = room({ tool: "area" });
+    const area = r.scope.get(areaSlot).store;
+    area.setState({ draft: { ...newDraft("d1", "sphere", "#fff"), spell: "Fireball" } });
+    r.scope.get(toolbarSlot).setState({ tucked: "area" });
+    hit(r.env, a);
+    assert.equal(r.scope.get(toolbarSlot).getState().tucked, null, "shown");
+    assert.equal(area.getState().draft?.spell, "Fireball");
+    assert.equal(area.getState().draft?.shape, "sphere");
+    assert.deepEqual(r.said(), { key: 1, text: SPELL_HELD });
+  });
+
+  test("a press during a drag on the map moves nothing and says nothing, and moves again once it lifts", () => {
+    const r = room({ tool: "draw" });
+    let dragging = true;
+    r.scope.get(stageKeysSlot).busy = () => dragging;
+    hit(r.env, press({ key: "d", code: "KeyD" }));
+    assert.equal(r.scope.get(drawSlot).store.getState().mode, "free", "the stroke goes on as Pen");
+    assert.equal(r.said().key, 0);
+    dragging = false;
+    hit(r.env, press({ key: "d", code: "KeyD" }));
+    assert.equal(r.scope.get(drawSlot).store.getState().mode, "line");
+  });
+
+  test("D eight times from Pen goes through Eraser and back to Pen, saying each", () => {
+    const r = room({ tool: "draw" });
+    const seen: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      hit(r.env, press({ key: "d", code: "KeyD" }));
+      seen.push(r.said().text);
+    }
+    assert.deepEqual(seen, ["Draw: Line", "Draw: Arrow", "Draw: Box", "Draw: Circle", "Draw: Shape", "Draw: Text", "Draw: Eraser", "Draw: Pen"]);
+  });
+
+  test("a held press, and the drag's, leave an open pop-up as it is, and a moving press closes it first", () => {
+    const r = room({ tool: "draw" });
+    const closed: string[] = [];
+    const room_ = r.scope.get(popoverSlot);
+    room_.open({ key: "stroke", where: () => "elsewhere", close: (why) => void (closed.push(why), room_.release("stroke")) });
+    r.scope.get(drawSlot).store.setState({ mode: "polygon", draft: { kind: "polygon", points: [1, 1, 2, 2] } });
+    hit(r.env, press({ key: "d", code: "KeyD" }));
+    assert.deepEqual(closed, [], "held");
+    r.scope.get(drawSlot).store.setState({ mode: "free", draft: null });
+    r.scope.get(stageKeysSlot).busy = () => true;
+    hit(r.env, press({ key: "d", code: "KeyD" }));
+    assert.deepEqual(closed, [], "a drag");
+    r.scope.get(stageKeysSlot).busy = null;
+    hit(r.env, press({ key: "d", code: "KeyD" }));
+    assert.deepEqual(closed, ["state"]);
+    assert.equal(r.scope.get(drawSlot).store.getState().mode, "line");
+  });
+
+  test("D for a player whose drawing rights are off, with the eraser-only Draw in use, does nothing, as today", () => {
+    const drawings = { d1: { id: "d1", sceneId: "s1", kind: "free", ownerId: "p1" } };
+    const r = room({ role: "player", tool: "draw", playersDraw: "none", drawings });
+    r.scope.get(drawSlot).store.setState({ mode: "erase" });
+    assert.equal(hit(r.env, press({ key: "d", code: "KeyD" })), null);
+    assert.equal(r.scope.get(drawSlot).store.getState().mode, "erase");
+    assert.equal(r.said().key, 0);
+  });
+
+  test("V, P, M and G pressed again only show tucked options, and say nothing", () => {
+    for (const [tool, key] of [["select", "v"], ["ping", "p"], ["pin", "m"], ["grid", "g"]] as const) {
+      const r = room({ tool });
+      r.scope.get(toolbarSlot).setState({ tucked: tool });
+      assert.equal(hit(r.env, press({ key, code: `Key${key.toUpperCase()}` })), `tool:${tool}`);
+      assert.equal(r.scope.get(toolbarSlot).getState().tucked, null, tool);
+      assert.equal(r.said().key, 0, tool);
+    }
+  });
+
+  test("B on a shape room with corners holds, and the status says why", () => {
+    const r = room({ tool: "build" });
+    r.scope.get(builderSlot).store.setState({ mode: "poly", poly: [{ x: 1, y: 1 }, { x: 2, y: 1 }] });
+    hit(r.env, press({ key: "b", code: "KeyB" }));
+    assert.equal(r.scope.get(builderSlot).store.getState().poly.length, 2);
+    assert.deepEqual(r.said(), { key: 1, text: "Close or cancel the room first." });
+    hit(r.env, press({ key: "b", code: "KeyB" }));
+    assert.deepEqual(r.said(), { key: 2, text: "Close or cancel the room first." }, "a repeat is said again");
+  });
+
+  test("B ten times from Brush, then once more, and Shift+B from Brush: Stamp", () => {
+    const r = room({ tool: "build" });
+    const seen: string[] = [];
+    for (let i = 0; i < 11; i++) {
+      hit(r.env, press({ key: "b", code: "KeyB" }));
+      seen.push(r.said().text.replace("Map builder: ", ""));
+    }
+    assert.deepEqual(seen, ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]);
+    hit(r.env, press({ key: "B", code: "KeyB", shiftKey: true }));
+    assert.equal(r.scope.get(builderSlot).store.getState().mode, "stamp");
+  });
+
+  test("a moved key moves the choice: Area on K, Shift goes back on a moved letter with case, and a moved symbol always goes forward", () => {
+    try {
+      setKeyChanges({ "tool:area": "k" });
+      const r = room({ tool: "area" });
+      assert.equal(hit(r.env, a), null, "A does nothing");
+      hit(r.env, press({ key: "k", code: "KeyK" }));
+      assert.equal(shape(r.scope), "sphere");
+      hit(r.env, press({ key: "K", code: "KeyK", shiftKey: true }));
+      assert.equal(shape(r.scope), "cone");
+
+      setKeyChanges({ "tool:area": "ñ" });
+      // A Spanish layout's Ñ, with Shift, at the key QWERTY has the semicolon on.
+      hit(r.env, press({ key: "Ñ", code: "Semicolon", shiftKey: true }));
+      assert.equal(shape(r.scope), "emanation", "back one shape");
+
+      setKeyChanges({ "tool:area": "!" });
+      hit(r.env, press({ key: "!", code: "Digit1", shiftKey: true }));
+      assert.equal(shape(r.scope), "cone", "Shift+1 goes forward");
+      hit(r.env, press({ key: "!", code: "Digit1", shiftKey: true }));
+      assert.equal(shape(r.scope), "sphere");
+
+      setKeyChanges({ "tool:area": "1" });
+      // AZERTY: 1 takes Shift.
+      hit(r.env, press({ key: "1", code: "Digit1", shiftKey: true }));
+      assert.equal(shape(r.scope), "cylinder", "a digit always goes forward");
+
+      setKeyChanges({ "tool:area": "q" });
+      // The binding decides, not what the key types: a layout whose Q key types a quote reaches Q by its place, and Shift still goes back.
+      hit(r.env, press({ key: '"', code: "KeyQ", shiftKey: true }));
+      assert.equal(shape(r.scope), "sphere", "back one shape");
+    } finally {
+      setKeyChanges({});
+    }
+  });
+
+  test("500 random presses with and without Shift on each tool's list: the choice sits at the forward presses less the back ones, round the list", () => {
+    // A fixed seed, so a failure repeats.
+    let seed = 20261025;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    const keyed = SHORTCUTS.filter((s) => s.id.startsWith("tool:") && CYCLES[s.id.slice(5)]);
+    assert.ok(keyed.length >= 6, "every cycling tool with a key is run");
+    for (const s of keyed) {
+      const id = s.id.slice(5);
+      const r = room({ tool: id });
+      const cycle = CYCLES[id]!;
+      const first = cycle.now(r.env)!;
+      const n = first.options.length;
+      const start = first.options.findIndex((o) => o.value === first.value);
+      let net = 0;
+      for (let i = 0; i < 500; i++) {
+        const back = random() < 0.4;
+        const letter = s.key!;
+        hit(r.env, press({ key: back ? letter.toUpperCase() : letter, code: `Key${letter.toUpperCase()}`, shiftKey: back }));
+        net += back ? -1 : 1;
+        const at = cycle.now(r.env)!.options.findIndex((o) => o.value === cycle.now(r.env)!.value);
+        assert.equal(at, (((start + net) % n) + n) % n, `${id} after press ${i + 1}`);
+      }
+    }
+  });
+});

@@ -25,6 +25,7 @@ import {
 import { MEASURES, pickMeasure, publish, rulerSlot, shares } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, walkShown, walkText } from "./walkRuler.ts";
+import { rulerCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -297,4 +298,5 @@ export const rulerTool: ToolDef = {
     if (tool.activeCtx === ctx) tool.activeCtx = null;
   },
   Options: RulerOptions,
+  cycle: rulerCycle,
 };

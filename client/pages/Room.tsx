@@ -71,7 +71,7 @@ import { IconButton } from "../components/IconButton.tsx";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type PopoverHandle } from "../components/Popover.tsx";
 import { popoverSlot } from "../components/popoverRules.ts";
-import { toolbarSlot, toolChanged, tuckEvent } from "../state/toolbar.ts";
+import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -1097,6 +1097,7 @@ function RoomPage() {
           onShowSide={showSidePanel}
           named={!wide || touchFirst}
         />
+        <ToolVoice />
       </div>
       {wide ? (
         <SidePanel
@@ -1899,6 +1900,21 @@ function toastWords(t: Toast): string {
  * record of what it has said stays in the Room's scope, and its region
  * starts empty in a new place, so a move or a blackout says nothing again.
  */
+/**
+ * What a tool's key said (docs/design-v1-tool-cycle.md 4.3), "Area:
+ * Sphere", in a polite status beside the toolbar, mounted with it, so a
+ * phone's sheet over the options never takes it away. It alone reads its
+ * slot, so a press re-renders it and not the page.
+ */
+function ToolVoice() {
+  const said = useStore(useScoped(toolVoiceSlot));
+  return (
+    <div role="status" data-rvtt-tool-status="" style={VISUALLY_HIDDEN}>
+      <span key={said.key}>{said.text}</span>
+    </div>
+  );
+}
+
 function ToastVoice(props: { toasts: readonly Toast[] }) {
   const voice = useScoped(toastVoiceSlot);
   const slot = useModalSlot("status");

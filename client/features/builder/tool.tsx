@@ -31,6 +31,7 @@ import { builderSlot, resetGesture } from "./store.ts";
 import { withStampMode } from "./stamps/pointer.ts";
 import { withHeightMode } from "./heights/pointer.ts";
 import { withLightMode } from "../lights/pointer.ts";
+import { builderCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** Brush strokes send what they painted this often (design 12): a few ops a second, never one per cell. */
@@ -287,4 +288,5 @@ export const builderTool: ToolDef = {
       <Options />
     </Suspense>
   ),
+  cycle: builderCycle,
 };

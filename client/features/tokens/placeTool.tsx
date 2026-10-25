@@ -8,6 +8,7 @@ import { placeOnGround } from "../movement/ground.ts";
 import type { Point } from "./factory.ts";
 import { pendingTokens } from "./placeInputs.ts";
 import { BLANK_KINDS, PLACE_TOOL_ID, describePending, placementSlot, resetPending, setPending, type Pending } from "./placement.ts";
+import { placeCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A tap moves less than this on screen. More is a slip of the finger, and places nothing. */
@@ -67,6 +68,7 @@ export const placeTool: ToolDef = {
     resetPending(ctx.scope);
   },
   Options: PlaceOptions,
+  cycle: placeCycle,
 };
 
 /**
