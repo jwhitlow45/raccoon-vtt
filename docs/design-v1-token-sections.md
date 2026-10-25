@@ -306,3 +306,8 @@ S2 placed the list and the switch in the panel and the page, and settled the oth
   - Nothing is out of line by more than 1 px on the panel's Combat, Uses with pips at maxima 3 and 10, Reaction, the attach controls, Token settings and a lent player's Stats, or on the page's Combat, at the three sizes.
 - **Not fixed here**: at 390 x 844 at 130% Position's Elevation and Facing labels wrap by `FieldRow`'s own basis (docs/design-v1-polish.md R2), from before S2. The check measures the attach controls alone.
 - **Tests**: the order, presence and summary rules are in panelOrder.test.ts. The e2e steps are prefixed `s2-` in tokenpanel, combatuses, classresources, characters, companions, attach and barrest, each with its alignment check inside it. The alignment sweep's class resources root now reads the Uses section. Stats' maxima are checked in StatsSection.test.ts and tokenpanel. combatuses' `setUp` waits up to 75 s for Connected, since the desk and the op socket share one session and its many reloads meet the server's snapshot budget, which delays rather than refuses (server/rooms/budgets.ts).
+
+### Live play 22
+
+- **The list's name** (7, Screen readers): a character's class resources stand in a list of their own under Uses, named "Thorn's uses" where it is the only list, and "Thorn's class resources" beside a block's uses or a skipped prompt, which keep "Thorn's uses".
+- **ResourceSheet's focus** (7, Keys and focus): Remove takes the resource's Edit with it, and an answered level-up takes its line's Update. Focus then goes to "Add a class resource", else the section's first control, never the page (classresources lp22-cr-a).
