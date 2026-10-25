@@ -1,4 +1,6 @@
-import type { TokenKind } from "#shared/model.ts";
+import type { RoomState, TokenKind } from "#shared/model.ts";
+import { reactionTarget } from "../encounter/ready.ts";
+import type { SelfRef } from "./durations.ts";
 
 /*
  * The token panel's order (docs/design-v1-token-panel.md 3.5), ranked by
@@ -14,11 +16,13 @@ export type PanelSectionId =
   | "statBlock"
   | "hp"
   | "conditions"
+  | "uses"
+  | "reaction"
   | "position"
+  | "attach"
   | "rangeRings"
   | "notes"
   | "rest"
-  | "resources"
   | "sight"
   | "stats"
   | "settings"
@@ -41,25 +45,52 @@ export type PanelOrderInput = {
   ownerRenames: boolean;
   /**
    * The token is a character's and the viewer is the DM or plays it, so it
-   * holds the character's class resources (docs/design-v1-combat-controls.md 7.2).
+   * holds the character's class resources (docs/design-v1-combat-controls.md 7.2),
+   * which its Uses lists and adds to.
    */
   classResources?: boolean;
+  /** Whether the creature has uses to show this viewer (CombatUses.tsx useUsesPresence), as the bar's Uses button reads it. */
+  uses?: "yes" | "loading" | "no";
+  /** The viewer may mark the creature's Reaction used in the fight (encounter/ReactionSection.tsx reactionFor). */
+  reaction?: boolean;
+  /** The bar offers this viewer an attach control for the token (attach/detach.ts attachControls). */
+  attach?: boolean;
+  /** The DM locked the token, which keeps its size from its owners. */
+  locked?: boolean;
+  /** A companion's owner who is not the DM, who dismisses it in Delete's place (access.ts `dismiss`). */
+  dismiss?: boolean;
 };
+
+/**
+ * Combat's sections in their order (docs/design-v1-token-sections.md 3):
+ * what a fight changes turn by turn first, then the rings, which are set
+ * once and read on the map, then Rest. A character's page keeps the same
+ * order without the rings (cardCombat).
+ */
+const COMBAT: readonly PanelSectionId[] = ["hp", "conditions", "uses", "reaction", "rangeRings", "rest"];
 
 export function panelSections(input: PanelOrderInput): PanelSectionId[] {
   const { dm, owner } = input;
   const full = dm || owner;
   const out: PanelSectionId[] = ["name", "image"];
   if (input.statBlockShown) out.push("statBlock");
-  out.push("hp", "conditions", "position", "rangeRings", "notes");
+  out.push("hp", "conditions");
+  // Uses never reach anyone else, whose copy holds none of a creature's uses. A character's always stand for the DM and its players, so Add is reached with none yet.
+  if (full && (input.classResources === true || (input.uses ?? "no") !== "no")) out.push("uses");
+  if (input.reaction) out.push("reaction");
+  if (full) out.push("position");
+  // Whoever the bar offers Attach, Get off, Let go or Put down gets the same here, a player who is not an owner included (D-261024-40).
+  if (input.attach) out.push("attach");
+  out.push("rangeRings", "notes");
   if (full && input.kind !== "object") out.push("rest");
-  if (input.classResources) out.push("resources");
-  out.push("sight");
-  if (full && input.actor) out.push("stats");
+  if (full) out.push("sight");
+  // A player lent a character's token holds no stat card, but sizes the token from the bar while it is unlocked, so Stats holds that Size alone.
+  if ((full && input.actor) || (owner && input.locked !== true)) out.push("stats");
   if (dm || input.ownerRenames) out.push("settings");
   // Next to Owners, which a companion's link decides.
   if (input.companion && full) out.push("companion");
-  if (dm) out.push("owners", "remove");
+  if (dm) out.push("owners");
+  if (dm || input.dismiss === true) out.push("remove");
   return out;
 }
 
@@ -73,10 +104,11 @@ export function offersMakeCompanion(input: Pick<PanelOrderInput, "dm" | "kind" |
 }
 
 /**
- * Whether a token's panel holds its character's Class resources: on a
- * character's token, for the DM and the character's players
- * (docs/design-v1-combat-controls.md 7.2). A player lent only the token
- * holds nothing of the character's card, its resources included.
+ * Whether a token's panel holds its character's class resources, which its
+ * Uses lists, edits and adds to: on a character's token, for the DM and
+ * the character's players (docs/design-v1-combat-controls.md 7.2). A
+ * player lent only the token holds nothing of the character's card, its
+ * resources included.
  */
 export function holdsClassResources(input: { dm: boolean; character: boolean; playsCharacter: boolean }): boolean {
   return input.character && (input.dm || input.playsCharacter);
@@ -95,8 +127,7 @@ export type PanelGroupsInput = PanelOrderInput & {
   image: boolean;
 };
 
-const COMBAT: readonly PanelSectionId[] = ["hp", "conditions", "rangeRings", "rest", "resources"];
-const PLACE: readonly PanelSectionId[] = ["position", "sight"];
+const PLACE: readonly PanelSectionId[] = ["position", "attach", "sight"];
 const SETUP: readonly PanelSectionId[] = ["stats", "settings", "companion", "owners", "remove"];
 
 /**
@@ -107,10 +138,10 @@ const SETUP: readonly PanelSectionId[] = ["stats", "settings", "companion", "own
  * against its neighbors, and a group with nothing in it is not drawn.
  *
  * The quick numbers and the picture stand in the name's header, the
- * picture's buttons in Image. Position is the DM's and the owners': a player
- * looking at another creature reads its elevation in the quick numbers,
- * and Sight shows them nothing. Notes shows only with a note to read or
- * write.
+ * picture's buttons in Image. Position is the DM's and the owners', and a
+ * viewer's the bar offers an attach control, who sees those controls
+ * alone: a player looking at another creature reads its elevation in the
+ * quick numbers. Notes shows only with a note to read or write.
  */
 export function panelGroups(input: PanelGroupsInput): PanelPart[] {
   const sections = panelSections(input);
@@ -126,7 +157,7 @@ export function panelGroups(input: PanelGroupsInput): PanelPart[] {
   alone(["name", "statBlock"]);
   group("combat", COMBAT);
   if (input.notes) group("notes", ["notes"]);
-  if (input.dm || input.owner) group("position", PLACE);
+  group("position", PLACE);
   if (input.image) group("image", ["image"]);
   alone(SETUP);
   return out;
@@ -137,6 +168,29 @@ export function panelRelation(input: Pick<PanelOrderInput, "dm" | "owner">): "ow
   return input.dm || input.owner ? "own" : "other";
 }
 
+/**
+ * Whether the creature's Reaction is spent in the fight, which every viewer
+ * reads in the row's "Reaction used" tag and so in Combat's summary: its
+ * row's, or a companion's own while it shares its character's turn.
+ */
+export function reactionSpent(view: Pick<RoomState, "tokens" | "characters" | "encounter"> | null | undefined, self: SelfRef): boolean {
+  const answer = reactionTarget(view, self);
+  if (!answer || !view) return false;
+  if (answer.kind === "companion") return view.tokens[answer.tokenId]?.companion?.reactionUsed === true;
+  return view.encounter?.entries.find((e) => e.id === answer.entryId)?.reactionUsed === true;
+}
+
+/**
+ * Combat's one-line summary while it is folded, the token panel's and a
+ * character's page's: "HP 52/60 · 1 condition · Reaction used · rings 30 ft".
+ * The rings stay last, so a summary the group's row cuts keeps what a
+ * fight changes.
+ */
+export function combatSummary(input: { hp: string; effects: number; reactionUsed: boolean; rings?: readonly number[] }): string {
+  const { effects } = input;
+  const rings = input.rings ?? [];
+  return [input.hp, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", input.reactionUsed ? "Reaction used" : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ");
+}
 
 /** A character's page, top to bottom (docs/design-v1-look-pass.md 3.1): the header, the actions row, then parts that are groups but Remove. */
 export type CardPartId = "header" | "place" | "statBlock" | "combat" | "companions" | "notes" | "image" | "stats" | "owners" | "remove";
@@ -179,4 +233,18 @@ export function cardGroups(input: CardGroupsInput): CardPartId[] {
   if (input.dm) out.push("owners");
   out.push("remove");
   return out;
+}
+
+/** The sections of a character's Combat. */
+export type CardCombatId = "hp" | "conditions" | "uses" | "reaction" | "rest";
+
+/**
+ * A character's Combat on its page, in the token panel's order with no
+ * rings, which a page with no map has none of. Uses always stands, since
+ * only the DM and the character's players open the page, and both edit
+ * its class resources. Reaction stands while the viewer may mark the
+ * character's row's (encounter/ReactionSection.tsx reactionFor).
+ */
+export function cardCombat(input: { reaction: boolean }): CardCombatId[] {
+  return input.reaction ? ["hp", "conditions", "uses", "reaction", "rest"] : ["hp", "conditions", "uses", "rest"];
 }

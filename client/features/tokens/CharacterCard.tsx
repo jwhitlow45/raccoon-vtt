@@ -12,12 +12,13 @@ import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { UsesSection } from "../combat/UsesSection.tsx";
 import { usePreview } from "../dm/previewContext.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
+import { ReactionSection, reactionFor } from "../encounter/ReactionSection.tsx";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { placeOnGround } from "../movement/ground.ts";
 import { PcStatBlock } from "../pcstats/PcStatBlock.tsx";
-import { ClassResourcesSection } from "../resources/ClassResourcesSection.tsx";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import { characterAccess } from "./access.ts";
 import { deleteWarning, sharedNote } from "./characterDelete.ts";
@@ -27,7 +28,7 @@ import { characterKind, kindLine, sizeText } from "./creatureKind.ts";
 import { EffectsSection } from "./EffectsSection.tsx";
 import { HpSection } from "./HpSection.tsx";
 import { usePanelFolds, type FoldKey } from "./panelFolds.ts";
-import { cardGroups, type CardPartId } from "./panelOrder.ts";
+import { cardCombat, cardGroups, combatSummary, reactionSpent, type CardCombatId, type CardPartId } from "./panelOrder.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
 import { onScene, playerToken } from "./playerCharacters.ts";
 import { QuickNumbers } from "./QuickNumbers.tsx";
@@ -73,6 +74,10 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
     () => characterAccess({ role: you?.role ?? "player", memberId: you?.memberId, character }),
     [you, character],
   );
+  const self = useMemo(() => ({ characterId: character.id }), [character.id]);
+  // Each a yes or no, so the page draws again only when one changes, not on every change to the room.
+  const reaction = useRoomView((s) => (s.view ? reactionFor(s.view, s.you, self) !== null : false));
+  const spent = useRoomView((s) => (s.view ? reactionSpent(s.view, self) : false));
   const { folds, slot } = usePanelFolds();
   const preview = usePreview() !== null;
   // A viewer's tap is what this device remembers. "View as a player" reads what is stored and never writes it.
@@ -106,6 +111,31 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
   const hpWords = hpUnits({ actor, hpVisibility: undefined, fullAccess: access.full }).map(unitText).join(" ");
   const noteCount = [actor.notes, access.dm ? actor.dmNotes : undefined].filter((n) => typeof n === "string" && n.trim() !== "").length;
 
+  // Combat in the token panel's order, with no rings (panelOrder.ts cardCombat).
+  const combatPart = (id: CardCombatId): ReactNode => {
+    switch (id) {
+      case "hp":
+        return (
+          <HpSection
+            key={id}
+            actor={actor}
+            hpVisibility={undefined}
+            target={{ characterId: character.id }}
+            access={{ full: access.full, hp: access.full ? "all" : "none", deathSaves: access.full, life: access.dm }}
+            name={character.name}
+          />
+        );
+      case "conditions":
+        return <EffectsSection key={id} effects={actor.effects ?? []} target={{ characterId: character.id }} self={{ characterId: character.id }} selfLabel={character.name} canEdit={access.full} />;
+      case "uses":
+        return <UsesSection key={id} target={{ characterId: character.id }} name={character.name} character={character} />;
+      case "reaction":
+        return <ReactionSection key={id} self={{ characterId: character.id }} name={character.name} />;
+      case "rest":
+        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={character.resources} />;
+    }
+  };
+
   const part = (id: CardPartId): ReactNode => {
     switch (id) {
       case "header":
@@ -128,17 +158,8 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return <PcStatBlock key={id} character={character} fold={fold("statBlock")} />;
       case "combat":
         return (
-          <Group key={id} label="Combat" icon="combat" {...fold("page.combat")} summary={[hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : ""].filter(Boolean).join(" · ")} holds="sections">
-            <HpSection
-              actor={actor}
-              hpVisibility={undefined}
-              target={{ characterId: character.id }}
-              access={{ full: access.full, hp: access.full ? "all" : "none", deathSaves: access.full, life: access.dm }}
-              name={character.name}
-            />
-            <EffectsSection effects={actor.effects ?? []} target={{ characterId: character.id }} self={{ characterId: character.id }} selfLabel={character.name} canEdit={access.full} />
-            <RestSection actor={actor} target={{ characterId: character.id }} resources={character.resources} />
-            <ClassResourcesSection character={character} />
+          <Group key={id} label="Combat" icon="combat" {...fold("page.combat")} summary={combatSummary({ hp: hpWords, effects, reactionUsed: spent })} holds="sections">
+            {cardCombat({ reaction }).map(combatPart)}
           </Group>
         );
       case "companions":

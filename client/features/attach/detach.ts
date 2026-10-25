@@ -1,6 +1,6 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { carriedGroup, getOffSpot, holderOf, isCreature, overlaps } from "#shared/rules/attach.ts";
+import { carriedGroup, carriedIndex, getOffSpot, holderOf, isCreature, overlaps } from "#shared/rules/attach.ts";
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -37,6 +37,23 @@ export function barSlots(view: RightsView, viewer: AttachViewer, token: Token): 
   if (carried && detachAllowed(view, viewer, token)) out.push("detach");
   if ((!carried || isCreature(token)) && offersAttach(view, viewer, token)) out.push("attach");
   return out;
+}
+
+/**
+ * Whether the bar offers this viewer any attach control for the token
+ * (docs/design-v1-token-sections.md 3.3), so its panel's Position holds
+ * the same: one of its own slots (barSlots), or the group line's Let go or
+ * Put down beside a token it holds, which the bar's group line offers
+ * whoever may undo that link. So the player whose creature a goblin drags
+ * gets Position on the goblin's panel with Let go for theirs, though the
+ * goblin's own bar has no slot for them.
+ */
+export function attachControls(view: RightsView, viewer: AttachViewer, token: Token): boolean {
+  if (barSlots(view, viewer, token).length > 0) return true;
+  return (carriedIndex(view.tokens).get(token.id) ?? []).some((id) => {
+    const held = view.tokens[id];
+    return held !== undefined && holderAction(held) !== null && detachAllowed(view, viewer, held);
+  });
 }
 
 /** The carried token's own button. */

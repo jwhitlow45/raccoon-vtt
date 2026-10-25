@@ -6,6 +6,7 @@ import type { ClassResource, PromptKey } from "#shared/model.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
 import { Loading } from "../../components/Loading.tsx";
+import { GROUP_BOX, GROUP_FOLD } from "../../components/Panel.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { handFocusTo } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
@@ -220,12 +221,14 @@ function reachable(el: HTMLElement | null | undefined): HTMLElement | null {
  * nearest control that stays. That is the row's first button, else the
  * list's, else the prompt card a Reopen brought back, else the turn card,
  * the drawer's first button, the drawer itself or the bar's frame that
- * held the list, else the tracker row's own button. None stays after a
+ * held the list, else the fold of the panel's group that held it (the
+ * Token panel's or a character page's Combat, whose Uses goes with its
+ * last row), else the tracker row's own button. None stays after a
  * Reopen that took its turn card away when this device had dismissed the
  * card it reopens. Focus is then left on the page, as it is when the
  * button goes only after handFocusTo stopped waiting (HAND_OFF_WAIT_MS).
  */
-function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "trackerRow", HTMLElement | null>, key: string, reopened: string | null): HTMLElement | null {
+function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "group" | "trackerRow", HTMLElement | null>, key: string, reopened: string | null): HTMLElement | null {
   const list = reachable(near.list);
   return (
     reachable(list?.querySelector<HTMLElement>(`[data-use-key="${CSS.escape(key)}"] button`)) ??
@@ -235,6 +238,7 @@ function usesFocusTarget(near: Record<"list" | "card" | "drawer" | "frame" | "tr
     reachable(reachable(near.drawer)?.querySelector<HTMLElement>("button")) ??
     reachable(near.drawer) ??
     reachable(near.frame) ??
+    reachable(reachable(near.group)?.querySelector<HTMLElement>(GROUP_FOLD)) ??
     reachable(reachable(near.trackerRow)?.querySelector<HTMLElement>("[data-row-button]"))
   );
 }
@@ -274,6 +278,7 @@ function UseLine(props: LineProps) {
       card: li.closest<HTMLElement>('[data-alert="turn"]'),
       drawer: li.closest<HTMLElement>("[data-uses-drawer]"),
       frame: li.closest<HTMLElement>('[role="dialog"][data-bar-mode]'),
+      group: li.closest<HTMLElement>(GROUP_BOX),
       trackerRow: li.closest<HTMLElement>("[data-companion-row], [data-entry-row]"),
     };
     const reopened = row.kind === "skipped" && props.record !== undefined ? reopenedCard(props.holder, props.record, row.what) : null;

@@ -157,10 +157,10 @@ async function thornsPanel(page: Page): Promise<Locator> {
   return panel;
 }
 
-/** The Class resources section in a panel. */
+/** Combat's Uses section in a panel, which lists, edits and adds a character's class resources (docs/design-v1-token-sections.md 3.1). */
 function section(scope: Locator): Locator {
   // The section whose own heading it is, not a panel's region around it.
-  return scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Class resources"]]');
+  return scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Uses"]]');
 }
 
 /** One resource's row in the section, by its name. */
@@ -532,8 +532,10 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
     await countReads(panel, "Rage", "2 of 4");
     const order = await panel.evaluate((root) => Array.from((root as unknown as DomNode).querySelectorAll("h3, h4")).map((h) => h.textContent ?? ""));
-    const rest = order.indexOf("Rest");
-    assert.ok(rest >= 0 && order[rest + 1] === "Class resources", `Class resources follows Rest: ${order.join(", ")}`);
+    // Out of the fight: Uses after Conditions, then the rings and Rest, and no Class resources heading (docs/design-v1-token-sections.md 3).
+    const conditions = order.indexOf("Conditions");
+    assert.deepEqual(order.slice(conditions, conditions + 4), ["Conditions", "Uses", "Range rings", "Rest"], `Combat's order: ${order.join(", ")}`);
+    assert.equal(order.includes("Class resources"), false, `no Class resources heading: ${order.join(", ")}`);
 
     // A use's line names the resource to everyone who sees Thorn (docs/design-v1-combat-controls.md 8), so the list and its counts are what must never reach Quin.
     for (const words of ['"resources"', "barbarian-rage", '"atLevel"']) assert.equal(quinSocket.everSaw(words), false, `Quin's copy holds ${words}`);
@@ -562,7 +564,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       }
       await section(scope).getByText("Your level went up. Update Barbarian resources?", { exact: true }).waitFor();
       await section(scope).scrollIntoViewIfNeeded();
-      await measure(page, section(scope), `the Class resources section at ${at}`);
+      await measure(page, section(scope), `the Uses section at ${at}`);
       await shots.take(page, `cr-c-section-${view.width}-${Math.round(view.scale * 100)}`);
 
       await section(scope).locator("div").filter({ hasText: /^Your level went up\. Update Barbarian resources\?Update$/ }).getByRole("button", { name: "Update" }).click();
@@ -615,9 +617,9 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
       "the Add sheet from a class",
       "the Add sheet with a subclass's two rows",
       "the Add sheet's own",
-      "the Class resources section",
       "the Edit sheet",
       "the Update sheet",
+      "the Uses section",
       "the amount field with its error",
     ]);
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
@@ -700,6 +702,34 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
     await setUp(dm, dmCdp, DESK);
+  });
+
+  test("s2-cr-a. Pat on Thorn's token panel: Uses holds Rage with Use, Restore and Edit, then Add, under no Class resources heading, and Add's sheet gives focus back to Add as it closes (docs/design-v1-token-sections.md 3.1)", async () => {
+    await setUp(pat, patCdp, PHONE);
+    const rage = stored().find((x) => x.name === "Rage")!;
+    if (rage.used === 0) await ops.send({ t: "actor.use", target: { characterId: run.thorn }, use: { kind: "resource", id: rage.id } });
+    const panel = await thornsPanel(pat);
+    const uses = section(panel);
+    await uses.scrollIntoViewIfNeeded();
+    const row_ = row(panel, "Rage");
+    await row_.getByRole("button", { name: /^Use Rage, / }).waitFor();
+    await row_.getByRole("button", { name: "Restore one use of Rage" }).waitFor();
+    await row_.getByRole("button", { name: "Edit Rage" }).waitFor();
+    assert.equal(await panel.getByRole("heading", { name: "Class resources" }).count(), 0, "no Class resources heading");
+    const add = uses.getByRole("button", { name: "Add a class resource" });
+    // Add follows the rows (UsesSection.test.ts checks the order in the markup).
+    assert.ok((await add.boundingBox())!.y > (await row_.boundingBox())!.y, "Add after the rows");
+    await shots.take(pat, "s2-cr-panel-uses");
+    await add.focus();
+    await pat.keyboard.press("Enter");
+    const opened = sheet(pat, "Add a class resource");
+    await opened.waitFor();
+    await opened.getByRole("button", { name: "Cancel", exact: true }).click();
+    await opened.waitFor({ state: "detached" });
+    await waitFor("focus back on Add", () => pat.evaluate(() => ((globalThis as unknown as Doc).document.activeElement?.textContent ?? "").trim()).then((t) => (t === "Add a class resource" ? true : null)), 5_000).catch(async () =>
+      assert.fail(`focus is on "${await pat.evaluate(() => ((globalThis as unknown as Doc).document.activeElement?.textContent ?? "").trim())}"`),
+    );
+    await closeSheets(pat);
   });
 
   test("cr-c-13. no console errors on any page", () => {

@@ -929,7 +929,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.equal(Object.keys(breeIn(anaSocket)!.ddbSync!.res ?? {}).length, 3, "the record links all three");
     await done.getByRole("button", { name: "Done", exact: true }).click();
     await done.waitFor({ state: "detached" });
-    // The Class resources section shows them, Wild Shape 1 of 3.
+    // Combat's Uses shows them, Wild Shape 1 of 3.
     const wild = ana.getByRole("button", { name: "Use Wild Shape, 1 of 3 left", exact: true });
     const panel = await breeBlock(ana);
     if ((await wild.count()) === 0) await panel.getByRole("button", { name: /^Combat/ }).first().click();

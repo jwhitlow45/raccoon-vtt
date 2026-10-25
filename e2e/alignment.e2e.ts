@@ -42,7 +42,7 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * measured at 390 x 844, 320 x 568 and 1440 x 900, at 100% and 130%, in a
  * fight of their own: Thorn dying with his class resources, an adult red
  * dragon with Fire Breath used, and a troll at 0 HP that took Fire, with
- * monsters dying at 0 HP off. Pat measures Thorn's Class resources
+ * monsters dying at 0 HP off. Pat measures Thorn's Uses
  * section with its level-up question, a pool's amount field open and with
  * its range error, the Add sheet with no class, from Barbarian 14, Ranger
  * 3 and Bard with its modifier's error, and of his own with Spend an
@@ -1091,9 +1091,9 @@ async function thornsPage(page: Page): Promise<Locator> {
   return panel;
 }
 
-/** The Class resources section in a panel: the section whose own heading it is. */
+/** Combat's Uses section in a panel, where a character's class resources are listed, edited and added: the section whose own heading it is. */
 function resourcesSection(scope: Locator): Locator {
-  return scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Class resources"]]');
+  return scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Uses"]]');
 }
 
 function resourceRow(scope: Locator, name: string): Locator {

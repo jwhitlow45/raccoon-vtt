@@ -62,7 +62,7 @@ export function TokenSight(props: { token: Token; actor: Partial<Actor> | undefi
       ) : null}
       {canLight ? (
         <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0` }}>
-          <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong }}>Light it carries</span>
+          <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong }}>Light</span>
           <LightChoices light={token.light} onChoose={(light) => update({ light })} />
         </div>
       ) : (

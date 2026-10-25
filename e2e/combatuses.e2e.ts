@@ -118,7 +118,8 @@ async function setUp(page: Page, cdp: CDPSession, view: View): Promise<void> {
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
   await openPage(page, `${server.origin}/r/${run.roomId}`);
-  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  // The DM's desk, phone and op socket share one session, and a run that reloads quickly meets the server's snapshot budget of 20 a minute a session, which delays a snapshot rather than refuse it, up to a minute (server/rooms/budgets.ts).
+  await page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 75_000 });
   await page.locator(".konvajs-content").first().waitFor();
 }
 
@@ -258,6 +259,73 @@ async function trackerSection(page: Page, heading: string): Promise<Locator> {
 /** The alerts column's cards of one kind. */
 function alerts(page: Page, kind: string): Locator {
   return page.locator(`[data-alert="${kind}"]`);
+}
+
+/** The token's panel: the side panel's Token tab from 900 px up, the Token sheet below. */
+function tokenPanel(page: Page): Locator {
+  return page.getByRole("tabpanel", { name: "Token", exact: true }).or(page.getByRole("region", { name: "Token", exact: true }));
+}
+
+/**
+ * Puts the DM's turn card away on this device. A reload brings it back,
+ * and on a phone held upright at 130% it covers the dragon's cells.
+ */
+async function dismissTurnCard(page: Page): Promise<void> {
+  const card = alerts(page, "turn");
+  await card.waitFor();
+  const show = card.getByRole("button", { name: /^Show .*'s turn$/ });
+  if (await show.isVisible()) await show.click();
+  await card.getByRole("button", { name: /^Dismiss .*'s turn$/ }).click();
+  await card.waitFor({ state: "detached" });
+}
+
+/** A creature's Token panel, from a tap on its token and Details in its bar. */
+async function creaturePanel(page: Page, name: string, at: { x: number; y: number }): Promise<Locator> {
+  await closeSheets(page);
+  await deselect(page);
+  await tapCell(page, run.bounds, at);
+  const bar = page.getByRole("dialog", { name: `${name} actions` });
+  await bar.waitFor();
+  await (await barControl(bar, "Details")).click();
+  const panel = tokenPanel(page);
+  await panel.getByRole("heading", { name, exact: true }).first().waitFor();
+  const combat = panel.getByRole("button", { name: "Combat", exact: true });
+  if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+  return panel;
+}
+
+/** A section of a panel by its own heading. */
+function sectionIn(scope: Locator, heading: string): Locator {
+  return scope.locator(`xpath=.//section[*[self::h3 or self::h4][normalize-space()="${heading}"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="${heading}"]]`);
+}
+
+/** A panel's group by the name on its fold (components/Panel.tsx Group). */
+function groupIn(scope: Locator, name: string): Locator {
+  return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
+}
+
+/** The headings of Combat's sections, in order. */
+function combatSections(panel: Locator): Promise<string[]> {
+  return groupIn(panel, "Combat").evaluate((el) => Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<{ textContent: string | null }> }).querySelectorAll("h4")).map((h) => (h.textContent ?? "").trim()));
+}
+
+/**
+ * A folded group's row and its summary: the row's height, the summary's
+ * words, the width it takes and the width its words need, whether its
+ * words are cut, and its floor, 4em of its own font (docs/design-v1-icons-2.md 3.3).
+ */
+function foldedSummary(panel: Locator, name: string): Promise<{ text: string; width: number; needs: number; cut: boolean; floor: number; row: number }> {
+  type Box = { width: number; height: number };
+  type El = { textContent: string | null; scrollWidth: number; clientWidth: number; getBoundingClientRect(): Box; querySelector(s: string): El | null };
+  return panel.getByRole("button", { name, exact: true }).evaluate((el) => {
+    const button = el as unknown as El;
+    const summary = button.querySelector("[id$='-summary']");
+    if (!summary) throw new Error("no summary on the folded row");
+    const fontSize = parseFloat((globalThis as unknown as { getComputedStyle(e: El): { fontSize: string } }).getComputedStyle(summary).fontSize);
+    // Layout px, as the floor and the words' width are: a larger interface size scales the boxes on the page.
+    const width = summary.clientWidth;
+    return { text: summary.textContent ?? "", width, needs: summary.scrollWidth, cut: summary.scrollWidth > summary.clientWidth + 1, floor: fontSize * 4, row: button.getBoundingClientRect().height };
+  });
 }
 
 /** The DM's use lines as one device's log holds them. */
@@ -1120,6 +1188,172 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
   });
+
+  test("s2-cu-a. the DM on the dragon's Token panel: Combat runs Hit Points, Conditions, Uses with Fiery Rays and the pips, Reaction, Range rings and Rest; its Uses waits under Loading the uses while the block loads; Fiery Rays from there spends a pip the row and the bar's drawer show; the pips wrap at maxima of 3 and 10 at 320 x 568 and 390 x 844 at 130%; and Combat in line, with its heights (docs/design-v1-token-sections.md 3)", async () => {
+    const before = dragon()!.legendary!;
+    const seen: string[] = [];
+    try {
+      // The SRD chunk waits, so the panel's Uses holds the list's loading line before the dragon's block lists its rows.
+      await desk.route(/\/assets\/monsters-[^/]*\.js$/, async (route) => {
+        await new Promise((r) => setTimeout(r, 8_000));
+        await route.continue();
+      });
+      await setUp(desk, deskCdp, DESK);
+      let panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
+      const uses = sectionIn(panel, "Uses");
+      await uses.getByText("Loading the uses…", { exact: true }).waitFor();
+      await uses.scrollIntoViewIfNeeded();
+      await shots.take(desk, "s2-cu-dragon-uses-loading");
+      await uses.getByRole("button", { name: /^Use Fiery Rays, legendary action, / }).waitFor();
+      await uses.getByText("Loading the uses…", { exact: true }).waitFor({ state: "detached" });
+      await desk.unroute(/\/assets\/monsters-[^/]*\.js$/);
+      assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Uses", "Reaction", "Range rings", "Rest"]);
+      for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) await uses.getByRole("group", { name, exact: true }).waitFor();
+      await uses.scrollIntoViewIfNeeded();
+      await shots.take(desk, "s2-cu-dragon-combat");
+
+      // Fiery Rays from the panel spends a legendary action, which the row's pips and the bar's drawer read too.
+      const spent = dragon()!.legendary!.actionsUsed;
+      await uses.getByRole("button", { name: /^Use Fiery Rays, legendary action, / }).click();
+      await waitFor("a pip spent", () => (dragon()?.legendary?.actionsUsed === spent + 1 ? true : null));
+      const max = dragon()!.legendary!.actionsMax;
+      await uses.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();
+      const drawer = await barUses(desk);
+      await drawer.getByText(`Legendary actions ${max - spent - 1} of ${max}`, { exact: true }).waitFor();
+      await closeBar(desk);
+      const row = await rowUses(desk, DRAGON);
+      await row.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();
+      await closeSheets(desk);
+      // Restore from the panel frees Fiery Rays for the steps after.
+      panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
+      await sectionIn(panel, "Uses").getByRole("button", { name: "Restore one legendary action", exact: true }).click();
+      await waitFor("the pip back", () => (dragon()?.legendary?.actionsUsed === spent ? true : null));
+
+      // A phone's column folds the troll's open Regeneration into a row over the dragon's cells, so it is settled first.
+      await ops.send({ t: "actor.prompt", target: { tokenId: run.troll }, record: troll()!.turnRecord!.id, what: "regeneration", state: "skipped" });
+      await waitFor("the troll's Regeneration skipped", () => (troll()?.turnRecord?.settled?.regeneration?.state === "skipped" ? true : null));
+
+      // Combat open, and folded with its summary, at the three sizes the design measured.
+      for (const view of [{ width: 1280, height: 800, scale: 1 }, { ...PHONE, scale: 1.3 }, { ...SMALL, scale: 1.3 }]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(desk, deskCdp, view);
+        await dismissTurnCard(desk);
+        panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
+        await sectionIn(panel, "Uses").getByRole("button", { name: /^Use Fiery Rays/ }).waitFor();
+        const combat = groupIn(panel, "Combat");
+        const open = await combat.boundingBox();
+        assert.ok(open, "Combat drawn");
+        await measure(desk, sectionIn(panel, "Uses"), `the dragon's panel Uses at ${at}`);
+        await measure(desk, sectionIn(panel, "Reaction"), `the dragon's panel Reaction at ${at}`);
+        await measure(desk, combat, `the dragon's Combat at ${at}`);
+        await panel.getByRole("button", { name: "Combat", exact: true }).click();
+        await sectionIn(panel, "Uses").waitFor({ state: "detached" });
+        const folded = await foldedSummary(panel, "Combat");
+        seen.push(`${at}: Combat ${Math.round(open.height)} px open, ${Math.round(folded.row)} px folded, summary "${folded.text}" in ${Math.round(folded.width)} of ${Math.round(folded.needs)} px${folded.cut ? ", cut" : ""}, its floor ${Math.round(folded.floor)} px`);
+        assert.ok(folded.width >= folded.floor - 0.5, `${at}: the summary under its 4em floor`);
+        await measure(desk, groupIn(panel, "Combat"), `the dragon's Combat folded at ${at}`);
+        await shots.take(desk, `s2-cu-dragon-combat-folded-${view.width}-${Math.round(view.scale * 100)}`);
+        await panel.getByRole("button", { name: "Combat", exact: true }).click();
+        await sectionIn(panel, "Uses").waitFor();
+      }
+
+      // The pips in the panel's Uses wrap with 44 px targets as the row's do, at maxima of 3 and 10.
+      for (const view of [{ ...SMALL, scale: 1.3 }, { ...PHONE, scale: 1.3 }]) {
+        const at = `${view.width} x ${view.height} at 130%`;
+        await setUp(desk, deskCdp, view);
+        await dismissTurnCard(desk);
+        panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
+        const list = sectionIn(panel, "Uses");
+        for (const most of [3, 10]) {
+          await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: most, actionsUsed: 1, resistMax: most, resistUsed: 0 } } } });
+          for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) {
+            const pips = list.getByRole("group", { name, exact: true }).getByRole("button");
+            await waitFor(`${most} pips in ${name}`, async () => ((await pips.count()) === most ? true : null));
+          }
+          const blocks = await pipGeometry(list, "section");
+          assert.equal(blocks.length, 2, "both pip blocks");
+          for (const b of blocks) {
+            const what = `the panel's ${b.label} at a maximum of ${most} at ${at}`;
+            const target = theme44 * view.scale;
+            assert.deepEqual(b.pips.filter((p) => p.right > b.row.right + 0.5 || p.left < b.row.left - 0.5), [], `${what}: a pip past its section`);
+            for (const p of b.pips) assert.ok(Math.abs(p.width - target) <= 0.5 && Math.abs(p.height - target) <= 0.5, `${what}: a pip of ${p.width} x ${p.height}`);
+            const tops = [...new Set(b.pips.map((p) => Math.round(p.top)))];
+            const perRow = b.pips.filter((p) => Math.round(p.top) === tops[0]).length;
+            assert.equal(perRow, Math.min(most, Math.floor((b.box.width + 0.5) / target)), `${what}: ${perRow} to a row in ${b.box.width} px`);
+            seen.push(`${at} panel ${b.label} max ${most}: ${perRow} a row, ${tops.length} rows, block ${Math.round(b.box.bottom - b.words.top)} px`);
+          }
+          await measure(desk, list, `the panel's pips at a maximum of ${most} at ${at}`);
+          await list.locator("[data-pips]").first().scrollIntoViewIfNeeded();
+          await shots.take(desk, `s2-cu-panel-pips-${most}-${view.width}`);
+        }
+      }
+    } finally {
+      await desk.unroute(/\/assets\/monsters-[^/]*\.js$/).catch(() => {});
+      await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: before } } });
+      await setUp(desk, deskCdp, DESK);
+    }
+    console.log(`s2 Combat:\n${seen.join("\n")}`);
+    assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
+  test("s2-cu-b. a dying goblin's death save skipped with its cards dismissed on the desk: its Token panel's Uses holds Reopen, which by keyboard leaves focus on Combat's fold as the list goes with nothing else to take it, and Uses goes after Next (D-261024-40, D-261024-43, S1-NOTE-1)", async () => {
+    await setUp(desk, deskCdp, DESK);
+    await ops.send({ t: "room.update", settings: { monstersDieAtZero: false } });
+    await ops.send({ t: "actor.hp", target: { tokenId: run.goblin }, change: { kind: "set", cur: 0 } });
+    await waitFor("the goblin dying", () => (actorOf(deskSocket.state, run.goblin)?.life === "dying" ? true : null));
+    const GOBLIN_AT = { x: 22, y: 5 };
+    try {
+      await turnTo("fu26-goblin");
+      // The desk puts both cards away, the death save's among them, so a Reopen brings back no card here.
+      const save = desk.getByRole("group", { name: "Death save for Goblin" });
+      await save.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await save.waitFor({ state: "detached" });
+      const record = actorOf(deskSocket.state, run.goblin)!.turnRecord!.id;
+      await ops.send({ t: "actor.prompt", target: { tokenId: run.goblin }, record, what: "deathSave", state: "skipped" });
+      await waitFor("skipped for every device", () => (actorOf(deskSocket.state, run.goblin)?.turnRecord?.settled?.deathSave?.state === "skipped" ? true : null));
+      // The skipped save is the goblin's turn card's one row, so the card comes with it.
+      const turn = alerts(desk, "turn");
+      await turn.getByText("Death save skipped", { exact: true }).waitFor();
+      await turn.getByRole("button", { name: "Dismiss Goblin's turn" }).click();
+      await turn.waitFor({ state: "detached" });
+
+      const panel = await creaturePanel(desk, "Goblin", GOBLIN_AT);
+      const uses = sectionIn(panel, "Uses");
+      await uses.getByText("Death save skipped", { exact: true }).waitFor();
+      assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Uses", "Reaction", "Range rings", "Rest"]);
+      await measure(desk, uses, "the goblin's panel Uses with its skipped death save at 1440 x 900 at 100%");
+      await shots.take(desk, "s2-cu-skipped-panel");
+
+      await uses.getByRole("button", { name: "Reopen: Death save skipped" }).focus();
+      await desk.keyboard.press("Enter");
+      await waitFor("open again", () => (actorOf(deskSocket.state, run.goblin)?.turnRecord?.settled?.deathSave === undefined ? true : null));
+      await uses.waitFor({ state: "detached" });
+      assert.equal(await save.count(), 0, "no card here: the desk dismissed it");
+      const fold = panel.getByRole("button", { name: "Combat", exact: true });
+      await waitFor("focus on Combat's fold", async () => ((await fold.evaluate((el) => el === el.ownerDocument.activeElement)) ? true : null), 3_000).catch(async () =>
+        assert.fail(`focus is on ${await desk.evaluate(() => (globalThis as unknown as { document: { activeElement: { tagName: string } | null } }).document.activeElement?.tagName ?? "nothing")}, not Combat's fold`),
+      );
+      assert.equal(await fold.getAttribute("aria-expanded"), "true", "Combat stays open");
+
+      // Skipped again, then Next: the record is no longer current, and the panel's Uses goes.
+      await ops.send({ t: "actor.prompt", target: { tokenId: run.goblin }, record, what: "deathSave", state: "skipped" });
+      await uses.getByText("Death save skipped", { exact: true }).waitFor();
+      await turnTo("fu26-troll");
+      await uses.waitFor({ state: "detached" });
+      assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Reaction", "Range rings", "Rest"]);
+    } finally {
+      await deselect(desk);
+      await ops.send({ t: "actor.hp", target: { tokenId: run.goblin }, change: { kind: "set", cur: 7 } });
+      await ops.send({ t: "room.update", settings: { monstersDieAtZero: true } });
+    }
+    assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
+  test("s2-cu-z. no console errors after the s2 steps", () => {
+    assert.deepEqual(deskConsole.errors, [], "the desk");
+    assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
+    assert.deepEqual(patConsole.errors, [], "Pat's page");
+  });
 });
 
 /** A pip's target in layout px: the touch size (client/lib/theme.ts). */
@@ -1133,8 +1367,8 @@ type Box = { left: number; right: number; top: number; bottom: number; width: nu
  * from its pip's center, and its words' box with their line height in
  * layout px, which the interface size scales.
  */
-function pipGeometry(group: Locator): Promise<{ label: string; row: Box; box: Box; words: Box; lineHeight: number; pips: Box[]; dots: { x: number; y: number }[] }[]> {
-  return group.evaluate((root) => {
+function pipGeometry(group: Locator, within = "li[data-entry-row], li[data-companion-row]"): Promise<{ label: string; row: Box; box: Box; words: Box; lineHeight: number; pips: Box[]; dots: { x: number; y: number }[] }[]> {
+  return group.evaluate((root, within) => {
     type R = { left: number; right: number; top: number; bottom: number; width: number; height: number };
     type E = { getBoundingClientRect(): R; querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; closest(s: string): E | null; firstElementChild: E | null; getAttribute(n: string): string | null };
     const el = root as unknown as E;
@@ -1149,7 +1383,7 @@ function pipGeometry(group: Locator): Promise<{ label: string; row: Box; box: Bo
       const buttons = Array.from(pips.querySelectorAll("button"));
       return {
         label: pips.getAttribute("aria-label") ?? "",
-        row: box(block.closest("li[data-entry-row], li[data-companion-row]")!),
+        row: box(block.closest(within)!),
         box: box(pips),
         words: box(words),
         lineHeight: lineHeight(words),
@@ -1161,5 +1395,5 @@ function pipGeometry(group: Locator): Promise<{ label: string; row: Box; box: Bo
         }),
       };
     });
-  });
+  }, within);
 }

@@ -1342,6 +1342,77 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     for (const c of made) await ops.send({ t: "character.delete", characterId: c.id });
   });
 
+  test("s2-co-a. in a fight, the Owl sharing Bree's turn holds a Reaction of its own in its Token panel's Combat, for the DM and for Ana, who marks it used without touching Bree's; it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800 (docs/design-v1-token-sections.md 3.2)", async () => {
+    const owl = companionOf("Owl")!;
+    assert.equal(owl.companion?.turn, "shared");
+    await ops.send({ t: "encounter.start", entries: [{ id: "e-bree-s2", tokenId: run.bree.tokenId, value: 15 }] });
+    const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
+    const off: string[] = [];
+    const cdp = await anaContext.newCDPSession(ana);
+    try {
+      for (const page of [dm, ana]) {
+        await showCompanion(page, "Owl");
+        await (await barControl(bar(page, "Owl"), "Details")).click();
+        const panel = tokenPanel(page);
+        await panel.getByRole("heading", { name: "Owl", exact: true }).first().waitFor();
+        const reaction = panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Reaction"]]');
+        await reaction.getByText("Its own, which clears when its character's turn starts", { exact: true }).waitFor();
+        await reaction.getByRole("group", { name: "Owl's reaction", exact: true }).waitFor();
+        await shots.take(page, `s2-co-owl-reaction-${page === dm ? "dm" : "ana"}`);
+      }
+      const reaction = tokenPanel(ana).locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Reaction"]]');
+      await reaction.getByRole("switch", { name: /^Reaction used/ }).click();
+      await waitFor("the Owl's own Reaction spent", () => (companionOf("Owl")?.companion?.reactionUsed ? true : null));
+      assert.equal(dmSocket.state!.encounter!.entries.find((e) => e.id === "e-bree-s2")!.reactionUsed, false, "Bree's Reaction is untouched");
+      for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, { width: 1280, height: 800, scale: 1 }]) {
+        await setUp(ana, cdp, view);
+        await showCompanion(ana, "Owl");
+        await (await barControl(bar(ana, "Owl"), "Details")).click();
+        const panel = tokenPanel(ana);
+        const section = panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Reaction"]]');
+        await section.scrollIntoViewIfNeeded();
+        off.push(...alignmentLines(await measureAlignment(section), `the Owl's Reaction at ${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`));
+      }
+    } finally {
+      await setUp(ana, cdp, { width: 1280, height: 800, scale: 1 });
+      await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "token.update", tokenId: owl.id, patch: { companionReaction: false } });
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("s2-co-b. Ana dismisses a companion from its Token panel's Remove, the bar's own button: the first tap asks, the second takes it away, and it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800", async () => {
+    const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
+    const off: string[] = [];
+    const wisp = randomUUID();
+    await ops.send({ t: "token.create", token: { id: wisp, sceneId: run.sceneId, kind: "npc", name: "Wisp", size: "small", x: 9, y: 9, visibility: "all", disposition: "ally", ownerIds: [run.anaId], companion: { of: run.bree.characterId, turn: "none" }, actor: { inline: actor() } } });
+    await waitFor("Wisp in Ana's copy", () => anaSocket.state?.tokens[wisp]);
+    const cdp = await anaContext.newCDPSession(ana);
+    const remove = (panel: Locator) => panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Remove"]]');
+    try {
+      for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, { width: 1280, height: 800, scale: 1 }]) {
+        await setUp(ana, cdp, view);
+        await showCompanion(ana, "Wisp");
+        await (await barControl(bar(ana, "Wisp"), "Details")).click();
+        const panel = tokenPanel(ana);
+        await panel.getByRole("heading", { name: "Wisp", exact: true }).first().waitFor();
+        await remove(panel).getByRole("button", { name: "Dismiss", exact: true }).waitFor();
+        await remove(panel).scrollIntoViewIfNeeded();
+        off.push(...alignmentLines(await measureAlignment(remove(panel)), `Wisp's Remove at ${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`));
+      }
+      const panel = tokenPanel(ana);
+      await remove(panel).getByRole("button", { name: "Dismiss", exact: true }).click();
+      await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).waitFor();
+      assert.ok(dmSocket.state?.tokens[wisp], "one tap only asks");
+      await shots.take(ana, "s2-co-dismiss-armed");
+      await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).click();
+      await waitFor("Wisp dismissed", () => (dmSocket.state?.tokens[wisp] ? null : true));
+    } finally {
+      if (dmSocket.state?.tokens[wisp]) await ops.send({ t: "token.delete", tokenId: wisp });
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("10b. no page errors along the way", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} page errors`);
   });

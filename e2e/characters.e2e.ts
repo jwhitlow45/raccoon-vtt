@@ -643,6 +643,63 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await blocks.waitFor({ state: "detached" });
   });
 
+  test("s2-ch-a. Cyra's page in the fight: Combat runs Hit Points, Conditions, Uses with what it is for and Add, Reaction and Rest, for the DM and for Pat, whose Reaction used reaches the row and the folded summary; it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800 (docs/design-v1-token-sections.md 3)", async () => {
+    if (!dmSocket.state?.encounter?.entries.some((e) => e.tokenId === run.cyraToken)) {
+      await ops.send({ t: "encounter.start", entries: [{ id: "e-cyra-s2", tokenId: run.cyraToken, value: 12 }] });
+    }
+    const entry = await waitFor("Cyra's row", () => dmSocket.state?.encounter?.entries.find((e) => e.tokenId === run.cyraToken));
+    const sectionIn = (scope: Locator, heading: string) => scope.locator(`xpath=.//section[*[self::h3 or self::h4][normalize-space()="${heading}"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="${heading}"]]`);
+    const combat = (scope: Locator) => scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name: "Combat", exact: true }) });
+    const sections = (scope: Locator) => combat(scope).evaluate((el) => Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<{ textContent: string | null }> }).querySelectorAll("h4")).map((h) => (h.textContent ?? "").trim()));
+    const open = async (scope: Locator) => {
+      const fold = scope.getByRole("button", { name: "Combat", exact: true });
+      if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+    };
+    const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
+    const off: string[] = [];
+    const heights: string[] = [];
+    try {
+      for (const page of [dm, pat]) {
+        const panel = await openCharacters(page);
+        await openCard(panel, run.cyra);
+        await open(panel);
+        assert.deepEqual(await sections(panel), ["Hit Points", "Conditions", "Uses", "Reaction", "Rest"], page === dm ? "the DM" : "Pat");
+        const uses = sectionIn(panel, "Uses");
+        await uses.getByText("Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, typed, or brought in with Re-sync from D&D Beyond.", { exact: true }).waitFor();
+        await uses.getByRole("button", { name: "Add a class resource" }).waitFor();
+        assert.equal(await panel.getByRole("heading", { name: "Class resources" }).count(), 0);
+        await shots.take(page, `s2-ch-cyra-combat-${page === dm ? "dm" : "pat"}`);
+      }
+      const panel = await openCharacters(pat);
+      const reaction = sectionIn(panel, "Reaction");
+      await reaction.getByText("Clears at the start of your turn", { exact: true }).waitFor();
+      await reaction.getByRole("switch", { name: /^Reaction used/ }).click();
+      await waitFor("Cyra's row's Reaction used", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === entry.id)?.reactionUsed ? true : null));
+      await panel.getByRole("button", { name: "Combat", exact: true }).click();
+      const summary = await panel.getByRole("button", { name: "Combat", exact: true }).innerText();
+      assert.match(summary.replace(/\s+/g, " "), /^Combat HP \d+\/\d+ · Reaction used$/);
+      await panel.getByRole("button", { name: "Combat", exact: true }).click();
+      for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, DESK]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(pat, patCdp, view);
+        const page = await openCharacters(pat);
+        await openCard(page, run.cyra);
+        await open(page);
+        await sectionIn(page, "Reaction").waitFor();
+        const box = combat(page);
+        await box.scrollIntoViewIfNeeded();
+        heights.push(`${at}: Cyra's Combat ${Math.round((await box.boundingBox())!.height)} px`);
+        off.push(...alignmentLines(await measureAlignment(box), `Cyra's page Combat at ${at}`));
+        await shots.take(pat, `s2-ch-cyra-page-${view.width}-${Math.round(view.scale * 100)}`);
+      }
+    } finally {
+      await setUp(pat, patCdp, PHONE);
+      await ops.send({ t: "encounter.update", entryId: entry.id, patch: { reactionUsed: false } });
+    }
+    console.log(`s2-ch heights:\n${heights.join("\n")}`);
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("8. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(patConsole.errors, [], "Pat's page logged errors");

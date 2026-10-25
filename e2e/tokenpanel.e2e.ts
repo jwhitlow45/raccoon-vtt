@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, ConsoleWatch, expandBar, openSideTab, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 
@@ -235,6 +236,46 @@ async function openGroup(panel: Locator, name: string): Promise<void> {
   const fold = panel.getByRole("button", { name, exact: true });
   if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
   await waitFor(`${name} open`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null), 3000);
+}
+
+/** A token's panel from a tap on it and Details in its bar, Combat open. */
+async function panelOf(page: Page, at: { x: number; y: number }, name: string): Promise<Locator> {
+  await page.keyboard.press("Escape");
+  await tapToken(page, at);
+  const b = bar(page, name);
+  await b.waitFor();
+  await (await barControl(b, "Details")).click();
+  const panel = tokenPanel(page);
+  await panel.getByRole("heading", { name, exact: true }).first().waitFor();
+  await openGroup(panel, "Combat");
+  return panel;
+}
+
+/** A section of a panel by its own heading. */
+function sectionIn(scope: Locator, heading: string): Locator {
+  return scope.locator(`xpath=.//section[*[self::h3 or self::h4][normalize-space()="${heading}"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="${heading}"]]`);
+}
+
+/** A panel's group by the name on its fold (components/Panel.tsx Group). */
+function groupIn(scope: Locator, name: string): Locator {
+  return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
+}
+
+/** The headings of Combat's sections, in order. */
+function combatSections(panel: Locator): Promise<string[]> {
+  return groupIn(panel, "Combat").evaluate((el) => Array.from((el as unknown as El).querySelectorAll("h4")).map((h) => (h.textContent ?? "").trim()));
+}
+
+/** A folded group's row and its summary: the row's height, the summary's words, its width and the width its words need, whether they are cut, and its 4em floor (docs/design-v1-icons-2.md 3.3). */
+function foldedSummary(panel: Locator, name: string): Promise<{ text: string; width: number; needs: number; cut: boolean; floor: number; row: number }> {
+  return panel.getByRole("button", { name, exact: true }).evaluate((el) => {
+    type Q = El & { querySelector(s: string): El | null };
+    const button = el as unknown as Q;
+    const summary = button.querySelector("[id$='-summary']");
+    if (!summary) throw new Error("no summary on the folded row");
+    const fontSize = parseFloat((globalThis as unknown as { getComputedStyle(e: El): { fontSize: string } }).getComputedStyle(summary).fontSize);
+    return { text: summary.textContent ?? "", width: summary.clientWidth, needs: summary.scrollWidth, cut: summary.scrollWidth > summary.clientWidth + 1, floor: fontSize * 4, row: button.getBoundingClientRect().height };
+  });
 }
 
 /**
@@ -1947,6 +1988,222 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.equal(await player.getByRole("button", { name: "From starter packs" }).count(), 0);
     assert.equal(await player.getByRole("button", { name: "Map builder" }).count(), 0);
     await player.keyboard.press("Escape");
+  });
+
+  test("s2-tp-a. in a fight, the DM's goblin: Combat runs Hit Points, Conditions, Reaction, Range rings and Rest with no Uses; Reaction used set there shows on its row's tag, and Combat's folded summary says so to the DM and to Pat (docs/design-v1-token-sections.md 3.2)", async () => {
+    await ops.send({
+      t: "encounter.start",
+      entries: [
+        { id: "s2-thorn", tokenId: run.thorn.id, value: 18 },
+        { id: "s2-goblin", tokenId: run.goblin.id, value: 12 },
+        { id: "s2-bree", characterId: run.bree.characterId, value: 10 },
+        { id: "s2-dragon", tokenId: run.dragon.id, value: 8 },
+      ],
+    });
+    await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 4 ? true : null));
+    // Step 9c left the DM and the players on its own scene: back to the battle mat, where these tokens stand.
+    await setUp(dm, dmCdp, DESK, null);
+    if (dmSocket.you?.sceneId !== run.sceneId) {
+      await openSideTab(dm, "Scenes");
+      await dm.getByRole("button", { name: /^Battle mat/ }).first().click();
+      await waitFor("the DM on the battle mat", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
+    }
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("the players on the battle mat", () => (dmSocket.state?.meta.playerSceneId === run.sceneId ? true : null));
+    await setUp(dm, dmCdp, DESK, null);
+    let panel = await panelOf(dm, run.goblin.at, "Goblin 4");
+    // Uses waits for the goblin's block, which lists no use, so it goes.
+    await waitFor("no Uses for the goblin", async () => ((await sectionIn(panel, "Uses").count()) === 0 ? true : null), 10_000);
+    assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Reaction", "Range rings", "Rest"]);
+    const reaction = sectionIn(panel, "Reaction");
+    await reaction.getByText("Clears at the start of its turn", { exact: true }).waitFor();
+    assert.equal(await reaction.getByRole("group", { name: "Goblin 4's reaction", exact: true }).count(), 1, "named for its creature");
+    const used = reaction.getByRole("switch", { name: /^Reaction used/ });
+    await used.click();
+    await waitFor("the row's Reaction used", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === "s2-goblin")?.reactionUsed ? true : null));
+    assert.equal(await used.getAttribute("aria-checked"), "true");
+    await shots.take(dm, "s2-tp-goblin-reaction");
+
+    // The row's tag and its switch follow, in the tracker.
+    await openSideTab(dm, "Initiative");
+    const row = dm.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: "Goblin 4 options" }) });
+    await row.getByText("Reaction used", { exact: true }).waitFor();
+    await row.getByRole("button", { name: "Goblin 4 options" }).click();
+    assert.equal(await row.getByRole("switch", { name: /^Reaction used/ }).getAttribute("aria-checked"), "true", "the row's switch");
+    await row.getByRole("button", { name: "Goblin 4 options" }).click();
+    await openSideTab(dm, "Token");
+    panel = tokenPanel(dm);
+    await panel.getByRole("button", { name: "Combat", exact: true }).click();
+    await waitFor("the DM's folded summary", async () => ((await foldedSummary(panel, "Combat")).text.includes("Reaction used") ? true : null), 5_000);
+    assert.match((await foldedSummary(panel, "Combat")).text, /^HP \d+\/\d+ · Reaction used$/);
+    await shots.take(dm, "s2-tp-goblin-combat-folded");
+    await panel.getByRole("button", { name: "Combat", exact: true }).click();
+
+    // Pat reads it in the summary, as he reads the row's tag, though the switch is not his, and gets no Uses or Position on the goblin.
+    await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
+    await setUp(player, playerCdp, DESK, null);
+    const pat = await panelOf(player, run.goblin.at, "Goblin 4");
+    assert.equal(await sectionIn(pat, "Reaction").count(), 0, "the goblin's Reaction is not Pat's to mark");
+    assert.equal(await sectionIn(pat, "Uses").count(), 0);
+    assert.equal(await pat.getByRole("button", { name: "Position", exact: true }).count(), 0);
+    await pat.getByRole("button", { name: "Combat", exact: true }).click();
+    await waitFor("Pat's folded summary", async () => ((await foldedSummary(pat, "Combat")).text === "Healthy · Reaction used" ? true : null), 5_000).catch(async () => assert.fail(`Pat's summary reads "${(await foldedSummary(pat, "Combat")).text}"`));
+    await shots.take(player, "s2-tp-pat-goblin-summary");
+    await pat.getByRole("button", { name: "Combat", exact: true }).click();
+    await ops.send({ t: "encounter.update", entryId: "s2-goblin", patch: { reactionUsed: false } });
+  });
+
+  test("s2-tp-b. Pat on Thorn: Reaction with its player's words, and It fired from Conditions' Readied spends it there", async () => {
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: randomUUID(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "s2-thorn" } } } });
+    await waitFor("Pat's copy holds Thorn's Ready", () => (playerSocket.state?.characters[run.thorn.characterId]?.actor.effects.some((e) => e.key === "readied") ? true : null));
+    const panel = await panelOf(player, run.thorn.at, "Thorn");
+    // A character's Uses always stands for its player, who adds class resources there.
+    assert.deepEqual((await combatSections(panel)).slice(0, 5), ["Hit Points", "Conditions", "Uses", "Reaction", "Range rings"]);
+    const reaction = sectionIn(panel, "Reaction");
+    await reaction.getByText("Clears at the start of your turn", { exact: true }).waitFor();
+    const used = reaction.getByRole("switch", { name: /^Reaction used/ });
+    assert.equal(await used.getAttribute("aria-checked"), "false");
+    await sectionIn(panel, "Conditions").getByRole("button", { name: /if the door opens/ }).click();
+    await panel.getByRole("button", { name: "It fired: Reaction used", exact: true }).click();
+    await waitFor("Thorn's Reaction spent", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === "s2-thorn")?.reactionUsed ? true : null));
+    await waitFor("the section's switch on", async () => ((await used.getAttribute("aria-checked")) === "true" ? true : null), 5_000);
+    await shots.take(player, "s2-tp-pat-thorn-reaction");
+    await ops.send({ t: "encounter.update", entryId: "s2-thorn", patch: { reactionUsed: false } });
+  });
+
+  test("s2-tp-c. Pat lent Bree's token, her row kept by her character: no Reaction, and Stats holds the bar's Size alone, which changes it, reads a Custom size in the bar's words, and goes while the token is locked", async () => {
+    const panel = await panelOf(player, run.bree.at, "Bree");
+    assert.equal(await sectionIn(panel, "Reaction").count(), 0, "her row is the character's, not Pat's");
+    await openGroup(panel, "Stats");
+    const stats = groupIn(panel, "Stats");
+    const size = stats.getByRole("combobox", { name: "Size", exact: true });
+    await size.waitFor();
+    assert.deepEqual(await stats.getByRole("textbox").count(), 0, "no stat card in it");
+    for (const words of ["Armor Class", "Walk Speed", "Senses", "Sheet link"]) assert.equal(await stats.getByText(words).count(), 0, `no ${words}`);
+    await size.selectOption("large");
+    await waitFor("Bree large", () => (playerSocket.state?.tokens[run.bree.id]?.size === "large" ? true : null), 10_000);
+    await shots.take(player, "s2-tp-pat-bree-size");
+    await size.selectOption("medium");
+    await waitFor("Bree medium again", () => (playerSocket.state?.tokens[run.bree.id]?.size === "medium" ? true : null), 10_000);
+    await ops.send({ t: "token.update", tokenId: run.bree.id, patch: { size: "custom", w: 2, h: 1 } });
+    await waitFor("the Custom size's words", async () => ((await size.count()) === 0 && (await stats.innerText()).includes("Custom") ? true : null), 10_000).catch(async () => assert.fail(`Stats reads "${await stats.innerText()}"`));
+    await ops.send({ t: "token.update", tokenId: run.bree.id, patch: { size: "medium", w: null, h: null, locked: true } });
+    await waitFor("no Stats while locked", async () => ((await panel.getByRole("button", { name: "Stats", exact: true }).count()) === 0 ? true : null), 10_000);
+    await ops.send({ t: "token.update", tokenId: run.bree.id, patch: { locked: false } });
+    await panel.getByRole("button", { name: "Stats", exact: true }).waitFor();
+  });
+
+  test("s2-tp-d. Pat on the dragon: its HP as the DM allows, Conditions and the rings' line, and no Uses, Reaction or Position", async () => {
+    await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { rangeRings: [30] } });
+    try {
+      const panel = await panelOf(player, { x: run.dragon.at.x + 1, y: run.dragon.at.y + 1 }, "Adult White Dragon");
+      await sectionIn(panel, "Range rings").getByText(/30 ft/).waitFor();
+      assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Range rings"]);
+      assert.equal(await panel.getByRole("button", { name: "Position", exact: true }).count(), 0);
+      await shots.take(player, "s2-tp-pat-dragon");
+    } finally {
+      await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { rangeRings: [] } });
+    }
+  });
+
+  test("s2-tp-e. Duplicate from the DM's Token settings: a copy beside the goblin, selected, the panel showing it, focus on its name (docs/design-v1-token-sections.md 7)", async () => {
+    const panel = await panelOf(dm, run.goblin.at, "Goblin 4");
+    await openGroup(panel, "Token settings");
+    const known = new Set(Object.keys(dmSocket.state?.tokens ?? {}));
+    await groupIn(panel, "Token settings").getByRole("button", { name: "Duplicate", exact: true }).focus();
+    await dm.keyboard.press("Enter");
+    const copy = await waitFor("the copy", () => Object.keys(dmSocket.state?.tokens ?? {}).find((id) => !known.has(id)) ?? null);
+    try {
+      const name = await waitFor("the copy's name", () => {
+        const t = dmSocket.state?.tokens[copy];
+        return t ? `${t.name}${t.number ? ` ${t.number}` : ""}` : null;
+      });
+      assert.notEqual(name, "Goblin 4");
+      const heading = panel.locator("[data-creature-heading]");
+      await heading.filter({ hasText: name }).waitFor();
+      await waitFor("focus on the copy's name", async () => ((await heading.evaluate((el) => el === el.ownerDocument.activeElement)) ? true : null), 3_000).catch(async () =>
+        assert.fail(`focus is on ${(await focused(dm)).name || "the page"}`),
+      );
+      const original = dmSocket.state!.tokens[run.goblin.id]!;
+      const made = dmSocket.state!.tokens[copy]!;
+      assert.ok(Math.abs(made.x - original.x) <= 2 && Math.abs(made.y - original.y) <= 2, "beside it");
+      await shots.take(dm, "s2-tp-duplicate");
+    } finally {
+      await ops.send({ t: "token.delete", tokenId: copy });
+    }
+  });
+
+  test("s2-tp-f. the DM's Stats on a legendary creature hold the maxima alone, and its Uses the pips that count them used", async () => {
+    await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { actor: { legendary: { actionsMax: 3, actionsUsed: 1, resistMax: 3, resistUsed: 0 } } } });
+    try {
+      const panel = await panelOf(dm, { x: run.dragon.at.x + 1, y: run.dragon.at.y + 1 }, "Adult White Dragon");
+      await openGroup(panel, "Stats");
+      const stats = groupIn(panel, "Stats");
+      for (const name of ["Legendary Actions per round", "Legendary Resistance per day"]) await stats.getByRole("textbox", { name, exact: true }).waitFor();
+      assert.equal(await stats.getByText(/Actions used|Resistances? used/).count(), 0, "no used count's row in Stats");
+      assert.equal(await stats.getByRole("textbox", { name: /^Legendary (Actions|Resistance) used/ }).count(), 0, "no used stepper in Stats");
+      const uses = sectionIn(panel, "Uses");
+      for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) await uses.getByRole("group", { name, exact: true }).waitFor();
+      await stats.getByRole("textbox", { name: "Legendary Actions per round", exact: true }).scrollIntoViewIfNeeded();
+      await shots.take(dm, "s2-tp-dragon-stats-maxima");
+    } finally {
+      await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { actor: { legendary: null } } });
+    }
+  });
+
+  test("s2-tp-g. in line within 1 px at 320 x 568 and 390 x 844 at 130% and 1280 x 800: the goblin's Combat open and folded, its Position with Attach and its Token settings with Duplicate, and Pat's Stats holding Size alone", async () => {
+    const off: string[] = [];
+    const notes: string[] = [];
+    const check = async (page: Page, root: Locator, screen: string) => {
+      await root.first().scrollIntoViewIfNeeded();
+      off.push(...alignmentLines(await measureAlignment(root.first()), screen));
+    };
+    try {
+      for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, { width: 1280, height: 800, scale: 1 }]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(dm, dmCdp, view, null);
+        const panel = await panelOf(dm, run.goblin.at, "Goblin 4");
+        await sectionIn(panel, "Reaction").waitFor();
+        const combat = groupIn(panel, "Combat");
+        await check(dm, combat, `the goblin's Combat at ${at}`);
+        notes.push(`${at}: the goblin's Combat ${Math.round((await rectOf(combat)).height)} px open`);
+        await openGroup(panel, "Position");
+        await groupIn(panel, "Position").getByRole("button", { name: "Attach", exact: true }).waitFor();
+        // Position's attach controls, the part this lane added. Its Elevation and Facing rows wrap by FieldRow's own basis (docs/design-v1-polish.md R2), as before it.
+        await check(dm, groupIn(panel, "Position").locator("[data-attach-controls]"), `the goblin's attach controls at ${at}`);
+        await openGroup(panel, "Token settings");
+        await groupIn(panel, "Token settings").getByRole("button", { name: "Duplicate", exact: true }).waitFor();
+        await check(dm, groupIn(panel, "Token settings"), `the goblin's Token settings at ${at}`);
+        await groupIn(panel, "Token settings").getByRole("button", { name: "Duplicate", exact: true }).scrollIntoViewIfNeeded();
+        await shots.take(dm, `s2-tp-goblin-${view.width}-${Math.round(view.scale * 100)}`);
+        await ops.send({ t: "encounter.update", entryId: "s2-goblin", patch: { reactionUsed: true } });
+        await panel.getByRole("button", { name: "Combat", exact: true }).click();
+        await waitFor("the summary", async () => ((await foldedSummary(panel, "Combat")).text.includes("Reaction used") ? true : null), 5_000);
+        const folded = await foldedSummary(panel, "Combat");
+        notes.push(`${at}: folded ${Math.round(folded.row)} px, "${folded.text}" in ${Math.round(folded.width)} of ${Math.round(folded.needs)} px${folded.cut ? ", cut" : ""}, floor ${Math.round(folded.floor)} px`);
+        assert.ok(folded.width >= folded.floor - 0.5, `${at}: the summary under its 4em floor`);
+        await check(dm, groupIn(panel, "Combat"), `the goblin's Combat folded at ${at}`);
+        await panel.getByRole("button", { name: "Combat", exact: true }).click();
+        await ops.send({ t: "encounter.update", entryId: "s2-goblin", patch: { reactionUsed: false } });
+
+        await setUp(player, playerCdp, view, null);
+        const bree = await panelOf(player, run.bree.at, "Bree");
+        await openGroup(bree, "Stats");
+        await groupIn(bree, "Stats").getByRole("combobox", { name: "Size", exact: true }).waitFor();
+        await check(player, groupIn(bree, "Stats"), `Pat's Stats for Bree at ${at}`);
+        await shots.take(player, `s2-tp-pat-bree-stats-${view.width}-${Math.round(view.scale * 100)}`);
+      }
+    } finally {
+      await setUp(dm, dmCdp, DESK, null);
+    }
+    console.log(`s2-tp sizes:\n${notes.join("\n")}`);
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("s2-tp-z. the fight ends", async () => {
+    await ops.send({ t: "room.update", settings: { playersSeeOrder: "party" } });
+    await ops.send({ t: "encounter.end" });
+    await waitFor("no fight", () => (dmSocket.state?.encounter ? null : true));
   });
 
   test("10. no page errors along the way", () => {

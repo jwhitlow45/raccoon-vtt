@@ -1,11 +1,18 @@
 import type { IconName } from "../components/Icon.tsx";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
+import { DismissButton } from "../canvas/TokenActionBar.tsx";
+import { AttachButton } from "../features/attach/AttachButton.tsx";
+import { DetachButton, DetachNote, GroupLine, useAttachSlots, useDetach, type AttachFocus } from "../features/attach/BarParts.tsx";
+import { attachControls } from "../features/attach/detach.ts";
 import { SteerControl, usePanelLinkTags } from "../features/attach/SteerControl.tsx";
+import { useUsesPresence } from "../features/combat/CombatUses.tsx";
+import { UsesSection } from "../features/combat/UsesSection.tsx";
+import { ReactionSection, reactionFor } from "../features/encounter/ReactionSection.tsx";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
@@ -17,25 +24,25 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { usePanelHere, type PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
-import { ClassResourcesSection } from "../features/resources/ClassResourcesSection.tsx";
 import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { characterPageSlot, openCharacterPage } from "../features/tokens/characterPage.ts";
-import { CreatureHeader, type HeaderTag } from "../features/tokens/CreatureHeader.tsx";
+import { CREATURE_HEADING, CreatureHeader, type HeaderTag } from "../features/tokens/CreatureHeader.tsx";
 import { kindLine, sizeText, tokenKind } from "../features/tokens/creatureKind.ts";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { relationKey, usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
-import { holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { combatSummary, holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, reactionSpent, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
 import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/resize.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
 import { CardNotesField, SheetUrlField, StatsFields } from "../features/tokens/StatsSection.tsx";
 import { useSrdList } from "../features/tokens/StatSummary.tsx";
+import { useDuplicate, type DuplicateFocus } from "../features/tokens/useDuplicate.ts";
 import { useResize } from "../features/tokens/useResize.ts";
 import { hpUnits, unitText, vitals } from "../features/tokens/statSummary.ts";
 import { QuickNumbers } from "../features/tokens/QuickNumbers.tsx";
@@ -86,8 +93,30 @@ const HP_VISIBILITY_OPTIONS: { value: HpVisibility; label: string }[] = [
  */
 export default function TokenPanel(props: PanelProps) {
   // One instance per token, so an armed Delete or a half-typed field never carries over to the next token selected.
-  return <TokenDetails key={props.selectedTokenId ?? ""} {...props} />;
+  // The box around it stays, so a press that selects another token hands focus on inside it (PANEL_BOX).
+  return (
+    <div data-token-panel="">
+      <TokenDetails key={props.selectedTokenId ?? ""} {...props} />
+    </div>
+  );
 }
+
+/** The panel's own box, which stays while the panel remounts for another token. */
+const PANEL_BOX = "[data-token-panel]";
+
+/** Position's attach controls, for a press there that takes its button away to find the nearest one that stays. */
+const ATTACH_CONTROLS = "[data-attach-controls]";
+
+/**
+ * Where focus goes once an attach control's press took its button away
+ * (D-261024-42): the attach controls that stay, else the name heading, as
+ * after a name in the group line selected another token and the panel
+ * remounted for it.
+ */
+const ATTACH_FOCUS: AttachFocus = { scope: PANEL_BOX, to: [`${ATTACH_CONTROLS} button`, CREATURE_HEADING] };
+
+/** Duplicate selects the copy, and the panel remounts for it, so focus goes to the copy's name (docs/design-v1-token-sections.md 7). */
+const DUPLICATE_FOCUS: DuplicateFocus = { scope: PANEL_BOX, to: [CREATURE_HEADING] };
 
 function TokenDetails(props: PanelProps) {
   const tokenId = props.selectedTokenId;
@@ -112,6 +141,16 @@ function TokenDetails(props: PanelProps) {
         : null,
     [token, you, character, playersApplyDamage],
   );
+  const self = useMemo(() => (tokenId ? { tokenId } : null), [tokenId]);
+  // Its uses, for the DM on any creature with one and for owners on theirs, as the bar's Uses button reads them.
+  const usesPresence = useUsesPresence(access?.full ? self : null);
+  // Each a yes or no, so the panel draws again only when one changes, not on every change to the room.
+  const reaction = useRoomView((s) => (self && s.view ? reactionFor(s.view, s.you, self) !== null : false));
+  const spent = useRoomView((s) => (self && s.view ? reactionSpent(s.view, self) : false));
+  const attach = useRoomView((s) => {
+    const t = tokenId ? s.view?.tokens[tokenId] : undefined;
+    return t && s.view ? attachControls(s.view, { role: s.you?.role ?? "player", memberId: s.you?.memberId ?? null }, t) : false;
+  });
 
   if (!token || !access) return <Empty action={you?.role === "dm" ? <QuickStartLink /> : undefined}>Tap a token to see it here.</Empty>;
 
@@ -134,15 +173,22 @@ function TokenDetails(props: PanelProps) {
     access.full && actor && (access.canEditActor("notes") || actor.notes !== undefined) ? (
       <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
     ) : null;
+  const statCard = actor !== undefined && (character === undefined || access.dm || playsCharacter);
+  const classResources = holdsClassResources({ dm: access.dm, character: character !== undefined, playsCharacter });
   const parts = panelGroups({
     dm: access.dm,
     owner: access.owner,
     kind: token.kind,
     companion,
     statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? playsCharacter : undefined }),
-    actor: actor !== undefined && (character === undefined || access.dm || playsCharacter),
+    actor: statCard,
     ownerRenames: !access.dm && access.canEditToken("name"),
-    classResources: holdsClassResources({ dm: access.dm, character: character !== undefined, playsCharacter }),
+    classResources,
+    uses: usesPresence,
+    reaction,
+    attach,
+    locked: token.locked,
+    dismiss: access.dismiss,
     notes: access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null,
     image: access.canEditToken("image"),
   });
@@ -164,8 +210,14 @@ function TokenDetails(props: PanelProps) {
         return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} />;
       case "conditions":
         return <EffectsSection key={id} effects={actor?.effects ?? []} target={{ tokenId: token.id }} self={{ tokenId: token.id }} selfLabel={name} canEdit={access.effects} />;
+      case "uses":
+        return <UsesSection key={id} target={{ tokenId: token.id }} name={name} character={classResources ? character : undefined} />;
+      case "reaction":
+        return <ReactionSection key={id} self={{ tokenId: token.id }} name={name} />;
       case "position":
         return <PositionSection key={id} token={token} access={access} update={update} />;
+      case "attach":
+        return <AttachControls key={id} token={token} />;
       case "rangeRings":
         return <RangeRingsSection key={id} token={token} canEdit={access.canEditToken("rangeRings")} update={update} />;
       case "notes":
@@ -181,12 +233,11 @@ function TokenDetails(props: PanelProps) {
         );
       case "rest":
         return <RestSection key={id} actor={actor?.hp && actor.life ? { hp: actor.hp, life: actor.life } : undefined} target={{ tokenId: token.id }} resources={character?.resources} />;
-      case "resources":
-        return character ? <ClassResourcesSection key={id} character={character} /> : null;
       case "sight":
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":
-        return actor ? (
+        // A player lent only a character's token holds no card, so its Stats is the bar's Size alone (docs/design-v1-token-sections.md 3).
+        return statCard && actor ? (
           <Group key={id} label="Stats" icon="stats" {...groupFold("stats")}>
             <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
             <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} fromBlock={character?.stats !== undefined} />
@@ -196,7 +247,11 @@ function TokenDetails(props: PanelProps) {
               </FieldRow>
             ) : null}
           </Group>
-        ) : null;
+        ) : (
+          <Group key={id} label="Stats" icon="stats" {...groupFold("stats")}>
+            <SizeField token={token} actor={actor ?? {}} access={access} feetPerCell={feetPerCell} />
+          </Group>
+        );
       case "settings":
         return (
           <Group key={id} label="Token settings" icon="settings" {...groupFold("settings")}>
@@ -209,7 +264,16 @@ function TokenDetails(props: PanelProps) {
       case "owners":
         return <Owners key={id} token={token} update={update} group={groupFold("owners")} />;
       case "remove":
-        return <DmActions key={id} token={token} onDeleted={props.close} />;
+        return access.dm ? (
+          <DmActions key={id} token={token} onDeleted={props.close} />
+        ) : (
+          // A companion's player dismisses it in Delete's place, with the bar's own button (docs/design-v1-combat-flow.md 3.6.9).
+          <Section key={id} title="Remove">
+            <div>
+              <DismissButton tokenId={token.id} name={name} />
+            </div>
+          </Section>
+        );
     }
   };
 
@@ -220,7 +284,7 @@ function TokenDetails(props: PanelProps) {
   const height = elevationBadge(token.elevation);
   const noteCount = [token.notes, actor?.notes, access.dm ? actor?.dmNotes : undefined].filter((n) => typeof n === "string" && n.trim() !== "").length;
   const groups: Record<PanelGroupId, { label: string; icon: IconName; key: FoldKey; summary?: string }> = {
-    combat: { label: "Combat", icon: "combat", key: relationKey("combat", relation), summary: [hpWords, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ") },
+    combat: { label: "Combat", icon: "combat", key: relationKey("combat", relation), summary: combatSummary({ hp: hpWords, effects, reactionUsed: spent, rings }) },
     notes: { label: "Notes", icon: "notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}` },
     position: { label: "Position", icon: "position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ") },
     image: { label: "Image", icon: "image", key: "image" },
@@ -279,6 +343,8 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
       name={props.name}
       line={kindLine(kind, sizeText(token.size, fp, props.feetPerCell))}
       onCompanionOf={openKeeper}
+      // Focus lands here once a press selected another token and the panel remounted for it, as Duplicate's does.
+      focusable
       tags={tags}
       afterTags={<SteerControl token={token} />}
     >
@@ -339,6 +405,41 @@ function PositionSection(props: { token: Token; access: TokenAccess; update(patc
           <Stepper label="Facing" value={rotation} step={45} min={-360} max={360} onChange={(r) => update({ rotation: ((r % 360) + 360) % 360 })} />
         </FieldRow>
       ) : null}
+    </Section>
+  );
+}
+
+/**
+ * Position's attach controls (docs/design-v1-token-sections.md 3.3), each
+ * as the token's bar offers it: the group line whole, its names with Let
+ * go or Put down beside each token it holds, then Get off, Put down or Let
+ * go on a carried token and Attach, with Get off's note when there is no
+ * room. A viewer who is neither the DM nor an owner gets these alone, so a
+ * Let go always stands beside the name of what it releases (SECTIONS-R3-16).
+ * A phone opens Attach's list in a sheet over the panel's own, as the bar
+ * does, and a wide screen in a pop-up.
+ */
+function AttachControls(props: { token: Token }) {
+  const { token } = props;
+  const slots = useAttachSlots(token);
+  const detach = useDetach(token, slots.includes("detach"));
+  const noteId = useId();
+  return (
+    <Section>
+      <div data-attach-controls="" style={{ display: "grid", gap: theme.space(2) }}>
+        <GroupLine token={token} focusTo={ATTACH_FOCUS} />
+        {slots.length > 0 ? (
+          // Each keeps its own width, as the panel's other buttons do: the bar's grow to share its play row.
+          <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
+            {slots.map((slot) => (
+              <span key={slot} style={{ display: "flex" }}>
+                {slot === "detach" ? <DetachButton token={token} detach={detach} noteId={noteId} focusTo={ATTACH_FOCUS} /> : <AttachButton token={token} />}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {slots.includes("detach") ? <DetachNote detach={detach} id={noteId} /> : null}
+      </div>
     </Section>
   );
 }
@@ -439,7 +540,20 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
         <NumberField label="Height" value={token.height} min={0} max={10_000} nullable placeholder={`${autoHeight}`} onCommit={(height) => update({ height })} />
       </FieldRow>
       {offersMakeCompanion({ dm: true, kind: token.kind, companion: isCompanion(token) }) ? <MakeCompanion token={token} /> : null}
+      <DuplicateButton token={token} />
     </>
+  );
+}
+
+/** The bar's Duplicate, worded, last in the DM's Token settings (docs/design-v1-token-sections.md 3.4). */
+function DuplicateButton(props: { token: Token }) {
+  const duplicate = useDuplicate(props.token, DUPLICATE_FOCUS);
+  return (
+    <div>
+      <Button size="sm" icon="duplicate" onClick={duplicate}>
+        Duplicate
+      </Button>
+    </div>
   );
 }
 

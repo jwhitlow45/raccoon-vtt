@@ -822,4 +822,169 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       await ops.send({ t: "token.delete", tokenId: porter });
     }
   });
+
+  describe("s2-at: the Token panel's Position holds the bar's attach controls (docs/design-v1-token-sections.md 3.3)", () => {
+    /** A field of its own, where the party goes for these steps: Thorn, a goblin named Scamp and Pat's pony, nothing else near. */
+    const field = { sceneId: randomUUID(), thorn: randomUUID(), scamp: randomUUID(), pony: randomUUID(), bounds: { w: 10, h: 8 } };
+    const THORN_AT = { x: 2, y: 3 };
+    const SCAMP_AT = { x: 3, y: 3 };
+    const PONY_AT = { x: 2, y: 4 };
+    /** How many errors each page had logged before these steps. */
+    const errorsBefore: Record<string, number> = {};
+
+    /** A token's panel on Pat's phone, from a tap on it and Details in its bar, its Position open. */
+    async function patPanel(name: string, at: { x: number; y: number }): Promise<Locator> {
+      await closeSheet(pat);
+      await tapCell(pat, field.bounds, at);
+      const b = bar(pat, name);
+      await b.waitFor();
+      await (await barControl(b, "Details")).click();
+      const panel = pat.getByRole("region", { name: "Token", exact: true });
+      await panel.getByRole("heading", { name, exact: true }).first().waitFor();
+      return panel;
+    }
+
+    /** Puts away Pat's open sheet, which would take a tap meant for the map. */
+    async function closeSheet(page: Page): Promise<void> {
+      for (let i = 0; i < 3; i++) {
+        const open = page.locator("dialog[data-rvtt-sheet]").filter({ visible: true });
+        if ((await open.count()) === 0) break;
+        await open.first().getByRole("button", { name: /^Close / }).first().click();
+        await page.waitForTimeout(300);
+      }
+      await page.keyboard.press("Escape");
+    }
+
+    /** The Position group of a panel, opened, or null where the panel has none. */
+    async function position(panel: Locator): Promise<Locator | null> {
+      const fold = panel.getByRole("button", { name: "Position", exact: true });
+      if ((await fold.count()) === 0) return null;
+      if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+      // The filter's locator is matched inside each group, so it starts from the page, not the panel.
+      return panel.locator("[data-panel-group]").filter({ has: panel.page().getByRole("button", { name: "Position", exact: true }) });
+    }
+
+    /** What has focus on Pat's page, read as the attach steps above read it. */
+    const focusedOn = () =>
+      pat.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        if (!a || a.tagName === "BODY") return "the page";
+        return `${a.tagName.toLowerCase()} ${a.getAttribute("aria-label") ?? (a.textContent ?? "").trim().slice(0, 60)}`;
+      });
+
+    test("s2-at-0. a field of its own with Thorn, Scamp and Pat's pony, the party moved there and the fight over", async () => {
+      for (const c of Object.values(consoles)) errorsBefore[c.label] = c.errors.length;
+      await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "scene.create", scene: { id: field.sceneId, name: "The S2 field", bounds: field.bounds, fogEnabled: false } });
+      await ops.send(tokenOp(field.thorn, { sceneId: field.sceneId, kind: "pc", name: "Thorn", ...THORN_AT, disposition: "ally", actor: { ref: run.thornChar } }));
+      await ops.send(tokenOp(field.scamp, { sceneId: field.sceneId, kind: "monster", name: "Scamp", ...SCAMP_AT, disposition: "hostile", actor: { inline: actor() } }));
+      await ops.send(tokenOp(field.pony, { sceneId: field.sceneId, kind: "npc", name: "Pony", size: "large", ...PONY_AT, disposition: "ally", ownerIds: [run.patId], actor: { inline: actor() } }));
+      await ops.send({ t: "room.setPlayerScene", sceneId: field.sceneId });
+      await pat.goto(`${server.origin}/r/${run.roomId}`);
+      await waitFor("Pat on the field", () => token(patSocket, field.scamp));
+      await pat.locator(".konvajs-content").first().waitFor();
+    });
+
+    test("s2-at-1. with players allowed to move any token, Pat on Scamp's panel gets Position holding Attach alone", async () => {
+      assert.equal(await position(await patPanel("Scamp", SCAMP_AT)), null, "no Position while Scamp is not Pat's to move");
+      await ops.send({ t: "room.update", settings: { playersMoveAny: "all" } });
+      try {
+        await waitFor("Pat may move Scamp", () => (patSocket.state?.meta.settings.playersMoveAny === "all" ? true : null));
+        const panel = await patPanel("Scamp", SCAMP_AT);
+        const place = await position(panel);
+        assert.ok(place, "Position for a player the bar offers Attach");
+        await place.getByRole("button", { name: "Attach", exact: true }).waitFor();
+        assert.deepEqual(await place.getByRole("button").allInnerTexts().then((t) => t.map((x) => x.trim())), ["Position", "Attach"], "Attach alone");
+        assert.equal(await place.getByText(/Elevation|Facing|Sight/).count(), 0, "nothing else of Position");
+        await shots.take(pat, "s2-at-attach-alone");
+      } finally {
+        await ops.send({ t: "room.update", settings: { playersMoveAny: "none" } });
+      }
+    });
+
+    test("s2-at-2. Thorn drags Scamp: Pat on Scamp's panel gets Position holding the group line and Let go alone, and Let go by keyboard hands focus to Scamp's name as Position goes", async () => {
+      await ops.send({ t: "token.attach", tokenId: field.scamp, to: field.thorn, kind: "drag", ...SCAMP_AT, elevation: 0 });
+      await waitFor("Scamp in Thorn's tow", () => (token(patSocket, field.scamp)?.attached?.to === field.thorn ? true : null));
+      const panel = await patPanel("Scamp", SCAMP_AT);
+      const place = await position(panel);
+      assert.ok(place, "Position for Thorn's player");
+      await place.getByRole("button", { name: "Dragged by Thorn", exact: true }).waitFor();
+      const go = place.getByRole("button", { name: "Let go", exact: true });
+      await go.waitFor();
+      assert.equal(await place.getByRole("button", { name: "Attach", exact: true }).count(), 0);
+      assert.equal(await place.getByText(/Elevation|Facing/).count(), 0);
+      await shots.take(pat, "s2-at-let-go-alone");
+      await go.focus();
+      await pat.keyboard.press("Enter");
+      await waitFor("Scamp let go", () => (token(patSocket, field.scamp) && !token(patSocket, field.scamp)!.attached ? true : null));
+      await panel.getByRole("button", { name: "Position", exact: true }).waitFor({ state: "detached" });
+      await waitFor("focus on Scamp's name", async () => ((await focusedOn()) === "h3 Scamp" ? true : null), 3_000).catch(async () => assert.fail(`focus is on "${await focusedOn()}"`));
+    });
+
+    test("s2-at-3. Scamp drags Thorn: Pat on Scamp's panel gets Position holding the group line alone, Thorn's name beside its Let go, which Scamp's own slots miss, and it lines up at 320 x 568 and 390 x 844 at 130%", async () => {
+      await ops.send({ t: "token.attach", tokenId: field.thorn, to: field.scamp, kind: "drag", ...THORN_AT, elevation: 0 });
+      await waitFor("Thorn in Scamp's tow", () => (token(patSocket, field.thorn)?.attached?.to === field.scamp ? true : null));
+      const off: string[] = [];
+      const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
+      try {
+        for (const scale of [1, 1.3]) {
+          for (const viewport of scale === 1 ? [PHONE] : [{ width: 320, height: 568 }, PHONE]) {
+            await pat.setViewportSize(viewport);
+            await pat.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+            await pat.goto(`${server.origin}/r/${run.roomId}`);
+            await pat.locator(".konvajs-content").first().waitFor();
+            const panel = await patPanel("Scamp", SCAMP_AT);
+            const place = await position(panel);
+            assert.ok(place, `${viewport.width} at ${scale * 100}%: Position for the dragged creature's player`);
+            const line = place.getByRole("group", { name: "Attached tokens", exact: true });
+            await line.getByRole("button", { name: "Dragging Thorn", exact: true }).waitFor();
+            await line.getByRole("button", { name: "Let go of Thorn", exact: true }).waitFor();
+            assert.equal(await place.getByRole("button", { name: "Attach", exact: true }).count(), 0, "no Attach");
+            await place.scrollIntoViewIfNeeded();
+            off.push(...alignmentLines(await measureAlignment(place), `Scamp's Position for Pat at ${viewport.width} x ${viewport.height} at ${Math.round(scale * 100)}%`));
+            await shots.take(pat, `s2-at-group-line-${viewport.width}-${Math.round(scale * 100)}`);
+          }
+        }
+      } finally {
+        await pat.setViewportSize(PHONE);
+        await pat.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+        await pat.goto(`${server.origin}/r/${run.roomId}`);
+        await pat.locator(".konvajs-content").first().waitFor();
+      }
+      assert.deepEqual(off, [], "out of line by more than 1 px");
+      const panel = await patPanel("Scamp", SCAMP_AT);
+      await (await position(panel))!.getByRole("button", { name: "Let go of Thorn", exact: true }).click();
+      await waitFor("Thorn let go", () => (token(patSocket, field.thorn) && !token(patSocket, field.thorn)!.attached ? true : null));
+    });
+
+    test("s2-at-4. Attach from Thorn's Position on the phone opens the attach sheet over the panel's, Ride Pony makes the link, and Get off is offered there and undoes it", async () => {
+      const panel = await patPanel("Thorn", THORN_AT);
+      const place = await position(panel);
+      assert.ok(place, "Position for Thorn's player");
+      await place.getByText("Elevation", { exact: true }).first().waitFor();
+      await place.getByRole("button", { name: "Attach", exact: true }).click();
+      const sheet = pat.getByRole("dialog", { name: "Attach Thorn", exact: true });
+      await sheet.waitFor();
+      assert.ok(await panel.isVisible(), "the panel's sheet stays under it");
+      await shots.take(pat, "s2-at-attach-sheet");
+      await sheet.getByRole("button", { name: /^Ride Pony/ }).click();
+      await sheet.getByRole("button", { name: "Ride", exact: true }).click();
+      await waitFor("Thorn on the pony", () => (token(patSocket, field.thorn)?.attached?.to === field.pony ? true : null));
+      await sheet.waitFor({ state: "detached" });
+      const off = place.getByRole("button", { name: "Get off", exact: true });
+      await off.waitFor();
+      await place.getByRole("button", { name: "Riding Pony", exact: true }).waitFor();
+      await shots.take(pat, "s2-at-get-off");
+      await off.click();
+      await waitFor("Thorn off the pony", () => (token(patSocket, field.thorn) && !token(patSocket, field.thorn)!.attached ? true : null));
+    });
+
+    test("s2-at-z. the party back on its scene, the field's tokens gone, and no page logged an error", async () => {
+      await closeSheet(pat);
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+      for (const id of [field.thorn, field.scamp, field.pony]) await ops.send({ t: "token.delete", tokenId: id });
+      await ops.send({ t: "scene.delete", sceneId: field.sceneId });
+      for (const c of Object.values(consoles)) assert.deepEqual(c.errors.slice(errorsBefore[c.label] ?? 0), [], c.label);
+    });
+  });
 });

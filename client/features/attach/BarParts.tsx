@@ -50,20 +50,22 @@ export function useDetach(token: Token, shows: boolean): DetachState | null {
  * own so no button in the row stretches to the note's width
  * (docs/design-v1-look-pass-2.md 2.7).
  */
-export function DetachButton(props: { token: Token; detach: DetachState | null; noteId: string }) {
+export function DetachButton(props: { token: Token; detach: DetachState | null; noteId: string; focusTo?: AttachFocus }) {
   const actions = useRoomActions();
   const { detach } = props;
+  const focusTo = props.focusTo ?? IN_BAR;
   if (!detach) return null;
   return (
     <Button
       size="sm"
       aria-disabled={detach.stuck ? true : undefined}
       aria-describedby={detach.stuck ? props.noteId : undefined}
-      onClick={() => {
+      onClick={(e) => {
         if (detach.stuck) return;
+        const scope = e.currentTarget.closest<HTMLElement>(focusTo.scope);
         actions.dispatch(detachOp(props.token.id, detach.place));
         // The button goes with the link it undid, so focus moves to the bar around it.
-        handFocusOn(document.body, [BAR_FRAME]);
+        handFocusOn(scope, focusTo.to);
       }}
       // It stands only in the bar's play row, whose buttons grow to share their line (canvas/TokenActionBar.tsx ButtonRow).
       style={{ flex: "1 1 auto", ...(detach.stuck ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
@@ -93,6 +95,16 @@ const HOLDS: Record<"carrying" | "dragging", string> = { carrying: "Carrying", d
 const BAR_FRAME = '[role="dialog"][data-bar-mode]';
 
 /**
+ * Where focus goes once a press here took its button away: the first of
+ * `to` inside the closest `scope` to the button, as Revive's hand-off reads
+ * it. The bar's frame by default. The Token panel's Position, which holds
+ * the same controls, names its own (docs/design-v1-token-sections.md 3.3).
+ */
+export type AttachFocus = { scope: string; to: readonly string[] };
+
+const IN_BAR: AttachFocus = { scope: "body", to: [BAR_FRAME] };
+
+/**
  * The group line in the bar's summary (4.4): "Riding Warhorse" or
  * "Dragged by Thorn" on a carried token, in the panel's words, and on a
  * holder "Carrying Bree, Torch" and "Dragging Goblin 2", each name a
@@ -110,8 +122,9 @@ const BAR_FRAME = '[role="dialog"][data-bar-mode]';
  * the word stands on its first name's first line, as rows meet on their
  * baseline.
  */
-export function GroupLine(props: { token: Token }) {
+export function GroupLine(props: { token: Token; focusTo?: AttachFocus }) {
   const { token } = props;
+  const focusTo = props.focusTo ?? IN_BAR;
   const actions = useRoomActions();
   const ui = useRoomUi();
   const viewer = useAttachViewer();
@@ -121,15 +134,16 @@ export function GroupLine(props: { token: Token }) {
   if (!line.holder && line.carried.length === 0) return null;
   // A name here opens that token's bar in place of this one, and Put down or Let go takes its row away, so the
   // button pressed leaves the page with focus on it. Focus moves to the bar that stands then, as Revive's does.
-  const press = (run: () => void) => {
+  const press = (from: HTMLElement, run: () => void) => {
+    const scope = from.closest<HTMLElement>(focusTo.scope);
     run();
-    handFocusOn(document.body, [BAR_FRAME]);
+    handFocusOn(scope, focusTo.to);
   };
   const holds = (["carrying", "dragging"] as const).map((key) => ({ key, tokens: line.carried.filter((c) => c.dragged === (key === "dragging")) })).filter((h) => h.tokens.length > 0);
   return (
     <div role="group" aria-label="Attached tokens" style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "baseline", gap: theme.space(1) }}>
       {line.holder ? (
-        <Button size="sm" onClick={() => press(() => ui.select(line.holder!.id, { opens: true }))} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
+        <Button size="sm" onClick={(e) => press(e.currentTarget, () => ui.select(line.holder!.id, { opens: true }))} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
           {line.holder.text}
         </Button>
       ) : null}
@@ -143,11 +157,11 @@ export function GroupLine(props: { token: Token }) {
               const action = holderAction(c.token);
               return (
                 <Fragment key={c.id}>
-                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={() => press(() => ui.select(c.id, { opens: true }))} style={IN_CELL}>
+                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={(e) => press(e.currentTarget, () => ui.select(c.id, { opens: true }))} style={IN_CELL}>
                     {c.name}
                   </Button>
                   {action && detachAllowed(view, viewer, c.token) ? (
-                    <Button size="sm" aria-label={action.words} onClick={() => press(() => actions.dispatch(detachOp(c.id, null)))} style={IN_CELL}>
+                    <Button size="sm" aria-label={action.words} onClick={(e) => press(e.currentTarget, () => actions.dispatch(detachOp(c.id, null)))} style={IN_CELL}>
                       {DETACH_WORDS[action.choice]}
                     </Button>
                   ) : null}
