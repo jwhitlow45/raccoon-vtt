@@ -32,7 +32,7 @@ Status: draft 3, 2026-10-18, revised for review rounds 1 and 2 and the project o
 
 ### 4.1 Building a trap
 
-- **The Trap tool**, DM only, a setup tool after Pin (`TOOL_ORDER` 65 and `SETUP_TOOLS`, `client/features/toolbarOrder.ts`), behind Setup on a phone. No key: the free letters name nothing about traps, and setup tools are opened rarely. Its options hold **Start from**: Blank, Alarm (a note only, nothing players can see), and the SRD traps (Appendix A), with **Party level** 1–4, 5–10, 11–16 or 17–20. A preset picks its zone's kind, which can also be picked by hand: **Squares** (drag a rectangle snapped to whole cells, or tap to place the preset's own squares, a Hidden Pit's 2 x 2, one square from Blank or Alarm, "Add squares" for up to 8), **Trip wire** (from point to point, ends on cell corners and edge midpoints, at most 20 cells), or **Door** (tap a door on a grid edge or a free door).
+- **The Trap tool**, DM only, a setup tool after Pin (`TOOL_ORDER` 65 and `SETUP_TOOLS`, `client/features/toolbarOrder.ts`), behind Setup on a phone. No key: the free letters name nothing about traps, and setup tools are opened rarely. Changed by D-261025-2: the Trap tool has the key X, and the sheet's DM tool row lists it. Its options hold **Start from**: Blank, Alarm (a note only, nothing players can see), and the SRD traps (Appendix A), with **Party level** 1–4, 5–10, 11–16 or 17–20. A preset picks its zone's kind, which can also be picked by hand: **Squares** (drag a rectangle snapped to whole cells, or tap to place the preset's own squares, a Hidden Pit's 2 x 2, one square from Blank or Alarm, "Add squares" for up to 8), **Trip wire** (from point to point, ends on cell corners and edge midpoints, at most 20 cells), or **Door** (tap a door on a grid edge or a free door).
 - A tap on a trap with the tool opens its pane, as does its row in the Outliner's new Traps group (4.6).
 - **The trap pane**: a bottom sheet where the map is under 600 px wide, as on a phone held upright, and otherwise a card over the map beside the trap, as the label, pin and light panes are. Its first line says where it started ("From Hidden Pit, levels 1–4"). The sections fold to one line each:
   1. **Name**, "Players see this name once the trap is found."
@@ -325,9 +325,7 @@ After movement's and attach's builds, on their tip:
 11. `feat(traps): pits open the ground`, with attach's group rules and second link pass.
 12. `perf(traps): bench the worst group move`.
 13. `test(e2e): traps`.
-14. `docs: traps in docs/design.md, FEATURES.md and the DM guide`: design.md sections 6 (model), 7.3 (projection), 7.7 (the refused player undo), 8.1 (ops), 9.3 (the teleport sweep), a new 9.12 (traps), 10.5 (limits, reserves and the pit count), 16.2 (versioning) and 16.4 (export). The shortcut sheet holds keys and key-plus-pointer combinations only (the project owner's rule of 2026-10-16), and the Trap tool has neither, so the sheet gains no row: its taps and drags are told in FEATURES.md's Traps section and the guide's prose.
-
-Changed by D-261025-2: the Trap tool has the key X.
+14. `docs: traps in docs/design.md, FEATURES.md and the DM guide`: design.md sections 6 (model), 7.3 (projection), 7.7 (the refused player undo), 8.1 (ops), 9.3 (the teleport sweep), a new 9.12 (traps), 10.5 (limits, reserves and the pit count), 16.2 (versioning) and 16.4 (export). The shortcut sheet holds keys and key-plus-pointer combinations only (the project owner's rule of 2026-10-16), and the Trap tool has neither, so the sheet gains no row (changed by D-261025-2: the Trap tool has the key X, so the sheet's DM tool row lists it): its taps and drags are told in FEATURES.md's Traps section and the guide's prose.
 
 ## 13. The shared move description
 
