@@ -208,6 +208,24 @@ export function DescribedItems(props: { items: readonly (ReactNode | null | fals
   );
 }
 
+/**
+ * Items of a row's second line that wrap as one part, such as AC with HP
+ * and a legendary creature's LA with LR: where the line has no room for
+ * the part beside what comes before, the whole part starts the next line,
+ * so neither stands alone there where both fit. It wraps inside itself
+ * only where it alone is wider than the line. Its items keep the unseen
+ * separators between them. Null when none is present, so the line's own
+ * DescribedItems leaves it out with its separator.
+ */
+export function linePart(name: string, items: readonly (ReactNode | null | false | undefined)[]): ReactNode {
+  if (!items.some((item) => item !== null && item !== false && item !== undefined)) return null;
+  return (
+    <span data-line-part={name} style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0, maxWidth: "100%" }}>
+      <DescribedItems items={items} />
+    </span>
+  );
+}
+
 /** The HP readout for a row's description: "HP 7/7" to a screen reader, "7/7" on screen. */
 export function DescribedHp(props: { hp: HpView }) {
   if (props.hp.kind === "none") return null;

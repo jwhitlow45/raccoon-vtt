@@ -31,7 +31,7 @@ import { usePanelHere } from "../panels.ts";
 import { RowRollTools } from "./AutoInitiative.tsx";
 import { useSend, useSendAll } from "./hooks.ts";
 import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollReminder, rowAc, SECRET_ROW, secretUntilItsTurn, valueText, type HpView } from "./logic.ts";
-import { Chips, DescribedHp, DescribedItems, Portrait, RollBadge, Spinner } from "./parts.tsx";
+import { Chips, DescribedHp, DescribedItems, linePart, Portrait, RollBadge, Spinner } from "./parts.tsx";
 import { readiedEffect, rowTarget, type ReactionTarget } from "./ready.ts";
 import { ReadyControls } from "./ReadyControls.tsx";
 import { LegendaryPips } from "./Pips.tsx";
@@ -212,8 +212,7 @@ export function EntryRow(props: {
             <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
               <DescribedItems
                 items={[
-                  ac !== null ? <AcBadge ac={ac} size="sm" /> : null,
-                  hp.kind !== "none" ? <DescribedHp hp={hp} /> : null,
+                  linePart("numbers", [ac !== null ? <AcBadge ac={ac} size="sm" /> : null, hp.kind !== "none" ? <DescribedHp hp={hp} /> : null]),
                   reminder ? <RollBadge kind={reminder} /> : null,
                   dm && entry.hidden ? (
                     <Tag tone="muted" dense icon="hidden">
@@ -258,16 +257,18 @@ export function EntryRow(props: {
                       {link.controlled}
                     </span>
                   ) : null,
-                  legendary && legendary.actionsMax > 0 ? (
-                    <Tag tone="turn" dense>
-                      LA {legendary.actionsMax - legendary.actionsUsed}/{legendary.actionsMax}
-                    </Tag>
-                  ) : null,
-                  legendary && legendary.resistMax > 0 ? (
-                    <Tag tone="turn" dense>
-                      LR {legendary.resistMax - legendary.resistUsed}/{legendary.resistMax}
-                    </Tag>
-                  ) : null,
+                  linePart("legendary", [
+                    legendary && legendary.actionsMax > 0 ? (
+                      <Tag tone="turn" dense>
+                        LA {legendary.actionsMax - legendary.actionsUsed}/{legendary.actionsMax}
+                      </Tag>
+                    ) : null,
+                    legendary && legendary.resistMax > 0 ? (
+                      <Tag tone="turn" dense>
+                        LR {legendary.resistMax - legendary.resistUsed}/{legendary.resistMax}
+                      </Tag>
+                    ) : null,
+                  ]),
                   ...(dm ? spentChips(actor?.uses) : []),
                   effects.length > 0 ? <Chips effects={effects} max={6} /> : null,
                 ]}
@@ -403,8 +404,7 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
             <span id={lineId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
               <DescribedItems
                 items={[
-                  ac !== null ? <AcBadge ac={ac} size="sm" /> : null,
-                  hp.kind !== "none" ? <DescribedHp hp={hp} /> : null,
+                  linePart("numbers", [ac !== null ? <AcBadge ac={ac} size="sm" /> : null, hp.kind !== "none" ? <DescribedHp hp={hp} /> : null]),
                   dm && token.visibility === "dm" ? (
                     <Tag tone="muted" dense>
                       Hidden

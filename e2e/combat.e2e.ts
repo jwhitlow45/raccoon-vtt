@@ -1642,7 +1642,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
-  test("s1-c-a. the DM's row options lead with the creature's uses, its pips wrapping, Reaction used and Ready, then the row's own from Row hidden from players to Remove, and a companion's sub-row lists its uses first, in line at 1280 x 800, 390 x 844 at 130% and 320 x 568 at 130% (docs/design-v1-token-sections.md 4)", async () => {
+  test("s1-c-a. the DM's row options lead with the creature's uses, its pips wrapping, Reaction used and Ready, then the row's own from Row hidden from players to Remove, and a companion's sub-row lists its uses first, in line at 1280 x 800, 390 x 844 at 100% and 130% and 320 x 568 at 130%, the row's own line with its LA and LR together where they fit (docs/design-v1-token-sections.md 4, S1-ROW-1)", async () => {
     const boss = randomUUID();
     const skitter = randomUUID();
     await ops.send({ t: "token.create", token: { id: boss, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 3, resistMax: 10, resistUsed: 1 } } } } });
@@ -1668,6 +1668,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     try {
       for (const view of [
         { ...DESK, scale: 1 },
+        // Where LA and LR fit side by side after AC and HP, but not beside them (S1-ROW-1).
+        { width: 390, height: 844, scale: 1 },
         { width: 390, height: 844, scale: 1.3 },
         { width: 320, height: 568, scale: 1.3 },
       ]) {
@@ -1696,10 +1698,23 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
           assert.ok(b.x + b.width <= rowBox.x + rowBox.width + 0.5, `${at}: a pip at ${b.x + b.width} past the row's ${rowBox.x + rowBox.width}`);
         }
         await row.scrollIntoViewIfNeeded();
-        // Its options, which S1 reordered. The row's own line is logged: at 320 x 568 at 130% its AC, HP and tags stand one to a line, and the edge check reads the tags' words, inside their pills, as the column's start (the row's line is parts.tsx's, unchanged here).
+        // Its options, which S1 reordered, and the row's own line: AC with HP and LA with LR each wrap as one part, so no tag stands alone where two fit (S1-ROW-1).
         off.push(...alignmentLines(await measureAlignment(row.locator("[data-row-options]")), `the boss's row options at ${at}`));
-        const line = alignmentLines(await measureAlignment(row.locator("[data-row-button]")), `the boss's row line at ${at}`);
-        if (line.length > 0) console.log(`known, outside S1: ${line.join("; ")}`);
+        off.push(...alignmentLines(await measureAlignment(row.locator("[data-row-button]")), `the boss's row line at ${at}`));
+        // Where LA and LR fit on a line side by side, they share it.
+        const pair = await row.locator("[data-row-button]").evaluate((button) => {
+          const doc = button.ownerDocument;
+          const line = doc.getElementById(button.getAttribute("aria-describedby") ?? "");
+          if (!line) return null;
+          const tag = (lead: string) => [...line.querySelectorAll("span")].find((el) => el.children.length === 0 && new RegExp(`^${lead} \\d+/\\d+$`).test(el.textContent ?? ""))?.getBoundingClientRect();
+          const la = tag("LA");
+          const lr = tag("LR");
+          if (!la || !lr) return null;
+          const gap = parseFloat(doc.defaultView.getComputedStyle(line).columnGap) || 0;
+          return { fits: la.width + gap + lr.width <= line.getBoundingClientRect().width + 0.5, together: Math.abs(la.top - lr.top) < 1 };
+        });
+        assert.ok(pair, `${at}: the boss's row line shows LA and LR`);
+        if (pair.fits) assert.ok(pair.together, `${at}: LA and LR fit together on a line, yet stand apart`);
         await shots.take(dm, `s1-c-row-options-${view.width}-${Math.round(view.scale * 100)}`);
         await toggle.click();
 
