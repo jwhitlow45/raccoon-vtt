@@ -123,7 +123,7 @@ These jobs run on Ubuntu:
 - **typecheck-int**: `pnpm typecheck` and `pnpm test:int`, the second
   against a postgres service container like the one in `docker-compose.yml`.
 - **unit**: `pnpm test`, which needs no database.
-- **e2e**, 13 shards at once: each shard installs, downloads the build,
+- **e2e**, 14 shards at once: each shard installs, downloads the build,
   gets a postgres service container of its own and runs its share of
   `e2e/*.e2e.ts`, one file at a time, in Google Chrome.
 
@@ -171,7 +171,7 @@ lands, rewrite the list from a few green runs with
 `node scripts/e2e-durations.ts <run id> ...`, which reads those times
 through `gh`. The list holds CI seconds, the largest of the runs given, and
 the shard count is chosen so the longest shard plans about 8 minutes. A run
-is 16 jobs and peaks at 15 at once, of the account's 20 Linux jobs, so a
+is 17 jobs and peaks at 16 at once, of the account's 20 Linux jobs, so a
 second run that overlaps it queues part of its shards.
 
 A file that takes much over 5 minutes in CI holds its shard up, so a long

@@ -1,6 +1,6 @@
 # Every check on a push to main or to a ci/ branch, on Linux: the typecheck
-# with the integration tests, the unit tests, and the e2e files in 13 shards.
-# That is 16 jobs with the build. One run peaks at 15 Linux jobs of the
+# with the integration tests, the unit tests, and the e2e files in 14 shards.
+# That is 17 jobs with the build. One run peaks at 16 Linux jobs of the
 # account's 20, so a run that overlaps it queues part of its shards: a single
 # run's speed was chosen over two runs at full speed at once.
 #
@@ -158,7 +158,7 @@ jobs:
   e2e:
     needs: build
     runs-on: ubuntu-24.04
-    # 13 shards (scripts/ci-scope.ts SHARDS) of about 8 minutes each,
+    # 14 shards (scripts/ci-scope.ts SHARDS) of about 8 minutes each,
     # balanced by scripts/e2e-shard.ts from e2e/durations.json, which holds
     # the seconds a file took in CI.
     # The shard's deadline keeps it inside this limit even when a file hangs.

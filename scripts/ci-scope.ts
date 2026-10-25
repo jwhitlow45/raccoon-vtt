@@ -21,7 +21,7 @@ import { appendFileSync } from "node:fs";
  */
 
 /** The e2e shards of a full run (.github/workflows/ci.yml, the e2e job). */
-export const SHARDS = 13;
+export const SHARDS = 14;
 
 /**
  * Whether a changed path is a doc: anything under docs/, which holds the
