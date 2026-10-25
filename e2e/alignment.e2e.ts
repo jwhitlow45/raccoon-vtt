@@ -3013,7 +3013,80 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
   });
+
+  /*
+   * The app icon's places (D-261025-16), measured since its look changed
+   * from a disc to the iOS app icon shape: Home's header, the docs pages'
+   * bar and About's header, at FU30_AT's sizes.
+   */
+  test(`appicon-a. Home's header, the docs pages' bar and About's header, each icon drawn in the square box its size gives it, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (D-261025-16)`, async () => {
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(atName(at));
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await page.setViewportSize({ width: at.size.width, height: at.size.height });
+      await page.goto(`${server.origin}/`);
+      await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), at.scale);
+      for (const [screen, path] of [
+        ["appicon-home", "/"],
+        ["appicon-docs", "/docs"],
+        ["appicon-guide", "/docs/dm-guide"],
+      ] as const) {
+        await page.goto(`${server.origin}${path}`);
+        await iconPlace(sweep, page, screen, page.locator(':is(header, div):has(> img[src="/icon.svg"])'));
+      }
+      await openAt(page, at.size, at.scale);
+      const menu = await openMenu(page);
+      const about = menu.locator('header:has(> img[src="/icon.svg"])');
+      // The Menu may open on About already, as the last size left it.
+      if (!(await visible(about))) await menu.getByRole("button", { name: /^About/ }).click();
+      await iconPlace(sweep, page, "appicon-about", about);
+      await closeSheets(page);
+      await escapeAll(page);
+      lines.push(...sweep.lines);
+    }
+    assert.deepEqual(lines, [], "the app icon's places out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+  });
 });
+
+/** The Menu panel: its side panel tab from 900 px up, else its sheet from Panels. */
+async function openMenu(page: Page): Promise<Locator> {
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if (await visible(tabs)) {
+    await openSideTab(page, "Menu");
+    return page.getByRole("tabpanel", { name: sideTabName("Menu") });
+  }
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Menu"]');
+  if (await visible(sheet)) return sheet;
+  await closeSheets(page);
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/**
+ * One of the app icon's places (D-261025-16): its root measured, and its
+ * icon drawn in the square box its width and height give it at its
+ * layer's zoom, so a change to the icon's art never moves what is beside it.
+ */
+async function iconPlace(sweep: Sweep, page: Page, screen: string, root: Locator): Promise<void> {
+  const icon = root.locator(':scope > img[src="/icon.svg"]').first();
+  await icon.waitFor();
+  const box = await icon.evaluate(async (el) => {
+    const img = el as unknown as { decode(): Promise<void>; getAttribute(name: string): string | null; getBoundingClientRect(): { width: number; height: number }; currentCSSZoom?: number };
+    // Rejects when the SVG does not draw.
+    await img.decode();
+    const rect = img.getBoundingClientRect();
+    return { width: rect.width, height: rect.height, want: Number(img.getAttribute("width")) * (img.currentCSSZoom ?? 1) };
+  });
+  const off = Math.max(Math.abs(box.width - box.want), Math.abs(box.height - box.want));
+  await sweep.add(page, screen, off > 0.1 ? [`${sweep.at} ${screen}: the icon's box is ${box.width} x ${box.height}, not ${box.want} square`] : []);
+  await sweep.measure(page, screen, root);
+  await shots.take(page, `alignment-${sweep.at}-${screen}`);
+}
 
 /**
  * The round header's "Round N" and its clock (ICONS2B-OPUS-06,
