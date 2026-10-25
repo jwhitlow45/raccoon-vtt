@@ -118,7 +118,7 @@ async function setUp(page: Page, cdp: CDPSession, view: View): Promise<void> {
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
   await openPage(page, `${server.origin}/r/${run.roomId}`);
-  // The DM's desk, phone and op socket share one session, and a run that reloads quickly meets the server's snapshot budget of 20 a minute a session, which delays a snapshot rather than refuse it, up to a minute (server/rooms/budgets.ts).
+  // The desk and the op socket share one session, and a run that reloads quickly meets the server's snapshot budget of 20 a minute a session, which delays a snapshot rather than refuse it, up to a minute (server/rooms/budgets.ts).
   await page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 75_000 });
   await page.locator(".konvajs-content").first().waitFor();
 }
