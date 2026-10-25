@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { RoomState, Viewer } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
@@ -9,7 +9,7 @@ import { actor, character, companionBlock, DM, entry, P1, P2, room, template, to
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
-import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, predictedLines, refusalText, replayPending, type RoomStore } from "./store.ts";
+import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
@@ -80,22 +80,34 @@ describe("a predicted op's log lines are the viewer's own (design 7.4)", () => {
 });
 
 describe("a predicted shared line keeps only the parts the viewer could read", () => {
-  test("a player's line without the HP numbers shows no numbers ahead, the DM's keeps them", () => {
-    const state = room({ tokens: { wolf: token("wolf", { name: "Wolf", hpVisibility: "label" }) } });
-    const line: LogEntry = {
-      id: "2:0",
-      at: "1970-01-01T00:00:00.000Z",
-      kind: "event",
-      data: { type: "hp", change: "damage", amount: 3, label: "Healthy", left: { cur: 17, max: 20, temp: 0 }, tokenId: "wolf", seen: true },
-      parts: { exact: [] },
+  // Through the store's own path: each op replayed on the viewer's projection (replayPending), then the server's answer.
+  test("a player's line shows no HP numbers ahead that the server keeps from them, the DM's keeps them, and each line ahead is the confirmed one", () => {
+    // Players may damage what they do not own, so P1 hits the wolf whose numbers they never read, and their own pet, whose numbers they do.
+    const state = room({ tokens: { wolf: token("wolf", { name: "Wolf", hpVisibility: "label" }), pet: token("pet", { name: "Pet", hpVisibility: "label", ownerIds: ["p1"] }) } });
+    state.meta.settings.playersApplyDamage = true;
+    const lineOf = (s: ReturnType<typeof setup>, tokenId: string) => {
+      const line = s.state().view!.log.findLast((e) => e.data?.type === "hp" && e.data.tokenId === tokenId);
+      if (!line) return null;
+      const { id: _id, at: _at, ...rest } = line;
+      return rest;
     };
-    const withLine = { ...state, log: [line] };
-    const hp = (viewer: Viewer) => {
-      const data = predictedLines(withLine, viewer, 2, "s1").log[0]?.data;
-      return data?.type === "hp" ? [data.amount, data.left, data.label] : null;
-    };
-    assert.deepEqual(hp(P1), [undefined, undefined, "Healthy"]);
-    assert.deepEqual(hp(DM), [3, { cur: 17, max: 20, temp: 0 }, "Healthy"]);
+    const numbers = (line: ReturnType<typeof lineOf>) => (line?.data?.type === "hp" ? [line.data.amount, line.data.left, line.data.label] : null);
+    for (const viewer of [P1, DM]) {
+      const s = setup(state, viewer);
+      s.connect();
+      for (const tokenId of ["wolf", "pet"]) {
+        s.room.dispatch(damage(tokenId, 3));
+        const ahead = lineOf(s, tokenId);
+        s.deliver();
+        const confirmed = lineOf(s, tokenId);
+        const what = `${viewer.memberId} hitting the ${tokenId}`;
+        // A player's hit on a creature they do not own waits for the server, so its line never shows ahead.
+        if (viewer === P1 && tokenId === "wolf") assert.equal(ahead, null, `${what}: no line ahead`);
+        else assert.deepEqual(ahead, confirmed, `${what}: the line ahead is the confirmed one`);
+        const seesNumbers = viewer === DM || tokenId === "pet";
+        assert.deepEqual(numbers(confirmed), seesNumbers ? [3, { cur: 17, max: 20, temp: 0 }, "Healthy"] : [undefined, undefined, "Healthy"], `${what}: the numbers it reads`);
+      }
+    }
   });
 });
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, PcRoll, PcStats } from "#shared/model.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { afterSync, defaultTicks, planSync, syncPatch, syncResult, type SyncPlan, type SyncResult } from "#shared/rules/pcSync.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor, character } from "#shared/testutil.ts";
 
@@ -29,11 +29,11 @@ function fillOf(stats: Partial<PcStats>): PcFill {
 
 const bree = (stats?: PcStats): Character => character("bree", { name: "Bree", level: 5, ...(stats ? { stats } : {}), actor: actor({ ac: 15, hp: { cur: 38, max: 38, temp: 0 }, speeds: { walk: 30 }, senses: "", sheetUrl: SHEET }) });
 
-function render(c: Character, fill: PcFill, ticks?: Set<string>, mode: "resync" | "editor" = "resync", only?: "resources"): { html: string; plan: SyncPlan } {
+function render(c: Character, fill: PcFill, ticks?: Set<string>, mode: "resync" | "editor" = "resync", only?: "resources", dropped?: SyncResult["goneDropped"]): { html: string; plan: SyncPlan } {
   const plan = planSync({ mode, stats: c.stats, level: c.level, character: c, fill });
   const t = ticks ?? defaultTicks(plan);
   const result = syncResult(plan, t);
-  const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}`, ...(only ? { only } : {}) }));
+  const html = renderToStaticMarkup(createElement(SyncReview, { plan, result, ticks: t, onTick() {}, onBulk() {}, name: "Bree", character: c, nothingNew: syncPatch(c, result) === null, labelId: (s: string) => `label-${s}`, ...(only ? { only } : {}), ...(dropped ? { dropped } : {}) }));
   return { html, plan };
 }
 
@@ -175,5 +175,19 @@ describe("the review's class resources (docs/design-v1-ddb-resources.md 6.1 and 
     assert.doesNotMatch(only, /Name Bree Tallow/);
     assert.match(only, /Updates Rage: 4 uses, now 3/);
     assert.match(only, /Rage 4 of 4 left, now 2 of 4/);
+  });
+
+  test("after a refused Save, Check these holds only the line for the markers Use it's splice cuts, the dropped list it is handed (OP-21)", () => {
+    const base = synced();
+    const fill = { ...withResources(fillOf({ spellAbility: "cha" }), [{ ...rage, max: 4 }]), warnings: ["A warning."] };
+    const tail = "may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.";
+    const named = render(base, fill, undefined, "resync", "resources", [{ k: "r:x1", name: "Channel Divinity" }, { k: "w:x2", name: "Shortbow" }]).html;
+    assert.match(named, /id="label-checks"/);
+    assert.ok(named.includes(`Your deleted Channel Divinity and Shortbow ${tail}`), "the dropped markers named");
+    assert.doesNotMatch(named, /A warning\./, "the reader's own lines stay out");
+    const unnamed = render(base, fill, undefined, "resync", "resources", [{ k: "r:x1" }, { k: "r:x3" }, { k: "w:x2" }]).html;
+    assert.ok(unnamed.includes(`A roll and 2 class resources you deleted ${tail}`), "unnamed markers counted by kind");
+    const none = render(base, fill, undefined, "resync", "resources", []).html;
+    assert.doesNotMatch(none, /id="label-checks"/, "nothing dropped, no Check these");
   });
 });

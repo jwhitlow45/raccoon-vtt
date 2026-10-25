@@ -247,7 +247,8 @@ function run(seed: number, steps: number): void {
           options = { ...options, cast: null };
           add([preview], [{ tag: id, creature: owner.key, group: section }]);
         } else if (shown !== owner && random() < 0.5) {
-          markSendSeen(page, foldKind(state, owner.creature), id);
+          // By the caster's token, as the list's Ask again names it (CastBlock.tsx).
+          markSendSeen(page, foldKind(state, { tokenId: casterOf(owner) }), id);
           // Taken while the owner's options are not drawn (another tab, or loading): the ask then waits in the view and the block goes before the owner shows again, which must open nothing on this page.
           state.casts[id] = castAsk(id, { caster: casterOf(owner), spell: cast.spell, roll: cast.roll, area: undefined });
           options = { ...options, cast: null };

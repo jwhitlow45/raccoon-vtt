@@ -1,7 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
-import { lineAudience } from "#shared/logRings.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
 import {
