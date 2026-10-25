@@ -936,6 +936,63 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await focusLands(ana, /^Add$/, "Remove");
   });
 
+  test("lp22-r1-e. by keyboard, Polymorph taken from the picker takes Take a shape away with it, and focus goes to the Stat block's fold, never the page (LP22-OPUS-2)", async () => {
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    const panel = await showBree(ana);
+    const breeActor = () => anaSocket.state?.characters[run.bree.characterId]?.actor;
+    await pressKey(ana, panel.getByRole("button", { name: /shapes?, take a shape$|^Take a shape$/ }).first());
+    const picker = ana.getByRole("dialog", { name: "Take a shape" });
+    await picker.getByRole("searchbox", { name: "Search creatures" }).fill("brown bear");
+    await pressKey(ana, picker.getByRole("button", { name: /Brown Bear/ }).first());
+    const choice = ana.getByRole("dialog", { name: "Take the shape of Brown Bear" });
+    await choice.getByRole("radio", { name: /^Polymorph or another shape/ }).check();
+    await pressKey(ana, choice.getByRole("button", { name: "Take the shape", exact: true }));
+    await waitFor("Bree in another shape", () => (breeActor()?.srdId !== undefined && !breeActor()?.wildShape ? true : null));
+    // In another shape the button is hidden until End the shape.
+    assert.equal(await panel.getByRole("button", { name: /take a shape$/i }).count(), 0);
+    await focusLands(ana, /^fold Stat block/, "Take the shape");
+    await panel.getByRole("button", { name: "End the shape" }).click();
+    await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
+  });
+
+  test("lp22-r1-f. by keyboard on a character with no block, Take a shape moves to the fold's row with the shape and focus goes to the Stat block's fold, and Save on a first block leaves it on Edit, where Add a stat block stood, never the page (LP22-OPUS-2)", async () => {
+    const cal = { characterId: randomUUID(), tokenId: randomUUID() };
+    await ops.send({ t: "character.create", character: { id: cal.characterId, name: "Cal", size: "medium", ownerIds: [], actor: actor() } });
+    await ops.send({ t: "token.create", token: { id: cal.tokenId, sceneId: run.sceneId, kind: "pc", name: "Cal", size: "medium", x: 9, y: 5, disposition: "ally", actor: { ref: cal.characterId } } });
+    const calOf = () => dmSocket.state?.characters[cal.characterId];
+    await waitFor("Cal on the DM's device", () => calOf());
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.locator(".konvajs-content").first().waitFor();
+    await tapCell(dm, BOUNDS, { x: 9, y: 5 });
+    await dm.getByRole("dialog", { name: "Cal actions" }).waitFor();
+    await openSideTab(dm, "Token");
+    const panel = tokenPanel(dm);
+    const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+
+    await pressKey(dm, panel.getByRole("button", { name: "Take a shape", exact: true }));
+    const picker = dm.getByRole("dialog", { name: "Take a shape" });
+    await picker.getByRole("searchbox", { name: "Search creatures" }).fill("wolf");
+    await pressKey(dm, picker.getByRole("button", { name: /^Wolf/ }).first());
+    await pressKey(dm, dm.getByRole("dialog", { name: "Take the shape of Wolf" }).getByRole("button", { name: "Take the shape", exact: true }));
+    await waitFor("Cal in Wild Shape", () => (calOf()?.actor.wildShape ? true : null));
+    await focusLands(dm, /^fold Stat block/, "Take the shape");
+    await pressKey(dm, panel.getByRole("button", { name: "End the shape" }));
+    await waitFor("the shape ended", () => (calOf()?.actor.srdId === undefined ? true : null));
+    await focusLands(dm, /^fold Stat block/, "End the shape");
+
+    await pressKey(dm, panel.getByRole("button", { name: "Add a stat block" }));
+    const sheet = dm.getByRole("dialog", { name: "Cal's stat block" });
+    await sheet.getByLabel("Level", { exact: true }).fill("3");
+    await pressKey(dm, sheet.getByRole("button", { name: "Save", exact: true }));
+    await sheet.waitFor({ state: "detached" });
+    await waitFor("Cal's block", () => calOf()?.stats);
+    // React keeps the button and gives it Edit's words, so the editor hands focus back to it.
+    await focusLands(dm, /^Edit$/, "Save");
+  });
+
   test("6. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");

@@ -1,11 +1,11 @@
-import { useRef, useState, type Ref } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import type { RollNumbers } from "#shared/dice/bonus.ts";
 import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
-import { handFocusOn } from "../../lib/handFocus.ts";
+import { handFocusNow, handFocusOn, pressedControl } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -53,8 +53,16 @@ export function PcStatBlock(props: {
   // In another shape, such as Polymorph, the button is hidden: End the shape first. In Wild Shape it stays, as the way to change form or forms.
   // The count lives on the button, not in the folded summary, which would crowd the row (D-261024-26, D-261024-27).
   const words = takeShapeWords(character.knownForms?.length ?? 0);
+  const shapeOpener = useFoldAfterDialog(picking);
   const take = !edits || pcShape(character) === "other" ? null : (
-    <SmallButton wrap ariaLabel={words.name} onClick={() => setPicking(true)}>
+    <SmallButton
+      wrap
+      ariaLabel={words.name}
+      onClick={() => {
+        shapeOpener();
+        setPicking(true);
+      }}
+    >
       {words.text}
     </SmallButton>
   );
@@ -105,6 +113,30 @@ export function PcStatBlock(props: {
       {picker}
     </>
   );
+}
+
+/**
+ * Focus for a dialog the section opens whose work can take its opener
+ * away. A shape taken can take Take a shape with it: Polymorph hides the
+ * button, and with no block it moves from the help to the fold's row, a
+ * new button. The dialog then finds no opener to hand focus back to, and
+ * focus moves to the group's fold, which reads the section as it now
+ * stands, as End the shape's does. Call the returned function as the
+ * opener is pressed. As lib/handFocus.ts's hand-offs, it moves nothing
+ * after a press that focused nothing, a tap on a phone.
+ */
+function useFoldAfterDialog(open: boolean): () => void {
+  const opener = useRef<{ control: HTMLElement; group: HTMLElement | null } | null>(null);
+  useEffect(() => {
+    if (open) return;
+    const was = opener.current;
+    opener.current = null;
+    if (was) handFocusNow(was.group, was.control, [GROUP_FOLD]);
+  }, [open]);
+  return () => {
+    const control = pressedControl();
+    opener.current = control instanceof HTMLElement ? { control, group: control.closest<HTMLElement>(GROUP_BOX) } : null;
+  };
 }
 
 /** A shape's part of the section: what it does, the numbers rolled with, the creature's block and "End the shape". */
