@@ -350,8 +350,15 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.ok(done.ok(), `completing the join answered ${done.status()}`);
     run.patId = ((await done.json()) as { member: { id: string } }).member.id;
 
-    // The DM's phone is a second device of the same DM.
-    await phoneContext.addCookies(await deskContext.cookies(server.origin));
+    // The DM's phone is a second device of the same DM, signed in by the DM link as a real one is (smoke.e2e.ts 1b). A copy of
+    // the desk's cookie would make it the same session, whose reloads here and on the desk would together outrun the server's
+    // 20 snapshots a minute a session (design 10.4), so the server would hold a phone's reload for about 30 s (cu-b-9).
+    phoneConsole.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/, /status of 409 .*\/api\/rooms\/[0-9A-Z]{8}\/dm\)$/];
+    await phone.goto(link);
+    await phone.getByRole("button", { name: /Dana the DM/ }).click();
+    await waitFor("the phone's snapshot", () => phoneSocket.state);
+    assert.equal(phoneSocket.you?.memberId, deskSocket.you?.memberId, "the phone is the same DM");
+    phoneConsole.allow = [];
     const cookie = (await deskContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     await ops.send({ t: "character.create", character: { id: run.thorn, name: "Thorn", size: "medium", ownerIds: [run.patId], actor: plainActor(30), level: 5 } });
