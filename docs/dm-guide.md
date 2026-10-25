@@ -458,7 +458,7 @@ On a phone held upright, the bar rests as a strip across the foot of the map. It
 
 Press **Expand** (a chevron pointing up, with its name beside it where there is room) to grow the bar up the screen and show all of it, and **Collapse** to rest it again. **Conditions** and **Uses** in the strip open the whole bar with their list showing, and closing the list rests it again. On a screen too short for the bar to grow, the strip scrolls instead, and **Scroll for more** takes Expand's place.
 
-The fight's alert cards and the app's toasts keep above the strip and leave a band of map clear over it. Where the screen is too short for that, the alert cards fold into one row, and a new toast shows as a single line over the top bar. Tap its words to read the whole message.
+The fight's alert cards and the app's toasts stay above the strip and leave a band of map clear over it. When the cards would leave no band of map, they fold into their one row. Where the map above the strip is short, a new toast shows as one line over the top bar, and the alerts' row moves into the strip's header until the toast goes. Tap the toast's words to read the whole message.
 
 ![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll and Attach, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
 
@@ -476,7 +476,7 @@ With a mouse, Hidden, Locked and Duplicate show only their icons, to keep the ba
 
 A few keys work on the selected tokens: `H` hides or shows them, `L` locks them, and Delete removes them (Ctrl+Z brings them back). The arrow keys move the selection one square at a time.
 
-**The Token panel** starts with the token's picture and name, and a line that says what it is and how big: "Monster, CR 1/4 · Small (5 ft)", say, or "Companion of Bree" for a companion, whose picture also wears a small portrait of its character. Press "Companion of Bree" to open Bree's page in **Characters**. Under that line sit its quick numbers, the ones you reach for most in a fight: AC, Speed, **PP** (Passive Perception), **Init** (its Initiative bonus), its elevation, and a link to its sheet. Tags beside them tell you at a glance when the token is **Hidden** (after an eye struck through) or **Locked** (after a padlock), and when it rides, carries or drags another. A monster or NPC's stat block comes next. Folded, its row names the block, such as "Wolf, CR 1/4".
+**The Token panel** starts with the token's picture and name, and a line that says what it is and how big: "Monster, CR 1/4 · Small (5 ft)", say, or "Companion of Bree" for a companion, whose picture also wears a small portrait of its character. Press "Companion of Bree" to open Bree's page in **Characters**. Under that line, tags tell you at a glance when the token is **Hidden** (after an eye struck through), **Locked** (after a padlock) or has its **Name hidden**, and when it rides, carries or drags another. Under them sit its quick numbers, the ones you reach for most in a fight: AC, Speed, **PP** (Passive Perception), **Init** (its Initiative bonus), its elevation, and a link to its sheet. A monster or NPC's stat block comes next. Folded, its row names the block, such as "Wolf, CR 1/4".
 
 The rest of the panel is sorted into groups by what you use them for, each led by a small picture of its own, such as crossed swords for Combat. Each group folds as one, so you can keep open only what matters right now:
 
@@ -586,7 +586,7 @@ The order runs from high to low. When a row's value ties with others, the app sl
 
 Each **Next** does a little bookkeeping for you. It clears **Reaction used** for the creature whose turn begins, refills its Legendary Actions and frees the ones it could take only once until this turn, counts down durations, reveals it if it was hidden (while the room setting for that is on), and raises save-ends reminders for the creature whose turn just ended. With "Skip defeated creatures" on, the dead are passed over.
 
-Next also asks what the new turn needs. If the creature has a breath weapon to recharge, a Regeneration to apply or a death save to make, a card for each comes up for whoever answers for it, along with a turn card that lists what it can spend until the turn ends (see [Alerts during a fight](#alerts-during-a-fight)). Nothing happens by itself: the cards wait for an answer, and the next **Next** puts them away.
+Next also asks what the new turn needs. If the creature has a breath weapon to recharge, a Regeneration to apply or a death save to make, a card for each comes up for whoever answers for it, and, when the creature has something to spend, a turn card that lists it until the turn ends (see [Alerts during a fight](#alerts-during-a-fight)). Nothing happens by itself: the cards wait for an answer, and the next **Next** puts them away.
 
 **Previous** takes back exactly what the last Next did: whose turn it is, the durations it counted down, the Reaction and Legendary Actions it gave back and a hidden creature it revealed. The turn's cards come back as they were left, results and all. What you changed yourself during the turn, such as a row you added, a value you typed or a condition you set, stays as you left it.
 
@@ -830,7 +830,7 @@ Many creatures have something to spend in a fight that you would otherwise count
 The same list shows in three places, so it is always close to whatever you are looking at:
 
 - **Uses** in the creature's action bar, after a lightning bolt, which opens the list inside the bar.
-- **Uses** at the top of the creature's tracker row's **⋯**.
+- **Uses** near the top of the **⋯** of the creature's tracker row.
 - The **Uses** section of the **Combat** group, in the creature's Token panel or on a character's page.
 
 The action bar and the tracker row show **Uses** only for a creature with something to spend. A character's page and the Token panels of its tokens always show the Uses section, so you can add class resources before the character has any. Only you and the players who play or own a creature see its uses, so a player you lend a monster sees that monster's, but never those of your other monsters. Every use belongs to the whole room, so Fire Breath marked used on your phone shows as used on your computer too, and stays used after a reload.
@@ -845,7 +845,7 @@ Here is the list of an adult red dragon in its lair, which has a little of every
 
 Other creatures bring lines of their own. An ability with uses per day reads "Dominate Mind, 2/Day, 1 left", with **Use**, and a troll's list says "Regeneration: 15 HP at the start of its turn". A character's class resources read like "Rage 3 of 3", with **Use**, and a pool such as Lay on Hands asks how many points to spend. The spells a monster casts through its Spellcasting, such as the dragon's Fireball once a day, aren't listed, so count those as you always have.
 
-Once something is spent, **Restore** beside it gives one back, which is handy when you tapped a Legendary Resistance too soon. In the Token panel and the tracker row, the list ends with two rows of pips that only you see, **Legendary Actions used** and **Legendary Resistances used today**, and a tap on a pip sets either count by hand. The pips wrap onto as many lines as they need, so even a count of 10 fits on a phone.
+Once something is spent, **Restore** beside it gives one back, which is handy when you tapped a Legendary Resistance too soon. Restore is in the lists of the action bar, the tracker row and the Token panel, not on the turn card, and a used recharge comes back with **Mark ready** instead. In the Token panel and the tracker row, the list ends with two rows of pips that only you see, **Legendary Actions used** and **Legendary Resistances used today**, and a tap on a pip sets either count by hand. The pips wrap onto as many lines as they need, so even a count of 10 fits on a phone.
 
 Each use writes a line in the log, such as "Adult Red Dragon used Fiery Rays (legendary action, 3 of 4 left)." Your players read what the creature did, "Adult Red Dragon used Fiery Rays, a legendary action.", but the count only for their own creatures.
 
@@ -853,7 +853,7 @@ Each use writes a line in the log, such as "Adult Red Dragon used Fiery Rays (le
 
 - **Legendary Actions** come back at the start of the creature's turn, together with any action it couldn't take again until then.
 - **A recharge** comes back when its roll succeeds. At the start of the creature's turn, a card asks for the roll (see [Alerts during a fight](#alerts-during-a-fight)). You can also roll it at any time with **Roll recharge**, or with **Recharge** in the Dice panel, or skip the dice with **Mark ready**.
-- **Legendary Resistances**, abilities with uses per day and a character's class resources come back with a rest, each by its own rule. Press **Short Rest** or **Long Rest** in the **Rest** section of the creature's Combat group (see [Class resources and rests](#class-resources-and-rests)).
+- **Legendary Resistances**, abilities with uses per day and a character's class resources come back with a rest, each by its own rule. Either rest also brings back a recharge ability that is still used, and one that recharges only after a rest, such as the cloaker's Phantasms (Recharge after a Short or Long Rest). Press **Short Rest** or **Long Rest** in the **Rest** section of the creature's Combat group (see [Class resources and rests](#class-resources-and-rests)).
 
 A creature's turn can also leave something in its **Uses** for a while. If you skip its Regeneration or its death save, the skipped prompt stays in the list with **Reopen** until you press **Next**. So even after you have dismissed the turn's cards, you can still bring the prompt back, and a creature with nothing else to spend shows **Uses** just for this.
 
@@ -865,7 +865,7 @@ A monster with a lair, such as an adult dragon, is stronger at home: its stat bl
 
 ## Alerts during a fight
 
-Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders, a trap that went off, and the cards a creature's turn brings. What someone is waiting on comes first, then the turn's prompts, and the turn card, which lasts the whole turn, comes last. Where the screen is short, the cards fold into one row that names the most pressing one and how many more are waiting. Tap the row to see them all.
+Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders, a trap that went off, and the cards a creature's turn brings. Concentration and save-ends cards come first, then the cards a creature's turn brings, then roll requests and traps, then the short news, and the turn card, which lasts the whole turn, comes last. Where the screen is short, the cards fold into one row that names the most pressing one and how many more are waiting. Tap the row to see them all.
 
 ![A recharge card at the start of the dragon's turn, "Fire Breath can recharge (5–6)." with Roll and Dismiss, beside its tracker row's legendary pips.](dm-guide/alerts.webp)
 
@@ -875,10 +875,10 @@ Toasts, the short messages that come and go, such as another player's roll or a 
 
 These cards wait for an answer:
 
-- **A roll request** you sent, which counts the answers as they come in (see [Asking for rolls](#asking-for-rolls)).
 - **Concentration save**: "Bree (Spirit Guardians) took damage. Constitution save, DC 11." with **Roll +5**, **Passed** and **Failed**. The result settles it ("Concentration holds" or "Concentration ended"). The card goes to the creature's player, or to you for a creature no player plays.
 - **Save-ends**: at the end of a creature's turn, for a condition set to end with **A Wisdom save at the end of each of its turns ends it**: "Goblin Warrior 2 ended its turn Frightened. Wisdom save, DC 15, ends it." with **Roll +0**, **Passed**, **Failed** and **Dismiss**. For a player's creature on the players' scene, **Ask Thorn** asks its player to roll. A pass ends the condition. Players see which save ends it, but never its DC.
 - **Legendary Resistance**: when a monster with uses left fails a roll on a Concentration or save-ends card, the card offers **Use Legendary Resistance (2 left)** or **Accept failure**.
+- **A roll request** you sent, which counts the answers as they come in (see [Asking for rolls](#asking-for-rolls)).
 - **A trap went off**: "Hidden Pit went off", with who set it off and who it hits, **Save and damage** and **Dismiss**. It comes in and out of fights alike, and stays until you settle it. See [Traps](#traps).
 
 ### A creature's turn
@@ -1137,7 +1137,7 @@ The **Characters** panel lists the party. A character belongs to the room rather
 
 - **New character** takes a name, size, max HP, AC, Speed, Initiative bonus, Passive Perception, and who plays it (**Played by**). While "Players can create their own characters" is on, each player can also make up to 3 of their own.
 - To put a character on the scene you are viewing, open it, press **Place a token**, and tap the map.
-- Tap a character to open its page. It reads like the Token panel: the picture, name, level and size, the quick numbers and **Place a token**, then the stat block, then **Combat** and **Companions**, open, and **Notes**, **Image**, **Stats** and **Played by**, folded until you need them. Your device remembers which ones you open. At the foot of the page, **Delete Thorn** (after a trash can) deletes the character, along with its tokens and its place in a fight. The chevron before the character's name at the top of the panel (**Back to Characters**) returns to the list. A player who plays a single character goes straight to its page, until they go back to the list. The list then stays until they leave the room or reload the page.
+- Tap a character to open its page. It reads like the Token panel: the picture, name, level and size, the quick numbers and **Place a token**, then the stat block, then **Combat** and **Companions**, open, and **Notes**, **Image**, **Stats** and **Played by**, folded until you need them. Your device remembers which ones you open. At the foot of the page, **Delete Thorn** (after a trash can) deletes the character with its tokens, its companions and its place in a fight. The line above it says what will go, and it takes a second tap ("Tap again to delete"). The chevron before the character's name at the top of the panel (**Back to Characters**) returns to the list. A player who plays a single character goes straight to its page, until they go back to the list. The list then stays until they leave the room or reload the page.
 
 ![Thorn's page in the Characters panel: his picture, level and quick numbers, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
 
@@ -1166,7 +1166,7 @@ Rage, Channel Divinity, Lay on Hands, Bardic Inspiration: the features a charact
 
 To add them, press **Add a class resource** under **Uses**. **From a class** lists a class's resources at the class level you pick, with their counts filled in from the SRD 5.2.1, such as "Rage: 3 uses. One back on a Short Rest, all on a Long Rest." for a level 5 barbarian. A subclass's resources start unticked, and where a count depends on a modifier the stat block doesn't give, the sheet asks for it. **Your own** adds anything else, such as Superiority Dice or a feat's uses. Give it a name, a count and the rest that brings it back, or tick **Spend an amount** for a pool of points.
 
-Each resource then reads like "Rage 3 of 3", with **Use**, **Restore** (which gives one back) and **Edit** (a pencil), which changes or removes it. A pool such as Lay on Hands has **Use…** and **Restore…**, which ask how many points. When the character's level goes up, the list asks once for each class whether to update its counts ("Your level went up. Update Barbarian resources?"). Class resources also show in the **Uses** of the character's action bar and tracker row, and on its turn card, so a player can spend Rage without leaving the fight (see [Uses and legendary actions](#uses-and-legendary-actions)). Only you and the character's players see them.
+Each resource then reads like "Rage 3 of 3", with **Use**, **Restore** (which gives one back) and **Edit** (a pencil), to change or remove it. A pool such as Lay on Hands has **Use…** and **Restore…**, which ask how many points. When the character's level goes up, the list asks once for each class whether to update its counts ("Your level went up. Update Barbarian resources?"). Class resources also show in the **Uses** of the character's action bar and tracker row, and on its turn card, so a player can spend Rage without leaving the fight (see [Uses and legendary actions](#uses-and-legendary-actions)). Only you and the character's players see them.
 
 A character from D&D Beyond doesn't need its resources typed in at all. The D&D Beyond import and [Re-sync from D&D Beyond](#re-sync-from-dd-beyond) bring in the limited uses of its classes, species and feats, each with its count, the rest that brings it back, and the uses already spent there. Magic items' charges and spells stay out.
 
