@@ -39,6 +39,7 @@ function tab(id: string, alone: boolean, count: number, label?: string): string 
       chosen: false,
       controls: undefined,
       describedBy: undefined,
+      tipHost: null,
       stop: false,
       index: 0,
       onClick: () => {},

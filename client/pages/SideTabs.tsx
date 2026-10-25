@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { headerRow, Pill, PILL_FOCUS, PILL_HOST } from "../components/HeaderRow.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { useTooltip } from "../components/Tooltip.tsx";
@@ -334,6 +334,8 @@ export function SideTabs(props: {
   const cutTitle = named ? chosenPanel.title : null;
   // More with its icon alone shows the held panel's name as every icon-only tab does, on hover, keyboard focus and a long press (docs/design-v1-icons-2.md 6).
   const moreTip = useTooltip(chosenHeld?.title ?? "More panels");
+  // Where the icon tabs' tooltips stand: after the tab list, which may own only tabs (review ICONS2B-OPUS-05). A tip is a popover, so where it stands in the page moves nothing on screen.
+  const [tipHost, setTipHost] = useState<HTMLDivElement | null>(null);
   // Before paint, so the name and the panel under it draw in one frame.
   const onCutTitle = useRef(props.onCutTitle);
   onCutTitle.current = props.onCutTitle;
@@ -359,6 +361,7 @@ export function SideTabs(props: {
                 chosen={chosen}
                 controls={chosen ? props.panelId : undefined}
                 describedBy={marked ? belowDescribedId : undefined}
+                tipHost={tipHost}
                 stop={p.id === stop}
                 index={i}
                 onClick={() => props.onTab(p.id)}
@@ -409,8 +412,9 @@ export function SideTabs(props: {
               </Pill>
             </button>
           ) : null}
-          {moreCut ? moreTip.tip : null}
         </div>
+        {moreCut ? moreTip.tip : null}
+        <div ref={setTipHost} style={{ display: "contents" }} />
         <Popover handle={menu} side="below" bound={() => innerBox(listRef.current?.closest("aside") ?? document.body, latest.current.zoom)}>
           <Menu label="More panels" sections={sections} onPick={pick} data={{ "data-tabs-menu": "" }} />
         </Popover>
@@ -473,6 +477,8 @@ export function PanelTab(props: {
   chosen: boolean;
   controls: string | undefined;
   describedBy: string | undefined;
+  /** Where its tooltip stands, outside the tab list, which may own only tabs. */
+  tipHost: Element | null;
   stop: boolean;
   index: number;
   onClick(): void;
@@ -503,7 +509,7 @@ export function PanelTab(props: {
         {alone ? <span style={VISUALLY_HIDDEN}>{panel.title}</span> : panel.title}
         {props.children}
       </button>
-      {alone ? tooltip.tip : null}
+      {alone && props.tipHost ? createPortal(tooltip.tip, props.tipHost) : null}
     </>
   );
 }

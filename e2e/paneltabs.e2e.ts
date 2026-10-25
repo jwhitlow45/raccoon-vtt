@@ -797,6 +797,8 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       await reloadAt(dm, scale);
       await openSideTab(dm, "Initiative");
       assert.deepEqual(await rowTitles(dm), ROW, `${at}: four tabs`);
+      // A tab list owns only tabs: the icon tabs' tooltips stand after it (review ICONS2B-OPUS-05).
+      assert.equal(await tablist(dm).locator(':scope > :not([role="tab"])').count(), 0, `${at}: the tab list holds more than its tabs`);
       for (const title of ROW) {
         const tab = tablist(dm).getByRole("tab", { name: sideTabName(title) });
         assert.equal(await tab.getAttribute("title"), null, `${at}: ${title} has no native title`);
@@ -807,6 +809,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       const top = (await box(dm.getByRole("tabpanel", { name: "Initiative", exact: true }))).y;
       await openSideTab(dm, "Encounters");
       if (!(await moreTitleDrawn(dm))) iconAlone++;
+      assert.equal(await tablist(dm).locator(':scope > :not([role="tab"])').count(), 0, `${at}: the tab list holds more than its tabs beside More's icon alone`);
       assert.equal(await headerOver(dm, more(dm)), null, `${at}: no header over a panel More holds`);
       assert.ok(Math.abs((await box(dm.getByRole("tabpanel", { name: "Encounters", exact: true }))).y - top) <= 0.5, `${at}: the panel keeps its top, so its height`);
       await openSideTab(dm, "Journal");
@@ -814,6 +817,7 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
       if (scale === 1) {
         await initiative.hover();
         await tipOn(dm, "Initiative").waitFor();
+        assert.equal(await tablist(dm).locator('[role="tooltip"]').count(), 0, "the shown tooltip stands in the tab list");
         await shots.take(dm, "paneltabs-ic2-1280x800-hover-initiative");
         await dm.mouse.move(640, 700);
         await tipOn(dm, "Initiative").waitFor({ state: "detached" }).catch(() => {});
