@@ -209,10 +209,11 @@ export function DescribedItems(props: { items: readonly (ReactNode | null | fals
 }
 
 /**
- * Items of a row's second line that wrap as one part, such as AC with HP
- * and a legendary creature's LA with LR: where the line has no room for
- * the part beside what comes before, the whole part starts the next line,
- * so neither stands alone there where both fit. It wraps inside itself
+ * Items of a row's second line that wrap as one part, such as AC with HP,
+ * the row's state tags, and a legendary creature's LA with LR: where the
+ * line has no room for the part beside what comes before, the whole part
+ * starts the next line, so no item stands alone there where two fit, and
+ * a column of parts starts at one edge. It wraps inside itself
  * only where it alone is wider than the line. Its items keep the unseen
  * separators between them. Null when none is present, so the line's own
  * DescribedItems leaves it out with its separator.

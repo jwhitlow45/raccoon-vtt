@@ -1740,6 +1740,69 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
+  test("fu31-b. a legendary row's line with three and four state tags beside LA and LR, and a companion's sub-row with three, start every part and tag at one edge and leave no tag alone on its last line where two fit, at 1440 x 900, 1280 x 800, 932 x 430, 390 x 844, 360 x 740 and 320 x 568, at 100% and 130% (FU30-NOTED)", async () => {
+    const bosses = [
+      { id: randomUUID(), entryId: "fu31-boss-3", name: "Goblin Boss", hidden: false },
+      { id: randomUUID(), entryId: "fu31-boss-4", name: "Goblin Warlord", hidden: true },
+    ];
+    // Hidden, Readied and its own Reaction used, under Bree's row.
+    const hound = { id: randomUUID(), name: "Hound" };
+    for (const [i, b] of bosses.entries()) {
+      await ops.send({ t: "token.create", token: { id: b.id, sceneId: run.sceneId, kind: "monster", name: b.name, size: "medium", x: 17 + 2 * i, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 3, resistMax: 10, resistUsed: 1 } } } } });
+    }
+    await ops.send({ t: "token.create", token: { id: hound.id, sceneId: run.sceneId, kind: "monster", name: hound.name, size: "medium", x: 15, y: 15, visibility: "dm", disposition: "ally", companion: { of: run.bree.characterId, turn: "shared" }, actor: { inline: actor(11) } } });
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "encounter.start", entries: [...bosses.map((b, i) => ({ id: b.entryId, tokenId: b.id, value: 18 - i })), { id: "fu31-bree", tokenId: run.bree.id, value: 12 }] });
+    for (const b of bosses) {
+      await ops.send({ t: "encounter.update", entryId: b.entryId, patch: { reactionUsed: true, inLair: true, ...(b.hidden ? { hidden: true } : null) } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: b.id }, effect: { id: randomUUID(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: b.entryId } } } });
+    }
+    await ops.send({ t: "token.update", tokenId: hound.id, patch: { companionReaction: true } });
+    await ops.send({ t: "actor.effect.add", target: { tokenId: hound.id }, effect: { id: randomUUID(), key: "readied", label: "if the door opens", duration: { mode: "turnStart", of: { entryId: "fu31-bree" } } } });
+    const readied = (tokenId: string) => {
+      const a = dmSocket.state?.tokens[tokenId]?.actor;
+      return !!a && "inline" in a && a.inline.effects.some((e) => e.key === "readied");
+    };
+    await waitFor("the tags", () => (bosses.every((b) => dmSocket.state?.encounter?.entries.find((e) => e.id === b.entryId)?.inLair && readied(b.id)) && readied(hound.id) && dmSocket.state?.tokens[hound.id]?.companion?.reactionUsed ? true : null));
+    const off: string[] = [];
+    try {
+      // One load at each interface size and a resize to each window after, since the server delays a session's snapshots past 20 a minute.
+      const views = [
+        ...[{ width: 1440, height: 900 }, DESK, { width: 390, height: 844 }, { width: 320, height: 568 }].map((size) => ({ ...size, scale: 1 })),
+        ...[{ width: 1440, height: 900 }, { width: 932, height: 430 }, { width: 390, height: 844 }, { width: 360, height: 740 }, { width: 320, height: 568 }].map((size) => ({ ...size, scale: 1.3 })),
+      ];
+      let scale = 0;
+      for (const view of views) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        if (view.scale !== scale) await setUp(dm, dmCdp, view);
+        else {
+          await dm.keyboard.press("Escape");
+          await dm.setViewportSize({ width: view.width, height: view.height });
+          await dm.waitForTimeout(400);
+        }
+        scale = view.scale;
+        const tracker = await openTracker(dm);
+        for (const b of bosses) {
+          const row = tracker.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: `${b.name} options`, exact: true }) });
+          const line = row.locator("[data-row-button]");
+          await line.getByText("Lair", { exact: true }).waitFor();
+          await row.scrollIntoViewIfNeeded();
+          off.push(...alignmentLines(await measureAlignment(line), `${b.name}'s row line at ${at}`));
+        }
+        const sub = tracker.locator("li[data-companion-row]").filter({ has: dm.getByRole("button", { name: `${hound.name} options`, exact: true }) });
+        await sub.getByText("Reaction used", { exact: true }).waitFor();
+        await sub.scrollIntoViewIfNeeded();
+        off.push(...alignmentLines(await measureAlignment(sub.locator("[data-row-button]")), `${hound.name}'s sub-row line at ${at}`));
+        await shots.take(dm, `fu31-row-tags-${view.width}-${Math.round(view.scale * 100)}`);
+      }
+    } finally {
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      for (const id of [...bosses.map((b) => b.id), hound.id]) await ops.send({ t: "token.delete", tokenId: id });
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("14. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(anaConsole.errors, [], "Ana's page logged errors");

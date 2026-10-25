@@ -214,43 +214,46 @@ export function EntryRow(props: {
                 items={[
                   linePart("numbers", [ac !== null ? <AcBadge ac={ac} size="sm" /> : null, hp.kind !== "none" ? <DescribedHp hp={hp} /> : null]),
                   reminder ? <RollBadge kind={reminder} /> : null,
-                  dm && entry.hidden ? (
-                    <Tag tone="muted" dense icon="hidden">
-                      Hidden
-                    </Tag>
-                  ) : null,
-                  secret ? (
-                    <Tag tone="muted" dense icon="hidden" title={SECRET_ROW.help}>
-                      {SECRET_ROW.label}
-                    </Tag>
-                  ) : null,
-                  readied ? (
-                    <Tag tone="turn" dense>
-                      Readied
-                    </Tag>
-                  ) : null,
-                  entry.reactionUsed ? (
-                    <Tag tone="muted" dense>
-                      Reaction used
-                    </Tag>
-                  ) : null,
-                  entry.inLair ? (
-                    <Tag tone="muted" dense>
-                      Lair
-                    </Tag>
-                  ) : null,
-                  companionOf !== undefined ? (
-                    // A character's name of any length: cut, so the row's other tags keep their room.
-                    <Tag tone="muted" dense cut={160} title={`Companion of ${companionOf}`}>
-                      Companion of {companionOf}
-                    </Tag>
-                  ) : null,
-                  link.riding !== null ? (
-                    // A mount's name of any length: cut, so the row's other tags keep their room.
-                    <Tag tone="muted" dense cut={160}>
-                      {link.riding}
-                    </Tag>
-                  ) : null,
+                  // The state tags wrap as one part, as AC with HP and LA with LR do, so stacked on a narrow line they start where those parts start (FU30-NOTED).
+                  linePart("state", [
+                    dm && entry.hidden ? (
+                      <Tag tone="muted" dense icon="hidden">
+                        Hidden
+                      </Tag>
+                    ) : null,
+                    secret ? (
+                      <Tag tone="muted" dense icon="hidden" title={SECRET_ROW.help}>
+                        {SECRET_ROW.label}
+                      </Tag>
+                    ) : null,
+                    readied ? (
+                      <Tag tone="turn" dense>
+                        Readied
+                      </Tag>
+                    ) : null,
+                    entry.reactionUsed ? (
+                      <Tag tone="muted" dense>
+                        Reaction used
+                      </Tag>
+                    ) : null,
+                    entry.inLair ? (
+                      <Tag tone="muted" dense>
+                        Lair
+                      </Tag>
+                    ) : null,
+                    companionOf !== undefined ? (
+                      // A character's name of any length: cut, so the row's other tags keep their room.
+                      <Tag tone="muted" dense cut={160} title={`Companion of ${companionOf}`}>
+                        Companion of {companionOf}
+                      </Tag>
+                    ) : null,
+                    link.riding !== null ? (
+                      // A mount's name of any length: cut, so the row's other tags keep their room.
+                      <Tag tone="muted" dense cut={160}>
+                        {link.riding}
+                      </Tag>
+                    ) : null,
+                  ]),
                   link.controlled !== null ? (
                     // Too long for a tag that never wraps: its own line, which wraps on a phone.
                     <span data-controlled-by="" style={{ flexBasis: "100%", minWidth: 0, overflowWrap: "anywhere" }}>
@@ -405,21 +408,23 @@ function CompanionRow(props: { token: Token; characterName: string; entryId: str
               <DescribedItems
                 items={[
                   linePart("numbers", [ac !== null ? <AcBadge ac={ac} size="sm" /> : null, hp.kind !== "none" ? <DescribedHp hp={hp} /> : null]),
-                  dm && token.visibility === "dm" ? (
-                    <Tag tone="muted" dense>
-                      Hidden
-                    </Tag>
-                  ) : null,
-                  readied ? (
-                    <Tag tone="turn" dense>
-                      Readied
-                    </Tag>
-                  ) : null,
-                  spent ? (
-                    <Tag tone="muted" dense>
-                      Reaction used
-                    </Tag>
-                  ) : null,
+                  linePart("state", [
+                    dm && token.visibility === "dm" ? (
+                      <Tag tone="muted" dense>
+                        Hidden
+                      </Tag>
+                    ) : null,
+                    readied ? (
+                      <Tag tone="turn" dense>
+                        Readied
+                      </Tag>
+                    ) : null,
+                    spent ? (
+                      <Tag tone="muted" dense>
+                        Reaction used
+                      </Tag>
+                    ) : null,
+                  ]),
                   ...(dm ? spentChips(actor?.uses) : []),
                   effects.length > 0 ? <Chips effects={effects} max={6} /> : null,
                 ]}
