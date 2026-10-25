@@ -149,7 +149,7 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   // The numbers its rolls get, read from the SRD table as the server reads them.
   const { numbers } = useCharacterRollNumbers(character.id);
   const endBox = useRef<HTMLDivElement>(null);
-  // End the shape goes with the shape, so focus moves to the group's fold, which reads the section as it now stands, as Revive's does to the HP line.
+  // End the shape goes with the shape, so focus moves to the group's fold, which reads the section as it now stands, as Make a companion's does.
   const endShape = () => {
     actions.dispatch({ t: "character.update", characterId: character.id, patch: { actor: END_SHAPE } });
     handFocusOn(endBox.current?.closest<HTMLElement>(GROUP_BOX), [GROUP_FOLD]);
