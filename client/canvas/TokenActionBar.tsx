@@ -31,7 +31,6 @@ import { DetachButton, DetachNote, GroupLine, useAttachSlots, useDetach } from "
 import { offersRequest } from "../features/rolls/logic.ts";
 import { openAsk } from "../features/rolls/open.ts";
 import { EffectIcon } from "../features/tokens/EffectIcon.tsx";
-import { duplicateToken, occupiedBoxes, spreadPositions } from "../features/tokens/factory.ts";
 import { DefenseLines, MoreStats, SavesLine, useLinkedBlock, VitalsLine } from "../features/tokens/StatSummary.tsx";
 import { openStatBlock } from "../features/tokens/statBlockOpen.ts";
 import { shortSplit, vitals } from "../features/tokens/statSummary.ts";
@@ -60,10 +59,12 @@ import { GroupMoreSheet } from "../features/tokens/GroupMoreSheet.tsx";
 import { DeathSaves, HpEntry, oneTarget } from "../features/tokens/HpSection.tsx";
 import { pathNow } from "../features/measure/movement.ts";
 import { customWords, SIZE_WORDS, stepSize } from "../features/tokens/resize.ts";
+import { useDuplicate, type DuplicateFocus } from "../features/tokens/useDuplicate.ts";
 import { useResize } from "../features/tokens/useResize.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../features/tokens/Revive.tsx";
 import { barTokenIds, lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { handFocusOn } from "../lib/handFocus.ts";
 import type { Point, Size } from "../lib/camera.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
@@ -128,7 +129,7 @@ import { NOTE_INSET } from "./barDock.ts";
 import { unitText, type VitalItem } from "../features/tokens/statSummary.ts";
 import { useGroupHp } from "../features/tokens/GroupHpEntry.tsx";
 import type { HpRest } from "../features/tokens/HpSection.tsx";
-import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 
 const NO_CHARACTERS = {};
 
@@ -164,6 +165,12 @@ type Drawer = "conditions" | "uses" | null;
  * room's undo, which takes the Revive back, and open a phone's keyboard.
  */
 const REVIVE_FOCUS_IN_BAR = { scope: '[role="dialog"]', to: [":scope"] } as const;
+
+/** The bar's frame, which holds one token's or a group's bar at a time and takes focus from script. */
+const BAR_FRAME = '[role="dialog"][data-bar-mode]';
+
+/** Where focus goes once Duplicate replaced the bar with the copy's: the frame that stands then, a new one. */
+const DUPLICATE_FOCUS_IN_BAR: DuplicateFocus = { scope: "body", to: [BAR_FRAME] };
 
 /**
  * The bar that opens under a tapped token (design section 14.3), in the
@@ -217,7 +224,6 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const frame = useContext(FrameContext);
   const actions = useRoomActions();
   const ui = useRoomUi();
-  const store = useRoomStore();
   const you = useRoomView((s) => s.you);
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const playersApplyDamage = useRoomView((s) => s.view?.meta.settings.playersApplyDamage ?? false);
@@ -282,19 +288,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     else actions.dispatch({ t: "actor.effect.add", target, effect: { id: actions.newId(), key, ...(key === "exhaustion" ? { level: 1 } : {}) } });
   };
 
-  const duplicate = () => {
-    if (!scene) return;
-    const fp = footprint(token);
-    const occupied = occupiedBoxes(Object.values(tokens ?? {}), token.sceneId);
-    const [at] = spreadPositions({ center: { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, footprint: fp, count: 1, bounds: scene.bounds, occupied });
-    const id = actions.newId();
-    const chunks = store.getState().view?.buildChunks ?? {};
-    const copy = duplicateToken(token, { id, at: at ?? { x: token.x + fp.w, y: token.y }, chunks, blocks: blocks ?? {} });
-    if (actions.dispatch({ t: "token.create", token: copy }) !== null) {
-      // The viewer's own opening of the copy's bar, which an upright phone's strip clears once (docs/design-v1-bar-compact.md 3.6).
-      ui.select(id, { opens: true });
-    }
-  };
+  const duplicate = useDuplicate(token, DUPLICATE_FOCUS_IN_BAR);
 
   const path = pathNow(encounter, token, you?.role ?? "player");
   const undoIds = barTokenIds(tokens, token);
@@ -813,13 +807,18 @@ function UndoMoveButton(props: { tokenIds: readonly string[]; arrow?: boolean })
   const actions = useRoomActions();
   const offer = useStore(useScoped(lastMoveSlot), offered);
   if (!offer || !offersUndo(offer, props.tokenIds)) return null;
+  // The button goes with the move it took back, Roll taking the strip's place, so focus moves to the bar's frame, as Revive's does (D-261024-42).
+  const undo = () => {
+    const pressed = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (actions.dispatch(undoOf(offer)) !== null) handFocusOn(pressed?.closest<HTMLElement>(BAR_FRAME), [":scope"]);
+  };
   // The strip's is the undo arrow alone, named and tipped "Undo move" as the top bar's Undo is, so it fits Roll's place (docs/design-v1-bar-compact.md R13).
   return props.arrow ? (
-    <BarButton icon="undo" iconOnly always onClick={() => actions.dispatch(undoOf(offer))}>
+    <BarButton icon="undo" iconOnly always onClick={undo}>
       Undo move
     </BarButton>
   ) : (
-    <BarButton onClick={() => actions.dispatch(undoOf(offer))}>Undo move</BarButton>
+    <BarButton onClick={undo}>Undo move</BarButton>
   );
 }
 
@@ -1945,7 +1944,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
  * the server answers, since it can take a row out of the fight and pass a
  * turn on. The token, and with it this bar, goes when it does.
  */
-function DismissButton(props: { tokenId: string; name: string }) {
+export function DismissButton(props: { tokenId: string; name: string }) {
   const inRow = useContext(InButtonRow);
   const [armed, setArmed] = useState(false);
   const { send, waiting } = useSend();

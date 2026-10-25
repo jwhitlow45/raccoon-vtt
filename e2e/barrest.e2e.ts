@@ -2654,5 +2654,55 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         await setUp(dm, PHONES[0]);
       }
     });
+
+    test("s2-bar-1. by keyboard, Undo move in Pat's strip and Duplicate in the DM's bar each go with their press and hand focus to the bar's frame that stands then, as Revive does (LP21-BAR-1, D-261024-42)", async () => {
+      const focusedOn = (page: Page) =>
+        page.evaluate(() => {
+          const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+          if (!a || a.tagName === "BODY") return "the page";
+          return `${a.tagName.toLowerCase()} ${a.getAttribute("aria-label") ?? (a.textContent ?? "").trim().slice(0, 60)}`;
+        });
+      const lands = async (page: Page, where: RegExp, label: string) => {
+        try {
+          await waitFor(label, async () => where.test(await focusedOn(page)), 3_000);
+        } catch {
+          assert.fail(`${label}: focus is on "${await focusedOn(page)}", not ${where}`);
+        }
+      };
+      const { pagePoint, touchSwipe } = await harness();
+      await setUp(pat, PHONES[0]);
+      await openBar(pat, run.thorn);
+      const before = patSocket.state!.tokens[run.thorn.id]!;
+      const from = await pagePoint(pat, BOUNDS, { x: before.x + 0.5, y: before.y + 0.5 });
+      const to = await pagePoint(pat, BOUNDS, { x: before.x + 1.5, y: before.y + 0.5 });
+      await touchSwipe(patCdp, from, to, { steps: 10, everyMs: 20 });
+      await waitFor("Thorn one cell east", () => patSocket.state?.tokens[run.thorn.id]?.x === before.x + 1);
+      const thorn = barOf(pat, "Thorn");
+      const undo = thorn.locator("[data-rest-row]").getByRole("button", { name: "Undo move", exact: true });
+      await undo.waitFor();
+      await undo.focus();
+      await pat.keyboard.press("Enter");
+      await waitFor("Thorn back", () => patSocket.state?.tokens[run.thorn.id]?.x === before.x);
+      await lands(pat, /^div Thorn actions$/, "Undo move handed focus on");
+      await shots.take(pat, "s2-bar-undo-focus");
+
+      await setUp(dm, PHONES[0]);
+      const goblin = await openBar(dm, run.goblin2);
+      const known = new Set(Object.keys(dmSocket.state?.tokens ?? {}));
+      const duplicate = await barControl(goblin, "Duplicate");
+      await duplicate.focus();
+      await dm.keyboard.press("Enter");
+      const copy = await waitFor("the copy", () => Object.keys(dmSocket.state?.tokens ?? {}).find((id) => !known.has(id)) ?? null);
+      try {
+        const made = await waitFor("the copy's name", () => dmSocket.state?.tokens[copy]);
+        const name = made.number === undefined ? made.name : `${made.name} ${made.number}`;
+        await lands(dm, new RegExp(`^div ${name} actions$`), "Duplicate handed focus on to the copy's bar");
+        await shots.take(dm, "s2-bar-duplicate-focus");
+      } finally {
+        await closeBars(dm);
+        await ops.send({ t: "token.delete", tokenId: copy });
+        await ops.send({ t: "token.update", tokenId: run.goblin2.id, patch: { number: null } });
+      }
+    });
   });
 });
