@@ -304,6 +304,41 @@ function focusedText(page: Page): Promise<string> {
   });
 }
 
+/** measureAlignment's lines for a root, scrolled into view first. */
+async function measureIn(root: Locator, screen: string): Promise<string[]> {
+  await root.first().scrollIntoViewIfNeeded();
+  return alignmentLines(await measureAlignment(root.first()), screen);
+}
+
+/**
+ * Runs `step` at the sizes live play 22 measured the panel at, 1440 x 900,
+ * 1280 x 800, 430 x 932, 390 x 844 and 320 x 568, at 100% and 130%, for
+ * the DM and with `withPlayer` for Pat too, and gathers its lines. Each
+ * size loads the room again, so no sheet or panned map is left from the
+ * last one: about ten loads a minute, under the server's 20 a session.
+ */
+async function atLp22Sizes(step: (at: string) => Promise<string[]>, withPlayer = false): Promise<string[]> {
+  const off: string[] = [];
+  const pages: [Page, CDPSession][] = [[dm, dmCdp], ...(withPlayer ? [[player, playerCdp] as [Page, CDPSession]] : [])];
+  try {
+    for (const scale of [1, 1.3]) {
+      for (const size of [
+        { width: 1440, height: 900 },
+        { width: 1280, height: 800 },
+        { width: 430, height: 932 },
+        { width: 390, height: 844 },
+        { width: 320, height: 568 },
+      ]) {
+        for (const [page, cdp] of pages) await setUp(page, cdp, { ...size, scale }, null);
+        off.push(...(await step(`${size.width} x ${size.height} at ${Math.round(scale * 100)}%`)));
+      }
+    }
+  } finally {
+    for (const [page, cdp] of pages) await setUp(page, cdp, DESK, null);
+  }
+  return off;
+}
+
 /** A panel's group by the name on its fold (components/Panel.tsx Group). */
 function groupIn(scope: Locator, name: string): Locator {
   return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
@@ -2323,6 +2358,16 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     } finally {
       await ops.send({ t: "token.delete", tokenId: wolf.id });
     }
+  });
+
+  test("fu31-e. the goblin's Image group: its picture centered on the pair beside it, in line within 1 px at live play 22's sizes (LP22-ALIGN-1)", async () => {
+    const off = await atLp22Sizes(async (at) => {
+      const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
+      await openGroup(goblin, "Image");
+      await shots.take(dm, `fu31-image-${at.replace(/ /g, "")}`);
+      return measureIn(groupIn(goblin, "Image"), `the goblin's Image at ${at}`);
+    });
+    assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
   test("10. no page errors along the way", () => {

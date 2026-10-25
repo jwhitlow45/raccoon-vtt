@@ -75,13 +75,20 @@ export function ImageField(props: {
     </>
   );
   const buttons = { display: "flex", flexWrap: "wrap", gap: theme.space(1) } as const;
-  const preview = <ImagePreview image={props.value} shape={props.shape} aspect={props.aspect} width={props.previewSize ?? 64} ring={props.ring} initials={props.initials} />;
+  const width = props.previewSize ?? 64;
+  const preview = <ImagePreview image={props.value} shape={props.shape} aspect={props.aspect} width={width} ring={props.ring} initials={props.initials} />;
+  /*
+   * Beside the button column, the preview and the pair share a first line as
+   * tall as the taller of the two, each centered in it: a 48 px picture
+   * stood 2 px below the middle of its 44 px pair (LP22-ALIGN-1).
+   */
+  const firstLine = Math.max(theme.touch, width / props.aspect);
 
   return (
     // One column no wider than its box, so the button column, sized to the pair, can still shrink and wrap.
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
       <div style={{ display: "flex", alignItems: props.extra ? "flex-start" : "center", flexWrap: props.extra ? "wrap" : undefined, gap: props.extra ? theme.space(2) : theme.space(3) }}>
-        {preview}
+        {props.extra ? <span style={{ display: "flex", alignItems: "center", minHeight: firstLine, flex: "none" }}>{preview}</span> : preview}
         {props.canEdit && props.extra ? (
           /*
            * The column's width is the pair's: rows that may run longer (the
@@ -90,7 +97,7 @@ export function ImageField(props: {
            * preview, the gap and the pair no longer fit on one line.
            */
           <div style={{ flex: "1 1 auto", width: "max-content", minWidth: 0, display: "grid", gap: theme.space(1) }}>
-            <div data-image-pair="" style={buttons}>
+            <div data-image-pair="" style={{ ...buttons, alignItems: "center", minHeight: firstLine }}>
               {change}
               {props.extra.beside}
             </div>
