@@ -462,8 +462,8 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     const named = tools(dm).getByRole("button", { name: "Setup tools: Map builder" });
     await named.waitFor();
     assert.match((await named.textContent()) ?? "", /Builder/);
-    // T, M, B and G pick directly, outside the menu.
-    for (const [letter, id] of [["t", "add-token"], ["m", "pin"], ["g", "grid"], ["b", "build"]] as const) {
+    // T, M, X, B and G pick directly, outside the menu.
+    for (const [letter, id] of [["t", "add-token"], ["m", "pin"], ["x", "trap"], ["g", "grid"], ["b", "build"]] as const) {
       await key(dm, letter);
       await waitFor(`the ${letter} key`, async () => ((await dm.evaluate(() => (globalThis as unknown as { document: PageDoc }).document.querySelector('[role="toolbar"][data-rvtt-arrangement]')?.getAttribute("aria-label"))) ? true : null));
       assert.ok(id);

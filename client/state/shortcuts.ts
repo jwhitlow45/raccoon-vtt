@@ -281,6 +281,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   toolShortcut("ping", "p", "Ping", ["dm", "player"]),
   toolShortcut(PLACE_TOOL_ID, "t", "Add token", ["dm"]),
   toolShortcut("pin", "m", "Pin", ["dm"]),
+  toolShortcut("trap", "x", "Trap", ["dm"]),
   toolShortcut("fog", "f", "Fog", ["dm"]),
   toolShortcut("build", "b", "Builder", ["dm"]),
   toolShortcut("grid", "g", "Grid", ["dm"]),

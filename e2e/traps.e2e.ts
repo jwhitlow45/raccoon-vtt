@@ -330,6 +330,20 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
   });
 
   test("tr-1. the DM picks the Trap tool, starts from Hidden Pit, drags its 2 x 2 squares, and in its pane gives it a Dexterity save and leaves it unfound when it goes off", async () => {
+    // X is the Trap tool's default key (D-261025-2), and its tooltip names it.
+    const trapButton = dm.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Trap", exact: true });
+    await trapButton.waitFor();
+    await dm.keyboard.press("x");
+    await waitFor("X to pick the Trap tool", async () => ((await trapButton.getAttribute("data-active")) === "true" ? true : null));
+    const tip = await trapButton.evaluate((el) => {
+      const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(name: string): string | null; textContent: string | null } | null } }).document;
+      for (const id of (el.getAttribute("aria-describedby") ?? "").split(" ")) {
+        const t = doc.getElementById(id);
+        if (t?.getAttribute("role") === "tooltip") return t.textContent;
+      }
+      return null;
+    });
+    assert.equal(tip, "Trap (X)", "the tooltip names the key");
     await pickTool(dm, "Trap");
     await pickOption(dm, "Trap", "Start from", "Hidden Pit");
     await dm.getByRole("toolbar", { name: "Trap options" }).getByRole("button", { name: "Party level: Levels 1–4" }).waitFor();

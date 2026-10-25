@@ -101,7 +101,7 @@ describe("the shortcut table", () => {
     const scope = new RoomScope();
     const e: ShortcutEnv = {
       role,
-      tools: (role === "dm" ? ["select", "ruler", "area", "draw", "ping", "add-token", "fog", "build", "grid"] : ["select", "ruler", "area", "draw", "ping"]).map((id) => ({ id })),
+      tools: (role === "dm" ? ["select", "ruler", "area", "draw", "ping", "add-token", "trap", "fog", "build", "grid"] : ["select", "ruler", "area", "draw", "ping"]).map((id) => ({ id })),
       getState: () => state as unknown as RoomView,
       actions: {
         dispatch: (op, opts) => {
@@ -138,16 +138,16 @@ describe("the shortcut table", () => {
   describe("keys this device moved", () => {
     test("a moved letter matches as the room's letters do, and its old key picks nothing", () => {
       const { env: e } = env();
-      const find = moved({ "tool:fog": "x" });
-      assert.equal(find(e, press({ key: "x", code: "KeyX" })), "tool:fog");
-      assert.equal(find(e, press({ key: "X", code: "KeyX", shiftKey: true })), "tool:fog", "with Shift");
-      // Russian: the key at X types ч.
-      assert.equal(find(e, press({ key: "ч", code: "KeyX" })), "tool:fog", "by its place on a Cyrillic layout");
+      const find = moved({ "tool:fog": "k" });
+      assert.equal(find(e, press({ key: "k", code: "KeyK" })), "tool:fog");
+      assert.equal(find(e, press({ key: "K", code: "KeyK", shiftKey: true })), "tool:fog", "with Shift");
+      // Russian: the key at K types к.
+      assert.equal(find(e, press({ key: "к", code: "KeyK" })), "tool:fog", "by its place on a Cyrillic layout");
       assert.equal(find(e, press({ key: "f", code: "KeyF" })), null, "F is free now");
       assert.equal(find(e, press({ key: "а", code: "KeyF" })), null, "and so is its place");
-      assert.equal(find(e, press({ key: "x", code: "KeyX", target: { tagName: "INPUT", type: "text" } })), null, "typing in a field");
-      assert.equal(find(e, press({ key: "x", code: "KeyX", ctrlKey: true })), null, "Ctrl+X stays the browser's");
-      assert.equal(find(env({ role: "player" }).env, press({ key: "x", code: "KeyX" })), null, "Fog is still the DM's");
+      assert.equal(find(e, press({ key: "k", code: "KeyK", target: { tagName: "INPUT", type: "text" } })), null, "typing in a field");
+      assert.equal(find(e, press({ key: "k", code: "KeyK", ctrlKey: true })), null, "Ctrl+K stays the browser's");
+      assert.equal(find(env({ role: "player" }).env, press({ key: "k", code: "KeyK" })), null, "Fog is still the DM's");
     });
 
     test("a moved symbol and a moved digit match by key, with Shift allowed", () => {
@@ -177,7 +177,7 @@ describe("the shortcut table", () => {
     });
 
     test("a press finds the device's own keys, and a change that clashes is ignored", () => {
-      assert.equal(shortcutKeys({ "tool:fog": "x" })["tool:fog"], "x");
+      assert.equal(shortcutKeys({ "tool:fog": "k" })["tool:fog"], "k");
       assert.equal(shortcutKeys({ "tool:fog": "v" })["tool:fog"], "f", "V is Select's");
       assert.equal(shortcutKeys({ "tool:fog": "v", "tool:select": "f" })["tool:fog"], "v", "a swap holds");
       assert.equal(shortcutKeys({})["tool:fog"], "f");
@@ -196,6 +196,16 @@ describe("the shortcut table", () => {
     assert.deepEqual(dm.calls.tool, ["build", "fog"], "the tool stays as it was");
     run(dm.env, press({ key: "r", code: "KeyR" }));
     assert.equal(toolbar.getState().tucked, null, "a second press never hides them");
+  });
+
+  test("X picks the Trap tool for the DM and does nothing for a player (D-261025-2)", () => {
+    const dm = env();
+    assert.equal(run(dm.env, press({ key: "x", code: "KeyX" })), "tool:trap");
+    assert.deepEqual(dm.calls.tool, ["trap"]);
+    assert.equal(shortcutKeys({})["tool:trap"], "x");
+    const player = env({ role: "player" });
+    assert.equal(run(player.env, press({ key: "x", code: "KeyX" })), null);
+    assert.deepEqual(player.calls.tool, []);
   });
 
   test("letters pick tools by role, where they are printed or by their place on a non-Latin layout", () => {
@@ -467,6 +477,7 @@ describe("the shortcut table", () => {
       "tool:ping",
       "tool:ruler",
       "tool:select",
+      "tool:trap",
       "turn",
       "zoomIn",
       "zoomOut",
