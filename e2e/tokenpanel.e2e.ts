@@ -310,14 +310,18 @@ async function measureIn(root: Locator, screen: string): Promise<string[]> {
   return alignmentLines(await measureAlignment(root.first()), screen);
 }
 
+/** The alignment sweep's tablet, held upright (alignment.e2e.ts). */
+const TABLET = { width: 820, height: 1180 };
+
 /**
  * Runs `step` at the sizes live play 22 measured the panel at, 1440 x 900,
- * 1280 x 800, 430 x 932, 390 x 844 and 320 x 568, at 100% and 130%, for
- * the DM and with `withPlayer` for Pat too, and gathers its lines. Each
- * size loads the room again, so no sheet or panned map is left from the
- * last one: about ten loads a minute, under the server's 20 a session.
+ * 1280 x 800, 430 x 932, 390 x 844 and 320 x 568, and any `also`, at 100%
+ * and 130%, for the DM and with `withPlayer` for Pat too, and gathers its
+ * lines. Each size loads the room again, so no sheet or panned map is left
+ * from the last one: about ten loads a minute, under the server's 20 a
+ * session.
  */
-async function atLp22Sizes(step: (at: string) => Promise<string[]>, withPlayer = false): Promise<string[]> {
+async function atLp22Sizes(step: (at: string) => Promise<string[]>, withPlayer = false, also: { width: number; height: number }[] = []): Promise<string[]> {
   const off: string[] = [];
   const pages: [Page, CDPSession][] = [[dm, dmCdp], ...(withPlayer ? [[player, playerCdp] as [Page, CDPSession]] : [])];
   try {
@@ -328,6 +332,7 @@ async function atLp22Sizes(step: (at: string) => Promise<string[]>, withPlayer =
         { width: 430, height: 932 },
         { width: 390, height: 844 },
         { width: 320, height: 568 },
+        ...also,
       ]) {
         for (const [page, cdp] of pages) await setUp(page, cdp, { ...size, scale }, null);
         off.push(...(await step(`${size.width} x ${size.height} at ${Math.round(scale * 100)}%`)));
@@ -2396,13 +2401,17 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("fu31-e. the goblin's Image group: its picture centered on the pair beside it, in line within 1 px at live play 22's sizes (LP22-ALIGN-1)", async () => {
-    const off = await atLp22Sizes(async (at) => {
-      const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
-      await openGroup(goblin, "Image");
-      await shots.take(dm, `fu31-image-${at.replace(/ /g, "")}`);
-      return measureIn(groupIn(goblin, "Image"), `the goblin's Image at ${at}`);
-    });
+  test("fu31-e. the goblin's Image group: its picture centered on the pair beside it, in line within 1 px at live play 22's sizes and the alignment sweep's 820 x 1180 tablet (LP22-ALIGN-1, FU31 review F8)", async () => {
+    const off = await atLp22Sizes(
+      async (at) => {
+        const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
+        await openGroup(goblin, "Image");
+        await shots.take(dm, `fu31-image-${at.replace(/ /g, "")}`);
+        return measureIn(groupIn(goblin, "Image"), `the goblin's Image at ${at}`);
+      },
+      false,
+      [TABLET],
+    );
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
@@ -2502,10 +2511,13 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("fu31-i. a counted condition's row is as tall as a plain one: the goblin's Exhaustion 2 with its − and + beside Poisoned, in line within 1 px at live play 22's sizes (LP22-ALIGN-5)", async () => {
+  test("fu31-i. a counted condition's row is as tall as a plain one: Exhaustion 2 with its − and + beside Poisoned, on the goblin and on a desk on Thorn's page, in line within 1 px at live play 22's sizes (LP22-ALIGN-5, FU31 review F8)", async () => {
     const added = [randomUUID(), randomUUID()];
+    const thorn = [randomUUID(), randomUUID()];
     await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: added[0]!, key: "exhaustion", level: 2 } });
     await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: added[1]!, key: "poisoned" } });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: thorn[0]!, key: "exhaustion", level: 2 } });
+    await ops.send({ t: "actor.effect.add", target: { characterId: run.thorn.characterId }, effect: { id: thorn[1]!, key: "poisoned" } });
     try {
       const off = await atLp22Sizes(async (at) => {
         const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
@@ -2514,11 +2526,22 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await shots.take(dm, `fu31-conditions-${at.replace(/ /g, "")}`);
         const rows = await conditions.locator("li").evaluateAll((items) => items.map((li) => `${((li as unknown as { textContent: string | null }).textContent ?? "").trim().slice(0, 14)} ${(li as unknown as { getBoundingClientRect(): { height: number } }).getBoundingClientRect().height.toFixed(1)}`));
         console.log(`fu31-i ${at}: ${rows.join(" | ")}`);
-        return measureIn(conditions, `the goblin's Conditions at ${at}`);
+        const lines = await measureIn(conditions, `the goblin's Conditions at ${at}`);
+        if (!at.startsWith("1440") && !at.startsWith("1280")) return lines;
+        await openSideTab(dm, "Characters");
+        const page = dm.getByRole("tabpanel", { name: "Characters" });
+        await page.locator(`[data-opener="character:${run.thorn.characterId}"]`).click();
+        await openGroup(page, "Combat");
+        const own = sectionIn(groupIn(page, "Combat"), "Conditions");
+        await own.getByRole("button", { name: /one more$/ }).waitFor();
+        await own.scrollIntoViewIfNeeded();
+        await shots.take(dm, `fu31-conditions-thorn-${at.replace(/ /g, "")}`);
+        return [...lines, ...(await measureIn(own, `Thorn's Conditions at ${at}`))];
       });
       assert.deepEqual(off, [], "out of line by more than 1 px");
     } finally {
       for (const effectId of added) await ops.send({ t: "actor.effect.remove", target: { tokenId: run.goblin.id }, effectId }).catch((err: unknown) => console.error("fu31-i: a condition stayed", err));
+      for (const effectId of thorn) await ops.send({ t: "actor.effect.remove", target: { characterId: run.thorn.characterId }, effectId }).catch((err: unknown) => console.error("fu31-i: a condition stayed on Thorn", err));
     }
   });
 
