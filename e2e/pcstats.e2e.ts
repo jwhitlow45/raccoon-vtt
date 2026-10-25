@@ -189,6 +189,30 @@ async function openKnownFormsStep(page: Page): Promise<Locator> {
   return step;
 }
 
+/** The Conditions section in a panel or on a page, by its heading, an h3 or an h4, which may sit one box down. */
+function conditionsIn(scope: Locator): Locator {
+  return scope.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Conditions"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="Conditions"]]');
+}
+
+/** What has the keyboard's focus: "the page", or the control's text, after "fold " for a group's fold. */
+function focusedOn(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const a = (globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null; hasAttribute(n: string): boolean } | null } }).document.activeElement;
+    return !a || a.tagName === "BODY" ? "the page" : `${a.hasAttribute("data-group-fold") ? "fold " : ""}${(a.textContent ?? "").trim()}`;
+  });
+}
+
+/** A keyboard's press: focus on the control, then Enter. */
+async function pressKey(page: Page, target: Locator): Promise<void> {
+  await target.focus();
+  await page.keyboard.press("Enter");
+}
+
+/** Waits for the keyboard's focus to match `want`, and fails with where it is instead. */
+async function focusLands(page: Page, want: RegExp, after: string): Promise<void> {
+  await waitFor(`focus after ${after}`, () => focusedOn(page).then((f) => (want.test(f) ? true : null)), 5_000).catch(async () => assert.fail(`after ${after} focus is on "${await focusedOn(page)}"`));
+}
+
 describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -783,19 +807,10 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const panel = await showBree(ana);
     const combat = panel.getByRole("button", { name: "Combat", exact: true });
     if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
-    const conditions = panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Conditions"] or *[not(self::section)]/*[self::h3 or self::h4][normalize-space()="Conditions"]]');
+    const conditions = conditionsIn(panel);
     const poisoned = () => (anaSocket.state?.characters[run.bree.characterId]?.actor.effects ?? []).some((e) => e.key === "poisoned");
-    const focused = () =>
-      ana.evaluate(() => {
-        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null } | null } }).document.activeElement;
-        return !a || a.tagName === "BODY" ? "the page" : (a.textContent ?? "").trim();
-      });
-    const press = async (target: Locator) => {
-      await target.focus();
-      await ana.keyboard.press("Enter");
-    };
-    const focusOn = (want: RegExp, after: string) =>
-      waitFor(`focus after ${after}`, () => focused().then((f) => (want.test(f) ? true : null)), 5_000).catch(async () => assert.fail(`after ${after} focus is on "${await focused()}"`));
+    const press = (target: Locator) => pressKey(ana, target);
+    const focusOn = (want: RegExp, after: string) => focusLands(ana, want, after);
 
     await press(conditions.getByRole("button", { name: "Add", exact: true }));
     await press(conditions.locator("button[aria-pressed]").filter({ hasText: "Poisoned" }));
@@ -828,16 +843,9 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await waitFor("the shape or its question", async () => (breeActor()?.wildShape || (await choice.count()) > 0 ? true : null));
     if (!breeActor()?.wildShape) await choice.getByRole("button", { name: "Take the shape", exact: true }).click();
     await waitFor("Bree's shape", () => (breeActor()?.wildShape ? true : null));
-    const end = panel.getByRole("button", { name: "End the shape" });
-    await end.focus();
-    await ana.keyboard.press("Enter");
+    await pressKey(ana, panel.getByRole("button", { name: "End the shape" }));
     await waitFor("the shape ended", () => (breeActor()?.srdId === undefined ? true : null));
-    const focused = () =>
-      ana.evaluate(() => {
-        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null; hasAttribute(n: string): boolean } | null } }).document.activeElement;
-        return !a || a.tagName === "BODY" ? "the page" : `${a.hasAttribute("data-group-fold") ? "fold " : ""}${(a.textContent ?? "").trim()}`;
-      });
-    await waitFor("focus on the Stat block's fold", () => focused().then((f) => (/^fold Stat block/.test(f) ? true : null)), 5_000).catch(async () => assert.fail(`after End the shape focus is on "${await focused()}"`));
+    await focusLands(ana, /^fold Stat block/, "End the shape");
   });
 
   test("6. no page logged an error", () => {
