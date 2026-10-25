@@ -4,6 +4,7 @@ import { MAX_RANGE_RINGS, MAX_RANGE_RING_FT, type TokenPatch } from "#shared/pro
 import { Button } from "../../components/Button.tsx";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
+import { theme } from "../../lib/theme.ts";
 import { NumberField } from "../tokens/ui.tsx";
 import { RING_PRESETS, ringsText } from "./rings.ts";
 
@@ -59,20 +60,27 @@ export function RangeRingsSection(props: { token: Pick<Token, "rangeRings">; can
             </Chip>
           );
         })}
-        {/* Keyed by the rings, so the field empties once its distance is added. */}
-        <NumberField
-          key={rings.join(",")}
-          label="Custom ring distance in feet"
-          placeholder="Custom ft"
-          // Wide enough for its placeholder at the 16 px fields keep, which the number fields' 88 px cuts.
-          width="calc(9.5ch + 26px)"
-          value={undefined}
-          min={5}
-          max={MAX_RANGE_RING_FT}
-          unavailable={full}
-          describedBy={full ? fullId : undefined}
-          onCommit={(ft) => !full && ft !== null && set([...rings, ft])}
-        />
+        {/*
+         * Wide enough for its placeholder at the 16 px fields keep, which the number fields' 88 px cuts, and growing
+         * to fill its line, so where the presets leave it no room beside them it is a line of its own rather than a
+         * field alone under them (docs/design-v1-token-sections.md 7). Its box takes the field's font, so the two
+         * measure ch alike.
+         */}
+        <span style={{ display: "flex", flex: "1 0 calc(9.5ch + 26px)", fontSize: theme.font.input }}>
+          {/* Keyed by the rings, so the field empties once its distance is added. */}
+          <NumberField
+            key={rings.join(",")}
+            label="Custom ring distance in feet"
+            placeholder="Custom ft"
+            width="100%"
+            value={undefined}
+            min={5}
+            max={MAX_RANGE_RING_FT}
+            unavailable={full}
+            describedBy={full ? fullId : undefined}
+            onCommit={(ft) => !full && ft !== null && set([...rings, ft])}
+          />
+        </span>
       </ChipRow>
       {full ? <Help id={fullId}>At most {MAX_RANGE_RINGS} rings. Turn one off to add another.</Help> : null}
     </Section>
