@@ -890,6 +890,52 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await stays("Back");
   });
 
+  test("lp22-r1-c. by keyboard in a fight, Save on Readied's form hands focus to its row, and It fired, which takes the row away, to Add (LP22-OPUS-5)", async () => {
+    const characterId = run.bree.characterId;
+    const entryId = randomUUID();
+    await ops.send({ t: "encounter.start", entries: [{ id: entryId, tokenId: run.bree.tokenId, value: 12 }] });
+    await ops.send({ t: "actor.effect.add", target: { characterId }, effect: { id: randomUUID(), key: "readied", duration: { mode: "turnStart", of: { entryId } } } });
+    const readied = () => (anaSocket.state?.characters[characterId]?.actor.effects ?? []).some((e) => e.key === "readied");
+    const conditions = await breeConditions(ana);
+    const row = conditions.locator("[data-effect-row]").filter({ hasText: "Readied" });
+    await pressKey(ana, row);
+    await pressKey(ana, conditions.getByRole("button", { name: "Save", exact: true }));
+    await focusLands(ana, /^Readied/, "Save");
+    await pressKey(ana, row);
+    await pressKey(ana, conditions.getByRole("button", { name: "It fired: Reaction used", exact: true }));
+    await waitFor("Readied off Bree", () => (readied() ? null : true));
+    await focusLands(ana, /^Add$/, "It fired");
+    await ops.send({ t: "encounter.end" });
+  });
+
+  test("lp22-r1-d. by keyboard on Bree's page, a condition's form hands focus as in the token panel: to Back, the condition's row or Add, never the page (LP22-OPUS-5)", async () => {
+    await reopenRoom(ana);
+    await ana.getByRole("status", { name: "Connected" }).first().waitFor();
+    // Ana plays Bree alone, so the Characters panel lands on Bree's page.
+    await openSideTab(ana, "Characters");
+    const page = ana.getByRole("tabpanel", { name: "Characters" });
+    await page.locator("[data-creature-heading]", { hasText: /^Bree$/ }).waitFor();
+    const combat = page.getByRole("button", { name: "Combat", exact: true });
+    if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+    const conditions = conditionsIn(page);
+    const frightened = () => (anaSocket.state?.characters[run.bree.characterId]?.actor.effects ?? []).some((e) => e.key === "frightened");
+    await pressKey(ana, conditions.getByRole("button", { name: "Add", exact: true }));
+    await pressKey(ana, conditions.locator("button[aria-pressed]").filter({ hasText: "Frightened" }));
+    await focusLands(ana, /^Back$/, "Frightened's tile opened its form");
+    await pressKey(ana, conditions.getByRole("button", { name: "Add", exact: true }));
+    await waitFor("Frightened on Bree", () => (frightened() ? true : null));
+    await focusLands(ana, /^Add$/, "the form's Add");
+    const row = conditions.locator("[data-effect-row]").filter({ hasText: "Frightened" });
+    await pressKey(ana, row);
+    await focusLands(ana, /^Back$/, "the row opened its form");
+    await pressKey(ana, conditions.getByRole("button", { name: "Back", exact: true }));
+    await focusLands(ana, /^Frightened/, "Back");
+    await pressKey(ana, row);
+    await pressKey(ana, conditions.getByRole("button", { name: "Remove", exact: true }));
+    await waitFor("Frightened off Bree", () => (frightened() ? null : true));
+    await focusLands(ana, /^Add$/, "Remove");
+  });
+
   test("6. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.ana.errors, [], "Ana's page logged errors");
