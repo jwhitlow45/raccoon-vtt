@@ -1549,7 +1549,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await shots.take(dm, "tokenpanel-dm-group-bar");
   });
 
-  test("ic2-tags. a hidden, locked token with its name hidden: Hidden and Locked wear their icons, Hidden keeps its whole words as its tooltip, and Name hidden stays words (docs/design-v1-icons-2.md 5)", async () => {
+  test("ic2-tags. a hidden, locked token with its name hidden: Hidden and Locked wear their icons, Hidden keeps its whole words as its tooltip and for a screen reader, and Name hidden stays words (docs/design-v1-icons-2.md 5, D-261024-46)", async () => {
     await setUp(dm, dmCdp, DESK, null);
     await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { visibility: "dm", locked: true, nameHidden: true } });
     try {
@@ -1558,18 +1558,21 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await bar(dm, "Goblin 4").getByRole("button", { name: "Details", exact: true }).click();
       const panel = tokenPanel(dm);
       await panel.locator("[data-kind-line]").first().waitFor();
-      // A tag's words stand in a span of their own inside it, where it cuts them (components/Tag.tsx).
-      const tag = (words: string) => panel.locator("[data-kind-line] ~ div").first().getByText(words, { exact: true }).locator("..");
-      const looks = [];
-      for (const words of ["Hidden", "Locked", "Name hidden"]) {
-        const t = tag(words);
-        await t.waitFor();
-        looks.push({ words, icon: await t.locator("svg").count(), title: await t.getAttribute("title") });
-      }
+      // Each tag: the words it shows, those a screen reader reads (a visually hidden part kept, at 1 px wide), its icon and its tooltip.
+      const tags = panel.locator("[data-kind-line] ~ div").first().locator(":scope > span");
+      await tags.nth(2).waitFor();
+      const looks = await tags.evaluateAll((els) =>
+        els.map((el) => {
+          type Node = { nodeType: number; textContent: string | null; childNodes: ArrayLike<Node>; getBoundingClientRect?(): { width: number } };
+          const shown = (n: Node): string => (n.nodeType === 3 ? (n.textContent ?? "") : (n.getBoundingClientRect?.().width ?? 0) > 2 ? Array.from(n.childNodes).map(shown).join("") : "");
+          const tag = el as unknown as Node & { getAttribute(n: string): string | null; querySelectorAll(s: string): ArrayLike<unknown> };
+          return { words: shown(tag).trim(), spoken: (tag.textContent ?? "").trim(), icon: tag.querySelectorAll("svg").length, title: tag.getAttribute("title") };
+        }),
+      );
       assert.deepEqual(looks, [
-        { words: "Hidden", icon: 1, title: "Hidden from players" },
-        { words: "Locked", icon: 1, title: "Locked" },
-        { words: "Name hidden", icon: 0, title: "Name hidden" },
+        { words: "Hidden", spoken: "Hidden from players", icon: 1, title: "Hidden from players" },
+        { words: "Locked", spoken: "Locked", icon: 1, title: "Locked" },
+        { words: "Name hidden", spoken: "Name hidden", icon: 0, title: "Name hidden" },
       ]);
       await shots.take(dm, "tokenpanel-ic2-header-tags");
     } finally {

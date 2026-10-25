@@ -2,12 +2,19 @@ import type { ReactNode } from "react";
 import type { ImageRef } from "#shared/model.ts";
 import type { IconName } from "../../components/Icon.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import type { KindLine } from "./creatureKind.ts";
 
-/** A tag with the icon its state wears elsewhere, such as the tracker's Hidden (docs/design-v1-icons-2.md 5), and its full words as its tooltip where they are shorter. */
-export type HeaderTag = { text: string; icon: IconName; title?: string };
+/**
+ * A tag with the icon its state wears elsewhere, such as the tracker's
+ * Hidden (docs/design-v1-icons-2.md 5). Where its words are shorter than
+ * its meaning, `title` is the whole as its tooltip, and `spoken` the rest
+ * of it, read after the words by a screen reader, which may not read a
+ * title (D-261024-46).
+ */
+export type HeaderTag = { text: string; icon: IconName; title?: string; spoken?: string };
 
 /** A character's page's name, found by the focus that lands there. */
 export const CREATURE_HEADING = "[data-creature-heading]";
@@ -82,7 +89,15 @@ export function CreatureHeader(props: {
                 </Tag>
               ) : (
                 <Tag key={tag.text} cut="100%" icon={tag.icon} {...(tag.title ? { title: tag.title } : null)}>
-                  {tag.text}
+                  {/* Words alone stay a string, which the tag takes as its tooltip where it cuts them. */}
+                  {tag.spoken ? (
+                    <>
+                      {tag.text}
+                      <span style={VISUALLY_HIDDEN}> {tag.spoken}</span>
+                    </>
+                  ) : (
+                    tag.text
+                  )}
                 </Tag>
               ),
             )}

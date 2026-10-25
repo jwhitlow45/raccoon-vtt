@@ -1918,7 +1918,8 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     // The tags' row stands under the kind line (features/tokens/CreatureHeader.tsx).
     const tags = goblin.locator("[data-kind-line] + div").first();
     for (const words of ["Hidden", "Locked", "Name hidden"]) {
-      const tag = tags.getByText(words, { exact: true }).first();
+      // Hidden's words go on, out of sight, for a screen reader (D-261024-46).
+      const tag = tags.getByText(new RegExp(`^${words}( from players)?$`)).first();
       if (!(await visible(tag))) await sweep.missing(page, "ic2-goblin-tags", `no "${words}" tag`);
       else if (await tag.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth + 0.5)) sweep.lines.push(`${at} ic2-goblin-tags: "${words}" is cut`);
     }

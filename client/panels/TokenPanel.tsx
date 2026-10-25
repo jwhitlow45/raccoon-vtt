@@ -266,7 +266,7 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
   const linkTags = usePanelLinkTags(token);
   // The tracker's words and icons for the same states (docs/design-v1-icons-2.md 5): "Hidden" with the eye struck through fits a 320 px phone at 130% where "Hidden from players" with it would cut.
   const tags: (string | HeaderTag)[] = [];
-  if (token.visibility === "dm") tags.push({ text: "Hidden", icon: "hidden", title: "Hidden from players" });
+  if (token.visibility === "dm") tags.push({ text: "Hidden", icon: "hidden", title: "Hidden from players", spoken: "from players" });
   if (token.locked) tags.push({ text: "Locked", icon: "locked" });
   // Words alone: the Hidden tag beside it already draws the struck-out eye (docs/design-v1-icons-2.md 3.2).
   if (token.nameHidden) tags.push("Name hidden");
