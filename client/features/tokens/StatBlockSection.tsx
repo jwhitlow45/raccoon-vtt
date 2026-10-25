@@ -138,7 +138,7 @@ export function StatBlockSection(props: {
     openEditor({ monster: null, initial: { ...statBlockFromSrd(monster), ...(image ? { defaultImage: image } : {}) }, onSaved: attach });
   };
   // A companion's players detach what they may link. The DM's Detach clears a room monster's link too.
-  // The block's buttons grow to fill their line, so where they do not fit on one, Detach never stands alone under the others (LP22-ALIGN-3).
+  // The block's buttons grow to fill their line, so where they do not fit on one, Detach never stands alone under the others (LP22-ALIGN-3). An SRD block's Copy grows alike, so the row reads as one set (FU31 review F9).
   const detach =
     (access.dm || keeper !== null) && link.kind !== "none" ? (
       <SmallButton grow onClick={() => props.patchActor(access.dm ? DETACH_PATCH : OWNER_DETACH_PATCH)}>
@@ -258,7 +258,7 @@ function SrdBlock(props: { srdId: string; copy: string | null; buttons: ReactNod
       {props.copy !== null ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
           {monster ? (
-            <SmallButton wrap onClick={() => props.onCopy(monster)}>
+            <SmallButton grow wrap onClick={() => props.onCopy(monster)}>
               {props.copy}
             </SmallButton>
           ) : null}

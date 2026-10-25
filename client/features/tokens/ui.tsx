@@ -332,7 +332,8 @@ export function SmallButton(props: {
       disabled={props.disabled}
       aria-disabled={props.unavailable || undefined}
       style={{
-        flex: props.grow ? 1 : "none",
+        // A label that wraps has no least width of its own, so it grows from its whole width: from none, it would never take a line of its own.
+        flex: props.grow ? (props.wrap ? "1 1 auto" : 1) : "none",
         ...(props.wrap ? { minWidth: 0, maxWidth: "100%", whiteSpace: "normal", textAlign: "center" } : { whiteSpace: "nowrap" }),
         ...(props.unavailable ? { ...buttonLook(variant, { pressed: props.pressed, disabled: true }), cursor: "default" } : null),
       }}

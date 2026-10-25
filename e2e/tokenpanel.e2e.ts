@@ -380,6 +380,27 @@ function afterPpLines(lines: Locator, at: string): Promise<string[]> {
   );
 }
 
+/**
+ * Each line of a button row that grows its buttons ends at the row's end,
+ * so no button keeps its own width where the others fill theirs (FU31
+ * review F9). `button` names one button in the row.
+ */
+function unfilledLines(button: Locator, at: string): Promise<string[]> {
+  return button.locator("xpath=..").evaluate((row, at) => {
+    type R = { top: number; bottom: number; right: number };
+    type E = { textContent: string | null; getBoundingClientRect(): R };
+    const box = (row as unknown as E).getBoundingClientRect();
+    const buttons = Array.from((row as unknown as { children: ArrayLike<E> }).children);
+    const out: string[] = [];
+    for (const b of buttons) {
+      const r = b.getBoundingClientRect();
+      const later = buttons.filter((o) => o !== b && Math.abs(o.getBoundingClientRect().top - r.top) < 1 && o.getBoundingClientRect().right > r.right);
+      if (later.length === 0 && box.right - r.right > 1) out.push(`${at}: "${(b.textContent ?? "").trim()}" ends its line ${(box.right - r.right).toFixed(1)} px short of the row's end`);
+    }
+    return out;
+  }, at);
+}
+
 /** A panel's group by the name on its fold (components/Panel.tsx Group). */
 function groupIn(scope: Locator, name: string): Locator {
   return scope.locator("[data-panel-group]").filter({ has: scope.page().getByRole("button", { name, exact: true }) });
@@ -2470,7 +2491,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
-  test("fu31-g. a Stat block's Copy, Change and Detach leave no button alone under the others: Pat's wolf companion and the DM's goblin, in line within 1 px at live play 22's sizes (LP22-ALIGN-3)", async () => {
+  test("fu31-g. a Stat block's Copy, Change and Detach leave no button alone under the others and all fill the lines they take: Pat's wolf companion and the DM's goblin, in line within 1 px at live play 22's sizes (LP22-ALIGN-3, FU31 review F9)", async () => {
     const wolf = { id: randomUUID(), at: cell(6, 4) };
     await ops.send({ t: "token.create", token: { id: wolf.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: wolf.at.x, y: wolf.at.y, disposition: "ally", kind: "monster", name: "Wolf", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
     await waitFor("Pat's wolf", () => playerSocket.state?.tokens[wolf.id]);
@@ -2479,10 +2500,12 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
         await openGroup(goblin, "Stat block");
         const lines = await measureIn(groupIn(goblin, "Stat block"), `the goblin's Stat block at ${at}`);
+        lines.push(...(await unfilledLines(groupIn(goblin, "Stat block").getByRole("button", { name: /^Copy to/ }), `the goblin's Stat block at ${at}`)));
         const pet = await panelOf(player, wolf.at, "Wolf");
         await openGroup(pet, "Stat block");
         await groupIn(pet, "Stat block").getByRole("button", { name: "Detach", exact: true }).waitFor();
         await shots.take(player, `fu31-wolf-block-${at.replace(/ /g, "")}`);
+        lines.push(...(await unfilledLines(groupIn(pet, "Stat block").getByRole("button", { name: /^Copy to/ }), `Pat's wolf's Stat block at ${at}`)));
         return [...lines, ...(await measureIn(groupIn(pet, "Stat block"), `Pat's wolf's Stat block at ${at}`))];
       }, true);
       assert.deepEqual(off, [], "out of line by more than 1 px");
