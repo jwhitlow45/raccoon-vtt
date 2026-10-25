@@ -1487,7 +1487,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       return { header: parseFloat(w.getComputedStyle(header).paddingRight), toolbar: parseFloat(w.getComputedStyle(nav).paddingRight), left: parseFloat(w.getComputedStyle(header).paddingLeft) };
     });
     assert.deepEqual(pads, { header: 12, toolbar: 4, left: 59 + 12 });
-    // One row of tabs that does not scroll: Token and Initiative, then More (docs/design-v1-panel-tabs.md 9.1).
+    // One row of tabs that does not scroll: Token, Initiative and Dice as their icons, then More (docs/design-v1-panel-tabs.md 9.1, docs/design-v1-icons-2.md 3.1).
     const tablist = phone.getByRole("tablist", { name: "Panels" });
     const row = await tablist.evaluate((el) => {
       const e = el as unknown as DomEl;
@@ -1497,7 +1497,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.deepEqual(row, { scrolls: false, rows: 1 });
     const more = tablist.locator('[role="tab"][aria-haspopup="menu"]');
     const rowTabs = await tablist.locator('[role="tab"]:not([aria-haspopup])').allTextContents();
-    assert.deepEqual(rowTabs, ["Token", "Initiative"]);
+    assert.deepEqual(rowTabs, ["Token", "Initiative", "Dice"]);
     assert.equal(await more.count(), 1, "More ends the row");
     // Hide panels draws its own icon, unlike More's caret a few pixels away.
     const icons = await tablist.evaluate((el) => {
@@ -1518,14 +1518,15 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.equal(await wholeInReach(body.getByRole("button", { name: "Next", exact: true })), true, "Next is in view");
     await shots.take(phone, "layout-932x430-side-panel-shown");
 
-    // The tab keys move along Token, Initiative and More, which takes focus and chooses nothing.
+    // The tab keys move along Token, Initiative, Dice and More, which takes focus and chooses nothing.
     await chosen.focus();
     const isFocused = (target: Locator) => target.evaluate((el) => el === el.ownerDocument.activeElement);
     for (const [key, to] of [
+      ["ArrowRight", "Dice"],
       ["ArrowRight", "More"],
       ["Home", "Token"],
       ["ArrowLeft", "More"],
-      ["ArrowLeft", "Initiative"],
+      ["ArrowLeft", "Dice"],
       ["End", "More"],
     ] as const) {
       await phone.keyboard.press(key);
