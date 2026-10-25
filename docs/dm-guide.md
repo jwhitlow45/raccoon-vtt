@@ -458,6 +458,8 @@ On a phone held upright, the bar rests as a strip across the foot of the map. It
 
 Press **Expand** (a chevron pointing up, with its name beside it where there is room) to grow the bar up the screen and show all of it, and **Collapse** to rest it again. **Conditions** and **Uses** in the strip open the whole bar with their list showing, and closing the list rests it again. On a screen too short for the bar to grow, the strip scrolls instead, and **Scroll for more** takes Expand's place.
 
+![The DM's phone held upright on the forest road, Goblin Warrior 2 tapped: its action bar rests as a strip at the foot of the map, with its name and "AC 15 · HP 4/10", Expand and Close, then the − sign, the HP field, Apply, Conditions and Roll.](dm-guide/phone-strip.webp)
+
 The fight's alert cards and the app's toasts stay above the strip and leave a band of map clear over it. When the cards would leave no band of map, they fold into their one row. Where the map above the strip is short, a new toast shows as one line over the top bar, and the alerts' row moves into the strip's header until the toast goes. Tap the toast's words to read the whole message.
 
 ![A goblin's action bar: AC, HP, Speed after its footprints and PP, the HP entry, its saves, Stat block, Details and elevation, then Conditions, Hidden, Multi-select, Roll and Attach, Size, and the padlock, copy and trash can icons.](dm-guide/action-bar.webp)
@@ -639,7 +641,7 @@ A few more details follow from this. A creature added mid-fight waits for its ow
 
 Every roll in the app happens on the server, so everyone sees the same result and nobody can fake one. Players who prefer real dice can still roll at the table and type their totals wherever the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is open to everyone.
 
-![The Dice panel with the Goblin Boss selected: its last roll at the top, the formula field and quick dice, Adv and Dis joined under Next roll beside Secret, and the boss's card with Initiative above its open Saves and checks and its folded Skills.](dm-guide/dice.webp)
+![The Dice panel with the Goblin Boss selected: its last roll at the top with Again, the formula field and quick dice, Adv and Dis joined under Next roll beside Secret, the notice "Fireball's save: applied." with Open, and the boss's card with Initiative above its open Saves and checks.](dm-guide/dice.webp)
 
 **Typing a roll.** Type a formula in the field and press **Roll** or Enter. A few examples of what it understands:
 
@@ -702,7 +704,7 @@ Under the card, the rolls fold into groups, as they do for one creature:
 
 A shared attack keeps its result while you work. You can fold the group between the attack and its damage, or select another creature or let one go, and as long as two or more stay selected and they all still have that attack, the hits and **Roll damage** are waiting when you come back. While the group is folded, its row reminds you of them ("Scimitar: 2 hits"). Selecting fewer than two clears them, and so does selecting creatures that don't share the attack, even if you go back to ones that do.
 
-A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll. If you step back from that page before it is finished, the panel shows a notice above the card, such as "Fire Breath's save: set up.", with **Open** to return to it.
+A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll. If you step back from that page, the panel shows a notice above the card that says how far it got, such as "Fire Breath's save: 2 waiting." or "Fireball's save: applied.", with **Open** to return to it. The notice stays until you close the page, with **Discard** or, once it is applied, **Done**.
 
 ## Asking for rolls
 
@@ -809,7 +811,7 @@ When you start it from an area, the page fills itself in from the spell and its 
 3. Check the rows. Each creature in the area has one. Monsters roll on the server. Players' creatures are asked, so the player rolls on their own device, or you can press **Roll +3** for them. To change how a single row rolls, pick **Ask**, **Server** or **Type** (you type the total), or **Fails**, which is offered when a condition such as Stunned fails the roll outright. To decide a row yourself, pick **Fail**, **Pass** or **Skip**.
 4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed.
 5. Roll the damage: press **Roll** beside it, type a number, or take a player's roll from **Rolled by someone else**. Once the saves are rolled, the damage folds into one line, and **Edit** opens it again. Each row then shows the damage it takes, halved on a pass. Tap a row's amount to type a different one.
-6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and Concentration saves are handled for you, and the app confirms: "Applied to 4. Undo takes it all back."
+6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and Concentration saves are handled for you, and the app confirms: "Applied to 4. Undo takes it all back." Press **Done** to close the page.
 
 With **No save** ("No save: everyone takes it"), **Apply** shows at once, for damage that everyone in the area simply takes. An open group save stays on your device through a reload, and the Dice panel's **Open** brings you back to it.
 
@@ -845,6 +847,8 @@ Here is the list of an adult red dragon in its lair, which has a little of every
 
 Other creatures bring lines of their own. An ability with uses per day reads "Dominate Mind, 2/Day, 1 left", with **Use**, and a troll's list says "Regeneration: 15 HP at the start of its turn". A character's class resources read like "Rage 3 of 3", with **Use**, and a pool such as Lay on Hands asks how many points to spend. The spells a monster casts through its Spellcasting, such as the dragon's Fireball once a day, aren't listed, so count those as you always have.
 
+![The dragon's Token panel after it took Fiery Rays and used a Legendary Resistance: Legendary Resistance 3 of 4 with Use and Restore, legendary actions 3 of 4 with Fiery Rays off and Restore, Fire Breath used with Roll recharge and Mark ready, then the pips.](dm-guide/uses.webp)
+
 Once something is spent, **Restore** beside it gives one back, which is handy when you tapped a Legendary Resistance too soon. Restore is in the lists of the action bar, the tracker row and the Token panel, not on the turn card, and a used recharge comes back with **Mark ready** instead. In the Token panel and the tracker row, the list ends with two rows of pips that only you see, **Legendary Actions used** and **Legendary Resistances used today**, and a tap on a pip sets either count by hand. The pips wrap onto as many lines as they need, so even a count of 10 fits on a phone.
 
 Each use writes a line in the log, such as "Adult Red Dragon used Fiery Rays (legendary action, 3 of 4 left)." Your players read what the creature did, "Adult Red Dragon used Fiery Rays, a legendary action.", but the count only for their own creatures.
@@ -867,7 +871,7 @@ A monster with a lair, such as an adult dragon, is stronger at home: its stat bl
 
 Some moments in a fight need an answer from you, and the app shows them as cards stacked at the right of the map, under the top bar: roll requests, Concentration saves, save-ends reminders, a trap that went off, and the cards a creature's turn brings. Concentration and save-ends cards come first, then the cards a creature's turn brings, then roll requests and traps, then the short news, and the turn card, which lasts the whole turn, comes last. Where the screen is short, the cards fold into one row that names the most pressing one and how many more are waiting. Tap the row to see them all.
 
-![A recharge card at the start of the dragon's turn, "Fire Breath can recharge (5–6)." with Roll and Dismiss, beside its tracker row's legendary pips.](dm-guide/alerts.webp)
+![The start of the dragon's turn: the recharge card, "Fire Breath can recharge (5–6)." with Roll, Mark ready and Dismiss, above the dragon's turn card, beside its tracker row with the Lair tag, LA 4/4, LR 4/4 and a Fire Breath used chip.](dm-guide/alerts.webp)
 
 The cards keep out of the way of whatever you are working on. On a phone, a pane that opens from the bottom of the screen for a label, a pin, a light or a trap folds the cards into their row on the pane's top edge, so the pane's header and **Close** stay in reach. On a wider screen these panes open beside what they edit, to the left of the cards, and where the screen is too narrow for both, the cards fold into their row at the top right with the pane just under it. Tap the row, or close the pane, to bring the cards back.
 
@@ -889,6 +893,8 @@ At the start of a creature's turn, whoever answers for it, its player or you for
 - **Regeneration**, while a regenerating creature is hurt: "Troll regenerates 15 HP." with **Apply**, **Skip** and **Dismiss**. A troll at 0 HP that is dying rather than dead reads "Troll is at 0 HP and regenerates 15 HP.", and **Apply** gets it up. If the damage it took since its last turn was Fire or Acid, the card adds "Recorded Fire damage may stop Regeneration." The app knows a hit's damage type when it came through a damage roll's **Use** chip, or through a group save whose damage names its type, such as "8d6 Fire" or a typed "28 Fire", even where you typed over a row's amount. A plain number typed into the HP entry carries no type, so that damage isn't counted. Either way the choice stays yours, and **Apply** and **Skip** are both there.
 - **Death save**, for a dying creature: "Thorn is dying. Death save: 1 success, 2 failures." with **Roll**, **Skip** and **Dismiss**. It goes to the character's player and to you, so either of you can roll it, and the first roll counts: "Rolled 14: a success." A monster gets one only while "Monsters die at 0 HP" is off. While a Regeneration card for the same creature waits, the death save reads "Waiting for Regeneration", since a troll that regenerates never needs the save.
 - **The turn card**, for the whole of the turn: "Adult Red Dragon's turn" lists what the creature can spend, as its **Uses** does, with **Use** for its Legendary Resistance, its recharge and per-day abilities and a character's class resources. Its Legendary Actions are only counted ("4 of 4, after other creatures' turns"), since a monster takes them after another creature's turn. A creature that shares the turn, such as a controlled mount, gets a block of its own. A Regeneration or death save you skipped shows here with **Reopen**. On a phone, or where the card would not fit above the action bar, it folds to one row, "Adult Red Dragon's turn: 3 uses", led by a chevron. Press the row to open the card, and the chevron before the open card's title (**Collapse**) to fold it again.
+
+![The troll's turn after Ivo's Fire Bolt burned it: its Regeneration card, "Troll regenerates 15 HP." with "Recorded Fire damage may stop Regeneration." and Apply, Skip and Dismiss, above the troll's turn card with Loathsome Limbs, and the troll's row acting in the tracker.](dm-guide/regeneration.webp)
 
 **Dismiss** (the x on the turn card) hides a card on this device only, for this turn, so tidying your phone never answers the player's card. **Skip** answers for everyone. Nothing on these cards happens by itself: the next **Next** puts away whatever is left, and **Previous** brings the cards back as they were.
 
@@ -996,14 +1002,14 @@ The holder's bar lists what it carries and drags, such as "Carrying Bree, Torch"
 The app follows the 2024 rules for mounted combat, and takes care of the bookkeeping that makes it awkward at a table.
 
 - **Getting on or off** a mount on the rider's turn costs half the rider's Speed, and players can mount only on their own turn. A rider who slides off by dragging pays the same as one who presses Get off.
-- **A controlled mount takes its rider's Initiative.** When a creature mounts a controlled mount, the mount's Initiative changes to match the rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill counts the mount's path, with the rider's own movement under it ("Mara: 5 ft, used 15 ft"), and the mount gets its Reaction back when its rider's turn starts.
+- **A controlled mount takes its rider's Initiative.** When a creature mounts a controlled mount, the mount's Initiative changes to match the rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill counts the mount's path, with the rider's own movement under it ("Mara: 5 ft, used 15 ft"), and the mount gets its Reaction back when its rider's turn starts. The rows move only for a ride your players can see: on the players' scene, with the rider and the mount both in their view, and the rider's row in their order. Anywhere else, such as on a scene you are still preparing, the order stays as it stands, so the tracker never gives the ride away.
 - **The mount's own row** stays in the tracker, dimmed, so effects that count its turns still tick there, but it has no movement of its own that round. If the mount had already taken its turn this round, the tracker passes over its row until the next round. When the mount's own row is the one acting as a rider mounts it, its row stays put, and its **⋯** offers **Move after Mara** for once its turn is over.
 - **The tracker** tags the rider's row "Riding Warhorse 2" and the mount's row "Controlled by Mara", with the three actions a controlled mount may take: Dash, Disengage or Dodge.
 - **An independent mount** keeps its own place in the order, and carries its rider along on its own turn.
 
-![Mara's turn, just after she mounted Warhorse 2: her row reads "Riding Warhorse 2", the horse's row has moved up to just after hers at her Initiative of 18 and reads "Controlled by Mara", and the pill on the horse's path reads "Moved 20 ft, 40 ft left" with "Mara: 5 ft, used 15 ft" under it.](dm-guide/mounted-turn.webp)
+![Mara's turn, after she mounted Warhorse 2 and rode it 30 ft east onto the rise: her row reads "Riding Warhorse 2", the horse's row sits just after hers at 18, "Controlled by Mara", and its pill reads "Moved 30 ft, 30 ft left" with "Mara: 5 ft, used 15 ft" under it.](dm-guide/mounted-turn.webp)
 
-Here is how that plays out in the picture. On her turn, Mara stands beside a warhorse, presses **Attach**, and picks **Ride Warhorse 2** with **Controlled**. Getting on costs half her 30 ft Speed, and the horse's row moves up to just after hers. Now a drag of Mara moves the horse, at the horse's own 60 ft Speed, and the pill on its path counts the horse's movement, with "Mara: 5 ft, used 15 ft" under it for her step into the saddle. When you press **Next** at the end of Mara's turn, the horse's own row comes up dimmed, since its turn this round went to carrying her, so press **Next** again to move on.
+Here is how that plays out in the picture. On her turn, Mara stands beside a warhorse, presses **Attach**, and picks **Ride Warhorse 2** with **Controlled**. Getting on costs half her 30 ft Speed, and the horse's row moves up to just after hers. Now a drag of Mara moves the horse, at the horse's own 60 ft Speed, here 30 ft up onto the rise, and the pill on its path counts the horse's movement, with "Mara: 5 ft, used 15 ft" under it for her step into the saddle. When you press **Next** at the end of Mara's turn, the horse's own row comes up dimmed, since its turn this round went to carrying her, so press **Next** again to move on.
 
 If a rider, or the mount under it, is knocked Prone or Unconscious, you get a reminder that the rider may fall off, with the DC 10 Dexterity save and **Ask for the save** for a player's rider. The app never decides this for you, and nothing falls off by itself.
 
@@ -1158,7 +1164,7 @@ When the character changes in D&D Beyond later, such as at a level-up, use [Re-s
 
 With a **Druid level** picked, the app counts the forms against what that level knows and marks any form above its CR limit or with a Fly Speed too soon, but it never stops one: the rules let you allow other Beasts, so the call is yours. It doesn't track the one form a druid may swap after a Long Rest either. Each device remembers the **Druid level** its player last picked for the character, **Any** included. Until a level is picked on a device, a druid with known forms starts at the character's level, so a player who uses Polymorph picks **Any** once, and the device keeps it. Wild Shape's Temporary HP follow the picked level, which matters for a druid who has taken levels in another class.
 
-![Take a shape for Wren, a level 5 druid: her six known forms first, with "6 of 6 at Druid level 5" and Change, then Beasts only and Druid level 5, which allows up to CR 1/2 and no Fly Speed.](dm-guide/known-forms.webp)
+![Take a shape for Wren, a level 5 druid, opened from the "6 shapes" button on her Stat block row: her six known forms first, with "6 of 6 at Druid level 5" and Change, then Beasts only and Druid level 5, which allows up to CR 1/2 and no Fly Speed.](dm-guide/known-forms.webp)
 
 ### Class resources and rests
 
@@ -1167,6 +1173,8 @@ Rage, Channel Divinity, Lay on Hands, Bardic Inspiration: the features a charact
 To add them, press **Add a class resource** under **Uses**. **From a class** lists a class's resources at the class level you pick, with their counts filled in from the SRD 5.2.1, such as "Rage: 3 uses. One back on a Short Rest, all on a Long Rest." for a level 5 barbarian. A subclass's resources start unticked, and where a count depends on a modifier the stat block doesn't give, the sheet asks for it. **Your own** adds anything else, such as Superiority Dice or a feat's uses. Give it a name, a count and the rest that brings it back, or tick **Spend an amount** for a pool of points.
 
 Each resource then reads like "Rage 3 of 3", with **Use**, **Restore** (which gives one back) and **Edit** (a pencil), to change or remove it. A pool such as Lay on Hands has **Use…** and **Restore…**, which ask how many points. When the character's level goes up, the list asks once for each class whether to update its counts ("Your level went up. Update Barbarian resources?"). Class resources also show in the **Uses** of the character's action bar and tracker row, and on its turn card, so a player can spend Rage without leaving the fight (see [Uses and legendary actions](#uses-and-legendary-actions)). Only you and the character's players see them.
+
+![Thorn's page, a level 5 fighter, after one Second Wind: Uses lists Second Wind 2 of 3 and Action Surge 1 of 1, each with Use, Restore and its pencil, then Add a class resource, and Rest's Short Rest and Long Rest under them.](dm-guide/class-resources.webp)
 
 A character from D&D Beyond doesn't need its resources typed in at all. The D&D Beyond import and [Re-sync from D&D Beyond](#re-sync-from-dd-beyond) bring in the limited uses of its classes, species and feats, each with its count, the rest that brings it back, and the uses already spent there. Magic items' charges and spells stay out.
 
@@ -1184,7 +1192,9 @@ The app remembers what the last sync brought in, so it can tell a change made in
 
 ![Check what changes for Wren after a level-up in D&D Beyond: Wisdom 18, a stronger Shillelagh and Moonbeam come in, Level 6 and Max HP 45 are ticked under Also set while the name is not, and her Charisma spellcasting and AC 15, both changed here, are kept, each with its Overwrite box.](dm-guide/resync.webp)
 
-Class resources come in the same way, each on a line of its own, such as "Updates Rage: 4 uses, now 3" after a level-up. One changed here is kept, with **Overwrite**, like any other change. Spending them, though, is play rather than the sheet. If a player spent a use here that D&D Beyond still shows as unspent, the review lists it unticked under **Also set**, such as "Rage 3 of 3 left, now 1 of 3", so a re-sync never hands back a use spent in a fight. Tick it to take D&D Beyond's count.
+Class resources come in the same way, each on a line of its own, such as "Updates Rage: 4 uses, now 3" after a level-up. One changed here is kept, with **Overwrite**, like any other change. Spending them, though, is play rather than the sheet. If a player spent a use here that D&D Beyond still shows as unspent, the review lists it unticked under **Also set**, such as "Rage 4 of 4 left, now 3 of 4", so a re-sync never hands back a use spent in a fight. Tick it to take D&D Beyond's count.
+
+![Check what changes for Kael, a barbarian who spent a Rage here and then reached level 6 in D&D Beyond: "Updates Rage: 4 uses, now 3" comes in, and under Also set, Level 6 and Max HP 78 are ticked while "Rage 4 of 4 left, now 3 of 4" is not, since unticked keeps what was spent here.](dm-guide/ddb-resources.webp)
 
 Press **Apply** to make the changes. The app tells you how many came in and how many of your changes stayed, and **Undo the re-sync** takes it all back, the exact HP included, until you close the dialog.
 
@@ -1367,7 +1377,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 - To take a Legendary Action, tap the dragon and press **Uses** in its action bar, or open its row's **⋯**, and tap the action by name, such as **Fiery Rays**. The count goes down, and Fiery Rays, which the dragon can't take again until its next turn, stays off until then. They all come back at the start of its turn. If you tap the wrong one, **Restore** gives it back.
 - When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)** the first time, since the label counts the uses it still has, and a save-ends or Concentration card offers the same. For a save you roll yourself from its roll options, press **Use** beside **Legendary Resistance** in its **Uses**.
 
-![The dragon's turn: Fire Breath's recharge card and the dragon's turn card in the alerts, and its tracker row with its Lair tag, LA 4/4, LR 3/4 and a Fire Breath used chip.](dm-guide/boss.webp)
+![The dragon on its turn, after its Fire Breath: its action bar with Uses after a lightning bolt, and the Dice panel with the Multiattack note, Rend's Attack, Damage and Critical, and Fire Breath marked Used, with Group save, Damage and Recharge.](dm-guide/boss.webp)
 
 ## Spirit Guardians and a summoned companion
 
