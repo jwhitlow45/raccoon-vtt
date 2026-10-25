@@ -807,7 +807,8 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       await waitFor("the bar to rest", async () => ((await thorn.getAttribute("data-bar-state")) === "rest" ? true : null));
       assert.deepEqual(await steady(dm), strip, "Collapse left another box than the strip");
       assert.deepEqual(await readCamera(dm), before, "Collapse moved the map");
-      assert.equal(await dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") ?? null), "Expand", "focus after Collapse");
+      // Its name is its aria-label or its words, which it keeps hidden from sight when the chevron stands alone (D-261024-46).
+      assert.equal(await dm.evaluate(() => { const a = (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement; return a ? (a.getAttribute("aria-label") ?? a.textContent?.trim() ?? null) : null; }), "Expand", "focus after Collapse");
 
       // Close ends it: the next bar rests.
       await thorn.getByRole("button", { name: "Expand", exact: true }).click();
@@ -2527,25 +2528,39 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       }
     });
 
-    test("ic2-bar-1. Expand and Collapse show their words beside the chevron where the strip has room, at 390 x 844 at 85%, its name whole, its status line keeping AC and HP and focus kept on Expand, and the chevron alone at 390 x 844 at 130% to 100% and 320 x 568, their words their name (docs/design-v1-icons-2.md 8)", async () => {
-      /** The header's Expand or Collapse: its words, whether its chevron draws, and its width in layout px. */
-      const sizeControl = (bar: Locator) =>
-        bar
-          .getByRole("button", { name: /^(Expand|Collapse)$/ })
-          .first()
-          .evaluate((el) => {
-            const button = el as unknown as PageEl & { currentCSSZoom?: number };
-            return { words: (button.textContent ?? "").trim(), chevron: button.querySelector("svg") !== null, width: Math.round(button.getBoundingClientRect().width / (button.currentCSSZoom ?? 1)) };
-          });
-      /** Whether the strip's name is cut, and the status line under it. */
-      const titleAndLine = (bar: Locator) =>
-        bar.evaluate((el) => {
-          const frame = el as unknown as PageEl;
-          const title = frame.querySelector("strong");
-          const cut = title !== null && [title, ...title.querySelectorAll("span")].some((s) => s.scrollWidth > s.clientWidth + 0.5);
-          return { cut, line: frame.querySelector("[data-rest-status]")?.getAttribute("data-rest-line") ?? "" };
+    /**
+     * The header's Expand or Collapse: the words it shows, whether its
+     * chevron draws, and its width in layout px. Words hidden from sight
+     * but kept as its name (D-261024-46) are no words shown.
+     */
+    const sizeControl = (bar: Locator) =>
+      bar
+        .getByRole("button", { name: /^(Expand|Collapse)$/ })
+        .first()
+        .evaluate((el) => {
+          type Node = { nodeType: number; textContent: string | null; getBoundingClientRect?(): { width: number } };
+          const button = el as unknown as PageEl & { currentCSSZoom?: number; childNodes: ArrayLike<Node> };
+          const zoom = button.currentCSSZoom ?? 1;
+          // A text node shows its words, and an element its own where it is wider than the 1 px a visually hidden one keeps.
+          const words = Array.from(button.childNodes)
+            .map((n) => (n.nodeType === 3 || (n.getBoundingClientRect?.().width ?? 0) > 2 * zoom ? (n.textContent ?? "") : ""))
+            .join("")
+            .trim();
+          return { words, chevron: button.querySelector("svg") !== null, width: Math.round(button.getBoundingClientRect().width / zoom) };
         });
-      const state = (bar: Locator, want: string) => until(`the bar ${want}`, () => bar.getAttribute("data-bar-state"), (s) => s === want);
+    /** Whether the strip's name is cut, and the status line under it. */
+    const titleAndLine = (bar: Locator) =>
+      bar.evaluate((el) => {
+        const frame = el as unknown as PageEl;
+        const title = frame.querySelector("strong");
+        const cut = title !== null && [title, ...title.querySelectorAll("span")].some((s) => s.scrollWidth > s.clientWidth + 0.5);
+        return { cut, line: frame.querySelector("[data-rest-status]")?.getAttribute("data-rest-line") ?? "" };
+      });
+    const barState = (bar: Locator, want: string) => until(`the bar ${want}`, () => bar.getAttribute("data-bar-state"), (s) => s === want);
+    /** Whether focus stands on the strip's Expand. */
+    const focusOnExpand = (bar: Locator) => expandButton(bar).evaluate((el) => el.ownerDocument.activeElement === el);
+
+    test("ic2-bar-1. Expand and Collapse show their words beside the chevron where the strip has room, at 390 x 844 at 85%, its name whole, its status line keeping AC and HP and focus kept on Expand, and the chevron alone at 390 x 844 at 130% to 100% and 320 x 568, their words their name (docs/design-v1-icons-2.md 8)", async () => {
       // The words need a strip of 431 px, which keeps the title as wide as at 390 x 844 with the chevron alone: 443 at 390 x 844 at 85%, and 374 at 100%.
       const views = [
         { view: { width: 320, height: 568, scale: 1.3 }, words: false },
@@ -2555,8 +2570,6 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
         { view: { width: 390, height: 844, scale: 0.85 }, words: true },
         { view: { width: 320, height: 568, scale: 1 }, words: false },
       ];
-      /** Whether focus stands on the strip's Expand. */
-      const focusOnExpand = (bar: Locator) => expandButton(bar).evaluate((el) => el.ownerDocument.activeElement === el);
       // A longer name and a longer status line than Thorn's, by Goblin 1 named as the bar design's dragon.
       const dragon = { ...run.goblin1, name: "Adult Red Dragon" };
       await ops.send({ t: "token.update", tokenId: dragon.id, patch: { name: dragon.name } });
@@ -2568,7 +2581,7 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
           for (const t of [run.thorn, dragon]) {
             const at = `${label}, ${t.name}`;
             const bar = await openBar(dm, t);
-            await state(bar, "rest");
+            await barState(bar, "rest");
             const expand = await sizeControl(bar);
             if (words) {
               assert.deepEqual({ words: expand.words, chevron: expand.chevron }, { words: "Expand", chevron: true }, `${at}: Expand`);
@@ -2579,20 +2592,20 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
             assert.deepEqual(await alignmentOf(dm, bar, `the strip at ${at}`), []);
             await shots.take(dm, `ic2-bar-1-${view.width}-${Math.round(view.scale * 100)}-${t.name.replaceAll(" ", "-").toLowerCase()}`);
             await expandButton(bar).tap();
-            await state(bar, "expanded");
+            await barState(bar, "expanded");
             const collapse = await sizeControl(bar);
             if (words) assert.deepEqual({ words: collapse.words, chevron: collapse.chevron }, { words: "Collapse", chevron: true }, `${at}: Collapse`);
             else assert.deepEqual(collapse, { words: "", chevron: true, width: 44 }, `${at}: Collapse`);
             assert.deepEqual(await alignmentOf(dm, bar.locator("[data-sticky-header]"), `the expanded bar's header at ${at}`), []);
             await collapseButton(bar).click();
-            await state(bar, "rest");
+            await barState(bar, "rest");
             await until(`${at}: focus on Expand after Collapse`, () => focusOnExpand(bar), (on) => on);
             if (words) {
               // Multi-select from the expanded bar rests it and hands focus to Expand, which its words leave with no aria-label (review BB-OPUS-11).
               await expandButton(bar).click();
-              await state(bar, "expanded");
+              await barState(bar, "expanded");
               await bar.getByRole("button", { name: "Multi-select", exact: true }).click();
-              await state(bar, "rest");
+              await barState(bar, "rest");
               await until(`${at}: focus on Expand after Multi-select`, () => focusOnExpand(bar), (on) => on);
               await press(bar, "Multi-select");
               await waitFor("Multi-select off", async () => ((await dm.getByRole("toolbar", { name: "Select options" }).count()) === 0 ? true : null), 3_000);
@@ -2603,6 +2616,41 @@ describe("raccoon-vtt: the token bar rests on an upright phone (docs/design-v1-b
       } finally {
         await ops.send({ t: "token.update", tokenId: dragon.id, patch: { name: run.goblin1.name } });
         await waitFor("Goblin 1 named again", () => dmSocket.state?.tokens[dragon.id]?.name === run.goblin1.name);
+        await setUp(dm, PHONES[0]);
+      }
+    });
+
+    test("ic2-bar-3. beside a name its words would cut, Expand keeps the chevron alone and the name stays whole, and focus stays on Expand as its words come and go with the strip's width (D-261024-46)", async () => {
+      const boss = { ...run.goblin1, name: "Goblin Boss of the Sunless Citadel" };
+      await ops.send({ t: "token.update", tokenId: boss.id, patch: { name: boss.name } });
+      await waitFor("Goblin 1 named as a boss", () => dmSocket.state?.tokens[boss.id]?.name === boss.name);
+      try {
+        // At 390 x 844 at 85% the strip has room for the words: Thorn's name fits beside them, the boss's would not.
+        await setUp(dm, { width: 390, height: 844, scale: 0.85 });
+        let bar = await openBar(dm, boss);
+        await barState(bar, "rest");
+        assert.deepEqual(await sizeControl(bar), { words: "", chevron: true, width: 44 }, "Expand beside the boss's name");
+        assert.equal((await titleAndLine(bar)).cut, false, "the boss's name is cut");
+        assert.equal(await expandButton(bar).count(), 1, "Expand keeps its name");
+        await shots.take(dm, "ic2-bar-3-boss-390-85");
+
+        bar = await openBar(dm, run.thorn);
+        await barState(bar, "rest");
+        assert.equal((await sizeControl(bar)).words, "Expand", "Expand beside Thorn's name");
+        // Focus on Expand as the strip narrows past 431 px and widens again: one button, so focus never drops.
+        await expandButton(bar).focus();
+        await until("focus on Expand", () => focusOnExpand(bar), (on) => on);
+        await dm.setViewportSize({ width: 360, height: 844 });
+        await until("the chevron alone at 360 x 844 at 85%", () => sizeControl(bar), (c) => c.words === "");
+        assert.equal(await focusOnExpand(bar), true, "focus left Expand as its words went");
+        await dm.setViewportSize({ width: 390, height: 844 });
+        await until("the words back at 390 x 844 at 85%", () => sizeControl(bar), (c) => c.words === "Expand");
+        assert.equal(await focusOnExpand(bar), true, "focus left Expand as its words came back");
+        await shots.take(dm, "ic2-bar-3-focus-kept");
+        await closeBars(dm);
+      } finally {
+        await ops.send({ t: "token.update", tokenId: boss.id, patch: { name: run.goblin1.name } });
+        await waitFor("Goblin 1 named again", () => dmSocket.state?.tokens[boss.id]?.name === run.goblin1.name);
         await setUp(dm, PHONES[0]);
       }
     });

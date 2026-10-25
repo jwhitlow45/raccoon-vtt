@@ -955,16 +955,63 @@ function BarHeader(props: { title: string; status?: ReactNode; sentence?: RestSe
     if (came && rest?.scrolls) strip?.toTop();
   }, [error, rest?.scrolls, strip]);
   const summary = resting && strip?.summary ? <HeaderSummaryButton summary={strip.summary} /> : null;
-  // Expand and Collapse change the whole bar, so they say so in words beside the chevron where the strip is wide enough and no summary stands beside them, else the chevron alone names itself (D-261024-37 amended).
-  const restWords = rest !== null && rest.words && summary === null;
+  const sizeName = rest?.resting ? "Expand" : "Collapse";
+  // The name on hover, keyboard focus and a long press, while the chevron stands alone.
+  const sizeTip = useTooltip(sizeName);
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const wordsRef = useRef<HTMLSpanElement>(null);
+  // Whether this token's name fits whole beside Expand's words, read on the strip for each name. Unread, as for a name that changed while expanded, the chevron stands alone.
+  const [nameFit, setNameFit] = useState<{ title: string; fits: boolean } | null>(null);
+  const nameFits = nameFit !== null && nameFit.title === props.title && nameFit.fits;
+  // Expand and Collapse change the whole bar, so they say so in words beside the chevron where the strip is wide enough, the name still fits whole and no summary stands beside them, else the chevron alone names itself (D-261024-37 amended, D-261024-46).
+  const restWords = rest !== null && rest.words && nameFits && summary === null;
+  useLayoutEffect(() => {
+    const name = nameRef.current;
+    const words = wordsRef.current;
+    const button = words?.parentElement;
+    if (!name || !words || !button || !rest?.words) return;
+    // Text widths by ranges, which an ellipsis or a clip leaves whole, all in the screen's px.
+    const textWidth = (el: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getBoundingClientRect().width;
+    };
+    const zoom = button.offsetWidth > 0 ? button.getBoundingClientRect().width / button.offsetWidth : 1;
+    const nameWidth = textWidth(name);
+    const room = name.getBoundingClientRect().width;
+    /*
+     * Shown, the words keep their place while the name is whole. Hidden,
+     * they come back only where the name keeps a pixel to spare beside the
+     * room they would take: their width, the small chevron, the gap, the
+     * button's padding and border, less what the chevron alone draws. The
+     * pixel apart is what keeps a name right at the edge from flipping the
+     * look on every render.
+     */
+    const fits = restWords
+      ? nameWidth <= room + 0.5
+      : nameWidth <= room - (textWidth(words) + (theme.icon.sm + theme.space(2) + 2 * theme.space(3) + 2 * theme.line.border) * zoom - button.getBoundingClientRect().width) - zoom;
+    if (nameFit === null || nameFit.title !== props.title || nameFit.fits !== fits) setNameFit({ title: props.title, fits });
+  });
   const sizeButton = !rest ? null : rest.scrolls ? (
     <IconButton icon="scrollMore" label="Scroll for more" onClick={() => strip?.scrollMore()} />
-  ) : restWords ? (
-    <Button size="sm" variant="quiet" icon={rest.resting ? "chevronUp" : "chevronDown"} data-bar-size="" onClick={rest.resting ? rest.expand : rest.collapse} style={{ flex: "none" }}>
-      {rest.resting ? "Expand" : "Collapse"}
-    </Button>
   ) : (
-    <IconButton icon={rest.resting ? "chevronUp" : "chevronDown"} label={rest.resting ? "Expand" : "Collapse"} data-bar-size="" onClick={rest.resting ? rest.expand : rest.collapse} />
+    // One button in both looks, its words hidden from sight but kept as its name while the chevron stands alone, so focus stays on it as they come and go (D-261024-46).
+    <>
+      <Button
+        size="sm"
+        variant="quiet"
+        data-bar-size=""
+        {...(restWords ? null : sizeTip.anchor())}
+        onClick={rest.resting ? rest.expand : rest.collapse}
+        style={restWords ? { flex: "none", position: "relative" } : { flex: "none", position: "relative", padding: 0, color: theme.color.textMuted }}
+      >
+        <Icon name={rest.resting ? "chevronUp" : "chevronDown"} size={restWords ? "sm" : "md"} />
+        <span ref={wordsRef} style={restWords ? undefined : VISUALLY_HIDDEN}>
+          {sizeName}
+        </span>
+      </Button>
+      {restWords ? null : sizeTip.tip}
+    </>
   );
   // Reset shows only while the window docks, and the size only while the bar spans, so the two never stand together.
   const beforeClose = place?.moved ? (
@@ -983,7 +1030,9 @@ function BarHeader(props: { title: string; status?: ReactNode; sentence?: RestSe
       <span style={{ ...SENTENCE_LINES, fontSize: theme.font.small, fontWeight: theme.weight.regular, color: sentence.error ? theme.color.dangerText : theme.color.text }}>{sentence.text}</span>
     ) : status !== null ? (
       <>
-        <span style={RESTING_LINE}>{props.title}</span>
+        <span ref={nameRef} style={RESTING_LINE}>
+          {props.title}
+        </span>
         <span style={{ ...RESTING_LINE, color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>{status}</span>
       </>
     ) : (
