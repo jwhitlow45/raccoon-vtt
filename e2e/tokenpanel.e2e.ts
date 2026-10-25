@@ -2370,6 +2370,22 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
+  test("fu31-f. each member's dot on its name, in line within 1 px at live play 22's sizes: the goblin's Owners, and on a desk Thorn's page's Played by (LP22-ALIGN-2)", async () => {
+    const off = await atLp22Sizes(async (at) => {
+      const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
+      await openGroup(goblin, "Owners");
+      const lines = await measureIn(groupIn(goblin, "Owners"), `the goblin's Owners at ${at}`);
+      if (!at.startsWith("1440") && !at.startsWith("1280")) return lines;
+      await openSideTab(dm, "Characters");
+      const page = dm.getByRole("tabpanel", { name: "Characters" });
+      await page.locator(`[data-opener="character:${run.thorn.characterId}"]`).click();
+      await openGroup(page, "Played by");
+      await groupIn(page, "Played by").getByText("Pat", { exact: true }).waitFor();
+      return [...lines, ...(await measureIn(groupIn(page, "Played by"), `Thorn's Played by at ${at}`))];
+    });
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("10. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

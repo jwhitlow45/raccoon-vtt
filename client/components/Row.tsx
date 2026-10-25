@@ -200,6 +200,21 @@ export function RowDot(props: { color: string; size?: number }) {
   return <span aria-hidden style={{ display: "block", width: size, height: size, borderRadius: theme.radius.round, background: props.color }} />;
 }
 
+/**
+ * A member's color dot before their name, as a checkbox's label (Owners,
+ * Played by). A block, not an inline box: on a line, an inline flex box
+ * sits by its first item's baseline, which for the dot is its bottom edge,
+ * and that left the name 1.5 px high in its row at 130% (LP22-ALIGN-2).
+ */
+export function DotLabel(props: { color: string; children: ReactNode }) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+      <RowDot color={props.color} size={12} />
+      {props.children}
+    </span>
+  );
+}
+
 /** A row's 32 px leading disk: a picture, or initials on a color. */
 export function RowDisk(props: { color?: string; image?: string; children?: ReactNode }) {
   return (

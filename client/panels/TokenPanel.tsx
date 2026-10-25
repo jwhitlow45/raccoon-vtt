@@ -18,7 +18,7 @@ import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
 import { Group } from "../components/Panel.tsx";
 import { QuickStartLink } from "../features/guide/GuideLink.tsx";
-import { RowDot } from "../components/Row.tsx";
+import { DotLabel } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { usePanelHere, type PanelProps } from "../features/panels.ts";
@@ -717,11 +717,10 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
             checked={owners.includes(m.id)}
             onChange={(on) => update({ ownerIds: on ? [...owners, m.id] : owners.filter((id) => id !== m.id) })}
             label={
-              <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
-                <RowDot color={m.color} size={12} />
+              <DotLabel color={m.color}>
                 {m.name}
                 {m.kind === "dm" ? <span style={{ color: theme.color.textMuted }}>(DM)</span> : null}
-              </span>
+              </DotLabel>
             }
           />
         ))}

@@ -7,7 +7,7 @@ import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { FieldRow, Select } from "../../components/Field.tsx";
 import { Group, Help, Note, Section } from "../../components/Panel.tsx";
-import { RowDot } from "../../components/Row.tsx";
+import { DotLabel } from "../../components/Row.tsx";
 import { theme } from "../../lib/theme.ts";
 import { initials } from "../../lib/tokenView.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
@@ -268,12 +268,7 @@ function CharacterOwners(props: { character: Character; members: RoomState["memb
             key={m.id}
             checked={owners.includes(m.id)}
             onChange={(on) => props.update({ ownerIds: on ? [...owners, m.id] : owners.filter((id) => id !== m.id) })}
-            label={
-              <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
-                <RowDot color={m.color} size={12} />
-                {m.name}
-              </span>
-            }
+            label={<DotLabel color={m.color}>{m.name}</DotLabel>}
           />
         ))}
       </div>
