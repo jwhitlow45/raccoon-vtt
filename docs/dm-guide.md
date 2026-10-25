@@ -823,7 +823,7 @@ If the player withdraws the ask while you have it open, the page says so and car
 
 ## Uses and legendary actions
 
-Many creatures have something to spend in a fight that you would otherwise count on scrap paper: a dragon's Legendary Actions and Legendary Resistances, a breath weapon that recharges on a 5 or 6, a spell a creature can cast twice a day, a troll's Regeneration, or a barbarian's Rage. The app keeps all of these in one list, called **Uses**. For a monster or a companion it reads them from the stat block (2014 stat blocks included), and for a character the list holds its class resources (see [Class resources and rests](#class-resources-and-rests)).
+Many creatures have something to spend in a fight that you would otherwise count on scrap paper: a dragon's Legendary Actions and Legendary Resistances, a breath weapon that recharges on a 5 or 6, an ability a creature can use only twice a day, a troll's Regeneration, or a barbarian's Rage. The app keeps all of these in one list, called **Uses**. For a monster or a companion it reads them from the stat block (2014 stat blocks included), and for a character the list holds its class resources (see [Class resources and rests](#class-resources-and-rests)).
 
 ### Where to find them
 
@@ -843,7 +843,7 @@ Here is the list of an adult red dragon in its lair, which has a little of every
 - **Legendary actions 4 of 4**, with a button for each action by name: **Commanding Presence**, **Fiery Rays** and **Pounce**. A tap spends the action. A button is off, and says why when you tap it, during the dragon's own turn ("After another creature's turn"), after it has taken an action that the stat block says it can't take again until its next turn ("Until the start of its next turn"), and when too few actions are left for one that costs more ("Needs 2"). An action with a cost in an older stat block reads like "Wing Attack (2)".
 - **Fire Breath, Recharge 5–6, Ready**, with **Use**. Once the dragon breathes, the line reads **Used**, with **Roll recharge** and **Mark ready**.
 
-Other creatures bring lines of their own. An ability with uses per day reads "Dominate Mind, 2/Day, 1 left", with **Use**, and a troll's list says "Regeneration: 15 HP at the start of its turn". A character's class resources read like "Rage 3 of 3", with **Use**, and a pool such as Lay on Hands asks how many points to spend.
+Other creatures bring lines of their own. An ability with uses per day reads "Dominate Mind, 2/Day, 1 left", with **Use**, and a troll's list says "Regeneration: 15 HP at the start of its turn". A character's class resources read like "Rage 3 of 3", with **Use**, and a pool such as Lay on Hands asks how many points to spend. The spells a monster casts through its Spellcasting, such as the dragon's Fireball once a day, aren't listed, so count those as you always have.
 
 Once something is spent, **Restore** beside it gives one back, which is handy when you tapped a Legendary Resistance too soon. In the Token panel and the tracker row, the list ends with two rows of pips that only you see, **Legendary Actions used** and **Legendary Resistances used today**, and a tap on a pip sets either count by hand. The pips wrap onto as many lines as they need, so even a count of 10 fits on a phone.
 
