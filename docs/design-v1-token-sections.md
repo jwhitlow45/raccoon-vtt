@@ -1,6 +1,6 @@
 # raccoon-vtt v1: what each token section holds
 
-Status: S1 built (the list and the tracker). S2 not built. Revised for design review rounds 1 and 2 (findings SEC-1 to SEC-15 and SEC-ASTRA-01 to 07, decided as D-261024-39 and D-261024-40). Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing), the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built) and the D&D Beyond class resources stack (docs/design-v1-ddb-resources.md, built and landing). Measured in the browser against short local prototypes that were not kept (section 5).
+Status: S1 built (the list and the tracker). S2 built (the groups). Revised for design review rounds 1 and 2 (findings SEC-1 to SEC-15 and SEC-ASTRA-01 to 07, decided as D-261024-39 and D-261024-40). Code is cited from main at `1ca246d2`, the token bar from its stack (docs/design-v1-bar-compact.md, built and landing), the group icons from the second icon pass (docs/design-v1-icons-2.md, reviewed and not yet built) and the D&D Beyond class resources stack (docs/design-v1-ddb-resources.md, built and landing). Measured in the browser against short local prototypes that were not kept (section 5).
 
 The project owner, 2026-10-24: "It feels a little weird that the token pop up has uses but the combat section doesn't. Up to ideas of what all should be included in the various sections"
 
@@ -282,3 +282,27 @@ S1 built the list and the tracker. The Token panel and the page do not show `Use
   - Not fixed here: at 320 x 568 at 130% the row's own line stacks AC, HP and the LA and LR tags one to a line, and the edge check reads the tags' words, inside their pills, 11.4 px right of the AC and HP. The line is unchanged since before S1 and drawn by parts.tsx and Tag.tsx, which S1 does not own. s1-c-a logs it.
 - **Skipped prompts**: `usesPresence` takes `record`, required, so no caller can leave the current record out by mistake.
 - **Tests**: UsesSection.test.ts is new beside ClassResourcesSection.test.ts, which S2 deletes with the section. The order is checked in usesSurfaces.test.ts on the rendered options and in combat s1-c-a in the browser. The pips' alignment is in combatuses s1-cu-a, not the alignment sweep, which S2 edits: the panel's pips are S2's to measure once it places them.
+
+### S2 as built
+
+S2 placed the list and the switch in the panel and the page, and settled the other groups as section 3 has them.
+
+- **Combat**: `panelSections` (tokens/panelOrder.ts) takes the panel's facts as inputs, `uses` from `useUsesPresence`, `reaction` from `reactionFor`, `attach` from `attachControls`, `locked` and `dismiss`, so the rules are pure and tested there. A character's page has its own `cardCombat`, the same order without rings. One `combatSummary` writes both summaries, and `reactionSpent` reads the row's flag, or a shared companion's own.
+- **Uses** passes `character` only where the viewer holds class resources (`holdsClassResources`). A player lent only a character's token gets no Uses, since their copy holds none of the character's.
+- **Position's attach controls** are one part after Elevation and facing, with no heading of its own, since the group's name and the controls' words say what they are. The group line draws whole, names and all, for any viewer with a control (SECTIONS-R3-16). Each control keeps its own width in a row that wraps, as the panel's other buttons do. The bar's grow to share its play row.
+  - Let go, Put down, Get off and the group line's links hand focus to the next attach control in the panel, else the creature's name, which `CreatureHeader` makes focusable for it. `DetachButton` and `GroupLine` (attach/BarParts.tsx) take that target as a prop, the bar's frame by default as before.
+- **Stats** keeps "Legendary Actions per round" and "Legendary Resistance per day" with their "1 of 3 used" hints, so a DM setting a maximum sees the count beside it. A lent player's Stats is the bar's `SizeField` alone.
+- **Duplicate** is `useDuplicate(token, focus)` (tokens/useDuplicate.ts), shared by the bar and Token settings. The bar's hands focus to the copy's bar, the panel's to the copy's name, since the panel shows the copy once it is selected.
+- **Undo move** in the strip hands focus to the bar's frame, which stays (LP21-BAR-1). barrest s2-bar-1 checks it and the bar's Duplicate, and failed before either hand-off.
+- **Remove** for a companion's player is the bar's `DismissButton`. After the dismiss the panel shows its empty state, as it does for a deleted token.
+- **S1-NOTE-1**: `usesFocusTarget` tries the fold of the panel group that held the list, after `frame`. A Reopen in the panel that brings back no card leaves focus on Combat's fold.
+- **Range rings**: the Custom ft field grows to fill its line, so at 320 x 568 at 130% it no longer wraps alone (section 2).
+- **Measured** (tokenpanel s2-tp-g, combatuses s2-cu-a, characters s2-ch-a), Combat open in screen px at 1280 x 800, 390 x 844 at 130% and 320 x 568 at 130%:
+  - The goblin, the DM: 722, 966 and 1052, as section 5's table has them.
+  - The adult red dragon in its lair, the DM, with Fiery Rays live and its pips: 1152, 1525 and 1656, inside section 5's range for it.
+  - Cyra's page, the DM, with Uses' help line and Add, and Reaction: 685, 941 and 988.
+  - The panel's pips wrap 4 a row at 320 x 568 at 130% and 6 a row at 390 x 844 at 130%, as section 5's table has them. A block is 86, 143 and 200 px for one, two and three rows, 24 px more where its words take two lines, as S1 measured in the row.
+  - Folded, Combat's row is 48 px at 1280 and 62 px at 130%. The dragon's "HP 256/256" is whole at all three. The goblin's "HP 10/10 · Reaction used" is whole in 210 px at 1280, and cut at 130%: 149 of the 152 layout px it needs at 390 and 95 at 320, as section 5 expected. The summary never goes under its 4em floor of 52 px.
+  - Nothing is out of line by more than 1 px on the panel's Combat, Uses with pips at maxima 3 and 10, Reaction, the attach controls, Token settings and a lent player's Stats, or on the page's Combat, at the three sizes.
+- **Not fixed here**: at 390 x 844 at 130% Position's Elevation and Facing labels wrap by `FieldRow`'s own basis (docs/design-v1-polish.md R2), from before S2. The check measures the attach controls alone.
+- **Tests**: the order, presence and summary rules are in panelOrder.test.ts. The e2e steps are prefixed `s2-` in tokenpanel, combatuses, classresources, characters, companions, attach and barrest, each with its alignment check inside it. The alignment sweep's class resources root now reads the Uses section. Stats' maxima are checked in StatsSection.test.ts and tokenpanel. combatuses' `setUp` waits up to 75 s for Connected, since its many reloads meet the server's snapshot budget, which delays rather than refuses (server/rooms/budgets.ts).
