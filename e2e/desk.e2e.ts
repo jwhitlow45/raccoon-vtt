@@ -186,14 +186,16 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
       assert.equal(await dm.getByRole("menu").count(), 0, "and opens nothing");
     };
 
-    // At 1280 x 800 the row holds Token, Initiative and Dice, and Log stands in More (docs/design-v1-dice.md 8.1).
+    // At 1280 x 800 the row holds Token, Initiative, Dice and Log, each its icon alone (docs/design-v1-icons-2.md 3.1).
     await list.getByRole("tab", { name: sideTabName("Dice") }).focus();
     await dm.keyboard.press("ArrowLeft");
     await on("Initiative");
     await dm.keyboard.press("ArrowRight");
     await on("Dice");
     await dm.keyboard.press("ArrowRight");
-    await onMore("Dice");
+    await on("Log");
+    await dm.keyboard.press("ArrowRight");
+    await onMore("Log");
     await dm.keyboard.press("ArrowRight");
     await on("Token");
     await dm.keyboard.press("ArrowLeft");
@@ -251,8 +253,8 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     const list = dm.getByRole("tablist", { name: "Panels" });
     const more = list.locator('[role="tab"][aria-haspopup="menu"]');
     const isFocused = (target: Locator) => target.evaluate((el) => el === el.ownerDocument.activeElement);
-    // The row's last tab before More: Dice, since it took Log's place in the row (docs/design-v1-dice.md 8.1).
-    const last = list.getByRole("tab", { name: sideTabName("Dice") });
+    // The row's last tab before More: Log, the fourth of its icon tabs (docs/design-v1-icons-2.md 3.1).
+    const last = list.getByRole("tab", { name: sideTabName("Log") });
     await last.click();
     await dm.keyboard.press("ArrowRight");
     assert.ok(await isFocused(more), "Right from the row's last tab reaches More");
