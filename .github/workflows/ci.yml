@@ -206,15 +206,25 @@ jobs:
         with:
           name: dist
           path: dist
-      # The fallback font behind Inter: Ubuntu 24.04's Roboto, pinned to its
-      # version in the archive. The last line fails the step unless
+      # The fallback font behind Inter: Ubuntu 24.04's Roboto, the fonts of
+      # fonts-roboto-unhinted 2:0~20170802-3 (fonts-roboto only depends on
+      # it), from the archive's pool by its checksum and into the user's
+      # fonts. apt's index update took most of the step's time before. The
+      # runner's own mirror answers in a tenth of a second, but about one
+      # fetch in ten crawls for 30 s, so it gets 5 s before the main archive,
+      # which takes 1 to 2 s, is asked. The last line fails the step unless
       # fontconfig now answers Roboto.
       - name: Roboto as the system font
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends fonts-roboto=2:0~20170802-3 fonts-roboto-unhinted=2:0~20170802-3
-          mkdir -p ~/.config/fontconfig
+          deb=fonts-roboto-unhinted_0~20170802-3_all.deb
+          pool=ubuntu/pool/universe/f/fonts-roboto
+          curl -fsS --max-time 5 -o "$RUNNER_TEMP/$deb" "http://azure.archive.ubuntu.com/$pool/$deb" || curl -fsS --retry 3 --max-time 60 -o "$RUNNER_TEMP/$deb" "http://archive.ubuntu.com/$pool/$deb"
+          echo "21852f3ef1a13ae4cb9cfabd89a3cd0b3979f189bd14801d3010e8a7da3bff0e  $RUNNER_TEMP/$deb" | sha256sum -c --quiet -
+          dpkg-deb -x "$RUNNER_TEMP/$deb" "$RUNNER_TEMP/roboto"
+          mkdir -p ~/.local/share/fonts ~/.config/fontconfig
+          cp -r "$RUNNER_TEMP/roboto/usr/share/fonts/truetype/roboto" ~/.local/share/fonts/
           cp e2e/fonts.conf ~/.config/fontconfig/fonts.conf
+          fc-cache ~/.local/share/fonts
           test "$(fc-match --format='%{family}' sans-serif)" = Roboto
       # The harness launches Chrome with channel "chrome", which is the
       # runner image's Google Chrome stable. The image sets its version.

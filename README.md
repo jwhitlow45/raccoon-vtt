@@ -137,8 +137,9 @@ every push to `main`, runs everything.
 
 The app draws its text in Inter, which it serves itself from
 `public/fonts/`, so a page lays out the same on the Linux shards as on a
-phone or a Mac. Each shard still installs Roboto and makes it the system
-font with `e2e/fonts.conf`, as the fallback font. It draws only before
+phone or a Mac. Each shard still installs Roboto, Ubuntu's package taken
+from its archive by its checksum, and makes it the system font with
+`e2e/fonts.conf`, as the fallback font. It draws only before
 Inter loads and for the few characters Inter's subset lacks, as on an
 Android phone. A file that still fails on Linux from font metrics alone,
 and cannot be made tolerant without losing what it guards, goes in
