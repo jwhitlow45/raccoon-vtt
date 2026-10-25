@@ -164,7 +164,21 @@ async function failSrdData(route: Route): Promise<void> {
   else await route.fulfill({ response, body });
 }
 
+/**
+ * When each page last loaded the room. The server's snapshot budget allows a
+ * session 20 a minute and an address 40 (server/rooms/budgets.ts), and a
+ * session kept over it for 30 s has every socket closed, the op socket's
+ * too, which left the ops after fu31-i unanswered (FU31 review round 1). So
+ * a page loads at most once every 3.5 s: 17 a minute, and 34 for the DM's
+ * page and Pat's together.
+ */
+const lastLoad = new Map<Page, number>();
+const LOAD_GAP_MS = 3_500;
+
 async function setUp(page: Page, cdp: CDPSession, view: View, folds?: string | null): Promise<void> {
+  const since = Date.now() - (lastLoad.get(page) ?? 0);
+  if (since < LOAD_GAP_MS) await page.waitForTimeout(LOAD_GAP_MS - since);
+  lastLoad.set(page, Date.now());
   const i = view.insets ?? {};
   await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: i.bottom ?? 0, left: i.side ?? 0, right: i.side ?? 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
