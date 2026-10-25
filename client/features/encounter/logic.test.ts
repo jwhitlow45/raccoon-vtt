@@ -558,7 +558,7 @@ describe("the drag handle's slot (SFB-P-13)", () => {
 
 describe("the round header's form (docs/design-v1-combat-flow.md 3.1)", () => {
   // The sheet's header: 56 px in full, 49 compact (4 px of pane padding, the 44 px row and its border), over 58 px rows.
-  const sheet = { fullHeader: 56, compactHeader: 49, row: 58 };
+  const sheet = { fullHeader: 56, compactHeader: 49, row: 58, width: 300, compactNeed: 0 };
 
   test("full and sticky from the full header and two standard rows, compact from the compact header and two, and scrolling with the list below that", () => {
     const forms = [0, 120, 164, 165, 171, 172, 223, 400].map((px) => [px, roundHeaderForm({ ...sheet, scroller: px })]);
@@ -574,8 +574,16 @@ describe("the round header's form (docs/design-v1-combat-flow.md 3.1)", () => {
     ]);
   });
 
+  test("the compact form never cuts the round: where its row needs more than the header's width, the header shows in full and scrolls with the list (FU30-ROUND-COMPACT)", () => {
+    // 320 x 568 at 130%: "Round 1", Previous and Next need 214 px of the row's 212.
+    const narrow = { ...sheet, width: 212, compactNeed: 214.3 };
+    assert.deepEqual([164, 165, 171, 172].map((px) => roundHeaderForm({ ...narrow, scroller: px })), ["static", "static", "static", "full"]);
+    assert.equal(roundHeaderForm({ ...narrow, compactNeed: 212, scroller: 165 }), "compact", "a row just wide enough");
+    assert.equal(roundHeaderForm({ ...narrow, compactNeed: 0, scroller: 165 }), "compact", "before the compact row has shown");
+  });
+
   test("the side panel's taller header and padding ask for more room, and taller standard rows for more again", () => {
-    const side = { fullHeader: 68, compactHeader: 61, row: 58 };
+    const side = { fullHeader: 68, compactHeader: 61, row: 58, width: 300, compactNeed: 0 };
     assert.equal(roundHeaderForm({ ...side, scroller: 176 }), "static");
     assert.equal(roundHeaderForm({ ...side, scroller: 177 }), "compact");
     assert.equal(roundHeaderForm({ ...side, scroller: 184 }), "full");

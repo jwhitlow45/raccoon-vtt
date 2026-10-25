@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import type { Token } from "#shared/model.ts";
 import { MAX_ENTRIES_PER_OP, type EntryInput } from "#shared/protocol.ts";
@@ -34,7 +34,7 @@ import {
 } from "../features/encounter/logic.ts";
 import { panAnchor, requestPan } from "../features/encounter/pan.ts";
 import { EndTurnPill, TimerClock } from "../features/encounter/parts.tsx";
-import { timerChoices } from "../features/encounter/timer.ts";
+import { clockText, timerChoices } from "../features/encounter/timer.ts";
 import { EntryRow, type RowDrag } from "../features/encounter/Row.tsx";
 import { ValueEntry } from "../features/encounter/ValueEntry.tsx";
 import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
@@ -133,7 +133,9 @@ const STANDARD_ROW_GUESS = 56 + 2 * theme.line.border;
  * sheet, "Your turn" and a toast push the body down for a few seconds,
  * which is when End turn or Next is wanted, so the room they take counts
  * as the body's (pages/modalSlot.tsx passingNoticesPx) and the header
- * keeps its form while they show.
+ * keeps its form while they show. The compact row's least width is kept
+ * from when it last showed, as the full height is, and measured again
+ * whenever its words or buttons change, which resize nothing it observes.
  */
 function RoundSection(props: { children: ReactNode }) {
   const sectionRef = useRef<HTMLElement>(null);
@@ -144,6 +146,9 @@ function RoundSection(props: { children: ReactNode }) {
   const formRef = useRef(form);
   formRef.current = form;
   const fullPx = useRef(0);
+  const compactNeed = useRef(0);
+  const measureRef = useRef<() => void>(() => {});
+  const remeasure = useCallback(() => measureRef.current(), []);
 
   useLayoutEffect(() => {
     const header = headerRef.current;
@@ -155,12 +160,16 @@ function RoundSection(props: { children: ReactNode }) {
     }
     const measure = () => {
       if (formRef.current !== "compact" && header.offsetHeight > 0) fullPx.current = header.offsetHeight;
+      const row = header.firstElementChild instanceof HTMLElement ? header.firstElementChild : null;
+      if (formRef.current === "compact" && row) compactNeed.current = compactNeedPx(row);
       const next = roundHeaderForm({
         scroller: scroller.clientHeight + passingNoticesPx(scroller),
         fullHeader: fullPx.current || FULL_HEADER_GUESS,
         // The compact form's bottom padding is 0, so its height follows from the pane's top padding it takes back.
         compactHeader: (parseFloat(getComputedStyle(header).paddingTop) || 0) + COMPACT_HEADER_PX + theme.line.border,
         row: standardRowPx(list),
+        width: row?.offsetWidth ?? 0,
+        compactNeed: compactNeed.current,
       });
       formRef.current = next;
       setForm(next);
@@ -172,8 +181,12 @@ function RoundSection(props: { children: ReactNode }) {
     observer.observe(header);
     // The order's own size changes as rows come, go, open their options or gain companions.
     observer.observe(list);
+    measureRef.current = measure;
     measure();
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      measureRef.current = () => {};
+    };
   }, []);
 
   const sticks = form !== "static";
@@ -197,13 +210,29 @@ function RoundSection(props: { children: ReactNode }) {
           ...(sticks ? { position: "sticky", top: `calc(-1 * ${PAD_TOP})`, zIndex: theme.z.stickyHeader } : null),
         }}
       >
-        <TurnControls compact={form === "compact"} />
+        <TurnControls compact={form === "compact"} onCompactChange={remeasure} />
       </div>
       <div ref={listRef} style={{ display: "grid", ...COLUMN, gap: theme.space(2) }}>
         {props.children}
       </div>
     </section>
   );
+}
+
+/**
+ * The least width the compact row needs for "Round N" and its clock whole:
+ * its width now, less the room its heading leaves after them, or with what
+ * the heading cuts of them, in layout px. The rects are in the page's
+ * pixels, which an interface size other than 100% scales and offsetWidth
+ * does not.
+ */
+function compactNeedPx(row: HTMLElement): number {
+  const heading = row.querySelector<HTMLElement>("[data-compact-heading]");
+  const words = heading ? Array.from(heading.querySelectorAll<HTMLElement>("[data-round-words], [role='timer']")) : [];
+  if (!heading || words.length === 0 || row.offsetWidth === 0) return 0;
+  const scale = row.getBoundingClientRect().width / row.offsetWidth;
+  const cut = Math.max(...words.map((w) => w.getBoundingClientRect().right)) - heading.getBoundingClientRect().right;
+  return row.offsetWidth + cut / scale;
 }
 
 /** The shortest standard row in the order with the gap after it, or a row's usual height while there is none. */
@@ -219,7 +248,7 @@ function standardRowPx(list: HTMLElement): number {
 const PAD_TOP = "var(--pane-pad-top, 0px)";
 const PAD_X = "var(--pane-pad-x, 0px)";
 
-function TurnControls(props: { compact: boolean }) {
+function TurnControls(props: { compact: boolean; onCompactChange(): void }) {
   const you = useYou();
   const actions = useRoomActions();
   const store = useRoomStore();
@@ -235,10 +264,18 @@ function TurnControls(props: { compact: boolean }) {
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
 
   const line = whoseTurn({ dm: you.role === "dm", started, activeName: active ? entryName(facts.view, active) : null, yours: status === "yours" }).line;
+  const ends = you.role === "dm" ? (activeEntryId === null ? "start" : "next") : status === "yours" || endTurn.waiting ? `end ${endTurn.waiting}` : "none";
+  // Its figures are all one width, so only its length and whether time is up change the clock's.
+  const clock = timer && active ? `${timer.over} ${clockText(timer).length}` : "none";
+  const { compact, onCompactChange } = props;
+  // What the compact row needs beside its buttons changes with the round, the clock's words and the buttons, none of which resizes the header (FU30-ROUND-COMPACT).
+  useLayoutEffect(() => {
+    if (compact) onCompactChange();
+  }, [compact, onCompactChange, round, clock, ends]);
   const heading = props.compact ? (
-    // One line that ends in an ellipsis on a short panel. The whole whose-turn text stays in it, so a screen reader reads all of it.
-    <div style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-      <span style={{ fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
+    // One line that ends in an ellipsis on a short panel, never inside the round or its clock (roundHeaderForm). The whole whose-turn text stays in it, so a screen reader reads all of it.
+    <div data-compact-heading="" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span data-round-words="" style={{ fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
       {timer && active ? (
         <>
           {" "}

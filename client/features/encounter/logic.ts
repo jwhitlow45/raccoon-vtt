@@ -348,6 +348,10 @@ export type RoundHeaderRoom = {
   compactHeader: number;
   /** A standard row, one with no companions under it and its options closed, with the gap to the next row. */
   row: number;
+  /** The header's row, as wide in every form. */
+  width: number;
+  /** The least width the compact row needs to show "Round N" and its clock whole beside its buttons, measured while it last showed: 0 before it has. */
+  compactNeed: number;
 };
 
 /** Standard rows a sticky header leaves room for under it. With two, any scroll offset shows one whole row. */
@@ -358,7 +362,9 @@ export const ROWS_UNDER_HEADER = 2;
  * while the scroller holds the full header and two standard rows, one
  * compact sticky row while it holds the compact header and two rows, and
  * otherwise full and scrolling with the list, so a short panel still
- * shows its rows.
+ * shows its rows. The compact row never cuts the round: where its one
+ * line has no room for "Round N" and its clock beside the buttons, the
+ * header shows in full and scrolls with the list (FU30-ROUND-COMPACT).
  *
  * Two rows are enough because a stuck header hides at most the part of
  * one row above it: the next row starts within one row interval of the
@@ -369,7 +375,7 @@ export const ROWS_UNDER_HEADER = 2;
 export function roundHeaderForm(room: RoundHeaderRoom): RoundHeaderForm {
   const rows = ROWS_UNDER_HEADER * room.row;
   if (room.scroller >= room.fullHeader + rows) return "full";
-  if (room.scroller >= room.compactHeader + rows) return "compact";
+  if (room.scroller >= room.compactHeader + rows && room.compactNeed <= room.width) return "compact";
   return "static";
 }
 

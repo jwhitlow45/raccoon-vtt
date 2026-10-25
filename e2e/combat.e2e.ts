@@ -723,6 +723,57 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await resized(rest.scroller, "full");
   });
 
+  test("fu31-c. the compact round header never cuts its round: at 320 x 568 at 130%, a sheet with room for the compact row and two rows has none in that row for \"Round 1\" beside Previous and Next, so the header shows in full and scrolls with the order, while at 390 x 844 at 130% it sticks as one compact row (FU30-ROUND-COMPACT)", async () => {
+    for (const view of [
+      { width: 320, height: 568, scale: 1.3, form: "static" },
+      { width: 390, height: 844, scale: 1.3, form: "compact" },
+    ]) {
+      const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+      await setUp(dm, dmCdp, view);
+      await openTracker(dm);
+      let room = await headerRoom(dm);
+      // Room for the compact row and two rows, not for the full header and two: the room alone picks the compact row.
+      const low = room.compactHeader + 2 * room.row;
+      /*
+       * Where the full header sticks, a resize with the sheet open brings the
+       * scroller just over that, as test 3's does, not a reload. Its body is
+       * not as tall as the window, and the page's pixels are 1.3 layout px,
+       * so each step takes what is left of the way and stops within 6 px.
+       */
+      let height = view.height;
+      for (let i = 0; i < 12 && room.form === "full" && !(room.scroller >= low + 1 && room.scroller <= low + 6); i++) {
+        height = Math.round(height - (room.scroller - (low + 3)) * view.scale);
+        await dm.setViewportSize({ width: view.width, height });
+        let last = -1;
+        room = await headerRoom(dm);
+        while (room.scroller !== last) {
+          last = room.scroller;
+          await dm.waitForTimeout(50);
+          room = await headerRoom(dm);
+        }
+      }
+      assert.ok(room.scroller >= low && room.form !== "full", `${at}: no height gives a scroller over ${low} px with no room for the full header: the last was ${room.scroller} px at ${height}, ${room.form}`);
+      const round = await dm.locator("[data-round-header]").evaluate((header) => {
+        type R = { left: number; right: number };
+        type El = { textContent: string | null; parentElement: El | null; getBoundingClientRect(): R };
+        const root = header as unknown as El & { querySelectorAll(s: string): ArrayLike<El>; ownerDocument: { defaultView: { getComputedStyle(e: El): { overflowX: string } } } };
+        const span = Array.from(root.querySelectorAll("span")).find((el) => /^Round \d+$/.test(el.textContent ?? ""));
+        if (!span) return { words: null, cut: 0 };
+        const words = span.getBoundingClientRect();
+        let cut = 0;
+        for (let box = span.parentElement; box && box !== root; box = box.parentElement) {
+          if (root.ownerDocument.defaultView.getComputedStyle(box).overflowX !== "visible") cut = Math.max(cut, words.right - box.getBoundingClientRect().right);
+        }
+        return { words: span.textContent, cut };
+      });
+      await shots.take(dm, `fu31-round-${view.width}-${Math.round(view.scale * 100)}-${room.scroller}`);
+      assert.ok(round.words, `${at}: no "Round N" in the header`);
+      assert.ok(round.cut <= 0.5, `${at}: "${round.words}" is cut by ${round.cut.toFixed(1)} px in a ${room.scroller} px sheet's ${room.form} header`);
+      assert.equal(room.form, view.form, `${at}: a ${room.scroller} px sheet's header`);
+      assert.equal((await measure(dm)).sticky, view.form !== "static", `${at}: the header's stickiness`);
+    }
+  });
+
   test("4. scrolling to Auto initiative takes the header away, and focus moving through the rows never lands under it", async () => {
     await setUp(dm, dmCdp, { width: 390, height: 844, scale: 1 });
     const section = await openTracker(dm);
