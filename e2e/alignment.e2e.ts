@@ -2885,7 +2885,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     assert.deepEqual(lines, [], "the round header out of line");
   });
 
-  test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, and Speed, Passive Perception and the sheet link together, for an adult red dragon, a mage, a panther and Thorn as Pat sees him, expanded on phones and in More stats where the bar is short, and beside a sideways phone's sheet with the elevation badge, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42, FU30-OPUS-3)`, async () => {
+  test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, and Speed, Passive Perception and the sheet link together, for an adult red dragon, a mage, a panther and Thorn as the DM and Pat see him, expanded on phones and in More stats where the bar is short, and beside a sideways phone's sheet with the elevation badge, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42, FU30-OPUS-3)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const made = { dragon: randomUUID(), mage: randomUUID(), panther: randomUUID(), scout: randomUUID() };
     const creatures = [
@@ -2909,7 +2909,8 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
         page.setDefaultTimeout(10_000);
         await openAt(page, at.size, at.scale);
         await waitFor("the DM's snapshot", () => dmSocket.state);
-        for (const c of creatures) await summaryScreen(sweep, page, c, c.saves || at.size.touch);
+        // Thorn with his sheet link too, so a mouse window measures one (FU30-OPUS-8).
+        for (const c of [...creatures, { name: "Thorn", tap: { x: 5, y: 5 }, saves: false }]) await summaryScreen(sweep, page, c, c.saves || at.size.touch);
         lines.push(...sweep.lines);
       }
       // Thorn's sheet link as his player sees it, after his Speed and Passive Perception.
