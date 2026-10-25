@@ -310,13 +310,15 @@ function readKeys(op: ClientOp, state: RoomState): string[] {
 }
 
 /**
- * The predicted op's log lines as the viewer's projection keeps them
- * (shared/project.ts projectLogEntry): a player keeps its shared lines
- * and their own copies, without part readers, the parts they could not read
- * or the DM line a copy names, and the DM keeps every line but the copies. No area reminder is shown
- * ahead: whether one reaches this viewer rests on the turn's record of who
- * read what (shared/reducer/reminded.ts), which only the server holds, so
- * the confirmed log brings it.
+ * The predicted op's log lines as the viewer's projection keeps them, by
+ * the projection's own rules (shared/project.ts projectLogEntry): a player
+ * keeps its shared lines and their own copies, without part readers, the
+ * parts they could not read or the DM line a copy names, and with what
+ * they may read of each event, such as HP and a hidden roll's mark, and
+ * the DM keeps every line but the copies. No area reminder is shown ahead:
+ * whether one reaches this viewer rests on the turn's record of who read
+ * what (shared/reducer/reminded.ts), which only the server holds, so the
+ * confirmed log brings it.
  */
 export function predictedLines(state: RoomState, viewer: Viewer, seq: number, sceneId: string | null): RoomState {
   const prefix = `${seq}:`;
@@ -333,7 +335,6 @@ export function predictedLines(state: RoomState, viewer: Viewer, seq: number, sc
 }
 
 function keptLine(state: RoomState, entry: LogEntry, viewer: Viewer, sceneId: string | null): LogEntry | null {
-  // Whether an area reminder reaches this viewer rests on the server-only record of who read what.
   if (entry.data?.type === "area") return null;
   return projectLogEntry(state, entry, viewer, { sceneId });
 }

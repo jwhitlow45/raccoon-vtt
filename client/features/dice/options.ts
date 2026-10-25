@@ -752,15 +752,16 @@ export function castRowOf<R extends Pick<NamedRoll, "key" | "name">>(named: read
  * the group that holds its row, by the opening's stamp, as does an ask
  * waiting in the view, by its id. The block's own send is marked seen,
  * opening nothing, only when its creature's groups render with the block.
- * So an ask sent from it opens nothing again once it waits, nor does a
- * retry the block follows from the list above the card while its group is
- * folded, as the retry is marked seen when it is taken (markSendSeen), even
- * with the options not drawn. A send those groups never rendered is first
- * seen in the view and opens its group once, as one does after a reload. The block names its spell in the
- * folded line only while it waits for the player or for the server's
- * answer (`castPhase` null or sending): once refused or unknown, the list
- * above the card says so, and once it waits in the view, the view's ask
- * names it, until the DM settles it.
+ * So an ask sent from it opens nothing again once it waits. Every retry
+ * taken from the waiting list above the card is marked seen as it is taken
+ * (markSendSeen), whether or not the block follows it, so its group never
+ * opens for it: the player pressed it in the list and is looking there
+ * (D-261024-44). Any other send those groups never rendered is first seen
+ * in the view and opens its group once, as one does after a reload. The
+ * block names its spell in the folded line only while it waits for the
+ * player or for the server's answer (`castPhase` null or sending): once
+ * refused or unknown, the list above the card says so, and once it waits
+ * in the view, the view's ask names it, until the DM settles it.
  */
 export function groupAsks(input: {
   state: Pick<RoomState, "tokens" | "rolls" | "casts">;

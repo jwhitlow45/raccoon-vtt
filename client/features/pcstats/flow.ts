@@ -180,8 +180,9 @@ function spliceResources(pending: DdbSyncPatch, from: SyncResult): { record: Ddb
 /**
  * The markers a resources-only review's splice cuts at 40 (OP-21), for the
  * review to name: the review's own cap counts the saved record's markers,
- * while Use it cuts the pending record's, so the two can differ. Empty when
- * there is no record to splice into, where the review's own cap is the cut.
+ * while Use it cuts the pending record's, so the two can differ. With no
+ * record to splice into, Use it keeps the review's own record, so its own
+ * cut is the one named.
  */
 export function onlyGoneDropped(result: SyncResult, saved: ExpectSubject | undefined, pending: DdbSyncPatch | null): SyncResult["goneDropped"] {
   const base = pending ?? withoutAt(saved?.ddbSync);
