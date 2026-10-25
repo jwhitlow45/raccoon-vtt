@@ -223,7 +223,7 @@ export function useMapVariant(): "full" | "mobile" {
 /**
  * The shortcut sheet's changed keys (state/keyBindings.ts): only the
  * changes from the defaults, with the stored form's version, as
- * `{"v":1,"keys":{"tool:fog":"x"}}`. What they mean against the table is
+ * `{"v":1,"keys":{"tool:fog":"k"}}`. What they mean against the table is
  * state/shortcuts.ts's to say, since only it knows the defaults.
  */
 const keyChangesSetting = setting<KeyChanges>("rvtt.keys", parseKeyChanges, formatKeyChanges);
