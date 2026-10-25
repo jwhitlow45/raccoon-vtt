@@ -290,16 +290,24 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
   // Not keyed on the form, which a change of form it makes would then change again.
   useLayoutEffect(() => onContentChange(), [onContentChange, round, clock, ends]);
   const heading = props.compact ? (
-    // One line that ends in an ellipsis on a short panel, never inside the round or its clock (roundHeaderForm). The whole whose-turn text stays in it, so a screen reader reads all of it.
-    <div data-compact-heading="" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-      <span data-round-words="" style={{ fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
+    /*
+     * One line. Only the whose-turn words after the round and its clock end
+     * in an ellipsis: one over the whole line landed on the end of the round
+     * or its clock wherever less than its own width was left after them
+     * (FU31 review ASTRA-01). Where the round and its clock do not fit, the
+     * header leaves this form (roundHeaderForm). The whole whose-turn text
+     * stays in it, so a screen reader reads all of it, and the spaces
+     * between the parts keep its words apart there.
+     */
+    <div data-compact-heading="" style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: theme.space(1), overflow: "hidden", whiteSpace: "nowrap" }}>
+      <span data-round-words="" style={{ flex: "none", fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
       {timer && active ? (
         <>
           {" "}
           <TimerClock state={timer} size={theme.font.body14} icon />
         </>
       ) : null}{" "}
-      <span style={{ color: theme.color.textMuted }}>{line}</span>
+      <span style={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", color: theme.color.textMuted }}>{line}</span>
     </div>
   ) : (
     // Never narrower than "Round N" or its clock, the wider of the two (its least width, as a flex item's is by default), so

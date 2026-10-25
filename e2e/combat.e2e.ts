@@ -169,14 +169,17 @@ function headerRoom(page: Page): Promise<HeaderRoom> {
  * window, and the page's pixels are `scale` layout px, so each step takes
  * what is left of the way and stops within 6 px. It stops too once the
  * header leaves its full form, as it does where the row has no room for
- * "Round N" beside its buttons.
+ * "Round N" beside its buttons. `top` brings the scroller just under the
+ * full header and two rows instead, the most room the compact row takes,
+ * so rows that grow as the window narrows still leave it that.
  */
-async function toCompactBand(page: Page, view: { width: number; height: number; scale: number }): Promise<{ room: HeaderRoom; height: number; low: number }> {
+async function toCompactBand(page: Page, view: { width: number; height: number; scale: number }, top = false): Promise<{ room: HeaderRoom; height: number; low: number }> {
   let room = await headerRoom(page);
   const low = room.compactHeader + 2 * room.row;
+  const goal = top ? room.header + 2 * room.row - 6 : low;
   let height = view.height;
-  for (let i = 0; i < 12 && room.form === "full" && !(room.scroller >= low + 1 && room.scroller <= low + 6); i++) {
-    height = Math.round(height - (room.scroller - (low + 3)) * view.scale);
+  for (let i = 0; i < 12 && room.form === "full" && !(room.scroller >= goal + 1 && room.scroller <= goal + 6); i++) {
+    height = Math.round(height - (room.scroller - (goal + 3)) * view.scale);
     await page.setViewportSize({ width: view.width, height });
     let last = -1;
     room = await headerRoom(page);
@@ -187,6 +190,58 @@ async function toCompactBand(page: Page, view: { width: number; height: number; 
     }
   }
   return { room, height, low };
+}
+
+/** The compact round header's "Round N" and its clock: their box in the page's pixels, their words, and the room the heading leaves after them. */
+function roundWords(page: Page): Promise<{ clip: { x: number; y: number; width: number; height: number }; text: string; spare: number }> {
+  return page.locator("[data-compact-heading]").evaluate((heading) => {
+    type R = { left: number; top: number; right: number; bottom: number };
+    type El = { textContent: string | null; getBoundingClientRect(): R };
+    const h = heading as unknown as El & { querySelectorAll(s: string): ArrayLike<El> };
+    const parts = Array.from(h.querySelectorAll("[data-round-words], [role='timer']"));
+    const rects = parts.map((p) => p.getBoundingClientRect());
+    const left = Math.min(...rects.map((r) => r.left));
+    const top = Math.min(...rects.map((r) => r.top));
+    const right = Math.max(...rects.map((r) => r.right));
+    const bottom = Math.max(...rects.map((r) => r.bottom));
+    return { clip: { x: left, y: top, width: right - left, height: bottom - top }, text: parts.map((p) => (p.textContent ?? "").trim()).join(" "), spare: h.getBoundingClientRect().right - right };
+  });
+}
+
+/**
+ * Hides the compact heading's whose-turn words after the round and its
+ * clock, or shows them again, through the element's own style, as the
+ * page's style policy takes no style sheet from a test. With nothing after
+ * them to cut, no ellipsis lands on the round or its clock.
+ */
+function turnWords(page: Page, shown: boolean): Promise<void> {
+  return page.locator("[data-compact-heading]").evaluate((heading, shown) => {
+    type El = { style: { display: string }; matches(s: string): boolean };
+    const last = (heading as unknown as { lastElementChild: El | null }).lastElementChild;
+    if (!last || last.matches("[data-round-words], [role='timer']")) throw new Error("no whose-turn words after the round");
+    last.style.display = shown ? "" : "none";
+  }, shown);
+}
+
+/**
+ * Why the compact round header does not paint "Round N" and its clock
+ * whole, or null where it does: they must stand inside the heading's box
+ * and draw the same as with nothing after them, since an ellipsis hides
+ * what it lands on whatever their boxes say (FU31 review ASTRA-01).
+ * The clock ticks each second, so a difference is looked at twice more
+ * before it counts.
+ */
+async function roundNotWhole(page: Page): Promise<string | null> {
+  const words = await roundWords(page);
+  if (words.spare < -0.5) return `"${words.text}" runs ${(-words.spare).toFixed(1)} px out of the heading`;
+  for (let i = 0; i < 3; i++) {
+    const drawn = await page.screenshot({ clip: words.clip });
+    await turnWords(page, false);
+    const whole = await page.screenshot({ clip: words.clip });
+    await turnWords(page, true);
+    if (drawn.equals(whole)) return null;
+  }
+  return `"${words.text}" is drawn otherwise than whole, ${words.spare.toFixed(1)} px from the heading's end`;
 }
 
 /**
@@ -812,6 +867,48 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       }
       await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     }
+  });
+
+  test("fu31-o. the compact round header's ellipsis never paints over \"Round 1\" or its clock: at 430 x 932 at 130%, the window narrowed 1 px at a time from 24 px more than the row needs for them to 4 px less, with no clock and with one, the order's rows growing a line under the narrowest (FU31 review ASTRA-01)", async () => {
+    const view = { width: 430, height: 932, scale: 1.3 };
+    const off: string[] = [];
+    try {
+      await setUp(dm, dmCdp, view);
+      await openTracker(dm);
+      const { room, height } = await toCompactBand(dm, view, true);
+      assert.equal(room.form, "compact", `the header in a ${room.scroller} px sheet with no clock`);
+      // Ten minutes a turn, so the clock keeps its four figures while the window narrows.
+      for (const timer of [0, 600]) {
+        const at = timer ? "with a clock" : "with no clock";
+        await ops.send({ t: "room.update", settings: { turnTimerSec: timer } });
+        await dm.setViewportSize({ width: view.width, height });
+        const clock = dm.locator("[data-round-header]").getByRole("timer");
+        await waitFor(`the header ${at}`, async () => ((await clock.count()) > 0) === timer > 0 || null);
+        await waitFor(`the compact row ${at}`, async () => (await headerRoom(dm)).form === "compact" || null);
+        // The window narrower by the room the heading leaves after them leaves none.
+        const edge = view.width - Math.floor((await roundWords(dm)).spare);
+        let close = 0;
+        for (let width = edge + 24; width >= edge - 4; width--) {
+          await dm.setViewportSize({ width, height });
+          // Two frames: the resize's own, in which the header picks its form, and one after.
+          await dm.evaluate(() => {
+            const g = globalThis as unknown as { requestAnimationFrame(fn: () => void): number };
+            return new Promise<void>((done) => g.requestAnimationFrame(() => g.requestAnimationFrame(done)));
+          });
+          if ((await headerRoom(dm)).form !== "compact") continue;
+          // Where less than an ellipsis is left after them, the ellipsis would land on them.
+          if ((await roundWords(dm)).spare < 16) close++;
+          const wrong = await roundNotWhole(dm);
+          if (wrong) off.push(`${width} x ${height} ${at}: ${wrong}`);
+        }
+        assert.ok(close >= 3, `${at}: the row was compact with less than 16 px after them at only ${close} widths`);
+        await shots.take(dm, `fu31-round-edge-${timer ? "clock" : "plain"}`);
+      }
+    } finally {
+      await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    }
+    assert.deepEqual(off, [], "the round or its clock not drawn whole");
   });
 
   test("fu31-k. in a fight, the side panel's Add to the fight leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
