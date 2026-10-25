@@ -19,13 +19,20 @@ import { quickUnit, type QuickUnit, type VitalItem } from "./statSummary.ts";
  * touch screen ("PP 14", "Init +2").
  */
 export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partial<Actor> | undefined; token: Pick<Token, "elevation" | "kind"> }) {
-  const units: ReactNode[] = [];
+  // Each unit drawn with the margin it takes when another follows it.
+  const units: ((between: CSSProperties | undefined) => ReactNode)[] = [];
   let sheetUrl: string | null = null;
   for (let n = 0; n < props.items.length; n++) {
     const item = props.items[n]!;
     if (item.key === "ac") {
       const ac = item.units[0];
-      if (ac?.kind === "ac") units.push(<AcBadge key="ac" ac={ac.ac} />);
+      if (ac?.kind === "ac") {
+        units.push((between) => (
+          <span key="ac" style={{ display: "inline-flex", ...between }}>
+            <AcBadge ac={ac.ac} />
+          </span>
+        ));
+      }
     } else if (item.key === "sheet") {
       const sheet = item.units[0];
       if (sheet?.kind === "sheet") sheetUrl = sheet.url;
@@ -34,41 +41,51 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
       const next = props.items[n + 1];
       const pp = next ? quickUnit(next) : null;
       if (unit?.key === "speed" && unit.modes.length > 1 && pp?.key === "passivePerception") {
-        // The line's own gap, its columnGap below.
-        units.push(<SpeedThenPerception key="speed" speed={unit} pp={pp} lineGap={theme.space(3)} />);
+        units.push((between) => <SpeedThenPerception key="speed" speed={unit} pp={pp} style={between} />);
         n++;
-      } else if (unit) units.push(<QuickNumberUnit key={unit.key} unit={unit} />);
+      } else if (unit) units.push((between) => <QuickNumberUnit key={unit.key} unit={unit} style={between} />);
     }
   }
   const init = props.actor?.initBonus;
   if (props.token.kind !== "object" && typeof init === "number") {
     const text = init < 0 ? `−${-init}` : `+${init}`;
-    units.push(
-      <Unit key="init" name={`Initiative ${text}`}>
+    units.push((between) => (
+      <Unit key="init" name={`Initiative ${text}`} style={between}>
         <span style={{ color: theme.color.textMuted }}>Init</span>
         <strong>{text}</strong>
-      </Unit>,
-    );
+      </Unit>
+    ));
   }
   const height = elevationBadge(props.token.elevation);
   if (height) {
-    units.push(
-      <Unit key="elevation" name={`Elevation ${props.token.elevation} ft`}>
+    units.push((between) => (
+      <Unit key="elevation" name={`Elevation ${props.token.elevation} ft`} style={between}>
         <strong>{height} ft</strong>
-      </Unit>,
-    );
+      </Unit>
+    ));
   }
   if (sheetUrl) {
+    const url = sheetUrl;
     // Last, as the one unit that leaves the page: its icon says a new tab, as every outside link's does.
-    units.push(<SheetLink key="sheet" url={sheetUrl} />);
+    units.push(() => <SheetLink key="sheet" url={url} />);
   }
   if (units.length === 0) return null;
+  /*
+   * The line's own gap is the speed's 4 px between its modes, which its last
+   * mode keeps from the rest (SpeedThenPerception), and a unit another
+   * follows adds 8 more, so the units stand 12 px apart. A trailing margin
+   * can only send a unit to the next line a little early. A negative one
+   * let the speed stay on a line it ran 8 px past (FU31 review F10).
+   */
   return (
-    <div data-quick-numbers="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: theme.space(1), fontSize: theme.font.body14, fontVariantNumeric: "tabular-nums" }}>
-      {units}
+    <div data-quick-numbers="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(1), rowGap: theme.space(1), fontSize: theme.font.body14, fontVariantNumeric: "tabular-nums" }}>
+      {units.map((draw, i) => draw(i < units.length - 1 ? BETWEEN : undefined))}
     </div>
   );
 }
+
+/** What a header unit that another follows adds to the line's 4 px gap. */
+const BETWEEN: CSSProperties = { marginInlineEnd: theme.space(2) };
 
 /**
  * Speed after the footprints or Passive Perception after "PP", as one
@@ -117,17 +134,19 @@ type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
  * The two parts are the line's own items, not one box around them: a box
  * whose contents wrap takes its whole line, and the item after Passive
  * Perception then stood alone under it where it fit beside it, as
- * "Init +0" did under "Burrow 30 ft PP 21" (FU31 review F1). `lineGap` is
- * the gap of the line they stand in. The speed's end margin takes it back
- * to the modes' own gap, and a speed that ends its line loses nothing by
- * it. `style` goes on the part with Passive Perception, which ends this.
+ * "Init +0" did under "Burrow 30 ft PP 21" (FU31 review F1). So the
+ * speed stands from its last mode by the gap of the line they stand in:
+ * the modes' own 4 px in the panel's header, and 6 in a summary line. No
+ * margin on the speed takes it back, since a negative one let the speed
+ * stay on a line it ran past (FU31 review F10). `style` goes on the part
+ * with Passive Perception, which ends this.
  */
-export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; lineGap: number; style?: CSSProperties }) {
+export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; style?: CSSProperties }) {
   const { speed } = props;
   const last = speed.modes.length - 1;
   return (
     <span data-speed-pp="" style={{ display: "contents" }}>
-      <Unit name={speed.name} wraps style={{ marginInlineEnd: theme.space(1) - props.lineGap }}>
+      <Unit name={speed.name} wraps>
         <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
         {speed.modes.slice(0, last).map((mode, i) => (
           <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>

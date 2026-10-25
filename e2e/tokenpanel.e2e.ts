@@ -370,6 +370,7 @@ function afterPpLines(lines: Locator, at: string): Promise<string[]> {
     (els, at) => {
       type R = { left: number; right: number; top: number; bottom: number; width: number };
       type E = { offsetWidth: number; textContent: string | null; parentElement: E | null; nextElementSibling: E | null; firstElementChild: E | null; getBoundingClientRect(): R; querySelector(s: string): E | null };
+      const g = globalThis as unknown as { getComputedStyle(e: E): { marginRight: string } };
       const out: string[] = [];
       for (const line of els as unknown as E[]) {
         const pp = line.querySelector('[role="img"][aria-label^="Passive Perception"]');
@@ -385,7 +386,8 @@ function afterPpLines(lines: Locator, at: string): Promise<string[]> {
         const n = next.getBoundingClientRect();
         const mid = (r: R) => (r.top + r.bottom) / 2;
         const beside = Math.abs(mid(p) - mid(n)) < 2;
-        const fits = p.right + 12 * zoom + n.width <= box.right + 0.5;
+        // With the margin it takes when another unit follows it, which wraps it as its width does.
+        const fits = p.right + (12 + (parseFloat(g.getComputedStyle(next).marginRight) || 0)) * zoom + n.width <= box.right + 0.5;
         if (!beside && fits) out.push(`${at}: "${(next.textContent ?? "").trim()}" stands on a line of its own after PP, where it fits beside PP (${(box.right - p.right).toFixed(1)} px left for ${n.width.toFixed(1)})`);
       }
       return out;
@@ -413,6 +415,29 @@ function unfilledLines(button: Locator, at: string): Promise<string[]> {
     }
     return out;
   }, at);
+}
+
+/**
+ * Units in each line, the panel header's quick numbers or a summary line,
+ * whose box runs past the line's end: AC, the speed and its modes, PP,
+ * Init, the elevation and the sheet link (FU31 review F10).
+ */
+function pastLineEnd(lines: Locator, at: string): Promise<string[]> {
+  return lines.evaluateAll(
+    (els, at) => {
+      type E = { textContent: string | null; getBoundingClientRect(): { right: number; width: number }; querySelectorAll(s: string): ArrayLike<E> };
+      const out = new Set<string>();
+      for (const line of els as unknown as E[]) {
+        const end = line.getBoundingClientRect().right;
+        for (const unit of Array.from(line.querySelectorAll('[role="img"], [data-unit], a'))) {
+          const r = unit.getBoundingClientRect();
+          if (r.width > 0 && r.right > end + 0.5) out.add(`${at}: "${(unit.textContent ?? "").trim()}" runs ${(r.right - end).toFixed(1)} px past its line's end`);
+        }
+      }
+      return [...out];
+    },
+    at,
+  );
 }
 
 /** A panel's group by the name on its fold (components/Panel.tsx Group). */
@@ -2642,6 +2667,52 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
       await setUp(dm, dmCdp, DESK, null);
     }
     assert.deepEqual(off, [], "an item alone after Passive Perception");
+  });
+
+  test("fu31-q. no quick number runs past its line's end: the dragon's and Swift's panel headers and window summaries, the window narrowed 1 px at a time from 430 to 320 px wide, at 100% and 130% (FU31 review F10)", async () => {
+    const off: string[] = [];
+    const settled = () =>
+      dm.evaluate(() => {
+        const g = globalThis as unknown as { requestAnimationFrame(fn: () => void): number };
+        return new Promise<void>((done) => g.requestAnimationFrame(() => g.requestAnimationFrame(done)));
+      });
+    // From 430 px down, so the band where a speed just stays beside AC, or its last mode beside it, is crossed for every creature at one of the sizes.
+    const sweep = async (lines: Locator, label: string) => {
+      let shown = 0;
+      for (let width = 430; width >= 320; width--) {
+        await dm.setViewportSize({ width, height: 844 });
+        await settled();
+        if ((await lines.count()) === 0) continue;
+        shown++;
+        off.push(...(await pastLineEnd(lines, `${label} at ${width} px`)));
+      }
+      assert.ok(shown > 100, `${label}: shown at only ${shown} of 111 widths`);
+    };
+    try {
+      for (const scale of [1, 1.3]) {
+        for (const [at, name] of [
+          [run.dragon.at, "Adult White Dragon"],
+          [run.swift.at, "Swift"],
+        ] as const) {
+          const where = `${name} at ${Math.round(scale * 100)}%`;
+          await setUp(dm, dmCdp, { width: 430, height: 844, scale }, null);
+          const panel = await panelOf(dm, at, name);
+          await sweep(panel.locator("[data-quick-numbers]"), `${where}, the panel header`);
+          await shots.take(dm, `fu31-header-sweep-${name.split(" ")[0]!.toLowerCase()}-${Math.round(scale * 100)}`);
+          await setUp(dm, dmCdp, { width: 430, height: 844, scale }, null);
+          await tapToken(dm, at);
+          const b = bar(dm, name);
+          await b.waitFor();
+          await expandBar(b);
+          const more = b.getByRole("button", { name: "More stats", exact: true });
+          if ((await more.count()) > 0 && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
+          await sweep(b.locator("[data-vitals]"), `${where}, the window's summary`);
+        }
+      }
+    } finally {
+      await setUp(dm, dmCdp, DESK, null);
+    }
+    assert.deepEqual(off, [], "a unit past its line's end");
   });
 
   test("10. no page errors along the way", () => {
