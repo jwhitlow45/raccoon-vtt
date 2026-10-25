@@ -327,6 +327,8 @@ After movement's and attach's builds, on their tip:
 13. `test(e2e): traps`.
 14. `docs: traps in docs/design.md, FEATURES.md and the DM guide`: design.md sections 6 (model), 7.3 (projection), 7.7 (the refused player undo), 8.1 (ops), 9.3 (the teleport sweep), a new 9.12 (traps), 10.5 (limits, reserves and the pit count), 16.2 (versioning) and 16.4 (export). The shortcut sheet holds keys and key-plus-pointer combinations only (the project owner's rule of 2026-10-16), and the Trap tool has neither, so the sheet gains no row: its taps and drags are told in FEATURES.md's Traps section and the guide's prose.
 
+Changed by D-261025-2: the Trap tool has the key X.
+
 ## 13. The shared move description
 
 The three designers agreed this, each signing their part in the shared contract. Movement and attach state their sides in their own notes.
