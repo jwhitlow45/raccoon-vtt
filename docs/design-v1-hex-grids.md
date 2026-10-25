@@ -1,20 +1,20 @@
 # raccoon-vtt v1: hex grids beside squares
 
-Status: draft 2, revised for design review round 1 (HX-ASTRA-01 to 07 and HO-1 to HO-11, all adopted, decided as D-261025-11) and the owner's room default (D-261025-10). Code is cited from main at `cf98b4be`. Nothing is built.
+Status: draft 3, revised for design review rounds 1 and 2 (HX-ASTRA-01 to 11 and HO-1 to HO-18, all adopted, decided as D-261025-11 and D-261025-13) and the owner's room default (D-261025-10). Code is cited from main at `cf98b4be`. Nothing is built.
 
 The project owner, 2026-10-25, after hearing that per-player sight was never added: "Once done with your current scope of work I'd like you to add support for per player vision (toggleable between whole party and per player by the dm) and also hex grids (keep square as the default though)." Right after: "Any designs these can be done ahead of time should be". Then: "DMs should also be able to set their preferred default for scenes so that when they create a new scene it's square or hex rather than having to change each time".
 
-Decided as D-261025-7 and its amendment: hex grids are a scene's grid shape, square by default for new and existing scenes. The design starts now, and its build waits for the current scope and follows the per-player vision run. D-261025-10 adds the room's default for new scenes. D-261025-11 settles the review's questions. Asking the owner is off, so every other open choice below is a guess at the owner's likely answer, listed with the options it rejects (section 5).
+Decided as D-261025-7 and its amendment: hex grids are a scene's grid shape, square by default for new and existing scenes. The design starts now, and its build waits for the current scope and follows the per-player vision run. D-261025-10 adds the room's default for new scenes. D-261025-11 and D-261025-13 settle the reviews' questions. Asking the owner is off, so every other open choice below is a guess at the owner's likely answer, listed with the options it rejects (section 5).
 
 ## 1. The answer in short
 
-- **A scene's grid is Squares, Hex rows or Hex columns.** A room setting, "New scenes", picks the shape every new scene starts with, Squares by default. The new scene form shows it and changes it for that one scene. The scene's Grid settings change it later.
+- **A scene's grid is Squares, Hex rows or Hex columns.** A room setting, "New scenes", picks the shape a new Battle mat or Map image starts with, Squares by default. Builder scenes, starter maps and Universal VTT imports start as squares. The new scene form shows the shape and changes it for that one scene. The scene's Grid settings change it later.
 - **The world stays measured in cells.** One cell is the distance between two neighboring hex centers, the room's feet per cell, so a hex is one cell across its flat sides. Positions, the fog's bitmap, sight, lights, radii, area shapes and free walls keep their units and their code. Only what reads the grid's cells changes.
 - **Every hex is one step.** Hexes have no diagonals, so the room's diagonal rule only combines a distance with height.
 - **Sizes follow the DMG's hex table:** Tiny, Small and Medium 1 hex, Large 3, Huge 7, Gargantuan 12.
 - **Areas keep their true shapes**, graded per hex by the room's rule, at least half by default, as the 2024 DMG says for "squares or hexes". An emanation is the exception: it covers the hexes within its size in steps of its creature's hexes, so it agrees with the ruler.
 - **Walls on hexes are free walls**, drawn as lines from H2. No hex edge keys.
-- **Three phases.** H1 runs a fight on a hex map without walls: place, move, measure, areas, fog and party vision. H2 adds walls, ways around them, difficult ground, riding and carrying, and traps other than pits. H3 adds heights, stairs, pits, Reveal room and Find the grid for hexes. Painted ground, pillars, squeezing, Count the squares and the Universal VTT import stay square, each saying so in plain words.
+- **Three phases.** H1 runs a fight on a hex map without walls: place, move, measure, areas, fog and party vision. H2 adds walls, ways around them, squeezing, difficult ground, riding and carrying, and traps other than pits. H3 adds heights, stairs, pits, Reveal room and Find the grid for hexes. Painted ground, pillars, squeezing, Count the squares and the Universal VTT import stay square, each saying so in plain words.
 - **The server holds each phase's line.** On a hex scene it refuses every op whose rules are not hex yet, and the shape switch, an undo and a redo all refuse to leave square-only data on a hex scene or hex data on a square one.
 
 ## 2. What the 2024 rules say
@@ -23,7 +23,8 @@ Decided as D-261025-7 and its amendment: hex grids are a scene's grid shape, squ
 - **Emanation, 2024 rules glossary:** an emanation extends from the creature or object it comes from in every direction. On hexes that reads as steps from the creature's hexes (HX-D11).
 - **Creature space on hexes.** The 2014 DMG's table "Creature Size on Squares and Hexes" gives Tiny 4 per hex, Small and Medium 1 hex, Large 3 hexes, Huge 7 and Gargantuan 12 or more, and says a miniature of another footprint still uses the creature's real size for every other rule. No 2024 text on hex footprints was found, so this note follows the 2014 table.
 - **Movement.** The 2024 Player's Handbook counts a grid in 5 ft squares with its diagonal rule. Nothing found in the 2024 books covers moving on hexes. This note counts one step per hex, and a hex has no diagonal to rule on.
-- **No rule covers** height on a hex grid, hex walls, hex fog or squeezing on hexes. Those follow the app's square rules where they carry over, as below.
+- **Squeezing.** The 2024 rule lets a creature squeeze into a space sized for a creature one size smaller. From H2 it works on hexes as on squares (D-261025-13): a Large creature into one hex.
+- **No rule covers** height on a hex grid, hex walls or hex fog. Those follow the app's square rules where they carry over, as below.
 
 ## 3. The audit
 
@@ -50,15 +51,15 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 | Arrow keys | `state/shortcuts.ts:297`, `Stage.tsx:819` | four directions, one square | one hex, zigzag | H1 |
 | Routes, walking ruler | `walk.ts`, `walkWorld.ts`, `route.ts`, `measure/walkRuler.ts` | 8 neighbors on a half lattice | 6 neighbors on the anchor lattice | H2 |
 | Movement blocking | `movement.ts:91-155, 892` | square core, 9 half-cell shifts | each hex center's step (HX-D8) | H2 |
-| Squeezing | `movement.ts:209-247, 809-848`, `footprint.ts:63` | footprints shrink on cell lines | none | square |
+| Squeezing | `movement.ts:209-247, 809-848`, `footprint.ts:63` | footprints shrink on cell lines | the footprint one size smaller (HX-D17) | H2 |
 | Area shapes | `aoe.ts` predicates | continuous 3D | unchanged, except emanations | H1 |
-| Emanations | `aoe.ts:211, 436, 615-635`, `model.ts` AreaFootprint | a rounded box from the rect, 5 probes | steps from the footprint's hexes, stored as hexes | H1 |
+| Emanations | `aoe.ts:211, 436, 615-635, 652`, `model.ts` AreaFootprint, `placement.ts:606`, `areaTriggers.ts:369` | a rounded box around the origin, 5 probes | steps from the footprint's hexes, a size around the origin | H1 |
 | Area coverage and shading | `aoe.ts:30, 661-808`, `areas/draw.tsx:26` | 16 by 16 samples per cell | a fixed sample pattern per hex | H1 |
 | Area placement and range | `areas/placement.ts:215-322, 606`, `caster.ts:356`, `AreaOptions.tsx:462`, `AreaPreviewLayer.tsx:112` | intersections or centers, 8 rect points, 45° | hex corners or centers, outline corners and side midpoints, 30° | H1 |
 | Who an area catches | `aoe.ts:870-996` | occupied rect | footprint hexes | H1 |
 | Areas that slow movement | `walkWorld.ts:160` | square cells | hex cells | H2 |
 | Fog bitmap and shapes | `fog.ts:16, 215-307, 361` | world raster | unchanged | H1 |
-| Tokens under fog, in sight | `fog.ts:120-140`, `project.ts:223, 367, 2294`, `vision.ts:71, 322` | a cell's 4 by 4 block, the rect | sub-cells inside the footprint's hexes | H1 |
+| Tokens under fog, in sight | `fog.ts:120-140`, `project.ts:223, 367, 2294`, `vision.ts:71, 322` | a cell's 4 by 4 block, the rect | sub-cells inside the footprint's hexes, clipped by walls from H2 (HX-D10) | H1 |
 | Labels, stamps, pins under fog | `fog.ts:148`, `project.ts:910, 1131` | world cells of the raster | unchanged | H1 |
 | Sight, lights, explored ground | `vision.ts`, `server/rooms/explore.ts` | world units | unchanged, no walls in H1 | H1 |
 | Reprojection | `reducer/tx.ts:748` | a scene's fog, walls rule and vision | its shape too (HX-D21) | H1 |
@@ -77,7 +78,7 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 | Riding, carrying, dragging | `attach.ts:45-298`, `dismount.ts`, `moveLeg.ts:127-250` | rects, Chebyshev rings | hex sets and rings | H2 |
 | Universal VTT import | `uvtt/*` | the format is square | none | square |
 | Export as image | `mapexport/size.ts:45`, `fileName.ts:14`, `MapExport.tsx:163` | px per square, `-30x20-70px` | px per hex, `-hex-70px` | H1 |
-| Starter maps | `shared/starter.ts:72`, `starter/mapScene.ts` | measured square grids | the room's default, Line up grid on hexes | H1 |
+| Starter maps | `shared/starter.ts:72`, `starter/mapScene.ts` | measured square grids | squares whatever the default, hexes choosable | H1 |
 | New scene, settings | `scenes/create.ts`, `NewScene.tsx:258`, `SceneSettings.tsx:92, 208`, `settings/form.ts:167` | square words and defaults | the shape row, the room default | H1 |
 | Words | about 200 strings in 33 client files, `server/rooms/undoLabels.ts:234, 669`, `permissions.ts:363`, `reducer/traps.ts:46-60` | "square" | the scene's cell word | H1 |
 
@@ -115,7 +116,7 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 
 - **Between two creatures:** the fewest hex steps between any hex of one and any hex of the other. Adjacent hexes are 1 step, shared hexes 0.
 - **With height:** vertical steps as today. `five` takes `max(h, v)`, `euclid` `hypot(h, v)` rounded to the foot, and `fiveTen` `max + floor(min / 2)` with the path's vertical counter carried across legs as `legFeet` carries it (`distance.ts:68-85`). The horizontal counter stays 0, since a hex has no diagonal.
-- **Chunks.** Hex cell data lives in chunks of 16 by 16 hexes by key, so a 200 by 200 hex rows scene reaches chunk row 14. Free walls keep the world chunk of their midpoint. Every bound check on cell data goes through one `inScene(grid, bounds, key)`: `reducer/map.ts:140` and its callers, `walls.ts:557` and `1441`, `builder/cells.ts`, and the per-cell grids of `walk.ts` and `heights.ts`, sized by the scene's hex columns and rows. Chunk indices up to 14 fit the room import's schema (-100 to 100). `protocol.ts`'s `chunkIndex` names only world chunks (free walls, fog tiles) and stays. A test marks the last row of a 200 by 200 hex rows scene and the last column of a hex columns one.
+- **Chunks.** Hex cell data lives in chunks of 16 by 16 hexes by key, so a 200 by 200 hex rows scene reaches chunk row 14. Free walls keep the world chunk of their midpoint. Every bound check on cell data goes through one `inScene(grid, bounds, key)`: `reducer/map.ts:140` and its callers, `walls.ts:557` and `1441`, `builder/cells.ts`, and the per-cell grids of `walk.ts` and `heights.ts`, sized by the scene's hex columns and rows. Chunk indices up to 14 fit the room import's schema (-100 to 100). `protocol.ts`'s `chunkIndex` names only world chunks (free walls, fog tiles) and stays, and so does `limits.ts:893`, which sizes raster fog tiles. A test marks the last row of a 200 by 200 hex rows scene and the last column of a hex columns one.
 
 ### 4.4 Walk spots and sweeps
 
@@ -131,18 +132,18 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 - **HX-D5 Tiny:** one hex, at its center. Rejected: four spots per hex (no even split).
 - **HX-D6 Large's triangle** points one way, two hexes below one. Rejected: both ways (two lattices, and the creature would turn as it moves).
 - **HX-D7 Walls:** free walls only. In H2 a hex scene's Walls and doors draws Wall lines: tap or drag point to point, each line a free wall, door or window, split past 8 cells. Points snap to hex corners while Snap to hex corners is on (the default), else to the 1/64 lattice, for tracing art. Rejected: hex edge keys (three sides per cell, a new derive and new automatic walls, for walls that seldom follow hex sides on map art). Rejected: Wall lines on squares too (not asked for).
-- **HX-D8 Blocking on hexes (H2):** a step is allowed when every footprint hex's center-to-center step crosses no movement wall, touching counting as today, and at its end no movement wall crosses the line between two neighboring hexes of the footprint. So a creature passes only where its whole footprint fits: a Large creature needs two rows, not one. A player's creature too big for a gap stops at it with "Too narrow for a Large creature. Squeezing through works on squares only." The DM's moves are never stopped. Rejected: a square core around the anchor (a Large anchor in a one-row corridor lies on the corridor's wall). Rejected: passing where the footprint one size smaller is clear (the footprint pokes through the walls, and its position cannot say which part stands inside).
+- **HX-D8 Blocking on hexes (H2):** a step is allowed when every footprint hex's center-to-center step crosses no movement wall, touching counting as today, and at its end no movement wall crosses the line between two neighboring hexes of the footprint. So a creature walks where its whole footprint fits, and squeezes (HX-D17) where only the footprint one size smaller does. A Large creature walks two rows and squeezes through one. The DM's moves are never stopped. Rejected: a square core around the anchor (a Large anchor in a one-row corridor lies on the corridor's wall). Rejected: no squeezing on hexes (D-261025-13: the 2024 rule applies on any grid).
 - **HX-D9 The builder on hexes:** Builder scenes may be hexes (D-261025-11), and the builder offers what each phase supports, saying so for the rest: H1 lights, stamps, labels and Clear build, H2 Wall lines, Remove, door states, Difficult ground and Erase by hexes, H3 Heights and stairs. Painted ground, rooms, pillars and automatic walls stay square. Rejected: the whole builder on hexes (textured hex floors and hex automatic walls are a large build for dungeons people draw on squares). Rejected: refusing hexes for Builder scenes.
-- **HX-D10 Fog and sight:** the world raster as it is. Tokens under fog and in sight read the sub-cells inside their hexes. A creature the DM drops across a wall (H2) is read only on the hexes joined to its reference hex by center steps that cross no sight wall, for sight, fog and its drag preview alike. Reveal room on hexes (H3) floods hexes, a step blocked where a movement wall crosses the line between two centers. Rejected: a hex fog raster.
-- **HX-D11 Areas:** true shapes graded per hex, except emanations (D-261025-11). An emanation covers every hex within `floor(size / feetPerCell)` steps of its creature's hexes, height counted by the room's rule from the footprint's vertical extent, and clipped by walls through probes at each footprint hex's center, a hex counting when the room's rule passes on its visible part. An emanation that stays put stores its hexes (`AreaFootprint.hexes`). A free origin snaps to the nearest hex corner or center. A cone, line or cube cast from a token starts at the corner or side midpoint of its footprint's outline where the aim leaves it. The 45° step reads 30°. A placed area moves by whole lattice steps. Rejected: true-shape emanations (a 15 ft one catches 10 of the 24 hexes the ruler puts at 20 ft). Rejected: corners only (an eastward cone from a hex rows creature would start off center). Rejected: hex stencils per spell.
+- **HX-D10 Fog and sight:** the world raster as it is. A token is read on the sub-cells inside its hexes (its squeezed hexes while it squeezes). From H2, when walls exist, only those whose centers its stored center sees past no sight wall count, for sight, fog withholding and drag previews alike, so a wall through one of its hexes never shows it from the far side. A stored center within 1/4096 cell of a sight wall steps off it as an eye does (`stepOffWalls`). One that cannot reads no sub-cell, and the token is unseen and counts as under fog: it fails closed. Party members stay shown as always. Rejected: whole hexes joined to the reference hex (a wall can cut the reference hex itself). Reveal room on hexes (H3) floods hexes, a step blocked where a movement wall crosses the line between two centers. Rejected: a hex fog raster.
+- **HX-D11 Areas:** true shapes graded per hex, except emanations (D-261025-11). An emanation covers every hex within `floor(size / feetPerCell)` steps of its creature's hexes, height counted by the room's rule from the footprint's vertical extent, and clipped by walls through probes at each footprint hex's center, a hex counting when the room's rule passes on its visible part. An emanation that stays put stores its creature's size around its origin (`AreaFootprint.size`), and its hexes are `footprintHexes(grid, size, snapAnchor(grid, size, origin))` on every read. Moving the area moves the origin (`placement.ts:606`), so the hexes move with it, across an odd row as across an even one, since they are found in world space and never by shifting keys. A sweep (`areaTriggers.ts:369`) and an undo read them the same way. An older one with only w by h reads as the size whose box that is (the longer side for an uneven box). A size reads on any grid, so a template holds no cell keys, and a switch or a restore re-reads it as it re-reads a token. A free origin snaps to the nearest hex corner or center. A cone, line or cube cast from a token starts at the corner or side midpoint of its footprint's outline where the aim leaves it. The 45° step reads 30°. A placed area moves by whole lattice steps. Rejected: true-shape emanations (a 15 ft one catches 10 of the 24 hexes the ruler puts at 20 ft). Rejected: absolute hex keys for a stationary footprint (they stay behind when the area moves). Rejected: corners only (an eastward cone from a hex rows creature would start off center). Rejected: hex stencils per spell.
 - **HX-D12 Line up grid:** a box 3 hexes across, holding its 7 hexes, 3 by 2.89 cells on hex rows (2.89 by 3 on columns), kept to that shape as it is dragged, resized by its corners and nudged. Count the squares stays square. Find the grid stays square until H3. Rejected: placing two hex centers (a worse fit on a small screen).
 - **HX-D13 Imports and exports:** a Universal VTT import makes a square scene whatever the room's default, and says so. A scene that came with its grid (`cameWithGrid`: `gridFromFile` or a negative origin) cannot change shape. Export as image draws hexes at a whole number of px per hex and names the file `crypt-hex-70px.png`, which the upload's size hint already ignores. Rejected: the `WxH` name for hexes (other VTTs would read squares).
-- **HX-D14 The shape's invariant:** a hex scene holds only what its phase supports, and a square scene no hex data. The switch is refused while the scene holds anything that breaks it, naming what: in H1 painted ground, edge walls and "no wall" marks, heights, stair marks, difficult ground, free walls, any trap, any attach link, a squeezed token, or a fog draft shape of kind `cells`. A restore (undo or redo) that would break it is refused with the same words, checked on the scenes, chunks, traps and tokens it writes, so two DMs cannot sneak square data onto a hex scene. H2 tags every chunk it writes on a hex scene (`BuildChunk.grid`), so a restore can tell square marks from hex ones. Tokens keep their spots, and every rule reads them at their nearest anchor at once. A map scene keeps its cellPx and origin and opens Line up grid. Rejected: converting square data to hexes, refusing while tokens are on the scene, snapping every token in the same op.
+- **HX-D14 The shape's invariant:** cell data belongs to the exact shape it was written under, Hex rows and Hex columns being different shapes, since one key names different places on each. A scene holds only cell data of its own shape, and on hexes only what its phase supports. So a switch between any two shapes, rows to columns included, is refused while the scene holds cell data, naming it: painted ground, edge walls and "no wall" marks, heights, stair marks, difficult ground, any trap, a fog draft shape of kind `cells`, a squeezed token, and in H1 also free walls and any attach link. Each grid-keyed entity carries the shape it was written under: `BuildChunk.grid`, `Trap.grid` and `FogDraft.grid`, stamped by the reducer on a hex scene and absent on squares. A restore (undo or redo) that writes a chunk, trap or fog draft whose stamp is not its scene's shape, or that brings back a token or link the scene's phase refuses, is refused with the switch's words, so neither two DMs nor a long history can bring rows data onto columns or square data onto hexes. Tokens keep their spots, and every rule reads them at their nearest anchor at once. A map scene keeps its cellPx and origin and opens Line up grid. Rejected: converting square data to hexes, refusing while tokens are on the scene, snapping every token in the same op.
 - **HX-D15 Arrow keys:** Left and Right move along a row on hex rows. Up and Down go right of straight from an even row and left of it from an odd row, so presses zigzag and keep to one column. Hex columns mirror it. Rejected: six keys.
 - **HX-D16 Size row:** a hex scene's size reads in the room's feet-per-cell steps, with a line saying how many hexes it holds. Rejected: sizes typed in hexes and rows (rows do not fit whole cells).
-- **HX-D17 Squeezing:** square only (HX-D8).
+- **HX-D17 Squeezing (H2, D-261025-13):** as on squares, by the 2024 rule. A squeezing creature takes the footprint one size smaller, on that size's anchors: a Large one stands on one hex, a Huge one on a Large's three. Every rule reads the squeezed footprint while `squeeze` is set, as on squares. A move with `squeeze` is accepted where the smaller footprint fits by HX-D8 and no full footprint holding it does, the narrow space test on hexes. Each step squeezed pays the same extra as on squares, and any move without the flag ends it. Rejected: only the DM's moves putting a creature in a narrower space.
 - **HX-D18 Hex lines:** drawn in the board's own redraws, as square lines are, but only the hexes in view and only while a hex is at least 6 px across, so a pan costs the hexes on screen. Rejected: every hex on every redraw (46,000 on the largest scene).
-- **HX-D19 The room's default (D-261025-10):** "New scenes" in Room settings, Grid and distance, last in the group. Battle mat, Map image (pasted ones included), Builder and a starter map all start with it, and the form's Grid row changes it for that scene. A starter map with a measured square grid, made as hexes, opens Line up grid instead of using that grid. A duplicate keeps its source's shape. Rejected: a per-device preference (scenes would differ by device), remembering the last shape used (surprising).
+- **HX-D19 The room's default (D-261025-10, D-261025-13):** "New scenes" in Room settings, Grid and distance, last in the group. A Battle mat and a Map image (pasted ones included) start with it. A Builder scene and a starter map start as squares whatever it says, as a Universal VTT import does, since the builder's core tools and the starter art are square. The form's Grid row changes the shape for that one scene, and a Builder scene set to hexes shows the builder's limits there. A starter map made as hexes opens Line up grid rather than use its measured square grid. A duplicate keeps its source's shape. Only the form reads the setting: a `scene.create` without `gridShape` makes squares, so replay never depends on it. Rejected: a per-device preference, remembering the last shape used, Builder and starter maps following the default.
 - **HX-D20 Phase refusals (D-261025-11):** the server refuses on a hex scene every op whose rules are not hex yet (section 6), so no stored op on a hex scene ever needs a later phase's rule gated. Rejected: gating each later rule by op version (more replay paths to test for ops nobody could make).
 - **HX-D21 A shape change reprojects** the room, as a change of fog or vision does, and so do its undo and redo, since tokens can fall under fog or out of sight without moving (HX-ASTRA-01).
 
@@ -152,7 +153,7 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 
 The shape field and the room default, `hex.ts`, hex lines, Line up grid's box, snapping and group drops, footprints, the selected token's outline, placement and companions, sizes, distance, the Straight ruler, drag labels and speed colors, legs and walk spots, range rings, arrow keys, areas with step-count emanations, area sweeps, fog and party vision with their footprint test, the reprojection, the invariant, export, and the word pass. A hex scene has no walls in H1, so party vision there is light and senses only, and Block movement has nothing to stop until H2. A new hex Map image skips the upload's grid search, which finds squares only.
 
-The server refuses on a hex scene, with `invalid`: `build.paint`, `build.erase`, `build.rect`, `build.poly`, `build.edge`, `build.walls`, `build.height`, `build.stairs`, `build.rough`, every `trap.create` and `trap.update`, `token.attach`, a `token.move` or `token.moveMany` that carries `route` or `squeeze`, a `token.update` that brings an attach link onto it, and a fog `cells` shape. No such op was ever stored, so lifting a refusal later changes no replay. Every op H1 accepts on a hex scene gets a replay test.
+The server refuses on a hex scene, with `invalid`: `build.paint`, `build.erase`, `build.rect`, `build.poly`, `build.edge`, `build.walls`, `build.height`, `build.stairs`, `build.rough`, every `trap.create` and `trap.update`, `token.attach`, a `token.move` that carries `route` or `squeeze` (only `token.move` carries either), a `token.update` that brings an attach link onto it, and a fog `cells` shape. No such op was ever stored, so lifting a refusal later changes no replay. H1 commits a fixture of every op it accepts on a hex scene with the states they make (`shared/reducer/hexH1.fixture.json`, as `opVersion19.fixture.json` does), and H2 and H3 replay it unchanged.
 
 | Where | Words shown on a hex scene |
 |---|---|
@@ -169,7 +170,7 @@ The server refuses on a hex scene, with `invalid`: `build.paint`, `build.erase`,
 
 ### H2: walls, ways and terrain
 
-Wall lines, Remove and door states on free walls (design.md 12), blocking by HX-D8, routes on the six-neighbor anchor lattice, the walking ruler, difficult ground by hex under hex keys, areas that slow movement, door reach from the hexes beside a free door, Erase by hexes, riding, carrying and dragging, and traps other than pits. Trap zones are rects of hex keys, read for fog and `tileDependents` by their hexes' sub-cells, so revealing other ground never shows a found trap. Wires end on the 1/64 lattice. The chunk tag of HX-D14 comes in. Pits are refused with "A pit needs heights, which hex scenes get later.", since opening one writes ground (`reducer/traps.ts:233`). The builder's hint becomes "On hexes the builder draws wall lines, marks difficult ground, and places lights, stamps and labels. Painted ground and heights need squares."
+Wall lines, Remove and door states on free walls (design.md 12), blocking by HX-D8, squeezing by HX-D17, the wall clip of HX-D10, routes on the six-neighbor anchor lattice with squeezed steps, the walking ruler, difficult ground by hex under hex keys, areas that slow movement, door reach from the hexes beside a free door, Erase by hexes, riding, carrying and dragging, and traps other than pits. Trap zones are rects of hex keys, read for fog and `tileDependents` by their hexes' sub-cells, so revealing other ground never shows a found trap. Wires end on the 1/64 lattice. H2 is the first phase to write HX-D14's stamps, since H1 refuses every grid-keyed write on hexes. Pits are refused with "A pit needs heights, which hex scenes get later.", since opening one writes ground (`reducer/traps.ts:233`). The builder's hint becomes "On hexes the builder draws wall lines, marks difficult ground, and places lights, stamps and labels. Painted ground and heights need squares."
 
 ### H3: heights, pits, rooms and found grids
 
@@ -187,16 +188,16 @@ type GridShape = "hexRows" | "hexColumns";
 gridShape?: GridShape;
 // RoomSettings: the shape new scenes start with, absent reads as squares.
 newScenes?: GridShape;
-// AreaFootprint: an emanation that stays put on a hex scene keeps its hex keys, at most 12.
-hexes?: string[];
-// BuildChunk, from H2: written on a hex scene, so a restore can tell hex data from square data.
-grid?: "hex";
+// AreaFootprint: the size an emanation that stays put was cast from, read around its origin on hexes.
+size?: Exclude<CreatureSize, "custom">;
+// BuildChunk, Trap and FogDraft: the hex shape they were written under, absent for squares.
+grid?: GridShape;
 ```
 
-- **Ops.** `scene.create` takes `gridShape`. `scene.update`'s patch takes `gridShape: "squares" | GridShape`, "squares" removing the field, so a square scene's stored form and its undo hash never change. `room.update`'s settings patch takes `newScenes` the same way. The reducer refuses a switch or a restore that breaks HX-D14, naming the data in the scene's own cell word: "This scene has difficult ground and 2 traps on its squares, which can't stand on hexes. Remove them to change the grid." and "Can't undo that: difficult ground on squares can't stand on this scene's hexes." DM only. `scene.duplicate` and the room export copy the shape.
+- **Ops.** `scene.create` takes `gridShape`. `scene.update`'s patch takes `gridShape: "squares" | GridShape`, "squares" removing the field, so a square scene's stored form and its undo hash never change. `room.update`'s settings patch takes `newScenes` the same way. The reducer refuses a switch or a restore that breaks HX-D14, naming the data in the scene's own cell word: "This scene has difficult ground and 2 traps on its squares, which can't stand on hexes. Remove them to change the grid." and "Can't undo that: difficult ground on squares can't stand on this scene's hexes." DM only. `scene.duplicate` and the room export copy the shape, and the reducer never reads `newScenes`. The schema takes `AreaFootprint.size` from the size list, never `custom`. The stamps are in H1's model, and H1's restore check reads an absent stamp as squares.
 - **Players** receive `gridShape` in their scene copy (`project.ts:999`), since they snap and draw by it. `tx.ts:748` counts it in a scene's change of visibility (HX-D21). A change of `newScenes` reprojects as every settings change does today, which is rare and cheap enough.
 - **Meanings on a hex scene.** `map.cellPx` and `phaseGrid.cellPx` are px across a hex's flats. `originPx` is the canonical pixel of world (0, 0), reduced as 4.1 says. `bounds` are cells. Cell keys name hexes, in chunks of 16 by 16 hexes (4.3).
-- **Versions.** H1 takes the next free op and snapshot pair at build time, identity steps as shared/migrate.ts practice, so an older build refuses a room that may hold a hex scene. H2 and H3 take their own pairs, since a build of the phase before would misread their data. HX-D20's refusals mean no rule needs a gate below a phase's op version, and a test replays every op H1 accepts on a hex scene under H2's rules to prove it.
+- **Versions.** H1 takes the next free op and snapshot pair at build time, identity steps as shared/migrate.ts practice, so an older build refuses a room that may hold a hex scene. H2 and H3 take their own pairs, since a build of the phase before would misread their data. HX-D20's refusals mean no rule needs a gate below a phase's op version, and H1's fixture (section 6), replayed unchanged by H2 and H3, proves it.
 - **Schemas.** `shared/protocol.ts` and `server/rooms/stateSchema.ts` take the new fields. H2 loosens a trap wire's ends to the 1/64 lattice with its op version, and permissions keep a square scene's on the half lattice.
 - **Code contract** (`shared/rules/hex.ts` and `shared/rules/grid.ts`, built first):
 
@@ -209,11 +210,11 @@ footprintHexes(g, size, anchor), referenceHex(g, size, anchor), snapAnchor(g, si
 sceneHexes(g, bounds), hexSubcells(g, hex)   // the fog sub-cells whose centers it holds
 ```
 
-Rule functions take the grid as a required parameter. Their square path is today's code, and every existing test passes unchanged.
+Rule functions take the grid as a required parameter. Their square path is today's code. Existing tests gain an explicit square grid in their calls, a mechanical edit, and keep every assertion as it is.
 
 ## 8. UI checklist
 
-- **Words shown.** Room settings, Grid and distance: "New scenes", "Squares", "Hex rows" and "Hex columns", help "The grid a new scene starts with. Each new scene can pick its own." Scene settings, Grid: "Grid shape" with the same three choices, help "Hex rows have pointed tops and run straight across. Hex columns have flat tops and run straight down." A refusal disables the choice and shows the reducer's words, or "This scene came with its own square grid from its file." New scene, every kind: a "Grid" row on the room's default, and for a starter map with a measured grid made as hexes, "This map is drawn with squares." A Universal VTT import's summary, when the room's default is hexes: "Universal VTT files make square scenes." Line up grid on hexes: "Drag a box over 3 hexes across. Fine-tune it by its corners." and "px per hex". Size on a hex scene: "Size in 5 ft steps" with the room's feet per cell, fields "Across" and "Down", and "Holds 30 hexes across and 22 rows down." Export: "hexes at 70 px", its switch "Hex lines". A token's panel: "Large (3 hexes)". Every string that names the grid's cell, the server's undo labels and refusals included, says the scene's cell word through one helper (`cellWord`). H1's limit lines are in section 6.
+- **Words shown.** Room settings, Grid and distance: "New scenes", "Squares", "Hex rows" and "Hex columns", help "The grid a new battle mat or map starts with. Builder scenes and starter maps start on squares. Each new scene can pick its own." Scene settings, Grid: "Grid shape" with the same three choices, help "Hex rows have pointed tops and run straight across. Hex columns have flat tops and run straight down." A refusal disables the choice and shows the reducer's words, or "This scene came with its own square grid from its file." New scene, every kind: a "Grid" row, on the room's default for a Battle mat or Map image and on Squares for a Builder scene or a starter map. A Builder scene set to hexes shows the builder's limit line under the row, and a starter map whose room default is hexes says "Starter maps are drawn on squares." A Universal VTT import's summary, when the room's default is hexes: "Universal VTT files make square scenes." Line up grid on hexes: "Drag a box over 3 hexes across. Fine-tune it by its corners." and "px per hex". Size on a hex scene: "Size in 5 ft steps" with the room's feet per cell, fields "Across" and "Down", and "Holds 30 hexes across and 22 rows down." Export: "hexes at 70 px", its switch "Hex lines". A token's panel: "Large (3 hexes)". Every string that names the grid's cell, the server's undo labels and refusals included, says the scene's cell word through one helper (`cellWord`). H1's limit lines are in section 6.
 - **Loading.** Nothing new is slow. A shape change is one op with the usual pending state.
 - **Keys and focus.** Each shape choice is a radio group, arrow keys move within it, and a refusal keeps focus on it with the reason linked by `aria-describedby`. Arrow keys move a token one hex (HX-D15). The shortcut sheet's line becomes "Arrow keys: move a token one square, or one hex on a hex scene", in its registry and FEATURES.md together.
 - **Screen readers.** Each choice is announced with its options. Readings stay in feet. Disabled Walking, Attach, Trap and Reveal room name their reason.
@@ -226,7 +227,8 @@ Rule functions take the grid as a required parameter. Their square path is today
 | Case | Expected | Test |
 |---|---|---|
 | An existing scene after the deploy | Squares, nothing moved, every square test unchanged | migrate, all units |
-| A room with New scenes on Hex rows | Battle mat, Map image, Builder and a starter map all start as Hex rows, the form can pick Squares | create unit, maps e2e |
+| A room with New scenes on Hex rows | Battle mat and Map image start as Hex rows, Builder and a starter map as Squares, each changeable in the form | create unit, maps e2e |
+| A `scene.create` without `gridShape` in that room | a square scene | room reducer unit |
 | A Universal VTT import in that room | a square scene, the summary says why | uvtt unit |
 | New Battle mat, Hex rows, 30 by 20 | 22 rows, 30 hexes in even rows and 29 in odd | hex unit, hex e2e |
 | The last row of a 200 by 200 hex rows scene | row 229 exists and takes a mark (H2) | map reducer unit |
@@ -239,6 +241,8 @@ Rule functions take the grid as a required parameter. Their square path is today
 | A flier rising 10 ft a leg for two legs under `fiveTen` | the vertical counter carries | distance unit |
 | A leg through one fogged hex | not `routeSeen`, and fails with the hex line removed | reducer unit |
 | A 15 ft emanation on a Medium, attached and stationary | 37 hexes, 3 steps out (Large 48, Huge 61, Gargantuan 75) | aoe unit |
+| A stationary emanation moved one step, across an odd row, then undone | its hexes move with it, reminders fire on the moved hexes, the sweep reads them at each sample, undo puts them back | aoe unit, areaTriggers unit |
+| An older stationary emanation with a 2 by 2 box on a hex scene | reads as Large | aoe unit |
 | A 10 ft emanation on each size | Medium 19, Large 27, Huge 37, Gargantuan 48 | aoe unit |
 | A 20 ft sphere on a hex corner | the hexes at least half inside, as a brute-force sampler counts | aoe unit |
 | A 15 ft cone cast east from a hex rows token | starts at the east side's midpoint, 30° steps | placement unit |
@@ -247,6 +251,10 @@ Rule functions take the grid as a required parameter. Their square path is today
 | A switch under a token half in a revealed corner | its visibility follows the hexes without a move, with fog, party vision and per-player vision, and again on undo and redo | project unit |
 | Switching with difficult ground, a trap, a link, a squeezed token or a free wall | refused, naming it | room reducer unit |
 | Two DMs: A erases difficult ground, B switches to hexes, A undoes | refused, "can't stand on this scene's hexes" | restore unit |
+| Two DMs: A deletes a square trap, B switches to hexes, A undoes | refused | restore unit |
+| H2, Hex rows with difficult ground switched to Hex columns | refused, naming difficult ground | room reducer unit |
+| H2, two DMs: A erases rows-era difficult ground, B switches to columns, A undoes | refused by the chunk's stamp | restore unit |
+| A stationary emanation through a switch, rows to columns | kept, re-read on the new hexes | room reducer unit |
 | A trap, an attach, a routed or squeezed move on a hex scene (H1) | each refused | permissions unit |
 | A holder with a rider sent to a hex scene (H1) | refused | permissions unit |
 | A scene with a negative origin | the shape choice disabled | settings unit |
@@ -255,8 +263,11 @@ Rule functions take the grid as a required parameter. Their square path is today
 | Export as image | hex lines, `crypt-hex-70px.png` | mapexport unit |
 | No "square" on a hex scene's DM and player screens | none but the Squares choices | hex e2e |
 | A 200 by 200 hex scene zoomed out on a phone | lines skip below 6 px a hex | bench |
-| A Large creature at a one-row corridor (H2) | stops, "Too narrow for a Large creature." | movement unit |
-| A Large creature the DM drops across a wall (H2) | seen only on its reference hex's side, its preview too | vision unit, ephemeral unit |
+| A sight tile change holding only an edge hex of a Large footprint | reprojects that token, and fails with the square range | project unit |
+| A Large creature walking a one-row corridor (H2) | squeezes onto one hex, each step at the extra cost | movement unit, walk unit |
+| A Large creature squeezing beside a wall into open ground (H2) | refused: a full footprint fits there | permissions unit |
+| A Medium stored at (5.49, 0.2), a wall at x = 5.4375 through its hex (H2) | the 7 sub-cells left of the wall never show it, its preview too | vision unit, ephemeral unit |
+| A token's stored center on a wall it cannot step off (H2) | unseen and withheld | vision unit |
 | Revealing ground beside a fogged trap of hexes (H2) | the trap stays withheld | project unit |
 | A pit on a hex scene (H2) | refused, "A pit needs heights" | permissions unit |
 
@@ -271,8 +282,9 @@ Rule functions take the grid as a required parameter. Their square path is today
   - Every sub-cell of a scene belongs to exactly one hex, or to none at its edge.
   - Rows and columns agree under the mirror, chirality included.
 - **Determinism.** `hex.ts` joins the banned-function test. A golden test pins a hex scene's sight tiles and withheld tokens.
-- **Rules.** Every case of section 9 marked unit. The square path stays untouched: every existing test passes with no change to its file.
-- **Mutation checks.** Each new test fails with its rule removed: the line's nudge, the Large lattice offset, the reference hex kept on a resize, the vertical samples of a sweep, the shape in `tx.ts`'s visibility check, a restore's invariant, the trap zone's sub-cells, distance by the two anchors' hexes only, the rect in the sight test.
+- **Rules.** Every case of section 9 marked unit. The square path stays untouched: existing tests only gain the explicit square grid their calls now need, and every assertion stays as it is.
+- **Replay.** H1's fixture of the ops it accepts on a hex scene, replayed unchanged by H2 and H3.
+- **Mutation checks.** Each new test fails with its rule removed: the line's nudge, the Large lattice offset, the reference hex kept on a resize, the vertical samples of a sweep, the shape in `tx.ts`'s visibility check, a restore's stamp check, the trap zone's sub-cells, distance by the two anchors' hexes only, the rect in the sight test, the wall clip, the origin in a stationary footprint.
 - **e2e.** A new `e2e/hex.e2e.ts` (prefix HX): the room's default set to Hex rows, a mat made, a goblin and a Large ogre placed, the goblin moved 4 hexes on its turn, measured, a fireball and Spirit Guardians read for who they catch, fog revealed, and a player seeing the same. Plus the alignment roots, `maps.e2e.ts` for the Grid rows and Line up grid, and `reach`.
 - **Bench.** `scripts/bench-grid.ts`: hex lines at fit and at 100% on the largest scene, area coverage for a 1,000 ft line, against design 9.3's budgets.
 
@@ -285,9 +297,9 @@ Order: after the per-player vision run lands, since both touch `vision.ts`. H1's
 | HX-1 Contract | `shared/rules/hex.ts`, `shared/rules/grid.ts` and their tests, `shared/model.ts`, `shared/protocol.ts`, `shared/migrate.ts`, `server/rooms/stateSchema.ts`, `shared/reducer/room.ts` (the switch), `shared/reducer/misc.ts` and `tx.ts` (the restore invariant, the reprojection), `shared/permissions.ts` (H1's refusals, companion reach, the refusal words) | none |
 | HX-2 Rules | `shared/rules/footprint.ts` and `distance.ts` (the grid required), `route.ts` (straight legs, `routeWalk`), `aoe.ts`, `fog.ts`, `vision.ts` (the footprint test), `shared/project.ts` (the scene copy, withheld, `tileDependents`), `shared/reducer/tokens.ts`, `areaTriggers.ts`, `duplicate.ts`, `server/rooms/ephemeral.ts`, `server/rooms/undoLabels.ts` | HX-1 |
 | HX-3 Board | `client/lib/scene.ts`, `client/lib/group.ts`, `client/canvas/layers/MapLayer.tsx`, `TokenNode.tsx`, `Stage.tsx`, `client/state/shortcuts.ts`, `movement/drop.ts`, `stageHooks.ts`, `dragTesting.ts`, `preview.ts`, `measure/*`, `areas/placement.ts`, `AreaTool.tsx`, `AreaPreviewLayer.tsx`, `AreaOptions.tsx`, `draw.tsx`, `caster.ts`, `store.ts`, `tokens/factory.ts`, `placeInputs.ts`, `resize.ts`, `companions.ts`, `mapexport/*` | HX-1, beside HX-2 |
-| HX-4 Settings and words | `client/features/grid/*`, `scenes/SceneSettings.tsx`, `NewScene.tsx`, `create.ts`, `starter/mapScene.ts`, `uvtt/ImportDialog.tsx` and `summary.ts`, `settings/form.ts`, the word helper and pass, the limit lines (`builder/Options.tsx`, `attach/AttachButton.tsx`, `traps/TrapTool.tsx`, `fog/Options.tsx`, the size picker), `e2e/hex.e2e.ts`, alignment roots, then FEATURES.md, README.md and the docs in its last commit | HX-2 and HX-3 |
+| HX-4 Settings and words | `client/features/grid/*`, `scenes/SceneSettings.tsx`, `NewScene.tsx`, `create.ts`, `starter/mapScene.ts`, `uvtt/ImportDialog.tsx` and `summary.ts`, `settings/form.ts`, the word helper and pass, the limit lines (`builder/Options.tsx`, `attach/AttachButton.tsx`, `traps/TrapTool.tsx`, `fog/Options.tsx`, the size picker), `e2e/hex.e2e.ts`, `shared/reducer/hexH1.fixture.json` and its replay test, alignment roots, then FEATURES.md, README.md and the docs in its last commit | HX-2 and HX-3 |
 
-HX-2 and HX-3 work beside each other on HX-1's contract. The word pass is mechanical and suits a lighter model. H2 runs as HX-5 (routes, blocking, the walking ruler), HX-6 (Wall lines, Erase and Difficult ground on hexes, door reach, the cell bounds, the chunk tag) and HX-7 (attach, and traps without pits), each from a brief of its own. H3 runs as HX-8 (heights, stairs, pits) and HX-9 (Reveal room, the hex detector).
+HX-2 and HX-3 work beside each other on HX-1's contract. Each lane adds the explicit square grid to the existing tests of the callers in its own files. The word pass is mechanical and suits a lighter model. H2 runs as HX-5 (routes, blocking, squeezing, the walking ruler, the wall clip), HX-6 (Wall lines, Erase and Difficult ground on hexes, door reach, the cell bounds, the chunk tag) and HX-7 (attach, and traps without pits), each from a brief of its own. H3 runs as HX-8 (heights, stairs, pits) and HX-9 (Reveal room, the hex detector).
 
 **Docs to update:** FEATURES.md (its opening "on a square grid", Scenes and maps, Measuring and movement, Areas of effect, Fog and vision, Shortcuts, and what stays square), docs/features.md (section 4, and section 19 keeps only isometric), docs/design.md (5, 9.1 to 9.3, 12, 13.4), docs/dm-guide.md (Making a scene, Lining up the grid, a short Hex grids section with a screenshot), docs/design-v1-grid-detect.md (section 5), and README.md's update notes for each phase: back up first, and reload every page left open, since there is no client version check and an old page would treat a hex scene as squares.
 
@@ -297,7 +309,7 @@ HX-2 and HX-3 work beside each other on HX-1's contract. The word pass is mechan
 |---|---|
 | HX-ASTRA-01 a switch must reproject | HX-D21, section 7, cases |
 | HX-ASTRA-02 trap fog by hex sub-cells | H2, cases |
-| HO-1, HX-ASTRA-03 emanations | HX-D11, section 7 (`AreaFootprint.hexes`), counts in cases |
+| HO-1, HX-ASTRA-03 emanations | HX-D11, section 7 (now `AreaFootprint.size`, round 2), counts in cases |
 | HO-2, HX-ASTRA-06 H1's refusals and the switch's list | H1, HX-D14, HX-D20 |
 | HO-3 restores | HX-D14, section 7, the two-DM case |
 | HO-4 walk spots | 4.4 |
@@ -311,6 +323,23 @@ HX-2 and HX-3 work beside each other on HX-1's contract. The word pass is mechan
 | HO-10 smaller fixes | 4.1, 4.2, 4.3, HX-D9, HX-D12, HX-D18, section 7, docs |
 | HO-11 tests | sections 9 and 10 |
 | D-261025-10 the room's default | HX-D19, sections 7 to 9 |
+
+### Round 2
+
+| Finding | Where it went |
+|---|---|
+| HX-ASTRA-08 a wall through the token's own hex | HX-D10's clip by the stored center, failing closed, cases |
+| HO-12, HX-ASTRA-09 exact shapes | HX-D14 (rows and columns differ, stamps on chunks, traps and fog drafts), section 7, cases |
+| HO-12's templates | settled by HO-13: a stationary footprint is a size, so a template holds no cell keys and is re-read on a switch or restore, with a case |
+| HO-13, HX-ASTRA-10 relative stationary footprints | HX-D11, section 7 (`AreaFootprint.size`), cases |
+| HO-14, D-261025-13 Builder and starter maps | HX-D19, section 8 |
+| D-261025-13 squeezing on hexes | HX-D8, HX-D17, H2, cases |
+| HO-15 the reducer never reads the default | HX-D19, section 7 |
+| HO-16 the replay fixture | H1, section 7, lane plan |
+| HO-17 only `token.move` | H1 |
+| HO-18 `tileDependents` on an edge hex | cases |
+| HX-ASTRA-11 test edits | section 7, tests, lane plan |
+| `limits.ts:893` | 4.3 |
 
 ## As built
 
