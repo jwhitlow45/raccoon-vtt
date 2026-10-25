@@ -2,7 +2,7 @@ import { useMemo, type ReactNode, type RefObject } from "react";
 import type { CreatureSize, HpVisibility, Member, Token } from "#shared/model.ts";
 import type { ClientOp, TokenGroupPatch } from "#shared/protocol.ts";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { RowDot } from "../../components/Row.tsx";
+import { DotLabel } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
@@ -165,11 +165,10 @@ function litOf(tokens: readonly Token[], read: (t: Token) => boolean): Lit {
 
 function MemberLabel(props: { member: Member }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
-      <RowDot color={props.member.color} size={12} />
+    <DotLabel color={props.member.color}>
       {props.member.name}
       {props.member.kind === "dm" ? <span style={{ color: theme.color.textMuted }}>(DM)</span> : null}
-    </span>
+    </DotLabel>
   );
 }
 

@@ -8,7 +8,7 @@ import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
-import { Row, RowDot, RowList } from "../../components/Row.tsx";
+import { DotLabel, Row, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { api, ApiError, type AssetRow } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
@@ -496,12 +496,7 @@ function ShowHandout(props: {
             {players.map((p) => (
               <Checkbox
                 key={p.id}
-                label={
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
-                    <RowDot color={p.color} size={12} />
-                    {p.name}
-                  </span>
-                }
+                label={<DotLabel color={p.color}>{p.name}</DotLabel>}
                 checked={chosen.includes(p.id)}
                 onChange={(on) => set({ chosen: on ? [...chosen, p.id] : chosen.filter((id) => id !== p.id) })}
               />

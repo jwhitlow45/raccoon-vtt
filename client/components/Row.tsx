@@ -202,7 +202,7 @@ export function RowDot(props: { color: string; size?: number }) {
 
 /**
  * A member's color dot before their name, as a checkbox's label (Owners,
- * Played by). A block, not an inline box: on a line, an inline flex box
+ * Played by, a handout's players, a group's Owners). A block, not an inline box: on a line, an inline flex box
  * sits by its first item's baseline, which for the dot is its bottom edge,
  * and that left the name 1.5 px high in its row at 130% (LP22-ALIGN-2).
  */

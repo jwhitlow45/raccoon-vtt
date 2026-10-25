@@ -2422,6 +2422,45 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
+  test("fu31-p. each member's dot on its name, in line within 1 px at 1440 x 900 and 1280 x 800 at 130%: a handout's chosen players, and the Owners of two tokens' More (FU31 review F3, LP22-ALIGN-2)", async () => {
+    const off: string[] = [];
+    try {
+      for (const size of [{ width: 1440, height: 900 }, DESK]) {
+        const at = `${size.width} x ${size.height} at 130%`;
+        await setUp(dm, dmCdp, { ...size, scale: 1.3 }, null);
+        await tapToken(dm, run.goblin.at);
+        await bar(dm, "Goblin 4").waitFor();
+        await dm.keyboard.down("Shift");
+        await tapToken(dm, run.bog.at);
+        await dm.keyboard.up("Shift");
+        await (await barControl(dm.getByRole("dialog", { name: "2 selected tokens" }), "More")).click();
+        const more = dm.getByRole("dialog", { name: "2 tokens" });
+        const owners = more.locator("section").filter({ has: dm.getByRole("heading", { name: "Owners", exact: true }) });
+        await owners.getByText("Pat", { exact: true }).waitFor();
+        off.push(...(await measureIn(owners, `two tokens' Owners at ${at}`)));
+        await owners.getByText("Pat", { exact: true }).scrollIntoViewIfNeeded();
+        await shots.take(dm, `fu31-group-owners-${size.width}`);
+        await dm.keyboard.press("Escape");
+        await more.waitFor({ state: "detached" });
+
+        await openSideTab(dm, "DM");
+        const dmPanel = dm.getByRole("tabpanel", { name: "DM" });
+        await dmPanel.getByRole("button", { name: "Show a handout" }).click();
+        await dmPanel.getByRole("radio", { name: "Chosen players" }).check();
+        const players = dmPanel.getByRole("group", { name: "Players to show it to" });
+        await players.getByText("Pat", { exact: true }).waitFor();
+        off.push(...(await measureIn(players, `a handout's players at ${at}`)));
+        await shots.take(dm, `fu31-handout-players-${size.width}`);
+        // Only closes the form: Everyone again, so the draft left is as it was.
+        await dmPanel.getByRole("radio", { name: "Everyone" }).check();
+        await dmPanel.getByRole("button", { name: "Cancel", exact: true }).click();
+      }
+    } finally {
+      await setUp(dm, dmCdp, DESK, null);
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
   test("fu31-g. a Stat block's Copy, Change and Detach leave no button alone under the others: Pat's wolf companion and the DM's goblin, in line within 1 px at live play 22's sizes (LP22-ALIGN-3)", async () => {
     const wolf = { id: randomUUID(), at: cell(6, 4) };
     await ops.send({ t: "token.create", token: { id: wolf.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: wolf.at.x, y: wolf.at.y, disposition: "ally", kind: "monster", name: "Wolf", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
