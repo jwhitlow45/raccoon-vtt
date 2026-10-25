@@ -140,7 +140,10 @@ the macOS job runs only when it is not.
 
 A newer push to a `ci/` branch cancels that branch's run in progress. Every
 push to `main` runs to the end, so each commit there is tested. A failing
-e2e file runs once more, and its shard fails only if the rerun fails too. A
+e2e file runs once more, and its shard fails only if the rerun fails too.
+The rerun leaves out the tests that passed after the file's last failure,
+since any test before it may set up what a failure needs, and runs the
+whole file when the first run timed out, crashed or failed in a hook. A
 file that passed only on its rerun shows as a warning on the run. A shard
 that failed, was cancelled or reran keeps its logs and screenshots as an
 artifact for two weeks.

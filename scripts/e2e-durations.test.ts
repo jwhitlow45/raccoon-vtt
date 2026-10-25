@@ -14,6 +14,7 @@ const LOG = [
   "2026-10-25T17:20:54.4213695Z ##[error]pcstats failed twice. Its logs and screenshots are in this shard's artifact.",
   "2026-10-25T17:20:54.4213700Z   pdf         timed out (3 of 9 tests passed) in 300 s, and no rerun, too little of the job's time left",
   "2026-10-25T17:20:54.4213710Z   size        not run, too little of the job's time left",
+  "2026-10-25T17:20:54.4213720Z   swipe       failed (12 of 13 tests passed) in 250 s, then its rerun passed (11 tests, 2 left out) in 210 s",
   "2026-10-25T17:20:54.4336003Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
   "2026-10-25T17:20:54.4336433Z   name: e2e-shard-2",
 ].join("\n");
@@ -23,12 +24,13 @@ describe("a shard's report", () => {
     const reported = readReport(LOG);
     assert.deepEqual(
       reported.map((r) => r.file),
-      ["alignment", "companions", "guide", "pcstats", "pdf", "size"],
+      ["alignment", "companions", "guide", "pcstats", "pdf", "size", "swipe"],
     );
-    assert.deepEqual(reported[0], { file: "alignment", first: { how: "failed", seconds: 558 }, rerun: { how: "passed", seconds: 560 } });
-    assert.deepEqual(reported[2], { file: "guide", first: { how: "passed", seconds: 14 }, rerun: null });
-    assert.deepEqual(reported[4], { file: "pdf", first: { how: "timed out", seconds: 300 }, rerun: null }, "no rerun ran");
-    assert.deepEqual(reported[5], { file: "size", first: { how: "not run", seconds: null }, rerun: null });
+    assert.deepEqual(reported[0], { file: "alignment", first: { how: "failed", seconds: 558, partial: false }, rerun: { how: "passed", seconds: 560, partial: false } });
+    assert.deepEqual(reported[2], { file: "guide", first: { how: "passed", seconds: 14, partial: false }, rerun: null });
+    assert.deepEqual(reported[4], { file: "pdf", first: { how: "timed out", seconds: 300, partial: false }, rerun: null }, "no rerun ran");
+    assert.deepEqual(reported[5], { file: "size", first: { how: "not run", seconds: null, partial: false }, rerun: null });
+    assert.deepEqual(reported[6], { file: "swipe", first: { how: "failed", seconds: 250, partial: false }, rerun: { how: "passed", seconds: 210, partial: true } });
   });
 
   test("the shard's first line, which lists its files, starts no report", () => {
@@ -41,26 +43,27 @@ describe("a shard's report", () => {
 
   test("color codes and Windows line ends hide no line", () => {
     const log = "shard 1 of 1\r\n\x1b[32m  kit  passed (4 tests) in 7 s\x1b[0m\r\n";
-    assert.deepEqual(readReport(log), [{ file: "kit", first: { how: "passed", seconds: 7 }, rerun: null }]);
+    assert.deepEqual(readReport(log), [{ file: "kit", first: { how: "passed", seconds: 7, partial: false }, rerun: null }]);
   });
 });
 
 describe("a file's time", () => {
-  const run = (how: Reported["first"]["how"], seconds: number | null) => ({ how, seconds });
-  test("is the run that passed, the first or its rerun, and none when neither did", () => {
+  const run = (how: Reported["first"]["how"], seconds: number | null, partial = false) => ({ how, seconds, partial });
+  test("is the whole run that passed, the first or its rerun, and none when neither did", () => {
     assert.equal(passedSeconds({ file: "a", first: run("passed", 40), rerun: null }), 40);
     assert.equal(passedSeconds({ file: "a", first: run("failed", 12), rerun: run("passed", 41) }), 41);
     assert.equal(passedSeconds({ file: "a", first: run("failed", 12), rerun: run("failed", 13) }), null);
     assert.equal(passedSeconds({ file: "a", first: run("timed out", 300), rerun: run("not run", null) }), null);
+    assert.equal(passedSeconds({ file: "a", first: run("failed", 250), rerun: run("passed", 210, true) }), null, "a rerun that left tests out");
   });
 });
 
 describe("the new list", () => {
   const old = { defaultSeconds: 60, seconds: { alignment: 272, barrest: 910, gone: 30, pcstats: 32 } };
-  const passed = (file: string, seconds: number): Reported => ({ file, first: { how: "passed", seconds }, rerun: null });
+  const passed = (file: string, seconds: number): Reported => ({ file, first: { how: "passed", seconds, partial: false }, rerun: null });
 
   test("holds the largest time a run passed in, the old time where none passed, and only files that exist", () => {
-    const reports: Reported[] = [passed("alignment", 585), passed("alignment", 541), passed("barrest", 300), { file: "pcstats", first: { how: "failed", seconds: 3 }, rerun: { how: "failed", seconds: 4 } }, passed("fresh", 20)];
+    const reports: Reported[] = [passed("alignment", 585), passed("alignment", 541), passed("barrest", 300), { file: "pcstats", first: { how: "failed", seconds: 3, partial: false }, rerun: { how: "failed", seconds: 4, partial: false } }, passed("fresh", 20)];
     assert.deepEqual(rewrite(old, reports, ["pcstats", "fresh", "barrest", "alignment", "unrecorded"]), {
       defaultSeconds: 60,
       seconds: { alignment: 585, barrest: 300, fresh: 20, pcstats: 32 },

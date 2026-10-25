@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { clearJoinCounts } from "./e2e-join-counts.ts";
-import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, summaryCount, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
+import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, rerunSkips, runLimit, secondsFor, skipPattern, summaryCount, type Durations, type Result, type Run, type TestResult } from "./e2e-shard-plan.ts";
 
 /**
  * One shard of the e2e run, for continuous integration, for a laptop that
@@ -30,7 +30,10 @@ import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, r
  * A shard runs its files one after another, since they share the port
  * range and the database. A file that fails runs once more, and the shard
  * fails only when that run fails too. Both results are reported, so a file
- * that passed only on its rerun still shows as flaky.
+ * that passed only on its rerun still shows as flaky. The rerun leaves out
+ * the tests that passed after the file's last failure, read from a second
+ * reporter's results (scripts/e2e-results.ts), and runs the whole file
+ * when those results are not whole (scripts/e2e-shard-plan.ts, rerunSkips).
  *
  * With a deadline, each run's limit leaves time for its rerun and for the
  * files after it, and a run the time left cannot hold is not started. So a
@@ -47,6 +50,7 @@ const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list] [--maco
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 const LOG_DIR = path.join(ROOT, "test-results/e2e-logs");
+const RESULTS_REPORTER = path.join(ROOT, "scripts/e2e-results.ts");
 const ACTIONS = process.env.GITHUB_ACTIONS === "true";
 
 /** e2e/macos-only.json: each file's name, and why it runs only on macOS. */
@@ -84,14 +88,35 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-async function runFile(file: string, label: string, limit: number): Promise<Omit<Run, "countsCleared">> {
+/** Where a run's results go, one JSON line per test (scripts/e2e-results.ts). */
+const resultsOf = (label: string) => path.join(LOG_DIR, `${label}.results.jsonl`);
+
+/** A run's results, or none where the file is missing or a line does not read. */
+function readResults(label: string): TestResult[] {
+  try {
+    return readFileSync(resultsOf(label), "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as TestResult);
+  } catch {
+    return [];
+  }
+}
+
+/** One run of a file, leaving out the tests named in `skips`, by their full names. */
+async function runFile(file: string, label: string, limit: number, skips: readonly string[]): Promise<Omit<Run, "countsCleared">> {
   mkdirSync(LOG_DIR, { recursive: true });
   const log = createWriteStream(path.join(LOG_DIR, `${label}.log`));
+  // A run that writes no results must not leave an older run's behind to be read as its own.
+  rmSync(resultsOf(label), { force: true });
   const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL };
   if (SHOT_DIR !== "0") env.E2E_SCREENSHOT_DIR = path.resolve(SHOT_DIR, label);
   console.log(ACTIONS ? `::group::${label}` : `\n=== ${label}`);
   const started = Date.now();
-  const child = spawn(process.execPath, ["--test", "--test-concurrency=1", "--test-reporter=spec", `e2e/${file}.e2e.ts`], {
+  const reporters = ["--test-reporter=spec", "--test-reporter-destination=stdout", `--test-reporter=${RESULTS_REPORTER}`, `--test-reporter-destination=${resultsOf(label)}`];
+  const skipping = skips.map((full) => `--test-skip-pattern=${skipPattern(full)}`);
+  if (skips.length > 0) console.log(`${label} leaves out ${skips.length} ${skips.length === 1 ? "test" : "tests"} that passed after the first run's last failure`);
+  const child = spawn(process.execPath, ["--test", "--test-concurrency=1", ...reporters, ...skipping, `e2e/${file}.e2e.ts`], {
     cwd: ROOT,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -129,16 +154,17 @@ async function runFile(file: string, label: string, limit: number): Promise<Omit
     tests: summaryCount(tail, "tests"),
     passed: summaryCount(tail, "pass"),
     todo: summaryCount(tail, "todo"),
+    leftOut: skips.length,
     timedOut,
   };
 }
 
 /** One attempt at a file, the join counts' cleanup and the run, within `limit` seconds (scripts/e2e-shard-plan.ts, attempt). */
-function attemptFile(file: string, label: string, limit: number): Promise<Run | typeof NO_TIME> {
+function attemptFile(file: string, label: string, limit: number, skips: readonly string[]): Promise<Run | typeof NO_TIME> {
   return attempt(limit, {
     now: () => Date.now() / 1000,
     clear: (seconds) => clearJoinCounts(DATABASE_URL, seconds),
-    run: (seconds) => runFile(file, label, seconds),
+    run: (seconds) => runFile(file, label, seconds, skips),
     note: (line) => console.log(ACTIONS ? `::warning title=Join counts not cleared::${label}: ${line}` : `${label}: ${line}`),
   });
 }
@@ -234,11 +260,12 @@ async function main(): Promise<number> {
       if (stopping) break;
       const rest = mine.files.slice(i + 1).reduce((sum, f) => sum + cost(f), 0);
       const firstLimit = runLimit(cost(file), left(), rest, true);
-      const first = firstLimit === null ? NO_TIME : await attemptFile(file, file, firstLimit);
+      const first = firstLimit === null ? NO_TIME : await attemptFile(file, file, firstLimit, []);
       let rerun: Result["rerun"] = null;
       if (first !== NO_TIME && !first.ok && !stopping) {
         const limit = runLimit(cost(file), left(), rest, false);
-        rerun = limit === null ? NO_TIME : await attemptFile(file, `${file}-rerun`, limit);
+        const skips = first.timedOut ? [] : rerunSkips(readResults(file), first.tests);
+        rerun = limit === null ? NO_TIME : await attemptFile(file, `${file}-rerun`, limit, skips);
       }
       results.push({ file, first, rerun });
     }
