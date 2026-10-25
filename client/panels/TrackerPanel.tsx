@@ -248,15 +248,15 @@ function TurnControls(props: { compact: boolean }) {
       <span style={{ color: theme.color.textMuted }}>{line}</span>
     </div>
   ) : (
-    // Never narrower than "Round N" (its least width, as a flex item's is by default), so where the buttons leave it less,
-    // they go under the heading rather than over the round's words (ICONS2B-OPUS-06).
+    // Never narrower than "Round N" or its clock, the wider of the two (its least width, as a flex item's is by default), so
+    // where the buttons leave it less, they go under the heading rather than over either (ICONS2B-OPUS-06, FU30-OPUS-1).
     <div style={{ flex: 1 }}>
       {/* Beside the DM's Previous and Next, "Time's up +1:05" leaves no room, so the clock goes under the round rather than splitting "Round" from its number. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2) }}>
         <span style={{ fontSize: theme.font.title, fontWeight: theme.weight.bold, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
         {timer && active ? <TimerClock state={timer} size={theme.font.body14} icon /> : null}
       </div>
-      {/* No width of its own in the heading's least width, which the round's words alone set: it fills the heading and ends in an ellipsis. */}
+      {/* No width of its own in the heading's least width, which the round and its clock alone set: it fills the heading and ends in an ellipsis. */}
       <div style={{ width: 0, minWidth: "100%", color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line}</div>
     </div>
   );
