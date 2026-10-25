@@ -160,6 +160,8 @@ Every button in the toolbar's row, Panels included, is `B` wide: 56 px with its 
 
 ### 5.5 Keys
 
+Amended by docs/design-v1-tool-cycle.md: a second press of the active tool's key also moves to the next option of its main choice.
+
 Unchanged: every key picks its tool directly, a setup tool behind Setup and any tool hidden by the pair included, because `useShortcuts` keeps reading `toolsFor` (`Room.tsx:293-298`), never the buttons the toolbar draws. One addition: the key of the active tool brings back its tucked options. It never tucks, so a held or repeated key never hides them. A key that picks another tool closes any open popover, as any tool change does.
 
 ## 6. The row
@@ -599,6 +601,8 @@ This keeps the rule today's design set (a tool's options report their drawn box 
 - **Keys.** Unchanged (5.5). Inside a popover's radio group the arrow keys belong to the group (`ownsNavigationKeys`), and in its field the letters belong to the field (`isTextField`).
 
 ### 11.1 Keys for the shortcut sheet
+
+Amended by docs/design-v1-tool-cycle.md 4.4: the `toolKeyShow` row's words.
 
 The project owner's standing rule (2026-10-16): the shortcut sheet (`?`, and Menu, This device: `client/features/device/ShortcutSheet.tsx`) lists the room's keys and its key-plus-pointer combinations (Shift or Ctrl+click, a key with a drag, Space+drag, a right or middle drag, Ctrl+wheel), from the registry in `client/state/shortcuts.ts`, `SHORTCUTS` and `BEHAVIORS` beside it, and FEATURES.md's shortcut tables mirror them (`shortcuts.test.ts` fails when they disagree). Plain taps, clicks, drags and touch gestures are not listed there, by the project owner's word: "just the key + click and key + drag behaviors". So the tap that tucks, Setup's and the pair's taps, a press on the map closing a popover, two fingers keeping it open, and the taps on the line and the "options hidden" pill stay rules of this design (5.1, 5.2, 5.4, 7.1, 7.4, 8) and get no sheet row. This design adds no key-plus-pointer combination.
 

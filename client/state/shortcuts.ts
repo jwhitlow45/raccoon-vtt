@@ -681,7 +681,15 @@ export const BEHAVIORS: readonly Behavior[] = [
 
   // The toolbar: state/shortcuts.ts toolShortcut, components/Menu.tsx in Setup and the tool menu (pages/Room.tsx Toolbar).
   // Keys are drawn whole on one line in the sheet, so a row's key stays short and its condition goes in `when`.
-  { id: "toolKeyShow", input: "The tool's key", does: "Show its hidden options again. It never hides them", roles: EVERYONE, when: "for the tool in use", device: "keys", surface: "Toolbar" },
+  {
+    id: "toolKeyShow",
+    input: "The tool's key",
+    does: "Show its hidden options and go to its next main choice, such as Area's next shape. With Shift on a letter key, the one before. It never hides them",
+    roles: EVERYONE,
+    when: "for the tool in use",
+    device: "keys",
+    surface: "Toolbar",
+  },
   {
     id: "toolMenuKeys",
     input: "Arrow keys, Home, End",

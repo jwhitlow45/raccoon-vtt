@@ -182,4 +182,16 @@ Builds after the Trap key lane lands. One lane, mostly wiring.
 
 ## 9. As built
 
-The builder fills this in the lane's docs commit with every place the build went its own way.
+Where the build went its own way:
+
+- **One cycle object per tool.** `client/features/toolChoices.ts` holds a `ToolCycle` per tool (`rulerCycle`, `areaCycle`, `drawCycle`, `fogCycle`, `builderCycle`, `placeCycle`, `trapCycle`) with `now(env)`, the "shows when", "starts on" and "held while" of 4.2, and `pick(env, value)`, rather than a bare `*Choice(state)` function, so a unit test reaches each pick through the same object the key calls. `ToolDef.cycle` points at it. Its env is the shortcut table's, less `ui`.
+- **The picks.** `pickMeasure` (`measure/rulerStore.ts`), `pickDrawMode` (`drawings/store.ts`), `pickFogMode` (`fog/store.ts`), `pickBuildMode` (`builder/store.ts`), `pickZone` (`traps/store.ts`), `pickAreaShape` (`areas/store.ts`, `withShape` and `setDraft` for a draft, the next area's shape while idle) and Add token's `setPending`, with `BLANK_KINDS` moved into `tokens/placement.ts`. Draw's `accessOf` moved into `drawings/store.ts` beside them, since the cycle reads it for "its full row".
+- **The drag check.** `stageKeysSlot.busy` is a function the canvas sets, as it sets `nudge` and `zoom`: whether `toolPointerRef` holds a pointer, a press not yet lifted as well as a drag.
+- **Shift reads the binding in effect** (`shortcutKeys()`), never the character the press typed, so a layout that reaches a letter's binding by its place still goes back with Shift.
+- **The status.** `ToolVoice` in `pages/Room.tsx` stands right after the toolbar, `data-rvtt-tool-status` for the tests, and reads `toolVoiceSlot` (`state/toolbar.ts`) alone. `sayTool` writes it.
+- **No usable option.** Where `cycleStep` finds none, the press moves nothing and says nothing. No list has a disabled option today.
+- **FEATURES.md.** 7's sentence is a bullet of its own right after the tool options bullet, not inside it, so the Trap key lane's edit of the bullet before it merges cleanly.
+- **Alignment.** 7 was wrong that no file measures the builder: the options sweep measures each builder mode's row (`e2e/optionsRoom.ts` STATES and `checkState`, run by options-dm-100 and options-dm-130). It now lists Difficult ground too, and `alignment.e2e.ts` gains no `builder-row-<mode>` roots. `shortcut-sheet-toolbar`, the sheet's Toolbar section, is measured in `alignment.e2e.ts`'s DM screens at each of the sweep's sizes at 100% and 130%.
+- **The e2e.** Section 8's rows are `shortcuts.e2e.ts` tc-a to tc-f, tc-c2 for the player's phone, and tc-x for the Trap's X. tc-c2 also covers a panel's sheet over the options (TC-ASTRA-04): the press moves Area's shape and says so with the row unmounted, and the row shows it once the sheet closes. "T while 3 Goblins wait" places them from the Monsters panel. "X with a pick waiting" is a unit case only, and the pane open is the e2e's.
+- **The audit.** options.e2e test 6 now expects D on a tucked Draw to move to Line, and steps back with Shift+D. Every other press of a tool letter the grep found picks a tool from another tool, so it keeps its meaning.
+- **The DM guide.** 7's bullet is left to the guide pass, which owns the guide.
