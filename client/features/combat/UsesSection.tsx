@@ -1,10 +1,11 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LIMITS } from "#shared/limits.ts";
 import type { Character } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { levelUps } from "#shared/rules/classResources.ts";
 import type { IconName } from "../../components/Icon.tsx";
 import { Help } from "../../components/Panel.tsx";
+import { handFocusNow } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { LegendaryPips } from "../encounter/Pips.tsx";
@@ -15,6 +16,9 @@ import { CreatureUses, useUsesPresence } from "./CombatUses.tsx";
 
 /** What Uses says with nothing in it, where class resources are added (the D&D Beyond stack's words). */
 export const NOTHING_TO_LIST = "Count Rage, Channel Divinity, Lay on Hands and the like here, picked by class and level, typed, or brought in with Re-sync from D&D Beyond.";
+
+/** Add a class resource's box, where focus goes when the sheet's opener went with what it saved. */
+const ADD_BOX = "[data-uses-add]";
 
 /**
  * Combat's Uses section on the token panel and a character's page
@@ -34,9 +38,22 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
   const dm = useRoomView((s) => s.you?.role === "dm");
   const [sheet, setSheet] = useState<SheetMode | null>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const box = useRef<HTMLElement | null>(null);
+  /*
+   * The sheet gives focus back to its opener as it closes. What it saved
+   * can take the opener with it: Remove takes the resource's Edit, and an
+   * answered level-up takes its line's Update. Focus then goes to Add,
+   * else the section's first control, never the page (D-261024-43). This
+   * runs after the commit that closed the sheet, so its own hand-back has
+   * had its turn.
+   */
+  useEffect(() => {
+    if (sheet === null) handFocusNow(box.current, opener.current, [`${ADD_BOX} button`, "button"]);
+  }, [sheet]);
   if (!character && presence === "no") return null;
   const open = (mode: SheetMode, from: HTMLElement | null) => {
     opener.current = from;
+    box.current = from?.closest("section") ?? null;
     setSheet(mode);
   };
   const resources = character?.resources ?? [];
@@ -56,7 +73,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
       {!character ? null : full ? (
         <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>
       ) : (
-        <div>
+        <div data-uses-add="">
           <OpenerButton icon="plus" onOpen={(from) => open({ kind: "add" }, from)}>
             Add a class resource
           </OpenerButton>

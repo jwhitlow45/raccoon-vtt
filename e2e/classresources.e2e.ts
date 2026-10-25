@@ -732,6 +732,48 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await closeSheets(pat);
   });
 
+  test("lp22-cr-a. by keyboard on Thorn's token panel, Remove from a resource's Edit sheet and an answered level-up's Update each take their opener away, and focus goes to Add, never the page", async () => {
+    await setUp(pat, patCdp, PHONE);
+    await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources: [...stored(), { id: randomUUID(), name: "Lucky Knack", max: 2, reset: "long" }] } });
+    await storedReads("Lucky Knack added", (list) => list.some((x) => x.name === "Lucky Knack"), true);
+    const panel = await thornsPanel(pat);
+    const uses = section(panel);
+    const focused = () =>
+      pat.evaluate(() => {
+        const { document } = globalThis as unknown as { document: { activeElement: (DomNode & { tagName: string }) | null } };
+        const el = document.activeElement;
+        return !el || el.tagName === "BODY" ? "the page" : (el.textContent ?? "").trim();
+      });
+    const focusOnAdd = (after: string) =>
+      waitFor(`focus on Add after ${after}`, () => focused().then((t) => (t === "Add a class resource" ? true : null)), 5_000).catch(async () => assert.fail(`after ${after} focus is on "${await focused()}"`));
+
+    await row(panel, "Lucky Knack").getByRole("button", { name: "Edit Lucky Knack" }).focus();
+    await pat.keyboard.press("Enter");
+    const edit = sheet(pat, "Edit Lucky Knack");
+    await edit.waitFor();
+    await edit.getByRole("button", { name: "Remove Lucky Knack" }).focus();
+    await pat.keyboard.press("Enter");
+    await edit.getByRole("button", { name: "Tap again to remove" }).focus();
+    await pat.keyboard.press("Enter");
+    await edit.waitFor({ state: "detached" });
+    await row(panel, "Lucky Knack").waitFor({ state: "detached" });
+    await focusOnAdd("Remove");
+
+    // A level past what Rage was read at asks once, and its line goes with the answer.
+    await ops.send({ t: "character.update", characterId: run.thorn, patch: { level: 7 } });
+    const line = uses.locator("div").filter({ hasText: /^Your level went up\. Update Barbarian resources\?Update$/ });
+    await line.getByRole("button", { name: "Update" }).focus();
+    await pat.keyboard.press("Enter");
+    const update = sheet(pat, "Update Barbarian resources");
+    await update.waitFor();
+    await update.getByRole("button", { name: "Update", exact: true }).focus();
+    await pat.keyboard.press("Enter");
+    await update.waitFor({ state: "detached" });
+    await line.waitFor({ state: "detached" });
+    await focusOnAdd("the level-up's Update");
+    await closeSheets(pat);
+  });
+
   test("cr-c-13. no console errors on any page", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
