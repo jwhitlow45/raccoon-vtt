@@ -30,28 +30,20 @@ export type ResourceRowsForm = "card" | "list";
 export function ClassResourceRows(props: { characterId: CharacterId; form: ResourceRowsForm; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const resources = useRoomView((s) => s.view?.characters[props.characterId]?.resources);
   if (!resources || resources.length === 0) return null;
-  return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} ownLine edit={props.edit} />;
+  return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} edit={props.edit} />;
 }
 
 /**
- * The rows themselves, for ClassResourceRows and the Class resources
- * section, which adds Edit. One status line under them says why a tap was
- * refused, such as the last use spent first on another device.
- *
- * `ownLine` puts each row's buttons on a line of their own under its words,
- * as the uses rows around them in a turn card, a row's Uses group and a
- * bar's Uses drawer stand (combat/CombatUses.tsx). Beside the words where
- * they fit, a row with short words, such as Lay on Hands' "Back on a Long
- * Rest", would stand a line shorter than one whose words push its Use under
- * them, such as Channel Divinity's.
+ * The rows themselves, with one status line under them that says why a tap
+ * was refused, such as the last use spent first on another device.
  */
-export function ResourceList(props: { characterId: CharacterId; resources: readonly ClassResource[]; back: boolean; ownLine?: boolean; edit?(r: ClassResource, opener: HTMLElement): void }) {
+function ResourceList(props: { characterId: CharacterId; resources: readonly ClassResource[]; back: boolean; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const [status, setStatus] = useState<string | null>(null);
   return (
     <div data-resource-list style={{ display: "grid", gap: theme.space(1) }}>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
         {props.resources.map((r) => (
-          <ResourceRow key={r.id} characterId={props.characterId} resource={r} back={props.back} ownLine={props.ownLine === true} edit={props.edit} onStatus={setStatus} />
+          <ResourceRow key={r.id} characterId={props.characterId} resource={r} back={props.back} edit={props.edit} onStatus={setStatus} />
         ))}
       </ul>
       {status ? (
@@ -85,14 +77,18 @@ export function amountFor(opened: Amount | null, r: Pick<ClassResource, "name" |
 
 /**
  * One resource: its name and count over the rest that brings it back, and
- * its buttons at the end of its line, or on a line of their own where the
- * panel is too narrow or the list asks for it (`ownLine`). A pool's Use…
+ * its buttons on a line of their own under its words, as the uses rows
+ * around them in a turn card, a row's Uses group and a bar's Uses drawer
+ * stand (combat/CombatUses.tsx). Beside the words where they fit, a row
+ * with short words, such as Lay on Hands' "Back on a Long Rest", would
+ * stand a line shorter than one whose words push its Use under them, such
+ * as Channel Divinity's. A pool's Use…
  * and Restore… open an amount field under the row, 16 px and numeric,
  * with Spend or Restore and Cancel. A button waits for the server's
  * answer, busy and deaf to a second tap, since the rules of a use are the
  * server's.
  */
-function ResourceRow(props: { characterId: CharacterId; resource: ClassResource; back: boolean; ownLine: boolean; edit?(r: ClassResource, opener: HTMLElement): void; onStatus(text: string | null): void }) {
+function ResourceRow(props: { characterId: CharacterId; resource: ClassResource; back: boolean; edit?(r: ClassResource, opener: HTMLElement): void; onStatus(text: string | null): void }) {
   const r = props.resource;
   const actions = useRoomActions();
   const [sent, setSent] = useState<{ n: number; back: boolean } | null>(null);
@@ -159,10 +155,9 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
           </div>
           <div style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>{RESET_WORDS[r.reset]}</div>
         </div>
-        <div style={props.ownLine ? { flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) } : { flex: "1 0 auto", display: "flex", justifyContent: "flex-end", gap: theme.space(1) }}>
+        <div style={{ flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
           <RowButton
             ref={useButton}
-            grow={props.ownLine}
             label={useLabel(r)}
             off={remaining === 0 ? `${id}-none` : undefined}
             busy={busy && amount === null && sent?.back === false}
@@ -173,7 +168,6 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
           </RowButton>
           {props.back ? (
             <RowButton
-              grow={props.ownLine}
               label={backLabel(r)}
               off={r.used === 0 ? `${id}-full` : undefined}
               busy={busy && amount === null && sent?.back === true}
@@ -254,7 +248,7 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
  * the line `off` names (docs/design-v1-combat-controls.md 9), rather than
  * dropping out of the Tab order as a disabled button would.
  */
-function RowButton(props: { ref?: Ref<HTMLButtonElement>; label: string; off?: string; busy?: boolean; expanded?: boolean; grow?: boolean; onClick(): void; children: ReactNode }) {
+function RowButton(props: { ref?: Ref<HTMLButtonElement>; label: string; off?: string; busy?: boolean; expanded?: boolean; onClick(): void; children: ReactNode }) {
   const off = props.off !== undefined;
   return (
     <Button
@@ -266,7 +260,7 @@ function RowButton(props: { ref?: Ref<HTMLButtonElement>; label: string; off?: s
       expanded={props.expanded}
       busy={props.busy}
       onClick={off ? undefined : props.onClick}
-      style={{ whiteSpace: "nowrap", ...(props.grow ? { flex: "1 1 auto" } : null), ...(off ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
+      style={{ whiteSpace: "nowrap", flex: "1 1 auto", ...(off ? { ...buttonLook("secondary", { disabled: true }), cursor: "default" } : null) }}
     >
       {props.children}
     </Button>
