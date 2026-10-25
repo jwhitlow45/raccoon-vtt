@@ -410,7 +410,7 @@ The build follows the note, with these differences and choices where it left one
 
 **The lane's order.** The reader came first and then the schema and op, as the build brief ordered, so the reader's commit carries the fill's schema in protocol.ts and the second commit the rest of 5. The re-sync review's words (client/features/pcstats/resync.ts, Resync.tsx) went in the merge's commit, since the merge's result changed their types. draft.ts is unchanged: the held result (6.2) lives in flow.ts. The reducer's rule for `used` moved into shared/rules/classResources.ts (`resourcesAfter`), so `keptResources` and `afterSync` share it.
 
-**Not in alignment.e2e.ts.** That file belonged to another lane during this build, so the review's root was not added there. resync.e2e.ts measures the review at all six sizes in ddbres-2 and ddbres-6, nothing over 1 px. Adding the root to alignment.e2e.ts is a follow-up.
+**Not in alignment.e2e.ts.** That file belonged to another lane during this build, so the review's root was not added there. resync.e2e.ts measures the review at all six sizes in ddbres-2 and ddbres-6, nothing over 1 px. Follow-up batch 30 added the root there (fu30-c): the review with 14 class resources read and 12 kept, at the six sizes, with its Class resources group folded and open.
 
 **Choices where the note was open:**
 - **One raised-count line.** Every count raised to a preset's reads "… fewer than a Paladin 5's 25 by SRD 5.2.1, so it reads 25 here. Check it.", with "by SRD 5.2.1" in all, not only for a 2014 count.
