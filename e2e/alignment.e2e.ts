@@ -2823,8 +2823,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
   });
 
   /*
-   * Follow-up batch 30's roots, here at the file's end: the token
-   * window's summary lines (LP21-BAR-3).
+   * Follow-up batch 30's roots, here at the file's end: the round header's
+   * words clear of its buttons (ICONS2B-OPUS-06) and the token window's
+   * summary lines (LP21-BAR-3).
    */
   const FU30_AT: { size: Size; scale: number }[] = [390, 320].flatMap((w) => [1, 1.3].map((scale) => ({ size: SIZES.find((s) => s.width === w)!, scale })));
   FU30_AT.push(...[1, 1.3].map((scale) => ({ size: SIZES.find((s) => s.width === 1440)!, scale })));
@@ -2837,6 +2838,25 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     { size: IC2_DESK, scale: 1 },
   ];
   const atName = (at: { size: Size; scale: number }) => `${at.size.name}${at.scale === 1 ? "" : `-${Math.round(at.scale * 100)}`}`;
+
+  test(`fu30-a. the round header's words and number never sit under Previous or Next, nor are cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (ICONS2B-OPUS-06)`, async () => {
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(atName(at));
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, at.size, at.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await openTracker(page);
+      const header = page.locator("[data-round-header]").first();
+      await sweep.add(page, "fu30-round", await roundLines(header, sweep.at));
+      await sweep.measure(page, "fu30-round", header.locator(":scope > div").first());
+      await shots.take(page, `alignment-fu30-round-${sweep.at}`);
+      await closeSheets(page);
+      lines.push(...sweep.lines);
+    }
+    assert.deepEqual(lines, [], "the round header out of line");
+  });
 
   test(`fu30-b. the token window's summary lines leave no unit alone: the saves three and three, Speed and Passive Perception together, for an adult red dragon, a mage and a panther, expanded on phones and in More stats where the bar is short, within ${LIMIT_PX} px (LP21-BAR-3, D-261024-42)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
@@ -2893,3 +2913,37 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
   });
 });
+
+/**
+ * The round header's "Round N" (ICONS2B-OPUS-06): its words under no
+ * button of the header, and whole, so no box that clips them ends first.
+ */
+async function roundLines(header: Locator, at: string): Promise<string[]> {
+  return header.evaluate(
+    (h, at) => {
+      type R = { left: number; right: number; top: number; bottom: number };
+      type El = { textContent: string | null; parentElement: El | null; getAttribute(n: string): string | null; getBoundingClientRect(): R };
+      const root = h as unknown as El & { ownerDocument: { createRange(): { selectNodeContents(n: El): void; getBoundingClientRect(): R }; defaultView: { getComputedStyle(e: El): { overflowX: string } } }; querySelectorAll(s: string): ArrayLike<El> };
+      const doc = root.ownerDocument;
+      const round = Array.from(root.querySelectorAll("span")).find((s) => /^Round \d+$/.test(s.textContent ?? ""));
+      if (!round) return [`${at} fu30-round: no "Round N" in the round header`];
+      const range = doc.createRange();
+      range.selectNodeContents(round);
+      const words = range.getBoundingClientRect();
+      const out: string[] = [];
+      for (const button of Array.from(root.querySelectorAll("button"))) {
+        const b = button.getBoundingClientRect();
+        const across = Math.min(words.right, b.right) - Math.max(words.left, b.left);
+        const down = Math.min(words.bottom, b.bottom) - Math.max(words.top, b.top);
+        if (across > 0.5 && down > 0.5) out.push(`${at} fu30-round: ${button.getAttribute("aria-label") ?? button.textContent} covers ${across.toFixed(1)} px of "${round.textContent}"`);
+      }
+      for (let box: El | null = round.parentElement; box && box !== root; box = box.parentElement) {
+        if (doc.defaultView.getComputedStyle(box).overflowX === "visible") continue;
+        const r = box.getBoundingClientRect();
+        if (words.right > r.right + 0.5 || words.left < r.left - 0.5) out.push(`${at} fu30-round: "${round.textContent}" is cut, its words from ${words.left.toFixed(1)} to ${words.right.toFixed(1)} in a box from ${r.left.toFixed(1)} to ${r.right.toFixed(1)}`);
+      }
+      return out;
+    },
+    at,
+  );
+}

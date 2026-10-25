@@ -248,27 +248,38 @@ function TurnControls(props: { compact: boolean }) {
       <span style={{ color: theme.color.textMuted }}>{line}</span>
     </div>
   ) : (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    // Never narrower than "Round N" (its least width, as a flex item's is by default), so where the buttons leave it less,
+    // they go under the heading rather than over the round's words (ICONS2B-OPUS-06).
+    <div style={{ flex: 1 }}>
       {/* Beside the DM's Previous and Next, "Time's up +1:05" leaves no room, so the clock goes under the round rather than splitting "Round" from its number. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2) }}>
         <span style={{ fontSize: theme.font.title, fontWeight: theme.weight.bold, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>Round {round}</span>
         {timer && active ? <TimerClock state={timer} size={theme.font.body14} icon /> : null}
       </div>
-      <div style={{ color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line}</div>
+      {/* No width of its own in the heading's least width, which the round's words alone set: it fills the heading and ends in an ellipsis. */}
+      <div style={{ width: 0, minWidth: "100%", color: theme.color.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{line}</div>
     </div>
   );
-  const row: CSSProperties = { display: "flex", alignItems: "center", gap: theme.space(2), minHeight: props.compact ? COMPACT_HEADER_PX : undefined };
+  // The compact form stays one line, as the round section's form rule counts it (roundHeaderForm). The full one wraps its buttons under the heading, together and at the end.
+  const row: CSSProperties = props.compact
+    ? { display: "flex", alignItems: "center", gap: theme.space(2), minHeight: COMPACT_HEADER_PX }
+    : { display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) };
+  const buttons = (children: ReactNode) => <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), marginInlineStart: "auto" }}>{children}</div>;
 
   if (you.role === "dm") {
     return (
       <div style={row}>
         {heading}
-        <Button size="sm" disabled={!canGoBack} onClick={() => actions.dispatch(turnOp("encounter.prev", store.getState()))} aria-label="Previous turn">
-          Previous
-        </Button>
-        <Button size="sm" variant="primary" disabled={entries.length === 0} onClick={() => actions.dispatch(turnOp("encounter.next", store.getState()))}>
-          {activeEntryId === null ? "Start" : "Next"}
-        </Button>
+        {buttons(
+          <>
+            <Button size="sm" disabled={!canGoBack} onClick={() => actions.dispatch(turnOp("encounter.prev", store.getState()))} aria-label="Previous turn">
+              Previous
+            </Button>
+            <Button size="sm" variant="primary" disabled={entries.length === 0} onClick={() => actions.dispatch(turnOp("encounter.next", store.getState()))}>
+              {activeEntryId === null ? "Start" : "Next"}
+            </Button>
+          </>,
+        )}
       </div>
     );
   }
@@ -276,7 +287,7 @@ function TurnControls(props: { compact: boolean }) {
   return (
     <div style={row}>
       {heading}
-      {status === "yours" || endTurn.waiting ? <EndTurnPill waiting={endTurn.waiting} onClick={() => endTurn.send(turnOp("encounter.next", store.getState()))} /> : null}
+      {status === "yours" || endTurn.waiting ? buttons(<EndTurnPill waiting={endTurn.waiting} onClick={() => endTurn.send(turnOp("encounter.next", store.getState()))} />) : null}
     </div>
   );
 }
