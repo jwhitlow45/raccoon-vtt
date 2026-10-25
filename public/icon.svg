@@ -1,11 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" role="img" aria-labelledby="title">
   <title id="title">raccoon-vtt</title>
 
-  <!-- A raccoon face drawn as negative space, so the white disc is what
-       keeps it readable on a dark background. Three colors only. Paths are
+  <!-- A raccoon face drawn as negative space on a white rounded square, the
+       white being what keeps it readable on a dark background. Three colors,
+       and a faint rim so the square still shows on a white page. Paths are
        in the original drawing's coordinates and scaled down as a group, and
        the right half mirrors the left across x = 510. -->
   <defs>
+    <!-- The iOS app icon shape, a 496 square in the middle: Apple's
+         continuous-corner rounded rectangle, not a superellipse. It is
+         UIKit's path as PaintCode measured it, with a corner radius of 22.5%
+         of the side as in Apple's icon templates. UIKit draws each corner a
+         little lopsided, so here each mirrors its first half across its
+         diagonal, and the shape is as symmetric as the face. -->
+    <path id="shape" d="M178.6 8L333.4 8C382.52 8 407.09 8 429.24 15.31L433.53 16.36C462.39 26.87 485.13 49.61 495.64 78.47L496.69 82.76C504 104.91 504 129.48 504 178.6L504 333.4C504 382.52 504 407.09 496.69 429.24L495.64 433.53C485.13 462.39 462.39 485.13 433.53 495.64L429.24 496.69C407.09 504 382.52 504 333.4 504L178.6 504C129.48 504 104.91 504 82.76 496.69L78.47 495.64C49.61 485.13 26.87 462.39 16.36 433.53L15.31 429.24C8 407.09 8 382.52 8 333.4L8 178.6C8 129.48 8 104.91 15.31 82.76L16.36 78.47C26.87 49.61 49.61 26.87 78.47 16.36L82.76 15.31C104.91 8 129.48 8 178.6 8Z"/>
+    <clipPath id="inside"><use xlink:href="#shape"/></clipPath>
     <g id="half">
       <path fill="#f38400" d="M232 238 C205 200 185 140 192 95 C198 55 225 40 262 45 C300 50 335 75 362 104 L353.54 115.8 C321.5 86.8 285 68 258 70 C232 72 218 95 216 130 C214.2 166.1 225.5 202.3 245.4 228.1 C252.1 236.9 238.4 247 232 238 Z"/>
       <!-- The tuft's left edge is the ear's inner edge offset by 9, so the gap stays even. -->
@@ -15,9 +24,15 @@
     </g>
   </defs>
 
-  <circle cx="256" cy="256" r="248" fill="#ffffff"/>
+  <use xlink:href="#shape" fill="#ffffff"/>
+  <!-- Clipped to the shape, so the rim stays inside it. scripts/icons.ts
+       leaves it out of the icons a system cuts to a shape of its own. -->
+  <use id="rim" xlink:href="#shape" fill="none" stroke="#000000" stroke-opacity="0.1" stroke-width="6" clip-path="url(#inside)"/>
 
-  <g transform="translate(256 256) scale(0.58) translate(-510 -291)">
+  <!-- The face spans 80% of the shape's width, inside Apple's icon grid.
+       It keeps the drawing's own middle, y = 291, which sets the light ears
+       a little high to balance the heavy cheeks. -->
+  <g transform="translate(256 256) scale(0.62) translate(-510 -291)">
     <use xlink:href="#half"/>
     <use xlink:href="#half" transform="translate(1020 0) scale(-1 1)"/>
     <!-- The nose sits at the muzzle tip between the mask's lower edges, large enough to stay a distinct shape at favicon size. -->

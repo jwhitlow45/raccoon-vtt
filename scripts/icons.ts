@@ -25,53 +25,95 @@ const PUBLIC = join(import.meta.dirname, "..", "public");
 const ICON_SVG = join(PUBLIC, "icon.svg");
 const ICONS_DIR = join(PUBLIC, "icons");
 
-/** The app's background, so maskable and Apple icons blend into the splash screen. */
-const BACKGROUND = "#16161a";
+/** The white of the icon's shape, which fills the icons a system cuts to its own shape. */
+const SHAPE_WHITE = "#ffffff";
 
-/**
- * The icon's white disc has a radius of 248 in its 512 viewBox. A maskable
- * icon must keep everything that matters inside the central circle of 80%
- * of its width, because launchers crop to anything from a circle to a
- * squircle. Drawing the icon at 80% of the canvas puts the disc's diameter at
- * about 77.5%, just inside that zone.
- */
-const MASKABLE_SCALE = 0.8;
+/** The icon's white rounded square in its 512 viewBox, 8 in from each edge. */
+const SHAPE = { x: 8, y: 8, size: 496 };
 
-/**
- * iOS fills transparency with black and rounds the corners itself, so the
- * Home Screen icon gets a solid background and a little room around the
- * disc. The rounded corners never reach a centered circle this size.
- */
-const APPLE_SCALE = 0.9;
-
-type AppIcon = { file: string; size: number; scale: number; background: string | null };
-
-const APP_ICONS: AppIcon[] = [
-  { file: "app-192.png", size: 192, scale: 1, background: null },
-  { file: "app-512.png", size: 512, scale: 1, background: null },
-  { file: "app-maskable-512.png", size: 512, scale: MASKABLE_SCALE, background: BACKGROUND },
-  { file: "apple-touch-icon-180.png", size: 180, scale: APPLE_SCALE, background: BACKGROUND },
-];
-
-/** The SVG's own size, from its viewBox. Density scales from there, 72 dpi being 1:1. */
+/** The SVG's own size, from its viewBox. */
 const SVG_SIZE = 512;
 
-async function rasterize(svg: Buffer, icon: AppIcon): Promise<Buffer> {
-  const inner = Math.round(icon.size * icon.scale);
-  const art = await sharp(svg, { density: (72 * inner) / SVG_SIZE })
-    .resize(inner, inner)
-    .png()
-    .toBuffer();
-  if (!icon.background) return sharp(art).png({ compressionLevel: 9 }).toBuffer();
-  const offset = Math.round((icon.size - inner) / 2);
-  return sharp({ create: { width: icon.size, height: icon.size, channels: 3, background: icon.background } })
-    .composite([{ input: art, left: offset, top: offset }])
-    .png({ compressionLevel: 9 })
-    .toBuffer();
+/**
+ * A maskable icon must keep everything that matters inside the central
+ * circle of 80% of its width, because launchers crop to anything from a
+ * circle to a squircle.
+ */
+const MASKABLE_SAFE = 0.8;
+
+/**
+ * How each icon shows the SVG:
+ * - "icon": as it is, the shape with transparent corners, for a page or
+ *   launcher that shows the icon unmasked.
+ * - "shape": the shape's square filled to its edges, for iOS, which cuts its
+ *   own rounded square from the Home Screen icon and fills transparency with
+ *   black. The face sits on it as on the icon.
+ * - "maskable": widened until the face fits the maskable safe circle, and
+ *   filled to the edges.
+ * Corners or a rim drawn into the last two would show inside the system's
+ * own shape, so they are full squares of the shape's white with no rim.
+ */
+type View = "icon" | "shape" | "maskable";
+
+type AppIcon = { file: string; size: number; view: View };
+
+const APP_ICONS: AppIcon[] = [
+  { file: "app-192.png", size: 192, view: "icon" },
+  { file: "app-512.png", size: 512, view: "icon" },
+  { file: "app-maskable-512.png", size: 512, view: "maskable" },
+  { file: "apple-touch-icon-180.png", size: 180, view: "shape" },
+];
+
+const RIM = /\s*<use id="rim"[^>]*\/>/;
+const VIEW_BOX = /viewBox="0 0 512 512"/;
+
+/** The SVG with its rim taken out and its viewBox set to the square at (x, y) of side `side`. */
+function filled(svg: string, x: number, y: number, side: number): string {
+  if (!RIM.test(svg) || !VIEW_BOX.test(svg)) throw new Error("public/icon.svg has no rim or no 512 viewBox to replace");
+  return svg.replace(RIM, "").replace(VIEW_BOX, `viewBox="${x} ${y} ${side} ${side}"`);
+}
+
+/** Draws `svg` whose viewBox is `side` wide at `size` px, flattened onto `background` unless it is null. */
+async function draw(svg: string, side: number, size: number, background: string | null): Promise<Buffer> {
+  // Density scales from the viewBox's size, 72 dpi being 1:1.
+  const art = sharp(Buffer.from(svg), { density: (72 * size) / side }).resize(size, size);
+  return (background ? art.flatten({ background }) : art).png({ compressionLevel: 9 }).toBuffer();
+}
+
+/**
+ * How far the face reaches from the icon's middle, in viewBox units: the
+ * farthest pixel that is not the shape's white, drawn 1:1 with the rim out.
+ * Measured rather than written down, so the maskable icon follows the art.
+ */
+async function faceReach(svg: string): Promise<number> {
+  const { data, info } = await sharp(Buffer.from(filled(svg, 0, 0, SVG_SIZE)), { density: 72 })
+    .resize(SVG_SIZE, SVG_SIZE)
+    .flatten({ background: SHAPE_WHITE })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const middle = SVG_SIZE / 2;
+  let reach = 0;
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      const i = (y * info.width + x) * info.channels;
+      if (data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255) continue;
+      // The pixel's far corner, so the face's edge is inside the circle, not only its pixel centers.
+      reach = Math.max(reach, Math.hypot(Math.abs(x + 0.5 - middle) + 0.5, Math.abs(y + 0.5 - middle) + 0.5));
+    }
+  }
+  return reach;
+}
+
+async function rasterize(svg: string, icon: AppIcon): Promise<Buffer> {
+  if (icon.view === "icon") return draw(svg, SVG_SIZE, icon.size, null);
+  if (icon.view === "shape") return draw(filled(svg, SHAPE.x, SHAPE.y, SHAPE.size), SHAPE.size, icon.size, SHAPE_WHITE);
+  const side = (2 * (await faceReach(svg))) / MASKABLE_SAFE;
+  const corner = SVG_SIZE / 2 - side / 2;
+  return draw(filled(svg, corner, corner, side), side, icon.size, SHAPE_WHITE);
 }
 
 async function buildAppIcons(): Promise<void> {
-  const svg = await readFile(ICON_SVG);
+  const svg = await readFile(ICON_SVG, "utf8");
   await mkdir(ICONS_DIR, { recursive: true });
   for (const icon of APP_ICONS) {
     const png = await rasterize(svg, icon);

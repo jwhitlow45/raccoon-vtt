@@ -421,7 +421,7 @@ export const CREDITS: CreditGroup[] = [
         author: "RaccoonVTT",
         source: "public/icon.svg",
         license: "original",
-        changes: "Drawn as an SVG after the party's crest. The PNGs are rasterized from it by scripts/icons.ts.",
+        changes: "Drawn as an SVG after the party's crest, on the iOS app icon shape. The PNGs are rasterized from it by scripts/icons.ts.",
       },
     ],
   },
