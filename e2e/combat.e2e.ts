@@ -162,6 +162,34 @@ function headerRoom(page: Page): Promise<HeaderRoom> {
 }
 
 /**
+ * Resizes the window's height with the tracker's sheet open until its
+ * scroller has room for the compact header and two rows, and none for the
+ * full header and two, so the room alone would pick the compact row (3.1).
+ * A resize, as test 3's is, not a reload. Its body is not as tall as the
+ * window, and the page's pixels are `scale` layout px, so each step takes
+ * what is left of the way and stops within 6 px. It stops too once the
+ * header leaves its full form, as it does where the row has no room for
+ * "Round N" beside its buttons.
+ */
+async function toCompactBand(page: Page, view: { width: number; height: number; scale: number }): Promise<{ room: HeaderRoom; height: number; low: number }> {
+  let room = await headerRoom(page);
+  const low = room.compactHeader + 2 * room.row;
+  let height = view.height;
+  for (let i = 0; i < 12 && room.form === "full" && !(room.scroller >= low + 1 && room.scroller <= low + 6); i++) {
+    height = Math.round(height - (room.scroller - (low + 3)) * view.scale);
+    await page.setViewportSize({ width: view.width, height });
+    let last = -1;
+    room = await headerRoom(page);
+    while (room.scroller !== last) {
+      last = room.scroller;
+      await page.waitForTimeout(50);
+      room = await headerRoom(page);
+    }
+  }
+  return { room, height, low };
+}
+
+/**
  * Scrolls the order through one whole standard row interval from `from`,
  * 2 px at a time, and fails at an offset where the stuck header leaves the
  * scroller's top or no whole row shows under it (docs/design-v1-combat-flow.md 3.1).
@@ -731,27 +759,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
       await setUp(dm, dmCdp, view);
       await openTracker(dm);
-      let room = await headerRoom(dm);
-      // Room for the compact row and two rows, not for the full header and two: the room alone picks the compact row.
-      const low = room.compactHeader + 2 * room.row;
-      /*
-       * Where the full header sticks, a resize with the sheet open brings the
-       * scroller just over that, as test 3's does, not a reload. Its body is
-       * not as tall as the window, and the page's pixels are 1.3 layout px,
-       * so each step takes what is left of the way and stops within 6 px.
-       */
-      let height = view.height;
-      for (let i = 0; i < 12 && room.form === "full" && !(room.scroller >= low + 1 && room.scroller <= low + 6); i++) {
-        height = Math.round(height - (room.scroller - (low + 3)) * view.scale);
-        await dm.setViewportSize({ width: view.width, height });
-        let last = -1;
-        room = await headerRoom(dm);
-        while (room.scroller !== last) {
-          last = room.scroller;
-          await dm.waitForTimeout(50);
-          room = await headerRoom(dm);
-        }
-      }
+      const { room, height, low } = await toCompactBand(dm, view);
       assert.ok(room.scroller >= low && room.form !== "full", `${at}: no height gives a scroller over ${low} px with no room for the full header: the last was ${room.scroller} px at ${height}, ${room.form}`);
       const round = await dm.locator("[data-round-header]").evaluate((header) => {
         type R = { left: number; right: number };
@@ -771,6 +779,38 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       assert.ok(round.cut <= 0.5, `${at}: "${round.words}" is cut by ${round.cut.toFixed(1)} px in a ${room.scroller} px sheet's ${room.form} header`);
       assert.equal(room.form, view.form, `${at}: a ${room.scroller} px sheet's header`);
       assert.equal((await measure(dm)).sticky, view.form !== "static", `${at}: the header's stickiness`);
+    }
+  });
+
+  test("fu31-n. a clock past its time drops the compact round header to scroll in full, and Next's fresh countdown, which fits beside Previous and Next, brings the compact row back with no resize, at 430 x 932 at 130% (FU31 review F2, ASTRA-02)", async () => {
+    const view = { width: 430, height: 932, scale: 1.3 };
+    const header = dm.locator("[data-round-header]");
+    const turn = dmSocket.state?.encounter?.activeEntryId ?? null;
+    assert.ok(turn, "a fight under way, with a turn to time");
+    let moved = false;
+    try {
+      await setUp(dm, dmCdp, view);
+      await openTracker(dm);
+      const { room } = await toCompactBand(dm, view);
+      assert.equal(room.form, "compact", `the header in a ${room.scroller} px sheet with no clock`);
+      // Within 8 s the turn's clock is past its time, and "Time's up" leaves the row no room. The next turn's 8 s are time enough to see the row come back.
+      await ops.send({ t: "room.update", settings: { turnTimerSec: 8 } });
+      await waitFor("the header scrolling in full, its clock past its time", async () => (await headerRoom(dm)).form === "static" || null);
+      assert.match((await header.getByRole("timer").textContent()) ?? "", /Time's up/);
+      await shots.take(dm, "fu31-round-clock-over");
+      await header.getByRole("button", { name: "Next", exact: true }).click();
+      moved = true;
+      // Nothing resizes: only the shorter clock and the new turn's words tell the header.
+      await waitFor("the compact row back with the next turn's countdown", async () => (await headerRoom(dm)).form === "compact" || null, 4_000);
+      assert.doesNotMatch((await header.getByRole("timer").textContent()) ?? "", /Time's up/);
+      await shots.take(dm, "fu31-round-clock-fresh");
+    } finally {
+      await ops.send({ t: "room.update", settings: { turnTimerSec: 0 } });
+      if (moved) {
+        await header.getByRole("button", { name: "Previous turn", exact: true }).click();
+        await waitFor("the turn back where it was", () => dmSocket.state?.encounter?.activeEntryId === turn || null);
+      }
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     }
   });
 
