@@ -2358,7 +2358,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     await waitFor("no fight", () => (dmSocket.state?.encounter ? null : true));
   });
 
-  test("fu31-c. by keyboard on a desk, the DM's Delete this token hands focus to the empty panel's line (LP22-SECT-1)", async () => {
+  test("fu31-l. by keyboard on a desk, the DM's Delete this token hands focus to the empty panel's line (LP22-SECT-1)", async () => {
     const doomed = { id: randomUUID(), at: cell(6, 4) };
     await setUp(dm, dmCdp, DESK, null);
     await ops.send({ t: "token.create", token: { id: doomed.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: doomed.at.x, y: doomed.at.y, disposition: "hostile", kind: "monster", name: "Doomed Wolf", actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
