@@ -81,6 +81,13 @@ describe("Combat's Uses for a character", () => {
     assert.ok(markup.indexOf("Your level went up") < markup.indexOf("Edit Rage"), "the question comes first");
   });
 
+  test("its rows are a list named for its uses, or for its class resources beside a block's uses (LP22-SECT-4)", () => {
+    assert.match(section({ resources: [rage] }), /<ul aria-label="Pat&#x27;s uses"/);
+    const mixed = section({ resources: [rage], actor: actor({ legendary: { actionsMax: 3, actionsUsed: 0, resistMax: 0, resistUsed: 0 } }) });
+    assert.match(mixed, /<ul aria-label="Pat&#x27;s uses"/, "the block's list");
+    assert.match(mixed, /<ul aria-label="Pat&#x27;s class resources"/, "the class resources apart from it");
+  });
+
   test("a full list says so in place of Add", () => {
     const many: ClassResource[] = Array.from({ length: LIMITS.resourcesPerCharacter }, (_, i) => ({ id: `o${i}`, name: `Own ${i}`, max: 1, used: 0, reset: "long" }));
     const markup = section({ resources: many });

@@ -28,7 +28,7 @@ function render(pat: Character, element: ReturnType<typeof createElement>): stri
 
 const rows = (resources: ClassResource[] | undefined, form: "card" | "list") => {
   const pat = character("pat", { name: "Pat", ...(resources ? { resources } : {}) });
-  return render(pat, createElement(ClassResourceRows, { characterId: "pat", form }));
+  return render(pat, createElement(ClassResourceRows, { characterId: "pat", form, label: "Pat's uses" }));
 };
 
 /** Each button's tag, from `<button` to its closing `>`, in order. */

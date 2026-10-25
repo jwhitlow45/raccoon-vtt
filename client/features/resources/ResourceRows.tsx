@@ -27,21 +27,21 @@ export type ResourceRowsForm = "card" | "list";
  * viewer whose copy holds none, since they reach only the DM and the
  * character's players.
  */
-export function ClassResourceRows(props: { characterId: CharacterId; form: ResourceRowsForm; edit?(r: ClassResource, opener: HTMLElement): void }) {
+export function ClassResourceRows(props: { characterId: CharacterId; form: ResourceRowsForm; label: string; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const resources = useRoomView((s) => s.view?.characters[props.characterId]?.resources);
   if (!resources || resources.length === 0) return null;
-  return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} edit={props.edit} />;
+  return <ResourceList characterId={props.characterId} resources={resources} back={props.form === "list"} label={props.label} edit={props.edit} />;
 }
 
 /**
  * The rows themselves, with one status line under them that says why a tap
  * was refused, such as the last use spent first on another device.
  */
-function ResourceList(props: { characterId: CharacterId; resources: readonly ClassResource[]; back: boolean; edit?(r: ClassResource, opener: HTMLElement): void }) {
+function ResourceList(props: { characterId: CharacterId; resources: readonly ClassResource[]; back: boolean; label: string; edit?(r: ClassResource, opener: HTMLElement): void }) {
   const [status, setStatus] = useState<string | null>(null);
   return (
     <div data-resource-list style={{ display: "grid", gap: theme.space(1) }}>
-      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
+      <ul aria-label={props.label} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(3) }}>
         {props.resources.map((r) => (
           <ResourceRow key={r.id} characterId={props.characterId} resource={r} back={props.back} edit={props.edit} onStatus={setStatus} />
         ))}

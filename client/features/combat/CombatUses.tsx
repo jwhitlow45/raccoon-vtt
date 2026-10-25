@@ -117,7 +117,8 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
         </ul>
       ) : null}
       {waits ? props.failed ? <SrdLoadFailed what="The uses" inline /> : <Loading text="Loading the uses…" style={{ minHeight: theme.touch }} /> : null}
-      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} edit={props.edit} /> : null}
+      {/* Named as the uses list where it is the only one (docs/design-v1-token-sections.md 7), and apart from it beside a block's uses. */}
+      {characterId !== undefined ? <ClassResourceRows characterId={characterId} form={form} label={rows.length > 0 ? `${props.name}'s class resources` : `${props.name}'s uses`} edit={props.edit} /> : null}
       {shown ? (
         <p role="status" style={{ margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: shown.refused ? theme.color.dangerText : theme.color.textMuted }}>
           {shown.text}
