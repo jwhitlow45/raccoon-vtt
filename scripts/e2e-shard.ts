@@ -14,6 +14,7 @@ import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, r
  *   node scripts/e2e-shard.ts <index> <count> --list         print every shard's files and run nothing
  *   node scripts/e2e-shard.ts <index> <count> --macos-only   shard only the files of e2e/macos-only.json
  *   node scripts/e2e-shard.ts <index> <count> --deadline <unix seconds>   report by then, as a CI job's limit needs
+ *   node scripts/e2e-shard.ts <index> <count> --only <file,...>   shard only these files, as a docs-only push runs guide (scripts/ci-scope.ts)
  *
  * It needs dist/ from `pnpm build`, and reads what the e2e files read:
  * E2E_PORT, DATABASE_URL and E2E_SCREENSHOT_DIR. Each run's output is also
@@ -46,7 +47,7 @@ import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, r
  */
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list] [--macos-only] [--deadline <unix seconds>]   (index counted from 1)";
+const USAGE = "Usage: node scripts/e2e-shard.ts <index> <count> [--list] [--macos-only] [--deadline <unix seconds>] [--only <file,...>]   (index counted from 1)";
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 const LOG_DIR = path.join(ROOT, "test-results/e2e-logs");
@@ -188,7 +189,7 @@ function report(index: number, count: number, results: Result[]): void {
   if (outputFile) appendFileSync(outputFile, `reran=${anyRerun(results)}\n`);
 }
 
-type Args = { index: number; count: number; list: boolean; macosOnly: boolean; deadline: number | null };
+type Args = { index: number; count: number; list: boolean; macosOnly: boolean; deadline: number | null; only: string[] | null };
 
 /** The arguments, or null when they make no sense. */
 function parseArgs(argv: readonly string[]): Args | null {
@@ -200,13 +201,20 @@ function parseArgs(argv: readonly string[]): Args | null {
     if (!Number.isFinite(deadline)) return null;
     rest.splice(at, 2);
   }
+  let only: string[] | null = null;
+  const onlyAt = rest.indexOf("--only");
+  if (onlyAt !== -1) {
+    only = (rest[onlyAt + 1] ?? "").split(",").filter(Boolean);
+    if (only.length === 0) return null;
+    rest.splice(onlyAt, 2);
+  }
   const list = rest.includes("--list");
   const macosOnly = rest.includes("--macos-only");
   const [indexText, countText, ...extra] = rest.filter((a) => a !== "--list" && a !== "--macos-only");
   const index = Number(indexText);
   const count = Number(countText);
   if (extra.length > 0 || !Number.isInteger(count) || count < 1 || !Number.isInteger(index) || index < 1 || index > count) return null;
-  return { index, count, list, macosOnly, deadline };
+  return { index, count, list, macosOnly, deadline, only };
 }
 
 async function main(): Promise<number> {
@@ -215,7 +223,7 @@ async function main(): Promise<number> {
     console.error(USAGE);
     return 2;
   }
-  const { index, count, list, macosOnly, deadline } = args;
+  const { index, count, list, macosOnly, deadline, only } = args;
 
   const durations = JSON.parse(readFileSync(path.join(ROOT, "e2e/durations.json"), "utf8")) as Durations;
   const every = readdirSync(path.join(ROOT, "e2e"))
@@ -227,12 +235,17 @@ async function main(): Promise<number> {
     console.error(`e2e/macos-only.json names ${stale.join(", ")}, which ${stale.length === 1 ? "is not an e2e file" : "are not e2e files"}`);
     return 2;
   }
+  const unknown = (only ?? []).filter((f) => !every.includes(f));
+  if (unknown.length > 0) {
+    console.error(`--only names ${unknown.join(", ")}, which ${unknown.length === 1 ? "is not an e2e file" : "are not e2e files"}`);
+    return 2;
+  }
   const isMacosOnly = (f: string) => Object.hasOwn(onMac, f);
-  let files = every;
-  if (macosOnly) files = every.filter(isMacosOnly);
+  let files = only === null ? every : every.filter((f) => only.includes(f));
+  if (macosOnly) files = files.filter(isMacosOnly);
   else if (process.platform !== "darwin") {
-    files = every.filter((f) => !isMacosOnly(f));
-    for (const f of every.filter(isMacosOnly)) console.log(`${f} runs only on macOS (e2e/macos-only.json): ${onMac[f]}`);
+    for (const f of files.filter(isMacosOnly)) console.log(`${f} runs only on macOS (e2e/macos-only.json): ${onMac[f]}`);
+    files = files.filter((f) => !isMacosOnly(f));
   }
   const shards = plan(files, durations, count);
   const cost = (f: string) => secondsFor(durations, f);

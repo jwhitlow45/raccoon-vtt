@@ -127,6 +127,14 @@ These jobs run on Ubuntu:
   gets a postgres service container of its own and runs its share of
   `e2e/*.e2e.ts`, one file at a time, in Google Chrome.
 
+A push to a `ci/` branch that changes only docs against its merge base
+with `main` runs just the typecheck, the unit tests, the build and
+`e2e/guide.e2e.ts`, which draws the DM guide from `docs/`, and still ends
+green, so the deploy gate takes it. The docs are the files under `docs/`
+and the Markdown files outside `client/`, `server/` and `shared/`, whose
+Markdown the app may import (`scripts/ci-scope.ts`). Any other push, and
+every push to `main`, runs everything.
+
 The app draws its text in Inter, which it serves itself from
 `public/fonts/`, so a page lays out the same on the Linux shards as on a
 phone or a Mac. Each shard still installs Roboto and makes it the system
