@@ -181,6 +181,9 @@ describe("the shortcut table", () => {
       assert.equal(shortcutKeys({ "tool:fog": "v" })["tool:fog"], "f", "V is Select's");
       assert.equal(shortcutKeys({ "tool:fog": "v", "tool:select": "f" })["tool:fog"], "v", "a swap holds");
       assert.equal(shortcutKeys({})["tool:fog"], "f");
+      const clash = shortcutKeys({ "tool:fog": "x" });
+      assert.equal(clash["tool:fog"], "f", "X is Trap's");
+      assert.equal(clash["tool:trap"], "x");
     });
   });
 
