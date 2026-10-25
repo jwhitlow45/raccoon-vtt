@@ -11,7 +11,7 @@ import type { RoomActions } from "../../state/types.ts";
 import { useRoomStore } from "../../state/view.ts";
 import { areaCreatures, choiceOf, draftCaster, savedChoice, seeSelection, type AreaCreature, type SavedChoice, type SelectionSeen } from "./caster.ts";
 import { areaContext } from "./coverage.ts";
-import { aoeFrame, draftTemplate, newDraft, templateInput, type AreaDraft, type DraftTemplate, type SnapMode } from "./placement.ts";
+import { aoeFrame, draftTemplate, newDraft, templateInput, withShape, type AreaDraft, type DraftTemplate, type SnapMode } from "./placement.ts";
 
 /**
  * The area tool's state, which lives on this device only.
@@ -224,6 +224,17 @@ export function setDraft(env: AreaEnv, draft: AreaDraft | null): void {
   if (prev.draft && prev.shared && (!draft || draft.id !== prev.draft.id)) env.actions.sendEph({ k: "aoeEnd", id: prev.draft.id });
   areaStore.setState({ draft, shared: draft && draft.id === prev.draft?.id ? prev.shared : false, ...(draft ? { shape: draft.shape } : null) });
   if (draft && areaStore.getState().shared) sendFrame(env);
+}
+
+/**
+ * A new shape, which the row and the tool's key both pick: the next area's
+ * while idle, or the draft's, which takes the new shape's own size and
+ * keeps its point, aim, caster and sharing (placement.ts withShape).
+ */
+export function pickAreaShape(env: AreaEnv, shape: AreaShape): void {
+  const { draft } = env.area.store.getState();
+  if (draft) setDraft(env, withShape(draft, shape));
+  else env.area.store.setState({ shape });
 }
 
 export function sendFrame(env: AreaEnv): void {

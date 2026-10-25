@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { TerrainId } from "#shared/model.ts";
-import { scopeSlot, useScoped } from "../../state/scope.ts";
+import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { BrushSize, Point } from "./cells.ts";
 
 /**
@@ -50,6 +50,26 @@ export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
   { value: "pillar", label: "Pillar" },
   { value: "stairs", label: "Stairs" },
 ];
+
+/** Each mode's whole name, which its tile and the chip's name keep, and the short word the chip shows (docs/design-v1-tool-options.md 6.2), in the row's order, which the tool's key steps through too. */
+export const BUILD_MODES: readonly { value: BuildMode; label: string; short: string }[] = [
+  { value: "paint", label: "Brush", short: "Brush" },
+  { value: "rect", label: "Rectangle room", short: "Rect room" },
+  { value: "poly", label: "Shape room", short: "Shape room" },
+  { value: "erase", label: "Erase", short: "Erase" },
+  { value: "eraseRect", label: "Erase area", short: "Erase area" },
+  { value: "edge", label: "Walls and doors", short: "Walls" },
+  { value: "height", label: "Heights and stairs", short: "Heights" },
+  { value: "rough", label: "Difficult ground", short: "Difficult" },
+  { value: "label", label: "Label", short: "Label" },
+  { value: "light", label: "Lights", short: "Lights" },
+  { value: "stamp", label: "Stamp", short: "Stamp" },
+];
+
+/** A new mode, which drops a shape room's corners, a rectangle's start, a wall run and the note. A selected stamp stays selected. */
+export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
+  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], note: null });
+}
 
 /** A gesture's bookkeeping that the canvas never draws. */
 export type BuilderGesture = {

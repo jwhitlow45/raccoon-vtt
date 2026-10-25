@@ -1,7 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import type { CellRect } from "#shared/model.ts";
 import type { LevelBand } from "#shared/srd/traps.ts";
-import { scopeSlot } from "../../state/scope.ts";
+import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 import { START_BLANK, type ZoneKind } from "./rules.ts";
 
 /** A zone being drawn with the Trap tool, drawn on the map until the create lands. */
@@ -32,3 +32,15 @@ export const trapSlot = scopeSlot(() => ({
   /** The pointer gesture in progress with the Trap tool. */
   gesture: null as { start: { x: number; y: number }; world: { x: number; y: number }; hit: string | null; moved: boolean } | null,
 }));
+
+/** The kinds of zone a new trap draws, in the row's order, which the tool's key steps through too. */
+export const ZONE_KINDS: readonly { value: ZoneKind; label: string }[] = [
+  { value: "squares", label: "Squares" },
+  { value: "wire", label: "Trip wire" },
+  { value: "door", label: "Door" },
+];
+
+/** What a drag or a tap draws for a new trap. Start from stays as it is. */
+export function pickZone(scope: RoomScope, kind: ZoneKind): void {
+  scope.get(trapSlot).store.setState({ kind });
+}

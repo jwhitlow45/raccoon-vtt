@@ -1,12 +1,10 @@
 import type { ReactNode } from "react";
 import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
-import type { EphEvent } from "#shared/protocol.ts";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { theme } from "../../lib/theme.ts";
 import { groundSource, seenGround } from "../builder/heights/ground.ts";
-import { scopeSlot, useScoped } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { OptButton, OptionsStrip, OptSegmented } from "./controls.tsx";
@@ -21,13 +19,12 @@ import {
   lift,
   measureStops,
   type GroundReader,
-  type LastTap,
-  type RulerGesture,
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
+import { MEASURES, pickMeasure, publish, rulerSlot, shares } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
-import { heldKey, saveWalk, savedWalk, walkShown, walkText } from "./walkRuler.ts";
+import { heldKey, walkShown, walkText } from "./walkRuler.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /**
@@ -44,30 +41,6 @@ import { TOOL_ORDER } from "../toolbarOrder.ts";
  * `ruler` (features section 4), shared exactly when the live ruler was. Its
  * owner and the DM remove it from the list under the ruler's options.
  */
-
-type RulerToolState = {
-  ruler: RulerState | null;
-  /** The DM's Share toggle. Players always share. */
-  share: boolean;
-  /** Whether a frame of the current ruler went to the server, so its end must too. */
-  sent: boolean;
-  /** Measure: Walking rather than Straight (docs/design-v1-movement.md 3.3), as this device remembers it. */
-  walk: boolean;
-};
-
-/** One Room page's ruler: the ruler shown, the gesture in progress, and the context its option buttons act through. */
-const rulerSlot = scopeSlot(() => ({
-  store: createStore<RulerToolState>(() => ({ ruler: null, share: false, sent: false, walk: savedWalk() })),
-  gesture: null as (RulerGesture & { screen: { x: number; y: number }; before: RulerState | null }) | null,
-  /** Room.tsx renders Options without a tool context, so the buttons reach the tool through this. */
-  activeCtx: null as ToolContext | null,
-  /** The last tap, and the ruler as it was before it, so a second tap close behind keeps that ruler. */
-  lastTap: null as LastTap | null,
-}));
-
-function shares(ctx: Pick<ToolContext, "role" | "scope">): boolean {
-  return ctx.role === "player" || ctx.scope.get(rulerSlot).store.getState().share;
-}
 
 function sceneToken(ctx: ToolContext, id: string | null): RulerToken | undefined {
   if (!id) return undefined;
@@ -86,22 +59,6 @@ function groundOf(ctx: ToolContext): GroundReader {
   if (!view) return () => 0;
   const src = groundSource(view, ctx.scene, ctx.role);
   return (cell) => seenGround(src, cell) ?? 0;
-}
-
-/** Shows the ruler here and, when it is shared, everywhere on the scene. */
-function publish(ctx: ToolContext, ruler: RulerState | null): void {
-  const rulerStore = ctx.scope.get(rulerSlot).store;
-  const prev = rulerStore.getState();
-  if (!ruler) {
-    if (prev.ruler) ctx.actions.sendEph({ k: "rulerEnd", id: prev.ruler.id }, { localOnly: !prev.sent });
-    rulerStore.setState({ ruler: null, sent: false });
-    return;
-  }
-  const shared = shares(ctx);
-  const points = allStops(ruler);
-  const e: EphEvent = { k: "ruler", id: ruler.id, points, shared, ...(prev.walk ? { walk: true as const } : {}) };
-  ctx.actions.sendEph(e, { localOnly: !shared });
-  rulerStore.setState({ ruler: { ...ruler, shared }, sent: prev.sent || shared });
 }
 
 function onDown(p: ToolPointer, ctx: ToolContext): void {
@@ -182,17 +139,6 @@ function onCancel(ctx: ToolContext): void {
 }
 
 /**
- * The Measure chip's choices. Its compact form shows the short words, so a
- * DM's row with kept rulers keeps Measure and the kept rulers' chip in view
- * on a 360 px phone: Shared and Clear as their icons, "Line" or "Walk",
- * Keep and "Kept (12)" take 338 px of the row's 344.
- */
-const MEASURES = [
-  { value: "straight", label: "Straight", short: "Line" },
-  { value: "walking", label: "Walking", short: "Walk" },
-] as const;
-
-/**
  * The Ruler's row (docs/design-v1-tool-options.md 9.2): Shared for the DM,
  * Measure, Keep and Clear, and the kept rulers behind a chip. Its line is
  * the hint, or the reading with the diagonal rule: a walking ruler's walk
@@ -202,6 +148,7 @@ const MEASURES = [
  * (walkRuler.ts walkShown).
  */
 function RulerOptions(props: { role: "dm" | "player" }) {
+  const scope = useRoomScope();
   const tool = useScoped(rulerSlot);
   const rulerStore = tool.store;
   const { ruler, share, walk } = useStore(rulerStore);
@@ -298,14 +245,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
               label="Measure"
               value={walk ? "walking" : "straight"}
               options={MEASURES}
-              onChange={(v) => {
-                const next = v === "walking";
-                saveWalk(next);
-                rulerStore.setState({ walk: next });
-                const ctx = tool.activeCtx;
-                const current = rulerStore.getState().ruler;
-                if (ctx && current) publish(ctx, current);
-              }}
+              onChange={(v) => pickMeasure(scope, v)}
             />
           ),
         },

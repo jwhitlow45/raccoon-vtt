@@ -5,7 +5,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ChoiceTiles, ConfirmButton, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
 import { brushLabel, publishLabel, publishShort, type FogMode } from "./shapes.ts";
-import { BRUSH_WIDTHS, useFogStore, type FogShapeKind } from "./store.ts";
+import { BRUSH_WIDTHS, FOG_MODES, pickFogMode, useFogStore, type FogShapeKind } from "./store.ts";
 import { closeFogPolygon } from "./tool.tsx";
 import { EXPLORED_UNDO_HINT, visionOn } from "../vision/sightMode.ts";
 
@@ -83,15 +83,11 @@ export default function FogOptions() {
           priority: 1 + drop,
           compact: true,
           control: (
-            // Named for the fog itself, so they never read like the publish button.
             <OptSegmented<FogMode>
               label="Clear or add fog"
               value={s.mode}
-              onChange={(mode) => set({ mode })}
-              options={[
-                { value: "reveal", label: "Clear fog", title: "Clear fog" },
-                { value: "hide", label: "Add fog", title: "Add fog" },
-              ]}
+              onChange={(mode) => pickFogMode(scope, mode)}
+              options={FOG_MODES.map((m) => ({ ...m, title: m.label }))}
             />
           ),
         },

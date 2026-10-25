@@ -29,6 +29,14 @@ export type Pending =
 
 export const DEFAULT_PENDING: Pending = { kind: "blank", tokenKind: "monster" };
 
+/** The blank tokens the tool offers, in the row's order, which the tool's key steps through too. */
+export const BLANK_KINDS: readonly { value: TokenKind; label: string }[] = [
+  { value: "monster", label: "Blank monster" },
+  { value: "npc", label: "Blank NPC" },
+  { value: "object", label: "Blank object" },
+  { value: "pc", label: "Blank player character" },
+];
+
 /** One Room page's pending choice (client/state/scope.ts), and where the tap that places it started. */
 export const placementSlot = scopeSlot(() => ({
   store: createStore<{ pending: Pending }>(() => ({ pending: DEFAULT_PENDING })),

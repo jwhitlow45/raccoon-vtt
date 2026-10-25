@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { scopeSlot, useScoped } from "../../state/scope.ts";
+import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { FogMode, Point } from "./shapes.ts";
 
 /**
@@ -46,4 +46,15 @@ export function useFogStore(): StoreApi<FogToolState> {
 
 export function resetFogGesture(store: StoreApi<FogToolState>): void {
   store.setState({ rect: null, poly: [], stroke: [], note: null });
+}
+
+/** Clear or add fog, in the row's order, which the tool's key steps through too. Named for the fog itself, so they never read like the publish button. */
+export const FOG_MODES: readonly { value: FogMode; label: string }[] = [
+  { value: "reveal", label: "Clear fog" },
+  { value: "hide", label: "Add fog" },
+];
+
+/** Whether the next shape clears fog or adds it. A polygon keeps its corners and a draft keeps waiting. */
+export function pickFogMode(scope: RoomScope, mode: FogMode): void {
+  scope.get(fogSlot).store.setState({ mode });
 }

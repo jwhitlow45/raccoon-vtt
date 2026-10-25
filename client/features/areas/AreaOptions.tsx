@@ -42,7 +42,6 @@ import {
   liveOrigin,
   normalizeTriggers,
   usesFrom,
-  withShape,
   withSlows,
   type AreaDraft,
   type SnapMode,
@@ -56,6 +55,7 @@ import {
   deleteTemplate,
   liveContext,
   openDamage,
+  pickAreaShape,
   placeDraft,
   resolvedChoice,
   samplesNow,
@@ -435,7 +435,7 @@ function IdleOptions(props: { env: AreaEnv; st: AreaToolState }) {
       line={{ tone: "hint", content: hint }}
       slots={[
         control.form !== "none" && { id: "from", priority: 1, compact: true, control: <FromControl control={control} onPick={(offer) => pickFrom(env, null, offer)} /> },
-        { id: "shape", priority: 1, compact: true, glyph: true, control: <ShapeChip value={st.shape} onChange={(shape) => env.area.store.setState({ shape })} /> },
+        { id: "shape", priority: 1, compact: true, glyph: true, control: <ShapeChip value={st.shape} onChange={(shape) => pickAreaShape(env, shape)} /> },
         { id: "spell", priority: 3, flex: theme.layout.options.field, home: "shape", control: <SpellField env={env} st={st} base={base} /> },
       ]}
     />
@@ -490,7 +490,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
       task
       slots={[
         control.form !== "none" && { id: "from", priority: 1, compact: true, control: <FromControl control={control} onPick={(offer) => pickFrom(env, d, offer)} /> },
-        { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => setDraft(env, withShape(d, shape))} /> },
+        { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => pickAreaShape(env, shape)} /> },
         { id: "size", priority: 3, home: "shape", control: <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} /> },
         {
           id: "place",
@@ -620,7 +620,7 @@ function TrapAreaOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDr
       task
       line={t ? inAreaLine({ env, t, moving: st.moving, title }) : { tone: "hint", content: `Tap the map where ${trapName}'s area starts.` }}
       slots={[
-        { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => setDraft(env, withShape(d, shape))} /> },
+        { id: "shape", priority: 1, compact: true, glyph: true, hosts: "size", control: <ShapeChip value={d.shape} size={d.size} onChange={(shape) => pickAreaShape(env, shape)} /> },
         { id: "size", priority: 3, home: "shape", control: <Stepper label="Size" unit="ft" value={d.size} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(size) => set({ size })} /> },
         {
           id: "save",

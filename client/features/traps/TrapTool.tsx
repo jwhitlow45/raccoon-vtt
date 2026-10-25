@@ -3,7 +3,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { Trap, TrapAction, TrapZone } from "#shared/model.ts";
 import { LEVEL_BANDS, trapPreset, type LevelBand } from "#shared/srd/traps.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
-import { useScoped } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { lightAt, LIGHT_REACH_PX } from "../builder/lightTap.ts";
 import { sceneStamps, stampAt } from "../builder/stamps/rules.ts";
@@ -14,7 +14,7 @@ import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
 import { BAND_NAMES, newTrapInput, rectBetween, START_ALARM, START_BLANK, startChoices, startKind, tapRect, trapAt, wireBetween, wireEnd, withRect, type ZoneKind } from "./rules.ts";
-import { trapSlot, type TrapDraft, type TrapPicking } from "./store.ts";
+import { pickZone, trapSlot, ZONE_KINDS, type TrapDraft, type TrapPicking } from "./store.ts";
 
 /**
  * The Trap tool (docs/design-v1-traps.md 4.1), the DM's: draw a new trap's
@@ -198,12 +198,6 @@ function onUp(p: ToolPointer, ctx: ToolContext): void {
   if (zone) create(ctx, zone);
 }
 
-const KIND_OPTIONS: { value: ZoneKind; label: string }[] = [
-  { value: "squares", label: "Squares" },
-  { value: "wire", label: "Trip wire" },
-  { value: "door", label: "Door" },
-];
-
 const PICK_LINES: Record<TrapPicking["what"], (name: string) => string> = {
   squares: (name) => `Drag across squares to add to ${name}, or tap one square.`,
   hits: (name) => `Drag across the squares ${name} hits, or tap one square.`,
@@ -216,6 +210,7 @@ const PICK_LINES: Record<TrapPicking["what"], (name: string) => string> = {
  * something on the map, the row says what to tap and offers Done.
  */
 function TrapOptions() {
+  const scope = useRoomScope();
   const store = useScoped(trapSlot).store;
   const start = useStore(store, (s) => s.start);
   const band = useStore(store, (s) => s.band);
@@ -285,7 +280,7 @@ function TrapOptions() {
             </ValueChip>
           ),
         },
-        { id: "kind", priority: 1, compact: true, control: <OptSegmented<ZoneKind> label="Zone" value={kind} options={KIND_OPTIONS} onChange={(next) => store.setState({ kind: next })} /> },
+        { id: "kind", priority: 1, compact: true, control: <OptSegmented<ZoneKind> label="Zone" value={kind} options={ZONE_KINDS} onChange={(next) => pickZone(scope, next)} /> },
       ]}
     />
   );

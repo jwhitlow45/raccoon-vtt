@@ -7,7 +7,7 @@ import { ChoiceRows, OptButton, OptionsStrip, PickCloses, ValueChip } from "../m
 import { placeOnGround } from "../movement/ground.ts";
 import type { Point } from "./factory.ts";
 import { pendingTokens } from "./placeInputs.ts";
-import { PLACE_TOOL_ID, describePending, placementSlot, resetPending, setPending, type Pending } from "./placement.ts";
+import { BLANK_KINDS, PLACE_TOOL_ID, describePending, placementSlot, resetPending, setPending, type Pending } from "./placement.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A tap moves less than this on screen. More is a slip of the finger, and places nothing. */
@@ -69,13 +69,6 @@ export const placeTool: ToolDef = {
   Options: PlaceOptions,
 };
 
-const KIND_OPTIONS: { value: TokenKind; label: string }[] = [
-  { value: "monster", label: "Blank monster" },
-  { value: "npc", label: "Blank NPC" },
-  { value: "object", label: "Blank object" },
-  { value: "pc", label: "Blank player character" },
-];
-
 /**
  * What the next tap will place, and the ways to pick something else
  * (docs/design-v1-tool-options.md 9.7): the blank kind as a chip, then
@@ -105,7 +98,7 @@ function PlaceOptions() {
       />
     );
   }
-  const kind = KIND_OPTIONS.find((o) => o.value === pending.tokenKind)?.label ?? "";
+  const kind = BLANK_KINDS.find((o) => o.value === pending.tokenKind)?.label ?? "";
   return (
     <OptionsStrip
       tool="Add token"
@@ -116,9 +109,9 @@ function PlaceOptions() {
           priority: 1,
           control: (
             // No compact form: short words would read "Monster" beside "Monster…".
-            <ValueChip label="Blank token kind" kind="choice" value={pending.tokenKind} valueName={kind} options={KIND_OPTIONS.map((o) => ({ key: o.value, words: o.label }))}>
+            <ValueChip label="Blank token kind" kind="choice" value={pending.tokenKind} valueName={kind} options={BLANK_KINDS.map((o) => ({ key: o.value, words: o.label }))}>
               <PickCloses>
-                <ChoiceRows<TokenKind> label="Blank token kind" value={pending.tokenKind} options={KIND_OPTIONS} onChange={(tokenKind) => setPending(scope, { kind: "blank", tokenKind } satisfies Pending)} />
+                <ChoiceRows<TokenKind> label="Blank token kind" value={pending.tokenKind} options={BLANK_KINDS} onChange={(tokenKind) => setPending(scope, { kind: "blank", tokenKind } satisfies Pending)} />
               </PickCloses>
             </ValueChip>
           ),

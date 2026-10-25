@@ -9,27 +9,12 @@ import { theme } from "../../lib/theme.ts";
 import type { BrushSize } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
 import { lightModeHint, sceneHasLights } from "./lightTap.ts";
-import { TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
+import { BUILD_MODES, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
 import { TERRAIN_SWATCHES } from "./textures.ts";
 import { closePolygon } from "./tool.tsx";
 import { useStampSlots } from "./stamps/StampOptions.tsx";
 import { useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
 import { LightChip } from "../lights/LightOptions.tsx";
-
-/** Each mode's whole name, which its tile and the chip's name keep, and the short word the chip shows (docs/design-v1-tool-options.md 6.2). */
-const MODES: readonly { value: BuildMode; label: string; short: string }[] = [
-  { value: "paint", label: "Brush", short: "Brush" },
-  { value: "rect", label: "Rectangle room", short: "Rect room" },
-  { value: "poly", label: "Shape room", short: "Shape room" },
-  { value: "erase", label: "Erase", short: "Erase" },
-  { value: "eraseRect", label: "Erase area", short: "Erase area" },
-  { value: "edge", label: "Walls and doors", short: "Walls" },
-  { value: "height", label: "Heights and stairs", short: "Heights" },
-  { value: "rough", label: "Difficult ground", short: "Difficult" },
-  { value: "label", label: "Label", short: "Label" },
-  { value: "light", label: "Lights", short: "Lights" },
-  { value: "stamp", label: "Stamp", short: "Stamp" },
-];
 
 const EDGES: readonly { value: EdgeKind; label: string }[] = [
   { value: "wall", label: "Wall" },
@@ -152,16 +137,16 @@ export default function BuilderOptions() {
       />
     ),
   });
-  const modeName = MODES.find((m) => m.value === s.mode)?.label ?? s.mode;
+  const modeName = BUILD_MODES.find((m) => m.value === s.mode)?.label ?? s.mode;
 
   const slots: (Slot | false)[] = [
     {
       id: "mode",
       priority: 1 + drop,
       control: (
-        <ValueChip label="Builder mode" kind="choice" value={s.mode} valueName={modeName} options={MODES.map((m) => ({ key: m.value, words: m.short }))}>
+        <ValueChip label="Builder mode" kind="choice" value={s.mode} valueName={modeName} options={BUILD_MODES.map((m) => ({ key: m.value, words: m.short }))}>
           <PickCloses>
-            <ChoiceTiles<BuildMode> label="Builder mode" value={s.mode} options={MODES.map((m) => ({ value: m.value, label: m.label }))} onChange={(mode) => set({ mode, poly: [], rect: null, run: [], note: null })} />
+            <ChoiceTiles<BuildMode> label="Builder mode" value={s.mode} options={BUILD_MODES.map((m) => ({ value: m.value, label: m.label }))} onChange={(mode) => pickBuildMode(scope, mode)} />
           </PickCloses>
         </ValueChip>
       ),
