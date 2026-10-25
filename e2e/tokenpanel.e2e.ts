@@ -2151,13 +2151,15 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     }
   });
 
-  test("s2-tp-g. in line within 1 px at 320 x 568 and 390 x 844 at 130% and 1280 x 800: the goblin's Combat open and folded, its Position with Attach and its Token settings with Duplicate, and Pat's Stats holding Size alone", async () => {
+  test("s2-tp-g. in line within 1 px at 320 x 568 and 390 x 844 at 130% and 1280 x 800: the goblin's Combat open and folded, its Position with Attach and Sight's Light row in the bar's word, its Token settings with Duplicate, and Pat's Stats holding Size alone", async () => {
     const off: string[] = [];
     const notes: string[] = [];
     const check = async (page: Page, root: Locator, screen: string) => {
       await root.first().scrollIntoViewIfNeeded();
       off.push(...alignmentLines(await measureAlignment(root.first()), screen));
     };
+    // A light it carries puts Sight in Position on a scene without vision.
+    await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { light: { bright: 20, dim: 20 } } });
     try {
       for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, { width: 1280, height: 800, scale: 1 }]) {
         const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
@@ -2169,6 +2171,9 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         notes.push(`${at}: the goblin's Combat ${Math.round((await rectOf(combat)).height)} px open`);
         await openGroup(panel, "Position");
         await groupIn(panel, "Position").getByRole("button", { name: "Attach", exact: true }).waitFor();
+        // The row's label, not the preset of the same word under it.
+        await groupIn(panel, "Position").locator('xpath=.//span[normalize-space()="Light"][not(ancestor::button)]').waitFor();
+        assert.equal(await groupIn(panel, "Position").getByText("Light it carries").count(), 0, `${at}: Sight's light row in its old words`);
         // Position's attach controls, the part this lane added. Its Elevation and Facing rows wrap by FieldRow's own basis (docs/design-v1-polish.md R2), as before it.
         await check(dm, groupIn(panel, "Position").locator("[data-attach-controls]"), `the goblin's attach controls at ${at}`);
         await openGroup(panel, "Token settings");
@@ -2194,6 +2199,7 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
         await shots.take(player, `s2-tp-pat-bree-stats-${view.width}-${Math.round(view.scale * 100)}`);
       }
     } finally {
+      await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { light: null } });
       await setUp(dm, dmCdp, DESK, null);
     }
     console.log(`s2-tp sizes:\n${notes.join("\n")}`);
