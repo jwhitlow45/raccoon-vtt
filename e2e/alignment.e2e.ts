@@ -2841,7 +2841,7 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
   ];
   const atName = (at: { size: Size; scale: number }) => `${at.size.name}${at.scale === 1 ? "" : `-${Math.round(at.scale * 100)}`}`;
 
-  test(`fu30-a. the round header's words and number never sit under Previous or Next, nor are cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (ICONS2B-OPUS-06)`, async () => {
+  test(`fu30-a. the round header's words and number, and its clock, never sit under Previous or Next, nor are cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, and with an overtime turn's clock at 390 x 844 at 130%, within ${LIMIT_PX} px (ICONS2B-OPUS-06, FU30-OPUS-1)`, async () => {
     const lines: string[] = [];
     for (const at of FU30_AT) {
       const sweep = new Sweep(atName(at));
@@ -2856,6 +2856,31 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
       await shots.take(page, `alignment-fu30-round-${sweep.at}`);
       await closeSheets(page);
       lines.push(...sweep.lines);
+    }
+    // An overtime turn's clock, wider than "Round N": "Time's up +0:01" is as wide as "Time's up +1:05", since its figures are all one width (FU30-OPUS-1).
+    const over = FU30_AT.find((at) => at.size.width === 390 && at.scale === 1.3)!;
+    const fight = dmSocket.state!.encounter!;
+    const was = fight.activeEntryId!;
+    await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
+    try {
+      // A new turn, so its 2 s run out at once.
+      await turnTo(fight.entries.find((e) => e.id !== was)!.id);
+      const sweep = new Sweep(`${atName(over)}-overtime`);
+      const page = await dmPageFor(over.size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, over.size, over.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await openTracker(page);
+      const header = page.locator("[data-round-header]").first();
+      if (!(await showsWithin(header.getByRole("timer", { name: /^Turn time is up, \+\d:\d\d over$/ }), 10_000))) await sweep.missing(page, "fu30-round-overtime", "the turn's clock never ran over");
+      await sweep.add(page, "fu30-round-overtime", await roundLines(header, sweep.at));
+      await sweep.measure(page, "fu30-round-overtime", header.locator(":scope > div").first());
+      await shots.take(page, `alignment-fu30-round-${sweep.at}`);
+      await closeSheets(page);
+      lines.push(...sweep.lines);
+    } finally {
+      await ops.send({ t: "room.update", settings: { turnTimerSec: 300 } });
+      await turnTo(was);
     }
     assert.deepEqual(lines, [], "the round header out of line");
   });
@@ -2968,8 +2993,9 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
 });
 
 /**
- * The round header's "Round N" (ICONS2B-OPUS-06): its words under no
- * button of the header, and whole, so no box that clips them ends first.
+ * The round header's "Round N" and its clock (ICONS2B-OPUS-06,
+ * FU30-OPUS-1): each one's words under no button of the header, and
+ * whole, so no box that clips them ends first.
  */
 async function roundLines(header: Locator, at: string): Promise<string[]> {
   return header.evaluate(
@@ -2980,20 +3006,23 @@ async function roundLines(header: Locator, at: string): Promise<string[]> {
       const doc = root.ownerDocument;
       const round = Array.from(root.querySelectorAll("span")).find((s) => /^Round \d+$/.test(s.textContent ?? ""));
       if (!round) return [`${at} fu30-round: no "Round N" in the round header`];
-      const range = doc.createRange();
-      range.selectNodeContents(round);
-      const words = range.getBoundingClientRect();
       const out: string[] = [];
-      for (const button of Array.from(root.querySelectorAll("button"))) {
-        const b = button.getBoundingClientRect();
-        const across = Math.min(words.right, b.right) - Math.max(words.left, b.left);
-        const down = Math.min(words.bottom, b.bottom) - Math.max(words.top, b.top);
-        if (across > 0.5 && down > 0.5) out.push(`${at} fu30-round: ${button.getAttribute("aria-label") ?? button.textContent} covers ${across.toFixed(1)} px of "${round.textContent}"`);
-      }
-      for (let box: El | null = round.parentElement; box && box !== root; box = box.parentElement) {
-        if (doc.defaultView.getComputedStyle(box).overflowX === "visible") continue;
-        const r = box.getBoundingClientRect();
-        if (words.right > r.right + 0.5 || words.left < r.left - 0.5) out.push(`${at} fu30-round: "${round.textContent}" is cut, its words from ${words.left.toFixed(1)} to ${words.right.toFixed(1)} in a box from ${r.left.toFixed(1)} to ${r.right.toFixed(1)}`);
+      for (const part of [round, ...Array.from(root.querySelectorAll('[role="timer"]'))]) {
+        const range = doc.createRange();
+        range.selectNodeContents(part);
+        const words = range.getBoundingClientRect();
+        const name = `"${part.textContent}"`;
+        for (const button of Array.from(root.querySelectorAll("button"))) {
+          const b = button.getBoundingClientRect();
+          const across = Math.min(words.right, b.right) - Math.max(words.left, b.left);
+          const down = Math.min(words.bottom, b.bottom) - Math.max(words.top, b.top);
+          if (across > 0.5 && down > 0.5) out.push(`${at} fu30-round: ${button.getAttribute("aria-label") ?? button.textContent} covers ${across.toFixed(1)} px of ${name}`);
+        }
+        for (let box: El | null = part.parentElement; box && box !== root; box = box.parentElement) {
+          if (doc.defaultView.getComputedStyle(box).overflowX === "visible") continue;
+          const r = box.getBoundingClientRect();
+          if (words.right > r.right + 0.5 || words.left < r.left - 0.5) out.push(`${at} fu30-round: ${name} is cut, its words from ${words.left.toFixed(1)} to ${words.right.toFixed(1)} in a box from ${r.left.toFixed(1)} to ${r.right.toFixed(1)}`);
+        }
       }
       return out;
     },
