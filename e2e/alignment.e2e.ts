@@ -3047,9 +3047,42 @@ async function summaryScreen(sweep: Sweep, page: Page, c: { name: string; tap: {
   if ((await visible(more)) && (await more.getAttribute("aria-expanded")) !== "true") await more.click();
   if (c.saves && !(await showsWithin(bar.locator("[data-saves]").first(), 10_000))) await sweep.missing(page, screen, `${c.name}'s saves never showed`);
   await sweep.measure(page, screen, bar.locator("[data-vitals], [data-saves]"));
+  await sweep.add(page, screen, await speedEndLines(bar, `${sweep.at} ${screen}`));
   if (shot) await shots.take(page, `alignment-fu30-${sweep.at}-${screen}`);
   await bar.getByRole("button", { name: "Close", exact: true }).first().click();
   await bar.waitFor({ state: "detached" });
+}
+
+/**
+ * A speed of several modes in a summary line: its last mode never stands
+ * alone on its line where it fits beside Passive Perception or beside the
+ * mode before it (FU30-NOTED). The speed is one picture to measureAlignment,
+ * so its modes are read here.
+ */
+async function speedEndLines(bar: Locator, at: string): Promise<string[]> {
+  return bar.locator("[data-vitals]").evaluateAll(
+    (lines, at) => {
+      type R = { left: number; right: number; top: number; bottom: number; width: number };
+      type El = { textContent: string | null; offsetWidth: number; getBoundingClientRect(): R; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El> };
+      const out: string[] = [];
+      for (const line of lines as unknown as El[]) {
+        const modes = Array.from(line.querySelectorAll('[data-unit="speed"]'));
+        if (modes.length < 2) continue;
+        const pp = line.querySelector('[role="img"][aria-label^="Passive Perception"]');
+        const last = modes[modes.length - 1]!.getBoundingClientRect();
+        const before = modes[modes.length - 2]!.getBoundingClientRect();
+        const mid = (r: R) => (r.top + r.bottom) / 2;
+        const box = line.getBoundingClientRect();
+        // The page's pixels per layout pixel, so the gaps compare with the boxes at 130% too: 4 px between modes, 12 between units.
+        const zoom = box.width / line.offsetWidth;
+        const beside = [before, ...(pp ? [pp.getBoundingClientRect()] : [])].some((r) => Math.abs(mid(r) - mid(last)) < 2);
+        const fits = last.width + 4 * zoom + before.width <= box.width + 0.5 || (pp !== null && last.width + 12 * zoom + pp.getBoundingClientRect().width <= box.width + 0.5);
+        if (!beside && fits) out.push(`${at}: "${(modes[modes.length - 1]!.textContent ?? "").trim()}" stands alone on its line in ${box.width.toFixed(1)} px, where it fits beside the mode before it or PP`);
+      }
+      return out;
+    },
+    at,
+  );
 }
 
 /** Thorn's D&D Beyond number in fu30-c. */

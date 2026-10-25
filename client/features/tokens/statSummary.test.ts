@@ -242,6 +242,31 @@ describe("the token window's summary and the panel's header", () => {
     assert.match(line, /aria-label="Passive Perception 9"[^>]*><span[^>]*>PP<\/span><strong>9<\/strong>/);
   });
 
+  /*
+   * In More stats at 320 x 568 at 130%, a dragon's "40 ft, Fly 80 ft,"
+   * filled a line and "Climb 40 ft" stood alone on the next, with PP under
+   * it (FU30-NOTED). The last mode now wraps with PP.
+   */
+  test("a speed of several modes keeps its last beside Passive Perception, in the window and the header, and names itself whole once", () => {
+    for (const [label, a, t] of creatures.slice(1, 3)) {
+      const line = renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: a, token: t, fullAccess: true, place: "bar" }) }));
+      const header = renderToStaticMarkup(createElement(QuickNumbers, { items: vitals({ actor: a, token: t, fullAccess: true, place: "panel" }), actor: a, token: { kind: t.kind, elevation: 0 } }));
+      const speed = quickUnit(vitals({ actor: a, token: t, fullAccess: true, place: "bar" }).find((item) => item.key === "speed")!);
+      assert.ok(speed?.key === "speed", label);
+      const last = speed.modes.at(-1)!;
+      for (const [where, markup] of [["window", line], ["header", header]] as const) {
+        const img = quickMarkup(markup).get(speed.name);
+        assert.ok(img, `${label}, ${where}: the speed names itself whole`);
+        assert.doesNotMatch(img, new RegExp(`>${last.replace(/[()]/g, "\\$&")}<`), `${label}, ${where}: the last mode stays out of the picture`);
+        assert.match(img, new RegExp(`>${speed.modes.at(-2)!},?<`), `${label}, ${where}: the mode before it`);
+        const part = new RegExp(`<span[^>]*><strong data-unit="speed" aria-hidden="true"[^>]*>${last.replace(/[()]/g, "\\$&")}</strong><span role="img" aria-label="Passive Perception \\d+"`);
+        assert.match(markup, part, `${label}, ${where}: the last mode and PP in one part, the mode hidden from a screen reader`);
+      }
+    }
+    const [, one, t] = creatures[0]!;
+    assert.doesNotMatch(renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: one, token: t, fullAccess: true, place: "bar" }) })), /data-speed-pp/, "one speed stays one unit");
+  });
+
   test("More stats on a short bar holds the same units", () => {
     const [, a, t] = creatures[1]!;
     const { more } = shortSplit(vitals({ actor: a, token: t, fullAccess: true, place: "bar" }));

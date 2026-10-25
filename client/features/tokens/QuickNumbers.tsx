@@ -21,7 +21,8 @@ import { quickUnit, type QuickUnit, type VitalItem } from "./statSummary.ts";
 export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partial<Actor> | undefined; token: Pick<Token, "elevation" | "kind"> }) {
   const units: ReactNode[] = [];
   let sheetUrl: string | null = null;
-  for (const item of props.items) {
+  for (let n = 0; n < props.items.length; n++) {
+    const item = props.items[n]!;
     if (item.key === "ac") {
       const ac = item.units[0];
       if (ac?.kind === "ac") units.push(<AcBadge key="ac" ac={ac.ac} />);
@@ -30,7 +31,12 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
       if (sheet?.kind === "sheet") sheetUrl = sheet.url;
     } else {
       const unit = quickUnit(item);
-      if (unit) units.push(<QuickNumberUnit key={unit.key} unit={unit} />);
+      const next = props.items[n + 1];
+      const pp = next ? quickUnit(next) : null;
+      if (unit?.key === "speed" && unit.modes.length > 1 && pp?.key === "passivePerception") {
+        units.push(<SpeedThenPerception key="speed" speed={unit} pp={pp} />);
+        n++;
+      } else if (unit) units.push(<QuickNumberUnit key={unit.key} unit={unit} />);
     }
   }
   const init = props.actor?.initBonus;
@@ -89,6 +95,43 @@ export function QuickNumberUnit(props: { unit: QuickUnit; style?: CSSProperties 
       <span style={{ color: theme.color.textMuted }}>PP</span>
       <strong>{unit.value}</strong>
     </Unit>
+  );
+}
+
+type SpeedUnit = Extract<QuickUnit, { key: "speed" }>;
+type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
+
+/**
+ * A speed of two modes or more with Passive Perception after it, as the
+ * panel's header and a summary line draw them (StatSummary.tsx
+ * VitalsLine): the speed's last mode and Passive Perception wrap as one
+ * part, so where the modes do not
+ * fit on one line, the last never stands alone under the others, as
+ * "Climb 40 ft" did in More stats on the narrowest phone (FU30-NOTED).
+ * The speed keeps its whole name, so a screen reader hears it once, and
+ * the last mode drawn beside Passive Perception is hidden from it.
+ */
+export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; style?: CSSProperties }) {
+  const { speed } = props;
+  const last = speed.modes.length - 1;
+  // The modes' own gap between the speed and its last mode, and the summary line's between that mode and Passive Perception.
+  return (
+    <span data-speed-pp="" style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0, maxWidth: "100%", ...props.style }}>
+      <Unit name={speed.name} wraps>
+        <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
+        {speed.modes.slice(0, last).map((mode, i) => (
+          <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>
+            {`${mode},`}
+          </strong>
+        ))}
+      </Unit>
+      <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(3), minWidth: 0, maxWidth: "100%" }}>
+        <strong data-unit="speed" aria-hidden="true" style={{ whiteSpace: "nowrap" }}>
+          {speed.modes[last]}
+        </strong>
+        <QuickNumberUnit unit={props.pp} />
+      </span>
+    </span>
   );
 }
 

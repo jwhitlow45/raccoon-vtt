@@ -13,7 +13,7 @@ import { statBlockShown, tokenStatBlock } from "../monsters/statBlockLink.ts";
 import type { TokenAccess } from "./access.ts";
 import { OVER_REACH, SheetLink } from "./SheetLink.tsx";
 import { defenseLines, linkedBlockState, moreStatsShown, quickUnit, saveUnits, saveUnitsOf, type LinkedBlock, type VitalItem, type VitalUnit } from "./statSummary.ts";
-import { QuickNumberUnit } from "./QuickNumbers.tsx";
+import { QuickNumberUnit, SpeedThenPerception } from "./QuickNumbers.tsx";
 import { pcDefenseLines } from "../pcstats/reading.ts";
 import { useCharacterRollNumbers } from "../pcstats/useRollNumbers.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
@@ -120,7 +120,9 @@ function Unit(props: { unit: VitalUnit }) {
  *
  * So no unit stands alone on a line, AC and HP make one part of the line
  * and everything after them another: Speed, Passive Perception, the sheet
- * link and the elevation badge (D-261024-42, FU30-OPUS-3). Each part
+ * link and the elevation badge (D-261024-42, FU30-OPUS-3). A speed of
+ * several modes keeps its last with Passive Perception
+ * (QuickNumbers.tsx SpeedThenPerception). Each part
  * wraps as a whole, so where the line does not hold them all, the second
  * stands together on a line of its own. A part wraps inside itself only
  * where it alone is wider than the box. The second part takes every item
@@ -128,8 +130,9 @@ function Unit(props: { unit: VitalUnit }) {
  */
 export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
   if (props.items.length === 0 && props.end == null) return null;
+  const betweenAfter = (i: number) => (i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined);
   const drawn = (item: VitalItem, i: number): ReactNode[] => {
-    const between = i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined;
+    const between = betweenAfter(i);
     const quick = quickUnit(item);
     if (quick) return [<QuickNumberUnit key={item.key} unit={quick} style={between} />];
     return item.units.flatMap((unit, j) => {
@@ -144,7 +147,18 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
   };
   const indexed = props.items.map((item, i) => ({ item, i }));
   const numbers = indexed.filter(({ item }) => item.key === "ac" || item.key === "hp");
-  const quick: ReactNode[] = indexed.filter(({ item }) => item.key !== "ac" && item.key !== "hp").flatMap(({ item, i }) => drawn(item, i));
+  const rest = indexed.filter(({ item }) => item.key !== "ac" && item.key !== "hp");
+  const quick: ReactNode[] = [];
+  for (let n = 0; n < rest.length; n++) {
+    const { item, i } = rest[n]!;
+    const speed = quickUnit(item);
+    const next = rest[n + 1];
+    const pp = next ? quickUnit(next.item) : null;
+    if (next && speed?.key === "speed" && speed.modes.length > 1 && pp?.key === "passivePerception") {
+      quick.push(<SpeedThenPerception key="speed" speed={speed} pp={pp} style={betweenAfter(next.i)} />);
+      n++;
+    } else quick.push(...drawn(item, i));
+  }
   if (props.end != null) {
     quick.push(
       <span key="elevation" data-unit="elevation" style={{ display: "inline-flex", flex: "none", ...OVER_REACH }}>
