@@ -18,7 +18,7 @@ export function guideHref(section?: string): string {
  */
 const DEFAULT_SIZE = { width: 1280, height: 800 };
 const PHONE_SIZE = { width: 390, height: 844 };
-const PHONE_SHOTS = new Set(["screen-phone.webp", "reveal-blackout.webp"]);
+const PHONE_SHOTS = new Set(["screen-phone.webp", "reveal-blackout.webp", "phone-strip.webp"]);
 
 export function guideImageSize(fileName: string): { width: number; height: number } {
   return PHONE_SHOTS.has(fileName) ? PHONE_SIZE : DEFAULT_SIZE;
