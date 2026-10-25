@@ -1460,6 +1460,7 @@ Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) 
 These are the keys a DM uses most:
 
 - A tool's key picks it: `V` for Select, `R` for Ruler, `A` for Area, `F` for Fog, `D` for Draw and `P` for Ping. For the setup tools, it is `T` for Add token, `M` for Pin, `X` for Trap, `B` for Map builder and `G` for Line up grid.
+- Press a tool's key again while you are using it to move to the next option of its main choice: the next shape for Area, the next drawing tool for Draw, Straight or Walking for the Ruler, Clear fog or Add fog for Fog, the next mode for the Map builder, the next blank token for Add token, and the next zone for Trap. With Shift, a letter key goes back one instead. If the tool's options are hidden, the same press shows them. While you drag, or while a change would lose something you started, such as a shape with corners, unfinished text or an area from a spell, the key leaves the choice alone. Select, Ping, Pin and Line up grid have no such choice, so a second press of their key only shows their options.
 - `N` moves to the next turn, and starts the fight if it hasn't started yet.
 - `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
 - The arrow keys move the selection a square. Page Up raises it 5 ft, and Page Down lowers it 5 ft.
