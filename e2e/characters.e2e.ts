@@ -444,7 +444,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     // The DM's log, and no player's, says who deleted what.
     const said = "Pat deleted Bree, with 2 tokens, 1 companion and its place in the fight.";
     assert.ok(state.log.some((e) => e.data?.type === "characterDeleted"), "the DM's log holds the line");
-    // The Log is in More since Dice joined the row (docs/design-v1-dice.md 8.1).
+    // At 1280 x 800 the Log stands in the tab row. openSideTab takes it from More too, where a narrower row has no room for it.
     await openSideTab(dm, "Log");
     await dm.getByRole("tabpanel", { name: sideTabName("Log") }).getByText(said, { exact: true }).waitFor();
     await shots.take(dm, "characters-dm-log-player-delete");

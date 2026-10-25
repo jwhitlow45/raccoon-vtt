@@ -124,7 +124,6 @@ const TO_NAME: AttachFocus & DuplicateFocus = { scope: PANEL_BOX, to: [CREATURE_
 /** The empty panel's line, which takes focus from script when what had it went with its token. */
 const EMPTY_LINE = "[data-token-empty]";
 
-
 function TokenDetails(props: PanelProps) {
   const tokenId = props.selectedTokenId;
   const token = useRoomView((s) => (tokenId ? s.view?.tokens[tokenId] : undefined));
