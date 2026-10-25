@@ -24,8 +24,8 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * pane filled, a door trap and a found trip wire, the attach set (a
  * warhorse, a goblin carrying a lantern and dragging a prisoner), and
  * walls with a door. For each of 6 sizes at 100% and 130% the DM measures
- * the toolbar's Setup tools or Tools menu where it has one, the Trap
- * tool, the four traps' panes with every group unfolded, the
+ * the toolbar's Setup tools or Tools menu where it has one, the shortcut
+ * sheet's Toolbar section, the Trap tool, the four traps' panes with every group unfolded, the
  * alerts as traps go off on Pat's walks (the toast under a pane, the
  * column, a toast under its first card, the summary row and the alerts
  * over the screen), the board's pills, the Attach list and Ride, and the
@@ -582,6 +582,27 @@ async function toolMenuScreen(sweep: Sweep, page: Page): Promise<void> {
   await menu.waitFor({ state: "detached" });
 }
 
+/**
+ * The shortcut sheet's Toolbar section, whose row for the tool's key grew
+ * with the tool cycle (docs/design-v1-tool-cycle.md 7). No other file
+ * measures the sheet.
+ */
+async function shortcutSheetScreen(sweep: Sweep, page: Page): Promise<void> {
+  await escapeAll(page);
+  await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+  await page.keyboard.press("?");
+  const sheet = page.getByRole("dialog", { name: "Shortcuts" });
+  if (!(await showsWithin(sheet, 3_000))) {
+    await sweep.missing(page, "shortcut-sheet-toolbar", "? opened no sheet");
+    return;
+  }
+  const section = sheet.getByRole("heading", { name: "Toolbar", exact: true }).locator("xpath=ancestor::section[1]");
+  await section.scrollIntoViewIfNeeded();
+  await sweep.measure(page, "shortcut-sheet-toolbar", section);
+  await page.keyboard.press("Escape");
+  await sheet.waitFor({ state: "detached" });
+}
+
 /** The DM's screens at one size. */
 async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const headers: HeaderPlace[] = [];
@@ -589,6 +610,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await settleTraps();
   await sweep.pills(page, "board", { points: await trapPoints(page, true), needPills: true });
   await toolMenuScreen(sweep, page);
+  await shortcutSheetScreen(sweep, page);
 
   // The Trap tool's options, its Start from, and its More where the row has one.
   await pickTool(page, "Trap");

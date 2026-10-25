@@ -599,9 +599,12 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     await dragCellsTouch(dm, { x: 18, y: 6 }, { x: 22, y: 8 });
     await waitFor("a stroke drawn while tucked", () => (drawings() > drawn ? true : null));
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), "", "still tucked after drawing");
-    // D brings them back, and picking Ruler shows the Ruler's options.
+    // D brings them back and moves to the next drawing tool (docs/design-v1-tool-cycle.md), Shift+D goes back to Pen, and picking Ruler shows the Ruler's options.
     await key(dm, "d");
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), null);
+    await options(dm).getByRole("button", { name: "Drawing tool: Line" }).waitFor();
+    await key(dm, "Shift+D");
+    await options(dm).getByRole("button", { name: "Drawing tool: Pen" }).waitFor();
     await draw.tap();
     await key(dm, "r");
     assert.equal(await options(dm).getAttribute("data-rvtt-tucked"), null, "a new tool shows its options");

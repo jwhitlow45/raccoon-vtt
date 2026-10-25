@@ -473,7 +473,7 @@ export const STATES: State[] = [
       await ops.send({ t: "fog.discard", sceneId: run.sceneId });
     },
   },
-  ...(["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Label", "Lights", "Stamp"] as const).map(
+  ...(["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp"] as const).map(
     (mode): State => ({
       name: `Builder, ${mode}`,
       roles: DM_ONLY,
