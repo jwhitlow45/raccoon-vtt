@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page } from "playwright-core";
+import { ddbSheetUrl } from "../shared/ddb/link.ts";
+import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
@@ -2824,8 +2826,8 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
 
   /*
    * Follow-up batch 30's roots, here at the file's end: the round header's
-   * words clear of its buttons (ICONS2B-OPUS-06) and the token window's
-   * summary lines (LP21-BAR-3).
+   * words clear of its buttons (ICONS2B-OPUS-06), the token window's
+   * summary lines (LP21-BAR-3) and the D&D Beyond review (DDBRES-ALIGN).
    */
   const FU30_AT: { size: Size; scale: number }[] = [390, 320].flatMap((w) => [1, 1.3].map((scale) => ({ size: SIZES.find((s) => s.width === w)!, scale })));
   FU30_AT.push(...[1, 1.3].map((scale) => ({ size: SIZES.find((s) => s.width === 1440)!, scale })));
@@ -2908,6 +2910,43 @@ describe("raccoon-vtt alignment sweep", { timeout: 900_000 }, () => {
     assert.deepEqual(lines, [], "the summary lines out of line");
   });
 
+  test(`fu30-c. the D&D Beyond review with class resources, 14 read and 12 kept, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, its Class resources group folded and open, within ${LIMIT_PX} px (docs/design-v1-ddb-resources.md 6.3, DDBRES-ALIGN)`, async () => {
+    // Thorn linked to D&D Beyond, whose answer Pat's page gets from here: no request leaves the machine.
+    await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { sheetUrl: ddbSheetUrl(DDB_THORN) } } });
+    await pat.route("**/api/rooms/*/ddb-import", (route) => route.fulfill({ status: 200, json: { fill: readDdbCharacter(ddbThorn()) } }));
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        pat.setDefaultTimeout(10_000);
+        await openAt(pat, at.size, at.scale);
+        const review = await openThornResync(pat);
+        if (!review) {
+          await sweep.missing(pat, "fu30-ddb-review", "Thorn's Stat block showed no Re-sync from D&D Beyond");
+          lines.push(...sweep.lines);
+          continue;
+        }
+        await review.getByText(/^Read from D&D Beyond: /).waitFor();
+        await review.getByText("D&D Beyond has 14 class resources for Thorn, more than the 12 a character holds, so 2 were not read. Class resources here that they would change stay as they are.", { exact: true }).waitFor();
+        await sweep.measure(pat, "fu30-ddb-review", review);
+        const group = review.getByRole("button", { name: "Class resources", exact: true });
+        if ((await group.getAttribute("aria-expanded")) !== "true") await group.click();
+        await review.getByText("Adds Knack 12: 2 uses, back on a Long Rest", { exact: true }).waitFor();
+        await sweep.measure(pat, "fu30-ddb-review-resources", review);
+        await shots.take(pat, `alignment-fu30-${sweep.at}-ddb-review`);
+        await review.getByRole("button", { name: "Cancel", exact: true }).click();
+        await review.waitFor({ state: "detached" });
+        await closeSheets(pat);
+        await escapeAll(pat);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await pat.unroute("**/api/rooms/*/ddb-import");
+      await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { sheetUrl: null } } });
+    }
+    assert.deepEqual(lines, [], "the D&D Beyond review out of line");
+  });
+
   test("fu30-d. no page logged an error in follow-up batch 30's steps", () => {
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
@@ -2946,4 +2985,69 @@ async function roundLines(header: Locator, at: string): Promise<string[]> {
     },
     at,
   );
+}
+
+/** Thorn's D&D Beyond number in fu30-c. */
+const DDB_THORN = "12345678";
+
+/**
+ * Thorn as D&D Beyond would send him, in its JSON shape with only the
+ * paths the reader reads (shared/ddb/read.ts): a Barbarian 7 with the
+ * sweep's scores and 14 limited uses, two past the 12 a character holds,
+ * so the review shows its cut warning and folds its Class resources group.
+ */
+function ddbThorn(): Record<string, unknown> {
+  const proficiency = (subType: string) => ({ type: "proficiency", subType, fixedValue: null, value: null });
+  const knack = (i: number) => ({
+    name: `Knack ${i + 1}`,
+    componentTypeId: 1088085227,
+    componentId: 9000 + i,
+    limitedUse: { name: null, statModifierUsesId: null, resetType: 2, numberUsed: 0, minNumberConsumed: 1, maxNumberConsumed: 1, maxUses: 2, operator: 1, useProficiencyBonus: false, proficiencyBonusOperator: 1, resetDice: null },
+  });
+  return {
+    success: true,
+    data: {
+      id: Number(DDB_THORN),
+      name: "Thorn",
+      stats: [16, 12, 14, 10, 12, 10].map((value, i) => ({ id: i + 1, value })),
+      bonusStats: [],
+      overrideStats: [],
+      baseHitPoints: 60,
+      race: { weightSpeeds: { normal: { walk: 30 } } },
+      classes: [{ level: 7, definition: { name: "Barbarian", spellCastingAbilityId: null }, classFeatures: [] }],
+      modifiers: { race: [], class: [proficiency("strength-saving-throws"), proficiency("constitution-saving-throws")], background: [proficiency("athletics")], feat: [], item: [], condition: [] },
+      inventory: [],
+      classSpells: [],
+      spells: { race: [], class: [], item: [], feat: [] },
+      actions: { race: [], class: [], feat: Array.from({ length: 14 }, (_, i) => knack(i)) },
+    },
+  };
+}
+
+/**
+ * The review Re-sync from D&D Beyond opens on Thorn's Stat block, Pat's
+ * to open: from 900 px the Token tab beside a tap on him, below it the
+ * Token sheet his bar's Stat block opens. Null where the Stat block shows
+ * no Re-sync.
+ */
+async function openThornResync(page: Page): Promise<Locator | null> {
+  await closeSheets(page);
+  await escapeAll(page);
+  const wide = (page.viewportSize()?.width ?? 0) / Number(await page.evaluate(() => localStorage.getItem("rvtt.uiScale") ?? "1")) >= 900;
+  const bar = await selectToken(page, "Thorn", { x: 5, y: 5 });
+  if (!bar) return null;
+  if (wide) await openSideTab(page, "Token");
+  else await (await barControl(bar, "Stat block")).click();
+  const panel = wide ? page.getByRole("tabpanel", { name: sideTabName("Token") }) : page.getByRole("region", { name: "Token", exact: true });
+  const resync = panel.getByRole("button", { name: "Re-sync from D&D Beyond", exact: true });
+  if (!(await showsWithin(resync, 3_000))) {
+    // The Stat block group as this device last left it, folded.
+    await panel.getByRole("button", { name: /^Stat block/ }).first().click();
+    if (!(await showsWithin(resync, 5_000))) return null;
+  }
+  await resync.scrollIntoViewIfNeeded();
+  await resync.click();
+  const review = page.getByRole("dialog", { name: "Check what changes" });
+  await review.waitFor();
+  return review;
 }
