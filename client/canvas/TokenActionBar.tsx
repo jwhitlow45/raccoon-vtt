@@ -1938,13 +1938,19 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
   );
 }
 
+/** Where focus goes once Dismiss took its companion away: the first of `to` inside the closest `scope` to the button (D-261024-47). */
+export type DismissFocus = { scope: string; to: readonly string[] };
+
 /**
  * Dismiss, for a companion's owners who are not the DM, in Delete's place
  * (docs/design-v1-combat-flow.md 3.6.9): armed as Delete is, and busy until
  * the server answers, since it can take a row out of the fight and pass a
  * turn on. The token, and with it this bar, goes when it does.
+ *
+ * The Token panel, which stays, passes `focusTo`. Focus moves only once the
+ * button has gone with its companion, so a refusal leaves it on Dismiss.
  */
-export function DismissButton(props: { tokenId: string; name: string }) {
+export function DismissButton(props: { tokenId: string; name: string; focusTo?: DismissFocus }) {
   const inRow = useContext(InButtonRow);
   const [armed, setArmed] = useState(false);
   const { send, waiting } = useSend();
@@ -1961,13 +1967,16 @@ export function DismissButton(props: { tokenId: string; name: string }) {
       armed={armed}
       busy={waiting}
       aria-label={text}
-      onClick={() => {
+      onClick={(e) => {
         if (!armed) {
           setArmed(true);
           return;
         }
         setArmed(false);
+        // The scope is read while the pressed button still stands in it.
+        const scope = props.focusTo ? e.currentTarget.closest<HTMLElement>(props.focusTo.scope) : null;
         send({ t: "token.delete", tokenId: props.tokenId });
+        if (props.focusTo) handFocusOn(scope, props.focusTo.to);
       }}
       style={{ flex: inRow ? ROW_BUTTON_FLEX : "none" }}
     >

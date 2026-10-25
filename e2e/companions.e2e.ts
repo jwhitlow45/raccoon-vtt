@@ -1381,14 +1381,37 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
-  test("s2-co-b. Ana dismisses a companion from its Token panel's Remove, the bar's own button: the first tap asks, the second takes it away, and it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800", async () => {
+  test("s2-co-b. Ana dismisses a companion from its Token panel's Remove, the bar's own button: the first tap asks, the second takes it away, and it lines up at 320 x 568 and 390 x 844 at 130% and 1280 x 800. By keyboard, a refused dismissal leaves focus on Dismiss and a taken one hands it to the panel's empty line (D-261024-47)", async () => {
     const { alignmentLines, measureAlignment } = await import("./helpers/alignment.ts");
     const off: string[] = [];
     const wisp = randomUUID();
+    const decoy = randomUUID();
     await ops.send({ t: "token.create", token: { id: wisp, sceneId: run.sceneId, kind: "npc", name: "Wisp", size: "small", x: 9, y: 9, visibility: "all", disposition: "ally", ownerIds: [run.anaId], companion: { of: run.bree.characterId, turn: "none" }, actor: { inline: actor() } } });
+    // A token of the DM's, which Ana may not take away: the refused dismissal below is sent for it in Wisp's place.
+    await ops.send({ t: "token.create", token: { id: decoy, sceneId: run.sceneId, kind: "monster", name: "Decoy", size: "medium", x: 11, y: 9, visibility: "all", disposition: "hostile", actor: { inline: actor() } } });
     await waitFor("Wisp in Ana's copy", () => anaSocket.state?.tokens[wisp]);
     const cdp = await anaContext.newCDPSession(ana);
     const remove = (panel: Locator) => panel.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Remove"]]');
+    const route = { swap: false, refused: 0 };
+    await ana.routeWebSocket(/\/ws\?room=/, (ws) => {
+      const upstream = ws.connectToServer();
+      ws.onMessage((m) => {
+        if (route.swap && typeof m === "string" && m.includes('"token.delete"') && m.includes(wisp)) {
+          route.swap = false;
+          upstream.send(m.replace(wisp, decoy));
+        } else upstream.send(m);
+      });
+      upstream.onMessage((m) => {
+        if (typeof m === "string" && m.includes('"rejects"')) route.refused++;
+        ws.send(m);
+      });
+    });
+    const focused = () =>
+      ana.evaluate(() => {
+        const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
+        return a ? `${a.tagName.toLowerCase()} ${(a.getAttribute("aria-label") ?? a.textContent ?? "").trim()}` : "none";
+      });
+    const lands = (on: string, what: string) => waitFor(what, async () => ((await focused()) === on ? true : null), 5_000).catch(async () => assert.fail(`${what}: focus is on "${await focused()}"`));
     try {
       for (const view of [{ width: 320, height: 568, scale: 1.3 }, { width: 390, height: 844, scale: 1.3 }, { width: 1280, height: 800, scale: 1 }]) {
         await setUp(ana, cdp, view);
@@ -1405,10 +1428,24 @@ describe("raccoon-vtt companion stat blocks", { timeout: 900_000 }, () => {
       await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).waitFor();
       assert.ok(dmSocket.state?.tokens[wisp], "one tap only asks");
       await shots.take(ana, "s2-co-dismiss-armed");
-      await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).click();
+
+      // Refused: Wisp and its Dismiss stay, busy until the server's answer, and focus stays on Dismiss.
+      route.swap = true;
+      await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).press("Enter");
+      await waitFor("the server's refusal", () => (route.refused > 0 ? true : null));
+      await waitFor("Dismiss ready again", async () => ((await remove(panel).getByRole("button", { name: "Dismiss", exact: true }).getAttribute("aria-busy")) !== "true" ? true : null));
+      await lands("button Dismiss", "a refused dismissal");
+      assert.ok(dmSocket.state?.tokens[wisp] && dmSocket.state.tokens[decoy], "nothing went on the server");
+
+      // Taken, by keyboard: Dismiss goes with Wisp, and focus goes to the panel's empty line rather than the page.
+      await remove(panel).getByRole("button", { name: "Dismiss", exact: true }).press("Enter");
+      await remove(panel).getByRole("button", { name: "Dismiss Wisp?", exact: true }).press("Enter");
       await waitFor("Wisp dismissed", () => (dmSocket.state?.tokens[wisp] ? null : true));
+      await lands("span Tap a token to see it here.", "a taken dismissal");
+      await shots.take(ana, "s2-co-dismissed-focus");
     } finally {
-      if (dmSocket.state?.tokens[wisp]) await ops.send({ t: "token.delete", tokenId: wisp });
+      await ana.unrouteAll({ behavior: "ignoreErrors" });
+      for (const id of [wisp, decoy]) if (dmSocket.state?.tokens[id]) await ops.send({ t: "token.delete", tokenId: id });
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });

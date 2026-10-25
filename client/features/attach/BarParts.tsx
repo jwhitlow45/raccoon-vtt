@@ -122,9 +122,11 @@ const IN_BAR: AttachFocus = { scope: "body", to: [BAR_FRAME] };
  * the word stands on its first name's first line, as rows meet on their
  * baseline.
  */
-export function GroupLine(props: { token: Token; focusTo?: AttachFocus }) {
+export function GroupLine(props: { token: Token; focusTo?: AttachFocus; nameFocusTo?: AttachFocus }) {
   const { token } = props;
   const focusTo = props.focusTo ?? IN_BAR;
+  // The Token panel sends a name press to the next creature's name, where Let go and Put down find the next control (D-261024-47).
+  const nameFocusTo = props.nameFocusTo ?? focusTo;
   const actions = useRoomActions();
   const ui = useRoomUi();
   const viewer = useAttachViewer();
@@ -134,16 +136,16 @@ export function GroupLine(props: { token: Token; focusTo?: AttachFocus }) {
   if (!line.holder && line.carried.length === 0) return null;
   // A name here opens that token's bar in place of this one, and Put down or Let go takes its row away, so the
   // button pressed leaves the page with focus on it. Focus moves to the bar that stands then, as Revive's does.
-  const press = (from: HTMLElement, run: () => void) => {
-    const scope = from.closest<HTMLElement>(focusTo.scope);
+  const press = (from: HTMLElement, run: () => void, to: AttachFocus = focusTo) => {
+    const scope = from.closest<HTMLElement>(to.scope);
     run();
-    handFocusOn(scope, focusTo.to);
+    handFocusOn(scope, to.to);
   };
   const holds = (["carrying", "dragging"] as const).map((key) => ({ key, tokens: line.carried.filter((c) => c.dragged === (key === "dragging")) })).filter((h) => h.tokens.length > 0);
   return (
     <div role="group" aria-label="Attached tokens" style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", alignItems: "baseline", gap: theme.space(1) }}>
       {line.holder ? (
-        <Button size="sm" onClick={(e) => press(e.currentTarget, () => ui.select(line.holder!.id, { opens: true }))} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
+        <Button size="sm" onClick={(e) => press(e.currentTarget, () => ui.select(line.holder!.id, { opens: true }), nameFocusTo)} style={{ ...IN_CELL, gridColumn: "1 / -1", justifySelf: "start" }}>
           {line.holder.text}
         </Button>
       ) : null}
@@ -157,7 +159,7 @@ export function GroupLine(props: { token: Token; focusTo?: AttachFocus }) {
               const action = holderAction(c.token);
               return (
                 <Fragment key={c.id}>
-                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={(e) => press(e.currentTarget, () => ui.select(c.id, { opens: true }))} style={IN_CELL}>
+                  <Button size="sm" aria-label={`${HOLDS[h.key]} ${c.name}`} onClick={(e) => press(e.currentTarget, () => ui.select(c.id, { opens: true }), nameFocusTo)} style={IN_CELL}>
                     {c.name}
                   </Button>
                   {action && detachAllowed(view, viewer, c.token) ? (

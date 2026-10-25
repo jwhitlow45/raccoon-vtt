@@ -979,6 +979,25 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       await waitFor("Thorn off the pony", () => (token(patSocket, field.thorn) && !token(patSocket, field.thorn)!.attached ? true : null));
     });
 
+    test("s2-at-5. a name in the panel's group line, pressed by keyboard, opens that creature's panel with focus on its name, not on its own attach controls (D-261024-47)", async () => {
+      // Off the pony, Thorn stands where Get off put him: back beside Scamp first, as a drag takes a creature where it stands.
+      await ops.send({ t: "token.move", tokenId: field.thorn, ...THORN_AT, elevation: 0 });
+      await waitFor("Thorn beside Scamp", () => (token(patSocket, field.thorn)?.x === THORN_AT.x && token(patSocket, field.thorn)?.y === THORN_AT.y ? true : null));
+      await ops.send({ t: "token.attach", tokenId: field.thorn, to: field.scamp, kind: "drag", ...THORN_AT, elevation: 0 });
+      await waitFor("Thorn in Scamp's tow", () => (token(patSocket, field.thorn)?.attached?.to === field.scamp ? true : null));
+      try {
+        const panel = await patPanel("Scamp", SCAMP_AT);
+        const place = await position(panel);
+        assert.ok(place, "Position for the dragged creature's player");
+        await place.getByRole("button", { name: "Dragging Thorn", exact: true }).press("Enter");
+        await panel.getByRole("heading", { name: "Thorn", exact: true }).first().waitFor();
+        await waitFor("focus on Thorn's name", async () => ((await focusedOn()) === "h3 Thorn" ? true : null), 3_000).catch(async () => assert.fail(`focus is on "${await focusedOn()}"`));
+        await shots.take(pat, "s2-at-name-focus");
+      } finally {
+        await ops.send({ t: "token.detach", tokenId: field.thorn });
+      }
+    });
+
     test("s2-at-z. the party back on its scene, the field's tokens gone, and no page logged an error", async () => {
       await closeSheet(pat);
       await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });

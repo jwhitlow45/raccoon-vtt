@@ -5,7 +5,7 @@ import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
-import { DismissButton } from "../canvas/TokenActionBar.tsx";
+import { DismissButton, type DismissFocus } from "../canvas/TokenActionBar.tsx";
 import { AttachButton } from "../features/attach/AttachButton.tsx";
 import { DetachButton, DetachNote, GroupLine, useAttachSlots, useDetach, type AttachFocus } from "../features/attach/BarParts.tsx";
 import { attachControls } from "../features/attach/detach.ts";
@@ -108,15 +108,23 @@ const PANEL_BOX = "[data-token-panel]";
 const ATTACH_CONTROLS = "[data-attach-controls]";
 
 /**
- * Where focus goes once an attach control's press took its button away
- * (D-261024-42): the attach controls that stay, else the name heading, as
- * after a name in the group line selected another token and the panel
- * remounted for it.
+ * Where focus goes once Let go, Put down or Get off took its button away
+ * (D-261024-42): the attach controls that stay, else the name heading.
  */
 const ATTACH_FOCUS: AttachFocus = { scope: PANEL_BOX, to: [`${ATTACH_CONTROLS} button`, CREATURE_HEADING] };
 
-/** Duplicate selects the copy, and the panel remounts for it, so focus goes to the copy's name (docs/design-v1-token-sections.md 7). */
-const DUPLICATE_FOCUS: DuplicateFocus = { scope: PANEL_BOX, to: [CREATURE_HEADING] };
+/**
+ * A press that selects another token remounts the panel for it, so focus
+ * goes to that creature's name, read first: Duplicate's copy, and a name in
+ * Position's group line (docs/design-v1-token-sections.md 7, D-261024-47).
+ */
+const TO_NAME: AttachFocus & DuplicateFocus = { scope: PANEL_BOX, to: [CREATURE_HEADING] };
+
+/** The empty panel's line, which takes focus from script when what had it went with its token. */
+const EMPTY_LINE = "[data-token-empty]";
+
+/** A companion dismissed here leaves the panel empty, so focus goes to the empty panel's line (D-261024-47). */
+const DISMISS_FOCUS: DismissFocus = { scope: PANEL_BOX, to: [EMPTY_LINE] };
 
 function TokenDetails(props: PanelProps) {
   const tokenId = props.selectedTokenId;
@@ -152,7 +160,15 @@ function TokenDetails(props: PanelProps) {
     return t && s.view ? attachControls(s.view, { role: s.you?.role ?? "player", memberId: s.you?.memberId ?? null }, t) : false;
   });
 
-  if (!token || !access) return <Empty action={you?.role === "dm" ? <QuickStartLink /> : undefined}>Tap a token to see it here.</Empty>;
+  if (!token || !access)
+    return (
+      <Empty action={you?.role === "dm" ? <QuickStartLink /> : undefined}>
+        {/* Focusable from script, not by Tab, for a press that took the panel's token away (DISMISS_FOCUS). */}
+        <span tabIndex={-1} data-token-empty="">
+          Tap a token to see it here.
+        </span>
+      </Empty>
+    );
 
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
@@ -270,7 +286,7 @@ function TokenDetails(props: PanelProps) {
           // A companion's player dismisses it in Delete's place, with the bar's own button (docs/design-v1-combat-flow.md 3.6.9).
           <Section key={id} title="Remove">
             <div>
-              <DismissButton tokenId={token.id} name={name} />
+              <DismissButton tokenId={token.id} name={name} focusTo={DISMISS_FOCUS} />
             </div>
           </Section>
         );
@@ -427,7 +443,7 @@ function AttachControls(props: { token: Token }) {
   return (
     <Section>
       <div data-attach-controls="" style={{ display: "grid", gap: theme.space(2) }}>
-        <GroupLine token={token} focusTo={ATTACH_FOCUS} />
+        <GroupLine token={token} focusTo={ATTACH_FOCUS} nameFocusTo={TO_NAME} />
         {slots.length > 0 ? (
           // Each keeps its own width, as the panel's other buttons do: the bar's grow to share its play row.
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
@@ -547,7 +563,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
 
 /** The bar's Duplicate, worded, last in the DM's Token settings (docs/design-v1-token-sections.md 3.4). */
 function DuplicateButton(props: { token: Token }) {
-  const duplicate = useDuplicate(props.token, DUPLICATE_FOCUS);
+  const duplicate = useDuplicate(props.token, TO_NAME);
   return (
     <div>
       <Button size="sm" icon="duplicate" onClick={duplicate}>
