@@ -896,7 +896,7 @@ At the start of a creature's turn, whoever answers for it, its player or you for
 - **Death save**, for a dying creature: "Thorn is dying. Death save: 1 success, 2 failures." with **Roll**, **Skip** and **Dismiss**. It goes to the character's player and to you, so either of you can roll it, and the first roll counts: "Rolled 14: a success." A monster gets one only while "Monsters die at 0 HP" is off. While a Regeneration card for the same creature waits, the death save reads "Waiting for Regeneration", since a troll that regenerates never needs the save.
 - **The turn card**, for the whole of the turn: "Adult Red Dragon's turn" lists what the creature can spend, as its **Uses** does, with **Use** for its Legendary Resistance, its recharge and per-day abilities and a character's class resources. Its Legendary Actions are only counted ("4 of 4, after other creatures' turns"), since a monster takes them after another creature's turn. A creature that shares the turn, such as a controlled mount, gets a block of its own. A Regeneration or death save you skipped shows here with **Reopen**. On a phone, or where the card would not fit above the action bar, it folds to one row, "Adult Red Dragon's turn: 3 uses", led by a chevron. Press the row to open the card, and the chevron before the open card's title (**Collapse**) to fold it again.
 
-![The troll's turn after Ivo's Fire Bolt burned it: its Regeneration card, "Troll regenerates 15 HP." with "Recorded Fire damage may stop Regeneration." and Apply, Skip and Dismiss, above the troll's turn card with Loathsome Limbs, and the troll's row acting in the tracker.](dm-guide/regeneration.webp)
+![The troll's turn after Ivo's Fire Bolt: its Regeneration card, "Troll regenerates 15 HP.", with "Recorded Fire damage may stop Regeneration.", a note that a plain typed number is not counted, and Apply, Skip and Dismiss, over its turn card with Loathsome Limbs, and its row in the tracker.](dm-guide/regeneration.webp)
 
 **Dismiss** (the x on the turn card) hides a card on this device only, for this turn, so tidying your phone never answers the player's card. **Skip** answers for everyone. Nothing on these cards happens by itself: the next **Next** puts away whatever is left, and **Previous** brings the cards back as they were.
 
@@ -1379,7 +1379,7 @@ The party faces an adult red dragon in its lair. It has Multiattack, Fire Breath
 - To take a Legendary Action, tap the dragon and press **Uses** in its action bar, or open its row's **⋯**, and tap the action by name, such as **Fiery Rays**. The count goes down, and Fiery Rays, which the dragon can't take again until its next turn, stays off until then. They all come back at the start of its turn. If you tap the wrong one, **Restore** gives it back.
 - When the dragon fails a save in a group save, its row offers **Use Legendary Resistance (4 left)** the first time, since the label counts the uses it still has, and a save-ends or Concentration card offers the same. For a save you roll yourself from its roll options, press **Use** beside **Legendary Resistance** in its **Uses**.
 
-![The dragon on its turn, after its Fire Breath: its action bar with Uses after a lightning bolt, and the Dice panel with the Multiattack note, Rend's Attack, Damage and Critical, and Fire Breath marked Used, with Group save, Damage and Recharge.](dm-guide/boss.webp)
+![The dragon's turn after its Fire Breath and a Rend: its action bar with "Use 18 (Rend damage)", which every HP entry now offers, and Uses after a lightning bolt, and the Dice panel with the Rend damage on top, Rend's Attack, Damage and Critical, and Fire Breath marked Used.](dm-guide/boss.webp)
 
 ## Spirit Guardians and a summoned companion
 
@@ -1455,7 +1455,7 @@ This part is for quick lookups during play, starting with the keys that save a D
 
 Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) for the full list of shortcuts for your role.
 
-![The shortcut list the ? key opens, down to W for full screen: Change beside each key, Reset under Go to the other panel after its move to K, and Swap for Hide or show the side panel, since Full screen already has W.](dm-guide/shortcuts.webp)
+![The shortcut list the ? key opens, from Select down: each tool beside its key and Change, Ping moved to K with Reset under its Change, and Trap's X waiting on F, which Fog already has, with Swap and Cancel.](dm-guide/shortcuts.webp)
 
 These are the keys a DM uses most:
 
@@ -1469,6 +1469,8 @@ These are the keys a DM uses most:
 - `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
+
+![The shortcut list's Toolbar section: The tool's key, for the tool in use, shows its hidden options and goes to its next main choice, such as Area's next shape, and with Shift on a letter key goes back one.](dm-guide/shortcuts-toolbar.webp)
 
 These are the default keys. On any device with a keyboard, you can move a shortcut to another key from the shortcut list: press **Change** beside it, then press the new key. The change stays on that device, so your players keep their own keys, and **Reset all keys** at the bottom of the list brings the defaults back.
 
