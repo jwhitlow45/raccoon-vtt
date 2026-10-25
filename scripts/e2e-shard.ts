@@ -21,7 +21,11 @@ import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, r
  *
  * The files are placed by the time each took in e2e/durations.json
  * (scripts/e2e-shard-plan.ts). A file missing from the list counts as its
- * defaultSeconds until its time is recorded.
+ * defaultSeconds until its time is recorded. After the files change,
+ * rewrite the list from a few green CI runs, whose shard logs print each
+ * file's time, with GH_REPO=owner/name where there is no git checkout:
+ *
+ *   node scripts/e2e-durations.ts <run id> [<run id> ...]
  *
  * A shard runs its files one after another, since they share the port
  * range and the database. A file that fails runs once more, and the shard
