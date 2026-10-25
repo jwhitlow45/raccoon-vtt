@@ -72,10 +72,10 @@ Above the tabs sits the party bar, which shows your players' characters with the
 
 ![The DM's panel list on a phone, grouped under In play and Prepare, each panel led by its icon.](dm-guide/screen-phone.webp)
 
-**The toolbar** holds eleven tools. On a computer, each one but Trap has a key:
+**The toolbar** holds eleven tools. On a computer, each one has a key:
 
 - **Select** (`V`), **Ruler** (`R`), **Area** (`A`), **Fog** (`F`), **Draw** (`D`) and **Ping** (`P`).
-- Your setup tools: **Add token** (`T`), **Pin** (`M`), **Trap**, **Map builder** (`B`) and **Line up grid** (`G`).
+- Your setup tools: **Add token** (`T`), **Pin** (`M`), **Trap** (`X`), **Map builder** (`B`) and **Line up grid** (`G`).
 
 When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back.
 
@@ -1031,7 +1031,7 @@ A trap is something you build on the map and keep hidden: a pressure plate in a 
 
 ### Building a trap
 
-Pick the **Trap** tool. On a computer it sits among your setup tools, after Pin. On a phone it is behind **Setup**. It has no key.
+Pick the **Trap** tool. On a computer it sits among your setup tools, after Pin. On a phone it is behind **Setup**. Its key is `X`.
 
 The tool's options choose what your next trap starts from:
 
@@ -1459,7 +1459,7 @@ Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) 
 
 These are the keys a DM uses most:
 
-- A tool's key picks it: `V` for Select, `R` for Ruler, `A` for Area, `F` for Fog, `D` for Draw and `P` for Ping. For the setup tools, it is `T` for Add token, `M` for Pin, `B` for Map builder and `G` for Line up grid.
+- A tool's key picks it: `V` for Select, `R` for Ruler, `A` for Area, `F` for Fog, `D` for Draw and `P` for Ping. For the setup tools, it is `T` for Add token, `M` for Pin, `X` for Trap, `B` for Map builder and `G` for Line up grid.
 - `N` moves to the next turn, and starts the fight if it hasn't started yet.
 - `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
 - The arrow keys move the selection a square. Page Up raises it 5 ft, and Page Down lowers it 5 ft.
