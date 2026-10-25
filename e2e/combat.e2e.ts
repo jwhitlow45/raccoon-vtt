@@ -1953,7 +1953,13 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
-  test("fu31-b. a legendary row's line with three and four state tags beside LA and LR, and a companion's sub-row with three, start every part and tag at one edge and leave no tag alone on its last line where two fit, at 1440 x 900, 1280 x 800, 932 x 430, 390 x 844, 360 x 740 and 320 x 568, at 100% and 130% (FU30-NOTED)", async () => {
+  test("fu31-b. a legendary row's line with three and four state tags beside LA and LR, and a companion's sub-row with three, start every part and tag at one edge and leave no part alone on its last line where two fit, at 1440 x 900, 1280 x 800, 932 x 430, 390 x 844, 360 x 740 and 320 x 568, at 100% and 130% (FU30-NOTED)", async () => {
+    /*
+     * Between the parts only: the state tags inside theirs are all pills,
+     * which measureAlignment reads as a list of choices and does not hold to
+     * the lone item rule, so a tag alone under the others in its own part
+     * goes unmeasured here (FU31 review F4).
+     */
     const bosses = [
       { id: randomUUID(), entryId: "fu31-boss-3", name: "Goblin Boss", hidden: false },
       { id: randomUUID(), entryId: "fu31-boss-4", name: "Goblin Warlord", hidden: true },
