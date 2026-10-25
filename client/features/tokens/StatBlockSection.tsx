@@ -138,9 +138,18 @@ export function StatBlockSection(props: {
     openEditor({ monster: null, initial: { ...statBlockFromSrd(monster), ...(image ? { defaultImage: image } : {}) }, onSaved: attach });
   };
   // A companion's players detach what they may link. The DM's Detach clears a room monster's link too.
+  // The block's buttons grow to fill their line, so where they do not fit on one, Detach never stands alone under the others (LP22-ALIGN-3).
   const detach =
-    (access.dm || keeper !== null) && link.kind !== "none" ? <SmallButton onClick={() => props.patchActor(access.dm ? DETACH_PATCH : OWNER_DETACH_PATCH)}>Detach</SmallButton> : null;
-  const change = keeper ? <SmallButton onClick={() => setPicking(true)}>Change</SmallButton> : null;
+    (access.dm || keeper !== null) && link.kind !== "none" ? (
+      <SmallButton grow onClick={() => props.patchActor(access.dm ? DETACH_PATCH : OWNER_DETACH_PATCH)}>
+        Detach
+      </SmallButton>
+    ) : null;
+  const change = keeper ? (
+    <SmallButton grow onClick={() => setPicking(true)}>
+      Change
+    </SmallButton>
+  ) : null;
 
   return (
     // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.
@@ -155,7 +164,9 @@ export function StatBlockSection(props: {
               ) : null}
               {access.dm ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-                  <SmallButton onClick={() => editRoom(link.monster)}>Edit</SmallButton>
+                  <SmallButton grow onClick={() => editRoom(link.monster)}>
+                    Edit
+                  </SmallButton>
                   {change}
                   {detach}
                 </div>
@@ -177,7 +188,11 @@ export function StatBlockSection(props: {
             <>
               <StatBlockView view={viewOf(link.block)} source={link.block.fromSrd ? "srd" : "room"} credit={link.block.fromSrd !== undefined} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-                {keeper ? <SmallButton onClick={() => editBlock(link.block, keeper)}>Edit</SmallButton> : null}
+                {keeper ? (
+                  <SmallButton grow onClick={() => editBlock(link.block, keeper)}>
+                    Edit
+                  </SmallButton>
+                ) : null}
                 {change}
                 {detach}
               </div>

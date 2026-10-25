@@ -2386,6 +2386,27 @@ describe("raccoon-vtt: the token panel, the stat summary and AC on tokens", { ti
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
+  test("fu31-g. a Stat block's Copy, Change and Detach leave no button alone under the others: Pat's wolf companion and the DM's goblin, in line within 1 px at live play 22's sizes (LP22-ALIGN-3)", async () => {
+    const wolf = { id: randomUUID(), at: cell(6, 4) };
+    await ops.send({ t: "token.create", token: { id: wolf.id, sceneId: run.sceneId, size: "medium", visibility: "all", x: wolf.at.x, y: wolf.at.y, disposition: "ally", kind: "monster", name: "Wolf", companion: { of: run.thorn.characterId, turn: "shared" }, actor: { inline: actor({ ac: 13, srdId: "wolf", hp: { cur: 11, max: 11, temp: 0 } }) } } });
+    await waitFor("Pat's wolf", () => playerSocket.state?.tokens[wolf.id]);
+    try {
+      const off = await atLp22Sizes(async (at) => {
+        const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
+        await openGroup(goblin, "Stat block");
+        const lines = await measureIn(groupIn(goblin, "Stat block"), `the goblin's Stat block at ${at}`);
+        const pet = await panelOf(player, wolf.at, "Wolf");
+        await openGroup(pet, "Stat block");
+        await groupIn(pet, "Stat block").getByRole("button", { name: "Detach", exact: true }).waitFor();
+        await shots.take(player, `fu31-wolf-block-${at.replace(/ /g, "")}`);
+        return [...lines, ...(await measureIn(groupIn(pet, "Stat block"), `Pat's wolf's Stat block at ${at}`))];
+      }, true);
+      assert.deepEqual(off, [], "out of line by more than 1 px");
+    } finally {
+      await ops.send({ t: "token.delete", tokenId: wolf.id });
+    }
+  });
+
   test("10. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);
