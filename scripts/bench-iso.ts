@@ -282,12 +282,12 @@ async function timed(page: Page, cdp: CDPSession, steps: number, act: (i: number
 }
 
 /**
- * A token's middle on the page, in whichever stage on screen holds its node.
- * It must lie inside the canvas, or a row would press nothing and time an
- * idle page.
+ * A point on a token on the page, in whichever stage on screen holds its
+ * node: across its middle, `down` of the way from its top. It must lie
+ * inside the canvas, or a row would press nothing and time an idle page.
  */
-async function tokenPoint(page: Page, id: string): Promise<{ x: number; y: number }> {
-  const p = await page.evaluate((tokenId) => {
+async function tokenPoint(page: Page, id: string, down = 0.75): Promise<{ x: number; y: number }> {
+  const p = await page.evaluate(([tokenId, depth]) => {
     type Node = { getClientRect(): { x: number; y: number; width: number; height: number } };
     type Stage = { findOne(sel: string): Node | undefined; width(): number; height(): number; container(): { getBoundingClientRect(): { left: number; top: number } } };
     const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
@@ -297,7 +297,7 @@ async function tokenPoint(page: Page, id: string): Promise<{ x: number; y: numbe
       if (!node) continue;
       const r = node.getClientRect();
       const x = r.x + r.width / 2;
-      const y = r.y + r.height * 0.75;
+      const y = r.y + r.height * depth;
       if (x < 0 || y < 0 || x > stage.width() || y > stage.height()) return { off: true as const };
       const box = stage.container().getBoundingClientRect();
       // Nothing over the canvas there, such as the action bar, may take the press.
@@ -306,7 +306,7 @@ async function tokenPoint(page: Page, id: string): Promise<{ x: number; y: numbe
       return { x: box.left + x, y: box.top + y };
     }
     return null;
-  }, id);
+  }, [id, down] as const);
   if (!p) throw new Error(`token ${id} is not on the board`);
   if ("off" in p) throw new Error(`token ${id} is off the screen or under the chrome`);
   return p;
@@ -368,13 +368,13 @@ async function touchPan(page: Page, cdp: CDPSession, steps: number): Promise<num
   return out;
 }
 
-async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number, opts: { keepSelection?: boolean } = {}): Promise<number[]> {
+async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number, opts: { keepSelection?: boolean; down?: number } = {}): Promise<number[]> {
   // A token selected by an earlier row opens its bar, which can cover the next one: start each lone drag with none.
   if (!opts.keepSelection) {
     await page.keyboard.press("Escape");
     await frames(page, 8);
   }
-  const from = await tokenPoint(page, id);
+  const from = await tokenPoint(page, id, opts.down);
   // Toward the canvas's middle, so the token stays on screen.
   const box = await boardBox(page);
   const sx = from.x < box.x + box.width / 2 ? 1 : -1;
@@ -416,8 +416,7 @@ async function createRoom(page: Page, name: string): Promise<Room> {
 
 /** A press held on empty map until it pings (features/pings/hold.ts), then let go. */
 async function holdPing(page: Page, cdp: CDPSession): Promise<void> {
-  const box = await page.locator(".konvajs-content").first().boundingBox();
-  if (!box) throw new Error("no canvas");
+  const box = await boardBox(page);
   const at = { x: box.x + 40, y: box.y + box.height * 0.4, id: 0 };
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
   await page.waitForTimeout(900);
@@ -578,7 +577,8 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       add("group drag of 4, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.group![0]!, STEPS, { keepSelection: true }))));
       await page.keyboard.press("Escape");
       await frames(page, 8);
-      add("a horse with its rider dragged, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.horse!, STEPS))));
+      // Pressed near its foot, clear of the rider on its back, which a press would lift off it.
+      add("a horse with its rider dragged, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.horse!, STEPS, { down: 0.92 }))));
     }
 
     // The crowd.
