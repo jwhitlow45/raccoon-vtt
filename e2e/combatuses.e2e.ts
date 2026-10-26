@@ -1443,7 +1443,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const resources = deskSocket.state!.characters[run.thorn]!.resources!;
     const seen: string[] = [];
     try {
-      // Second Wind and Action Surge as a fighter has them, beside Rage and Lay on Hands; Rage at 6 for a short name beside 6 pips.
+      // Second Wind and Action Surge as a fighter has them, beside Rage and Lay on Hands. Rage at 6 is a short name beside 6 pips.
       await ops.send({
         t: "character.update",
         characterId: run.thorn,
@@ -1541,6 +1541,7 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
       textContent: string | null;
       previousElementSibling: E | null;
       parentElement: E | null;
+      closest(s: string): E | null;
       firstElementChild: E | null;
       childNodes: ArrayLike<{ nodeType: number; textContent: string | null }>;
     };
@@ -1581,7 +1582,8 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
       const scale = p.width / parseFloat(style(pips).width) || 1;
       const n = nameBox.getBoundingClientRect();
       const l = line.getBoundingClientRect();
-      const row = line.parentElement!;
+      // The row's item, which holds the buttons: a monster row's title line is its child, a class resource's sits in its words' column.
+      const row = line.closest("li")!;
       const buttons = Array.from(row.querySelectorAll("button")).map((b) => b.getBoundingClientRect().right);
       out.push({
         name,
