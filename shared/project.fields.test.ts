@@ -16,7 +16,12 @@ import { DM, P1, env, room, template, trap } from "./testutil.ts";
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
 const PLAYERS: readonly Viewer[] = [P1, DISPLAY];
 
-/** Holds a player's copy to a list: copied fields equal, zeroed ones 0, the DM's absent, and nothing else but `extra`. */
+/**
+ * Holds a player's copy to a list: copied fields equal, zeroed ones 0, the
+ * DM's absent, changed ones absent or not the stored value, and nothing
+ * else but `extra`. So each fixture must give every changed field a value
+ * its projection changes.
+ */
 function holds(list: Record<string, PlayerField>, stored: object, copy: object | null, extra: readonly string[] = []): void {
   assert.ok(copy, "the player gets a copy");
   const from = stored as Record<string, unknown>;
@@ -25,6 +30,7 @@ function holds(list: Record<string, PlayerField>, stored: object, copy: object |
     if (rule === "copied") assert.deepEqual(to[field], from[field], `${field} is copied`);
     else if (rule === "zeroed") assert.equal(to[field], 0, `${field} is zeroed`);
     else if (rule.startsWith("dm: ")) assert.ok(!(field in to), `${field} stays the DM's`);
+    else assert.ok(!(field in to) || !Object.is(to[field], from[field]), `${field} is changed for players`);
   }
   for (const field of Object.keys(to)) assert.ok(field in list ? !list[field]!.startsWith("dm: ") : extra.includes(field), `${field} is in the list`);
   assert.deepEqual(Object.keys(list).sort(), Object.keys(from).sort(), "the stored entity sets every field the list names");
@@ -66,7 +72,10 @@ function fullChunk(): Required<BuildChunk> {
     rev: 4,
     cells: { "1,1": "stone" },
     edges: { "1,1,n": { kind: "door", state: "locked", secret: false, discovered: false }, "2,1,n": { kind: "wall" } },
-    walls: [{ id: "w00000000001", a: [1, 1], b: [3, 1], f: { kind: "wall" } }],
+    walls: [
+      { id: "w00000000001", a: [1, 1], b: [3, 1], f: { kind: "wall" } },
+      { id: "w00000000002", a: [4, 1], b: [5, 1], f: { kind: "door", state: "locked", secret: false, discovered: false } },
+    ],
     heights: "A".repeat(683) + "=",
     up: ".".repeat(256),
     rough: "d".padEnd(256, "."),
@@ -91,6 +100,7 @@ describe("what a player's copy takes of each field", () => {
     const out = projectChunkForPlayer({ [chunkKey("s1", 0, 0)]: chunk }, chunk, "off");
     holds(CHUNK_FOR_PLAYERS, chunk, out);
     assert.deepEqual(out!.edges["1,1,n"], { kind: "door", state: "closed", secret: false, discovered: false }, "a lock reads closed");
+    assert.deepEqual(out!.walls?.[1]?.f, { kind: "door", state: "closed", secret: false, discovered: false }, "a free door's lock reads closed");
   });
 
   test("a found trap, as TRAP_FOR_PLAYERS says, Disarmed read as `disarmed`", () => {
