@@ -278,6 +278,14 @@ export type RoomSettings = {
    * whole order. Read it through `orderRevealOf` (shared/rules/initiative.ts).
    */
   playersSeeOrder?: OrderReveal;
+  /**
+   * The grid shape a new Battle mat or Map image starts with
+   * (docs/design-v1-hex-grids.md HX-D19). Absent reads as squares, so every
+   * room from before it keeps making square scenes. Only the new scene form
+   * reads it: a `scene.create` without a shape makes squares, so replay
+   * never depends on it.
+   */
+  newScenes?: GridShape;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
@@ -372,7 +380,20 @@ export type Scene = {
    * image, which only the import makes, stands in for it.
    */
   gridFromFile?: true;
+  /**
+   * The scene's grid shape (docs/design-v1-hex-grids.md section 7). Absent
+   * reads as squares, the shape of every scene from before hex grids. Rules
+   * read it through `sceneGrid` (shared/rules/grid.ts).
+   */
+  gridShape?: GridShape;
 };
+
+/**
+ * A hex grid's orientation (docs/design-v1-hex-grids.md 4.1): hex rows have
+ * pointed tops and run straight across, hex columns have flat tops and run
+ * straight down. Squares have no stored shape.
+ */
+export type GridShape = "hexRows" | "hexColumns";
 
 /** How lit a scene is where no light reaches (section 4.3.2). */
 export type LightLevel = "bright" | "dim" | "dark";
@@ -522,6 +543,12 @@ export type BuildChunk = {
    * chunk has none.
    */
   rough?: string;
+  /**
+   * The hex shape its grid-keyed content (cells, edges, heights, `up` and
+   * `rough`) was written under, absent for squares (docs/design-v1-hex-grids.md
+   * HX-D14). Free walls are in world units and carry none.
+   */
+  grid?: GridShape;
 };
 
 /**
@@ -672,7 +699,11 @@ export type FogShape =
 
 export type FogOp = { id: string; mode: "reveal" | "hide"; shape: FogShape };
 
-export type FogDraft = { sceneId: SceneId; rev: number; ops: FogOp[] };
+/**
+ * `grid` is the hex shape its `cells` shapes were written under, absent for
+ * squares and for a draft of world shapes only (docs/design-v1-hex-grids.md HX-D14).
+ */
+export type FogDraft = { sceneId: SceneId; rev: number; ops: FogOp[]; grid?: GridShape };
 
 export type CreatureSize = "tiny" | "small" | "medium" | "large" | "huge" | "gargantuan" | "custom";
 
@@ -1499,7 +1530,13 @@ export type Effect = {
 
 export type AreaShape = "sphere" | "cylinder" | "cone" | "cube" | "line" | "emanation";
 
-export type AreaFootprint = { w: number; h: number; elevation: number; height: number };
+/**
+ * `size` is the size an emanation that stays put was cast from
+ * (docs/design-v1-hex-grids.md HX-D11), read around its origin on hexes. It
+ * still stores w and h, its size's box, so a square scene reads the same
+ * creature. An older one with only w and h reads as the size whose box that is.
+ */
+export type AreaFootprint = { w: number; h: number; elevation: number; height: number; size?: Exclude<CreatureSize, "custom"> };
 
 /**
  * When an area hits a creature again after it was cast (features section
@@ -2061,6 +2098,8 @@ export type Trap = {
   found: boolean;
   /** Always stored. A player's projection leaves it out whole. */
   rig?: TrapRig;
+  /** The hex shape its zone was written under, absent for squares (docs/design-v1-hex-grids.md HX-D14). */
+  grid?: GridShape;
 };
 
 export type TrapState = "armed" | "sprung" | "disarmed";
