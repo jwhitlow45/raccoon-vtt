@@ -222,6 +222,51 @@ describe("under \"center\" a creature on hexes is judged at its anchor point, th
   }
 });
 
+describe("an emanation's hexes are found within the scene alone, the same as walking its steps (review HX2-ASTRA-03)", () => {
+  /** Every hex within `steps` of `from`, by walking neighbors, as coverage found them before. */
+  function walked(g: HexGrid, from: readonly Hex[], steps: number): Set<string> {
+    const out = new Set(from.map(hexKey));
+    let frontier = [...from];
+    for (let d = 1; d <= steps; d++) {
+      const next: Hex[] = [];
+      for (const h of frontier) for (const n of hexNeighbors(g, h)) if (!out.has(hexKey(n))) (out.add(hexKey(n)), next.push(n));
+      frontier = next;
+    }
+    return out;
+  }
+
+  for (const [name, g] of GRIDS) {
+    test(`${name}: random emanations on random creatures near the scene's edges cover the scene's hexes within their steps, and no other`, () => {
+      let seed = 7;
+      const r = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+      const bounds = { w: 24, h: 18 };
+      const scene = new Set(sceneHexes(g, bounds).map(hexKey));
+      for (let i = 0; i < 120; i++) {
+        const size = (["tiny", "small", "medium", "large", "huge", "gargantuan"] as const)[Math.floor(r() * 6)]!;
+        const caster = on(g, "c", size, { col: Math.floor(r() * 30) - 3, row: Math.floor(r() * 24) - 3 });
+        const ft = 5 * (1 + Math.floor(r() * 12));
+        const aura = template("e", { shape: "emanation", size: ft, attachedTo: "c", casterId: "c", includeOrigin: true });
+        const got = hexSet(computeCoverage(aura, { ...ctx(g, { c: caster }), bounds }));
+        const want = new Set([...walked(g, occupiedHexes(g, caster), ft / 5)].filter((k) => scene.has(k)));
+        assert.deepEqual([...got].sort(), [...want].sort(), `${size} at ${hexKey(occupiedHexes(g, caster)[0]!)}, ${ft} ft`);
+      }
+    });
+
+    test(`${name}: a 1,000 ft emanation at 1 ft a cell on a 20 by 20 scene covers every hex of it, in the time the scene takes and not its 1,000 steps`, () => {
+      const caster = on(g, "c", "medium", { col: 10, row: 10 });
+      const aura = template("e", { shape: "emanation", size: 1000, attachedTo: "c", casterId: "c", includeOrigin: true });
+      const opts = { ...ctx(g, { c: caster }), bounds: { w: 20, h: 20 } };
+      opts.settings = { ...opts.settings, feetPerCell: 1 };
+      const t0 = performance.now();
+      assert.equal(hexSet(computeCoverage(aura, opts)).size, sceneHexes(g, { w: 20, h: 20 }).length);
+      assert.deepEqual(creaturesInArea(aura, [on(g, "f", "medium", { col: 1, row: 1 })], opts), ["f"]);
+      // Walking all 3,003,001 hexes of its reach took seconds. The scene's few hundred take a few milliseconds.
+      const ms = performance.now() - t0;
+      assert.ok(ms < 1000, `${ms.toFixed(0)} ms`);
+    });
+  }
+});
+
 describe("a template on hexes reaches players' copies unchanged", () => {
   test("its footprint's size is plain data", () => {
     const t: AreaTemplate = template("s", { shape: "emanation", footprint: { w: 3, h: 3, elevation: 0, height: 15, size: "huge" } });
