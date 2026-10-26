@@ -18,7 +18,7 @@ import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
-import { useRoomStore, useRoomView } from "../../state/view.ts";
+import { useRoomStore, useRoomView, type RoomView } from "../../state/view.ts";
 import { FogShape } from "../FogShape.tsx";
 import { MapContent, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
@@ -110,9 +110,10 @@ export const IsoBoard = memo(IsoBoardImpl, (prev, next) => prev.hidden && next.h
 function IsoBoardImpl(props: IsoBoardProps) {
   const { scene, cam, size, turn, hidden } = props;
   const view = isometric(turn);
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const feet = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell);
-  const allLabels = useRoomView((s) => s.view?.labels);
+  // While hidden it keeps what it last read, so a brush stroke in Top-down walks no walls, heights or buckets here, and it reads afresh when shown.
+  const chunks = useShownView(!hidden, (s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
+  const feet = useShownView(!hidden, (s) => s.view?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell);
+  const allLabels = useShownView(!hidden, (s) => s.view?.labels);
   const { w, h } = scene.bounds;
   const stand = heightsStand(cam.scale, props.lowPower);
   const fog = useMemo(() => new FogView(props.viewerFog, scene.id, { w, h }), [props.viewerFog, scene.id, w, h]);
@@ -390,6 +391,14 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
 type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox };
+
+/** A read of the room that holds its last value while `shown` is false, so the store's changes reach nothing then. */
+function useShownView<T>(shown: boolean, select: (s: RoomView) => T): T {
+  const last = useRef<{ value: T } | null>(null);
+  const value = useRoomView((s) => (shown || !last.current ? select(s) : last.current.value));
+  last.current = { value };
+  return value;
+}
 
 const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
 

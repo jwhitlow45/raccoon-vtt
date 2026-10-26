@@ -160,6 +160,14 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     assert.match(iso, /<TreeShownContext\.Provider value=\{!hidden\}>/);
   });
 
+  test("the hidden isometric board reads no room changes, so a brush stroke in Top-down rebuilds nothing there", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    const impl = iso.slice(iso.indexOf("function IsoBoardImpl("), iso.indexOf("\n}\n", iso.indexOf("function IsoBoardImpl(")));
+    assert.doesNotMatch(impl, /useRoomView\(/, "every read of the room goes through useShownView");
+    assert.equal(impl.match(/useShownView\(!hidden, /g)?.length, 3);
+    assert.match(iso, /useRoomView\(\(s\) => \(shown \|\| !last\.current \? select\(s\) : last\.current\.value\)\)/);
+  });
+
   test("ghosts and shadows read no drag while their tree is hidden", () => {
     assert.match(read("canvas/RemoteDrags.tsx"), /useRoomView\(\(s\) => \(shown \? s\.ephemeral\.drags : NO_DRAGS\)\)/);
     assert.match(read("canvas/TokenShadow.tsx"), /\(shown \? s\.spots\[token\.id\] : undefined\)/);
