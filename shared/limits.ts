@@ -222,6 +222,9 @@ export const LIMITS = {
    * (docs/design-v1-per-player-vision.md 6.1): the entries of its holder
    * list that are on. The rest have the shared sight. 6 if the server box
    * passes the design's timing rows at the worst legal ownership, else 5.
+   * The reducer enforces it. Stored lists and ops are bounded by
+   * MOST_SIGHT_HOLDERS instead, so lowering it never refuses a room or an
+   * op stored under it.
    */
   sightHoldersPerScene: 6,
 
@@ -585,6 +588,15 @@ export function checkLimits(state: RoomState, sceneId?: string | null, before?: 
 }
 
 /** The refusal of a save past the room's handout pages, with what frees some (docs/design-v1-pdf-handouts.md 3.7). */
+/**
+ * The most players the design ever lets see for themselves on one scene
+ * (docs/design-v1-per-player-vision.md 6.1), the bound of every stored list
+ * of who saw, a holder list's entries that are on, and an explore op's
+ * holders (reviews SEC-PV1-4, PV1-O4). `LIMITS.sightHoldersPerScene` is the
+ * cap in force, at most this.
+ */
+export const MOST_SIGHT_HOLDERS = 6;
+
 export const HANDOUT_PAGES_FULL = `the room holds at most ${n(LIMITS.handoutPagesPerRoom)} handout pages. Delete a document or close a handout, then try again`;
 /** What a show adds, since showing a document is what passed the limit. */
 export const SHOWING_COUNTS_AGAIN = "Showing a document counts its pages again while it shows";

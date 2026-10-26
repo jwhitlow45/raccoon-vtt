@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LIMITS, serializedBytes } from "./limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "./limits.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
@@ -1811,9 +1811,10 @@ export const clientOps = [
    */
   op("vision.holders", {
     sceneId: id,
+    // Bounded by the roster, so a seventh name reaches the reducer, which refuses it in the DM's words (map.ts HOLDERS_FULL, review PV1-O6).
     on: z
       .array(id)
-      .max(LIMITS.sightHoldersPerScene)
+      .max(LIMITS.membersPerRoom)
       .refine((ids) => new Set(ids).size === ids.length, { message: "a player is listed twice" }),
   }),
   op("scene.delete", { sceneId: id }),
@@ -2306,7 +2307,7 @@ export const serverOnlyOps = [
     members: z
       .array(z.strictObject({ memberId: id, tiles: exploredTiles.min(1) }))
       .min(1)
-      .max(LIMITS.sightHoldersPerScene)
+      .max(MOST_SIGHT_HOLDERS)
       .refine((m) => new Set(m.map((e) => e.memberId)).size === m.length, { message: "a holder is listed twice" })
       .optional(),
     join: z

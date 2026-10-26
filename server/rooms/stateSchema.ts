@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
-import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
@@ -218,16 +218,17 @@ const fogDraft = z.strictObject({ sceneId: id, rev, ops: z.array(fogOpSchema).ma
 
 /**
  * Per-player vision (docs/design-v1-per-player-vision.md 6.7): who saw a
- * stop or a turn's start, at most the scene's holders that are on, and who
- * read a log line, at most the roster, each sorted with no repeat.
+ * stop or a turn's start, at most the design's most holders, each sorted
+ * with no repeat. A stored log line holds no list: the DM's keeps none once
+ * its readers are fixed, and a reader's copy names only them (Tx.settleLog,
+ * review PV1-O12).
  */
 const sortedIds = (max: number) =>
   z
     .array(id)
     .max(max)
     .refine((ids) => ids.every((m, i) => i === 0 || ids[i - 1]! < m), { message: "not sorted, or a member listed twice" });
-const stopSeenBy = sortedIds(LIMITS.sightHoldersPerScene);
-const lineSeenBy = sortedIds(LIMITS.membersPerRoom);
+const stopSeenBy = sortedIds(MOST_SIGHT_HOLDERS);
 const sightHolders = z.strictObject({
   sceneId: id,
   rev,
@@ -235,7 +236,7 @@ const sightHolders = z.strictObject({
     .array(z.strictObject({ memberId: id, on: z.boolean() }))
     .max(LIMITS.membersPerRoom)
     .refine((e) => new Set(e.map((h) => h.memberId)).size === e.length, { message: "a player is listed twice" })
-    .refine((e) => e.filter((h) => h.on).length <= LIMITS.sightHoldersPerScene, { message: `at most ${LIMITS.sightHoldersPerScene} players see for themselves` }),
+    .refine((e) => e.filter((h) => h.on).length <= MOST_SIGHT_HOLDERS, { message: `at most ${MOST_SIGHT_HOLDERS} players see for themselves` }),
 });
 const exploredTile = fogTile.extend({ memberId: id });
 
@@ -583,7 +584,7 @@ const light = z.strictObject({ ...mapSchemas.lightFields, rev, sceneId: id });
 
 const effectKey = z.enum([...CONDITION_KEYS, ...STATUS_KEYS, "custom"]);
 const lifeState = z.enum(["alive", "dying", "stable", "dead"]);
-const holder = { tokenId: id.optional(), characterId: id.optional(), seen: z.literal(true).optional(), seenBy: lineSeenBy.optional() };
+const holder = { tokenId: id.optional(), characterId: id.optional(), seen: z.literal(true).optional() };
 const hpNumber = z.number().int().min(0).max(100_000);
 const hpValues = z.strictObject({ cur: hpNumber, max: hpNumber, temp: hpNumber });
 const vitals = z.strictObject({ hp: hpValues, life: lifeState, deathSaves: z.strictObject({ ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3) }) });
@@ -641,11 +642,9 @@ const logEvent = z.discriminatedUnion("type", [
     entryId: id,
     round: z.number().int().min(0).max(100_000),
     seen: z.literal(true).optional(),
-    seenBy: lineSeenBy.optional(),
     back: z.literal(true).optional(),
     to: id.optional(),
     toSeen: z.literal(true).optional(),
-    toSeenBy: lineSeenBy.optional(),
   }),
   z.strictObject({
     type: z.literal("area"),
@@ -655,7 +654,6 @@ const logEvent = z.discriminatedUnion("type", [
     area: shortText,
     moved: z.literal(true).optional(),
     seen: z.literal(true).optional(),
-    seenBy: lineSeenBy.optional(),
     hidden: z.literal(true).optional(),
   }),
   z.strictObject({ type: z.literal("encounter"), action: z.enum(["start", "end"]) }),
@@ -709,7 +707,6 @@ const logEvent = z.discriminatedUnion("type", [
           tokenId: id.optional(),
           characterId: id.optional(),
           seen: z.literal(true).optional(),
-          seenBy: lineSeenBy.optional(),
           critOn: diceSchemas.critOn.optional(),
           initiative: z.literal(true).optional(),
           save: z.enum(ABILITY_KEYS).optional(),

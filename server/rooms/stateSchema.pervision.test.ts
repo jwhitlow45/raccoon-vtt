@@ -30,9 +30,11 @@ function perPlayer(): RoomState {
     turnStart: { entryId: "e1", tokenId: "gob", sceneId: "s1", x: 1, y: 1, elevation: 0, seq: 1, seenBy: ["p2"] },
   };
   s.log = [
-    { id: "1:900000", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", tokenId: "gob", seenBy: ["p2"], change: "damage", amount: 1 } },
-    { id: "1:900001", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "turn", entryId: "e1", round: 1, seenBy: ["p1"], back: true, to: "e1", toSeenBy: ["p1", "p2"] } },
-    { id: "1:900002", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "area", templateId: "a", tokenId: "gob", trigger: "enter", area: "Spirit Guardians", seenBy: [] } },
+    // The DM's lines and a reader's copy, as settled: no list of who saw (Tx.settleLog).
+    { id: "1:900000", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "hp", tokenId: "gob", change: "damage", amount: 1 } },
+    { id: "1:900001", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "turn", entryId: "e1", round: 1, back: true, to: "e1" } },
+    { id: "1:900002", at: "2026-10-12T20:00:00.000Z", kind: "event", data: { type: "area", templateId: "a", tokenId: "gob", trigger: "enter", area: "Spirit Guardians" } },
+    { id: "1:500000", at: "2026-10-12T20:00:00.000Z", kind: "event", to: ["p2"], copyOf: "1:900000", data: { type: "hp", tokenId: "gob", seen: true, change: "damage", amount: 1 } },
   ];
   return s;
 }
@@ -60,8 +62,30 @@ describe("roomStateSchema, per-player vision (docs/design-v1-per-player-vision.m
     assert.match(refused((s) => (s.tokens.gob!.path!.stops[1]!.seenBy = ["p2", "p1"])), /not sorted/);
     assert.match(refused((s) => (s.encounter!.turnStart!.seenBy = ["p1", "p1"])), /listed twice/);
     refused((s) => (s.tokens.gob!.path!.stops[1]!.seenBy = Array.from({ length: LIMITS.sightHoldersPerScene + 1 }, (_, i) => `p${i}`)));
-    refused((s) => ((s.log[1]!.data as { toSeenBy?: string[] }).toSeenBy = ["p2", "p1"]));
+    // A stored line holds no list of who saw (PV1-O12).
+    for (const [i, field] of [[0, "seenBy"], [1, "seenBy"], [1, "toSeenBy"], [2, "seenBy"], [3, "seenBy"]] as const) {
+      refused((s) => ((s.log[i]!.data as Record<string, unknown>)[field] = ["p2"]));
+    }
     refused((s) => (s.exploredBy[`${"k".repeat(141)}`] = s.exploredBy[holderTileKey("s1", "p2", 0, 0)]!));
+  });
+
+  test("a lower cap in force refuses no room stored under the design's most (SEC-PV1-4, PV1-O4)", async () => {
+    const limits = LIMITS as { sightHoldersPerScene: number };
+    const cap = limits.sightHoldersPerScene;
+    limits.sightHoldersPerScene = 5;
+    try {
+      // The schema is built as the module loads, so a copy loaded under the lower cap is the one to ask.
+      const { parseRoomState } = (await import(new URL("./stateSchema.ts?cap=5", import.meta.url).href)) as typeof import("./stateSchema.ts");
+      const s = perPlayer();
+      for (const id of ["p3", "p4", "p5", "p6"]) s.members[id] = member(id);
+      const six = ["p1", "p2", "p3", "p4", "p5", "p6"];
+      s.holders.s1 = { sceneId: "s1", rev: 3, entries: six.map((memberId) => ({ memberId, on: true })) };
+      s.tokens.gob!.path!.stops[1]!.seenBy = six;
+      const parsed = parseRoomState(s);
+      assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    } finally {
+      limits.sightHoldersPerScene = cap;
+    }
   });
 
   test("a backup from before per-player vision migrates to empty lists and layers that parse", () => {

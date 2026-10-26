@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { holderTileKey } from "./keys.ts";
-import { LIMITS } from "./limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS } from "./limits.ts";
 import type { ExploredTile, FogTile, RoomState, Scene, TurnStart } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
@@ -47,17 +47,37 @@ function revealed(tile: FogTile | undefined, x: number, y: number): boolean {
 }
 
 describe("the contract (6.7)", () => {
+  test("a lower cap in force refuses no explore op stored under the design's most (SEC-PV1-4, PV1-O4)", async () => {
+    const limits = LIMITS as { sightHoldersPerScene: number };
+    const cap = limits.sightHoldersPerScene;
+    limits.sightHoldersPerScene = 5;
+    try {
+      // The schemas are built as the module loads, so a copy loaded under the lower cap is the one to ask.
+      const lowered = (await import(new URL("./protocol.ts?cap=5", import.meta.url).href)) as typeof import("./protocol.ts");
+      const bits = layerTile("s1", { x: 0, y: 0, w: 2, h: 2 }).bits;
+      const members = ["p1", "p2", "p3", "p4", "p5", "p6"].map((memberId) => ({ memberId, tiles: [{ tx: 0, ty: 0, bits }] }));
+      assert.ok(lowered.opSchema.safeParse({ t: "sys.explore", sceneId: "s1", tiles: [], members }).success);
+    } finally {
+      limits.sightHoldersPerScene = cap;
+    }
+  });
+
   test("the Sight row's patch, the holder pick and the explore step's shapes", () => {
     assert.ok(opSchema.safeParse({ t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dim", perPlayer: true } } }).success);
     assert.ok(opSchema.safeParse({ t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dim", perPlayer: false } } }).success);
     assert.ok(!opSchema.safeParse({ t: "scene.create", scene: { id: "s9", name: "S", bounds: { w: 10, h: 10 }, vision: { on: true, light: "dim", perPlayer: false } } }).success, "a stored vision never holds false");
     const pick = (on: string[]) => opSchema.safeParse({ t: "vision.holders", sceneId: "s1", on });
     assert.ok(pick(["p1", "p2", "p3", "p4", "p5", "p6"]).success);
-    assert.ok(!pick(["p1", "p2", "p3", "p4", "p5", "p6", "p7"]).success, "a seventh is refused");
+    const seven = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"];
+    assert.ok(pick(seven).success, "a seventh passes the schema, so the reducer refuses it in the DM's words (PV1-O6)");
+    const many = perPlayerRoom();
+    for (const id of seven) many.members[id] = member(id);
+    assert.equal(refused(many, { t: "vision.holders", sceneId: "s1", on: seven }).message, HOLDERS_FULL);
     assert.ok(!pick(["p1", "p1"]).success, "a player twice is refused");
     assert.ok(!opSchema.safeParse({ t: "sys.explore", sceneId: "s1", tiles: [] }).success, "an explore holds something");
     assert.ok(opSchema.safeParse({ t: "sys.explore", sceneId: "s1", tiles: [], join: [{ memberId: "p1", on: true }] }).success);
     assert.equal(LIMITS.sightHoldersPerScene, 6);
+    assert.equal(MOST_SIGHT_HOLDERS, 6);
     assert.equal(HOLDERS_FULL, "At most 6 players see for themselves here. Untick one first.");
   });
 });
