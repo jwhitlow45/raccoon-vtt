@@ -362,7 +362,7 @@ export function groupWalls(pieces: readonly WallPiece[], prev: ReadonlyMap<strin
   const out = new Map<string, readonly WallPiece[]>();
   for (const [key, list] of groups) {
     const old = prev?.get(key);
-    const same = old && old.length === list.length && old.every((p, i) => p.id === list[i]!.id && p.ax === list[i]!.ax && p.ay === list[i]!.ay && p.bx === list[i]!.bx && p.by === list[i]!.by && p.kind === list[i]!.kind);
+    const same = old && old.length === list.length && old.every((p, i) => p.id === list[i]!.id && p.ax === list[i]!.ax && p.ay === list[i]!.ay && p.bx === list[i]!.bx && p.by === list[i]!.by && p.kind === list[i]!.kind && p.auto === list[i]!.auto);
     out.set(key, same ? old : list);
   }
   return out;

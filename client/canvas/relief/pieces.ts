@@ -36,12 +36,12 @@ export type CellPiece = {
   stair: boolean;
 };
 
-/** A standing wall piece on the higher drawn ground beside it, in cells. */
-export type WallItem = { kind: "wall"; id: string; piece: WallPiece; base: number };
+/** A standing wall piece, from `base` up `rise`, in cells (wallItems). */
+export type WallItem = { kind: "wall"; id: string; piece: WallPiece; base: number; rise: number };
 
 export type StaticPiece = CellPiece | WallItem;
 
-/** How high a wall piece stands, in cells (ISO-D7): rooms read as rooms and stay open to a phone that turns all the time. */
+/** How high a wall piece stands, in cells (ISO-D7): rooms read as rooms and stay open to a phone that turns all the time. An automatic wall beside raised ground stands less (wallItems). */
 export const WALL_RISE = 0.5;
 
 /** Ties in depth draw columns first, then pits, then walls, then standees (5.6). */
@@ -145,12 +145,12 @@ export function boundsOf(p: StaticPiece, turn: Turn): VBox {
   const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
   if (p.kind === "wall" && p.piece.kind === "pillar") {
     // A pillar's drum stands inside its cell: the cell's corners bound it.
-    for (const [cx, cy] of CORNERS) grow(box, turn, p.piece.ax + cx, p.piece.ay + cy, p.base, p.base + WALL_RISE);
+    for (const [cx, cy] of CORNERS) grow(box, turn, p.piece.ax + cx, p.piece.ay + cy, p.base, p.base + p.rise);
     return box;
   }
   if (p.kind === "wall") {
-    grow(box, turn, p.piece.ax, p.piece.ay, p.base, p.base + WALL_RISE);
-    grow(box, turn, p.piece.bx, p.piece.by, p.base, p.base + WALL_RISE);
+    grow(box, turn, p.piece.ax, p.piece.ay, p.base, p.base + p.rise);
+    grow(box, turn, p.piece.bx, p.piece.by, p.base, p.base + p.rise);
     return box;
   }
   // A column's sides reach down to 0 at the lowest. A pit draws only inside its opening at 0.
@@ -216,10 +216,34 @@ export function cellPieces(src: PieceSource, cx: number, cy: number, chunk: Buil
   return out;
 }
 
-/** The wall pieces of one bucket, each on the higher drawn ground beside it. */
+/**
+ * The wall pieces of one bucket. A piece stands WALL_RISE tall on the higher
+ * drawn ground beside it, or on its own cell's for a free wall or a pillar.
+ * An automatic wall instead keeps its top WALL_RISE above the lower ground
+ * (D-261026-27): the walls around a room stay one height whatever is raised
+ * along them, the part above a low platform shows, and beside ground that
+ * reaches that top no piece stands, since the raised ground's own side is
+ * the wall. A pit's floor never brings that top below a wall on the ground
+ * at 0, so a pit at a room's edge and a sunken room keep their rim.
+ */
 export function wallItems(src: Pick<PieceSource, "ground">, pieces: readonly WallPiece[]): WallItem[] {
-  return pieces.map((piece) => {
-    const base = piece.beside ? Math.max(src.ground(piece.beside[0], piece.beside[1]), src.ground(piece.beside[2], piece.beside[3])) : src.ground(piece.cx, piece.cy);
-    return { kind: "wall", id: `w${piece.id}`, piece, base };
-  });
+  const out: WallItem[] = [];
+  for (const piece of pieces) {
+    const id = `w${piece.id}`;
+    if (!piece.beside) {
+      out.push({ kind: "wall", id, piece, base: src.ground(piece.cx, piece.cy), rise: WALL_RISE });
+      continue;
+    }
+    const a = src.ground(piece.beside[0], piece.beside[1]);
+    const b = src.ground(piece.beside[2], piece.beside[3]);
+    const high = Math.max(a, b);
+    if (!piece.auto) {
+      out.push({ kind: "wall", id, piece, base: high, rise: WALL_RISE });
+      continue;
+    }
+    const top = Math.min(high, Math.max(Math.min(a, b), 0)) + WALL_RISE;
+    if (high >= top) continue;
+    out.push({ kind: "wall", id, piece, base: high, rise: top - high });
+  }
+  return out;
 }

@@ -6,7 +6,9 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { rng } from "#shared/testutil.ts";
+import { isometric, toView, type Turn } from "../../lib/view.ts";
 import { FogView } from "./fogView.ts";
+import { boundsOf, WALL_RISE, wallItems, type WallItem } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 
 const SCENE = { id: "s1", autoWalls: "off" as const, bounds: { w: 16, h: 16 } };
@@ -176,3 +178,87 @@ function properlyCross(p: WallPiece, q: WallPiece): boolean {
   const eps = 1e-9;
   return d1 * d2 < -eps && d3 * d4 < -eps;
 }
+
+describe("automatic walls beside raised ground", () => {
+  const ROOM = { ...SCENE, autoWalls: "all" as const };
+  const DOOR: EdgeFeature = { kind: "door", state: "closed", secret: false, discovered: false };
+
+  /**
+   * A room painted in stone from 2, 2 to 5, 5, so automatic walls ring it,
+   * with ground in feet by cell and edge features as given, and the items
+   * its walls stand as, read through drawn ground in cells.
+   */
+  function room(feet: Record<string, number>, edges: Record<string, EdgeFeature> = {}, feetPerCell = 5): WallItem[] {
+    const cells: Record<string, "stone"> = {};
+    for (let y = 2; y <= 5; y++) for (let x = 2; x <= 5; x++) cells[`${x},${y}`] = "stone";
+    const heights = new Int16Array(256);
+    for (const [key, ft] of Object.entries(feet)) {
+      const [x, y] = key.split(",").map(Number);
+      heights[y! * 16 + x!] = ft;
+    }
+    const walls = sceneWalls(ROOM, build(edges, [], { cells, heights: encodeHeights(Array.from(heights)) }));
+    const ground = (x: number, y: number) => (x >= 0 && y >= 0 && x < 16 && y < 16 ? heights[y * 16 + x]! / feetPerCell : 0);
+    return wallItems({ ground }, wallPieces(walls, ALL));
+  }
+
+  const itemOn = (items: WallItem[], edge: string) => items.find((w) => w.piece.id.startsWith(`e${edge}@`));
+  const top = (w: WallItem) => w.base + w.rise;
+
+  /** The view box of a wall piece's line standing from z0 to z1, projected on its own. */
+  function box(w: WallItem, turn: Turn, z0: number, z1: number) {
+    const view = isometric(turn);
+    const points = [z0, z1].flatMap((z) => [toView(view, { x: w.piece.ax, y: w.piece.ay }, z), toView(view, { x: w.piece.bx, y: w.piece.by }, z)]);
+    return { x0: Math.min(...points.map((p) => p.x)), y0: Math.min(...points.map((p) => p.y)), x1: Math.max(...points.map((p) => p.x)), y1: Math.max(...points.map((p) => p.y)) };
+  }
+
+  test("beside a column taller than a wall, an automatic wall stands nothing, on both of the column's outer edges", () => {
+    const items = room({ "2,2": 15 });
+    assert.equal(itemOn(items, "2,2n"), undefined);
+    assert.equal(itemOn(items, "2,2w"), undefined);
+    assert.ok(items.some((w) => w.piece.auto), "the room's other automatic walls stand");
+  });
+
+  test("beside ground exactly a wall's height, 5 ft on a scene of 10 ft cells, an automatic wall stands nothing", () => {
+    assert.equal(itemOn(room({ "3,2": 5 }, {}, 10), "3,2n"), undefined);
+  });
+
+  test("beside a platform lower than a wall, an automatic wall stands the rest, its top level with the wall on flat ground beside it, and its bounds are what it stands", () => {
+    const items = room({ "4,2": 1 });
+    const low = itemOn(items, "4,2n")!;
+    const flat = itemOn(items, "3,2n")!;
+    assert.ok(low.piece.auto && flat.piece.auto);
+    assert.equal(low.base, 0.2);
+    assert.ok(Math.abs(low.rise - 0.3) < 1e-9, `rise ${low.rise}`);
+    assert.deepEqual([flat.base, flat.rise], [0, WALL_RISE]);
+    assert.ok(Math.abs(top(low) - top(flat)) < 1e-9, `tops ${top(low)} and ${top(flat)}`);
+    for (const turn of [0, 1, 2, 3] as const) {
+      const got = boundsOf(low, turn);
+      const want = box(low, turn, 0.2, 0.5);
+      for (const k of ["x0", "y0", "x1", "y1"] as const) assert.ok(Math.abs(got[k] - want[k]) < 1e-9, `turn ${turn} ${k}: ${got[k]} against ${want[k]}`);
+    }
+  });
+
+  test("a wall the DM drew on a column's edge stands on the column, as before", () => {
+    const drawn = itemOn(room({ "2,2": 15 }, { "2,2,n": WALL }), "2,2n")!;
+    assert.equal(drawn.piece.auto, false);
+    assert.deepEqual([drawn.base, drawn.rise], [3, WALL_RISE]);
+    const want = box(drawn, 0, 3, 3 + WALL_RISE);
+    assert.deepEqual(boundsOf(drawn, 0), want);
+  });
+
+  test("a door on a raised edge stands on the higher ground, as before", () => {
+    const door = itemOn(room({ "4,2": 10 }, { "4,2,n": DOOR }), "4,2n")!;
+    assert.equal(door.piece.kind, "door");
+    assert.deepEqual([door.base, door.rise], [2, WALL_RISE]);
+  });
+
+  test("beside a pit, and around a sunken room, an automatic wall stands on the ground at 0 as before", () => {
+    const pit = itemOn(room({ "3,2": -10 }), "3,2n")!;
+    assert.deepEqual([pit.base, pit.rise], [0, WALL_RISE]);
+    const sunken: Record<string, number> = {};
+    for (let y = 2; y <= 5; y++) for (let x = 2; x <= 5; x++) sunken[`${x},${y}`] = -10;
+    const items = room(sunken);
+    assert.equal(items.length, 16, "every edge around the room stands");
+    for (const w of items) assert.deepEqual([w.base, w.rise], [0, WALL_RISE], w.piece.id);
+  });
+});

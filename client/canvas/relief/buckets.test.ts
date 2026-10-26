@@ -37,7 +37,7 @@ function order(items: Item[]): string[] {
 }
 
 function wall(x0: number, y0: number, x1: number, y1: number): WallPiece {
-  return { id: `e${x0},${y0}`, kind: "wall", ax: x0, ay: y0, bx: x1, by: y1, cx: Math.floor((x0 + x1) / 2), cy: Math.floor((y0 + y1) / 2), beside: y0 === y1 ? [x0, y0 - 1, x0, y0] : [x0 - 1, y0, x0, y0] };
+  return { id: `e${x0},${y0}`, kind: "wall", ax: x0, ay: y0, bx: x1, by: y1, cx: Math.floor((x0 + x1) / 2), cy: Math.floor((y0 + y1) / 2), beside: y0 === y1 ? [x0, y0 - 1, x0, y0] : [x0 - 1, y0, x0, y0], auto: false };
 }
 
 describe("depth order", () => {
@@ -102,7 +102,7 @@ describe("depth order", () => {
 
   test("ties draw a column, then a pit, then a wall, then a standee, then a rider after its holder, then by id", () => {
     // At turn 0 a cell center x + y = k has one depth: these all sort at depth of 4.5 + 4.5.
-    const relief = index({ "4,4": 1, "5,3": -1 }, [{ id: "free", kind: "wall", ax: 3.25, ay: 5.75, bx: 3.75, by: 5.25, cx: 3, cy: 5, beside: null }]);
+    const relief = index({ "4,4": 1, "5,3": -1 }, [{ id: "free", kind: "wall", ax: 3.25, ay: 5.75, bx: 3.75, by: 5.25, cx: 3, cy: 5, beside: null, auto: false }]);
     const names = order(
       relief.layout(0, EVERYTHING, [
         standee("b-rider", 2.5, 6.5, 0, 0.5, 0.5, { holder: "a-holder" }),
@@ -245,6 +245,14 @@ describe("buckets", () => {
     const second = groupWalls([{ ...a }, { ...b, ax: 20.25 }], first, { w: 40, h: 40 });
     assert.equal(second.get("0,0"), first.get("0,0"));
     assert.notEqual(second.get("1,0"), first.get("1,0"));
+  });
+
+  test("groupWalls gives a bucket a new array when the DM draws a wall over an automatic one, so it stands on the higher ground again", () => {
+    const auto = { ...wall(3, 5, 4, 5), auto: true };
+    const first = groupWalls([auto], null, { w: 40, h: 40 });
+    const drawn = groupWalls([{ ...auto, auto: false }], first, { w: 40, h: 40 });
+    assert.notEqual(drawn.get("0,0"), first.get("0,0"));
+    assert.equal(drawn.get("0,0")![0]!.auto, false);
   });
 
   test("walls on the east and south edges of a scene whose size is a multiple of 16 lay out, as do walls between buckets", () => {

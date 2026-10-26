@@ -5,7 +5,7 @@ import { theme } from "../../lib/theme.ts";
 import { isometric, K, toView, type Turn, type ViewPoint } from "../../lib/view.ts";
 import { meets } from "./buckets.ts";
 import { patternOf } from "./looks.ts";
-import { boundsOf, facesOf, WALL_RISE, type CellPiece, type Face, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
+import { boundsOf, facesOf, type CellPiece, type Face, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
 
 /**
  * Drawing a run of relief pieces (docs/design-v1-isometric-view.md 5.5):
@@ -170,7 +170,7 @@ function drawPillar(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): 
   const view = isometric(dc.turn);
   const center = { x: w.piece.ax + 0.5, y: w.piece.ay + 0.5 };
   const base = toView(view, center, w.base);
-  const top = toView(view, center, w.base + WALL_RISE);
+  const top = toView(view, center, w.base + w.rise);
   // A circle on the ground shows as an ellipse twice as wide as it is tall, at every turn.
   const rx = PILLAR_RADIUS;
   const ry = PILLAR_RADIUS / 2;
@@ -206,10 +206,10 @@ function drawPillar(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): 
 function drawWall(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   if (w.piece.kind === "pillar") return drawPillar(g, w, dc);
   const view = isometric(dc.turn);
-  const top = w.base + WALL_RISE;
+  const top = w.base + w.rise;
   const a = toView(view, { x: w.piece.ax, y: w.piece.ay }, top);
   const b = toView(view, { x: w.piece.bx, y: w.piece.by }, top);
-  const h = K * WALL_RISE;
+  const h = K * w.rise;
   if (w.piece.kind === "window") {
     fillSide(g, a, b, h, { texture: null, color: theme.relief.pane }, null, dc);
     return;

@@ -38,6 +38,8 @@ export type WallPiece = {
   cy: number;
   /** The cells either side of a grid edge, whose higher ground the piece stands on. Null for a free wall, which stands on its own cell's. */
   beside: readonly [number, number, number, number] | null;
+  /** An automatic wall nobody drew (WallEdge.auto), which stands level with the room's other walls beside raised ground (pieces.ts wallItems). */
+  auto: boolean;
 };
 
 /** What stands for a feature, or null for one that lies flat. A secret door not yet found stands as the wall the players got. */
@@ -47,7 +49,7 @@ export function wallKind(f: WallFeature): WallKind | null {
   return f.state === "open" ? null : "door";
 }
 
-type Segment = { id: string; kind: WallKind; ax: number; ay: number; bx: number; by: number; grid: boolean; cuts: number[] };
+type Segment = { id: string; kind: WallKind; ax: number; ay: number; bx: number; by: number; grid: boolean; auto: boolean; cuts: number[] };
 
 const EPS = 1e-9;
 
@@ -59,7 +61,7 @@ export function wallPieces(walls: WallSet, fog: FogView): WallPiece[] {
     if (!kind) continue;
     const bx = e.side === "n" ? e.x + 1 : e.x;
     const by = e.side === "n" ? e.y : e.y + 1;
-    segments.push({ id: `e${e.x},${e.y}${e.side}`, kind, ax: e.x, ay: e.y, bx, by, grid: true, cuts: [] });
+    segments.push({ id: `e${e.x},${e.y}${e.side}`, kind, ax: e.x, ay: e.y, bx, by, grid: true, auto: e.auto, cuts: [] });
   }
   const free: Segment[] = [];
   for (const ref of walls.free) {
@@ -68,7 +70,7 @@ export function wallPieces(walls: WallSet, fog: FogView): WallPiece[] {
     const [ax, ay] = ref.wall.a;
     const [bx, by] = ref.wall.b;
     if (Math.abs(ax - bx) < EPS && Math.abs(ay - by) < EPS) continue;
-    free.push({ id: `f${ref.cx},${ref.cy}:${ref.wall.id}`, kind, ax, ay, bx, by, grid: false, cuts: [] });
+    free.push({ id: `f${ref.cx},${ref.cy}:${ref.wall.id}`, kind, ax, ay, bx, by, grid: false, auto: false, cuts: [] });
   }
   splitCrossings(free);
   segments.push(...free);
@@ -151,7 +153,7 @@ function cutsOf(s: Segment): number[] {
  */
 export function standingStretches(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }): [number, number][] {
   if (fog.all) return [[0, 1]];
-  const ts = cutsOf({ id: "", kind: "wall", ax: a.x, ay: a.y, bx: b.x, by: b.y, grid: true, cuts: [] });
+  const ts = cutsOf({ id: "", kind: "wall", ax: a.x, ay: a.y, bx: b.x, by: b.y, grid: true, auto: false, cuts: [] });
   const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
   const out: [number, number][] = [];
   for (let i = 0; i + 1 < ts.length; i++) {
@@ -211,6 +213,7 @@ function piecesOf(s: Segment, fog: FogView, out: WallPiece[]): void {
       cx,
       cy,
       beside: s.grid ? (s.ay === s.by ? [cx, s.ay - 1, cx, s.ay] : [s.ax - 1, cy, s.ax, cy]) : null,
+      auto: s.auto,
     });
     start = -1;
   };
@@ -249,7 +252,7 @@ export function pillarPieces(chunks: Readonly<Record<string, BuildChunk | undefi
       // A cell key outside its chunk is not this chunk's to draw.
       if (Math.floor(x / CHUNK_CELLS) !== chunk.cx || Math.floor(y / CHUNK_CELLS) !== chunk.cy) continue;
       if (!fog.boxClear({ x0: x, y0: y, x1: x + 1, y1: y + 1 })) continue;
-      out.push({ id: `p${x},${y}`, kind: "pillar", ax: x, ay: y, bx: x + 1, by: y + 1, cx: x, cy: y, beside: null });
+      out.push({ id: `p${x},${y}`, kind: "pillar", ax: x, ay: y, bx: x + 1, by: y + 1, cx: x, cy: y, beside: null, auto: false });
     }
   }
   return out;
