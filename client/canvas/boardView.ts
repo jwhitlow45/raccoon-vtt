@@ -7,15 +7,18 @@ import { NO_INSETS, screenToView, type Camera, type Insets, type Size } from "..
 import { scopeSlot, useScoped } from "../state/scope.ts";
 
 /**
- * The scene in view, in cells, two ways: `clear`, the part the bars over
- * the map leave (`insets`, in screen px), which a readout near the screen's
- * edge slides back into (Pill.tsx), and `canvas`, the whole canvas, which
- * what is drawn culls by, since the map shows beside a bar's narrower parts
- * such as the options line (features/builder/heights/HeightLayer.tsx).
+ * The board in view, in view space (lib/view.ts), two ways: `clear`, the
+ * part the bars over the map leave (`insets`, in screen px), which a readout
+ * near the screen's edge slides back into (Pill.tsx), and `canvas`, the
+ * whole canvas, which what is drawn culls by, since the map shows beside a
+ * bar's narrower parts such as the options line
+ * (features/builder/heights/HeightLayer.tsx). In Top-down view space is the
+ * world's cells. In Isometric it is the turned and squashed picture, so a
+ * box here holds what stands upright there, never a stretch of ground.
  */
 export type BoardViews = { clear: Box; canvas: Box };
 
-/** The part of the scene in `insets` of the canvas, in cells. */
+/** The part of the board in `insets` of the canvas, in view space. */
 export function boardViewOf(cam: Camera, size: Size, insets: Insets): Box {
   const a = screenToView(cam, { x: insets.left, y: insets.top });
   const b = screenToView(cam, { x: size.width - insets.right, y: size.height - insets.bottom });
