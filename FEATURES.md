@@ -192,7 +192,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - With Select, tap raised or lowered ground to see its height for a few seconds, such as "↑10 ft", or "Stairs" on a stair. Under the fog it shows nothing. Screen readers hear it too.
 - Rulers, distances between tokens and areas of effect all count height.
 - Creatures have a height from their size, so a fireball can miss one flying above it.
-- A flying token's shadow shows from 5 ft up and drifts down and away as it rises, further for a larger creature.
+- A flying token's shadow shows from 5 ft up and drifts down and away as it rises, further for a larger creature. For a player, ground still under the fog counts as level, so a shadow never shows a height the fog hides.
 - On raised ground from the builder, with "Walls and ledges block players' moves" on, a player's walking token crosses an edge only by a stair, while a flier above it passes. A creature sees over a ledge no higher than its eyes, and one in a pit cannot see out.
 - A token left inside the ground after a height change says so and offers "Stand on it".
 
