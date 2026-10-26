@@ -19,7 +19,7 @@ import type { Locator, Page } from "playwright-core";
  * 5. Wrapping: a name alone on its line above its control, or one part
  *    alone on a wrapped row's last line where it could share it: where it
  *    fits on one line beside the part before it, which is the only part
- *    a wrap can move down to it.
+ *    a wrap can move down to it, each at its content's width.
  *
  * A line of text is measured by its line box, as CSS lays it out: the
  * text's Range rect grown by half the leading above and below. In a
@@ -668,10 +668,19 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const held = union(controls.map((it) => it.v));
             return need <= content.r - content.l - (held.r - held.l) + LIMIT;
           };
-          // A lone last part has company only where the part before it, the last on the line above, fits beside it on a line: a legendary row's LA with LR under its AC, HP and Lair is alone by need where Lair with LA and LR runs wider than the line (FU32-LAIR-ALONE).
+          // A part's width by its content, with its padding and border, where it is drawn wider: a part that grows to fill its line, or is sized against the line, would sit at that width beside another (review FU33-O3).
+          const needs = (it: Item) => {
+            const drawn = it.box.r - it.box.l;
+            const atoms = isEl(it.node) ? atomsOf(it.node) : [];
+            if (!isEl(it.node) || !atoms.length) return drawn;
+            const own = union(atoms);
+            const { border, inner, pad } = boxes(it.node);
+            return Math.min(drawn, own.r - own.l + pad.l + pad.r + (inner.l - border.l) + (border.r - inner.r));
+          };
+          // A lone last part has company only where the part before it, the last on the line above, fits beside it on a line: a legendary row's LA with LR under its AC, HP and Lair is alone by need where Lair with LA and LR runs wider than the line (FU32-LAIR-ALONE). A part sized almost to its line is still alone, since at its content's width it would fit beside the part before it.
           const couldShare = (above: Item[], lone: Item) => {
             const last = above.reduce((a, c) => (c.box.l > a.box.l ? c : a));
-            return last.box.r - last.box.l + gap + (lone.box.r - lone.box.l) <= content.r - content.l + LIMIT;
+            return needs(last) + gap + needs(lone) <= content.r - content.l + LIMIT;
           };
           for (let i = 1; i < lines.length; i++) {
             const prev = lines[i - 1]!.items.filter((it) => !ownLine(it));

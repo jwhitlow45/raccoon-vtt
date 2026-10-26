@@ -2066,19 +2066,27 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
         if (lair.alone && lair.fits) off.push(`${at}: Lair alone on its line, though LA and LR fit beside it`);
         await shots.take(dm, `fu33-lair-row-${view.width}-${Math.round(view.scale * 100)}`);
       }
-      // Two drawn rows of three parts, 158 px across as the row's line is at 390 x 844: the last part alone where the part before it fits beside it, and alone by need.
+      // Three drawn rows of three parts, 158 px across as the row's line is at 390 x 844: the last part alone where the part before it fits beside it, alone by need, and alone where the part before it grows to fill its line, though at its content's 38 px it fits beside the last (review FU33-O3).
       const drawn = await dm.evaluate(() => {
         type El = { id: string; style: { cssText: string }; append(child: El): void };
         const doc = (globalThis as unknown as { document: { createElement(tag: string): El; body: El } }).document;
-        for (const [id, last] of [["fu33-could-share", 100], ["fu33-by-need", 132]] as const) {
+        const part = (width: number) => {
+          const el = doc.createElement("span");
+          el.style.cssText = `display: inline-block; width: ${width}px; height: 18px; background: #888`;
+          return el;
+        };
+        for (const [id, last, grows] of [["fu33-could-share", 100, false], ["fu33-by-need", 132, false], ["fu33-grows", 100, true]] as const) {
           const row = doc.createElement("div");
           row.id = id;
           row.style.cssText = "position: fixed; left: 8px; top: 8px; width: 158px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; z-index: 9999";
-          for (const width of [70, 38, last]) {
-            const part = doc.createElement("span");
-            part.style.cssText = `display: inline-block; width: ${width}px; height: 18px; background: #888`;
-            row.append(part);
-          }
+          row.append(part(70));
+          if (grows) {
+            const grower = doc.createElement("span");
+            grower.style.cssText = "flex-grow: 1; display: flex";
+            grower.append(part(38));
+            row.append(grower);
+          } else row.append(part(38));
+          row.append(part(last));
           doc.body.append(row);
         }
         return true;
@@ -2087,8 +2095,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       const share = await measureAlignment(dm.locator("#fu33-could-share"));
       assert.ok(share.some((f) => f.check === "wrap-orphan"), `a last part that could share its line is not flagged: ${JSON.stringify(share)}`);
       assert.deepEqual(alignmentLines(await measureAlignment(dm.locator("#fu33-by-need")), "a last part alone by need"), []);
+      const grows = await measureAlignment(dm.locator("#fu33-grows"));
+      assert.ok(grows.some((f) => f.check === "wrap-orphan"), `a last part that could share its line beside a part that grows is not flagged: ${JSON.stringify(grows)}`);
     } finally {
-      await dm.evaluate(() => (globalThis as unknown as { document: { querySelectorAll(s: string): { forEach(fn: (el: { remove(): void }) => void): void } } }).document.querySelectorAll("#fu33-could-share, #fu33-by-need").forEach((el) => el.remove())).catch(() => {});
+      await dm.evaluate(() => (globalThis as unknown as { document: { querySelectorAll(s: string): { forEach(fn: (el: { remove(): void }) => void): void } } }).document.querySelectorAll("#fu33-could-share, #fu33-by-need, #fu33-grows").forEach((el) => el.remove())).catch(() => {});
       await ops.send({ t: "encounter.end" }).catch(() => {});
       await ops.send({ t: "token.delete", tokenId: boss.id });
       await ops.send({ t: "room.update", settings: { playersSeeOrder: order } });
