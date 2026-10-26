@@ -91,4 +91,15 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     assert.match(read("canvas/RemoteDrags.tsx"), /useRoomView\(\(s\) => \(shown \? s\.ephemeral\.drags : NO_DRAGS\)\)/);
     assert.match(read("canvas/TokenShadow.tsx"), /\(shown \? s\.spots\[token\.id\] : undefined\)/);
   });
+
+  test("a ghost's frame redraws the drag layer, never the overlay with its text", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    const main = iso.slice(iso.indexOf("<Stage key={`main:"));
+    const [relief, drag, overlay, ...rest] = main.split(/<Layer[ >]/).slice(1);
+    assert.equal(rest.length, 0, "the main stage holds three layers");
+    assert.match(relief!, /ReliefRun/);
+    for (const part of [/part="ghost"/, /part="tag"/, /MOVING_LAYERS\.map/]) assert.match(drag!, part);
+    assert.doesNotMatch(overlay!, /RemoteDrags|MOVING_LAYERS/);
+    assert.match(overlay!, /UprightLabels/);
+  });
 });

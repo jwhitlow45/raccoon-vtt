@@ -41,9 +41,9 @@ import { standeeShape } from "./standee.ts";
  * the creatures the stand rule lays flat, sight, fog and the still ground
  * marks in one layer, turned and squashed into the ground plane. The main
  * stage holds the relief (columns, pits, walls and standees in depth order,
- * whose tops copy the ground stage's pixels), the drag layer, and the
- * overlay in view space (silhouettes, decor, ghosts, upright labels and the
- * moving marks).
+ * whose tops copy the ground stage's pixels), the drag layer (other
+ * members' drags and the moving marks, and at a local drag what it moves),
+ * and the overlay in view space (silhouettes, decor and upright labels).
  *
  * Both trees stay mounted once Isometric has shown (ISO-D15). While
  * Top-down shows, this tree is memoized out of camera renders and its
@@ -330,25 +330,36 @@ function IsoBoardImpl(props: IsoBoardProps) {
               </Group>
             </Group>
           </Layer>
-          {/* What a local drag moves comes here at its start (ISO-4), so a drag redraws only this layer. */}
+          {/*
+            The drag layer: what moves frame by frame. Other members' drags with
+            their tags, and the moving marks, draw here rather than in the
+            overlay, so a ghost's frame redraws none of the overlay's text. What a
+            local drag moves comes into the empty group at its start (ISO-4).
+          */}
           <Layer>
+            <Group scaleY={groups.outer.scaleY} listening={false}>
+              <Group rotation={groups.inner.rotation}>
+                <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="ghost" />
+              </Group>
+            </Group>
             <Group scaleY={groups.outer.scaleY}>
               <Group rotation={groups.inner.rotation} />
+            </Group>
+            <Group scaleY={groups.outer.scaleY} listening={false}>
+              <Group rotation={groups.inner.rotation}>
+                {MOVING_LAYERS.map(({ id, Component }) => (
+                  <Component key={id} {...props.layerProps} />
+                ))}
+              </Group>
+            </Group>
+            <Group listening={false}>
+              <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="tag" />
             </Group>
           </Layer>
           <Layer listening={false}>
             {silhouettes.map((s) => (
               <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={standees.find((x) => x.id === s.id)!} scale={cam.scale} />
             ))}
-            <Group scaleY={groups.outer.scaleY}>
-              <Group rotation={groups.inner.rotation}>
-                <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="ghost" />
-                {MOVING_LAYERS.map(({ id, Component }) => (
-                  <Component key={id} {...props.layerProps} />
-                ))}
-              </Group>
-            </Group>
-            <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="tag" />
             <UprightLabels labels={uprightLabels} turn={turn} ground={(x, y) => heights.at(Math.floor(x), Math.floor(y))} />
             {(["marks", "label", "plate"] as const).flatMap((part) =>
               props.decorTokens
