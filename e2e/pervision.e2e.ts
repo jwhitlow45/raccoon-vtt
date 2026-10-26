@@ -27,7 +27,9 @@ import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoi
  * between them, a Night phase keeps the scene per player, the DM's list of
  * who sees for themselves moves Ana's place to a third player, and Whole
  * party pools the maps, which stay pooled once the scene is per player
- * again. At the end every frame Ben's page and the display received is
+ * again. In Isometric the DM's standee on ground the party explored stands
+ * bright, and Ben's page stands nothing he does not see. At the end every
+ * frame Ben's page and the display received is
  * replayed: neither held the goblin while the scene was per player, nor
  * the label before the maps were pooled.
  *
@@ -77,6 +79,10 @@ const DOOR_SOUTH = { x: 3, y: 10 };
 const BREE_CORNER = { x: 14, y: 18 };
 const LABEL_TEXT = "Old altar";
 const WHISPER = "Meet me by the old well";
+/** Ground nobody ever explores: past Thorn's torch in the north hall, behind the wall from Bree. */
+const NOBODY_AT = { x: 15, y: 0 };
+/** Installs the hook that picks a view without the View menu (client/canvas/relief/isoTest.ts), set before a page loads. */
+const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 
 const run = {
   roomId: "",
@@ -210,6 +216,35 @@ async function listIs(want: string[]): Promise<void> {
   }
 }
 
+/** Picks a view on a page through the test hook, as the View menu would. */
+async function pickView(page: Page, pick: "isometric" | "follow"): Promise<void> {
+  await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
+  await page.evaluate((p) => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick(p), pick);
+}
+
+/**
+ * A token's node on the isometric board, wherever it draws: "standee" with
+ * its opacity on the relief stage, "flat" on the ground stage only, where
+ * the stand rule lays a creature under the viewer's fog, or null where the
+ * page draws none. The relief stage also holds a flat creature's press
+ * area, so a node there counts as a standee only where the ground stage
+ * has none of it. Null too while no isometric board shows.
+ */
+async function isoNode(page: Page, tokenId: string): Promise<{ as: "standee"; opacity: number } | { as: "flat" } | null> {
+  return page.evaluate((id) => {
+    type Node = { opacity(): number };
+    type Stage = { width(): number; listening(): boolean; getLayers(): unknown[]; findOne(s: string): Node | undefined };
+    const stages = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.filter((s) => s.width() > 0);
+    // The relief stage takes presses and holds three layers (relief/IsoBoard.tsx), the ground stage under it takes none.
+    const relief = stages.find((s) => s.listening() && s.getLayers().length === 3);
+    if (!relief) return null;
+    const ground = stages.find((s) => s !== relief && !s.listening() && s.findOne(`#${id}`) !== undefined);
+    if (ground) return { as: "flat" as const };
+    const node = relief.findOne(`#${id}`);
+    return node ? { as: "standee" as const, opacity: node.opacity() } : null;
+  }, tokenId);
+}
+
 function turnStrip(page: Page | Locator): Locator {
   return page.getByRole("button", { name: /^Initiative, round 1\./ });
 }
@@ -296,6 +331,7 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     anaContext = await browser.newContext(phone);
     benContext = await browser.newContext(phone);
     tvContext = await browser.newContext({ viewport: { width: 960, height: 540 } });
+    for (const c of [dmContext, benContext]) await c.addInitScript(HOOK_FLAG);
     dm = await dmContext.newPage();
     ana = await anaContext.newPage();
     ben = await benContext.newPage();
@@ -574,6 +610,36 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     assert.equal(has.label(sockets.ben.state), true, "the label left Ben's pooled map");
     await shots.take(ben, "pervision-ben-pooled");
     await shots.take(ana, "pervision-ana-pooled");
+  });
+
+  test("pv-7b. in Isometric, per player: the DM's goblin on ground the party explored stands bright and a creature on ground nobody explored dims, and Ben's page stands neither (ISO5P2-FV-4)", async () => {
+    // The pool left the goblin's ground in the party's explored layer, which the DM's map draws beside the DM's own (D-261026-18).
+    const imp = randomUUID();
+    await ops.send(creature(imp, "Imp", NOBODY_AT, { disposition: "hostile" }));
+    try {
+      await waitFor("the imp in the DM's copy", () => (sockets.dm.state?.tokens[imp] ? true : null));
+      const dmState = sockets.dm.state!;
+      assert.equal(isCellFullyFogged(dmState.exploredTiles, run.sceneId, GOBLIN_LATER), false, "the goblin's ground is not in the party's explored layer");
+      assert.equal(isCellFullyFogged(dmState.exploredTiles, run.sceneId, NOBODY_AT) && isCellFullyFogged(dmState.fogTiles, run.sceneId, NOBODY_AT), true, "someone revealed the imp's ground");
+
+      await pickView(dm, "isometric");
+      await pickView(ben, "isometric");
+      await waitFor("the DM's imp dimmed", async () => {
+        const n = await isoNode(dm, imp);
+        return n?.as === "standee" && n.opacity === 0.5 ? true : null;
+      });
+      assert.deepEqual(await isoNode(dm, run.goblinId), { as: "standee", opacity: 1 }, "the DM's goblin on explored ground");
+      await shots.take(dm, "pervision-dm-isometric-goblin-bright-imp-dim");
+
+      // Ben's own Bree stands in her light, so his board is up and drawn, and neither creature reached his page to stand or lie flat.
+      await waitFor("Bree standing on Ben's board", async () => ((await isoNode(ben, run.breeId))?.as === "standee" ? true : null));
+      assert.equal(has.goblin(sockets.ben.state) || sockets.ben.state?.tokens[imp] !== undefined, false, "a creature Ben does not see reached his copy");
+      for (const [name, id] of [["goblin", run.goblinId], ["imp", imp]] as const) assert.equal(await isoNode(ben, id), null, `Ben's board draws the ${name}`);
+      await shots.take(ben, "pervision-ben-isometric");
+    } finally {
+      for (const page of [dm, ben]) await pickView(page, "follow");
+      await ops.send({ t: "token.delete", tokenId: imp });
+    }
   });
 
   test("pv-8. no frame Ben's page or the display received held or named the goblin, its row or a list or layer while per player, or the label before the pool, and no page logged an error", () => {
