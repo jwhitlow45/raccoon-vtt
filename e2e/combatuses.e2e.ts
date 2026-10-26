@@ -186,11 +186,11 @@ async function rowUses(page: Page, name: string): Promise<Locator> {
   return group;
 }
 
-/** The dragon's bar's Uses drawer, opened from a tap on its token. */
-async function barUses(page: Page): Promise<Locator> {
+/** A creature's bar's Uses drawer, the dragon's unless named, opened from a tap on its token. */
+async function barUses(page: Page, name = DRAGON, at = DRAGON_AT): Promise<Locator> {
   await closeSheets(page);
-  await tapCell(page, run.bounds, DRAGON_AT);
-  const bar = page.getByRole("dialog", { name: `${DRAGON} actions` });
+  await tapCell(page, run.bounds, at);
+  const bar = page.getByRole("dialog", { name: `${name} actions` });
   await bar.waitFor();
   // An upright phone's strip draws Uses only where it fits, else Expand shows it (docs/design-v1-bar-compact.md 6).
   const uses = await barControl(bar, "Uses");
@@ -201,9 +201,9 @@ async function barUses(page: Page): Promise<Locator> {
   return drawer;
 }
 
-/** Closes the token bar, by its own Close, so it leaves the alerts column's lane. */
-async function closeBar(page: Page): Promise<void> {
-  const bar = page.getByRole("dialog", { name: `${DRAGON} actions` });
+/** Closes a creature's token bar, the dragon's unless named, by its own Close, so it leaves the alerts column's lane. */
+async function closeBar(page: Page, name = DRAGON): Promise<void> {
+  const bar = page.getByRole("dialog", { name: `${name} actions` });
   if ((await bar.count()) === 0) return;
   await bar.getByRole("button", { name: "Close", exact: true }).first().click();
   await bar.waitFor({ state: "detached" });
@@ -1439,7 +1439,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await pat.goto("about:blank");
   });
 
-  test("mu-d. every Uses title line in line at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: the Aboleth's, the dragon's, the Tarrasque's 6 and Thorn's class resources (a count over 6 and a pool, in words at the right end) in their Token panels, and the Tarrasque's, the Aboleth's and Thorn's with Rage at 6 in their tracker rows (docs/design-v1-monster-uses.md 3.1, 3.7)", async () => {
+  test("mu-d. every Uses title line in line at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: the Aboleth's, the dragon's, the Tarrasque's 6 and Thorn's class resources (a count over 6 and a pool, in words at the right end) in their Token panels, and the Tarrasque's, the Aboleth's and Thorn's with Rage at 6 in their tracker rows, and at 320 x 568 at 130% Thorn's turn card and his bar's Uses drawer with Lay on Hands on Pat's phone (docs/design-v1-monster-uses.md 3.1, 3.7, XOFY-OPUS-03)", async () => {
     const resources = deskSocket.state!.characters[run.thorn]!.resources!;
     const legendary = dragon()!.legendary!;
     const seen: string[] = [];
@@ -1466,6 +1466,30 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
         const tag = `${view.width}-${Math.round(view.scale * 100)}`;
         await setUp(desk, deskCdp, view);
+        if (view.width === SMALL.width && view.scale === 1.3) {
+          // The narrowest line Thorn's uses take beyond panels and rows, on Pat's phone, whose turn card holds them: the card, open, and his bar's drawer, Lay on Hands' pool in words in each (XOFY-OPUS-03).
+          // Mu-c left his page blank, where the interface size cannot be stored, so it opens on the app first.
+          await pat.goto(server.origin);
+          await setUp(pat, patCdp, view);
+          const turn = alerts(pat, "turn");
+          await turn.waitFor();
+          const show = turn.getByRole("button", { name: "Show Thorn's turn" });
+          if (await show.isVisible()) await show.click();
+          const card = alerts(pat, "turn");
+          await card.locator("[data-use-pips]").first().waitFor();
+          await titlesInLine(card, `Thorn's turn card at ${at}`, seen, ["Lay on Hands"]);
+          await measure(pat, card, `Thorn's turn card at ${at}`);
+          await shots.take(pat, `mu-turn-thorn-${tag}`);
+          await dismissTurnCard(pat);
+          const drawer = await barUses(pat, "Thorn", THORN_AT);
+          await drawer.locator("[data-use-pips]").first().waitFor();
+          await titlesInLine(drawer, `Thorn's bar drawer at ${at}`, seen, ["Lay on Hands"]);
+          await measure(pat, drawer, `Thorn's bar drawer at ${at}`);
+          await shots.take(pat, `mu-drawer-thorn-${tag}`);
+          await closeBar(pat, "Thorn");
+          // Off the room again, as mu-c left it, so his page loads nothing while the desk's sizes run.
+          await pat.goto("about:blank");
+        }
         for (const [name, cell] of [
           ["Aboleth", { x: ABOLETH_AT.x + 1, y: ABOLETH_AT.y + 1 }],
           [DRAGON, DRAGON_AT],

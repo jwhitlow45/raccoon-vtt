@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { after, before, describe, test } from "node:test";
+import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
@@ -154,10 +154,21 @@ function actor(hp: number) {
 const patRequests: number[] = [];
 /** Under the server's 600 requests a minute per session, with room for what a step sends after its load. */
 const REQUESTS_PER_MINUTE = 400;
+/**
+ * The most of Pat's requests one step may send. A step loads the room once
+ * or twice, a request each, and none sent more than 2 when this was set, so
+ * more means a storm, such as a reconnect loop, which setUp's wait would
+ * otherwise only turn into slowness (KBD-OPUS-12).
+ */
+const STEP_REQUESTS = 30;
+/** Each step's requests from Pat's page, and the most the last minute held at any of its loads. */
+const steps: { name: string; requests: number; peak: number }[] = [];
+let stepPeak = 0;
 
 async function setUp(page: Page, view: View): Promise<void> {
   // This file loads Pat's room every few seconds, which can reach the server's limit and leave a load unconnected, so it waits until the last minute's requests leave room.
   const recent = () => patRequests.filter((t) => t > Date.now() - 60_000).length;
+  stepPeak = Math.max(stepPeak, recent());
   while (recent() > REQUESTS_PER_MINUTE) await page.waitForTimeout(1_000);
   await patCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
@@ -724,6 +735,15 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     });
   });
 
+  let stepFrom = 0;
+  beforeEach(() => {
+    stepFrom = patRequests.length;
+    stepPeak = 0;
+  });
+  afterEach((t) => {
+    steps.push({ name: t.name, requests: patRequests.length - stepFrom, peak: stepPeak });
+  });
+
   after(async () => {
     if (process.env.E2E_DEBUG === "1") {
       for (const c of [dmConsole, patConsole]) console.error(`[${c.label}] errors`, c.errors, "warnings", c.warnings);
@@ -985,5 +1005,11 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
   test("kb-20. no console errors on any page", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
+  });
+
+  test(`kb-21. no step sent more than ${STEP_REQUESTS} of Pat's requests, so no storm hid as slowness behind setUp's wait (KBD-OPUS-12)`, () => {
+    console.log(`Pat's requests by step, with the last minute's most at a load:\n${steps.map((s) => `${s.requests} (${s.peak}) ${s.name.slice(0, 60)}`).join("\n")}`);
+    assert.ok(steps.length > 10, `only ${steps.length} steps counted`);
+    assert.deepEqual(steps.filter((s) => s.requests > STEP_REQUESTS).map((s) => `${s.name}: ${s.requests}`), []);
   });
 });

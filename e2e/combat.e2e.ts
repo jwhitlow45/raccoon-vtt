@@ -2031,7 +2031,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     // Players see the whole order, so the row is no secret and Lair is its only tag, as live play saw it.
     await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
     await ops.send({ t: "token.create", token: { id: boss.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 0, resistMax: 10, resistUsed: 1 } } } } });
-    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    // Whatever the DM's copy holds yet: a refusal says no fight was left.
+    await ops.send({ t: "encounter.end" }).catch(() => {});
     await ops.send({ t: "encounter.start", entries: [{ id: boss.entryId, tokenId: boss.id, value: 18 }, { id: "fu33-bree", tokenId: run.bree.id, value: 12 }] });
     await ops.send({ t: "encounter.update", entryId: boss.entryId, patch: { inLair: true } });
     await waitFor("the boss in its lair", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === boss.entryId)?.inLair ? true : null));
@@ -2088,7 +2089,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       assert.deepEqual(alignmentLines(await measureAlignment(dm.locator("#fu33-by-need")), "a last part alone by need"), []);
     } finally {
       await dm.evaluate(() => (globalThis as unknown as { document: { querySelectorAll(s: string): { forEach(fn: (el: { remove(): void }) => void): void } } }).document.querySelectorAll("#fu33-could-share, #fu33-by-need").forEach((el) => el.remove())).catch(() => {});
-      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "encounter.end" }).catch(() => {});
       await ops.send({ t: "token.delete", tokenId: boss.id });
       await ops.send({ t: "room.update", settings: { playersSeeOrder: order } });
       await setUp(dm, dmCdp, { ...DESK, scale: 1 });

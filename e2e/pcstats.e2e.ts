@@ -913,8 +913,9 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
       await waitFor("Readied off Bree", () => (readied() ? null : true));
       await focusLands(ana, /^Add$/, "It fired");
     } finally {
-      if (dmSocket.state?.characters[characterId]?.actor.effects?.some((e) => e.id === effectId)) await ops.send({ t: "actor.effect.remove", target: { characterId }, effectId });
-      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      // Sent whatever the DM's copy holds, which hears an op's change a moment after its answer: a refusal says it was gone already (FU32-OPUS-1).
+      await ops.send({ t: "actor.effect.remove", target: { characterId }, effectId }).catch(() => {});
+      await ops.send({ t: "encounter.end" }).catch(() => {});
     }
   });
 
@@ -969,7 +970,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   test("lp22-r1-f. by keyboard on a character with no block, Take a shape moves to the fold's row with the shape and focus goes to the Stat block's fold, and Save on a first block leaves it on Edit, where Add a stat block stood, never the page (LP22-OPUS-2)", async () => {
     const cal = { characterId: randomUUID(), tokenId: randomUUID() };
     await ops.send({ t: "character.create", character: { id: cal.characterId, name: "Cal", size: "medium", ownerIds: [], actor: actor() } });
-    // Cal is this step's alone, so he and his token go at its end, whether it passes or not (LP22-OPUS-6).
+    // Cal is this step's alone, so he goes at its end, whether it passes or not, and his token with him (LP22-OPUS-6).
     try {
       await ops.send({ t: "token.create", token: { id: cal.tokenId, sceneId: run.sceneId, kind: "pc", name: "Cal", size: "medium", x: 9, y: 5, disposition: "ally", actor: { ref: cal.characterId } } });
       const calOf = () => dmSocket.state?.characters[cal.characterId];
@@ -1004,7 +1005,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
       // React keeps the button and gives it Edit's words, so the editor hands focus back to it.
       await focusLands(dm, /^Edit$/, "Save");
     } finally {
-      if (dmSocket.state?.tokens[cal.tokenId]) await ops.send({ t: "token.delete", tokenId: cal.tokenId });
+      // Deleting a character takes its tokens (FU32-OPUS-2).
       await ops.send({ t: "character.delete", characterId: cal.characterId });
     }
   });
