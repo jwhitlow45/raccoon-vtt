@@ -31,9 +31,10 @@ const AURA_MARGIN = 2;
  * sub-cells (canvas/markStand.ts), losing the fog's edge tint and the sight
  * shading over it, the cosmetic loss the design accepts.
  *
- * It draws in view space, in whatever group it is mounted in: the overlay
- * for every drag now, and the drag layer for this device's own once the
- * dragged standee moves there, each given its own token ids.
+ * It draws in view space, in whatever group it is mounted in, given its own
+ * token ids: the overlay for other members' drags, and the drag layer for
+ * this device's own, under the standees the drag moves there
+ * (canvas/dragLayer.ts), so its frames redraw that layer alone.
  */
 export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly string[]; iso: IsoGround; layer: LayerProps }) {
   const { iso, layer } = props;

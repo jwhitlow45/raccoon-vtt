@@ -213,7 +213,7 @@ function boardScale(page: Page): Promise<number> {
  * and a pill a Label with its words. `clipped` counts the aura's shadings
  * under a group with a clip, as one moving over fog draws.
  */
-type IsoMarks = { ground: { rings: number; aura: number; texts: string[] }; drag: { texts: string[]; uprightTexts: string[]; circles: number }; overlay: { rings: number; aura: number; clipped: number; texts: string[] } };
+type IsoMarks = { ground: { rings: number; aura: number; texts: string[] }; drag: { rings: number; texts: string[]; uprightTexts: string[]; circles: number }; overlay: { rings: number; aura: number; clipped: number; texts: string[] } };
 
 function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
   return page.evaluate((color) => {
@@ -248,7 +248,7 @@ function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
     };
     return {
       ground: { rings: rings(ground), aura: auras(ground).length, texts: texts(ground) },
-      drag: { texts: texts(drag), uprightTexts: drag.find("Text").filter(upright).map((t) => t.text?.() ?? ""), circles: drag.find("Circle").length },
+      drag: { rings: rings(drag), texts: texts(drag), uprightTexts: drag.find("Text").filter(upright).map((t) => t.text?.() ?? ""), circles: drag.find("Circle").length },
       overlay: { rings: rings(overlay), aura: auras(overlay).length, clipped: auras(overlay).filter(clippedBy).length, texts: overlay.find("Text").filter(upright).map((t) => t.text?.() ?? "") },
     };
   }, auraColor);
@@ -1069,7 +1069,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     });
   });
 
-  test("ISO-31. Pat drags Bree in Isometric: her ring moves on the overlay with the drag and lies on the ground stage after the drop", async () => {
+  test("ISO-31. Pat drags Bree in Isometric: her ring moves with her standee in the drag layer, under it, and lies on the ground stage after the drop", async () => {
     await pat.bringToFront();
     const at = await standeeAt(pat, hall.bree);
     await pat.mouse.move(at.x, at.y);
@@ -1077,18 +1077,22 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await pat.mouse.move(at.x + 20, at.y, { steps: 3 });
     await pat.mouse.move(at.x + 70, at.y + 10, { steps: 10 });
     try {
-      await waitFor("Bree's ring moving on Pat's overlay", async () => {
-        const m = await isoMarks(pat, AURA);
-        return m && m.overlay.rings >= 1 && m.overlay.texts.includes("10 ft") ? true : null;
+      // This device's own drag moves its marks with the standee (lane ISO-4), so its frames redraw the drag layer alone.
+      const m = await waitFor("Bree's ring moving in Pat's drag layer", async () => {
+        const marks = await isoMarks(pat, AURA);
+        return marks && marks.drag.rings >= 1 && marks.drag.uprightTexts.includes("10 ft") ? marks : null;
       });
+      assert.equal(m.overlay.rings, 0, "nothing of Pat's own drag moves on the overlay");
+      assert.equal(await parentOf(pat, hall.bree), "dragGround", "her standee moved into the drag layer over the ring");
       await shots.take(pat, "iso-pat-bree-dragged-ring");
     } finally {
       await pat.mouse.up();
     }
     await waitFor("Bree's ring back on the ground stage", async () => {
       const m = await isoMarks(pat, AURA);
-      return m && m.overlay.rings === 0 && m.ground.rings >= 2 ? true : null;
+      return m && m.overlay.rings === 0 && m.drag.rings === 0 && m.ground.rings >= 2 ? true : null;
     });
+    assert.notEqual(await parentOf(pat, hall.bree), "dragGround", "her standee back among the relief's");
   });
 
   test("ISO-32. Pat measures in Isometric: the ruler's line and its distance draw in the drag layer, the distance standing upright", async () => {

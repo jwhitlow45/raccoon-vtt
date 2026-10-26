@@ -332,7 +332,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const movingCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "moving" }), [groundCtx]);
   const uprightCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "upright" }), [groundCtx]);
   const dragged = useDraggedIds();
-  const dragIds = useMemo(() => [...dragged.remote, ...dragged.local], [dragged]);
   const groups = groundGroups(turn);
   const width = hidden ? 0 : size.width;
   const height = hidden ? 0 : size.height;
@@ -410,7 +409,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
             The drag layer: what moves frame by frame. Other members' drags with
             their tags, and the moving marks, draw here rather than in the
             overlay, so a ghost's frame redraws none of the overlay's text. What a
-            local drag moves comes into the empty group at its start (ISO-4).
+            local drag moves comes into the empty group at its start
+            (canvas/dragLayer.ts), over its own rings, auras and tethers, so each
+            frame of this device's drag redraws this layer alone.
           */}
           <Layer>
             <Group scaleY={groups.outer.scaleY} listening={false}>
@@ -418,6 +419,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="ghost" />
               </Group>
             </Group>
+            <DragMarks tokenIds={dragged.local} iso={uprightCtx} layer={props.layerProps} />
             <Group scaleY={groups.outer.scaleY}>
               <Group rotation={groups.inner.rotation} name={DRAG_GROUND} />
             </Group>
@@ -444,8 +446,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 <Component key={id} {...props.layerProps} />
               ))}
             </IsoGroundContext.Provider>
-            {/* The rings, auras and tethers of every token being dragged, here or on another device (5.1). */}
-            <DragMarks tokenIds={dragIds} iso={uprightCtx} layer={props.layerProps} />
+            {/* The rings, auras and tethers of the tokens another member drags (5.1). This device's own move with its standees in the drag layer. */}
+            <DragMarks tokenIds={dragged.remote} iso={uprightCtx} layer={props.layerProps} />
             {(["marks", "label", "plate"] as const).flatMap((part) =>
               props.decorTokens
                 .filter((t) => part !== "plate" || props.hasPlate(t))
