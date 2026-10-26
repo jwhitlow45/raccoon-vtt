@@ -50,6 +50,8 @@ The audit read every client file for visible words on controls. Its two tables (
 
 Build additions, in the same shape: `download`, `share`, `settings` (gear: settings only), `external` (`external-link`), `arrowUp` and `arrowDown` (move up and down, never a fold), `leave` (`log-out`), `crop`, `eraser` (clear a ruler or drawings), `focus` (Ping's Look here), `pass` and `fail` (`check` and `x` inside the DM desk's pair only), `fullScreen` and `leaveFullScreen` (`maximize-2` and `minimize-2`: the whole page in the browser's full screen and back, from the top bar, never `expand`'s corners, which Fit beside them already draws). A picture, upload, search, paste and the X-card's pause kept their words, with no icon built for them.
 
+The builder's modes, on their tiles and, by the chips' glyph rule (docs/design-v1-tool-options.md 6.2), on the mode chip (D-261026-3): `paint` (`paintbrush`: the Brush only), `eraseArea` (`square-dashed`), `walls` (`brick-wall`), `heights` (`mountain`), `difficultGround` (`snail`), `mapLabel` (Feather's `type`: a label on the map, never a text field), `light` (`lightbulb`: a placed light, never the scene's light level) and `stamp` (`stamp`). Rectangle room, Shape room and Erase take `shapeBox`, `shapePolygon` and `eraser`, which already meant those shapes and erasing.
+
 Where an app icon and Lucide's draw the same shape (close, chevrons, plus, minus, copy), the app's stays, so nothing changes for no gain. The side headers design names Lucide equivalents for its icons (its section 7): this table agrees with every one, and either build may swap them without the other.
 
 ### 2.3 Collisions fixed

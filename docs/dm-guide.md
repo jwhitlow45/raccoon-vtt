@@ -248,14 +248,14 @@ The **Map builder** tool (`B`, behind **Setup** on a phone) lets you paint a map
 
 ![The map builder: a crypt of stone rooms with automatic walls, doors, pillars, lights and stamps, with the Builder mode chip in the options row.](dm-guide/builder.webp)
 
-Open the builder from the toolbar, or with **Open the builder** in the scene's settings. Then use **Builder mode** to choose what a tap or a drag does:
+Open the builder from the toolbar, or with **Open the builder** in the scene's settings. Then use **Builder mode** to choose what a tap or a drag does. Each mode has its own icon, on its tile in the picker, and on the Builder mode chip too where the row has room for it:
 
-- **Brush**: drag to paint. **Terrain** picks a floor (Stone, Wood, Grass, Dirt or Cave) or a terrain (Water, Difficult, Rubble, Pit, Pillar or Stairs), and **Brush size** sets the brush to 1, 2 or 3 squares.
+- **Brush**: drag to paint. **Terrain** picks a floor (Stone, Wood, Grass, Dirt or Cave) or a terrain (Water, Difficult, Rubble, Pit, Pillar or Stairs), and **Brush size** sets the brush from 1 to 10 squares across, with − and +.
 - **Rectangle room**: drag from one corner of the room to the opposite one.
 - **Shape room**: tap each corner in turn, then tap the first corner again (or press **Close room**) to finish the room. **Undo corner** takes back the last corner you placed.
-- **Erase**: drag across squares to clear them completely, along with any floor, walls, doors, windows, heights, stairs, labels, stamps and lights on them. **Erase area** clears a whole rectangle at once.
-- **Walls and doors**: see [Walls and doors](#walls-and-doors).
-- **Heights and stairs**: see [Heights and stairs](#heights-and-stairs).
+- **Erase**: drag across squares to clear them completely, along with any floor, walls, doors, windows, heights, stairs, labels, stamps and lights on them. **Brush size** sets how wide it clears, as for the Brush. **Erase area** clears a whole rectangle at once.
+- **Walls/doors**: see [Walls and doors](#walls-and-doors).
+- **Heights/stairs**: see [Heights and stairs](#heights-and-stairs).
 - **Difficult ground**: see [Difficult ground](#difficult-ground).
 - **Label**: type the text, then tap the map to place it. **Label size** is S, M or L. To change a label later, tap it in this mode to edit or delete it, or drag it to move it. Tapping a label with the Select tool opens it too.
 - **Lights**: see [Light and party vision](#light-and-party-vision).
@@ -275,7 +275,7 @@ A scene can hold up to 100 lights, 500 stamps and 500 labels, and it can be at m
 - **Around floor only**: only floors (stone, wood, grass, dirt and cave) get walls. Use it when you paint water, rubble or pits over a map image and don't want them walled in. This is the default for map image scenes.
 - **Off**: no automatic walls, only the walls and doors you draw yourself. This is the default for a Universal VTT import, which brings its own walls.
 
-**Drawing walls, doors and windows.** Pick **Walls and doors**, then choose what to draw under **Edge**:
+**Drawing walls, doors and windows.** Pick **Walls/doors**, then choose what to draw under **Edge**:
 
 - **Wall** or **Window**: tap the edge of a square, or drag along a grid line to draw a run of them. Tap one again to take it off. Windows block movement and areas but not sight, so creatures can see through them.
 - **Door**: tap an edge for a closed door, or drag along several edges for a wide one. Tapping a door steps it through closed, open and locked.
@@ -302,7 +302,7 @@ Walls and doors shape movement as well. Drop a token on the far side of a wall, 
 
 ## Heights and stairs
 
-Heights let you raise or lower the ground, for a hill, a watchtower or a pit, and stairs are how walking creatures get from one level to another. To paint them, pick **Heights and stairs** in the builder. **Paint** chooses between **Height** and **Stairs**, and **Brush** paints 1, 2 or 3 squares at a time, or a rectangle with **Area**.
+Heights let you raise or lower the ground, for a hill, a watchtower or a pit, and stairs are how walking creatures get from one level to another. To paint them, pick **Heights/stairs** in the builder. **Paint** chooses between **Height** and **Stairs**, and **Brush** paints 1, 2 or 3 squares at a time, or a rectangle with **Area**.
 
 - **Height**: set the height with **5 ft lower** and **5 ft higher** (hold a button to step quickly), anywhere from 20 ft down to 100 ft up, then drag to paint it. **Ground (clears)** paints the ground back to 0. Tokens standing on ground you repaint rise or sink with it.
 - **Stairs**: **Stairs point** sets which way the stairs climb. **Auto** points each stair toward its one higher neighbor, or you can pick an arrow yourself. Where Auto can't tell which way is up, a "?" shows when you zoom in: pick an arrow and paint over that stair again. The Stairs terrain from the Brush counts as a stair too.
@@ -867,7 +867,7 @@ A creature's turn can also leave something in its **Uses** for a while. If you s
 
 A monster with a lair, such as an adult dragon, is stronger at home: its stat block gives it more Legendary Actions and Legendary Resistances there, and it is worth more XP. To fight it in its lair, tick **In its lair** on its place card in **Monsters**, or on its line in an encounter. The monster then joins a fight with **In lair** on in its tracker row, whichever way you add it: from the tracker, or by selecting it with others and pressing **Start a fight** or **Add to the fight**.
 
-**In lair**, in the row's **⋯**, also works on its own during a fight. It puts a "Lair" tag on the row, which players see too, and gives the monster its lair's Legendary Action and Legendary Resistance counts and XP. Turn it off, and the monster goes back to its own counts, though what it has already used stays used. The switch waits a moment while the monster's stat block loads, and if the stat block can't load, the switch stays off and offers a reload, so the counts never fall out of step with the stat block.
+**In lair**, in the row's **⋯**, also works on its own during a fight. It puts a "Lair" tag on the row, which players see too, and gives the monster its lair's Legendary Action and Legendary Resistance counts and XP. Turn it off, and the monster goes back to its own counts, though what it has already used stays used. The switch waits a moment while the monster's stat block loads, and if the stat block can't load, the switch stays off and offers a reload, so the counts never fall out of step with the stat block. The switch is there only for a monster whose stat block gives it a lair: more Legendary Actions or Legendary Resistances there, lair XP, or lair actions, which a stat block typed from an older book may list. For one with lair actions alone, the switch just adds the tag, a reminder that its lair acts too. A troll, or any creature with no stat block, has no lair, so its row has no switch.
 
 ## Alerts during a fight
 
@@ -1004,7 +1004,7 @@ The holder's bar lists what it carries and drags, such as "Carrying Bree, Torch"
 The app follows the 2024 rules for mounted combat, and takes care of the bookkeeping that makes it awkward at a table.
 
 - **Getting on or off** a mount on the rider's turn costs half the rider's Speed, and players can mount only on their own turn. A rider who slides off by dragging pays the same as one who presses Get off.
-- **A controlled mount takes its rider's Initiative.** When a creature mounts a controlled mount, the mount's Initiative changes to match the rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill counts the mount's path, with the rider's own movement under it ("Mara: 5 ft, used 15 ft"), and the mount gets its Reaction back when its rider's turn starts. For a rider whose row belongs to its token, as rows usually do, the rows move and the mount shares the turn only for a ride your players can see: on the players' scene, with the rider and the mount both in their view, and the rider's row in their order. Anywhere else, such as on a scene you are still preparing, the order stays as it stands, and the mount keeps its own turn. A rider whose row belongs to its character rather than to a token is the exception: its mount's row moves beside it wherever the ride takes place.
+- **A controlled mount takes its rider's Initiative.** When a creature mounts a controlled mount, the mount's Initiative changes to match the rider's, and its row moves to just after the rider's. From then on the mount moves and acts on its rider's turn: its moves count against its own Speed, the movement pill counts the mount's path, with the rider's own movement under it ("Mara: 5 ft, used 15 ft"), and the mount gets its Reaction back when its rider's turn starts. For a rider whose row belongs to its token, as rows usually do, the rows move and the mount shares the turn only for a ride your players can see: on the players' scene, with the rider and the mount both in their view, and the rider's row in their order. Anywhere else, such as on a scene you are still preparing, the order stays as it stands, and the mount keeps its own turn. A rider whose row belongs to its character rather than to a token is the exception: its mount's row moves beside it, and the mount shares its turn, wherever the ride takes place.
 - **The mount's own row** stays in the tracker, dimmed, so effects that count its turns still tick there, but it has no movement of its own that round. If the mount had already taken its turn this round, the tracker passes over its row until the next round. When the mount's own row is the one acting as a rider mounts it, its row stays put, and its **⋯** offers **Move after Mara** for once its turn is over.
 - **The tracker** tags the rider's row "Riding Warhorse 2" and the mount's row "Controlled by Mara", with the three actions a controlled mount may take: Dash, Disengage or Dodge.
 - **An independent mount** keeps its own place in the order, and carries its rider along on its own turn.
@@ -1315,7 +1315,7 @@ The party explores a crypt by torchlight, and the players should see only what t
 1. In **Scenes**, under **New scene**, pick **Builder**, name it "Crypt", and press **Create**. The builder opens.
 2. With **Rectangle room** and Stone, drag out an entry hall, a narrow corridor one square wide, and a large crypt chamber. Walls go up around them on their own.
 3. With the **Brush**, paint four Pillar squares in the chamber, then some Rubble for a fallen corner of the hall.
-4. Pick **Walls and doors**, then **Door**, and tap the edge where the corridor meets the hall. Tap the edge into the chamber for a second door, then tap that door twice more to lock it (it goes closed, open, locked).
+4. Pick **Walls/doors**, then **Door**, and tap the edge where the corridor meets the hall. Tap the edge into the chamber for a second door, then tap that door twice more to lock it (it goes closed, open, locked).
 5. Pick **Secret door** and **Hidden**, tap an edge of the chamber's east wall, and build a small room behind it.
 6. In **Lights**, pick **Torch** and tap the hall. Place two more torches in the chamber to serve as braziers, then tap each one, rename it "Brazier" and set it **Out**. Put a **Candle** in the hidden room.
 7. With **Stamp**, place a table, barrels and a chest. Set the chest to **DM only** until the party finds it.
@@ -1343,7 +1343,7 @@ A watchtower stands on a rise above a field, and harpies circle overhead.
 **Building it**
 
 1. In **Scenes**, under **New scene**, pick **Builder**, and paint Grass over the field with **Rectangle room**. Set **Automatic walls** to **Around floor only** or **Off**, so the field isn't walled in.
-2. Pick **Heights and stairs**, then **Height**, set it to 10 ft up, choose **Area**, and drag out the rise. Then set 30 ft up and drag the tower's top onto the rise.
+2. Pick **Heights/stairs**, then **Height**, set it to 10 ft up, choose **Area**, and drag out the rise. Then set 30 ft up and drag the tower's top onto the rise.
 3. Pick **Stairs** with **Auto**, and paint a run of stairs up the rise and another up the tower. Each stair points uphill. Where a "?" shows, pick an arrow and paint that stair again.
 4. Place an archer on the tower. A token placed on raised ground stands on top of it.
 5. Place the harpies and raise them to 40 ft with **+5** in the action bar, or Page Up. Each shows "↑40", with a shadow on the ground under it.
@@ -1455,12 +1455,12 @@ This part is for quick lookups during play, starting with the keys that save a D
 
 Press `?` (or open the Menu, then **This device**, then **Show the shortcuts**) for the full list of shortcuts for your role.
 
-![The shortcut list the ? key opens, from Select down: each tool beside its key and Change, Ping moved to K with Reset under its Change, and Trap's X waiting on F, which Fog already has, with Swap and Cancel.](dm-guide/shortcuts.webp)
+![The shortcut list the ? key opens, from Select down: each tool beside its key and Change, Ping moved to K with Reset under its Change, and "Already Fog." under Trap with Swap and Cancel, after Trap's Change and a press of F.](dm-guide/shortcuts.webp)
 
 These are the keys a DM uses most:
 
 - A tool's key picks it: `V` for Select, `R` for Ruler, `A` for Area, `F` for Fog, `D` for Draw and `P` for Ping. For the setup tools, it is `T` for Add token, `M` for Pin, `X` for Trap, `B` for Map builder and `G` for Line up grid.
-- Press a tool's key again while you are using it to move to the next option of its main choice: the next shape for Area, the next drawing tool for Draw, Straight or Walking for the Ruler, Clear fog or Add fog for Fog, the next mode for the Map builder, the next blank token for Add token, and the next zone for Trap. With Shift, a letter key goes back one instead. If the tool's options are hidden, the same press shows them. While you drag, or while a change would lose something you started, such as a shape with corners, unfinished text or an area from a spell, the key leaves the choice alone. Select, Ping, Pin and Line up grid have no such choice, so a second press of their key only shows their options.
+- Press a tool's key again while you are using it to move to the next option of its main choice: the next shape for Area, the next drawing tool for Draw, Straight or Walking for the Ruler, Clear fog or Add fog for Fog, the next mode for the Map builder, the next blank token for Add token, and the next zone for Trap. With Shift, a letter key goes back one instead. If the tool's options are hidden, the same press shows them. When the tool has no choice to move at that moment, the press only shows its options: Area while you have a placed area picked, for example. While you drag, or while a change would lose something you started, such as a shape with corners, unfinished text or an area from a spell, the key leaves the choice alone. Select, Ping, Pin and Line up grid have no such choice, so a second press of their key only shows their options.
 - `N` moves to the next turn, and starts the fight if it hasn't started yet.
 - `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
 - The arrow keys move the selection a square. Page Up raises it 5 ft, and Page Down lowers it 5 ft.

@@ -474,17 +474,17 @@ Line: each mode's hint and the builder's notes in the warning tone, as today. Al
 
 | Slot | Kind | Priority | Compact |
 |---|---|---|---|
-| Builder mode: Brush | Chip, ten tiles, the short words of 6.2 in the chip | 1 | |
+| Builder mode: Brush | Chip, eleven tiles of one size, each with the mode's icon, the short words of 6.2 in the chip and the icon as its glyph (D-261026-3) | 1 | the icon |
 | Undo ("Undo your last change") | Icon button | 2 | |
 | Redo | Icon button | 4 | |
 | Brush: Terrain: Stone | Chip, eleven swatch tiles | 1 | the swatch |
-| Brush: Brush size 1, 2, 3 | Segmented | 3 | chip "1" |
+| Brush: Brush size, 1 to 10 squares | Stepper (D-261026-4) | 3 | |
 | Rectangle room: Terrain | Chip | 1 | the swatch |
 | Shape room: Terrain | Chip | 1 | the swatch |
 | Shape room: Close room (a task while it has corners) | Primary, disabled under 3 corners as today | 1 while it has corners, else 2 | |
 | Shape room: Undo corner | Button | 2 | |
 | Shape room: Cancel (with corners) | Button | 2 | |
-| Erase: Brush size | Segmented | 2 | chip |
+| Erase: Brush size | Stepper, as the Brush's | 2 | |
 | Walls and doors: Edge: Wall | Chip, six rows (Wall, Door, Secret door, Window, No wall, Remove) | 1 | |
 | Walls and doors: Secret door: Hidden, Found (Secret door) | Segmented | 2 | chip |
 | Heights: Paint: Height, Stairs | Segmented, names "Paint a height", "Mark stairs" | 2 | chip |
