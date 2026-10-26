@@ -12,8 +12,9 @@
 # builds amd64, smoke-tests it, and pushes amd64 and arm64 (emulated) from
 # the same builder and cache, so the amd64 image pushed is the one tested:
 # it checks that their config digests match before it tags anything. It
-# never pushes a version Docker Hub already has, and it moves X.Y and latest
-# only forward (scripts/release-tags.ts).
+# never rebuilds or replaces a version Docker Hub already has. A run that
+# stopped after pushing X.Y.Z can be run again, and then only tags. X.Y and
+# latest move only forward, by what Docker Hub holds (scripts/release-tags.ts).
 #
 # A run on a ci/ branch that changes the image's own files, and a run
 # started by hand, do the checks and the smoke test, and never push. A change
@@ -47,9 +48,11 @@ on:
 permissions:
   contents: read
 
-# Never cancelled: a release half pushed is worse than one that waits. Every
-# release shares one group, so two never publish at once, and a branch has a
-# group of its own.
+# No run in progress is cancelled: a release half pushed is worse than one
+# that waits. Every release shares one group, so two never publish at once,
+# and a branch has a group of its own. GitHub keeps only one run waiting in a
+# group, though: a release waiting behind another is cancelled when a third
+# arrives, so push one release tag at a time (README.md, "Releasing").
 concurrency:
   group: ${{ github.ref_type == 'tag' && 'image-publish' || format('image-{0}', github.ref) }}
   cancel-in-progress: false
@@ -112,17 +115,6 @@ jobs:
             echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
           echo "Version $version at $sha. Publish: $publish."
-      # The publish job asks again just before it tags, since a newer tag can
-      # arrive while this run waits. This answer is for the log.
-      - name: The floating tags this release would move
-        if: steps.version.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node_image=$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile)
-          git tag -l 'v*' | docker run --rm -i --network none --read-only --user "$(id -u):$(id -g)" \
-            --volume "$PWD:/repo:ro" --workdir /repo "$node_image" \
-            node scripts/release-tags.ts "$VERSION"
       # In the production image's own Node, so it needs no install: the
       # generator uses nothing but Node's built-in modules.
       - name: selfhost/ is what its generator makes
@@ -212,6 +204,12 @@ jobs:
           echo "ci.yml passed on $SHA."
 
   # The one job that sees the Docker Hub secrets, and the one approval.
+  #
+  # Docker Hub's own state decides what it does, read inside the release
+  # slot. X.Y.Z not there: build, smoke-test, push and tag. X.Y.Z there from
+  # this same commit: a run before this one pushed it and stopped before the
+  # floating tags, so this one only tags. X.Y.Z there from anything else:
+  # refused, since a published version is never rebuilt or replaced.
   publish:
     needs: [check, build-arm64, ci-green]
     if: needs.check.outputs.publish == 'true'
@@ -222,8 +220,8 @@ jobs:
       VERSION: ${{ needs.check.outputs.version }}
       MINOR: ${{ needs.check.outputs.minor }}
       REVISION: ${{ needs.check.outputs.sha }}
-      # The username is an account name, not a credential. Only the push
-      # step sees the token.
+      # The username is an account name, not a credential. Only the steps
+      # that log in see the token.
       IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/raccoon-vtt
     steps:
       - name: The Docker Hub secrets are set
@@ -250,14 +248,49 @@ jobs:
             echo "::error::selfhost/compose.yml pulls '$pulled', but this job would push to '$IMAGE'. Change IMAGE in scripts/selfhost-compose.ts, or the dockerhub environment's namespace."
             exit 1
           fi
+      # Every login lives inside one step: the token reaches docker login on
+      # stdin, never on a command line, and the trap logs out however the
+      # step ends. Only "not found" counts as absent. Any other answer stops
+      # the job, which is why README.md's Releasing asks for the repository
+      # to exist, public, before the first tag.
+      - name: What Docker Hub holds for this version
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          trap 'docker logout docker.io' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          if ! found=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Image}}' 2>&1); then
+            case $found in
+              *"not found"*) echo "MODE=build" >> "$GITHUB_ENV"; echo "$VERSION is not on Docker Hub yet: building it."; exit 0 ;;
+              *) echo "::error::Could not tell whether $VERSION is on Docker Hub: $found"; exit 1 ;;
+            esac
+          fi
+          label() { jq -r --arg l "$1" '."linux/amd64".config.Labels[$l] // empty' <<< "$found"; }
+          platforms=$(jq -r 'keys | map(select(startswith("linux/"))) | sort | join(" ")' <<< "$found")
+          source_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          if [ "$(label org.opencontainers.image.revision)" != "$REVISION" ] || [ "$(label org.opencontainers.image.version)" != "$VERSION" ] \
+            || [ "$(label org.opencontainers.image.source)" != "$source_url" ] || [ "$platforms" != "linux/amd64 linux/arm64" ]; then
+            echo "::error::$VERSION is already on Docker Hub, from revision '$(label org.opencontainers.image.revision)', not this run's $REVISION. A published version is never rebuilt or replaced: release a new one."
+            exit 1
+          fi
+          index=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+          {
+            echo "MODE=resume"
+            echo "INDEX=$index"
+          } >> "$GITHUB_ENV"
+          echo "$VERSION is on Docker Hub from this commit ($index): only the floating tags are left to do."
       # QEMU for arm64, from tonistiigi/binfmt qemu-v10.2.1 by digest. Only
       # the production install runs emulated: the Dockerfile builds the
       # client on the runner's own platform.
       - name: arm64 emulation
+        if: env.MODE == 'build'
         run: docker run --privileged --rm tonistiigi/binfmt:qemu-v10.2.1@sha256:d3b963f787999e6c0219a48dba02978769286ff61a5f4d26245cb6a6e5567ea3 --install arm64
       - name: A buildx builder
+        if: env.MODE == 'build'
         run: docker buildx create --name raccoon --driver docker-container --driver-opt "image=$BUILDKIT_IMAGE" --bootstrap --use
       - name: Build for linux/amd64
+        if: env.MODE == 'build'
         run: |
           docker buildx build --platform linux/amd64 \
             --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
@@ -274,45 +307,26 @@ jobs:
           echo "TESTED_CONFIG=$config" >> "$GITHUB_ENV"
           echo "Built linux/amd64 with config $config."
       - name: Smoke test
+        if: env.MODE == 'build'
         run: sh selfhost/smoke-test.sh raccoon-vtt:smoke
       # Both architectures into the builder's cache before the login, so the
       # emulated arm64 install never runs while the token is on disk. The
       # push below then only exports from this cache.
       - name: Build both architectures into the cache
+        if: env.MODE == 'build'
         run: |
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
-      # `latest` and X.Y only move forward (scripts/release-tags.ts). The
-      # tags are read from the repository now, inside the one release slot,
-      # so a tag pushed while this run waited still counts.
-      - name: Which floating tags move
-        run: |
-          git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's|.*refs/tags/||' > "$RUNNER_TEMP/tags.txt"
-          node_image=$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile)
-          docker run --rm -i --network none --read-only --user "$(id -u):$(id -g)" \
-            --volume "$PWD:/repo:ro" --workdir /repo "$node_image" \
-            node scripts/release-tags.ts "$VERSION" < "$RUNNER_TEMP/tags.txt" > "$RUNNER_TEMP/floating.env"
-          cat "$RUNNER_TEMP/floating.env" | tee -a "$GITHUB_ENV"
-      # The login lives inside this one step: the token reaches docker login
-      # on stdin, never on a command line, and the trap logs out however the
-      # step ends. Both architectures are pushed by digest first, and tagged
-      # only once the amd64 image is shown to be the one smoke-tested.
-      - name: Push, check and tag
+      # By digest only, so nothing is tagged until the amd64 image is shown
+      # to be the one smoke-tested.
+      - name: Push both architectures and check
+        if: env.MODE == 'build'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           trap 'docker logout docker.io' EXIT
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          # A published version is never replaced.
-          if existing=$(docker buildx imagetools inspect "$IMAGE:$VERSION" 2>&1); then
-            echo "::error::$VERSION is already on Docker Hub. A published version is never overwritten: release a new one."
-            exit 1
-          fi
-          case $existing in
-            *"not found"*) ;;
-            *) echo "::error::Could not tell whether $VERSION is already on Docker Hub: $existing"; exit 1 ;;
-          esac
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --provenance mode=max --sbom "generator=$SBOM_SCANNER" \
@@ -332,14 +346,48 @@ jobs:
             echo "::error::The pushed linux/amd64 image has config $pushed, but the smoke test ran $TESTED_CONFIG. Nothing was tagged."
             exit 1
           fi
-          echo "The pushed linux/amd64 image is the one smoke-tested ($pushed)."
-          names=("$VERSION")
-          if [ "$TAG_MINOR" = true ]; then names+=("$MINOR"); fi
-          if [ "$TAG_LATEST" = true ]; then names+=(latest); fi
+          echo "INDEX=$index" >> "$GITHUB_ENV"
+          echo "The pushed linux/amd64 image is the one smoke-tested ($pushed): index $index, linux/amd64 $amd64, linux/arm64 $arm64."
+      # X.Y.Z first, so a run that stops partway can be run again and only
+      # tags. X.Y and latest each move only when Docker Hub has no such tag
+      # or it holds this release or an older one (scripts/release-tags.ts).
+      - name: Tag
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          trap 'docker logout docker.io' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          if [ "$MODE" = build ]; then
+            docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$INDEX"
+            echo "Tagged $VERSION: $INDEX."
+          fi
+          # The version a tag holds now, or "none" when Docker Hub has no such tag.
+          holds() {
+            local out
+            if out=$(docker buildx imagetools inspect "$IMAGE:$1" --format '{{json .Image}}' 2>&1); then
+              jq -r '."linux/amd64".config.Labels["org.opencontainers.image.version"] // empty' <<< "$out"
+              return
+            fi
+            case $out in
+              *"not found"*) echo none ;;
+              *) echo "::error::Could not read $1 on Docker Hub: $out" >&2; return 1 ;;
+            esac
+          }
+          minor_holds=$(holds "$MINOR")
+          latest_holds=$(holds latest)
+          node_image=$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile)
+          docker run --rm --network none --read-only --user "$(id -u):$(id -g)" \
+            --volume "$PWD:/repo:ro" --workdir /repo "$node_image" \
+            node scripts/release-tags.ts "$VERSION" "$minor_holds" "$latest_holds" > "$RUNNER_TEMP/floating.env"
+          . "$RUNNER_TEMP/floating.env"
           args=()
-          for name in "${names[@]}"; do args+=(--tag "$IMAGE:$name"); done
-          docker buildx imagetools create "${args[@]}" "$IMAGE@$index"
-          echo "Tagged ${names[*]}: index $index, linux/amd64 $amd64, linux/arm64 $arm64."
+          if [ "$TAG_MINOR" = true ]; then args+=(--tag "$IMAGE:$MINOR"); else echo "::warning::$MINOR stays at $minor_holds, which is newer than $VERSION."; fi
+          if [ "$TAG_LATEST" = true ]; then args+=(--tag "$IMAGE:latest"); else echo "::warning::latest stays at $latest_holds, which is newer than $VERSION."; fi
+          if [ "${#args[@]}" -gt 0 ]; then
+            docker buildx imagetools create "${args[@]}" "$IMAGE@$INDEX"
+          fi
+          echo "$VERSION is $INDEX. $MINOR: $([ "$TAG_MINOR" = true ] && echo "moved here" || echo "stays at $minor_holds"). latest: $([ "$TAG_LATEST" = true ] && echo "moved here" || echo "stays at $latest_holds")."
       - name: Remove the builder
-        if: always()
+        if: always() && env.MODE == 'build'
         run: docker buildx rm raccoon || true
