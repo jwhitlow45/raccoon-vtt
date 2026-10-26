@@ -1319,6 +1319,8 @@ class HexSampler {
    */
   count(h: Hex, z: number, d?: number, layers?: [number, number], c: Point = hexCenter(this.g, h)): number {
     this.center = false;
+    // A hex past the scene's edge is never shaded, so it catches no one either (review HX2-OPUS-02).
+    if (!hexInScene(this.g, this.scene, h)) return 0;
     const reach = this.area.reach;
     let whole: boolean;
     if (reach) {

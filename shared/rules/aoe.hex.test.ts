@@ -267,6 +267,21 @@ describe("an emanation's hexes are found within the scene alone, the same as wal
   }
 });
 
+describe("a hex past the scene's edge catches no one, as it is never shaded (review HX2-OPUS-02)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a creature whose only covered hex lies past the edge is not caught`, () => {
+      const out = on(g, "o", "medium", { col: -1, row: 6 });
+      const c = hexCenter(g, { col: -1, row: 6 });
+      const sphere = template("s", { shape: "sphere", size: 5, origin: { ...c, z: 0 }, includeOrigin: true });
+      assert.ok(!hexSet(computeCoverage(sphere, ctx(g))).has("-1,6"));
+      assert.deepEqual(creaturesInArea(sphere, [out], ctx(g)), []);
+      // One step inside, the same sphere catches it.
+      const inside = on(g, "i", "medium", { col: 1, row: 6 });
+      assert.deepEqual(creaturesInArea({ ...sphere, origin: { ...hexCenter(g, { col: 1, row: 6 }), z: 0 } }, [inside], ctx(g)), ["i"]);
+    });
+  }
+});
+
 describe("a template on hexes reaches players' copies unchanged", () => {
   test("its footprint's size is plain data", () => {
     const t: AreaTemplate = template("s", { shape: "emanation", footprint: { w: 3, h: 3, elevation: 0, height: 15, size: "huge" } });
