@@ -210,6 +210,15 @@ describe("an aura's reminder (6.5)", () => {
   });
 });
 
+describe("a line no player reads", () => {
+  test("keeps no list of who saw, though only Thorn's player saw its creature (review PV1-O12)", () => {
+    const { log } = lines(table(), { t: "actor.effect.add", target: { tokenId: "gob" }, effect: { id: "fx", key: "poisoned", hiddenFromPlayers: true } });
+    const line = log.find((l) => l.data?.type === "effect")!;
+    assert.equal(readers(log, "effect").length, 0, "the DM's alone");
+    assert.equal(JSON.stringify(line.data).includes("seenBy"), false);
+  });
+});
+
 describe("apply keeps the marks of a device's own prediction plain", () => {
   test("a DM's device predicts a line about a creature only some players see with no list", () => {
     const s = table();

@@ -247,7 +247,8 @@ export class Tx {
       return full;
     }
     const event = entry.kind === "event" && entry.data !== undefined;
-    if (event && neverRead(entry.data!)) return this.appendLine(entry, this.dmIndex(), cutLine);
+    // A line no player reads is the DM's alone at once, and keeps no list of who saw, as a settled DM line keeps none (settleLog).
+    if (event && neverRead(entry.data!)) return this.appendLine({ ...entry, data: listsStripped(entry.data!) }, this.dmIndex(), cutLine);
     const line = this.appendLine(entry, this.sharedIndex());
     this.unsettled.push({ line, dmIndex: event ? this.dmIndex() : -1 });
     return line;
