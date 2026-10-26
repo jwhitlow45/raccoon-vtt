@@ -4,8 +4,11 @@ import type { BuildChunk, FogTile, Scene, Token } from "#shared/model.ts";
 import { DOOR_TOO_FAR, reachesDoor } from "#shared/permissions.ts";
 import { Button } from "../../components/Button.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
-import { viewToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, toView } from "../../lib/view.ts";
+import type { Camera, Insets, Size } from "../../lib/camera.ts";
+import { groundAnchor } from "../../canvas/anchors.ts";
+import type { BoardPick } from "../../canvas/boardPick.ts";
+import { WALL_RISE } from "../../canvas/relief/pieces.ts";
+import { doorGround } from "./tap.ts";
 import { theme } from "../../lib/theme.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -27,9 +30,11 @@ const PILL_HEIGHT = 48 + 44 + theme.space(1) + 2 * theme.space(2);
  * this viewer's own view, so it follows the door as it changes and goes
  * when the door does or the fog covers it, when another tool is picked,
  * or when a token is tapped, whose bar takes its place. It steps aside
- * while a token is dragged, so it never covers where the token goes.
+ * while a token is dragged, so it never covers where the token goes. In
+ * Isometric it stands over the door's standing piece (`pick`,
+ * docs/design-v1-isometric-view.md 5.3).
  */
-export function DoorPillHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets }) {
+export function DoorPillHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
   const slot = useScoped(doorPillSlot);
   const pill = useStore(slot, (s) => s.pill);
   const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
@@ -45,10 +50,10 @@ export function DoorPillHost(props: { scene: Scene; tool: string; camera: Camera
     if (pill && !open) slot.setState({ pill: null });
   }, [pill, open, slot]);
   if (!open || !door || dragging) return null;
-  return <Pill door={door} selected={pill?.selected} scene={props.scene} role={role} camera={props.camera} viewport={props.viewport} insets={props.insets} />;
+  return <Pill door={door} selected={pill?.selected} scene={props.scene} role={role} camera={props.camera} viewport={props.viewport} insets={props.insets} pick={props.pick} />;
 }
 
-function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Scene; role: "dm" | "player"; camera: Camera; viewport: Size; insets: Insets }) {
+function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Scene; role: "dm" | "player"; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
   const { door, scene, role } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -62,7 +67,9 @@ function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Sce
   };
   const choices = doorActions(scene.id, door, role);
   const width = Math.min(role === "dm" ? 300 : 160, props.viewport.width - 16);
-  const anchor = viewToScreen(props.camera, toView(TOP_DOWN, door.mid));
+  // Over the top of a closed door's standing piece, or its line where it lies flat.
+  const rise = door.door.state !== "open" && props.pick.src?.stand === true ? WALL_RISE : 0;
+  const anchor = groundAnchor(props.camera, props.pick, door.mid, props.pick.view.kind === "isometric" ? doorGround(props.pick, door) + rise : 0);
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: PILL_HEIGHT, gap: 14, prefer: "above" });
   const name = doorName(door, role);
 

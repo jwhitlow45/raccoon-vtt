@@ -5,8 +5,9 @@ import { Button } from "../../components/Button.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
-import { viewToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, toView } from "../../lib/view.ts";
+import type { Camera, Insets, Size } from "../../lib/camera.ts";
+import { footAnchor } from "../../canvas/anchors.ts";
+import { flatPick, groundUnder, type BoardPick } from "../../canvas/boardPick.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -60,7 +61,7 @@ export const COMPACT_NOTE_ROOM = Math.ceil(2 * theme.touch + GAP + PAD_TOP + PAD
  * time, and it comes back when the bar closes. The stopped drop itself
  * closes the bar (send.ts), so the note wins after a drag.
  */
-export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Size; insets: Insets }) {
+export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Size; insets: Insets; pick?: BoardPick }) {
   const slot = useScoped(stopNoteSlot);
   const note = useStore(slot, (s) => s.note);
   const busy = useStore(slot, (s) => s.busy);
@@ -93,7 +94,9 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   if (!shown || !note || !token) return null;
 
   const fp = footprint(token);
-  const anchor = viewToScreen(props.camera, toView(TOP_DOWN, { x: note.ghost.x + fp.w / 2, y: note.ghost.y + fp.h }));
+  // Under the ghost where the walk stopped: in Isometric under its ring, on the ground drawn there (docs/design-v1-isometric-view.md 5.3).
+  const pick = props.pick ?? flatPick(props.camera);
+  const anchor = footAnchor(props.camera, pick, { x: note.ghost.x, y: note.ghost.y, w: fp.w, h: fp.h }, groundUnder(pick, { ...token, x: note.ghost.x, y: note.ghost.y, squeeze: undefined }));
   // A card over the map as wide as a map pane, inside the canvas's 8 px margins.
   const width = Math.min(PANE_WIDTH, props.viewport.width - 2 * theme.space(2));
   /*

@@ -82,8 +82,8 @@ export function doorGap(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid" | 
   return Math.min(onLine, sweepGap(screen, a, b, K * WALL_RISE * pick.camera.scale));
 }
 
-/** The higher drawn ground on either side of a door's middle, as its standing piece rises from (relief/runs.ts). */
-function doorGround(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid">): number {
+/** The higher drawn ground on either side of a door's middle, as its standing piece rises from (relief/runs.ts), in cells. */
+export function doorGround(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid">): number {
   const len = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) || 1;
   const nx = (-(d.b.y - d.a.y) / len) * 0.25;
   const ny = ((d.b.x - d.a.x) / len) * 0.25;

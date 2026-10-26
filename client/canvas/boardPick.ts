@@ -3,7 +3,7 @@ import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { cameraOfStage, screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
 import { footprint } from "../lib/scene.ts";
-import { arrowStep, drawnBase, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /**
@@ -78,6 +78,12 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
 export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, token: FootprintToken): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
   return drawnBase(pick.src, occupiedRange(token), token.elevation) / pick.feetPerCell;
+}
+
+/** The highest drawn ground under a footprint, in cells (view.ts drawnFootprintGround): where a ghost of it stands. 0 in Top-down. */
+export function groundUnder(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, token: Omit<FootprintToken, "elevation">): number {
+  if (pick.view.kind === "topDown" || !pick.src) return 0;
+  return drawnFootprintGround(pick.src, occupiedRange(token)) / pick.feetPerCell;
 }
 
 /** Where a token's ring's center shows on screen: its footprint's middle at its drawn base. */

@@ -3,8 +3,9 @@ import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
 import { measurePill } from "../../../canvas/measureText.ts";
 import { VISUALLY_HIDDEN } from "../../../lib/a11y.ts";
-import { viewToScreen, type Camera, type Insets, type Size } from "../../../lib/camera.ts";
-import { TOP_DOWN, toView } from "../../../lib/view.ts";
+import type { Camera, Insets, Size } from "../../../lib/camera.ts";
+import { groundAnchor } from "../../../canvas/anchors.ts";
+import { drawnAt, type BoardPick } from "../../../canvas/boardPick.ts";
 import { theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { TOAST_MS } from "../../../state/store.ts";
@@ -40,7 +41,7 @@ const EDGE_PX = 1.5;
  * screen reader already knows it when the first reading arrives. Only the
  * pill comes and goes.
  */
-export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets }) {
+export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
   const slot = useScoped(readoutSlot);
   const readout = useStore(slot.store, (s) => s.readout);
   const spoken = useStore(slot.store, (s) => s.spoken);
@@ -84,16 +85,18 @@ export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera;
         {spoken}
       </div>
       {open && readout ? (
-        <ReadoutPill words={words} cell={readout.cell} camera={props.camera} viewport={props.viewport} insets={props.insets} />
+        <ReadoutPill words={words} cell={readout.cell} camera={props.camera} viewport={props.viewport} insets={props.insets} pick={props.pick} />
       ) : null}
     </>
   );
 }
 
-function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; camera: Camera; viewport: Size; insets: Insets }) {
+/** The pill points at its cell's middle, on the cell's top as the isometric view raises it (docs/design-v1-isometric-view.md 5.3). */
+function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
   const { words } = props;
   const width = Math.ceil(measurePill(words.pill, FONT_PX, theme.font.body)) + 2 * PAD_PX;
-  const anchor = viewToScreen(props.camera, toView(TOP_DOWN, { x: props.cell.x + 0.5, y: props.cell.y + 0.5 }));
+  const middle = { x: props.cell.x + 0.5, y: props.cell.y + 0.5 };
+  const anchor = groundAnchor(props.camera, props.pick, middle, drawnAt(props.pick, middle));
   const place = readoutPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: BODY_HEIGHT });
   if (!place) return null;
   const bodyTop = place.pointer?.side === "up" ? POINTER_PX : 0;

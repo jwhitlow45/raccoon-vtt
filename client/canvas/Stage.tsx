@@ -77,7 +77,8 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
-import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
+import { footAnchor, headAnchor } from "./anchors.ts";
+import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, tokenBase, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
@@ -1695,9 +1696,9 @@ export function MapStage(props: {
             <GroupActionBar
               tokens={group}
               movable={group.filter(canDrag).length}
-              anchor={inZoomed(worldAnchor(cam, selected, shown), zoom)}
+              anchor={inZoomed(worldAnchor(cam, selected, pick!), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected, shown), zoom, shown)}
+              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected, pick!), zoom, pick!)}
               onClose={() => ui.select(null)}
               onShift={shiftForBar}
             />
@@ -1706,9 +1707,9 @@ export function MapStage(props: {
               // Keyed by token, so an armed Delete or a half-typed HP entry never carries over to the next token tapped.
               key={selected.id}
               token={selected}
-              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, shown), boardText.get(selected.id)), zoom)}
+              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, pick!), boardText.get(selected.id)), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, shown), boardText.get(selected.id)), zoom, shown)}
+              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, pick!), boardText.get(selected.id)), zoom, pick!)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
               onShift={shiftForBar}
@@ -1722,9 +1723,9 @@ export function MapStage(props: {
           {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
           {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
           {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
-          <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
-          <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
-          {draggingId === null ? <StopNoteHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
+          {pick ? <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
+          {pick ? <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
+          {draggingId === null && pick ? <StopNoteHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
         </div>
       ) : null}
       <div
@@ -1757,20 +1758,15 @@ function belowLabel(anchor: Point, text: TokenText | undefined): Point {
 
 /**
  * The screen point under a token's bottom center, where its action bar
- * hangs: in Isometric, under its ring on the ground (design 5.4). Drawn
- * heights lift it in ISO-4.
+ * hangs: in Isometric, under its ring at its drawn base (design 5.4).
  */
-function worldAnchor(cam: Camera, token: ViewToken, view: View): Point {
+function worldAnchor(cam: Camera, token: ViewToken, pick: BoardPick): Point {
   const fp = footprint(token);
-  if (view.kind === "topDown") return viewToScreen(cam, toView(TOP_DOWN, { x: token.x + fp.w / 2, y: token.y + fp.h }));
-  const center = toView(view, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 });
-  return viewToScreen(cam, { x: center.x, y: ellipseBox(view.turn, fp.w, fp.h, center).y1 } as ViewPoint);
+  return footAnchor(cam, pick, { x: token.x, y: token.y, w: fp.w, h: fp.h }, tokenBase(pick, token));
 }
 
 /** How far a token's top stands above the point under its label, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`): in Isometric, its standee's art box's top. */
-function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number, view: View): number {
-  if (view.kind === "topDown") return (anchor.y - viewToScreen(cam, toView(TOP_DOWN, { x: token.x, y: token.y })).y) / zoom;
+function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number, pick: BoardPick): number {
   const fp = footprint(token);
-  const center = toView(view, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 });
-  return (anchor.y - viewToScreen(cam, { x: center.x, y: center.y - fp.h } as ViewPoint).y) / zoom;
+  return (anchor.y - headAnchor(cam, pick, { x: token.x, y: token.y, w: fp.w, h: fp.h }, tokenBase(pick, token)).y) / zoom;
 }
