@@ -31,8 +31,10 @@ export function holderRows(view: Pick<RoomState, "members" | "holders">, sceneId
 /**
  * What a tick or an untick asks of the server: the players who then see
  * for themselves, the whole list the `vision.holders` op names, in the
- * list's order. Ticking one more than the cap allows is refused here with
- * the server's own words, so it never leaves the device.
+ * rows' order (by name, then id), the ticked one last. The reducer keeps
+ * each entry's own place, so the order sent changes nothing. Ticking one
+ * more than the cap allows is refused here with the server's own words,
+ * so it never leaves the device.
  */
 export function holdersAfter(rows: readonly HolderRow[], memberId: string, tick: boolean): { on: string[] } | { refused: string } {
   const on = rows.filter((r) => r.on && r.memberId !== memberId).map((r) => r.memberId);
@@ -68,10 +70,12 @@ function listed(names: readonly string[]): string {
  * sight holders who own it, by name. A creature whose players hold no
  * sight here lends it to no player, a case the design leaves unworded.
  */
-export function lendsText(view: RoomState, sceneId: string, token: Token): string {
+export function lendsText(view: Pick<RoomState, "members" | "holders" | "characters">, sceneId: string, token: Token): string {
   if (token.partyVision === true) return "Lends its sight to every player";
-  const names = sightHolders(view, sceneId)
-    .filter((memberId) => ownsToken(view, { memberId, role: "player" }, token))
+  // sightHolders reads the list and the roster, ownsToken the token and its character: the fields this function takes.
+  const room = view as RoomState;
+  const names = sightHolders(room, sceneId)
+    .filter((memberId) => ownsToken(room, { memberId, role: "player" }, token))
     .map((memberId) => view.members[memberId]?.name ?? "")
     .filter((name) => name !== "")
     .sort((a, b) => a.localeCompare(b));

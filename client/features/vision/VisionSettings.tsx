@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { LightLevel, RoomState, Scene } from "#shared/model.ts";
+import type { LightLevel, Scene } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
@@ -335,7 +335,7 @@ function Sources(props: { sceneId: string; perPlayer: boolean }) {
   const holders = useRoomView((s) => (props.perPlayer ? s.view?.holders : undefined));
   const characters = useRoomView((s) => (props.perPlayer ? s.view?.characters : undefined));
   // The DM's view holds every owner and the scene's list, all lendsText reads.
-  const owners = useMemo(() => (members ? ({ members, holders: holders ?? {}, characters: characters ?? {} } as unknown as RoomState) : null), [members, holders, characters]);
+  const owners = useMemo(() => (members ? { members, holders: holders ?? {}, characters: characters ?? {} } : null), [members, holders, characters]);
   const lending = report.rows.filter((r) => r.lends).length;
   return (
     <SettingRow name={props.perPlayer ? "Who lends sight" : "Who lends the party sight"} wide>
