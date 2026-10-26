@@ -20,9 +20,11 @@
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
  * scout dragged here and by another member, a group of 4 and the horse with
- * its rider dragged at the caps, a ping's frames, and a round trip to the
- * map builder. With `--view isometric`, also the switch, a turn, and a pan
- * with both drawing trees mounted. Isometric is out of reach until the
+ * its rider dragged at the caps, a ping's frames, a round trip to the map
+ * builder, and a brush stroke's steps arriving from another device. With
+ * `--view isometric`, also the switch, a turn, and a pan with both drawing
+ * trees mounted, and the brush stroke runs back in Top-down with the
+ * isometric tree mounted and hidden. Isometric is out of reach until the
  * integration commit (client/features/view/store.ts isoReady), so the page
  * turns it on through the test flag the view choice reads
  * (client/features/view/choice.ts ISO_TEST_FLAG).
@@ -580,6 +582,8 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await frames(page, 8);
       // Pressed near its foot, clear of the rider on its back, which a press would lift off it.
       add("a horse with its rider dragged, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.horse!, STEPS, { down: 0.92 }))));
+      // In Isometric this row runs last, in Top-down with the isometric tree mounted and hidden.
+      if (view === "topDown") add(BRUSH_ROW, await throttled(() => rounds(() => brushStrokes(page, cdp, built.caps!.dm))));
     }
 
     // The crowd.
@@ -598,6 +602,10 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       add("turn, caps, 40 px", await throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
       add("switch, caps, 40 px, both trees mounted", await throttled(() => rounds(() => timed(page, cdp, 2, async (i) => void (await hook("pick", i === 0 ? "topDown" : "isometric")), 4))));
       add("pan, caps, 40 px, both trees mounted", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      // Back in Top-down, as the builder will force it (ISO-4): a stroke must cost what it does with no isometric tree.
+      await hook("pick", "topDown");
+      await frames(page, 30);
+      add(BRUSH_ROW, await throttled(() => rounds(() => brushStrokes(page, cdp, built.caps!.dm))));
     }
     return rows;
   } finally {
@@ -610,6 +618,15 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
     await server.stop();
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+
+/** Each step paints a 2 by 2 patch of the caps in one terrain or another, as a builder stroke on another device does, and the page draws what arrives. */
+async function brushStrokes(page: Page, cdp: CDPSession, dm: Socket): Promise<number[]> {
+  return timed(page, cdp, STEPS, async (i) => {
+    await dm.op({ t: "build.rect", sceneId: dm.sceneId, terrain: i % 2 ? "stone" : "wood", x: 96 + (i % 4) * 2, y: 98, w: 2, h: 2 });
+  });
 }
 
 /** Selects tokens as a desktop does, a Shift click on each, so a drag of one moves them all. */
