@@ -124,6 +124,30 @@ function hashOf(projected: unknown): string {
 const SCENE_KINDS = new Set(["chunk", "scene", "light", "explored", "fogDraft", "sightAll", "fogAll", "exploredAny", "exploredBy", "holders"]);
 const FOG_KINDS = new Set(["fog", "label", "stamp", "trap"]);
 
+/**
+ * What a player reads on a per-player scene, by which both the fan-out and
+ * the drag preview's judgment (ephemeral.ts judgedBy) put players who read
+ * the same together (docs/design-v1-per-player-vision.md 6.9 and 7.5). One
+ * rule for both, so they never drift apart (review PV3-OPUS-6).
+ *
+ * - The sight: with vision on, the sight object the player's projection
+ *   reads, which viewers with the same sources share, named by its number
+ *   in `sights`, and "none" with vision off.
+ * - The fog: their own for a player who sees for themselves, whose layer is
+ *   in it, and "shared" for every other player and table display.
+ */
+export function perPlayerClasses(state: RoomState, sceneId: string, memberId: string, sights: Map<PartySight, number>): { sight: string; fog: string } {
+  const holder = sightHolders(state, sceneId).includes(memberId);
+  let sight = "none";
+  if (state.scenes[sceneId]?.vision?.on === true) {
+    const view = visionRules.holderSight(state, sceneId, holder ? memberId : null);
+    let n = sights.get(view);
+    if (n === undefined) sights.set(view, (n = sights.size));
+    sight = String(n);
+  }
+  return { sight, fog: holder ? `holder|${memberId}` : "shared" };
+}
+
 /** A player's three classes, each a string naming what it reads. */
 type PlayerClasses = { scene: string; sight: string; fog: string };
 
@@ -213,15 +237,8 @@ class Projector {
     const scene = sceneId === null ? undefined : state.scenes[sceneId];
     const at = sceneId ?? "";
     if (sceneId === null || !scene || !perPlayerScene(scene)) return { scene: `scene|${at}`, sight: `sight|${at}|party`, fog: `fog|${at}|party` };
-    const holder = sightHolders(state, sceneId).includes(conn.memberId);
-    let sight = "none";
-    if (scene.vision?.on === true) {
-      const view = visionRules.holderSight(state, sceneId, holder ? conn.memberId : null);
-      let n = this.#sights.get(view);
-      if (n === undefined) this.#sights.set(view, (n = this.#sights.size));
-      sight = String(n);
-    }
-    return { scene: `scene|${at}`, sight: `sight|${at}|${sight}`, fog: holder ? `fog|${at}|holder|${conn.memberId}` : `fog|${at}|shared` };
+    const { sight, fog } = perPlayerClasses(state, sceneId, conn.memberId, this.#sights);
+    return { scene: `scene|${at}`, sight: `sight|${at}|${sight}`, fog: `fog|${at}|${fog}` };
   }
 
   /** A label, stamp or found trap for a fog class, through the memo when it stands on the class's own scene. */

@@ -1,12 +1,13 @@
 import { keys } from "#shared/keys.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
-import { inSightOfNonOwners, ownsToken, perPlayerScene, projectEntity, sightHolders, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
+import { inSightOfNonOwners, ownsToken, perPlayerScene, projectEntity, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 import type { EphEvent } from "#shared/protocol.ts";
-import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
+import type { PartySight } from "#shared/ruleHooks.ts";
 import { previewSqueezed, walkEnd, walkStates, type WalkEnd } from "#shared/rules/movement.ts";
 import type { Connection, PreviewKind, SentPreview } from "./connection.ts";
+import { perPlayerClasses } from "./fanout.ts";
 
 /**
  * The ephemeral channel (design 7.6). Nothing here is stored: an event is
@@ -169,12 +170,9 @@ function judgedBy(state: RoomState, sceneId: string, receiver: Connection, sight
   const scene = state.scenes[sceneId];
   if (!scene || (scene.vision?.on !== true && !scene.fogEnabled)) return null;
   if (!perPlayerScene(scene)) return "party";
-  const holder = sightHolders(state, sceneId).includes(receiver.memberId);
-  if (scene.vision?.on !== true) return holder ? `fog|${receiver.memberId}` : "fog|shared";
-  const view = visionRules.holderSight(state, sceneId, holder ? receiver.memberId : null);
-  let n = sights.get(view);
-  if (n === undefined) sights.set(view, (n = sights.size));
-  return `sight|${n}`;
+  // The fan-out's classes (fanout.ts perPlayerClasses): withholding reads sight alone with vision on, and fog alone otherwise.
+  const { sight, fog } = perPlayerClasses(state, sceneId, receiver.memberId, sights);
+  return scene.vision?.on === true ? `sight|${sight}` : `fog|${fog}`;
 }
 
 /**
