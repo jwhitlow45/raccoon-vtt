@@ -9,7 +9,10 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { parseCellKey, polygonCells, rectBetween } from "./cells.ts";
-import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel } from "./draw.ts";
+import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths } from "./draw.ts";
+import { useIsoGround } from "../../canvas/relief/context.ts";
+import { boxStands } from "../../canvas/relief/stand.ts";
+import { splitLabels } from "./labelShape.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import { lightCaption, lightCaptionSpot, lightReach, lightSlot, tokenBodies } from "./lightTap.ts";
@@ -60,13 +63,21 @@ const BuildBoard = memo(function BuildBoard(props: {
   const paths = useMemo(() => buildPaths(chunks, role, { autoWalls, bounds: { w, h } }), [chunks, role, autoWalls, w, h]);
   const textures = useTextures(paths.floors.map(([t]) => t));
   const stamps = useStampDrawing(sceneId, role);
+  // On the isometric view's ground stage, what stands up there is left out here (docs/design-v1-isometric-view.md 5.3).
+  const iso = useIsoGround();
+  const flatLabels = useMemo(() => (iso ? splitLabels(iso.fog, labels, measureLabel).flat : labels), [iso, labels]);
+  const standing = useMemo(() => {
+    if (!iso?.heights) return undefined;
+    const flat = paths.drawing.symbols.pillar.filter((c) => !boxStands(iso.fog, { x0: c.x, y0: c.y, x1: c.x + 1, y1: c.y + 1 }));
+    return pillarPaths(flat, () => new Path2D());
+  }, [iso, paths]);
 
   if (chunks.length === 0 && labels.length === 0 && !stamps) return null;
   return (
     <Shape
       listening={false}
       perfectDrawEnabled={false}
-      sceneFunc={(ctx) => drawBuild(ctx._context, paths, { role, scale, grid, textures, labels, underWalls: stamps ?? undefined })}
+      sceneFunc={(ctx) => drawBuild(ctx._context, paths, { role, scale, grid, textures, labels: flatLabels, underWalls: stamps ?? undefined, standing })}
     />
   );
 });

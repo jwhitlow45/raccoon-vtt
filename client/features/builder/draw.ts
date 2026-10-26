@@ -191,6 +191,19 @@ export function freeSwingSide(f: Frame, isFloor: (x: number, y: number) => boole
   return !ahead && behind ? -1 : 1;
 }
 
+/** A pillar's stone disc and its shine, for each pillar cell given. */
+export function pillarPaths<P extends PathSink>(cells: Iterable<{ x: number; y: number }>, makePath: () => P): { pillars: P; pillarShine: P } {
+  const pillars = makePath();
+  const pillarShine = makePath();
+  for (const c of cells) {
+    pillars.moveTo(c.x + 0.86, c.y + 0.5);
+    pillars.arc(c.x + 0.5, c.y + 0.5, 0.36, 0, Math.PI * 2);
+    pillarShine.moveTo(c.x + 0.56, c.y + 0.4);
+    pillarShine.arc(c.x + 0.4, c.y + 0.4, 0.16, 0, Math.PI * 2);
+  }
+  return { pillars, pillarShine };
+}
+
 /** What the paths read of the scene: its automatic walls rule (absent for "all") and its size, which stairs and raised edges stop at. */
 export type BuildPathScene = { autoWalls?: AutoWalls; bounds?: { w: number; h: number } };
 
@@ -229,14 +242,7 @@ export function buildPaths(
     pits.rect(c.x + 0.08, c.y + 0.08, 0.84, 0.84);
     pitRims.rect(c.x + 0.2, c.y + 0.2, 0.6, 0.6);
   }
-  const pillars = makePath();
-  const pillarShine = makePath();
-  for (const c of drawing.symbols.pillar) {
-    pillars.moveTo(c.x + 0.86, c.y + 0.5);
-    pillars.arc(c.x + 0.5, c.y + 0.5, 0.36, 0, Math.PI * 2);
-    pillarShine.moveTo(c.x + 0.56, c.y + 0.4);
-    pillarShine.arc(c.x + 0.4, c.y + 0.4, 0.16, 0, Math.PI * 2);
-  }
+  const { pillars, pillarShine } = pillarPaths(drawing.symbols.pillar, makePath);
   const stairList = stairCells(chunks, derived);
   const stairs = makePath();
   for (const c of stairList) if (c.floor) stairs.rect(c.x + 0.08, c.y + 0.08, 0.84, 0.84);
@@ -492,6 +498,17 @@ export type DrawBuildOptions = {
   labels: readonly Label[];
   /** Drawn over the floor and under the walls, doors and labels: the scene's stamps (builder/stamps/draw.ts). */
   underWalls?: (g: CanvasRenderingContext2D) => void;
+  /**
+   * The isometric view's ground stage while heights stand
+   * (docs/design-v1-isometric-view.md 5.3 and 5.5): walls, closed doors,
+   * windows and the standing pillars stand in the relief, so the ground
+   * leaves them out, and the relief's tints and shadows give way to the
+   * columns. Open doors, the DM's locks and secret marks, and the pillars
+   * given here, which the stand rule keeps flat, still draw. A wall the
+   * relief leaves out lies under fog on both sides, where Top-down's line
+   * is covered too. Absent in Top-down, which draws as it always has.
+   */
+  standing?: { pillars: Path2D; pillarShine: Path2D };
 };
 
 /** Draws the build onto `g`, whose current transform maps world cells to pixels. */
@@ -521,13 +538,14 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
     g.strokeStyle = "rgba(255, 255, 255, 0.10)";
     g.lineWidth = 0.05;
     g.stroke(paths.pitRims);
+    const pillars = opts.standing ? opts.standing.pillars : paths.pillars;
     g.fillStyle = "#8f897e";
-    g.fill(paths.pillars);
+    g.fill(pillars);
     g.strokeStyle = "#2a2723";
     g.lineWidth = 0.06;
-    g.stroke(paths.pillars);
+    g.stroke(pillars);
     g.fillStyle = "rgba(255, 255, 255, 0.16)";
-    g.fill(paths.pillarShine);
+    g.fill(opts.standing ? opts.standing.pillarShine : paths.pillarShine);
     g.fillStyle = STAIR_SLAB;
     g.fill(paths.stairs);
     // The floor covers the map layer's grid, so the grid is drawn again on the floor.
@@ -551,16 +569,19 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
       g.restore();
     }
   }
-  drawRelief(g, paths.relief, scale);
+  const standing = opts.standing !== undefined;
+  if (!standing) drawRelief(g, paths.relief, scale);
   drawStairs(g, paths.floorStairs, FLOOR_STAIRS);
   drawStairs(g, paths.artStairs, ART_STAIRS);
   drawRough(g, paths, scale);
   opts.underWalls?.(g);
   // Every rim first, then every wall, so a rim never shows across a wall that meets it.
-  for (const [color, width] of [
-    [WALL_RIM, wallWidth + 3 / scale],
-    [WALL_COLOR, wallWidth],
-  ] as const) {
+  for (const [color, width] of standing
+    ? []
+    : ([
+        [WALL_RIM, wallWidth + 3 / scale],
+        [WALL_COLOR, wallWidth],
+      ] as const)) {
     g.strokeStyle = color;
     g.lineWidth = width;
     g.lineCap = "square";
@@ -570,14 +591,14 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
   }
   g.lineCap = "butt";
   g.fillStyle = WINDOW_FILL;
-  g.fill(paths.panes);
+  if (!standing) g.fill(paths.panes);
   g.fillStyle = DOOR_FILL;
-  g.fill(paths.leaves);
+  if (!standing) g.fill(paths.leaves);
   g.fill(paths.openLeaves);
   g.strokeStyle = WALL_COLOR;
   g.lineWidth = Math.max(0.03, hairline);
-  g.stroke(paths.panes);
-  g.stroke(paths.leaves);
+  if (!standing) g.stroke(paths.panes);
+  if (!standing) g.stroke(paths.leaves);
   g.stroke(paths.openLeaves);
   g.setLineDash([0.08, 0.08]);
   g.strokeStyle = "rgba(21, 18, 15, 0.7)";
@@ -594,7 +615,8 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
     g.fill(paths.locks);
     g.strokeStyle = theme.color.accentSoft;
     g.lineWidth = Math.max(0.04, 1.5 / scale);
-    g.stroke(paths.secrets);
+    // A secret door not yet found stands as a wall in the relief, its mark staying flat.
+    if (!standing) g.stroke(paths.secrets);
     g.setLineDash([]);
     for (const m of paths.secretMarks) drawLabel(g, { x: m.x, y: m.y, text: "S", size: 0.32 });
   }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BuildChunk, FreeWall, TerrainId } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { buildPaths, freeFrame, type PathSink } from "./draw.ts";
+import { buildPaths, drawBuild, freeFrame, type PathSink } from "./draw.ts";
 
 /** Records what a path is given, in place of a Path2D, which Node lacks. */
 class Recorder implements PathSink {
@@ -252,5 +252,47 @@ describe("difficult ground (docs/design-v1-movement.md 3.4)", () => {
       assert.deepEqual(p.roughBox, { x0: 0, y0: 0, x1: 2, y1: 2 });
     }
     assert.equal(paths(chunk({})).roughBox, null);
+  });
+});
+
+describe("the isometric view's ground stage (docs/design-v1-isometric-view.md 5.3 and 5.5)", () => {
+  /** A stand-in for a 2D context that records which path each fill and stroke draws. */
+  function recorder() {
+    const calls: { op: string; path: unknown }[] = [];
+    const g = new Proxy(
+      {},
+      {
+        get: (_t, name) => (name === "fill" || name === "stroke" || name === "clip" ? (path?: unknown) => calls.push({ op: String(name), path }) : () => undefined),
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    return { g, calls, drew: (path: unknown) => calls.some((c) => c.path === path && c.op !== "clip") };
+  }
+
+  const build = () => {
+    const heights = Array.from({ length: 256 }, (_, i) => (i === 3 * 16 + 3 ? 10 : 0));
+    const c = { ...chunk({ cells: { "1,1": "stone", "2,1": "stone", "5,5": "pillar" }, edges: { "1,1,n": { kind: "wall" }, "2,1,n": door("closed"), "1,2,n": door("open"), "2,2,n": { kind: "window" }, "4,4,n": door("locked", true) } }), heights: encodeHeights(heights) };
+    return buildPaths([c], "dm", {}, () => new Recorder()) as unknown as Parameters<typeof drawBuild>[1];
+  };
+  const opts = { role: "dm" as const, scale: 40, grid: { show: false, color: "#fff", opacity: 0.2, lineWidth: 1 } as never, textures: {}, labels: [] };
+
+  test("Top-down draws its walls, doors, windows, pillars and relief as it always has", () => {
+    const p = build();
+    const r = recorder();
+    drawBuild(r.g, p, opts);
+    for (const path of [p.walls, p.panes, p.leaves, p.openLeaves, p.pillars, p.secrets]) assert.ok(r.drew(path));
+    assert.ok(Object.values(p.relief).some((path) => r.drew(path)), "the relief's tints and shadows");
+  });
+
+  test("with heights standing, walls, closed doors, windows, standing pillars and the relief are left to the relief layer, and open doors stay flat", () => {
+    const p = build();
+    const r = recorder();
+    const flatPillars = new Recorder() as unknown as Path2D;
+    const flatShine = new Recorder() as unknown as Path2D;
+    drawBuild(r.g, p, { ...opts, standing: { pillars: flatPillars, pillarShine: flatShine } });
+    for (const path of [p.walls, p.freeWalls, p.panes, p.leaves, p.pillars, p.pillarShine, p.secrets]) assert.ok(!r.drew(path));
+    assert.ok(!Object.values(p.relief).some((path) => r.drew(path)), "no relief tint under a column");
+    for (const path of [p.openLeaves, p.swings, flatPillars, flatShine, p.locks]) assert.ok(r.drew(path));
+    assert.ok(r.calls.some((c) => c.op === "fill" && c.path === p.openLeaves), "an open door's leaf is filled as in Top-down");
   });
 });
